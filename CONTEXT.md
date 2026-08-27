@@ -11,7 +11,7 @@ An Agent with which the user interacts outside Mohist and that reads or operates
 Mohist on the user's behalf. It is not a Mohist resource, and Mohist neither
 schedules nor runs it.
 
-_Avoid_: Mohist Agent, Inline Agent
+_Avoid_: Mohist Agent
 
 **Agent Connection**:
 A persistent relationship that exposes one Mohist Agent in an external
@@ -52,23 +52,15 @@ _Avoid_: feed, intake label, origin snapshot
 ## Agent Execution
 
 **Action**:
-The input and output contract by which a work owner delegates one execution to
-a Runner. It has no Agent identity and owns no work lifecycle.
-
-**Inline Agent**:
-A use of Agent capability in which a Workflow task selects a Runtime Action
-directly and supplies its input. It is not a persistent resource and has no
-Agent ID.
-
-**Agent Definition Reference**:
-A use of Agent capability in which a Workflow task references a Mohist Agent
-definition. Its definition snapshot resolves at dispatch, and it creates
-neither an AgentJob nor an Agent identity.
+The input and output contract by which an AgentJob delegates one execution to a
+Runner. It carries the resolved Agent execution snapshot but owns no work
+lifecycle.
 
 **Mohist Agent**:
 A predefined, reusable Agent resource within a Project that has a stable
-identity and can start independently. The Web UI, CLI, Agent Connections, event
-routing, and comment mentions are entry points to the same Agent.
+identity and can start independently or as a Workflow worker. Workflow tasks,
+the Web UI, CLI, Agent Connections, event routing, and comment mentions all use
+the same Agent launch boundary.
 
 **Agent Readiness**:
 Mohist's unified diagnosis of whether an Agent execution configuration is
@@ -77,10 +69,11 @@ complete, with value `ready`, `needs-setup`, or `unknown`; it is not the
 an entry point cannot infer `ready` or failed from `unknown`.
 
 **AgentJob**:
-One unit of work created when a Mohist Agent starts, owning launch scheduling
-state, result, and recovery and associated with the first AgentTurn in an
-AgentSession. It is neither the continuing conversation nor the arbiter of
-subsequent Follow-up work.
+The sole top-level execution unit, created whenever a Workflow task or another
+entry point starts a Mohist Agent. It owns scheduling, result, retry, and
+recovery and is associated with the first AgentTurn in an AgentSession. It is
+neither the continuing conversation nor the arbiter of subsequent Follow-up
+work.
 
 **SessionInput**:
 One ordered input with stable identity that an AgentSession has accepted. One

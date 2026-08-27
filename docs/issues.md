@@ -78,7 +78,7 @@ Do not use a body with too little context:
 Add search
 ```
 
-The Inline Agent cannot determine what to search, which fields to include,
+The Plan stage's Mohist Agent cannot determine what to search, which fields to include,
 whether to highlight matches, or whether to paginate. It can produce a Plan
 that solves the wrong problem.
 
@@ -175,8 +175,8 @@ mo issue comment create 42 --display-name "Ada" --body "Looks good but check edg
 
 The comment area is at the bottom of the Issue details page in the Web UI.
 
-Comments are a lightweight collaboration channel between you and the Inline
-Agent. During Plan, the Inline Agent reads them as additional context.
+Comments are a lightweight collaboration channel between you and the stage's
+Mohist Agent. During Plan, the Agent reads them as additional context.
 
 ## Prerequisites
 
@@ -233,7 +233,7 @@ mo issue close 42
 mo issue reopen 42
 ```
 
-Use `pause` to stop temporarily, interrupt a stuck Inline Agent, or preserve a
+Use `pause` to stop temporarily, interrupt a stuck Agent, or preserve a
 recovery path; it ends the current turn and puts the Workflow in a paused
 state that supports `resume`. Use `stop` to end the Workflow Run permanently;
 it is terminal and cannot resume. Use `done` when the work was completed and
@@ -271,7 +271,7 @@ mo issue edit 42 --title "New title" --priority p1
 ```
 
 See [CLI Reference](cli-reference.md#issue) for all edit options. Edit the body
-of an active Issue with care. The Inline Agent is already working from the
+of an active Issue with care. The stage's Mohist Agent is already working from the
 previous body.
 
 ## Complete CLI Reference

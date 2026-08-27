@@ -109,4 +109,4 @@ TaskLog answers why execution reached this result; it belongs to Runner
 execution. Transcript answers what the Agent said and did conversationally; it
 belongs to the Session. Artifact answers which files were produced; it belongs
 to the Workflow. WorkResult answers whether the work succeeded and what
-structured result it returned; it belongs to the TaskRun or AgentJob.
+structured result it returned; it belongs to the AgentJob.

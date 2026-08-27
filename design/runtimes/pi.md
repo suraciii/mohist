@@ -6,7 +6,8 @@ Pi exposes coding-agent capabilities as an in-process SDK with file-backed
 Sessions. Mohist needs direct completion and typed control without letting Pi's
 service assembly, trust model, credentials, or event vocabulary escape into
 Workflow, AgentJob, or AgentSession. The shared ownership contract remains
-authoritative in [`agent-execution.md`](../agent-execution.md).
+authoritative in [`agent-execution.md`](../agent-execution.md). In the target
+model every execution is AgentJob-owned; Workflow is launch attribution only.
 
 Four pressures shape this adapter:
 
@@ -175,7 +176,7 @@ parameters applied to the existing physical Session before the Prompt; they do
 not trigger binding replacement.
 
 Worktree-cleanup Follow-up behaves exactly as in `OpenCodeRuntime`: the executor
-invokes the original task's resolved Action again, using the same Runtime and
+invokes the original job's Action again, using the same Runtime and
 physical Session, without replacing the binding.
 
 ## Execution and Completion Authority

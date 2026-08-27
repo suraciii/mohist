@@ -51,7 +51,7 @@ domain design, rationale, and constraints.
 - **Workflow has no awareness.** A child WorkflowRun behaves like an ordinary
   Issue run. A parent creates no WorkflowRun. The static `Issue -> Workflow`
   dependency remains one-way; Workflow does not know Issue.
-- At the HTTP dispatch-response boundary, a child Plan Inline Agent receives
+- At the HTTP dispatch-response boundary, the child Plan stage's Mohist Agent receives
   the current parent title and body as assembled background. They do not enter
   WorkflowRun, Workflow WorkDispatch, or task input. Runner's
   `mohist/opencode` Action marks this background read-only, while the child body
