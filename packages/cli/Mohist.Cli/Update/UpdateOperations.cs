@@ -180,7 +180,7 @@ internal sealed partial class UpdateOperations
         }
 
         _out.WriteLine(
-            $"Runner update interrupt: status=interrupted runnerId={interruption.RunnerId} interruptedWorkCount={interruption.InterruptedWorkCount}.");
+            $"Runner update drain: status=draining runnerId={interruption.RunnerId} activeWorkCount={interruption.ActiveWorkCount}.");
 
         try
         {

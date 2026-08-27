@@ -197,10 +197,10 @@ public sealed partial class ManagedRuntimeTransactionSpecs
                         data = new
                         {
                             runnerId = "runner-pluto",
-                            status = "interrupted",
+                            status = "draining",
                             updateInterruptId,
-                            interruptedWorkIds = new[] { "agent-job-1" },
-                            interruptedWorkCount = 1,
+                            activeWorkIds = new[] { "agent-job-1" },
+                            activeWorkCount = 1,
                             operationId = "runner-update:managed",
                             affectedWorks = new[]
                             {

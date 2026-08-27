@@ -33,7 +33,7 @@ public static partial class RunnerRoutes
                 .ToArray();
             return ApiResults.Ok(new RunnerUpdateInterruptResponse(
                 runnerId,
-                "interrupted",
+                "draining",
                 runtime.UpdateInterruptId,
                 workIds,
                 workIds.Length));
@@ -45,5 +45,5 @@ public record RunnerUpdateInterruptResponse(
     string RunnerId,
     string Status,
     string? UpdateInterruptId,
-    IReadOnlyList<string> InterruptedWorkIds,
-    int InterruptedWorkCount);
+    IReadOnlyList<string> ActiveWorkIds,
+    int ActiveWorkCount);
