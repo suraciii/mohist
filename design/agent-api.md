@@ -6,14 +6,11 @@ External callers need to retry writes and resume reads across network loss witho
 Agent work or receiving Mohist's internal execution state. This document defines the versioned
 direct API that provides that boundary for a private Project.
 
-```text diagram
-external caller -- PAT + Project grant --> /api/v1 Agent API
-                                               |
-                          +--------------------+--------------------+
-                          |                                         |
-                          v                                         v
-              canonical Agent execution                 public projection
-              Job / Session / Input / Turn              snapshot / event cursor
+```mermaid
+flowchart TD
+    C["external caller"] -->|"PAT + Project grant"| API["/api/v1 Agent API"]
+    API --> CE["canonical Agent execution<br/>Job / Session / Input / Turn"]
+    API --> PP["public projection<br/>snapshot / event cursor"]
 ```
 
 The API adapts existing canonical state; it does not create another execution lifecycle, queue,
@@ -409,12 +406,12 @@ context generation, complete binding or explicit null binding, and deadline. The
 internal and follow the canonical [operation projection](conventions.md#canonical-sessionoperationread)
 and [effect fence](conventions.md#canonical-effect-fence).
 
-```text diagram
-same public key --> same frozen Turn --> terminal public fact
-                         |
-                         +------------> unknown
-                                          |
-                                          +--> repeat the same POST
+```mermaid
+flowchart TD
+    K["same public key"] --> T["same frozen Turn"]
+    T --> F["terminal public fact"]
+    T --> U["unknown"]
+    U --> R["repeat the same POST"]
 ```
 
 A Turn already terminal at the first request produces a durable no-op observation and no Runner

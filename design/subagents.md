@@ -9,16 +9,12 @@ AgentJob, AgentSession, SessionInput, and AgentTurn remain defined in
 [`agent-execution.md`](agent-execution.md); this document defines only how they compose in one
 spawn.
 
-```text diagram
-Child AgentSession
-  | owns
-  v
-SessionParentLink -- references --> Parent AgentSession
-  ^
-  | orders publication
-SessionTreeMutationFence (Project-scoped)
-  |
-  +-- freezes membership --> SessionTreeStopOperation snapshot
+```mermaid
+flowchart TD
+    C["Child AgentSession"] -->|"owns"| L["SessionParentLink"]
+    L -->|"references"| P["Parent AgentSession"]
+    F["SessionTreeMutationFence (Project-scoped)"] -->|"orders publication"| L
+    F -->|"freezes membership"| SO["SessionTreeStopOperation snapshot"]
 ```
 
 The child-owned link is the topology truth, which avoids a second mutable child list on the parent.

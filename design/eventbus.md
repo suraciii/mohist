@@ -52,22 +52,19 @@ coordination state, not an offset; a lost lease never loses or reorders a row.
 
 ## Dispatcher
 
-```text diagram
-Producer transaction -- append row --> commit -- signal channel (in-proc) --+
-                                                                          |
-                                                                          v
-+---------------------------------------------------------------------------+
-| N dispatch workers (in-proc hosted services)                              |
-|                                                                           |
-| discover streams with undelivered rows (slow poll = correctness path)     |
-| claim a stream: write lease row if free or expired   (stream lease table) |
-| drain claimed stream in Id order:                                          |
-|   run every matching handler once per attempt                              |
-|   on failure: attempts++ on lease, park stream until backoff elapses      |
-|   at MaxAttempts: dead-letter the head row, mark it dispatched, advance   |
-|   settle the contiguous delivered prefix in one transaction               |
-| release lease when the stream is empty                                     |
-+---------------------------------------------------------------------------+
+```mermaid
+flowchart TD
+    P["Producer transaction: append row"] --> C["commit"]
+    C --> SC["signal channel (in-proc)"]
+    SC --> W["N dispatch workers (in-proc hosted services)"]
+    W --> WL
+    subgraph WL["worker loop"]
+        D1["discover streams with undelivered rows (slow poll = correctness path)"] --> D2["claim a stream: write lease row if free or expired (stream lease table)"]
+        D2 --> D3["drain claimed stream in Id order: run every matching handler once per attempt"]
+        D3 --> D4["on failure: attempts++ on lease; park stream until backoff elapses; at MaxAttempts dead-letter the head row, mark it dispatched, advance"]
+        D4 --> D5["settle the contiguous delivered prefix in one transaction"]
+        D5 --> D6["release lease when the stream is empty"]
+    end
 ```
 
 ### Stream leases

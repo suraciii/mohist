@@ -99,6 +99,64 @@ upstream-to-downstream relationships, not static source-code dependencies.
 In particular, entry 1 makes Workflow the DDD upstream of Issue. This does not conflict with the static
 `Issue -> Workflow` code dependency defined in [Dependency invariants](#dependency-invariants).
 
+The two diagrams render the same entries. The list below remains the normative form.
+
+Core domain contexts:
+
+```mermaid
+flowchart TD
+    WF["Workflow"]
+    IS["Issue + Epic"]
+    PS["Project Space"]
+    WS["Workspace"]
+    AG["Agent"]
+    RN["Runner"]
+    RP["runner process (infrastructure)"]
+    SS["Session"]
+    AO["AgentOps (read side)"]
+    GN["Generic"]
+    CO["IssueRepositoryCoordinator (process manager)"]
+
+    WF -->|"1 C/S"| IS
+    AG -->|"2 OHS+PL"| WF
+    PS -->|"3 PL"| WF
+    PS -->|"4 SK"| IS
+    WS -->|"5 PL"| WF
+    WS -->|"5 PL"| AG
+    AG -->|"6 OHS+PL"| RN
+    AG -->|"7 C"| RP
+    RN -->|"8 PL"| RP
+    GN -->|"11 SK/PL"| IS
+    SS -->|"12 OHS+PL"| IS
+    SS -->|"12 OHS+PL"| WF
+    SS -->|"12 OHS+PL"| AO
+    RN -->|"13 PL"| SS
+    AG -->|"13 PL"| SS
+    IS -->|"14 OHS"| AO
+    WF -->|"14 OHS"| AO
+    AG -->|"14 OHS"| AO
+    RN -->|"14 OHS"| AO
+    IS -->|"15 C"| CO
+    PS -->|"16 C"| CO
+```
+
+Entry and adapter surfaces:
+
+```mermaid
+flowchart TD
+    SV["Server application (hosts the business contexts)"]
+    AS["Agent / Session contexts"]
+    WEB["Web UI"]
+    CLI["CLI (mo)"]
+    PA["provider adapters (Slack, GitHub)"]
+
+    SV -->|"9, 10 OHS+PL: API DTO"| WEB
+    SV -->|"9, 10 OHS+PL: API DTO"| CLI
+    AS -->|"17 OHS+PL: management, launch, results, events"| WEB
+    AS -->|"17 OHS+PL"| CLI
+    AS -->|"17 OHS+PL"| PA
+```
+
 1. Workflow -> Issue (C/S): WorkflowProfile, run creation, verdict/output.
 2. Agent -> Workflow (OHS+PL): Agent launch contract, readiness, AgentJob result.
 3. Project Space -> Workflow (PL): default Profile ref, Repository resource,

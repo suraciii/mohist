@@ -16,21 +16,18 @@ See [`variables.md`](variables.md) for Variable resolution,
 
 ## Model
 
-```text diagram
-Project { defaultWorkflowProfileId, profileAgentActionOverrides }
-  -- owns 1..* --> WorkflowProfile { id, name, description, agentAction?, definition }
-  -- default ---> WorkflowProfile
-
-Issue { workflowProfileId? }
-  -- belongs to --> Project
-  -- selects ----> WorkflowProfile
-
-WorkflowRun { workflowProfileId, agentAction? }
-  -- selected at start --> WorkflowProfile
-
-WorkflowProfile: Project-scoped; does not own Variables or Prompts.
-WorkflowRun: Profile identity and Agent Action are fixed; Definition resolves as each Stage starts.
+```mermaid
+flowchart TD
+    PR["Project<br/>defaultWorkflowProfileId, profileAgentActionOverrides"] -->|"owns 1..*"| WP["WorkflowProfile<br/>id, name, description, agentAction?, definition"]
+    PR -->|"default"| WP
+    IS["Issue<br/>workflowProfileId?"] -->|"belongs to"| PR
+    IS -->|"selects"| WP
+    WR["WorkflowRun<br/>workflowProfileId, agentAction?"] -->|"selected at start"| WP
 ```
+
+WorkflowProfile is Project-scoped and does not own Variables or Prompts.
+WorkflowRun fixes the Profile identity and Agent Action; the Definition
+resolves as each Stage starts.
 
 The minimal `WorkflowProfile` model is:
 
@@ -203,12 +200,11 @@ stores one `agentActionOverrides` object keyed by canonical Profile ID; it does 
 builtin Profile source. WorkflowRun state stores the explicit Profile selection, resolved Profile ID, and
 resolved concrete `agentAction` string. This is a specific binding, not a general Profile parameter bag.
 
-```text diagram
-Issue -> Workflow
-
-WorkflowRun stage initialization -> IWorkflowProfileProvider
-                                      ^
-                              ProjectWorkflowProfileProvider
+```mermaid
+flowchart TD
+    I["Issue"] --> W["Workflow"]
+    SI["WorkflowRun stage initialization"] --> PP["IWorkflowProfileProvider"]
+    PWP["ProjectWorkflowProfileProvider"] -.->|"implements"| PP
 ```
 
 At WorkflowRun creation, the Profile coordinator uses `IWorkflowProfileProvider` to resolve the Profile

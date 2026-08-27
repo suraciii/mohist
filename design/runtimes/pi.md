@@ -67,11 +67,14 @@ or legacy keys to remain bindable to this Action. `options` does not carry
 
 ## Capability Boundary
 
-```text diagram
-Workflow Action ----+
-AgentJob executor ---+--> PiRuntime --> in-process SDK --> provider and tools
-Session commands ----+                    |
-                                         +--> physical Session files
+```mermaid
+flowchart LR
+    WA["Workflow Action"] --> PR["PiRuntime"]
+    AJ["AgentJob executor"] --> PR
+    SC["Session commands"] --> PR
+    PR --> SDK["in-process SDK"]
+    SDK --> PT["provider and tools"]
+    SDK --> PS["physical Session files"]
 ```
 
 `PiRuntime` owns SDK service assembly, readiness, the model catalog, physical
@@ -186,17 +189,11 @@ physical Session, without replacing the binding.
 Pi follows the same identity-before-effect rule as OpenCode, but restoration uses
 the bound Session-file path:
 
-```text diagram
-restore or create physical Session
-               |
-               v
-persist complete binding and Input identity
-               |
-               v
-apply model and thinking level
-               |
-               v
-submit Prompt
+```mermaid
+flowchart TD
+    R["restore or create physical Session"] --> P["persist complete binding and Input identity"]
+    P --> M["apply model and thinking level"]
+    M --> S["submit Prompt"]
 ```
 
 No Prompt is submitted through an unpersisted or stale binding. Preparation and

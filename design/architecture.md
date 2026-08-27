@@ -2,27 +2,17 @@
 
 ## Boundary
 
-```text diagram
-User in Slack -> Slack Bot / mohist-slack -> Connection boundary --+
-User -> Web UI (backup operation + view) -> API -------------------+
-User -> direct CLI -> API -----------------------------------------+
-                                                                   |
-User in IDE / chat                                                 |
-       |                                                           |
-       v                                                           |
-External Agent -> Mohist Skill -> mo CLI -> API -------------------+
-                                                                   |
-                                                                   v
-Agent API
-       |
-       v
-Control Plane        owns state, makes decisions
-       |
-       v
-Execution Plane      runs commands, reports facts
-       |
-       v
-User Project
+```mermaid
+flowchart TD
+    US["User in Slack"] --> SB["Slack Bot / mohist-slack"] --> CB["Connection boundary"]
+    UW["User"] -->|"Web UI: backup operation + view"| API["API"]
+    UC["User"] -->|"direct CLI"| API
+    UI["User in IDE / chat"] --> EA["External Agent"] --> MS["Mohist Skill"] --> MO["mo CLI"] --> API
+    CB --> AA["Agent API"]
+    API --> AA
+    AA --> CP["Control Plane: owns state, makes decisions"]
+    CP --> EP["Execution Plane: runs commands, reports facts"]
+    EP --> UP["User Project"]
 ```
 
 ## What goes where
@@ -81,20 +71,12 @@ Runner may report a failure classification, including `retry-safe`, as an execut
 
 ## Report pipeline
 
-```text diagram
-Side effect
-  |
-  v
-Report              <- fact, not command
-  |
-  v
-Ownership check     <- reject without proof
-  |
-  v
-Decision            <- interpret in workflow context
-  |
-  v
-State change        <- advance or wait
+```mermaid
+flowchart TD
+    SE["Side effect"] --> R["Report: fact, not command"]
+    R --> OC["Ownership check: reject without proof"]
+    OC --> D["Decision: interpret in workflow context"]
+    D --> SC["State change: advance or wait"]
 ```
 
 Runner may say: completed / failed / verification passed / output produced / failure classification reported.

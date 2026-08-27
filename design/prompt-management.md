@@ -14,13 +14,13 @@ WorkflowProfile stores only a Prompt key reference, such as `${{ prompts.plan }}
 the Prompt body. At dispatch, the Server loads the body by Project and key into the immutable attempt
 snapshot. At the execution entry point, the Runner evaluates the body template before it calls the Action:
 
-```text diagram
-WorkflowProfile prompts.<key> -- projectId + key --> Prompt Resolver
-Project Prompts, key -> body --- configured body ---> Prompt Resolver
-Builtin Prompts, key -> body --- fallback on miss --> Prompt Resolver
-
-Prompt Resolver -- load body by key at dispatch --> Attempt Snapshot
-Attempt Snapshot -- Runner renders before Action --> Rendered Prompt
+```mermaid
+flowchart TD
+    WP["WorkflowProfile prompts.<key>"] -->|"projectId + key"| PR["Prompt Resolver"]
+    PP["Project Prompts: key -> body"] -->|"configured body"| PR
+    BP["Builtin Prompts: key -> body"] -->|"fallback on miss"| PR
+    PR -->|"load body by key at dispatch"| AS["Attempt Snapshot"]
+    AS -->|"Runner renders before Action"| RP["Rendered Prompt"]
 ```
 
 Prompts do not merge across scopes and do not produce an `EffectivePrompts` collection. A Prompt body is

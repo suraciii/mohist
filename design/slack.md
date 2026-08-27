@@ -106,24 +106,19 @@ authoritative Server state but not responsibilities.
 
 ## System Boundary
 
-```text diagram
-Slack member
-    | message / action
-    v
-Slack App / Bot
-    |
-    v  Socket Mode, opened outbound by the local service
-mohist-slack -> Server ingress -> Connection boundary -> Agent API -> Agent / Job / Session -> Runner
-                                      |
-                                      +-> provider inbox / conversation mapping / outbound outbox
-
-Slack control plane in Server, independent of the wire adapter
-    | manages
-    v
-SlackWorkspaceEnrollment -> manages -> ManagedSlackAgentApp, one per managed Agent App
-                                              | references
-                                              v
-                                        AgentConnection
+```mermaid
+flowchart TD
+    M["Slack member"] -->|"message / action"| APP["Slack App / Bot"]
+    APP -->|"Socket Mode, opened outbound by the local service"| MS["mohist-slack"]
+    MS --> IN["Server ingress"]
+    IN --> CB["Connection boundary"]
+    CB --> AA["Agent API"]
+    AA --> AJS["Agent / Job / Session"]
+    AJS --> RN["Runner"]
+    CB --> PM["provider inbox / conversation mapping / outbound outbox"]
+    SCP["Slack control plane in Server (independent of the wire adapter)"] -->|"manages"| ENR["SlackWorkspaceEnrollment"]
+    ENR -->|"manages"| MAA["ManagedSlackAgentApp (one per managed Agent App)"]
+    MAA -->|"references"| AC["AgentConnection"]
 ```
 
 - **Slack** owns member identity, channels and message interaction, and event

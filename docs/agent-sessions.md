@@ -295,16 +295,15 @@ but those have different lifetimes. Mohist keeps them separate so that a clear
 work result does not close a useful conversation, and a later follow-up does not
 rewrite the result of the original delegation.
 
-```text diagram
-[Mohist Agent]
-      |
-      +-- launch --> [AgentJob: result of this delegation]
-                          |
-                          +--> [AgentSession: continuing record]
-                                    |
-                                    +-- [Input 1] --+
-                                    +-- [Input 2] --+--> [Turn 1]
-                                    +-- [Input 3] ------> [Turn 2]
+```mermaid
+flowchart TD
+    MA["Mohist Agent"] -->|"launch"| Job["AgentJob<br/>result of this delegation"]
+    Job --> S["AgentSession<br/>continuing record"]
+    S --> T1["Turn 1"]
+    S --> T2["Turn 2"]
+    I1["Input 1"] --> T1
+    I2["Input 2"] --> T1
+    I3["Input 3"] --> T2
 ```
 
 - **AgentJob** answers whether the first delegation completed, failed, was
