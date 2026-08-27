@@ -177,6 +177,66 @@ public class CliIssueCommandSpecs
     }
 
     [Fact]
+    public async Task IssueView_Json_PreservesNestedGitHubMirror()
+    {
+        var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    number = 7,
+                    title = "Linked issue",
+                    status = "backlog",
+                    priority = "p2",
+                    github = new
+                    {
+                        repository = "suraciii/mohist",
+                        number = 771,
+                        url = "https://github.com/suraciii/mohist/issues/771",
+                        syncStatus = "healthy",
+                    },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "view", "7", "--json", "number,github"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("\"github\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"repository\": \"suraciii/mohist\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"number\": 771", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"syncStatus\": \"healthy\"", stdout, StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task IssueView_Json_PreservesNullGitHubMirror()
+    {
+        var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    number = 8,
+                    title = "Unlinked issue",
+                    status = "backlog",
+                    priority = "p2",
+                    github = (object?)null,
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["issue", "view", "8", "--json", "number,github"], output, error, fileSystem, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("\"github\": null", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
     public async Task IssueEvents_Json_PreservesRoutedSessionClosedOutcome()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>

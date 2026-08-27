@@ -159,8 +159,9 @@ with durable failure records. The target model replaces label intake with the
 `/mohist` command entry and adds automatic mirroring, two-way content sync,
 automatic mirroring and two-way content sync. Link visibility is implemented:
 the detail and bounded list read models batch-project repository, number, URL,
-and provisional healthy sync state for CLI and Web. Real sync-health reporting
-and reconcile-based recovery remain gaps. Feed-by-label intake, its connection
+and a deliberately provisional `healthy` sync state for CLI and Web. The
+placeholder does not inspect or summarize write-back failures; real sync-health
+reporting and reconcile-based recovery belong to the later recovery slice. Feed-by-label intake, its connection
 options, and the `github-issue` origin
 label are removed when the command entry lands.
 

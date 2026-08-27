@@ -253,13 +253,26 @@ public class IssueReadModelLoader : IScopedService
             .ToListAsync();
         if (links.Count == 0) return;
 
-        var repositoryNames = links.Select(link => link.RepositoryName).Distinct(StringComparer.Ordinal).ToArray();
-        var connections = await db.GitHubConnections.AsNoTracking()
+        // Older databases did not enforce the target one-link-per-Issue
+        // invariant. Reads remain deterministic while the later mirror slice
+        // converges those records instead of making a summary endpoint fail.
+        var linksByIssue = links
+            .OrderBy(link => link.CreatedAt)
+            .ThenBy(link => link.Id, StringComparer.Ordinal)
+            .GroupBy(link => (link.ProjectId, link.IssueNumber))
+            .ToDictionary(group => group.Key, group => group.First());
+        var repositoryNames = linksByIssue.Values
+            .Select(link => link.RepositoryName)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var connectionRows = await db.GitHubConnections.AsNoTracking()
             .Where(row => projectIds.Contains(row.ProjectId) && repositoryNames.Contains(row.RepositoryName))
-            .ToDictionaryAsync(
-                row => (row.ProjectId, row.RepositoryName),
-                row => (row.Owner, row.Repo));
-        var linksByIssue = links.ToDictionary(link => (link.ProjectId, link.IssueNumber));
+            .ToListAsync();
+        var connections = connectionRows
+            .OrderBy(row => row.CreatedAt)
+            .ThenBy(row => row.Id, StringComparer.Ordinal)
+            .GroupBy(row => (row.ProjectId, row.RepositoryName))
+            .ToDictionary(group => group.Key, group => (group.First().Owner, group.First().Repo));
 
         foreach (var issue in issues)
         {

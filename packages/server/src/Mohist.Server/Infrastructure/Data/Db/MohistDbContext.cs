@@ -1323,6 +1323,7 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
                 .IsRequired();
             entity.HasIndex(e => new { e.Owner, e.Repo })
                 .IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.RepositoryName });
             entity.Property(e => e.RepositoryName)
                 .HasMaxLength(256)
                 .IsRequired();
@@ -1370,6 +1371,7 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
                 .IsRequired();
             entity.HasIndex(e => new { e.ProjectId, e.RepositoryName, e.GithubIssueNumber })
                 .IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber });
             entity.Property(e => e.PostedCommentsJson)
                 .HasColumnType("JSON")
                 .IsRequired();

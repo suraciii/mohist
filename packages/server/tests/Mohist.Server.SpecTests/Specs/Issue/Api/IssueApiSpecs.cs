@@ -1,5 +1,8 @@
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.GitHub;
 using Xunit;
 using System.Net;
 using System.Net.Http.Json;
@@ -10,10 +13,88 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 public class IssueApiSpecs
 {
     private readonly HttpClient _client;
+    private readonly MohistIntegrationFixture _fixture;
 
     public IssueApiSpecs(MohistIntegrationFixture fixture)
     {
+        _fixture = fixture;
         _client = fixture.Client;
+    }
+
+    [Fact]
+    public async Task GitHubMirror_RoundTripsThroughDetailAndListShapes()
+    {
+        var owner = $"owner-{Guid.NewGuid():N}";
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"github-shape-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"https://github.com/{owner}/mohist.git");
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Linked issue" });
+
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            db.GitHubConnections.Add(new GitHubConnectionRow
+            {
+                Id = $"connection-{project.Id}",
+                ProjectId = project.Id,
+                Owner = owner,
+                Repo = "mohist",
+                RepositoryName = "main",
+                IntakeLabel = "mohist",
+                FeedMode = "backlog",
+                ApproversJson = "[]",
+                Status = "active",
+                IdentityKind = "pat",
+                NeedsAttention = false,
+                CreatedAt = TestTime.UtcNow,
+                UpdatedAt = TestTime.UtcNow,
+            });
+            db.GitHubIssueLinks.Add(new GitHubIssueLinkRow
+            {
+                Id = $"link-{project.Id}",
+                ProjectId = project.Id,
+                RepositoryName = "main",
+                GithubIssueNumber = 771,
+                IssueNumber = issue.Number,
+                CreatedAt = TestTime.UtcNow,
+                UpdatedAt = TestTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var detail = await _client.GetDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues/{issue.Number}");
+        var list = await _client.GetDataAsync<IssueDto[]>(
+            $"/api/projects/{project.Id}/issues");
+
+        Assert.Equal(new GitHubIssueDto(
+            $"{owner}/mohist",
+            771,
+            $"https://github.com/{owner}/mohist/issues/771",
+            "healthy"), detail.Github);
+        Assert.Equal(detail.Github, Assert.Single(list).Github);
+    }
+
+    [Fact]
+    public async Task GitHubMirror_UnlinkedDetailAndListUseNull()
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects", $"github-unlinked-{Guid.NewGuid():N}");
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Unlinked issue" });
+
+        var detail = await _client.GetDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues/{issue.Number}");
+        var list = await _client.GetDataAsync<IssueDto[]>(
+            $"/api/projects/{project.Id}/issues");
+
+        Assert.Null(detail.Github);
+        Assert.Null(Assert.Single(list).Github);
     }
 
     [Fact]
@@ -196,7 +277,12 @@ public class IssueApiSpecs
         Assert.Null(status.Job);
     }
 
-    private sealed record IssueDto(int Number, CommentDto[] Comments, string WorkflowProfileId);
+    private sealed record IssueDto(
+        int Number,
+        CommentDto[] Comments,
+        string WorkflowProfileId,
+        GitHubIssueDto? Github = null);
+    private sealed record GitHubIssueDto(string Repository, int Number, string Url, string SyncStatus);
     private sealed record ProjectDto(string Id);
     private sealed record CommentDto(
         string Id,
