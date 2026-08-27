@@ -74,7 +74,11 @@ public static class GitHubMirrorMarker
     public static string? Strip(string? body, string marker)
     {
         if (body is null) return null;
-        var without = body.Replace(marker, string.Empty, StringComparison.Ordinal);
-        return without.TrimEnd();
+        var suffix = $"\n\n{marker}";
+        if (body.EndsWith(suffix, StringComparison.Ordinal))
+            return body[..^suffix.Length];
+        if (string.Equals(body, marker, StringComparison.Ordinal))
+            return string.Empty;
+        return body.Replace(marker, string.Empty, StringComparison.Ordinal);
     }
 }

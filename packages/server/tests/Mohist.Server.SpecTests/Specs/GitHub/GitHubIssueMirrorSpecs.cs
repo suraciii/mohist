@@ -32,6 +32,7 @@ public sealed class GitHubIssueMirrorSpecs
         fixture.Comments.MarkerMatches.Clear();
         fixture.Comments.CreateFailure = null;
         fixture.Comments.FindFailure = null;
+        fixture.Comments.ConfirmationFailure = null;
         fixture.Comments.CreateThenThrow = false;
         fixture.Comments.MarkerMatchCount = 0;
     }
@@ -76,6 +77,44 @@ public sealed class GitHubIssueMirrorSpecs
     }
 
     [Fact]
+    public async Task MarkerSearchFailure_LeavesPendingIntentWithoutBlockingEventProcessing()
+    {
+        var (projectId, issueNumber, _) = await CreateIssueAsync(isDraft: false);
+        _fixture.Comments.FindFailure = new InvalidOperationException("marker lookup failed");
+
+        await PumpAsync();
+
+        var link = await LoadLinkByIssueAsync(projectId, issueNumber);
+        Assert.NotNull(link);
+        Assert.True(link!.IsPending);
+        Assert.False(link.MirrorCreateAttempted);
+        Assert.Empty(_fixture.Comments.CreatedIssues);
+    }
+
+    [Fact]
+    public async Task UnknownCreateOutcome_WithNoMarkerMatchDoesNotPostAgainImmediately()
+    {
+        var (projectId, issueNumber, _) = await CreateIssueAsync(isDraft: false);
+        _fixture.Comments.CreateThenThrow = true;
+        await PumpAsync();
+
+        Assert.Single(_fixture.Comments.CreatedIssues);
+        var pending = await LoadLinkByIssueAsync(projectId, issueNumber);
+        Assert.NotNull(pending);
+        Assert.True(pending!.IsPending);
+        Assert.True(pending.MirrorCreateAttempted);
+
+        _fixture.Comments.CreateThenThrow = false;
+        await DispatchIssueEventAsync(projectId, issueNumber, EventCatalog.ReverseDns.IssueContentChanged,
+            new IssueContentChanged("Ready issue", "Ready issue body"));
+
+        var stillPending = await LoadLinkByIssueAsync(projectId, issueNumber);
+        Assert.True(stillPending!.IsPending);
+        Assert.True(stillPending.MirrorCreateAttempted);
+        Assert.Single(_fixture.Comments.CreatedIssues);
+    }
+
+    [Fact]
     public async Task UnknownCreateOutcome_ReconcilesByMarkerWithoutSecondPost()
     {
         var (projectId, issueNumber, connectionId) = await CreateIssueAsync(isDraft: false);
@@ -100,6 +139,28 @@ public sealed class GitHubIssueMirrorSpecs
     }
 
     [Fact]
+    public async Task SetMirrorCollision_FailsClosedWithoutConfirmation()
+    {
+        var (projectId, firstIssueNumber, connectionId) = await CreateIssueAsync(isDraft: false);
+        await PumpAsync();
+        var first = Assert.Single(_fixture.Comments.CreatedIssues, issue => issue.ConnectionId == connectionId);
+        var secondIssueNumber = await CreateIssueInProjectAsync(projectId, isDraft: false);
+        _fixture.Comments.MarkerMatches.Enqueue(first.GithubIssueNumber);
+
+        await PumpAsync();
+
+        var second = await LoadLinkByIssueAsync(projectId, secondIssueNumber);
+        Assert.NotNull(second);
+        Assert.True(second!.IsPending);
+        Assert.DoesNotContain(_fixture.Comments.Comments, comment =>
+            comment.GithubIssueNumber == first.GithubIssueNumber
+            && comment.Body.Contains($"Mohist issue #{secondIssueNumber}", StringComparison.Ordinal));
+        Assert.Contains(_fixture.Comments.Comments, comment =>
+            comment.GithubIssueNumber == first.GithubIssueNumber
+            && comment.Body.Contains($"Mohist issue #{firstIssueNumber}", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task DuplicateMarker_ReconciliationFailsClosed()
     {
         var (projectId, issueNumber, _) = await CreateIssueAsync(isDraft: false);
@@ -115,6 +176,31 @@ public sealed class GitHubIssueMirrorSpecs
         Assert.NotNull(link);
         Assert.True(link!.IsPending);
         Assert.Empty(_fixture.Comments.Comments);
+    }
+
+    [Fact]
+    public async Task ConfirmationFailure_IsRetriedOnLaterMirrorEventUsingPostedBookkeeping()
+    {
+        var (projectId, issueNumber, _) = await CreateIssueAsync(isDraft: false);
+        _fixture.Comments.ConfirmationFailure = new InvalidOperationException("confirmation failed");
+
+        await PumpAsync();
+
+        var linked = await LoadLinkByIssueAsync(projectId, issueNumber);
+        Assert.NotNull(linked);
+        Assert.False(linked!.IsPending);
+        Assert.False(linked.HasPostedComment(GitHubCommentKinds.MirrorCreated));
+        Assert.Empty(_fixture.Comments.Comments);
+        Assert.Single(_fixture.Comments.CreatedIssues);
+
+        _fixture.Comments.ConfirmationFailure = null;
+        await DispatchIssueEventAsync(projectId, issueNumber, EventCatalog.ReverseDns.IssueContentChanged,
+            new IssueContentChanged("Ready issue", "Ready issue body"));
+
+        var recovered = await LoadLinkByIssueAsync(projectId, issueNumber);
+        Assert.True(recovered!.HasPostedComment(GitHubCommentKinds.MirrorCreated));
+        Assert.Single(_fixture.Comments.Comments);
+        Assert.Single(_fixture.Comments.CreatedIssues);
     }
 
     [Fact]
@@ -181,10 +267,16 @@ public sealed class GitHubIssueMirrorSpecs
             gitUrl: $"https://github.com/{owner}/{RepositoryName}.git");
         var connection = await _fixture.Client.PostDataAsync<JsonElement>(
             $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName });
-        var issueNumber = await _fixture.Grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(project.Id)).NextAsync();
-        await _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issueNumber)))
-            .CreateAsync(project.Id, issueNumber, "Ready issue", "Ready issue body", null, "p2", RepositoryName, isDraft: isDraft);
+        var issueNumber = await CreateIssueInProjectAsync(project.Id, isDraft);
         return (project.Id, issueNumber, connection.GetProperty("id").GetString()!);
+    }
+
+    private async Task<int> CreateIssueInProjectAsync(string projectId, bool isDraft)
+    {
+        var issueNumber = await _fixture.Grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId)).NextAsync();
+        await _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)))
+            .CreateAsync(projectId, issueNumber, "Ready issue", "Ready issue body", null, "p2", RepositoryName, isDraft: isDraft);
+        return issueNumber;
     }
 
     private async Task PumpAsync()

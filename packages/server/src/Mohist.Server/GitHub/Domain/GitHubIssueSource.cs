@@ -1,9 +1,9 @@
 namespace Mohist.Server.GitHub.Domain;
 
 /// <summary>
-/// Legacy feed-origin label constants retained only for decoding historical
-/// issue data. New GitHub-fed issues use the persisted link as their origin
-/// identity and never emit this product label.
+/// Legacy feed-origin label constants retained for historical issue data. New
+/// GitHub-fed issues use the persisted link as their origin identity and never
+/// emit this product label.
 /// </summary>
 public static class GitHubIssueSource
 {

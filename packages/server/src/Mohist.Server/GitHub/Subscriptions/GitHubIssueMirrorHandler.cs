@@ -53,40 +53,151 @@ public sealed class GitHubIssueMirrorHandler : ICloudEventHandler
             link = await links.CreatePendingAsync(context.ProjectId, issue.RepositoryRef!, issue.Number, ct);
         }
         var port = sp.GetRequiredService<IGitHubIssuePort>();
-        if (link.GithubIssueNumber <= 0)
+        if (link.IsPending)
         {
-            var existing = await port.FindIssueByMarkerAsync(connection, link.MirrorMarker!, ct);
+            var marker = link.MirrorMarker;
+            if (string.IsNullOrWhiteSpace(marker))
+            {
+                _log.LogWarning(
+                    "GitHub mirror link {LinkId} for Mohist issue #{IssueNumber} has no reconciliation marker",
+                    link.Id, issue.Number);
+                return;
+            }
+
+            int? existing;
+            try
+            {
+                existing = await port.FindIssueByMarkerAsync(connection, marker, ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _log.LogWarning(
+                    ex,
+                    "GitHub mirror marker lookup failed for Mohist issue #{IssueNumber}",
+                    issue.Number);
+                return;
+            }
+
             if (existing is int found)
             {
-                link = await links.SetMirrorAsync(link.Id, found, ct) ?? link;
-                await PostConfirmationAsync(sp, connection, link, found, issue.Number, ct);
+                if (found <= 0)
+                {
+                    _log.LogWarning(
+                        "GitHub mirror marker lookup returned invalid issue number {GithubIssueNumber} for Mohist issue #{IssueNumber}",
+                        found, issue.Number);
+                    return;
+                }
+
+                try
+                {
+                    var linked = await links.SetMirrorAsync(link.Id, found, ct);
+                    if (linked is null)
+                    {
+                        _log.LogWarning(
+                            "GitHub mirror link {LinkId} disappeared before setting issue #{GithubIssueNumber}",
+                            link.Id, found);
+                        return;
+                    }
+                    link = linked;
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    _log.LogWarning(
+                        ex,
+                        "GitHub mirror link {LinkId} could not adopt issue #{GithubIssueNumber}; reconciliation failed closed",
+                        link.Id, found);
+                    return;
+                }
+
+                await TryPostConfirmationAsync(sp, connection, link, found, issue.Number, ct);
             }
             else if (!link.MirrorCreateAttempted)
             {
-                link = await links.MarkMirrorCreateAttemptedAsync(link.Id, ct) ?? link;
                 try
                 {
-                    var created = await port.CreateIssueAsync(connection, issue.Title, issue.Body ?? string.Empty, link.MirrorMarker!, ct);
-                    link = await links.SetMirrorAsync(link.Id, created, ct) ?? link;
-                    await PostConfirmationAsync(sp, connection, link, created, issue.Number, ct);
+                    var marked = await links.MarkMirrorCreateAttemptedAsync(link.Id, ct);
+                    if (marked is null)
+                    {
+                        _log.LogWarning(
+                            "GitHub mirror link {LinkId} disappeared before create attempt for Mohist issue #{IssueNumber}",
+                            link.Id, issue.Number);
+                        return;
+                    }
+                    link = marked;
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    _log.LogWarning(
+                        ex,
+                        "GitHub mirror creation intent could not be marked for Mohist issue #{IssueNumber}",
+                        issue.Number);
+                    return;
+                }
+
+                if (!link.IsPending)
+                {
+                    await TryPostConfirmationAsync(sp, connection, link, link.GithubIssueNumber, issue.Number, ct);
+                    return;
+                }
+
+                int created;
+                try
+                {
+                    created = await port.CreateIssueAsync(
+                        connection, issue.Title, issue.Body ?? string.Empty, marker, ct);
+                    if (created <= 0)
+                    {
+                        _log.LogWarning(
+                            "GitHub mirror create returned invalid issue number {GithubIssueNumber} for Mohist issue #{IssueNumber}",
+                            created, issue.Number);
+                        return;
+                    }
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested)
                 {
                     _log.LogWarning(ex, "GitHub mirror create failed for Mohist issue #{IssueNumber}", issue.Number);
                     return;
                 }
+
+                try
+                {
+                    var linked = await links.SetMirrorAsync(link.Id, created, ct);
+                    if (linked is null)
+                    {
+                        _log.LogWarning(
+                            "GitHub mirror link {LinkId} disappeared after creating issue #{GithubIssueNumber}",
+                            link.Id, created);
+                        return;
+                    }
+                    link = linked;
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    _log.LogWarning(
+                        ex,
+                        "GitHub mirror link {LinkId} could not record created issue #{GithubIssueNumber}; reconciliation failed closed",
+                        link.Id, created);
+                    return;
+                }
+
+                await TryPostConfirmationAsync(sp, connection, link, created, issue.Number, ct);
             }
             return;
         }
 
         if (link.MirrorMarker is null) return;
 
+        // Revisit the confirmation gate on every later mirror event. The
+        // posted-comment set is the durable success marker; a failed post does
+        // not block this event and a later event can retry it.
+        await TryPostConfirmationAsync(sp, connection, link, link.GithubIssueNumber, issue.Number, ct);
+
         if (evt.Type is EventCatalog.ReverseDns.IssueContentChanged
             && evt.Data?.Deserialize<IssueContentChanged>(CloudEvent.JsonOptions)?.Source?.StartsWith("github:", StringComparison.Ordinal) != true)
         {
             try
             {
-                await port.UpdateIssueAsync(connection, link.GithubIssueNumber, issue.Title, issue.Body ?? string.Empty, link.MirrorMarker!, ct);
+                await port.UpdateIssueAsync(connection, link.GithubIssueNumber, issue.Title, issue.Body ?? string.Empty, link.MirrorMarker, ct);
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
@@ -95,7 +206,7 @@ public sealed class GitHubIssueMirrorHandler : ICloudEventHandler
         }
     }
 
-    private static async Task PostConfirmationAsync(
+    private async Task TryPostConfirmationAsync(
         IServiceProvider sp,
         GitHubConnection connection,
         GitHubIssueLink link,
@@ -104,9 +215,32 @@ public sealed class GitHubIssueMirrorHandler : ICloudEventHandler
         CancellationToken ct)
     {
         if (link.HasPostedComment(GitHubCommentKinds.MirrorCreated)) return;
-        await sp.GetRequiredService<IGitHubCommentPort>().PostCommentAsync(
-            connection, githubIssueNumber, $"Mohist issue #{issueNumber} · linked from Mohist", ct);
-        await sp.GetRequiredService<GitHubIssueLinkStore>().MarkCommentPostedAsync(
-            link.Id, GitHubCommentKinds.MirrorCreated, ct);
+
+        try
+        {
+            await sp.GetRequiredService<IGitHubCommentPort>().PostCommentAsync(
+                connection, githubIssueNumber, $"Mohist issue #{issueNumber} · linked from Mohist", ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _log.LogWarning(
+                ex,
+                "GitHub mirror confirmation for Mohist issue #{IssueNumber} could not be posted",
+                issueNumber);
+            return;
+        }
+
+        try
+        {
+            await sp.GetRequiredService<GitHubIssueLinkStore>().MarkCommentPostedAsync(
+                link.Id, GitHubCommentKinds.MirrorCreated, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _log.LogWarning(
+                ex,
+                "GitHub mirror confirmation bookkeeping for link {LinkId} could not be persisted",
+                link.Id);
+        }
     }
 }

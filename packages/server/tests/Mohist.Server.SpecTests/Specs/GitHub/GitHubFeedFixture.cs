@@ -33,6 +33,7 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     public int MarkerMatchCount { get; set; }
     public Exception? CreateFailure { get; set; }
     public Exception? FindFailure { get; set; }
+    public Exception? ConfirmationFailure { get; set; }
     public bool CreateThenThrow { get; set; }
     public int NextGithubIssueNumber { get; set; } = 900;
     public List<IssueClose> Closes { get; } = [];
@@ -87,6 +88,7 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         string body,
         CancellationToken ct = default)
     {
+        if (ConfirmationFailure is not null) throw ConfirmationFailure;
         Comments.Add(new PostedComment(connection.Id, githubIssueNumber, body));
         return Task.CompletedTask;
     }

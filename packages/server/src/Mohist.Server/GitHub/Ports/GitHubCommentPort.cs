@@ -24,7 +24,6 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
 
     public GitHubCommentPort(
         HttpClient http,
-        GitHubConnectionStore connections,
         ISecretStore secrets,
         ILogger<GitHubCommentPort> log)
     {
@@ -59,22 +58,45 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
-        var query = Uri.EscapeDataString($"{marker} in:body is:issue");
-        var url = $"/search/issues?q={query}+repo:{connection.Owner}/{connection.Repo}&per_page=2";
+        const int pageSize = 100;
+        var matches = new List<int>();
         var pat = await LoadPatAsync(connection, ct);
-        using var request = BuildRequest(url, HttpMethod.Get, content: null, pat);
-        using var response = await _http.SendAsync(request, ct);
-        if (!response.IsSuccessStatusCode)
+        for (var page = 1; ; page++)
         {
-            await LogFailureAsync(response, url, ct);
-            response.EnsureSuccessStatusCode();
+            var url = $"/repos/{connection.Owner}/{connection.Repo}/issues?state=all&per_page={pageSize}&page={page}";
+            using var request = BuildRequest(url, HttpMethod.Get, content: null, pat);
+            using var response = await _http.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                await LogFailureAsync(response, url, ct);
+                response.EnsureSuccessStatusCode();
+            }
+
+            var items = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))?.AsArray();
+            if (items is null || items.Count == 0)
+                break;
+
+            foreach (var item in items)
+            {
+                if (item is not JsonObject issue || issue.ContainsKey("pull_request"))
+                    continue;
+                var body = issue["body"]?.GetValue<string>();
+                if (body?.Contains(marker, StringComparison.Ordinal) != true)
+                    continue;
+
+                var number = issue["number"]?.GetValue<int>();
+                if (number is not > 0)
+                    throw new InvalidOperationException("GitHub mirror marker matched an issue without a valid number");
+                matches.Add(number.Value);
+                if (matches.Count > 1)
+                    throw new InvalidOperationException("GitHub mirror marker matched multiple issues; reconciliation is ambiguous");
+            }
+
+            if (items.Count < pageSize)
+                break;
         }
-        var node = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct));
-        var items = node?["items"]?.AsArray();
-        if (items is null || items.Count == 0) return null;
-        if (items.Count != 1)
-            throw new InvalidOperationException($"GitHub mirror marker matched {items.Count} issues; reconciliation is ambiguous");
-        return items[0]?["number"]?.GetValue<int>();
+
+        return matches.Count == 0 ? null : matches[0];
     }
 
     public async Task UpdateIssueAsync(

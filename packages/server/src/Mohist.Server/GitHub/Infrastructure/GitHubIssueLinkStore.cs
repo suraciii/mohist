@@ -73,8 +73,7 @@ public sealed class GitHubIssueLinkStore : IScopedService
         string repositoryName,
         int githubIssueNumber,
         int issueNumber,
-        CancellationToken ct = default,
-        string? mirrorMarker = null)
+        CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryName);
@@ -91,8 +90,8 @@ public sealed class GitHubIssueLinkStore : IScopedService
             RepositoryName = repositoryName,
             GithubIssueNumber = githubIssueNumber,
             IssueNumber = issueNumber,
-            MirrorMarker = mirrorMarker,
-            MirrorCreateAttempted = mirrorMarker is not null,
+            MirrorMarker = null,
+            MirrorCreateAttempted = false,
             PostedCommentsJson = "[]",
             CreatedAt = now,
             UpdatedAt = now,
@@ -185,17 +184,6 @@ public sealed class GitHubIssueLinkStore : IScopedService
             await db.SaveChangesAsync(ct);
         }
         return ToDomain(row);
-    }
-
-    public async Task<GitHubIssueLink?> GetPendingByIssueAsync(
-        string projectId,
-        int issueNumber,
-        CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await db.GitHubIssueLinks.AsNoTracking()
-            .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.IssueNumber == issueNumber && r.GithubIssueNumber <= 0, ct);
-        return row is null ? null : ToDomain(row);
     }
 
     public async Task DeleteAsync(string id, CancellationToken ct = default)

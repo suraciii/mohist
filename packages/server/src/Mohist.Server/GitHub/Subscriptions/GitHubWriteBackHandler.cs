@@ -72,6 +72,13 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
             .GetByIssueAsync(context.ProjectId, context.IssueNumber, ct);
         if (link is null)
             return;
+        if (link.IsPending)
+        {
+            _log.LogDebug(
+                "GitHub write-back skipped for Mohist issue #{IssueNumber}: mirror link {LinkId} is still pending",
+                link.IssueNumber, link.Id);
+            return;
+        }
         var connection = await sp.GetRequiredService<GitHubConnectionStore>()
             .GetByRepositoryAsync(context.ProjectId, link.RepositoryName, ct);
         if (connection is null || connection.Status != GitHubConnectionStatus.Active)

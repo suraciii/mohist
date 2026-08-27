@@ -20,6 +20,7 @@ public partial class AddGitHubMirrorIntent : Migration
             type: "TEXT",
             maxLength: 256,
             nullable: true);
+        migrationBuilder.Sql("DROP INDEX IF EXISTS \"IX_GitHubConnections_ProjectId_RepositoryName\"");
         migrationBuilder.Sql("DROP INDEX IF EXISTS \"IX_GitHubIssueLinks_ProjectId_RepositoryName_GithubIssueNumber\"");
         migrationBuilder.Sql("DROP INDEX IF EXISTS \"IX_GitHubIssueLinks_ProjectId_IssueNumber\"");
         migrationBuilder.Sql("DELETE FROM GitHubIssueLinks WHERE Id IN (SELECT newer.Id FROM GitHubIssueLinks newer JOIN GitHubIssueLinks older ON older.ProjectId = newer.ProjectId AND older.IssueNumber = newer.IssueNumber AND (older.CreatedAt < newer.CreatedAt OR (older.CreatedAt = newer.CreatedAt AND older.Id < newer.Id)))");
@@ -34,10 +35,15 @@ public partial class AddGitHubMirrorIntent : Migration
             table: "GitHubIssueLinks",
             columns: new[] { "ProjectId", "IssueNumber" },
             unique: true);
+        migrationBuilder.CreateIndex(
+            name: "IX_GitHubConnections_ProjectId_RepositoryName",
+            table: "GitHubConnections",
+            columns: new[] { "ProjectId", "RepositoryName" });
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.Sql("DROP INDEX IF EXISTS \"IX_GitHubConnections_ProjectId_RepositoryName\"");
         migrationBuilder.Sql("DROP INDEX IF EXISTS \"IX_GitHubIssueLinks_ProjectId_IssueNumber\"");
         migrationBuilder.Sql("DROP INDEX IF EXISTS \"IX_GitHubIssueLinks_ProjectId_RepositoryName_GithubIssueNumber\"");
         migrationBuilder.CreateIndex(

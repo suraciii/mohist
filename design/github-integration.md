@@ -160,16 +160,18 @@ Mirroring is reliable by reconciliation, not by queueing:
 
 ## Status
 
-Implemented today: signed ingress and normalization, feed-by-label intake with
-its close withdrawal, Pull Request review Approval, best-effort write-back with
-durable failure records, the core no-Workflow Issue lifecycle, the GitHub
-mirror link visibility in the Issue read models, CLI, and Web, automatic
-ready-only mirroring with durable Pending intent and invisible marker
-reconciliation, and two-way title/body sync with equality echo suppression. The
-current link projection uses a deliberately provisional `healthy` sync state;
-real sync-health reporting and reconcile-based recovery belong to the later
-recovery slice. Feed-by-label intake, its connection options, and the
-`github-issue` origin label are removed when the command entry lands.
+Implemented today: signed ingress and normalization, the pre-command
+feed-by-label intake path with its close withdrawal, Pull Request review Approval,
+best-effort write-back with durable failure records, the core no-Workflow Issue
+lifecycle, the GitHub mirror link visibility in the Issue read models, CLI, and
+Web, automatic ready-only mirroring with durable Pending intent and invisible
+marker reconciliation, and two-way title/body sync with equality echo
+suppression. New feed-created issues no longer emit the `github-issue` origin
+label; historical feed-created links may retain it as data. The current link projection
+uses a deliberately provisional `healthy` sync state; real sync-health
+reporting and reconcile-based recovery belong to the later recovery slice.
+Feed-by-label intake and its connection options are removed when the command
+entry lands.
 
 Open questions:
 
