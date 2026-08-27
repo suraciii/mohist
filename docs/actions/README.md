@@ -203,8 +203,23 @@ list only additional codes.
   Session binding.
 - `session-binding-failed`: logical Session binding resolution or persistence
   failed.
+- `session-reporting-failed`: Mohist could not confirm the Workflow
+  AgentSession input or final turn facts.
 - `runtime-session-missing`: the physical Session is missing, but this
   operation cannot rebuild or resubmit safely.
 - `unavailable-runtime`: the backend reports that it is unavailable.
-- `execution-failed`: execution failed, including exhausted provider quota,
-  balance, or billing.
+- `turn-failed`: execution failed for a reason that has no more specific
+  declared code.
+- `skill-not-found`: an Agent Skill could not be resolved before execution.
+- `provider-quota-exhausted`: the provider reported exhausted quota, balance,
+  or billing.
+- `incompatible-runtime`: the selected Runtime is incompatible with the
+  request.
+- `interrupted`: execution was interrupted outside the normal deadline path.
+
+## Implementation Gaps
+
+The OpenCode and Pi manifests do not yet declare every code above that their
+current execution paths can produce. Until the manifests and Action boundaries
+are aligned, standard normalization can convert those omissions to
+`unexpected-error`.

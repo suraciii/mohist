@@ -118,6 +118,15 @@ commands such as `mo run approve` and `mo issue comment create`.
 Names follow [`cli.md`](cli.md): the resource comes first, and Project scope
 uses the active Project or `--project`.
 
+`mo routing rule create --agent` and `mo routing rule edit --agent` accept a
+project-scoped Agent name or stable ID. The CLI resolves either form before
+mutation and sends only the stable `AgentId`. Edit sends only fields the caller
+supplied; omitted fields remain unchanged. The PATCH presence vocabulary is
+`name`, `match`, `agentId`, `responsePrompt`, and `continue`. The Server does
+not resolve Agent names or accept alternate field casing. The boundary and its
+trade-offs are recorded in
+[`decisions/routing-agent-reference.md`](decisions/routing-agent-reference.md).
+
 ## Non-goals
 
 - An Agent-specific approval channel; Agents use the regular command surface.
@@ -141,6 +150,10 @@ Implemented: the Project-scoped ordered routing table with `Position` and
 and `mo agent subscription`, API, and Web views over the same RoutingRule
 facts.
 
-Implementation gap: the durable launch-pipeline key is still
-`(projectId, eventId, ruleId)`, so event-and-Agent coalescing applies only
-within one dispatch.
+Implementation gaps:
+
+- The durable launch-pipeline key is still `(projectId, eventId, ruleId)`, so
+  event-and-Agent coalescing applies only within one dispatch.
+- Routing-rule create and edit still send the raw CLI Agent value. Edit also
+  serializes omitted values and the Server PATCH presence vocabulary does not
+  yet match store application.

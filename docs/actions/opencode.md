@@ -121,10 +121,20 @@ authoritative for model validity and the default model.
 ## Error Codes
 
 See [Action Contracts](README.md#shared-semantics-for-agent-execution-actions)
-for the six shared business error codes and platform errors.
-`mohist/opencode` also defines:
+for shared business error codes and platform errors. `mohist/opencode` also
+defines:
 
-- `incompatible-runtime` means the OpenCode version or data is incompatible
-  with Mohist.
-- `permission-required` means permission is required to continue.
-- `interrupted` means a signal outside the Runner interrupted execution.
+- `permission-required`: OpenCode requires permission to continue.
+- `generation-drain-timeout`: a quarantined Runtime generation did not drain
+  before replacement.
+- `execution-unavailable`: Mohist could not hand Workflow input to the
+  execution capability.
+- `unsupported-execution-configuration`: OpenCode rejected the requested
+  execution configuration.
+
+Runtime diagnostics and recorded execution evidence keep the established
+`unsupported_execution_configuration` category. The ActionResult uses
+`unsupported-execution-configuration` because Action business error codes use
+lowercase kebab-case. Skill resolution follows the same boundary:
+`skill_not_found` is the resolver category, while `skill-not-found` is the
+ActionResult and recovery code.
