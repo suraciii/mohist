@@ -208,6 +208,20 @@ The owner must always produce a verdict. It must not express arbitration
 results as transport errors, and the Runner must not interpret status codes:
 `accepted` and `refused` retire a report; anything else keeps it.
 
+The report envelope has one closed status vocabulary. Task and AgentJob work
+report `completed`, `failed`, `timeout`, or `unknown`. A checks batch reports
+`pass` or `fail`; its rows use the same two check verdicts. There are no
+`success`, `ok`, or `succeeded` aliases. Route validation, translation, binding
+admission, and owner arbitration must use this same vocabulary and must reject
+a status that is invalid for the reported owner shape.
+
+An Agent success is `completed`. It is admissible only with the complete
+physical execution binding produced by that turn. A binding-less `failed`,
+`timeout`, or `unknown` report remains a legitimate pre-binding observation and
+settles through the ordinary unknown/failure path; a binding-less `completed`
+report is refused and never converted into an unknown observation. This keeps a
+successful execution fact from being retired without its physical witness.
+
 While its process lives, the Runner retries every unacknowledged report from
 memory at a fixed interval and continues to include it in poll reports. A
 report lost to process death is never replayed; its work is closed out.
@@ -289,9 +303,32 @@ expiry remains the backstop for a process that never returns. Both triggers
 produce the same ordinary failure code.
 
 A managed Runner update uses the same boundary. Update interrupt closes claim
-admission and records only the reversible drain fence. It does not settle work,
-prove that execution stopped, or authorize replacement execution. Its response
-is `draining` and lists `activeWorkIds`; it never labels that work interrupted.
+admission and records only a minimal drain-fence identity record: the pending
+identity and, after release, its most recent cancelled-identity tombstone. This
+record is not an update operation, work inventory, outcome journal, or recovery
+ledger. It does not settle work, prove that execution stopped, or authorize
+replacement execution. Its accepted response is `draining` and lists
+`activeWorkIds`; it never labels that work interrupted.
+
+The caller supplies one update-interrupt identity. Begin and cancel have these
+closed identity semantics:
+
+- Begin with the pending identity replays the same `draining` confirmation.
+- Begin with a different identity cannot replace a pending fence. It returns
+  `superseded` with the owning pending identity, without mutating the fence.
+- A cancel matching the pending identity releases the fence, records that
+  identity as the cancelled tombstone, and returns `cancelled`.
+- Repeating that cancel returns `already-cancelled` without mutation.
+- A cancel that matches neither the pending nor cancelled identity returns
+  `superseded` without mutation.
+- Begin with the cancelled identity returns `already-cancelled` and must not
+  claim that admission is closed. A new identity may establish the next fence;
+  persisting it clears the previous cancelled tombstone.
+
+A `draining` response is valid only when it carries the exact non-empty pending
+identity requested by the caller. The CLI must verify that identity before it
+restarts the service; an active-work snapshot alone is not confirmation.
+
 Once the replacement process registers, generation closeout fails the old work
 before new claims resume; Workflow and AgentJob then use their ordinary failure
 and retry semantics.
@@ -330,7 +367,10 @@ Rejected alternatives that may return:
 - Result preservation through Runtime session adoption: asking the Runtime for
   a finished turn's outcome. It covers only Runtime-backed Agent turns, cannot
   answer whether the Server already recorded a report, and rebuilds execution
-  identity from foreign file formats. Inferring unrecorded state is a defect
+  identity from foreign file formats. A Runtime may restore a physical Session
+  for a later independently admitted input, but neither Runner nor a Runtime
+  adapter may inspect, reattach, or adopt the previous turn to produce the lost
+  work result. Inferring unrecorded state is a defect
   ([`conventions.md`](conventions.md#facts-claims-and-settlement)).
 - A durable report journal on the Runner: preserves completed results across a
   crash, but turns the Runner into a second durable authority; every crash

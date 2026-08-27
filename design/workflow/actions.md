@@ -178,6 +178,12 @@ An Action has exactly one of two public result shapes:
 - The engine does not validate successful output against a schema at runtime. If a field declared
   in `outputs` is missing, `setVars` projection exposes an explicit error.
 
+The engine maps a successful task Action to the canonical work status
+`completed` and an Action error to `failed`; timeout and uncertain execution use
+the platform statuses `timeout` and `unknown`. It never emits `success`, `ok`,
+or `succeeded`. A checks batch uses `pass` or `fail` instead. The report boundary
+and binding rules are authoritative in [`../runner.md`](../runner.md#report).
+
 `TaskRun.Output` stores only successful Action output. If `expect`, a workspace constraint, or
 another Runner postcondition fails after an Action succeeds, TaskRun can store both the original
 output and the Runner-produced error. Task status, exit code, and Runner-private execution facts
