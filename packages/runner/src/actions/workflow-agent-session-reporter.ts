@@ -2,6 +2,7 @@ import type { RuntimeTurnEvent } from '../runtime/opencode/index.js'
 import {
   AlreadyConsumedRuntimeEventError,
   type AgentSessionRuntimeEventQueue,
+  type RuntimeEventInputReceiptWaitOptions,
   type RuntimeEventRecord,
 } from '../server/runtime-event-queue.js'
 import { runnerLogger } from '../system/logger.js'
@@ -28,6 +29,10 @@ export interface WorkflowAgentSessionReporterOptions {
   readonly workMetadata: WorkflowAgentSessionWorkMetadata
   readonly runtime: 'opencode' | 'pi'
   readonly randomId: () => string
+  /** The owning Workflow task's finite budget for ordinary input receipt waiting. */
+  readonly inputReceiptBudgetMs?: number
+  /** The owning Workflow task signal; it cancels only this receipt waiter. */
+  readonly signal?: AbortSignal
   /**
    * A positive bounded worktree-cleanup attempt creates a separate Session
    * follow-up turn. It is deliberately not part of action input.
@@ -50,6 +55,8 @@ export class WorkflowAgentSessionReporter {
   private readonly workMetadata: WorkflowAgentSessionWorkMetadata
   private readonly runtime: 'opencode' | 'pi'
   private readonly randomId: () => string
+  private readonly inputReceiptBudgetMs: number | null
+  private readonly signal: AbortSignal | null
   private readonly cleanupAttempt: number | null
   private readonly cleanupOperationId: string | null
   private readonly pendingPromises: Set<Promise<void>> = new Set()
@@ -68,6 +75,11 @@ export class WorkflowAgentSessionReporter {
     this.workMetadata = options.workMetadata
     this.runtime = options.runtime
     this.randomId = options.randomId
+    this.inputReceiptBudgetMs =
+      typeof options.inputReceiptBudgetMs === 'number' && Number.isFinite(options.inputReceiptBudgetMs)
+        ? Math.max(0, options.inputReceiptBudgetMs)
+        : null
+    this.signal = options.signal ?? null
     this.cleanupAttempt = isCleanupAttempt(options.cleanupAttempt) ? options.cleanupAttempt : null
     this.cleanupOperationId =
       this.cleanupAttempt === null
@@ -129,7 +141,7 @@ export class WorkflowAgentSessionReporter {
       .then(async () => {
         const awaitReceipt = this.outbox.awaitInputReceipt
         if (!awaitReceipt) throw new Error('Workflow AgentSession queue does not support Server input receipts')
-        const receipt = await awaitReceipt.call(this.outbox, inputDeliveryId)
+        const receipt = await awaitReceipt.call(this.outbox, inputDeliveryId, this.receiptWaitOptions())
         if (
           receipt.inputDeliveryId !== inputDeliveryId ||
           receipt.agentSessionId !== this.workMetadata.agentSessionId ||
@@ -358,6 +370,11 @@ export class WorkflowAgentSessionReporter {
       },
       acknowledgementPolicy: 'matching-receipt',
     }
+  }
+
+  private receiptWaitOptions(): RuntimeEventInputReceiptWaitOptions | undefined {
+    if (this.cleanupOperationId !== null || this.inputReceiptBudgetMs === null || this.signal === null) return undefined
+    return { budgetMs: this.inputReceiptBudgetMs, signal: this.signal }
   }
 
   private async awaitCleanupInput(prompt: string, runtimeSessionId: string): Promise<void> {

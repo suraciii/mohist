@@ -1,8 +1,15 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { piAction, PI_TURN_DURATION_MS } from './pi.js'
 import type { AgentExecutionDefinition, JsonObject, ParentIssueContext } from '../core/types.js'
 import type { ServerConnection } from '../server/connection.js'
 import type { PiResult, PiRuntime, PiTurnResult } from '../runtime/pi/index.js'
+import {
+  InputReceiptWaitCancelledError,
+  InputReceiptWaitTimeoutError,
+  createAgentSessionRuntimeEventQueue,
+  type AgentSessionRuntimeEventQueue,
+  type RuntimeEventRecord,
+} from '../server/runtime-event-queue.js'
 
 type ActionContext = {
   workflowRunId: string
@@ -15,6 +22,10 @@ type ActionContext = {
   writeVars: (vars: JsonObject) => Promise<void>
   projectId?: string | null
   parentIssueContext?: ParentIssueContext | null
+  taskRunId?: string | null
+  runnerId?: string | null
+  runtimeEventQueue?: AgentSessionRuntimeEventQueue | null
+  runtimeEventRecordId?: () => string
   piRuntime?: PiRuntime | null
   serverConnection?: ServerConnection | null
   agentDefinition?: AgentExecutionDefinition | null
@@ -74,6 +85,14 @@ function runtime() {
       },
     ),
   }
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+async function flushMicrotasks(count = 8): Promise<void> {
+  for (let index = 0; index < count; index += 1) await Promise.resolve()
 }
 
 function server() {
@@ -330,5 +349,221 @@ describe('mohist/pi Action', () => {
       }),
     )
     expect(unset.turns[0]).toMatchObject({ options: { reasoningEffort: null } })
+  })
+
+  it('recovers a retryable Pi input before the budget and invokes the runtime exactly once', async () => {
+    vi.useFakeTimers()
+    const pi = runtime()
+    const connection = server()
+    connection.openWorkflowAgentSession.mockResolvedValueOnce({
+      sessionId: 'agent-session-pi',
+      runtime: 'pi',
+      runtimeSessionId: null,
+      workDir: '/workspace',
+    } as never)
+    let inputAttempts = 0
+    const queue = createAgentSessionRuntimeEventQueue({
+      retryDelayMs: 100,
+      deliver: {
+        async send(record) {
+          if (record.event.type === 'session.input') {
+            inputAttempts += 1
+            if (inputAttempts === 1) return [{ type: 'message.delta' }]
+            return [
+              {
+                type: 'session.input',
+                inputDeliveryId: record.id,
+                agentTurnId: 'turn-pi-recovered',
+                agentSessionId: record.work?.agentSessionId ?? undefined,
+              },
+            ]
+          }
+          return [{ type: record.event.type }]
+        },
+      },
+    })
+    await queue.load()
+    const execution = piAction(
+      context({
+        with: { prompt: 'recover Pi input', timeout: 1_000 },
+        taskRunId: 'task-pi',
+        runnerId: 'runner-pi',
+        runtimeEventQueue: queue,
+        runtimeEventRecordId: () => 'pi-recovery-input',
+        piRuntime: pi as never,
+        serverConnection: connection as never,
+        projectId: 'project',
+      }),
+    )
+
+    await flushMicrotasks()
+    expect(inputAttempts).toBe(1)
+    expect(pi.runTurn).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(100)
+    const result = await execution
+
+    expect(result).not.toHaveProperty('error')
+    expect(inputAttempts).toBe(2)
+    expect(pi.runTurn).toHaveBeenCalledTimes(1)
+    await queue.stop()
+  })
+
+  it('projects bounded input receipt expiry as session-reporting-failed without invoking Pi', async () => {
+    const pi = runtime()
+    const connection = server()
+    connection.openWorkflowAgentSession.mockResolvedValueOnce({
+      sessionId: 'agent-session-1',
+      runtime: 'pi',
+      runtimeSessionId: null,
+      workDir: '/workspace',
+    } as never)
+    const records: RuntimeEventRecord[] = []
+    const receiptError = new InputReceiptWaitTimeoutError(
+      'input-1',
+      { attempts: 3, retries: 2, lastReason: 'retryable: temporary server refusal' },
+      250,
+      250,
+    )
+    const outbox: AgentSessionRuntimeEventQueue = {
+      ready: () => true,
+      load: async () => {},
+      recover: async () => {},
+      async enqueueBeforeExecution(record) {
+        records.push(record)
+      },
+      async awaitInputReceipt() {
+        throw receiptError
+      },
+      async enqueueProducedFact() {},
+      async enqueueProducedFactBatch() {},
+      kick: async () => {},
+      stop: async () => {},
+      snapshot: () => records,
+    }
+
+    const result = await piAction(
+      context({
+        with: { prompt: 'wait for Pi input', timeout: 250 },
+        taskRunId: 'task-1',
+        runnerId: 'runner-1',
+        runtimeEventQueue: outbox,
+        runtimeEventRecordId: () => 'input-1',
+        piRuntime: pi as never,
+        serverConnection: connection as never,
+        projectId: 'project',
+      }),
+    )
+
+    expect(result).toMatchObject({ error: { code: 'session-reporting-failed' } })
+    expect(result.error?.message).toContain('last reason: retryable: temporary server refusal')
+    expect(result.error?.message).toContain('elapsed 250ms of 250ms')
+    expect(result.error?.message).toContain('delivery attempts: 3; retries: 2')
+    expect(pi.runTurn).not.toHaveBeenCalled()
+    expect(records).toHaveLength(1)
+  })
+
+  it('projects receipt-wait cancellation as session-reporting-failed without invoking Pi', async () => {
+    const pi = runtime()
+    const connection = server()
+    connection.openWorkflowAgentSession.mockResolvedValueOnce({
+      sessionId: 'agent-session-1',
+      runtime: 'pi',
+      runtimeSessionId: null,
+      workDir: '/workspace',
+    } as never)
+    const records: RuntimeEventRecord[] = []
+    const receiptError = new InputReceiptWaitCancelledError('input-1', new Error('task cancellation'))
+    const outbox: AgentSessionRuntimeEventQueue = {
+      ready: () => true,
+      load: async () => {},
+      recover: async () => {},
+      async enqueueBeforeExecution(record) {
+        records.push(record)
+      },
+      async awaitInputReceipt() {
+        throw receiptError
+      },
+      async enqueueProducedFact() {},
+      async enqueueProducedFactBatch() {},
+      kick: async () => {},
+      stop: async () => {},
+      snapshot: () => records,
+    }
+
+    const result = await piAction(
+      context({
+        with: { prompt: 'cancel Pi input', timeout: 1_000 },
+        taskRunId: 'task-1',
+        runnerId: 'runner-1',
+        runtimeEventQueue: outbox,
+        runtimeEventRecordId: () => 'input-1',
+        piRuntime: pi as never,
+        serverConnection: connection as never,
+        projectId: 'project',
+      }),
+    )
+
+    expect(result).toMatchObject({ error: { code: 'session-reporting-failed' } })
+    expect(result.error?.message).toContain('task cancellation')
+    expect(pi.runTurn).not.toHaveBeenCalled()
+  })
+
+  it('passes the effective Pi receipt budget and task signal to the reporter', async () => {
+    const pi = runtime()
+    const connection = server()
+    connection.openWorkflowAgentSession.mockResolvedValueOnce({
+      sessionId: 'agent-session-1',
+      runtime: 'pi',
+      runtimeSessionId: null,
+      workDir: '/workspace',
+    } as never)
+    const records: RuntimeEventRecord[] = []
+    const waits: Array<{
+      recordId: string
+      options?: { readonly budgetMs: number; readonly signal: AbortSignal }
+    }> = []
+    const outbox: AgentSessionRuntimeEventQueue = {
+      ready: () => true,
+      load: async () => {},
+      recover: async () => {},
+      async enqueueBeforeExecution(record) {
+        records.push(record)
+      },
+      async awaitInputReceipt(recordId, options) {
+        waits.push({ recordId, options })
+        return {
+          type: 'session.input',
+          inputDeliveryId: recordId,
+          agentTurnId: 'turn-1',
+          agentSessionId: 'agent-session-1',
+        }
+      },
+      async enqueueProducedFact() {},
+      async enqueueProducedFactBatch() {},
+      kick: async () => {},
+      stop: async () => {},
+      snapshot: () => records,
+    }
+    const controller = new AbortController()
+
+    const result = await piAction(
+      context({
+        signal: controller.signal,
+        with: { prompt: 'run Pi', timeout: 12_345 },
+        taskRunId: 'task-1',
+        runnerId: 'runner-1',
+        runtimeEventQueue: outbox,
+        runtimeEventRecordId: () => 'input-1',
+        piRuntime: pi as never,
+        serverConnection: connection as never,
+        projectId: 'project',
+      }),
+    )
+
+    expect(result).not.toHaveProperty('error')
+    expect(waits).toHaveLength(1)
+    expect(waits[0]).toMatchObject({ recordId: 'input-1', options: { budgetMs: 12_345 } })
+    expect(waits[0]?.options?.signal).toBe(controller.signal)
+    expect(pi.runTurn).toHaveBeenCalledTimes(1)
   })
 })

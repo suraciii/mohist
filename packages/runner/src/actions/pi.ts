@@ -19,7 +19,11 @@ import { SkillResolver } from '../runtime/skill-resolver.js'
 import { buildExecutionEnvelope } from '../runtime/execution-envelope.js'
 import type { AgentExecutionDefinition } from '../core/types.js'
 import { WorkflowAgentSessionReporter } from './workflow-agent-session-reporter.js'
-import type { AgentSessionRuntimeEventQueue } from '../server/runtime-event-queue.js'
+import {
+  InputReceiptWaitCancelledError,
+  InputReceiptWaitTimeoutError,
+  type AgentSessionRuntimeEventQueue,
+} from '../server/runtime-event-queue.js'
 
 export const PI_USES = 'mohist/pi'
 export const PI_TURN_DURATION_MS = 60 * 60 * 1000
@@ -209,7 +213,13 @@ export async function piAction(
   }
 
   const events: PiRuntimeEvent[] = []
-  const reporter = createWorkflowReporter(context, sessionName, agentSessionId, runtimeSessionId)
+  const reporter = createWorkflowReporter(
+    context,
+    sessionName,
+    agentSessionId,
+    runtimeSessionId,
+    options.timeoutMs ?? PI_TURN_DURATION_MS,
+  )
   if (context.cleanupAttempt && !reporter) {
     return boundFailure(
       'session-reporting-failed',
@@ -255,14 +265,12 @@ export async function piAction(
 
   try {
     await report([inputEvent(runtimeSessionId, executionPrompt, context)])
-  } catch {
-    return boundFailure(
-      'session-reporting-failed',
-      'Workflow AgentSession rejected session.input; prompt was not submitted',
-      agentSessionId,
-      runtimeSessionId,
-      reporter,
-    )
+  } catch (error) {
+    const receiptWaitError =
+      error instanceof InputReceiptWaitTimeoutError || error instanceof InputReceiptWaitCancelledError ? error : null
+    const message =
+      receiptWaitError?.message ?? 'Workflow AgentSession rejected session.input; prompt was not submitted'
+    return boundFailure('session-reporting-failed', message, agentSessionId, runtimeSessionId, reporter)
   }
 
   const request: PiTurnRequest = {
@@ -528,6 +536,7 @@ async function piActionThroughAgent(inputs: JsonObject, host: ActionHost): Promi
     prompt: parsed.prompt,
     session,
     options: parsed.options,
+    deadlineMs: parsed.options.timeoutMs,
   })
 }
 
@@ -536,6 +545,7 @@ function createWorkflowReporter(
   sessionName: string,
   agentSessionId: string | null,
   runtimeSessionId: string | null,
+  inputReceiptBudgetMs?: number,
 ): WorkflowAgentSessionReporter | null {
   if (!context.projectId || !context.runtimeEventQueue || !context.runtimeEventRecordId) return null
   if (!context.taskRunId || !context.runnerId || !agentSessionId || !runtimeSessionId) return null
@@ -554,6 +564,8 @@ function createWorkflowReporter(
     },
     runtime: 'pi',
     randomId: context.runtimeEventRecordId,
+    inputReceiptBudgetMs,
+    signal: context.signal,
     cleanupAttempt: context.cleanupAttempt,
   })
 }
