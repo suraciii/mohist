@@ -60,7 +60,7 @@ See [`repositories.md`](repositories.md).
 Workspace is its own supporting subdomain, not part of Project Space configuration. Issue and
 entry contexts resolve to a Workspace through its Origin, and Runner materializes it as a
 directory. Execution placement is a collaboration: Workflow decides dispatch from Workspace
-routing facts and Runner capacity. See [`workspace.md`](workspaces.md).
+routing facts and Runner capacity. See [`workspaces.md`](workspaces.md).
 
 ### Agent and Session terms
 
