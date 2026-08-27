@@ -27,7 +27,7 @@ using Mohist.Server.Workspace.Grains;
 
 namespace Mohist.Server.Issue.Grains;
 
-public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
+public partial class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
 {
     private Domain.Issue? _issue;
     private bool _issueReloadRequired;
@@ -202,12 +202,8 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             await StartCompositeAsync();
             return string.Empty;
         }
-        if (_issue.NoWorkflow)
-        {
-            _issue.StartWithoutWorkflow(undeliveredPrerequisites, _timeProvider.GetUtcNow().UtcDateTime);
-            await SaveIssueAsync();
+        if (await TryStartWithoutWorkflowAsync(undeliveredPrerequisites))
             return string.Empty;
-        }
         var resolution = RequireResolvedRepository(await ResolveIssueRepositoryAtStartAsync(_issue!));
         var repo = resolution.Repository!;
         var wrId = $"wr_{Guid.NewGuid():N}";
@@ -898,8 +894,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var hasNoWorkflow = present.Contains(nameof(command.NoWorkflow));
         var hasParent = present.Contains(nameof(command.ParentIssueNumber));
 
-        if (hasWorkflowProfile && hasNoWorkflow && command.NoWorkflow == true && !string.IsNullOrWhiteSpace(command.WorkflowProfileId))
-            throw new ArgumentException("No Workflow and an explicit Workflow Profile are mutually exclusive");
+        ValidateWorkflowSelection(hasWorkflowProfile, command.WorkflowProfileId, hasNoWorkflow, command.NoWorkflow);
 
         if (hasWorkflowProfile
             && !string.IsNullOrWhiteSpace(command.WorkflowProfileId)
@@ -958,12 +953,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         if (hasIsDraft && command.IsDraft.HasValue)
             _issue.SetDraft(command.IsDraft.Value);
 
-        if (hasWorkflowProfile || hasNoWorkflow)
-        {
-            _issue.ReplaceWorkflowProfile(
-                hasWorkflowProfile ? command.WorkflowProfileId : null,
-                hasNoWorkflow ? command.NoWorkflow == true : false);
-        }
+        ApplyWorkflowSelection(hasWorkflowProfile, command.WorkflowProfileId, hasNoWorkflow, command.NoWorkflow);
 
         if (hasParent)
         {
@@ -1043,8 +1033,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
             await _attachmentService.ValidateIssueBindAsync(_issue!.ProjectId, _issue.Number, data.AttachmentIds);
         }
 
-        if (hasWorkflowProfile && hasNoWorkflow && data.NoWorkflow == true && !string.IsNullOrWhiteSpace(data.WorkflowProfileId))
-            throw new ArgumentException("No Workflow and an explicit Workflow Profile are mutually exclusive");
+        ValidateWorkflowSelection(hasWorkflowProfile, data.WorkflowProfileId, hasNoWorkflow, data.NoWorkflow);
 
         if (hasWorkflowProfile
             && !string.IsNullOrWhiteSpace(data.WorkflowProfileId)
@@ -1078,12 +1067,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         if (hasIsDraft && data.IsDraft.HasValue)
             _issue.SetDraft(data.IsDraft.Value);
 
-        if (hasWorkflowProfile || hasNoWorkflow)
-        {
-            _issue.ReplaceWorkflowProfile(
-                hasWorkflowProfile ? data.WorkflowProfileId : null,
-                hasNoWorkflow ? data.NoWorkflow == true : false);
-        }
+        ApplyWorkflowSelection(hasWorkflowProfile, data.WorkflowProfileId, hasNoWorkflow, data.NoWorkflow);
 
         if (hasParent)
         {
