@@ -53,7 +53,7 @@ repair loop exhausts that budget, retry starts a new budget.
 
 ### 1. Plan Does Not Produce `PLAN.md`
 
-**Symptom:** Plan is blocked and `PLANS/issue-<n>-PLAN.md` does not exist.
+**Symptom:** Plan is blocked and `PLANS/PLAN.md` does not exist.
 
 Possible causes:
 
@@ -92,7 +92,7 @@ mo session list --issue <n>
 
 Resolve:
 
-- Edit the handoff task list and remove a blocked task.
+- Edit the task list in `PLANS/tasks.json` and remove a blocked task.
 - Reject the Plan so the Agent plans again.
 - Split the Issue into smaller child Issues.
 

@@ -98,7 +98,7 @@ A Workflow Workspace has a fixed root layout:
 issue-<number>/
 ├── .mohist/                  # Platform marker and identity files
 ├── REPOS/<repository-name>/  # Repository checkout; only this tree enters Git
-├── PLANS/                    # Plans, designs, review reports, and the handoff contract
+├── PLANS/                    # Plans, designs, review reports, and the task list
 ├── RESEARCH/                 # Research notes and exploration material
 └── .scratch/                 # Temporary files
 ```

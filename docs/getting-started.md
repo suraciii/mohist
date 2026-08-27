@@ -257,7 +257,7 @@ artifacts:
 - `PLAN.md`: The Inline Agent's understanding of the requirement and its
   proposed approach
 - `DESIGN.md`: Design decisions, when the change involves design choices
-- `handoff.json`: The ordered task list that the Build stage will execute
+- `tasks.json`: The ordered task list that the Build stage will execute
 
 Approve the output when it is sound. Reject it with a reason when it needs a
 change; the Inline Agent will plan again. This step handles a Workflow approval
@@ -275,7 +275,7 @@ mo run reject --issue 1 --message "Changes required"  # Reject
 After Approval, the Workflow advances automatically:
 
 - **Build**: An Inline Agent writes code and runs tests according to the
-  approved handoff task list.
+  approved task list.
 - **Check**: A separate Inline Agent session reviews the output and records
   its findings as evidence, then the stage waits for another Approval.
 - **Integrate**: Mohist enables auto-merge on the pull request and waits until
@@ -290,7 +290,7 @@ After Integrate finishes, the Issue enters Done:
 
 - The pull request is merged into your base branch.
 - Your repository contains the code changes.
-- Plan, handoff, and review artifacts remain inspectable from the Issue as run
+- Plan and review artifacts remain inspectable from the Issue as run
   artifacts.
 
 In your repository, verify that `GET /hello` works.

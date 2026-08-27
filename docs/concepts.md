@@ -52,7 +52,7 @@ An Issue is one unit of work that can enter the production line.
 - A target repository in which the work executes; see
   [Repositories](repositories.md)
 - State such as stage, health, and `approvalState` after it enters a Workflow
-- Plan, handoff, and review artifacts after completion, recorded as run
+- Plan and review artifacts after completion, recorded as run
   artifacts
 
 If one requirement crosses multiple repositories, split one Issue into

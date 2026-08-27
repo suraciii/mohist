@@ -135,7 +135,7 @@ user and must be unique within the Project.
   work material. Only `REPOS/` participates in Git; plan and review material
   under `PLANS/` never enters a commit, branch, or Pull Request, and its
   durable record is the uploaded run artifact (see
-  [`workflow/handoff.md`](workflow/handoff.md)). Workspaces for parallel
+  [`workflow/plan-artifacts.md`](workflow/plan-artifacts.md)). Workspaces for parallel
   Issues use separate directories with no shared checkout or dependency cache.
 - Interactive path: an empty directory plus Repository access. The Agent
   organizes it according to convention; the platform creates no internal

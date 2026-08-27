@@ -36,9 +36,9 @@ mo issue create "..." --workflow-profile mohist/github-pr
 - A Workspace is rebuildable. The remote Workflow branch is the recovery point
   for Repository work; uploaded artifacts are the recovery point for plan
   material. Publishing both is visible in the Definition.
-- OpenSpec is not the Workflow's protocol. The only machine contract between
-  Plan and Build is the handoff file; all other planning material is the
-  Agent's free organization. See [`handoff.md`](handoff.md).
+- OpenSpec is not the Workflow's protocol. The only machine-readable plan
+  artifact the Workflow consumes is the task list; all other planning material
+  is the Agent's free organization. See [`plan-artifacts.md`](plan-artifacts.md).
 
 ## Shared Structure
 
@@ -51,12 +51,12 @@ plan -> approval -> build -> check -> approval -> integrate
 
 - Every Stage prepares its Workspace explicitly, so no Task relies on a hidden
   directory or branch transition.
-- Plan produces the named anchors and the handoff contract in one Agent
+- Plan produces the named artifacts, including the task list, in one Agent
   session. There is no self-review Task: the approval point is the plan
   review.
-- Build expands the approved handoff task list and verifies each increment.
+- Build expands the approved task list and verifies each increment.
   Check records an independent review as evidence; the verdict belongs to the
-  approver. See [`handoff.md`](handoff.md) for the review boundary.
+  approver. See [`plan-artifacts.md`](plan-artifacts.md) for the review boundary.
 - Approval feedback is ordered work in the rejected Stage's Session. This keeps
   feedback and repair context together and makes the next approval inspect the
   repaired result. The engine imposes no round limit: every feedback round is
@@ -156,5 +156,5 @@ The YAML and Runner still implement the previous shape: OpenSpec change
 directories under `openspec/changes/`, the `mohist/openspec-*` and
 `mohist/archive-change` Actions, a gated plan self-review and Check review with
 auto-fix loops, and synchronous `mohist/merge-github-pr`. This document and
-[`handoff.md`](handoff.md) are the target; the implementation issue closes the
+[`plan-artifacts.md`](plan-artifacts.md) are the target; the implementation issue closes the
 gap. The gap does not affect already-initialized Runs.

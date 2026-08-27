@@ -124,7 +124,7 @@ Effective Variables appear only under `vars`; variable keys are not copied to ba
 Runtime context is neither written back to nor merged into Variables. `work.approvalFeedback` exists
 only on a task produced by that feedback and is absent from ordinary tasks. Plan-artifact paths
 are not runtime context. A Profile and Prompt express them directly, for example
-`PLANS/issue-${{ issue.number }}-PLAN.md`.
+`PLANS/PLAN.md`.
 
 ## Dispatch Snapshot Persistence
 

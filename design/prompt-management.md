@@ -66,7 +66,7 @@ A builtin `.prompt` is product content. It ships with the product and applies to
   repository commands, directory structure, or examples from its development history.
 - The content may refer to Mohist product surfaces, such as the `mo` CLI, documented template namespaces,
   and workflow variables. These surfaces are valid in any managed project. Write plan-artifact
-  paths such as `PLANS/issue-${{ issue.number }}-PLAN.md` without an additional namespace dependency.
+  paths such as `PLANS/PLAN.md` without an additional namespace dependency.
 - State only the task, inputs, outputs, and machine-verifiable contracts such as output paths and markers.
   Do not prescribe process details, problem classifications, or report templates. The executing agent is
   capable, and the primary reader of its report is the agent for the next task.

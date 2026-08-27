@@ -86,13 +86,13 @@ stages:
           options: ${{ vars.agent }}
         expect:
           files:
-            - path: PLANS/issue-${{ issue.number }}-PLAN.md
-            - path: PLANS/issue-${{ issue.number }}.handoff.json
+            - path: PLANS/PLAN.md
+            - path: PLANS/tasks.json
 
   - stage: build
     requiresApproval: false
     tasks:
-      # Expand the handoff task list and verify each increment.
+      # Expand the task list and verify each increment.
 
   - stage: check
     requiresApproval: true
@@ -193,7 +193,7 @@ approval points as `mohist/local`, but it delivers the result differently:
 
 - Project settings can run all inline Agent tasks through the Profile's default
   `mohist/opencode` Action or another compatible Action such as `mohist/pi`.
-  Approval feedback, recovery, and handoff-generated Build tasks use the same
+  Approval feedback, recovery, and generated Build tasks use the same
   Run-bound Action.
 
 - The remote Workflow branch preserves completed work between Stages. A Runner

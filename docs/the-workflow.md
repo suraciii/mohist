@@ -35,23 +35,23 @@ mo issue start <number>          # Start the Workflow and enter Plan.
 
 The Inline Agent interprets the requirements and plans the implementation. This
 is the least expensive stage in which to find a wrong direction. During a
-manual approval, focus on the plan document and the handoff task list.
+manual approval, focus on the plan document and the task list.
 
 Plan artifacts live in the Issue Workspace under `PLANS/`, outside the
 Repository checkout, so they never appear in the Pull Request or the
 Repository history. See [Workspace](workspaces.md#layout) for the layout.
 Plan produces:
 
-- `PLANS/issue-<number>-PLAN.md`: the interpretation, scope, motivation, and
+- `PLANS/PLAN.md`: the interpretation, scope, motivation, and
   proposed approach. This is the primary approval document.
-- `PLANS/issue-<number>-DESIGN.md`, when the change involves design choices:
+- `PLANS/DESIGN.md`, when the change involves design choices:
   the technical design, including the selected option and its rationale.
-- `PLANS/issue-<number>.handoff.json`: the machine-readable handoff contract,
-  an ordered task list whose entries each carry a goal, acceptance criteria,
+- `PLANS/tasks.json`: the machine-readable task list,
+  an ordered list whose entries each carry a goal, acceptance criteria,
   and references to plan material.
 
 The Agent organizes any additional planning material freely under `PLANS/` and
-`RESEARCH/`; the Workflow consumes only the handoff contract.
+`RESEARCH/`; the Workflow consumes only the task list.
 
 This stage usually takes 5-20 minutes. The duration depends on the clarity of
 the Issue body, repository complexity, and model speed.
@@ -73,7 +73,7 @@ The approver may be any authorized actor. See
 
 Build turns the approved plan into small, reviewable changes. Keeping Build
 after plan approval avoids spending execution time on a rejected direction.
-The Workflow expands the approved handoff task list into one Agent task per
+The Workflow expands the approved task list into one Agent task per
 entry, executed in order; checking each increment and recording separate
 commits localizes failures and makes recovery understandable. Work remains
 isolated on the Issue branch until Integrate.
@@ -89,7 +89,7 @@ work; built-in Profiles include this loop. See
 
 Check prevents Build's claim of completion from being its only evidence. It
 runs the complete verification, reviews the diff in a separate Agent session,
-and records the findings in `PLANS/issue-<number>-REVIEW.md`. The review is
+and records the findings in `PLANS/REVIEW.md`. The review is
 evidence, not a verdict: the approve or reject decision belongs to the
 approver. A problem returns to Build before the shared base branch
 is involved.
@@ -131,7 +131,7 @@ It preserves the evidence needed for later audit while removing the Issue from
 active execution. In this state:
 
 - The code is on the base branch.
-- Plan, handoff, and review artifacts are recorded as run artifacts and remain
+- Plan and review artifacts are recorded as run artifacts and remain
   inspectable from the Issue.
 - You may archive the Issue to remove it from the board.
 

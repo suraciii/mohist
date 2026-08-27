@@ -2,20 +2,20 @@
 status: wip
 ---
 
-# Plan Handoff
+# Plan Artifacts
 
-The default Workflow separates free-form planning from machine execution at a
-single contract: the handoff file. The plan Stage's Agent may organize
-planning and design material freely under the Workspace `PLANS/` and
-`RESEARCH/` directories; the Workflow reads only the handoff file. This
-replaces the previous arrangement in which OpenSpec was the Workflow's
-implicit protocol: a fixed change directory, fixed file names, three dedicated
-Actions (`openspec-tasks`, `openspec-task-prompt`, `openspec-artifacts`), and
-an `archive-change` Task that committed plan material into the Repository.
+The default Workflow separates free-form planning from machine execution
+without inventing a new concept for it. Everything the plan Stage produces is
+a run artifact; exactly one of those artifacts, `tasks.json`, is
+machine-readable and expands into the Build Stage's tasks. This replaces the
+previous arrangement in which OpenSpec was the Workflow's implicit protocol: a
+fixed change directory, fixed file names, three dedicated Actions
+(`openspec-tasks`, `openspec-task-prompt`, `openspec-artifacts`), and an
+`archive-change` Task that committed plan material into the Repository.
 
-## Contract
+## The Task List
 
-`PLANS/issue-<number>.handoff.json`:
+`PLANS/tasks.json`:
 
 ```json
 {
@@ -25,7 +25,7 @@ an `archive-change` Task that committed plan material into the Repository.
       "title": "Extract the notification-channel abstraction",
       "goal": "What to implement and why, in a few sentences.",
       "acceptance": ["verifiable criterion"],
-      "refs": ["PLANS/issue-448-DESIGN.md#abstraction"]
+      "refs": ["PLANS/DESIGN.md#abstraction"]
     }
   ]
 }
@@ -40,8 +40,13 @@ an `archive-change` Task that committed plan material into the Repository.
   verify Tasks, the Check Stage's evidence, and the approver's judgment.
 - No other fields. There is no per-task `expect`, `uses`, priority, type,
   mode, or dependency graph. A previous schema carried eight fields the engine
-  never read and rendered ordering metadata as prompt text; the contract now
+  never read and rendered ordering metadata as prompt text; the schema now
   matches consumption.
+
+The task list is an ordinary artifact file that the engine happens to read.
+Its evidence and audit role is carried by the WorkflowArtifact entity; its
+expansion is carried by `addTasks`; its persistence is the Workspace
+directory. No dedicated entity, channel, or lifecycle exists for it.
 
 ### Why no mechanical per-task assertions
 
@@ -50,17 +55,16 @@ fragile part of self-review) and duplicate the Stage's real verification. Hard
 checks belong in explicit verify Tasks that run real tests, not in generated
 file-existence assertions.
 
-## Named Plan Anchors
+## Named Artifacts
 
 The Workflow binds four files as Task artifacts so the approver and later
 Stages have stable evidence:
 
-- `PLANS/issue-<number>-PLAN.md` — interpretation, scope, approach; the plan
-  approval document.
-- `PLANS/issue-<number>-DESIGN.md` — produced when the change involves design
-  choices.
-- `PLANS/issue-<number>-REVIEW.md` — the Check Stage's review evidence.
-- `PLANS/issue-<number>.handoff.json` — the contract above.
+- `PLANS/PLAN.md` — interpretation, scope, approach; the plan approval
+  document.
+- `PLANS/DESIGN.md` — produced when the change involves design choices.
+- `PLANS/REVIEW.md` — the Check Stage's review evidence.
+- `PLANS/tasks.json` — the task list above.
 
 Everything else under `PLANS/` and `RESEARCH/` is the Agent's own
 organization and is invisible to the Workflow.
@@ -68,16 +72,15 @@ organization and is invisible to the Workflow.
 ## Persistence and Recovery
 
 A WorkflowRun is pinned to one Runner and its Workspace persists across
-Stages, so the Build Stage reads the handoff file from the filesystem on the
-happy path; no artifact round-trip exists on the main path.
+Stages, so the Build Stage reads the task list from the filesystem on the
+happy path; no artifact round-trip exists anywhere.
 
-Artifact upload happens once, at the plan Stage's artifact binding, and
-serves two purposes: approval evidence and the recovery source. When the
-Workspace directory was rebuilt (Runner loss, reclamation), `mohist/task-list`
-restores the handoff file from the Run's uploaded artifact record before
-loading. This artifact fetch is the only new Runner–Server channel in this
-design; other plan material is not restored, and an Agent that needs it reads
-the recorded artifacts.
+Artifact upload serves exactly one purpose: evidence and audit. It is not an
+execution channel. A lost Workspace directory is an accepted loss (see
+[`../workspace.md`](../workspace.md)): unpushed Repository work and
+Workspace-local plan material are both gone, and the recovery is the existing
+`mo run rerun --from-stage plan`, which regenerates both. No artifact fetch
+or restore channel exists.
 
 ## Review as Approval
 
@@ -117,18 +120,19 @@ Stage Check with `expect: merged` remains as post-hoc verification.
 
 Built-in prompts follow the same boundary. Removed: `proposal`, `specs`,
 `design`, `tasks`, `self-review`, `fix-plan-review`, `auto-fix`. Added:
-`plan` (produces the named anchors and the handoff) and `build-task` (base
-prompt for generated Tasks). Repurposed: `review` writes evidence without a
-verdict marker; `apply-feedback`, `fix-ci`, `fix-pr-checks`, and
-`resolve-rebase-conflicts` keep their roles with `PLANS/` paths.
+`plan` (produces the named artifacts, including the task list) and
+`build-task` (base prompt for generated Tasks). Repurposed: `review` writes
+evidence without a verdict marker; `apply-feedback`, `fix-ci`,
+`fix-pr-checks`, and `resolve-rebase-conflicts` keep their roles with `PLANS/`
+paths.
 
 ## Web Evidence Surface
 
 The Check approval UI currently parses `review.md` task output
 (`ReviewSummary`, `ReviewReportModal`). It is rebound to the recorded
 `REVIEW.md` artifact, and the plan approval surface presents `PLAN.md` and the
-handoff task list the same way, so each approval point shows the artifacts of
-its own Stage.
+task list the same way, so each approval point shows the artifacts of its own
+Stage.
 
 ## Out of Scope
 
@@ -136,7 +140,6 @@ its own Stage.
   judgment position; who fills it — a person, an external Agent, or
   automation — stays outside the engine. This may be revisited after the
   simplified Workflow has production mileage.
-- Restoring `PLANS/` material beyond the handoff file on Workspace rebuild.
 
 ## Companion Requirement
 

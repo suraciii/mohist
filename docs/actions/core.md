@@ -75,7 +75,7 @@ Checks whether a file or directory exists at a relative workspace path.
 - id: check-proposal
   uses: core/artifact-exists
   with:
-    path: PLANS/issue-448-PLAN.md
+    path: PLANS/PLAN.md
 ```
 
 Inputs:

@@ -1,14 +1,14 @@
-# Handoff Actions
+# Task-list Action
 
 ## `mohist/task-list`
 
-Loads a handoff file and adds its tasks to the current Workflow execution.
+Loads a task list file and adds its tasks to the current Workflow execution.
 
-The handoff file is the single machine-readable contract between the plan
-Stage and the build Stage. The planning Agent may organize all other planning
-and design material freely; the Workflow reads only this file.
+The task list is the one machine-readable plan artifact the Workflow consumes.
+The planning Agent may organize all other planning and design material freely;
+only this file is read by the engine.
 
-### Handoff Schema
+### Schema
 
 ```json
 {
@@ -18,7 +18,7 @@ and design material freely; the Workflow reads only this file.
       "title": "Extract the notification-channel abstraction",
       "goal": "What to implement and why, in a few sentences.",
       "acceptance": ["verifiable criterion"],
-      "refs": ["PLANS/issue-448-DESIGN.md#abstraction"]
+      "refs": ["PLANS/DESIGN.md#abstraction"]
     }
   ]
 }
@@ -36,7 +36,7 @@ and design material freely; the Workflow reads only this file.
 
 ### Inputs
 
-- `path` is the required Workspace-relative path to the handoff file.
+- `path` is the required Workspace-relative path to the task list file.
 - `task` is required and supplies defaults for every generated task.
   `task.uses` is required and is resolved by the Profile before the Action
   runs.
@@ -44,10 +44,10 @@ and design material freely; the Workflow reads only this file.
   `tasks`.
 - `buildPrompt` is optional text used to build each task prompt.
 
-When the Workspace directory was rebuilt and the handoff file is missing
-locally, the Action restores it from the Run's uploaded artifact record before
-loading. Other plan material is not restored; an Agent that needs it reads the
-recorded artifacts.
+The file is Workspace-local. When the Workspace directory was rebuilt the
+file is gone with it, and the recovery is the existing
+`mo run rerun --from-stage plan`, which regenerates it. There is no artifact
+restore channel.
 
 ### Outputs
 
@@ -55,9 +55,9 @@ The output field `loaded` is the number of tasks added to this run.
 
 ### Business Error Codes
 
-- `missing-source` means the handoff file does not exist locally and no
-  uploaded artifact record exists for it.
-- `invalid-input` means the handoff file failed schema validation.
+- `missing-source` means the task list file does not exist. Recover by
+  rerunning from the plan Stage.
+- `invalid-input` means the task list file failed schema validation.
 
 ### Example
 
@@ -65,7 +65,7 @@ The output field `loaded` is the number of tasks added to this run.
 - id: load-tasks
   uses: mohist/task-list
   with:
-    path: PLANS/issue-${{ issue.number }}.handoff.json
+    path: PLANS/tasks.json
     task:
       uses: ${{ profile.agentAction }}
       with:

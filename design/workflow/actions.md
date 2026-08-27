@@ -336,14 +336,14 @@ validation and dispatch; there is no generic Agent-turn Action in the registry.
 `${{ profile.agentAction }}` because Profile materialization runs before deferred Action Input is
 captured.
 
-The source handoff file may describe task identity, title, goal, acceptance criteria, and plan
+The source task list may describe task identity, title, goal, acceptance criteria, and plan
 references, but it cannot provide `uses`. Allowing a source task to replace `task.uses` would
 bypass Profile validation and could mix Agent Runtimes inside a Run. The Action rejects such input
 with `invalid-input`; it does not fall back to `mohist/opencode`.
 
-When the Workspace directory was rebuilt and the handoff file is missing locally, the Action
-restores it from the Run's uploaded artifact record before loading. See
-[`handoff.md`](handoff.md) for the contract and the recovery boundary.
+The task list is a Workspace-local file. A rebuilt Workspace directory loses it, and the
+recovery is rerunning from the plan Stage, which regenerates it. See
+[`plan-artifacts.md`](plan-artifacts.md) for the artifact and persistence boundary.
 
 ### Git and GitHub PR Actions
 

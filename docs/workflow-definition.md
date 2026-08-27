@@ -210,7 +210,7 @@ list below.
 - When an expression occupies the complete value, the replacement retains its
   original type, including object, array, or number.
 - An expression can be embedded in a string, for example
-  `PLANS/issue-${{ issue.number }}.handoff.json`. Mohist converts the value to
+  `PLANS/tasks.json`. Mohist converts the value to
   text. The Task fails when the expression cannot resolve or its value is an
   object or array.
 - Write `\${{` when the literal text `${{` is required.
@@ -221,7 +221,7 @@ list below.
 - `workspace` describes only Workspace facts, such as `workspace.path` and
   `workspace.branch`. It does not provide plan-artifact path conventions. A
   Profile or Prompt must write a path such as
-  `PLANS/issue-${{ issue.number }}-PLAN.md` explicitly.
+  `PLANS/PLAN.md` explicitly.
 
 ## Validate a Definition
 

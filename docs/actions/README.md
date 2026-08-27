@@ -65,7 +65,7 @@ markers.
 - [`core/artifact-exists`](core.md#coreartifact-exists)
 - [`core/marker`](core.md#coremarker)
 
-**Handoff Actions** load the plan Stage's handoff contract into Build.
+**Task-list Actions** expand the plan Stage's task list into Build tasks.
 
 - [`mohist/task-list`](task-list.md#mohisttask-list)
 
