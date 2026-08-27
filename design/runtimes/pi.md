@@ -124,8 +124,10 @@ Pi's different topology has one important consequence: it runs inside the
 Runner, so terminating the Runner process terminates every running Pi Prompt.
 There is no independent Server exit, rebuild, or event-stream reconnection. The
 persisted physical Sessions, stored as JSONL files, survive. The Runner restores
-them by binding after restart, but it does not replay terminated execution;
-the work owner's redelivery semantics decide what follows.
+them by binding after restart only for a later independently admitted input or
+Session command. It does not inspect, reattach, or adopt the terminated Prompt
+to reconstruct final assistant text, failure, or any other work result; the
+work owner's `runner-lost` and retry semantics decide what follows.
 
 ## Session Binding
 
@@ -217,6 +219,10 @@ interruption begins, and a late Prompt resolution cannot reverse it.
 A failure with uncertain submission state is never replayed automatically. Runner
 redelivery can duplicate execution inside the accepted crash window; that explicit
 limitation is safer than reconstructing a fictitious provider replay identity.
+The JSONL transcript is physical Session context, not an execution-outcome
+ledger. Even when it contains a terminal assistant message, an adapter API must
+not turn that message into the result of work lost with an earlier Runner
+process.
 
 ## Prompt Deadline and Two-Phase Closeout
 
