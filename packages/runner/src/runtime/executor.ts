@@ -6,6 +6,7 @@ import { stringAt } from '../core/json-path.js'
 import { renderTemplate, unresolvedReferences } from '../core/template.js'
 import { ensureDir } from '../system/process.js'
 import { WorkspaceManager, WorkspaceNetworkTimeoutError } from './workspace.js'
+import { openWorkspaceDirectoryHandle } from './workspace-managed.js'
 import type { NamedWorkspaceManager } from './workspace-entity.js'
 import type { ActionRegistry } from '../actions/registry.js'
 import type { ServerConnection } from '../server/connection.js'
@@ -194,112 +195,118 @@ export class WorkExecutor {
       const validatedWith = validation.input
       const renderedExpect = work.expect != null ? renderTemplate(work.expect, variables) : null
       const workspaceRoot = this.workspaceRoot(variables)
-      const workDir = await this.resolveWorkDir(renderedWith, workspaceRoot)
-      const expectedBranch = expectedWorkspaceBranch(variables)
-      const startCheck = await checkBranchStability(work, workDir, expectedBranch, 'start', signal, log)
-      if (startCheck.kind === 'violation') {
-        return startCheck.result
-      }
-      const caps = capabilitySet(definition.manifest)
-      const host = buildActionHost(this.capabilityDeps(), work, workDir, signal, log, caps)
-      let rawResult: unknown
+      const workDirHandle = await this.resolveWorkDir(renderedWith, workspaceRoot)
       try {
-        rawResult = await definition.run(validatedWith, host)
-      } catch (thrown) {
-        rawResult = malformedToUnexpectedError(
-          `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
+        const workDir = workDirHandle.path
+        const expectedBranch = expectedWorkspaceBranch(variables)
+        const startCheck = await checkBranchStability(work, workDir, expectedBranch, 'start', signal, log)
+        if (startCheck.kind === 'violation') {
+          return startCheck.result
+        }
+        const caps = capabilitySet(definition.manifest)
+        const host = buildActionHost(this.capabilityDeps(), work, workDir, signal, log, caps)
+        let rawResult: unknown
+        try {
+          rawResult = await definition.run(validatedWith, host)
+        } catch (thrown) {
+          rawResult = malformedToUnexpectedError(
+            `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
+          )
+        }
+        const turnFact = (passThroughTurnFact(rawResult) ?? null) as ActionResult['turnFact']
+        const outcome = passThroughOutcome(rawResult)
+        const normalized = normalizeActionResult(rawResult, definition.manifest, caps)
+        let effects: ActionEffects = {}
+        let validatedResult: ActionResult
+        if (normalized.kind === 'malformed') {
+          validatedResult = malformedToUnexpectedError(normalized.message) as ActionResult
+        } else if (normalized.kind === 'ok') {
+          validatedResult = { output: normalized.output } as ActionResult
+          effects = normalized.effects
+        } else {
+          validatedResult = { error: normalized.error } as ActionResult
+        }
+        const exitCode = passThroughExitCode(rawResult)
+        if (exitCode !== undefined && exitCode !== null) {
+          ;(validatedResult as { exitCode?: number | null }).exitCode = exitCode
+        }
+        if (outcome) {
+          ;(validatedResult as { outcome?: 'unknown' }).outcome = outcome
+        }
+        const actionSucceeded = !isActionFailure(validatedResult)
+        const completion = actionSucceeded
+          ? await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
+          : null
+        const projected = withAgentBinding(projectTaskOutput(work, validatedResult, completion, caps), turnFact)
+        const resultForRecovery = projected
+        if (isActionFailure(validatedResult)) {
+          if (resultForRecovery.status === 'unknown') return resultForRecovery
+          // A branch-integrity failure is deliberately ineligible for
+          // automatic recovery: the server contract maps `completed` to
+          // task success and then completes the task and its follow-ups.
+          // Returning it directly keeps it `failed` with no `addTasks`, so
+          // a matching handler or self-retry can never settle it as
+          // successful. Ordinary conflicts stay eligible for recovery.
+          if (isBranchInvariantViolation(resultForRecovery)) return resultForRecovery
+          const recoveryResult = tryRecovery(work, resultForRecovery, variables)
+          if (recoveryResult) return recoveryResult
+          return resultForRecovery
+        }
+        const endCheck = await checkBranchStability(work, workDir, expectedBranch, 'end', signal, log)
+        if (endCheck.kind === 'violation') {
+          // End-boundary branch-integrity failures bypass tryRecovery too;
+          // the end probe must run before artifact/worktree settlement can
+          // convert the action result into successful task completion.
+          return endCheck.result
+        }
+        const artifactResult = await captureAndUploadArtifactsForWork(
+          this.connection,
+          work,
+          workspaceRoot,
+          workDir,
+          resultForRecovery,
+          validatedResult,
+          variables,
+          signal,
         )
-      }
-      const turnFact = (passThroughTurnFact(rawResult) ?? null) as ActionResult['turnFact']
-      const outcome = passThroughOutcome(rawResult)
-      const normalized = normalizeActionResult(rawResult, definition.manifest, caps)
-      let effects: ActionEffects = {}
-      let validatedResult: ActionResult
-      if (normalized.kind === 'malformed') {
-        validatedResult = malformedToUnexpectedError(normalized.message) as ActionResult
-      } else if (normalized.kind === 'ok') {
-        validatedResult = { output: normalized.output } as ActionResult
-        effects = normalized.effects
-      } else {
-        validatedResult = { error: normalized.error } as ActionResult
-      }
-      const exitCode = passThroughExitCode(rawResult)
-      if (exitCode !== undefined && exitCode !== null) {
-        ;(validatedResult as { exitCode?: number | null }).exitCode = exitCode
-      }
-      if (outcome) {
-        ;(validatedResult as { outcome?: 'unknown' }).outcome = outcome
-      }
-      const actionSucceeded = !isActionFailure(validatedResult)
-      const completion = actionSucceeded
-        ? await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
-        : null
-      const projected = withAgentBinding(projectTaskOutput(work, validatedResult, completion, caps), turnFact)
-      const resultForRecovery = projected
-      if (isActionFailure(validatedResult)) {
-        if (resultForRecovery.status === 'unknown') return resultForRecovery
-        // A branch-integrity failure is deliberately ineligible for
-        // automatic recovery: the server contract maps `completed` to
-        // task success and then completes the task and its follow-ups.
-        // Returning it directly keeps it `failed` with no `addTasks`, so
-        // a matching handler or self-retry can never settle it as
-        // successful. Ordinary conflicts stay eligible for recovery.
-        if (isBranchInvariantViolation(resultForRecovery)) return resultForRecovery
-        const recoveryResult = tryRecovery(work, resultForRecovery, variables)
+        const worktreeHostBuilder = (
+          cleanupWork: DispatchWorkItem,
+          cleanupSignal: AbortSignal,
+          cleanupWorkDir: string,
+          cleanupAttempt?: number,
+        ) =>
+          buildActionHost(this.capabilityDeps(), cleanupWork, cleanupWorkDir, cleanupSignal, log, caps, cleanupAttempt)
+        const worktreeResult = await enforceCleanWorktree(
+          work,
+          workDir,
+          artifactResult,
+          renderedWith,
+          variables,
+          signal,
+          resolveCleanupAgentAction((host, withInput) => definition.run(withInput, host)),
+          { buildHost: worktreeHostBuilder },
+          log,
+        )
+        const recoveryResult = tryRecovery(work, worktreeResult, variables)
         if (recoveryResult) return recoveryResult
-        return resultForRecovery
+        if (worktreeResult.status !== 'completed') {
+          return worktreeResult
+        }
+        const withCapturedOutputs = this.captureDeclaredOutputs(work, worktreeResult, validatedResult)
+        const withVarsResult = await applySetVarsForWork(
+          this.connection,
+          work,
+          withCapturedOutputs,
+          signal,
+          effects.writeVars ?? {},
+        )
+        if (withVarsResult.status !== 'completed') return withVarsResult
+        return effects.addTasks && effects.addTasks.length > 0
+          ? { ...withVarsResult, addTasks: effects.addTasks }
+          : withVarsResult
+      } finally {
+        await workDirHandle.close()
       }
-      const endCheck = await checkBranchStability(work, workDir, expectedBranch, 'end', signal, log)
-      if (endCheck.kind === 'violation') {
-        // End-boundary branch-integrity failures bypass tryRecovery too;
-        // the end probe must run before artifact/worktree settlement can
-        // convert the action result into successful task completion.
-        return endCheck.result
-      }
-      const artifactResult = await captureAndUploadArtifactsForWork(
-        this.connection,
-        work,
-        workspaceRoot,
-        workDir,
-        resultForRecovery,
-        validatedResult,
-        variables,
-        signal,
-      )
-      const worktreeHostBuilder = (
-        cleanupWork: DispatchWorkItem,
-        cleanupSignal: AbortSignal,
-        cleanupWorkDir: string,
-        cleanupAttempt?: number,
-      ) => buildActionHost(this.capabilityDeps(), cleanupWork, cleanupWorkDir, cleanupSignal, log, caps, cleanupAttempt)
-      const worktreeResult = await enforceCleanWorktree(
-        work,
-        workDir,
-        artifactResult,
-        renderedWith,
-        variables,
-        signal,
-        resolveCleanupAgentAction((host, withInput) => definition.run(withInput, host)),
-        { buildHost: worktreeHostBuilder },
-        log,
-      )
-      const recoveryResult = tryRecovery(work, worktreeResult, variables)
-      if (recoveryResult) return recoveryResult
-      if (worktreeResult.status !== 'completed') {
-        return worktreeResult
-      }
-      const withCapturedOutputs = this.captureDeclaredOutputs(work, worktreeResult, validatedResult)
-      const withVarsResult = await applySetVarsForWork(
-        this.connection,
-        work,
-        withCapturedOutputs,
-        signal,
-        effects.writeVars ?? {},
-      )
-      if (withVarsResult.status !== 'completed') return withVarsResult
-      return effects.addTasks && effects.addTasks.length > 0
-        ? { ...withVarsResult, addTasks: effects.addTasks }
-        : withVarsResult
     } catch (error) {
       return failure(work, errorMessage(error))
     }
@@ -384,9 +391,8 @@ export class WorkExecutor {
   private async resolveWorkDir(withInput: JsonObject | null, workspaceRoot: string) {
     const requested = stringInput(withInput, 'working-directory')
     const root = resolve(workspaceRoot)
-    const workDir = requested ? resolveWorkspacePath(root, requested) : root
-    await ensureDir(workDir)
-    return workDir
+    resolveWorkspacePath(root, requested ?? '')
+    return await openWorkspaceDirectoryHandle(root, requested)
   }
 
   private captureDeclaredOutputs(

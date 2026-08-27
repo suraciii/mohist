@@ -24,8 +24,6 @@ describe('ActionRegistry', () => {
 
     expect(catalog.actions.find((action) => action.name === 'mohist/opencode')?.capabilities).toEqual(['agent-turn'])
     expect(catalog.actions.find((action) => action.name === 'mohist/pi')?.capabilities).toEqual(['agent-turn'])
-    expect(catalog.actions.find((action) => action.name === 'mohist/openspec-tasks')?.capabilities).toEqual([
-      'add-tasks',
-    ])
+    expect(catalog.actions.find((action) => action.name === 'mohist/task-list')?.capabilities).toEqual(['add-tasks'])
   })
 })

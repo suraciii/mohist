@@ -599,6 +599,14 @@ internal static class CommandPresentations
                     CommandCapability.Automation, "Follow a WorkflowRun until it reaches a terminal state"));
                 CommandPresentationCatalog.Attach(Find(group, "feedback"), new CommandPresentation(
                     CommandCapability.Automation, "Inspect or submit WorkflowRun feedback"));
+                var artifact = Find(group, "artifact")!;
+                CommandPresentationCatalog.Attach(artifact, new CommandPresentation(
+                    CommandCapability.Automation, "Read recorded WorkflowRun artifacts"));
+                CommandPresentationCatalog.Attach(Find(artifact, "list"), new CommandPresentation(
+                    CommandCapability.Automation, "List latest recorded artifacts",
+                    JsonFields: RunCommands.ArtifactListDescriptor.Fields));
+                CommandPresentationCatalog.Attach(Find(artifact, "get"), new CommandPresentation(
+                    CommandCapability.Automation, "Print one recorded file artifact"));
                 CommandPresentationCatalog.Attach(Find(group, "variable"), new CommandPresentation(
                     CommandCapability.Automation, "Read or edit WorkflowRun-scoped Variables. Run-only --effective exposes the Project → Issue → Run merge."));
             }

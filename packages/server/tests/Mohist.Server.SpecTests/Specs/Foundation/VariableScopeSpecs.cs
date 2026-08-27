@@ -113,7 +113,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         {
             Assert.False(proposalWith.RootElement.TryGetProperty("changeDir", out _));
             Assert.False(proposalWith.RootElement.TryGetProperty("openspecChangeDir", out _));
-            Assert.Equal("${{ prompts.proposal }}", proposalWith.RootElement.GetProperty("prompt").GetString());
+            Assert.Equal("${{ prompts.plan }}", proposalWith.RootElement.GetProperty("prompt").GetString());
         }
         Assert.NotNull(proposal.Expect);
         using (var proposalExpect = JsonDocument.Parse(proposal.Expect!))
@@ -174,18 +174,20 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         Assert.Equal("mohist/workspace-prepare", prepare.Uses);
         await ReportAsync(prepareRunner, prepare.WorkId, "completed");
 
-        var (proposal, _) = await PollWorkAnyAsync();
+        var (plan, _) = await PollWorkAnyAsync();
 
-        Assert.Equal("task", proposal.WorkType);
-        Assert.Equal("plan", proposal.Stage);
-        Assert.Equal("mohist/opencode", proposal.Uses);
-        Assert.Contains("proposal", proposal.WorkId);
-        Assert.Contains("\"prompt\"", proposal.With);
-        Assert.DoesNotContain("\"stage\":", proposal.With);
-        Assert.DoesNotContain("\"task\":", proposal.With);
-        Assert.DoesNotContain("changeDir", proposal.With);
-        Assert.DoesNotContain("\"expect\"", proposal.With);
-         Assert.Contains("openspec/changes/issue-${{ issue.number }}/proposal.md", proposal.Expect!);
+        Assert.Equal("task", plan.WorkType);
+        Assert.Equal("plan", plan.Stage);
+        Assert.Equal("mohist/opencode", plan.Uses);
+        Assert.Contains("plan", plan.WorkId);
+        Assert.Contains("\"prompt\"", plan.With);
+        Assert.DoesNotContain("\"stage\":", plan.With);
+        Assert.DoesNotContain("\"task\":", plan.With);
+        Assert.DoesNotContain("changeDir", plan.With);
+        Assert.DoesNotContain("\"expect\"", plan.With);
+        Assert.Contains("PLANS/PLAN.md", plan.Expect!);
+        Assert.Contains("PLANS/DESIGN.md", plan.Expect!);
+        Assert.Contains("PLANS/tasks.json", plan.Expect!);
     }
 
     private static WorkflowDefinition MohistPlanDefinitionWithoutArtifacts() =>
@@ -195,7 +197,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
                 [
                     new("proposal", "Generate proposal", "mohist/opencode",
                         With("""
-                        { "session": "plan", "prompt": "${{ prompts.proposal }}", "options": "${{ vars.agent }}" }
+                        { "session": "plan", "prompt": "${{ prompts.plan }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
                          { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/proposal.md" } ] }

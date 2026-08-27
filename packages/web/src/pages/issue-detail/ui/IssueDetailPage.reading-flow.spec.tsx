@@ -18,7 +18,6 @@ import {
 } from './_issueDetailMsw'
 import { setScopedValue } from '../../../../tests/support/scoped-property'
 
-
 const projects: Project[] = [
   {
     id: 'proj-1',
@@ -160,28 +159,30 @@ describe('IssueDetailPage reading-flow — attention-ordered block sequence', ()
   })
 
   it('orders one artifacts and one changes section before commits, description, and comments', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      workflowRunId: 'wr-1',
-      body: LONG_BODY,
-      comments: [
-        {
-          id: 'c1',
-          author: 'tester',
-          body: 'A reviewer comment.',
-          createdAt: '2026-01-04T00:00:00Z',
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        workflowRunId: 'wr-1',
+        body: LONG_BODY,
+        comments: [
+          {
+            id: 'c1',
+            author: 'tester',
+            body: 'A reviewer comment.',
+            createdAt: '2026-01-04T00:00:00Z',
+          },
+        ],
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
         },
-      ],
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+      }),
+    )
 
     renderPage()
 
@@ -231,27 +232,29 @@ describe('IssueDetailPage reading-flow — attention-ordered block sequence', ()
   it('keeps explicit Changes and Artifacts boundaries when comparison data and a workflow run are absent', async () => {
     mockIssueDiff(null)
     mockIssueCommits(null)
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      body: LONG_BODY,
-      comments: [
-        {
-          id: 'c1',
-          author: 'tester',
-          body: 'A reviewer comment.',
-          createdAt: '2026-01-04T00:00:00Z',
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        body: LONG_BODY,
+        comments: [
+          {
+            id: 'c1',
+            author: 'tester',
+            body: 'A reviewer comment.',
+            createdAt: '2026-01-04T00:00:00Z',
+          },
+        ],
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
         },
-      ],
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+      }),
+    )
 
     renderPage()
 
@@ -354,7 +357,9 @@ describe('IssueDetailPage Changes ownership', () => {
 
     const changes = await screen.findByTestId('diff-files-section')
     await within(changes).findByText('Changes could not be loaded. Changed files and diff cannot be inspected.')
-    expect(within(changes).getByText('Changes could not be loaded. Changed files and diff cannot be inspected.')).toBeTruthy()
+    expect(
+      within(changes).getByText('Changes could not be loaded. Changed files and diff cannot be inspected.'),
+    ).toBeTruthy()
     expect(within(changes).queryByTestId('changes-unavailable')).toBeNull()
     expect(screen.queryByText('Workspace unavailable')).toBeNull()
   })
@@ -365,8 +370,8 @@ describe('IssueDetailPage Artifacts ownership', () => {
     artifactId: 'artifact-review',
     workflowRunId: 'wr-1',
     taskRunId: 'build.1',
-    path: 'review.md',
-    displayName: 'review.md',
+    path: 'PLANS/REVIEW.md',
+    displayName: 'REVIEW.md',
     kind: 'file',
     contentType: 'text/markdown',
     size: 12,
@@ -381,10 +386,10 @@ describe('IssueDetailPage Artifacts ownership', () => {
     renderPage()
 
     const panel = await screen.findByTestId('latest-artifacts-panel')
-    await within(panel).findByText('review.md')
+    await within(panel).findByText('REVIEW.md')
     expect(screen.getAllByRole('heading', { name: 'Artifacts' })).toHaveLength(1)
     expect(screen.getAllByTestId('latest-artifacts-panel')).toHaveLength(1)
-    fireEvent.click(within(panel).getByText('review.md'))
+    fireEvent.click(within(panel).getByText('REVIEW.md'))
     expect(await screen.findByRole('heading', { level: 2, name: 'Review' })).toBeTruthy()
     expect(screen.getByText('PASS')).toBeTruthy()
     expect(screen.queryByTestId('runtime-evidence-list')).toBeNull()
@@ -402,26 +407,28 @@ describe('IssueDetailPage Artifacts ownership', () => {
   })
 
   it('omits the ordinary collection during approval while retaining inline evidence', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'check',
-      workflowRunId: 'wr-1',
-      health: 'paused',
-      approvalState: { status: 'awaiting', stage: 'check', requestedAt: '2026-01-01T00:00:00Z' },
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: null,
-        workflowSummaryState: 'awaiting-approval',
-        allowedActions: ['approve', 'reject'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'check',
+        workflowRunId: 'wr-1',
+        health: 'paused',
+        approvalState: { status: 'awaiting', stage: 'check', requestedAt: '2026-01-01T00:00:00Z' },
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: null,
+          workflowSummaryState: 'awaiting-approval',
+          allowedActions: ['approve', 'reject'],
+        },
+      }),
+    )
     mockArtifacts([artifact])
     mockArtifactContent(artifact.artifactId, '# Review\n\nPASS')
 
     renderPage()
 
     expect(await screen.findByTestId('approval-review-evidence')).toBeTruthy()
-    expect(screen.getByTestId('approval-artifact-review.md')).toBeTruthy()
+    expect(screen.getByTestId('approval-artifact-PLANS/REVIEW.md')).toBeTruthy()
     expect(screen.queryByTestId('latest-artifacts-panel')).toBeNull()
     expect(screen.queryByTestId('runtime-evidence-list')).toBeNull()
   })
@@ -429,15 +436,17 @@ describe('IssueDetailPage Artifacts ownership', () => {
 
 describe('IssueDetailPage reading-flow — maximum-width body column', () => {
   it('renders the reading-flow as the lg:col-span-2 column of lg:grid-cols-3, wider than the rail', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      repository: {
-        name: 'master',
-        baseBranch: 'master',
-        gitUrl: 'https://github.com/suraciii/mohist.git',
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+      }),
+    )
 
     renderPage()
 
@@ -468,26 +477,28 @@ describe('IssueDetailPage reading-flow — lightest chrome', () => {
   })
 
   it('does not wrap purely-content blocks (description, comments) in heavy bordered/filled card chrome', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowRunId: 'wr-1',
-      body: LONG_BODY,
-      comments: [
-        {
-          id: 'c1',
-          author: 'tester',
-          body: 'A reviewer comment.',
-          createdAt: '2026-01-04T00:00:00Z',
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowRunId: 'wr-1',
+        body: LONG_BODY,
+        comments: [
+          {
+            id: 'c1',
+            author: 'tester',
+            body: 'A reviewer comment.',
+            createdAt: '2026-01-04T00:00:00Z',
+          },
+        ],
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
         },
-      ],
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+      }),
+    )
 
     renderPage()
 
@@ -508,22 +519,24 @@ describe('IssueDetailPage reading-flow — lightest chrome', () => {
   })
 
   it('does not give the diff-files section heavier chrome than the reference-rail CardSection substrate', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowRunId: 'wr-1',
-      repository: {
-        name: 'master',
-        baseBranch: 'master',
-        gitUrl: 'https://github.com/suraciii/mohist.git',
-      },
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowRunId: 'wr-1',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -541,18 +554,20 @@ describe('IssueDetailPage reading-flow — lightest chrome', () => {
 
 describe('IssueDetailPage reading-flow — medium visual-weight tier', () => {
   it('marks the three tiers with stable data-tier-weight values and orders them by attention weight', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -585,18 +600,20 @@ describe('IssueDetailPage reading-flow — collapsible key-signal preservation',
   })
 
   it('keeps a presence signal and a leading-text hint for a long description', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowRunId: 'wr-1',
-      body: LONG_BODY,
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowRunId: 'wr-1',
+        body: LONG_BODY,
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -613,12 +630,14 @@ describe('IssueDetailPage reading-flow — collapsible key-signal preservation',
   })
 
   it('renders the description in collapsible mode so the body can be expanded on demand', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowRunId: 'wr-1',
-      body: LONG_BODY,
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowRunId: 'wr-1',
+        body: LONG_BODY,
+      }),
+    )
 
     renderPage()
 
@@ -627,17 +646,19 @@ describe('IssueDetailPage reading-flow — collapsible key-signal preservation',
   })
 
   it('keeps the change-list file/addition/deletion counts visible so the scale of the change is always readable', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowRunId: 'wr-1',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowRunId: 'wr-1',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -669,11 +690,13 @@ describe('IssueDetailPage reading-flow — collapsible key-signal preservation',
       summary: { filesChanged: 0, commits: 0, additions: 0, deletions: 0 },
       files: [],
     })
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowRunId: 'wr-1',
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowRunId: 'wr-1',
+      }),
+    )
 
     renderPage()
 
@@ -690,18 +713,20 @@ describe('IssueDetailPage reading-flow — decision surface and rail content exc
   })
 
   it('does not place the runtime decision/action surface inside the reading flow', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop', 'retry'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop', 'retry'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -713,7 +738,9 @@ describe('IssueDetailPage reading-flow — decision surface and rail content exc
     expect(headerTier.contains(surface)).toBe(true)
 
     for (const kind of ['start', 'stop', 'retry', 'resume', 'rerun', 'approve', 'send-back']) {
-      const action = screen.getByTestId('issue-detail-page-container').querySelector(`[data-testid="decision-action-${kind}"]`)
+      const action = screen
+        .getByTestId('issue-detail-page-container')
+        .querySelector(`[data-testid="decision-action-${kind}"]`)
       if (action) {
         expect(readingFlow.contains(action)).toBe(false)
         expect(headerTier.contains(action)).toBe(true)
@@ -722,43 +749,43 @@ describe('IssueDetailPage reading-flow — decision surface and rail content exc
   })
 
   it('does not place metadata, model, profile, prerequisites, drift, or convergence blocks inside the reading flow', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'blocked',
-      model: 'sonnet',
-      repository: {
-        name: 'master',
-        baseBranch: 'master',
-        gitUrl: 'https://github.com/suraciii/mohist.git',
-      },
-      prereq: [
-        { number: 9, title: 'Prerequisite issue', completed: true },
-      ],
-      drift: {
-        drifted: true,
-        detectedAt: '2026-01-05T00:00:00Z',
-        decision: 'needs-attention',
-      },
-      convergence: {
-        blockingItemCount: 1,
-        directlyRepairedCount: 0,
-        reactionAttempts: 0,
-        attemptedItemIds: [],
-        resolvedItemIds: [],
-        unresolvedItemIds: ['cb-1'],
-        newBlockingItemIds: [],
-        nonBlockingItemIds: [],
-        blockedReason: 'A blocking check failed.',
-      },
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'blocked',
+        model: 'sonnet',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        prereq: [{ number: 9, title: 'Prerequisite issue', completed: true }],
+        drift: {
+          drifted: true,
+          detectedAt: '2026-01-05T00:00:00Z',
+          decision: 'needs-attention',
+        },
+        convergence: {
+          blockingItemCount: 1,
+          directlyRepairedCount: 0,
+          reactionAttempts: 0,
+          attemptedItemIds: [],
+          resolvedItemIds: [],
+          unresolvedItemIds: ['cb-1'],
+          newBlockingItemIds: [],
+          nonBlockingItemIds: [],
+          blockedReason: 'A blocking check failed.',
+        },
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 

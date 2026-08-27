@@ -159,7 +159,7 @@ public sealed class IssueWorkflowLifecycleGrainSpecs
             MohistWorkspaceLayout.WorkflowRunWorkspacePath(runnerRoot, wrId),
             run.Workspace.Path);
         Assert.Equal($"mohist/run-{wrId}", run.Workspace.Branch);
-        Assert.Equal($"openspec/changes/issue-{issueNumber}", run.Workspace.ChangeDir);
+        Assert.Equal("PLANS", run.Workspace.ChangeDir);
 
         using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
         var events = scope.ServiceProvider.GetRequiredService<IEventStore>();

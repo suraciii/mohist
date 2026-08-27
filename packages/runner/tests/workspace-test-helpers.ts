@@ -48,6 +48,7 @@ export class FakeGitRunner {
   private readonly stubbornMarkers = new Map<string, Set<string>>()
 
   async setBranch(path: string, branch: string | null): Promise<void> {
+    path = this.repositoryPath(path)
     this.ensureGitDir(path)
     const preparing = this.preparingSibling(path)
     if (branch === null) {
@@ -60,6 +61,7 @@ export class FakeGitRunner {
   }
 
   async setDetached(path: string, ref: string): Promise<void> {
+    path = this.repositoryPath(path)
     this.ensureGitDir(path)
     const preparing = this.preparingSibling(path)
     this.currentBranch.delete(path)
@@ -69,6 +71,7 @@ export class FakeGitRunner {
   }
 
   async setDirty(path: string, porcelain: string): Promise<void> {
+    path = this.repositoryPath(path)
     const preparing = this.preparingSibling(path)
     if (porcelain.trim() === '') {
       this.dirty.delete(path)
@@ -80,6 +83,7 @@ export class FakeGitRunner {
   }
 
   async ensureBranch(path: string, branch: string): Promise<void> {
+    path = this.repositoryPath(path)
     this.ensureGitDir(path)
     let set = this.branches.get(path)
     if (!set) {
@@ -90,6 +94,7 @@ export class FakeGitRunner {
   }
 
   async setResidual(path: string, markers: string[]): Promise<void> {
+    path = this.repositoryPath(path)
     this.ensureGitDir(path)
     const preparing = this.preparingSibling(path)
     let set = this.residualFiles.get(path)
@@ -111,6 +116,7 @@ export class FakeGitRunner {
 
   /** Markers that an abort command will not clear, simulating a re-probe failure. */
   async makeStubborn(path: string, markers: string[]): Promise<void> {
+    path = this.repositoryPath(path)
     const preparing = this.preparingSibling(path)
     let set = this.stubbornMarkers.get(path)
     let prepSet = this.stubbornMarkers.get(preparing)
@@ -130,7 +136,15 @@ export class FakeGitRunner {
   }
 
   residualMarkers(path: string): string[] {
-    return [...(this.residualFiles.get(path) ?? [])]
+    return [...(this.residualFiles.get(this.repositoryPath(path)) ?? [])]
+  }
+
+  private repositoryPath(path: string): string {
+    return path.includes(
+      `${process.platform === 'win32' ? '\\' : '/'}REPOS${process.platform === 'win32' ? '\\' : '/'}`,
+    )
+      ? path
+      : join(path, 'REPOS', 'master')
   }
 
   /** Inject a transient command failure for `times` matching calls. */
@@ -145,6 +159,9 @@ export class FakeGitRunner {
   }
 
   private preparingSibling(path: string): string {
+    const marker = `${process.platform === 'win32' ? '\\' : '/'}REPOS${process.platform === 'win32' ? '\\' : '/'}`
+    const index = path.indexOf(marker)
+    if (index >= 0) return `${path.slice(0, index)}.preparing${path.slice(index)}`
     return `${path}.preparing`
   }
 
@@ -221,7 +238,7 @@ export class FakeGitRunner {
       // stable path is addressed so `hasRunBranch` and the health probes see
       // the same worktree the clone produced. Adoption never overwrites state
       // a test explicitly set on the final path.
-      const preparing = `${workspacePath}.preparing`
+      const preparing = this.preparingSibling(workspacePath)
       if (this.branches.has(preparing)) {
         const preparedBranches = this.branches.get(preparing)!
         for (const branch of preparedBranches) {

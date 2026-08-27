@@ -28,7 +28,8 @@ import type { WorkspaceRemovalFence } from '../runtime/workspace-removal-fence.j
 import type { WorkspaceRegistry } from '../runtime/workspace-registry.js'
 import { issueWorkspacePath, validateWorkspaceIdentity, type IssueWorkspaceMarker } from '../runtime/workspace.js'
 import { runnerLogger } from '../system/logger.js'
-import { currentRunnerResources } from '../system/filesystem.js'
+import { currentRunnerFileSystem, currentRunnerResources } from '../system/filesystem.js'
+import { withManagedWorkspaceHandle } from '../runtime/workspace-managed.js'
 
 const log = runnerLogger.child('cleanup')
 
@@ -97,41 +98,67 @@ function registerWorkspaceRemovalHandler(
         await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
         return removal(false, 'missing', workspacePath, 'workspace_missing', 'Workspace already removed')
       }
-      const expected: IssueWorkspaceMarker = {
-        workflowRunId: query.workflowRunId,
-        runBranch: query.branch,
+      const expected: IssueWorkspaceMarker = { workflowRunId: query.workflowRunId, runBranch: query.branch }
+      const removeAt = async (operationPath: string, managed: boolean) => {
+        try {
+          await validateWorkspaceIdentity(
+            operationPath,
+            expected,
+            query.gitUrl,
+            new AbortController().signal,
+            null,
+            managed ? undefined : deps.runnerRoot,
+            workspacePath,
+            query.repositoryName ?? undefined,
+          )
+        } catch (error) {
+          return removal(
+            false,
+            'failed',
+            workspacePath,
+            'workspace_identity_mismatch',
+            error instanceof Error ? error.message : String(error),
+          )
+        }
+        try {
+          await deleteDirectory(operationPath)
+          await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
+          return removal(true, 'removed', workspacePath, null, 'Workspace removed')
+        } catch (error) {
+          return removal(
+            false,
+            'failed',
+            workspacePath,
+            'workspace_cleanup_failed',
+            error instanceof Error ? error.message : String(error),
+          )
+        }
       }
-      try {
-        await validateWorkspaceIdentity(
-          workspacePath,
-          expected,
-          query.gitUrl,
-          new AbortController().signal,
-          null,
-          deps.runnerRoot,
-        )
-      } catch (error) {
-        return removal(
-          false,
-          'failed',
-          workspacePath,
-          'workspace_identity_mismatch',
-          error instanceof Error ? error.message : String(error),
-        )
+      const fileSystem = currentRunnerFileSystem()
+      if (
+        !deps.pathExists &&
+        process.platform === 'linux' &&
+        fileSystem.supportsDirectoryHandles &&
+        fileSystem.openDirectory
+      ) {
+        try {
+          return await withManagedWorkspaceHandle(
+            deps.runnerRoot,
+            workspacePath,
+            true,
+            async (managedPath) => await removeAt(managedPath, true),
+          )
+        } catch (error) {
+          return removal(
+            false,
+            'failed',
+            workspacePath,
+            'workspace_identity_mismatch',
+            error instanceof Error ? error.message : String(error),
+          )
+        }
       }
-      try {
-        await deleteDirectory(workspacePath)
-        await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
-        return removal(true, 'removed', workspacePath, null, 'Workspace removed')
-      } catch (error) {
-        return removal(
-          false,
-          'failed',
-          workspacePath,
-          'workspace_cleanup_failed',
-          error instanceof Error ? error.message : String(error),
-        )
-      }
+      return await removeAt(workspacePath, false)
     }
 
     const fence = deps.removalFence?.() ?? null

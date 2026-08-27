@@ -64,8 +64,22 @@ export const issueArtifactKeys = {
     ['issue-artifacts', projectId ?? null, issueNumber ?? null] as const,
   list: (projectId: string | null | undefined, issueNumber: number, workflowRunId?: string | null, params?: unknown) =>
     ['issue-artifacts', projectId ?? null, issueNumber, 'list', workflowRunId ?? null, params ?? null] as const,
-  content: (projectId: string | null | undefined, issueNumber: number, artifactId: string, options?: unknown) =>
-    ['issue-artifacts', projectId ?? null, issueNumber, 'content', artifactId, options ?? null] as const,
+  content: (
+    projectId: string | null | undefined,
+    issueNumber: number,
+    artifactId: string,
+    workflowRunId?: string | null,
+    options?: unknown,
+  ) =>
+    [
+      'issue-artifacts',
+      projectId ?? null,
+      issueNumber,
+      'content',
+      workflowRunId ?? null,
+      artifactId,
+      options ?? null,
+    ] as const,
 }
 
 export const issueCandidateKeys = {

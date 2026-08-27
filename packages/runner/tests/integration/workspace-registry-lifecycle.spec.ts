@@ -32,6 +32,11 @@ function commandResult(stdout = '') {
 }
 
 function installGitFake(resources: TestResources, workspaceBranches: Map<string, string>) {
+  const preparingSibling = (path: string) => {
+    const marker = '/REPOS/'
+    const index = path.indexOf(marker)
+    return index >= 0 ? `${path.slice(0, index)}.preparing${path.slice(index)}` : `${path}.preparing`
+  }
   resources.commandRunner = {
     async run(command, args) {
       if (command !== 'git') return commandResult()
@@ -58,7 +63,7 @@ function installGitFake(resources: TestResources, workspaceBranches: Map<string,
 
       if (gitArgs[0] === 'rev-parse' && gitArgs.includes('--abbrev-ref') && workDir) {
         return commandResult(
-          `${workspaceBranches.get(workDir) ?? workspaceBranches.get(`${workDir}.preparing`) ?? 'main'}\n`,
+          `${workspaceBranches.get(workDir) ?? workspaceBranches.get(preparingSibling(workDir)) ?? 'main'}\n`,
         )
       }
 
@@ -92,6 +97,7 @@ function removalQuery(workflowRunId: string, issueNumber: number, workspacePath:
     workspacePath,
     branch: `mohist/run-${workflowRunId}`,
     baseBranch: 'main',
+    repositoryName: 'main',
   }
 }
 

@@ -150,12 +150,3 @@ Task failure.
 
 See [`actions.md`](actions.md) for the Action contract and
 [`recovery.md`](recovery.md) for recovery semantics.
-
-## Current Gap
-
-The YAML and Runner still implement the previous shape: OpenSpec change
-directories under `openspec/changes/`, the `mohist/openspec-*` and
-`mohist/archive-change` Actions, a gated plan self-review and Check review with
-auto-fix loops, and synchronous `mohist/merge-github-pr`. This document and
-[`plan-artifacts.md`](plan-artifacts.md) are the target; the implementation issue closes the
-gap. The gap does not affect already-initialized Runs.

@@ -154,10 +154,9 @@ Business error codes:
 - `auto-merge-unavailable`: the Repository does not allow auto-merge.
 - `pr-checks-failed`: a required Pull Request check failed after auto-merge
   was enabled.
-- `merge-conflict`: the Pull Request has unresolved merge conflicts.
+- `conflict`: the Pull Request has unresolved merge conflicts.
 - `retry-safe`: the operation can be retried safely.
 - `config-error`: GitHub configuration is missing or invalid.
-- `protection-conflict`: branch protection rejected the operation.
 - `pr-state-conflict`: the Pull Request is in a conflicting state.
 - `enable-failed`: enabling auto-merge failed.
 

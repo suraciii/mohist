@@ -1,12 +1,9 @@
-import { runCommand, type CommandLineOptions, type CommandResult } from "../system/process.js"
-import { classifyGhFailure, looksLikeRetrySafe } from "./github-pr-classify.js"
-import {
-  classifyPrChecks,
-  parsePrStatusCheckRollupResult,
-} from "./github-pr-checks.js"
-import { combinedGhOutput, errorMessage } from "./github-pr-parse.js"
-import { timeoutStepMetadata, type GitHubPrErrorCode, type GitHubPrStepMetadata } from "./github-pr-types.js"
-import { currentRunnerResources } from "../system/filesystem.js"
+import { runCommand, type CommandLineOptions, type CommandResult } from '../system/process.js'
+import { classifyGhFailure, looksLikeRetrySafe } from './github-pr-classify.js'
+import { classifyPrChecks, parsePrStatusCheckRollupResult } from './github-pr-checks.js'
+import { combinedGhOutput, errorMessage } from './github-pr-parse.js'
+import { timeoutStepMetadata, type GitHubPrErrorCode, type GitHubPrStepMetadata } from './github-pr-types.js'
+import { currentRunnerResources } from '../system/filesystem.js'
 
 type GhRunner = typeof runCommand
 
@@ -24,9 +21,10 @@ function checksTiming() {
   return {
     pollIntervalMs: timing?.pollIntervalMs ?? PR_CHECKS_POLL_INTERVAL_MS_DEFAULT,
     noChecksGraceMs: timing?.noChecksGraceMs ?? PR_CHECKS_NO_CHECKS_GRACE_MS_DEFAULT,
-    unavailableRetryLimit: timing?.unavailableRetryLimit === undefined
-      ? PR_CHECKS_UNAVAILABLE_RETRY_LIMIT_DEFAULT
-      : Math.max(0, Math.floor(timing.unavailableRetryLimit)),
+    unavailableRetryLimit:
+      timing?.unavailableRetryLimit === undefined
+        ? PR_CHECKS_UNAVAILABLE_RETRY_LIMIT_DEFAULT
+        : Math.max(0, Math.floor(timing.unavailableRetryLimit)),
   }
 }
 
@@ -48,7 +46,8 @@ function transientRetry() {
   const options = currentRunnerResources()?.githubPrTransientRetry
   return {
     limit: options?.limit === undefined ? GH_TRANSIENT_RETRY_LIMIT_DEFAULT : Math.max(0, Math.floor(options.limit)),
-    backoffMs: options?.backoffMs === undefined ? GH_TRANSIENT_RETRY_BACKOFF_MS_DEFAULT : Math.max(0, options.backoffMs),
+    backoffMs:
+      options?.backoffMs === undefined ? GH_TRANSIENT_RETRY_BACKOFF_MS_DEFAULT : Math.max(0, options.backoffMs),
   }
 }
 
@@ -61,10 +60,10 @@ export type GitHubPrCheckRecorder = (
 ) => void
 
 export type GitHubPrChecksWaitResult =
-  | { kind: "ok" }
-  | { kind: "failed"; message: string; output: string }
-  | { kind: "unavailable"; message: string; output: string }
-  | { kind: "cancelled"; message: string; output: string }
+  | { kind: 'ok' }
+  | { kind: 'failed'; message: string; output: string }
+  | { kind: 'unavailable'; message: string; output: string }
+  | { kind: 'cancelled'; message: string; output: string }
 
 export async function waitForGitHubPrChecks(
   gh: GhRunner,
@@ -84,18 +83,18 @@ export async function waitForGitHubPrChecks(
   for (;;) {
     if (signal.aborted) {
       return {
-        kind: "cancelled",
-        message: `Cancelled before polling checks: ${signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? "aborted")}`,
-        output: "cancelled before next poll",
+        kind: 'cancelled',
+        message: `Cancelled before polling checks: ${signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? 'aborted')}`,
+        output: 'cancelled before next poll',
       }
     }
     const checksResult = await runGhReadWithRetry(
       gh,
-      withGitHubRepository(["pr", "view", String(prNumber), "--json", "statusCheckRollup"], githubRepository),
+      withGitHubRepository(['pr', 'view', String(prNumber), '--json', 'statusCheckRollup'], githubRepository),
       workDir,
       signal,
       record,
-      "gh-pr-checks",
+      'gh-pr-checks',
       `pr view ${prNumber} --json statusCheckRollup`,
       options,
     )
@@ -105,7 +104,7 @@ export async function waitForGitHubPrChecks(
       unavailable = { message: checksOutput, output: checksOutput }
     } else {
       const parsed = parsePrStatusCheckRollupResult(checksResult.stdout)
-      if (parsed.kind === "invalid") {
+      if (parsed.kind === 'invalid') {
         unavailable = { message: parsed.message, output: checksResult.stdout }
       } else {
         unavailableRetries = 0
@@ -114,7 +113,7 @@ export async function waitForGitHubPrChecks(
           if (noChecksSince === null) noChecksSince = Date.now()
           if (Date.now() - noChecksSince >= timing.noChecksGraceMs) {
             return {
-              kind: "unavailable",
+              kind: 'unavailable',
               message: `no PR checks were reported during the ${timing.noChecksGraceMs / 1000}s bounded wait`,
               output: checksOutput,
             }
@@ -123,7 +122,7 @@ export async function waitForGitHubPrChecks(
             await delayWithSignal(timing.pollIntervalMs, signal)
           } catch (error) {
             return {
-              kind: "cancelled",
+              kind: 'cancelled',
               message: errorMessage(error),
               output: `cancelled during wait: ${errorMessage(error)}`,
             }
@@ -133,22 +132,22 @@ export async function waitForGitHubPrChecks(
           noChecksSince = null
         }
         const classification = classifyPrChecks(checks)
-        if (classification.kind === "failed") {
+        if (classification.kind === 'failed') {
           return {
-            kind: "failed",
+            kind: 'failed',
             message: classification.message,
             output: classification.message,
           }
         }
-        if (classification.kind === "passed") {
-          return { kind: "ok" }
+        if (classification.kind === 'passed') {
+          return { kind: 'ok' }
         }
       }
     }
     if (unavailable) {
       if (unavailableRetries >= timing.unavailableRetryLimit) {
         return {
-          kind: "unavailable",
+          kind: 'unavailable',
           message: `check status unavailable after ${unavailableRetries + 1} attempts: ${unavailable.message}`,
           output: unavailable.output,
         }
@@ -159,7 +158,7 @@ export async function waitForGitHubPrChecks(
       await delayWithSignal(timing.pollIntervalMs, signal)
     } catch (error) {
       return {
-        kind: "cancelled",
+        kind: 'cancelled',
         message: errorMessage(error),
         output: `cancelled during wait: ${errorMessage(error)}`,
       }
@@ -170,18 +169,18 @@ export async function waitForGitHubPrChecks(
 export function delayWithSignal(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (signal.aborted) {
-      reject(signal.reason ?? new Error("aborted"))
+      reject(signal.reason ?? new Error('aborted'))
       return
     }
     const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort)
+      signal.removeEventListener('abort', onAbort)
       resolve()
     }, ms)
     const onAbort = () => {
       clearTimeout(timer)
-      reject(signal.reason ?? new Error("aborted"))
+      reject(signal.reason ?? new Error('aborted'))
     }
-    signal.addEventListener("abort", onAbort, { once: true })
+    signal.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -203,17 +202,24 @@ export async function runGhReadWithRetry(
   const retry = transientRetry()
   let attempt = 0
   for (;;) {
-    const result = await gh("gh", args, workDir, signal, undefined, options)
-    const transient = result.exitCode !== 0
-      && result.status !== "timeout"
-      && attempt < retry.limit
-      && looksLikeRetrySafe(`${result.stdout}\n${result.stderr}`)
+    const result = await gh('gh', args, workDir, signal, undefined, options)
+    const transient =
+      result.exitCode !== 0 &&
+      result.status !== 'timeout' &&
+      attempt < retry.limit &&
+      looksLikeRetrySafe(`${result.stdout}\n${result.stderr}`)
     if (!transient) {
       record(recordName, recordCommand, result.exitCode, combinedGhOutput(result), timeoutStepMetadata(result))
       return result
     }
     attempt++
-    record(recordName, `${recordCommand} (transient retry ${attempt}/${retry.limit})`, result.exitCode, combinedGhOutput(result), timeoutStepMetadata(result))
+    record(
+      recordName,
+      `${recordCommand} (transient retry ${attempt}/${retry.limit})`,
+      result.exitCode,
+      combinedGhOutput(result),
+      timeoutStepMetadata(result),
+    )
     try {
       await delayWithSignal(retry.backoffMs, signal)
     } catch (error) {
@@ -225,9 +231,7 @@ export async function runGhReadWithRetry(
 }
 
 export function withGitHubRepository(args: string[], githubRepository?: string): string[] {
-  return githubRepository ? [...args, "--repo", githubRepository] : args
+  return githubRepository ? [...args, '--repo', githubRepository] : args
 }
 
-// Re-exported so github-pr-merge.ts can classify gh failures without a second
-// import site; the canonical classifier lives in github-pr-classify.ts.
 export { classifyGhFailure, type GitHubPrErrorCode }

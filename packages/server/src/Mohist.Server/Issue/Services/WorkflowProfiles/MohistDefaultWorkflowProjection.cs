@@ -137,7 +137,7 @@ public static class MohistDefaultWorkflowProjection
 
     public static string ChangeName(int issueNumber) => $"issue-{issueNumber}";
 
-    public static string ChangeDir(int issueNumber) => $"openspec/changes/{ChangeName(issueNumber)}";
+    public static string ChangeDir(int issueNumber) => "PLANS";
 
     private static DateTime ParseDateTime(string value) =>
         DateTime.TryParse(value, out var result) ? result : DateTime.UtcNow;

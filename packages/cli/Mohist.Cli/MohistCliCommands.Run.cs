@@ -61,6 +61,7 @@ internal static partial class RunCommands
 
         RegisterReads(run, api);
         RegisterFeedback(run, api);
+        run.Subcommands.Add(BuildArtifact(api));
         run.Subcommands.Add(VariableCommands.BuildVariableGroup(api, VariableScopeKind.Run));
 
         return run;

@@ -6,13 +6,13 @@ public sealed class FakePromptLoader : IPromptLoader
 {
     public Dictionary<string, string> Prompts { get; set; } = new(StringComparer.Ordinal)
     {
-        ["proposal"] = "# Proposal Artifact\nCreate proposal.md",
-        ["specs"] = "# Specs Artifact\nCreate specs",
-        ["design"] = "# Design Artifact\nCreate design.md",
-        ["tasks"] = "# Tasks Artifact\nCreate tasks.json",
-        ["self-review"] = "# Self Review\nReview artifacts",
-        ["review"] = "# Review\nReview implementation",
-        ["build"] = "# Build\nImplement task",
+        ["plan"] = "# Plan\nCreate PLAN.md, DESIGN.md, and tasks.json",
+        ["review"] = "# Review\nRecord review evidence",
+        ["build-task"] = "# Build\nImplement task",
+        ["apply-feedback"] = "# Feedback\nApply feedback",
+        ["fix-ci"] = "# Fix CI\nRepair verification",
+        ["fix-pr-checks"] = "# Fix PR checks\nRepair checks",
+        ["resolve-rebase-conflicts"] = "# Resolve conflicts\nRepair rebase",
     };
 
     public string Load(string name) =>

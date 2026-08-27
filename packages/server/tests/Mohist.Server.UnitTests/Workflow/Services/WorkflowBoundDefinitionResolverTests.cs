@@ -168,7 +168,7 @@ public sealed class WorkflowBoundDefinitionResolverTests
         var tasks = new List<TaskDefinition>
         {
             new("workspace-prepare", "Prepare workspace", "mohist/workspace-prepare"),
-            new("load-tasks", "Load tasks", "mohist/openspec-tasks"),
+            new("load-tasks", "Load tasks", "mohist/task-list"),
         };
         tasks.AddRange(VerificationLaneCatalog.LaneIds.Select(id => new TaskDefinition(id, id, "core/script")));
         tasks.Add(new TaskDefinition("push", "Push", "mohist/push"));

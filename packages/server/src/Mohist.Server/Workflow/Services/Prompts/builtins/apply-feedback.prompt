@@ -24,10 +24,10 @@ mo issue feedback show ${{ issue.number }} --feedback ${{ work.approvalFeedback.
 
 1. Read the feedback body through the CLI above. Do not skip this step.
 2. Read the relevant issue, workflow artifacts, and changed files:
-   - `openspec/changes/issue-${{ issue.number }}/proposal.md`
-   - `openspec/changes/issue-${{ issue.number }}/design.md`
-   - `openspec/changes/issue-${{ issue.number }}/tasks.json`
-   - `openspec/changes/issue-${{ issue.number }}/specs/`
+   - `PLANS/PLAN.md`
+   - `PLANS/DESIGN.md`
+   - `PLANS/tasks.json`
+   - additional material under `PLANS/` and `RESEARCH/`
    - any files the feedback points to
 3. Treat the feedback as required input, not optional commentary. Every requested change must be addressed.
 4. Apply only the changes needed to satisfy the feedback. Do not make unrelated edits.
@@ -37,8 +37,7 @@ mo issue feedback show ${{ issue.number }} --feedback ${{ work.approvalFeedback.
 
 ## Rules
 
-- Do not edit `openspec/changes/issue-${{ issue.number }}/review.md` or other review-marker artifacts; the next review task regenerates them.
-- Do not modify workflow artifacts under `openspec/changes/issue-${{ issue.number }}/` unless the feedback explicitly requires it.
+- Modify plan artifacts only when the feedback concerns the plan; repository feedback belongs under `REPOS/${{ repository.name }}`.
 - Do not approve the stage yourself. Approval is a user decision through the Mohist approval gate.
 - Do not create or remove feedback records. The user owns the feedback loop.
 - You may be interrupted at any time: commit incrementally and keep your progress

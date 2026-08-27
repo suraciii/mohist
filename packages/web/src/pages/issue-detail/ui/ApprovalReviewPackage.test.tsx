@@ -7,13 +7,21 @@ import type { IssueDecisionActionController } from '../model/useIssueDecisionAct
 
 const action = (kind: IssueDecisionAction['kind'], order: number, enabled = true): IssueDecisionAction => ({
   kind,
-  label: kind === 'ask-agent' ? 'Ask Agent' : kind === 'view-transcript' ? 'View transcript · session-1' : kind === 'approve' ? 'Approve' : 'Send back',
+  label:
+    kind === 'ask-agent'
+      ? 'Ask Agent'
+      : kind === 'view-transcript'
+        ? 'View transcript · session-1'
+        : kind === 'approve'
+          ? 'Approve'
+          : 'Send back',
   pendingLabel: 'Pending',
   enabled,
   reason: enabled ? null : 'Unavailable',
   primary: kind === 'approve',
   destructive: kind === 'send-back',
-  mode: kind === 'send-back' ? 'feedback' : kind === 'ask-agent' || kind === 'view-transcript' ? 'navigation' : 'immediate',
+  mode:
+    kind === 'send-back' ? 'feedback' : kind === 'ask-agent' || kind === 'view-transcript' ? 'navigation' : 'immediate',
   to: kind === 'ask-agent' ? '/agent-sessions/new' : kind === 'view-transcript' ? '/sessions/session-1' : null,
   order,
 })
@@ -32,22 +40,41 @@ const controller: IssueDecisionActionController = {
 
 const artifactListHook = () => ({
   data: [
-    { artifactId: 'proposal.md', workflowRunId: 'run-1', taskRunId: 'proposal.1', path: 'proposal.md', kind: 'file' as const, recordedAt: '2026-01-01T00:00:00Z' },
-    { artifactId: 'tasks.json', workflowRunId: 'run-1', taskRunId: 'tasks.1', path: 'tasks.json', kind: 'file' as const, recordedAt: '2026-01-01T00:00:00Z' },
-    { artifactId: 'review.md', workflowRunId: 'run-1', taskRunId: 'ai-review.1', path: 'review.md', kind: 'file' as const, recordedAt: '2026-01-01T00:00:00Z' },
+    {
+      artifactId: 'PLANS/PLAN.md',
+      workflowRunId: 'run-1',
+      taskRunId: 'proposal.1',
+      path: 'PLANS/PLAN.md',
+      kind: 'file' as const,
+      recordedAt: '2026-01-01T00:00:00Z',
+    },
+    {
+      artifactId: 'PLANS/tasks.json',
+      workflowRunId: 'run-1',
+      taskRunId: 'tasks.1',
+      path: 'PLANS/tasks.json',
+      kind: 'file' as const,
+      recordedAt: '2026-01-01T00:00:00Z',
+    },
+    {
+      artifactId: 'PLANS/REVIEW.md',
+      workflowRunId: 'run-1',
+      taskRunId: 'ai-review.1',
+      path: 'PLANS/REVIEW.md',
+      kind: 'file' as const,
+      recordedAt: '2026-01-01T00:00:00Z',
+    },
   ],
   isLoading: false,
   error: null,
 })
 
 const artifactContentHook = (_issue: number, artifactId: string | null) => ({
-  data: { kind: 'text' as const, content: artifactId === 'tasks.json' ? '{"token":"' + 'x'.repeat(100) + '"}' : `# ${artifactId}`, contentType: artifactId === 'tasks.json' ? 'application/json' : 'text/markdown' },
-  isLoading: false,
-  error: null,
-})
-
-const prefixedArtifactListHook = () => ({
-  data: [{ artifactId: 'artifact-review', workflowRunId: 'run-1', taskRunId: 'ai-review.3', path: 'openspec/changes/issue-455/review.md', kind: 'file' as const, recordedAt: '2026-01-01T00:00:00Z' }],
+  data: {
+    kind: 'text' as const,
+    content: artifactId === 'PLANS/tasks.json' ? '{"token":"' + 'x'.repeat(100) + '"}' : `# ${artifactId}`,
+    contentType: artifactId === 'PLANS/tasks.json' ? 'application/json' : 'text/markdown',
+  },
   isLoading: false,
   error: null,
 })
@@ -62,22 +89,24 @@ describe('ApprovalReviewPackage', () => {
 
   it('shows plan evidence and direct mobile actions without a generic launcher', () => {
     render(
-      <MemoryRouter><ApprovalReviewPackage
-        issueNumber={455}
-        workflowRunId="run-1"
-        approvalStage="plan"
-        actions={[action('approve', 0), action('send-back', 1), action('ask-agent', 2), action('view-transcript', 3)]}
-        controller={controller}
-        rationale="Review the plan."
-        nextAction="Approve or send back"
-        isNarrowViewport
-        artifactListHook={artifactListHook}
-        artifactContentHook={artifactContentHook}
-      /></MemoryRouter>,
+      <MemoryRouter>
+        <ApprovalReviewPackage
+          issueNumber={455}
+          workflowRunId="run-1"
+          approvalStage="plan"
+          actions={[action('approve', 0), action('send-back', 1), action('ask-agent', 2), action('view-transcript', 3)]}
+          controller={controller}
+          rationale="Review the plan."
+          nextAction="Approve or send back"
+          isNarrowViewport
+          artifactListHook={artifactListHook}
+          artifactContentHook={artifactContentHook}
+        />
+      </MemoryRouter>,
     )
 
-    expect(within(screen.getByTestId('approval-artifact-proposal.md')).getAllByText('proposal.md')).toHaveLength(2)
-    expect(screen.getByText('tasks.json')).toBeInTheDocument()
+    expect(within(screen.getByTestId('approval-artifact-PLANS/PLAN.md')).getAllByText('PLANS/PLAN.md')).toHaveLength(2)
+    expect(screen.getByText('PLANS/tasks.json')).toBeInTheDocument()
     expect(screen.getByTestId('approval-review-evidence')).toHaveAttribute('id', 'artifacts')
     expect(document.querySelectorAll('#artifacts')).toHaveLength(1)
     expect(screen.getByTestId('approval-mobile-approve')).toBeInTheDocument()
@@ -99,75 +128,93 @@ describe('ApprovalReviewPackage', () => {
   it('keeps the artifacts destination mounted while approval evidence is loading or unavailable', () => {
     const loadingHook = () => ({ data: undefined, isLoading: true, error: null })
     const { rerender } = render(
-      <MemoryRouter><ApprovalReviewPackage
-        issueNumber={455}
-        workflowRunId="run-1"
-        approvalStage="plan"
-        actions={[]}
-        controller={controller}
-        rationale="Review the plan."
-        nextAction="Approve or send back"
-        isNarrowViewport={false}
-        artifactListHook={loadingHook}
-        artifactContentHook={artifactContentHook}
-      /></MemoryRouter>,
+      <MemoryRouter>
+        <ApprovalReviewPackage
+          issueNumber={455}
+          workflowRunId="run-1"
+          approvalStage="plan"
+          actions={[]}
+          controller={controller}
+          rationale="Review the plan."
+          nextAction="Approve or send back"
+          isNarrowViewport={false}
+          artifactListHook={loadingHook}
+          artifactContentHook={artifactContentHook}
+        />
+      </MemoryRouter>,
     )
 
     expect(screen.getByTestId('approval-review-evidence')).toHaveAttribute('id', 'artifacts')
     expect(screen.getAllByText('Loading artifact list...')).toHaveLength(2)
 
     rerender(
-      <MemoryRouter><ApprovalReviewPackage
-        issueNumber={455}
-        workflowRunId={null}
-        approvalStage={null}
-        actions={[]}
-        controller={controller}
-        rationale="Review is unavailable."
-        nextAction="Wait"
-        isNarrowViewport={false}
-      /></MemoryRouter>,
+      <MemoryRouter>
+        <ApprovalReviewPackage
+          issueNumber={455}
+          workflowRunId={null}
+          approvalStage={null}
+          actions={[]}
+          controller={controller}
+          rationale="Review is unavailable."
+          nextAction="Wait"
+          isNarrowViewport={false}
+        />
+      </MemoryRouter>,
     )
     expect(screen.getByTestId('approval-review-evidence')).toHaveAttribute('id', 'artifacts')
     expect(screen.getByText('No inline evidence is configured for this approval stage.')).toBeInTheDocument()
     expect(document.querySelectorAll('#artifacts')).toHaveLength(1)
   })
 
-  it('renders approval evidence when the artifact path has a workflow directory prefix', () => {
+  it('includes the artifact workflow run in content query identity', () => {
+    const contentHook = vi.fn(artifactContentHook)
     render(
-      <MemoryRouter><ApprovalReviewPackage
-        issueNumber={455}
-        workflowRunId="run-1"
-        approvalStage="check"
-        actions={[]}
-        controller={controller}
-        rationale="Review the check."
-        nextAction="Approve or send back"
-        isNarrowViewport={false}
-        artifactListHook={prefixedArtifactListHook}
-        artifactContentHook={artifactContentHook}
-      /></MemoryRouter>,
+      <MemoryRouter>
+        <ApprovalReviewPackage
+          issueNumber={455}
+          workflowRunId="run-1"
+          approvalStage="plan"
+          artifactSummaries={[
+            {
+              artifactId: 'plan-artifact',
+              workflowRunId: 'run-1',
+              taskRunId: 'plan.1',
+              path: 'PLANS/PLAN.md',
+              kind: 'file',
+              recordedAt: '2026-01-01T00:00:00Z',
+            } as any,
+          ]}
+          actions={[]}
+          controller={controller}
+          rationale="Review the plan."
+          nextAction="Approve or send back"
+          isNarrowViewport={false}
+          artifactListHook={() => ({ data: [], isLoading: false, error: null })}
+          artifactContentHook={contentHook}
+        />
+      </MemoryRouter>,
     )
 
-    expect(screen.getByText('artifact-review')).toBeInTheDocument()
-    expect(screen.queryByText('Artifact is missing from this workflow run.')).not.toBeInTheDocument()
+    expect(contentHook).toHaveBeenCalledWith(455, 'plan-artifact', { artifactKind: 'file' }, true, 'run-1')
   })
 
   it('uses current-stage artifact summaries and leaves approval available when evidence is absent', () => {
     render(
-      <MemoryRouter><ApprovalReviewPackage
-        issueNumber={455}
-        workflowRunId="run-1"
-        approvalStage="check"
-        artifactSummaries={[]}
-        actions={[action('approve', 0)]}
-        controller={controller}
-        rationale="Review the check."
-        nextAction="Approve or send back"
-        isNarrowViewport={false}
-        artifactListHook={artifactListHook}
-        artifactContentHook={artifactContentHook}
-      /></MemoryRouter>,
+      <MemoryRouter>
+        <ApprovalReviewPackage
+          issueNumber={455}
+          workflowRunId="run-1"
+          approvalStage="check"
+          artifactSummaries={[]}
+          actions={[action('approve', 0)]}
+          controller={controller}
+          rationale="Review the check."
+          nextAction="Approve or send back"
+          isNarrowViewport={false}
+          artifactListHook={artifactListHook}
+          artifactContentHook={artifactContentHook}
+        />
+      </MemoryRouter>,
     )
 
     expect(screen.getByText('Artifact is missing from this workflow run.')).toBeInTheDocument()
@@ -179,18 +226,26 @@ describe('ApprovalReviewPackage', () => {
 
   it('keeps every secondary descriptor in ordered non-modal access', () => {
     render(
-      <MemoryRouter><ApprovalReviewPackage
-        issueNumber={455}
-        workflowRunId="run-1"
-        approvalStage="check"
-        actions={[action('approve', 0), action('send-back', 1), action('ask-agent', 2), action('view-transcript', 3), action('close', 4, false)]}
-        controller={controller}
-        rationale="Review the check."
-        nextAction="Approve or send back"
-        isNarrowViewport
-        artifactListHook={artifactListHook}
-        artifactContentHook={artifactContentHook}
-      /></MemoryRouter>,
+      <MemoryRouter>
+        <ApprovalReviewPackage
+          issueNumber={455}
+          workflowRunId="run-1"
+          approvalStage="check"
+          actions={[
+            action('approve', 0),
+            action('send-back', 1),
+            action('ask-agent', 2),
+            action('view-transcript', 3),
+            action('close', 4, false),
+          ]}
+          controller={controller}
+          rationale="Review the check."
+          nextAction="Approve or send back"
+          isNarrowViewport
+          artifactListHook={artifactListHook}
+          artifactContentHook={artifactContentHook}
+        />
+      </MemoryRouter>,
     )
     fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
     expect(screen.getByTestId('approval-more-action-ask-agent')).toBeInTheDocument()
@@ -202,18 +257,20 @@ describe('ApprovalReviewPackage', () => {
 
   it('handles desktop approval shortcuts only for enabled actions outside editable fields', () => {
     render(
-      <MemoryRouter><ApprovalReviewPackage
-        issueNumber={455}
-        workflowRunId="run-1"
-        approvalStage="plan"
-        actions={[action('approve', 0), action('send-back', 1)]}
-        controller={controller}
-        rationale="Review the plan."
-        nextAction="Approve or send back"
-        isNarrowViewport={false}
-        artifactListHook={artifactListHook}
-        artifactContentHook={artifactContentHook}
-      /></MemoryRouter>,
+      <MemoryRouter>
+        <ApprovalReviewPackage
+          issueNumber={455}
+          workflowRunId="run-1"
+          approvalStage="plan"
+          actions={[action('approve', 0), action('send-back', 1)]}
+          controller={controller}
+          rationale="Review the plan."
+          nextAction="Approve or send back"
+          isNarrowViewport={false}
+          artifactListHook={artifactListHook}
+          artifactContentHook={artifactContentHook}
+        />
+      </MemoryRouter>,
     )
 
     expect(screen.getByTestId('decision-action-approve-shortcut')).toHaveTextContent('a')
@@ -243,18 +300,20 @@ describe('ApprovalReviewPackage', () => {
 
   it('submits send-back feedback from Command+Enter once and keeps plain Enter multiline', () => {
     render(
-      <MemoryRouter><ApprovalReviewPackage
-        issueNumber={455}
-        workflowRunId="run-1"
-        approvalStage="plan"
-        actions={[action('approve', 0), action('send-back', 1)]}
-        controller={controller}
-        rationale="Review the plan."
-        nextAction="Approve or send back"
-        isNarrowViewport
-        artifactListHook={artifactListHook}
-        artifactContentHook={artifactContentHook}
-      /></MemoryRouter>,
+      <MemoryRouter>
+        <ApprovalReviewPackage
+          issueNumber={455}
+          workflowRunId="run-1"
+          approvalStage="plan"
+          actions={[action('approve', 0), action('send-back', 1)]}
+          controller={controller}
+          rationale="Review the plan."
+          nextAction="Approve or send back"
+          isNarrowViewport
+          artifactListHook={artifactListHook}
+          artifactContentHook={artifactContentHook}
+        />
+      </MemoryRouter>,
     )
     fireEvent.click(screen.getByTestId('approval-mobile-send-back'))
     fireEvent.click(screen.getByRole('radio', { name: 'Direction' }))

@@ -15,13 +15,13 @@ public sealed class InMemoryPromptLoader : IPromptLoader
     private static IEnumerable<SystemTemplate> DefaultTemplates()
     {
         yield return Template(
-            "proposal",
-            "Generate Proposal",
-            "Creates the OpenSpec proposal.md for an issue",
-            ["plan", "openspec"],
+            "plan",
+            "Plan Change",
+            "Creates Workspace plan artifacts for an issue",
+            ["plan"],
             "plan");
 
-        foreach (var key in DefaultKeys.Where(key => key != "proposal"))
+        foreach (var key in DefaultKeys.Where(key => key != "plan"))
             yield return Template(key, key, string.Empty, [], null);
     }
 
@@ -42,18 +42,12 @@ public sealed class InMemoryPromptLoader : IPromptLoader
     private static readonly string[] DefaultKeys =
     [
         "apply-feedback",
-        "auto-fix",
-        "build",
-        "design",
+        "build-task",
         "fix-ci",
-        "fix-plan-review",
         "fix-pr-checks",
-        "proposal",
+        "plan",
         "resolve-rebase-conflicts",
         "review",
-        "self-review",
-        "specs",
-        "tasks",
     ];
 
     public InMemoryPromptLoader(IEnumerable<SystemTemplate> templates)

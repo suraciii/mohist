@@ -1,14 +1,14 @@
-import { dirname, join, resolve } from "node:path"
-import type { RunnerDirectoryEntry, RunnerFileInfo, RunnerFileSystem } from "../../src/system/filesystem.js"
+import { dirname, join, resolve } from 'node:path'
+import type { RunnerDirectoryEntry, RunnerFileInfo, RunnerFileSystem } from '../../src/system/filesystem.js'
 
 type MemoryNode =
-  | { kind: "file"; content: Uint8Array; mtimeMs: number }
-  | { kind: "directory"; mtimeMs: number }
-  | { kind: "symlink"; target: string; mtimeMs: number }
+  | { kind: 'file'; content: Uint8Array; mtimeMs: number }
+  | { kind: 'directory'; mtimeMs: number }
+  | { kind: 'symlink'; target: string; mtimeMs: number }
 
 export class MemoryFileSystem implements RunnerFileSystem {
   readonly supportsDirectoryHandles: boolean = false
-  private readonly nodes = new Map<string, MemoryNode>([["/", { kind: "directory", mtimeMs: 0 }]])
+  private readonly nodes = new Map<string, MemoryNode>([['/', { kind: 'directory', mtimeMs: 0 }]])
   private nextMtime = 1
 
   exists(path: string): boolean {
@@ -29,7 +29,7 @@ export class MemoryFileSystem implements RunnerFileSystem {
 
   async readBinary(path: string): Promise<Uint8Array> {
     const node = this.node(path, false)
-    if (node.kind !== "file") throw this.error("EISDIR", path)
+    if (node.kind !== 'file') throw this.error('EISDIR', path)
     return new Uint8Array(node.content)
   }
 
@@ -40,18 +40,18 @@ export class MemoryFileSystem implements RunnerFileSystem {
   async writeBinary(path: string, content: Uint8Array): Promise<void> {
     const normalized = this.normalize(path)
     this.ensureDirectory(dirname(normalized))
-    this.nodes.set(normalized, { kind: "file", content: new Uint8Array(content), mtimeMs: this.nextMtime++ })
+    this.nodes.set(normalized, { kind: 'file', content: new Uint8Array(content), mtimeMs: this.nextMtime++ })
   }
 
   async appendText(path: string, content: string): Promise<void> {
-    const previous = this.exists(path) ? await this.readText(path) : ""
+    const previous = this.exists(path) ? await this.readText(path) : ''
     await this.writeText(path, previous + content)
   }
 
   async deleteFile(path: string): Promise<void> {
     const normalized = this.normalize(path)
     const node = this.nodes.get(normalized)
-    if (node?.kind === "directory") throw this.error("EISDIR", path)
+    if (node?.kind === 'directory') throw this.error('EISDIR', path)
     this.nodes.delete(normalized)
   }
 
@@ -66,12 +66,18 @@ export class MemoryFileSystem implements RunnerFileSystem {
     const sourcePath = this.normalize(source)
     const destinationPath = this.normalize(destination)
     const sourceNode = this.nodes.get(sourcePath)
-    if (!sourceNode) throw this.error("ENOENT", source)
+    if (!sourceNode) throw this.error('ENOENT', source)
     this.ensureDirectory(dirname(destinationPath))
     await this.deleteDirectory(destinationPath)
     const moved = [...this.nodes.entries()]
       .filter(([path]) => path === sourcePath || path.startsWith(`${sourcePath}/`))
-      .map(([path, node]) => [path === sourcePath ? destinationPath : join(destinationPath, path.slice(sourcePath.length + 1)), node] as const)
+      .map(
+        ([path, node]) =>
+          [
+            path === sourcePath ? destinationPath : join(destinationPath, path.slice(sourcePath.length + 1)),
+            node,
+          ] as const,
+      )
     await this.deleteDirectory(sourcePath)
     for (const [path, node] of moved) this.nodes.set(path, node)
   }
@@ -87,22 +93,22 @@ export class MemoryFileSystem implements RunnerFileSystem {
   async readdir(path: string): Promise<RunnerDirectoryEntry[]> {
     const normalized = this.normalize(path)
     const node = this.node(normalized, true)
-    if (node.kind !== "directory") throw this.error("ENOTDIR", path)
-    const prefix = normalized === "/" ? "/" : `${normalized}/`
+    if (node.kind !== 'directory') throw this.error('ENOTDIR', path)
+    const prefix = normalized === '/' ? '/' : `${normalized}/`
     const names = new Set<string>()
     for (const candidate of this.nodes.keys()) {
       if (!candidate.startsWith(prefix) || candidate === normalized) continue
       const rest = candidate.slice(prefix.length)
-      if (!rest || rest.includes("/")) continue
+      if (!rest || rest.includes('/')) continue
       names.add(rest)
     }
     return [...names].sort().map((name) => {
       const child = this.nodes.get(join(normalized, name))!
       return {
         name,
-        isFile: () => child.kind === "file",
-        isDirectory: () => child.kind === "directory",
-        isSymbolicLink: () => child.kind === "symlink",
+        isFile: () => child.kind === 'file',
+        isDirectory: () => child.kind === 'directory',
+        isSymbolicLink: () => child.kind === 'symlink',
       }
     })
   }
@@ -120,13 +126,13 @@ export class MemoryFileSystem implements RunnerFileSystem {
     const sourcePath = this.normalize(source)
     const destinationPath = this.normalize(destination)
     const sourceNode = this.node(sourcePath, true)
-    if (sourceNode.kind !== "directory") throw this.error("ENOTDIR", source)
+    if (sourceNode.kind !== 'directory') throw this.error('ENOTDIR', source)
     this.ensureDirectory(destinationPath)
     for (const [path, node] of this.nodes.entries()) {
       if (!path.startsWith(`${sourcePath}/`)) continue
       const copiedPath = join(destinationPath, path.slice(sourcePath.length + 1))
-      if (node.kind === "file") await this.writeBinary(copiedPath, node.content)
-      else if (node.kind === "directory") await this.ensureDir(copiedPath)
+      if (node.kind === 'file') await this.writeBinary(copiedPath, node.content)
+      else if (node.kind === 'directory') await this.ensureDir(copiedPath)
       else await this.symlink(node.target, copiedPath)
     }
   }
@@ -134,49 +140,54 @@ export class MemoryFileSystem implements RunnerFileSystem {
   async symlink(target: string, path: string): Promise<void> {
     const normalized = this.normalize(path)
     this.ensureDirectory(dirname(normalized))
-    this.nodes.set(normalized, { kind: "symlink", target, mtimeMs: this.nextMtime++ })
+    this.nodes.set(normalized, { kind: 'symlink', target, mtimeMs: this.nextMtime++ })
   }
 
   protected normalize(path: string): string {
-    return resolve("/", path)
+    return resolve('/', path)
   }
 
   private node(path: string, followSymlink: boolean): MemoryNode {
     const normalized = this.normalize(path)
     const node = this.nodes.get(normalized)
-    if (!node) throw this.error("ENOENT", path)
-    if (!followSymlink || node.kind !== "symlink") return node
-    return this.nodes.get(this.resolveNode(normalized, new Set())) ?? (() => { throw this.error("ENOENT", path) })()
+    if (!node) throw this.error('ENOENT', path)
+    if (!followSymlink || node.kind !== 'symlink') return node
+    return (
+      this.nodes.get(this.resolveNode(normalized, new Set())) ??
+      (() => {
+        throw this.error('ENOENT', path)
+      })()
+    )
   }
 
   private resolveNode(path: string, seen: Set<string>): string {
     const normalized = this.normalize(path)
     const node = this.nodes.get(normalized)
-    if (!node) throw this.error("ENOENT", path)
-    if (node.kind !== "symlink") return normalized
-    if (seen.has(normalized)) throw this.error("ELOOP", path)
+    if (!node) throw this.error('ENOENT', path)
+    if (node.kind !== 'symlink') return normalized
+    if (seen.has(normalized)) throw this.error('ELOOP', path)
     seen.add(normalized)
-    return this.resolveNode(node.target.startsWith("/") ? node.target : join(dirname(normalized), node.target), seen)
+    return this.resolveNode(node.target.startsWith('/') ? node.target : join(dirname(normalized), node.target), seen)
   }
 
   private ensureDirectory(path: string): void {
     const normalized = this.normalize(path)
-    if (normalized === "/") return
+    if (normalized === '/') return
     const parent = dirname(normalized)
     this.ensureDirectory(parent)
     const existing = this.nodes.get(normalized)
-    if (existing && existing.kind !== "directory") throw this.error("ENOTDIR", path)
-    if (!existing) this.nodes.set(normalized, { kind: "directory", mtimeMs: this.nextMtime++ })
+    if (existing && existing.kind !== 'directory') throw this.error('ENOTDIR', path)
+    if (!existing) this.nodes.set(normalized, { kind: 'directory', mtimeMs: this.nextMtime++ })
   }
 
   private info(node: MemoryNode): RunnerFileInfo {
     return {
       kind: node.kind,
-      size: node.kind === "file" ? node.content.byteLength : 0,
+      size: node.kind === 'file' ? node.content.byteLength : 0,
       mtimeMs: node.mtimeMs,
-      isFile: () => node.kind === "file",
-      isDirectory: () => node.kind === "directory",
-      isSymbolicLink: () => node.kind === "symlink",
+      isFile: () => node.kind === 'file',
+      isDirectory: () => node.kind === 'directory',
+      isSymbolicLink: () => node.kind === 'symlink',
     }
   }
 
@@ -192,20 +203,30 @@ export class MemoryDirectoryHandleFileSystem extends MemoryFileSystem {
   private readonly aliases = new Map<string, string>()
   private nextHandle = 1
 
-  async openDirectory(path: string): Promise<{ path: string; close(): Promise<void> }> {
-    const info = await this.stat(path)
+  async openDirectory(path: string, flags?: number): Promise<{ path: string; close(): Promise<void> }> {
+    const info = flags ? await this.lstat(path) : await this.stat(path)
+    if (flags && info.isSymbolicLink()) {
+      const error = new Error(`ELOOP: ${path}`) as NodeJS.ErrnoException
+      error.code = 'ELOOP'
+      throw error
+    }
     if (!info.isDirectory()) {
       const error = new Error(`ENOTDIR: ${path}`) as NodeJS.ErrnoException
-      error.code = "ENOTDIR"
+      error.code = 'ENOTDIR'
       throw error
     }
     const alias = `/memory-handle-${this.nextHandle++}`
     this.aliases.set(alias, this.normalize(path))
-    return { path: alias, close: async () => { this.aliases.delete(alias) } }
+    return {
+      path: alias,
+      close: async () => {
+        this.aliases.delete(alias)
+      },
+    }
   }
 
   protected normalize(path: string): string {
-    const normalized = resolve("/", path)
+    const normalized = resolve('/', path)
     for (const [alias, target] of this.aliases) {
       if (normalized === alias) return target
       if (normalized.startsWith(`${alias}/`)) return join(target, normalized.slice(alias.length + 1))
@@ -219,7 +240,8 @@ export class MemoryDirectoryHandleFileSystem extends MemoryFileSystem {
     await super.rename(source, destination)
     for (const [alias, target] of this.aliases) {
       if (target === sourcePath) this.aliases.set(alias, destinationPath)
-      else if (target.startsWith(`${sourcePath}/`)) this.aliases.set(alias, join(destinationPath, target.slice(sourcePath.length + 1)))
+      else if (target.startsWith(`${sourcePath}/`))
+        this.aliases.set(alias, join(destinationPath, target.slice(sourcePath.length + 1)))
     }
   }
 }

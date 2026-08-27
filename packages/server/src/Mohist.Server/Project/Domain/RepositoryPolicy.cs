@@ -100,6 +100,8 @@ public static class RepositoryPolicy
 
             if (string.IsNullOrWhiteSpace(repo.Name))
                 errors.Add(new($"{prefix}.name", $"{prefix}.name must be a non-empty string."));
+            else if (!IsSafePathSegment(repo.Name))
+                errors.Add(new($"{prefix}.name", $"{prefix}.name must be a safe single path segment."));
             else if (!seen.Add(repo.Name))
                 errors.Add(new($"{prefix}.name", $"Duplicate repository name '{repo.Name}' (case-insensitive)."));
 
@@ -370,6 +372,25 @@ public static class RepositoryPolicy
 
     public static string ResolveBaseBranch(string? raw) =>
         TryNormalizeBaseBranch(raw, out var value) ? value : DefaultBaseBranch;
+
+    private static bool IsSafePathSegment(string name)
+    {
+        if (name is "." or ".."
+            || name.EndsWith('.')
+            || name.EndsWith(' ')
+            || name.IndexOfAny(['<', '>', ':', '"', '/', '\\', '|', '?', '*']) >= 0
+            || name.Any(c => c == '\0' || char.IsControl(c)))
+            return false;
+
+        var baseName = name.Split('.', 2)[0];
+        return !baseName.Equals("CON", StringComparison.OrdinalIgnoreCase)
+            && !baseName.Equals("PRN", StringComparison.OrdinalIgnoreCase)
+            && !baseName.Equals("AUX", StringComparison.OrdinalIgnoreCase)
+            && !baseName.Equals("NUL", StringComparison.OrdinalIgnoreCase)
+            && !Enumerable.Range(1, 9).Any(index =>
+                baseName.Equals($"COM{index}", StringComparison.OrdinalIgnoreCase)
+                || baseName.Equals($"LPT{index}", StringComparison.OrdinalIgnoreCase));
+    }
 
     private static bool HasEmbeddedHttpCredentials(string gitUrl) =>
         Uri.TryCreate(gitUrl, UriKind.Absolute, out var uri)

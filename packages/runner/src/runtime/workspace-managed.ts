@@ -12,7 +12,7 @@ import {
   WorkspaceIdentityMismatchError,
   WorkspaceMissingError,
 } from './workspace-errors.js'
-import { readMarker, type IssueWorkspaceMarker } from './workspace-identity.js'
+import { readMarker, repositoryWorkspacePath, type IssueWorkspaceMarker } from './workspace-identity.js'
 
 /**
  * `source` tag recorded against every captured workspace-preparation
@@ -38,6 +38,88 @@ export function runnerVariables() {
   }
 }
 
+export async function withManagedReposHandle<T>(
+  managedWorkspacePath: string,
+  operation: (managedReposPath: string) => Promise<T>,
+): Promise<T> {
+  const fileSystem = currentRunnerFileSystem()
+  const reposPath = join(managedWorkspacePath, 'REPOS')
+  await assertDirectoryEntry(reposPath, reposPath)
+  if (process.platform !== 'linux' || !fileSystem.supportsDirectoryHandles || !fileSystem.openDirectory) {
+    return await operation(reposPath)
+  }
+
+  let reposHandle: RunnerDirectoryHandle | undefined
+  try {
+    reposHandle = await fileSystem.openDirectory(
+      reposPath,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    )
+    return await operation(reposHandle.path)
+  } catch (error) {
+    if (error instanceof WorkspaceIdentityMismatchError || error instanceof WorkspaceMissingError) throw error
+    throw new WorkspaceIdentityMismatchError(
+      `Repository root ${reposPath} is unavailable or symlinked`,
+      reposPath,
+      undefined,
+      undefined,
+      error,
+    )
+  } finally {
+    await reposHandle?.close()
+  }
+}
+
+export async function withManagedRepositoryHandle<T>(
+  managedWorkspacePath: string,
+  repositoryName: string,
+  operation: (managedRepositoryPath: string) => Promise<T>,
+): Promise<T> {
+  const repositoryPath = repositoryWorkspacePath(managedWorkspacePath, repositoryName)
+  return await withManagedReposHandle(managedWorkspacePath, async (managedReposPath) => {
+    const managedRepositoryPath = join(managedReposPath, repositoryName)
+    await assertDirectoryEntry(managedRepositoryPath, repositoryPath)
+    const fileSystem = currentRunnerFileSystem()
+    if (process.platform !== 'linux' || !fileSystem.supportsDirectoryHandles || !fileSystem.openDirectory) {
+      return await operation(managedRepositoryPath)
+    }
+    let repositoryHandle: RunnerDirectoryHandle | undefined
+    try {
+      repositoryHandle = await fileSystem.openDirectory(
+        managedRepositoryPath,
+        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+      )
+      return await operation(repositoryHandle.path)
+    } catch (error) {
+      if (error instanceof WorkspaceIdentityMismatchError || error instanceof WorkspaceMissingError) throw error
+      throw new WorkspaceIdentityMismatchError(
+        `Repository path ${repositoryPath} is unavailable or symlinked`,
+        repositoryPath,
+        undefined,
+        undefined,
+        error,
+      )
+    } finally {
+      await repositoryHandle?.close()
+    }
+  })
+}
+
+async function assertDirectoryEntry(path: string, displayPath: string): Promise<void> {
+  try {
+    const info = await currentRunnerFileSystem().lstat(path)
+    if (info.isSymbolicLink())
+      throw new WorkspaceIdentityMismatchError(`Repository path ${displayPath} is symlinked`, displayPath)
+    if (!info.isDirectory())
+      throw new WorkspaceIdentityMismatchError(`Repository path ${displayPath} is not a directory`, displayPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new WorkspaceMissingError(`Repository path ${displayPath} is missing`, displayPath)
+    }
+    throw error
+  }
+}
+
 export async function validateWorkspaceIdentity(
   workspacePath: string,
   expected: IssueWorkspaceMarker,
@@ -46,6 +128,7 @@ export async function validateWorkspaceIdentity(
   log: TaskLogger | null = null,
   runnerRoot?: string,
   displayPath = workspacePath,
+  repositoryName?: string,
 ): Promise<void> {
   if (runnerRoot) await assertManagedWorkspacePath(runnerRoot, workspacePath, true)
   const marker = await readMarker(workspacePath)
@@ -61,7 +144,15 @@ export async function validateWorkspaceIdentity(
       marker,
     )
   }
-  await validateWorkspaceOrigin(workspacePath, gitUrl, signal, log, displayPath)
+  if (repositoryName) {
+    await withManagedRepositoryHandle(
+      workspacePath,
+      repositoryName,
+      async (gitPath) => await validateWorkspaceOrigin(gitPath, gitUrl, signal, log, displayPath),
+    )
+  } else {
+    await validateWorkspaceOrigin(workspacePath, gitUrl, signal, log, displayPath)
+  }
 }
 
 export async function validateWorkspaceOrigin(
@@ -146,6 +237,75 @@ export async function assertManagedWorkspacePath(
   }
   if (requireFinal && !pathExists(target)) {
     throw new WorkspaceMissingError(`Workflow workspace ${target} is missing`, target)
+  }
+}
+
+export async function openWorkspaceDirectoryHandle(
+  workspaceRoot: string,
+  requested?: string | null,
+): Promise<RunnerDirectoryHandle> {
+  const root = resolve(workspaceRoot)
+  const target = requested ? (isAbsolute(requested) ? resolve(requested) : resolve(root, requested)) : root
+  const rel = relative(root, target)
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    throw new WorkspaceIdentityMismatchError(`Working directory ${target} is outside Workspace ${root}`, target)
+  }
+
+  const fileSystem = currentRunnerFileSystem()
+  const components = rel ? rel.split(/[\\/]+/).filter(Boolean) : []
+  if (process.platform !== 'linux' || !fileSystem.supportsDirectoryHandles || !fileSystem.openDirectory) {
+    let current = root
+    for (const component of components) {
+      current = join(current, component)
+      try {
+        if ((await fileSystem.lstat(current)).isSymbolicLink()) {
+          throw new WorkspaceIdentityMismatchError(`Working directory ${current} is symlinked`, target)
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        await fileSystem.ensureDir(current)
+      }
+    }
+    return { path: target, close: async () => {} }
+  }
+
+  const handles: RunnerDirectoryHandle[] = []
+  try {
+    let handle = await fileSystem.openDirectory(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+    handles.push(handle)
+    for (const component of components) {
+      const child = join(handle.path, component)
+      try {
+        handle = await fileSystem.openDirectory(
+          child,
+          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+        )
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        await fileSystem.ensureDir(child)
+        handle = await fileSystem.openDirectory(
+          child,
+          constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+        )
+      }
+      handles.push(handle)
+    }
+    return {
+      path: handles.at(-1)!.path,
+      close: async () => {
+        for (const opened of handles.reverse()) await opened.close()
+      },
+    }
+  } catch (error) {
+    for (const opened of handles.reverse()) await opened.close()
+    if (error instanceof WorkspaceIdentityMismatchError) throw error
+    throw new WorkspaceIdentityMismatchError(
+      `Working directory ${target} is unavailable or symlinked`,
+      target,
+      undefined,
+      undefined,
+      error,
+    )
   }
 }
 

@@ -1,0 +1,23 @@
+---
+name: "Plan Change"
+description: "Plans the issue and writes plan artifacts"
+tags: [plan]
+stage: plan
+---
+Read the current issue first:
+
+```bash
+mo issue view ${{ issue.number }} --project ${{ issue.projectId }}
+```
+
+Research the repository under `REPOS/${{ repository.name }}` and write:
+
+- `PLANS/PLAN.md`: scope, approach, risks, and acceptance interpretation.
+- `PLANS/DESIGN.md`: technical decisions and rationale. Always create this file; state that no separate design is needed when applicable.
+- `PLANS/tasks.json`: an ordered implementation task list with this exact shape:
+
+```json
+{"tasks":[{"id":"T-001","title":"...","goal":"...","acceptance":["..."],"refs":["PLANS/DESIGN.md#..."]}]}
+```
+
+Each task is a complete vertical increment including its tests. Use only `id`, `title`, `goal`, `acceptance`, and `refs`. Keep tasks ordered; do not add dependency, priority, mode, type, output, notes, uses, with, or expect fields.

@@ -316,6 +316,22 @@ The positional argument is a WorkflowRun ID. `--issue` resolves the current Run
 bound to that Issue. Callers must provide exactly one. An Issue number is unique
 within a Project and can be used with `--project`.
 
+Recorded evidence is available through the same target model:
+
+```bash
+mo run artifact list --issue 42
+mo run artifact get --issue 42 <artifact-id>
+mo run artifact list wr_abc123 --json artifactId,path,kind,recordedAt
+```
+
+`artifact list` returns the latest recorded version of each artifact path as a
+human table by default; bare `--json` discovers selectable fields and
+`--json field1,field2` returns structured output.
+`artifact get` streams one file artifact's recorded bytes to standard output;
+it does not upload,
+restore, or select history. A Run-ID read is accepted only while the associated
+Issue is still bound to that Run.
+
 `mo run view --yaml` reads the current Definition of the Profile ID bound to the
 Run and materializes Agent references with that Run's bound concrete Action. It
 is not a historical Definition snapshot: editing other Profile structure can

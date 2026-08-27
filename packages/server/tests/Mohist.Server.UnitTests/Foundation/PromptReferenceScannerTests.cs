@@ -21,13 +21,13 @@ public class PromptReferenceScannerTests
                 title: Write proposal
                 uses: mohist/opencode
                 with:
-                  prompt: ${{ prompts.proposal }}
+                  prompt: ${{ prompts.plan }}
             checks: []
         """);
 
         var keys = PromptReferenceScanner.Scan(definition);
 
-        Assert.Equal(new[] { "proposal" }, keys);
+        Assert.Equal(new[] { "plan" }, keys);
     }
 
     [Fact]
@@ -93,19 +93,19 @@ public class PromptReferenceScannerTests
                 title: T1
                 uses: mohist/opencode
                 with:
-                  prompt: ${{ prompts.proposal }}
+                  prompt: ${{ prompts.plan }}
               - id: t2
                 title: T2
                 uses: mohist/opencode
                 with:
-                  prompt: ${{ prompts.proposal }}
+                  prompt: ${{ prompts.plan }}
             checks: []
         """);
 
         var keys = PromptReferenceScanner.Scan(definition);
 
         Assert.Single(keys);
-        Assert.Contains("proposal", keys);
+        Assert.Contains("plan", keys);
     }
 
     [Fact]
@@ -146,12 +146,12 @@ public class PromptReferenceScannerTests
                 uses: mohist/opencode
                 with:
                   options:
-                    prompt: ${{ prompts.proposal }}
+                    prompt: ${{ prompts.plan }}
             checks: []
         """);
 
         var keys = PromptReferenceScanner.Scan(definition);
 
-        Assert.Contains("proposal", keys);
+        Assert.Contains("plan", keys);
     }
 }
