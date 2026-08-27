@@ -157,7 +157,7 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
     }
 
     [Fact]
-    public async Task RunnerReconnectReport_SuppressesUnresolvedRedeliveryWhileHeld()
+    public async Task UnresolvedAgentSettlement_WithholdsReportedWorkAndAcceptsSameAttemptReport()
     {
         var workflow = await StartWorkflowAsync(SingleStage(
             tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
@@ -184,126 +184,14 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
     }
 
     [Fact]
-    public async Task Redelivery_UnresolvedAgentWork_RedeliversToRecordedRunnerWithBinding()
-    {
-        var workflow = await StartWorkflowAsync(SingleStage(
-            tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
-            checks: []));
-        var runnerId = _runnerId!;
-        var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
-        Assert.Equal(WorkReportVerdict.Accepted, await workflow.BindAgentExecutionAsync(new AgentExecutionBinding(
-            first.TaskRunId!,
-            first.WorkId,
-            runnerId,
-            "session-1",
-            "turn-1",
-            "pi",
-            "/pi/sessions/spec-1")));
-
-        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
-
-        var redelivery = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
-        Assert.Equal(first.WorkflowRunId, redelivery.WorkflowRunId);
-        Assert.Equal(first.WorkId, redelivery.WorkId);
-        Assert.Equal(first.TaskRunId, redelivery.TaskRunId);
-        var binding = Assert.IsType<AgentRecoveryBinding>(redelivery.AgentRecovery);
-        Assert.Equal("pi", binding.Runtime);
-        Assert.Equal("/pi/sessions/spec-1", binding.RuntimeSessionId);
-        Assert.Equal("session-1", binding.AgentSessionId);
-        Assert.Equal("turn-1", binding.AgentTurnId);
-        var run = await LoadRunAsync(_workflowId!);
-        Assert.Equal(TaskRunStatus.Running, Assert.Single(run.CurrentStage().Tasks).Status);
-    }
-
-    [Fact]
-    public async Task Redelivery_UnresolvedAgentWork_RequiresMatchingProcessGenerationWithoutReservingCapacity()
-    {
-        await ClearBacklogAsync();
-        var prefix = $"recovery-generation-{Guid.NewGuid():N}";
-        var projectId = $"{prefix}-project";
-        var runnerId = $"{prefix}-runner";
-        const string owningGeneration = "runner-process-generation-g1";
-        const string replacementGeneration = "runner-process-generation-g2";
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var runnerInfo = new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId);
-        await runner.RegisterAsync(runnerInfo, owningGeneration);
-        await runner.UpdateAsync(1);
-
-        var recoveryWorkflowId = $"{prefix}-recovery";
-        var recoveryWorkflow = Grains.GetGrain<IWorkflowGrain>(recoveryWorkflowId);
-        await SeedWorkflowTemplateAsync(
-            recoveryWorkflowId,
-            SingleStage(tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")], checks: []),
-            projectId);
-        await recoveryWorkflow.StartAsync(TestInput(projectId));
-        var first = Assert.Single((await Dispatch.PollAsync(
-            runnerId,
-            new RunnerPollRequest([], [], ProcessGeneration: owningGeneration))).Dispatches);
-        Assert.Equal(WorkReportVerdict.Accepted, await recoveryWorkflow.BindAgentExecutionAsync(new AgentExecutionBinding(
-            first.TaskRunId!,
-            first.WorkId,
-            runnerId,
-            "session-generation",
-            "turn-generation",
-            "pi",
-            "/pi/sessions/spec-generation")));
-        Assert.Equal(WorkReportVerdict.Accepted, await recoveryWorkflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
-
-        var owningPoll = await Dispatch.PollAsync(
-            runnerId,
-            new RunnerPollRequest([], [], ProcessGeneration: owningGeneration));
-        var recovery = Assert.Single(owningPoll.Dispatches);
-        Assert.Equal(recoveryWorkflowId, recovery.WorkflowRunId);
-        Assert.Equal(first.WorkId, recovery.WorkId);
-        Assert.NotNull(recovery.AgentRecovery);
-
-        await runner.RegisterAsync(runnerInfo, replacementGeneration);
-
-        var freshWorkflowId = $"{prefix}-fresh";
-        var freshWorkflow = Grains.GetGrain<IWorkflowGrain>(freshWorkflowId);
-        await SeedWorkflowTemplateAsync(freshWorkflowId, SingleStage(checks: []), projectId);
-        await freshWorkflow.StartAsync(TestInput(projectId));
-
-        var recoveryKey = WorkKey(recoveryWorkflowId, first.WorkId);
-        var replacementPoll = await Dispatch.PollAsync(
-            runnerId,
-            new RunnerPollRequest([recoveryKey], [], ProcessGeneration: replacementGeneration));
-        var fresh = Assert.Single(replacementPoll.Dispatches);
-        Assert.Equal(freshWorkflowId, fresh.WorkflowRunId);
-        Assert.Null(fresh.AgentRecovery);
-    }
-
-    [Fact]
-    public async Task Redelivery_UnresolvedAgentWork_RequiresFullRuntimeBinding()
-    {
-        var workflow = await StartWorkflowAsync(SingleStage(
-            tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")],
-            checks: []));
-        var runnerId = _runnerId!;
-        var work = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
-
-        // An unknown observation without a bound execution leaves the
-        // settlement without runtime facts; redelivery stays closed.
-        Assert.Equal(WorkReportVerdict.Accepted, await workflow.ObserveAgentResultUnknownAsync(
-            runnerId,
-            work.TaskRunId!,
-            work.WorkId,
-            "runner-restarted"));
-
-        Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
-        var run = await LoadRunAsync(_workflowId!);
-        Assert.Equal(AgentResultSettlementState.Unknown, Assert.Single(run.CurrentStage().Tasks).AgentResultSettlement!.State);
-    }
-
-    [Fact]
-    public async Task Redelivery_BlockedUnresolvedAgentWork_StopsAfterReleaseButStillAcceptsAnAuthoritativeResult()
+    public async Task SettlementDeadline_ReleasesUnresolvedAgentWorkAndStillAcceptsAnAuthoritativeResult()
     {
         // Issue-628 T-005: a durably Blocked Agent settlement is the
         // sole exactly-once release boundary for the Runner control
         // plane. Once the workflow commits Unknown→Blocked, the run is
-        // absent from FindRunningAssignedToAsync / AddMissingRedeliveriesAsync
-        // / Runner activeWorks, and a subsequent poll must not redeliver
-        // it. A matching late authoritative report still settles the
+        // absent from FindRunningAssignedToAsync and Runner activeWorks,
+        // and a subsequent poll must not emit it. A matching late
+        // authoritative report still settles the
         // attempt through the workflow report path because the
         // task-run/work/runner identity is preserved on the aggregate.
         var workflow = await StartWorkflowAsync(SingleStage(
@@ -330,8 +218,8 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         Assert.Equal(AgentResultSettlementState.Blocked, Assert.Single(blocked.CurrentStage().Tasks).AgentResultSettlement!.State);
 
         // The deadline released the attempt's active-work lease, so the Runner
-        // must no longer be asked to recover it; the original attempt stays
-        // addressable for a late authoritative result.
+        // receives no dispatch for it; the original attempt stays addressable
+        // for a late authoritative result.
         Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Null(blocked.Assignment);
@@ -351,65 +239,6 @@ public partial class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTest
         Assert.Equal(TaskRunStatus.Completed, Assert.Single(recovered.CurrentStage().Tasks).Status);
         Assert.False(recovered.HasUnresolvedAgentResult());
         Assert.Empty((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
-    }
-
-    [Fact]
-    public async Task Redelivery_UnresolvedAgentWork_IsDeliveredRegardlessOfDispatchSlots()
-    {
-        await ClearBacklogAsync();
-        var projectId = $"recovery-slots-{Guid.NewGuid():N}";
-        var runnerId = await RegisterRunnerForProjectAsync(projectId, maxWorkflowSlots: 1);
-        _runnerId = runnerId;
-
-        var recoveryWorkflow = Grains.GetGrain<IWorkflowGrain>($"{projectId}-recovery");
-        await SeedWorkflowTemplateAsync(
-            $"{projectId}-recovery",
-            SingleStage(tasks: [new TaskDefinition("agent", "Agent", "mohist/pi")], checks: []),
-            projectId);
-        await recoveryWorkflow.StartAsync(TestInput(projectId));
-        var work = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
-        Assert.Equal(WorkReportVerdict.Accepted, await recoveryWorkflow.BindAgentExecutionAsync(new AgentExecutionBinding(
-            work.TaskRunId!,
-            work.WorkId,
-            runnerId,
-            "session-slots",
-            "turn-slots",
-            "pi",
-            "/pi/sessions/spec-slots")));
-        Assert.Equal(WorkReportVerdict.Accepted, await recoveryWorkflow.ObserveAgentRunnerDisconnectedAsync(runnerId));
-
-        var freshWorkflow = Grains.GetGrain<IWorkflowGrain>($"{projectId}-fresh");
-        await SeedWorkflowTemplateAsync($"{projectId}-fresh", SingleStage(checks: []), projectId);
-        await freshWorkflow.StartAsync(TestInput(projectId));
-
-        // The runner holds no reported work, so the recovery render must not
-        // consume the dispatch slot even at capacity.
-        var response = await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
-        var recovery = Assert.Single(response.Dispatches);
-        Assert.Equal(work.WorkId, recovery.WorkId);
-        Assert.NotNull(recovery.AgentRecovery);
-    }
-
-    [Fact]
-    public async Task Redelivery_UnresolvedAgentWork_RefusesRunnerOtherThanTheRecordedSettlement()
-    {
-        await ClearBacklogAsync();
-        var prefix = $"recovery-runner-{Guid.NewGuid():N}";
-        var recordedRunner = $"{prefix}-recorded";
-        var otherRunner = $"{prefix}-other";
-        var projectId = $"{prefix}-project";
-        foreach (var runnerId in new[] { recordedRunner, otherRunner })
-        {
-            await Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(
-                new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
-        }
-
-        var workflowRunId = $"{prefix}-run";
-        await InsertUnresolvedAgentRunAsync(workflowRunId, otherRunner, recordedRunner, binding: true);
-
-        // The run is assigned to the other runner, but the settlement was
-        // recorded against the recorded runner: neither may take it over.
-        Assert.Empty((await Dispatch.PollAsync(otherRunner, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
     }
 
     [Fact]
