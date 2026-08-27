@@ -23,27 +23,30 @@ public sealed class AgentSessionRecoveryOrchestratorSpecs : IClassFixture<AgentS
     [Theory]
     [InlineData(SessionCommandKind.Compact)]
     [InlineData(SessionCommandKind.Reset)]
-    public async Task RecoveryCommand_UnavailableRunnerResult_RetriesPersistedOperation(SessionCommandKind command)
+    public async Task RecoveryCommand_SimulatedRunnerRestart_AppliesOperationIdAtMostOnceAndAllowsNewOperation(SessionCommandKind command)
     {
         var (_, sessionId) = await CreateIdleSessionAsync($"runtime-unavailable-{command.ToString().ToLowerInvariant()}");
         var dispatcher = new RecordingSessionCommandDispatcher();
         dispatcher.Enqueue(new SessionCommandResult(Ok: false, Error: SessionCommandError.Unavailable));
         dispatcher.EnqueueSuccess();
 
-        var first = await ExecuteRecoveryAsync(command, sessionId, idempotencyKey: null, dispatcher);
-        var retry = await ExecuteRecoveryAsync(command, sessionId, idempotencyKey: null, dispatcher);
+        var first = await ExecuteRecoveryAsync(command, sessionId, "restart-operation", dispatcher);
+        var replay = await ExecuteRecoveryAsync(command, sessionId, "restart-operation", dispatcher);
+        var replacement = await ExecuteRecoveryAsync(command, sessionId, "new-operation", dispatcher);
 
         Assert.Equal(503, first.Status);
-        Assert.Equal("runner_unavailable", first.Body.GetProperty("code").GetString());
-        Assert.Equal(200, retry.Status);
-        Assert.Equal(dispatcher.Requests[0].OperationId, dispatcher.Requests[1].OperationId);
+        Assert.Equal(503, replay.Status);
+        Assert.Equal("runner_unavailable", replay.Body.GetProperty("code").GetString());
+        Assert.Equal(200, replacement.Status);
+        Assert.Equal(2, dispatcher.Requests.Count);
+        Assert.NotEqual(dispatcher.Requests[0].OperationId, dispatcher.Requests[1].OperationId);
         await AssertRuntimeBindingAsync(sessionId, command, dispatcher.Requests[1]);
     }
 
     [Theory]
     [InlineData(SessionCommandKind.Compact)]
     [InlineData(SessionCommandKind.Reset)]
-    public async Task RecoveryCommand_InvalidRunnerResult_RetriesPersistedOperation(SessionCommandKind command)
+    public async Task RecoveryCommand_AdmittedInvalidResultFailsClosedWithoutRedelivery(SessionCommandKind command)
     {
         var (_, sessionId) = await CreateIdleSessionAsync($"runtime-invalid-{command.ToString().ToLowerInvariant()}");
         var dispatcher = new RecordingSessionCommandDispatcher();
@@ -57,32 +60,34 @@ public sealed class AgentSessionRecoveryOrchestratorSpecs : IClassFixture<AgentS
 
         Assert.Equal(502, first.Status);
         Assert.Equal("runner_invalid_response", first.Body.GetProperty("code").GetString());
-        Assert.Equal(200, retry.Status);
-        Assert.Equal(dispatcher.Requests[0].OperationId, dispatcher.Requests[1].OperationId);
-        await AssertRuntimeBindingAsync(sessionId, command, dispatcher.Requests[1]);
+        Assert.Equal(503, retry.Status);
+        Assert.Equal("runner_unavailable", retry.Body.GetProperty("code").GetString());
+        Assert.Single(dispatcher.Requests);
+
+        var session = Assert.IsType<AgentSession>(await _fixture.StateStore.LoadAsync(sessionId));
+        var admission = Assert.Single(session.Status.SessionCommandAdmissionFacts!);
+        Assert.Null(admission.Outcome);
+        Assert.Null(session.Status.PendingReset);
     }
 
     [Fact]
-    public async Task Reset_NewIdempotencyKeyJoinsPendingOperationAndReplaysCompletion()
+    public async Task Reset_NewIdempotencyKeyStartsNewOperationAfterFailedOperationSettles()
     {
-        var (_, sessionId) = await CreateIdleSessionAsync("runtime-reset-join");
+        var (_, sessionId) = await CreateIdleSessionAsync("runtime-reset-retry");
         var dispatcher = new RecordingSessionCommandDispatcher();
         dispatcher.Enqueue(new SessionCommandResult(Ok: false, Error: SessionCommandError.Unavailable));
         dispatcher.EnqueueSuccess();
 
         var first = await ExecuteRecoveryAsync(SessionCommandKind.Reset, sessionId, "reset-1", dispatcher);
-        var joined = await ExecuteRecoveryAsync(SessionCommandKind.Reset, sessionId, "reset-2", dispatcher);
-        var replay = await ExecuteRecoveryAsync(SessionCommandKind.Reset, sessionId, "reset-2", dispatcher);
+        var replay = await ExecuteRecoveryAsync(SessionCommandKind.Reset, sessionId, "reset-1", dispatcher);
+        var retry = await ExecuteRecoveryAsync(SessionCommandKind.Reset, sessionId, "reset-2", dispatcher);
 
         Assert.Equal(503, first.Status);
-        Assert.Equal(200, joined.Status);
-        Assert.Equal(200, replay.Status);
+        Assert.Equal(503, replay.Status);
+        Assert.Equal(200, retry.Status);
         Assert.Equal(2, dispatcher.Requests.Count);
-        Assert.Equal(dispatcher.Requests[0].OperationId, dispatcher.Requests[1].OperationId);
-        Assert.Equal(
-            joined.Body.GetProperty("data").GetProperty("id").GetString(),
-            replay.Body.GetProperty("data").GetProperty("id").GetString());
-        Assert.Equal("runtime-reset-join-replacement", (await LoadAsync(sessionId))!.Status.AgentRuntimeSessionId);
+        Assert.NotEqual(dispatcher.Requests[0].OperationId, dispatcher.Requests[1].OperationId);
+        Assert.Equal("runtime-reset-retry-replacement", (await LoadAsync(sessionId))!.Status.AgentRuntimeSessionId);
     }
 
     [Fact]
@@ -141,7 +146,7 @@ public sealed class AgentSessionRecoveryOrchestratorSpecs : IClassFixture<AgentS
     [Theory]
     [InlineData(SessionCommandKind.Compact)]
     [InlineData(SessionCommandKind.Reset)]
-    public async Task RecoveryCommand_CancelledRequestKeepsPendingOperationForRetry(SessionCommandKind command)
+    public async Task RecoveryCommand_CancelledRequestFailsAdmittedOperationBeforeNewRetry(SessionCommandKind command)
     {
         var (_, sessionId) = await CreateIdleSessionAsync($"runtime-cancelled-{command.ToString().ToLowerInvariant()}");
         var dispatcher = new RecordingSessionCommandDispatcher();
@@ -156,16 +161,95 @@ public sealed class AgentSessionRecoveryOrchestratorSpecs : IClassFixture<AgentS
         dispatcher.EnqueueSuccess();
 
         using var cancellation = new CancellationTokenSource();
-        var first = ExecuteRecoveryAsync(command, sessionId, idempotencyKey: null, dispatcher, cancellation.Token);
+        var first = ExecuteRecoveryAsync(command, sessionId, idempotencyKey: "cancelled-operation", dispatcher, cancellation.Token);
         await dispatched.Task;
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
 
-        var retry = await ExecuteRecoveryAsync(command, sessionId, idempotencyKey: null, dispatcher);
+        var replay = await ExecuteRecoveryAsync(command, sessionId, idempotencyKey: "cancelled-operation", dispatcher);
+        var retry = await ExecuteRecoveryAsync(command, sessionId, idempotencyKey: "replacement-operation", dispatcher);
 
+        Assert.Equal(503, replay.Status);
         Assert.Equal(200, retry.Status);
         Assert.Equal(2, dispatcher.Requests.Count);
-        Assert.Equal(dispatcher.Requests[0].OperationId, dispatcher.Requests[1].OperationId);
+        Assert.NotEqual(dispatcher.Requests[0].OperationId, dispatcher.Requests[1].OperationId);
+    }
+
+    [Theory]
+    [InlineData(SessionCommandKind.Compact)]
+    [InlineData(SessionCommandKind.Reset)]
+    public async Task RecoveryCommand_SameIdDuplicateDuringDispatchDoesNotDispatchOrInvalidateCompletion(SessionCommandKind command)
+    {
+        var (_, sessionId) = await CreateIdleSessionAsync($"runtime-concurrent-{command.ToString().ToLowerInvariant()}");
+        var dispatcher = new RecordingSessionCommandDispatcher();
+        var dispatchStarted = new TaskCompletionSource<SessionCommandRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDispatch = new TaskCompletionSource<SessionCommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        dispatcher.Enqueue((request, _) =>
+        {
+            dispatchStarted.TrySetResult(request);
+            return releaseDispatch.Task;
+        });
+
+        var first = ExecuteRecoveryAsync(command, sessionId, "same-operation", dispatcher);
+        var request = await dispatchStarted.Task;
+        var duplicate = await ExecuteRecoveryAsync(command, sessionId, "same-operation", dispatcher);
+
+        Assert.Equal(503, duplicate.Status);
+        Assert.Equal("runner_unavailable", duplicate.Body.GetProperty("code").GetString());
+        Assert.Single(dispatcher.Requests);
+        var pending = (await LoadAsync(sessionId))!.Status.PendingReset;
+        Assert.NotNull(pending);
+        Assert.Equal(request.OperationId, pending!.OperationId);
+        Assert.True(pending.EffectAdmitted);
+
+        releaseDispatch.SetResult(RecordingSessionCommandDispatcher.SuccessFor(request));
+        var completed = await first;
+
+        Assert.Equal(200, completed.Status);
+        await AssertRuntimeBindingAsync(sessionId, command, request);
+    }
+
+    [Fact]
+    public async Task RunnerGenerationReplacementKeepsOldIdentityUnavailableAndDispatchesNewIdentityOnce()
+    {
+        var (_, sessionId) = await CreateIdleSessionAsync("runtime-generation-race");
+        var dispatcher = new RecordingSessionCommandDispatcher();
+        var dispatchStarted = new TaskCompletionSource<SessionCommandRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var oldResult = new TaskCompletionSource<SessionCommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        dispatcher.Enqueue((request, _) =>
+        {
+            dispatchStarted.TrySetResult(request);
+            return oldResult.Task;
+        });
+        dispatcher.EnqueueSuccess();
+
+        var first = ExecuteRecoveryAsync(SessionCommandKind.Compact, sessionId, "old-key", dispatcher);
+        var oldRequest = await dispatchStarted.Task;
+        var admitted = (await LoadAsync(sessionId))!.Status.PendingReset;
+        Assert.NotNull(admitted);
+        Assert.True(admitted!.EffectAdmitted);
+        Assert.Equal(oldRequest.OperationId, admitted.OperationId);
+        Assert.Single(dispatcher.Requests);
+
+        dispatcher.ProcessGeneration = "replacement-generation";
+        oldResult.SetResult(new SessionCommandResult(Ok: true));
+
+        var refused = await first;
+        var replay = await ExecuteRecoveryAsync(SessionCommandKind.Compact, sessionId, "old-key", dispatcher);
+        var replacement = await ExecuteRecoveryAsync(SessionCommandKind.Compact, sessionId, "new-key", dispatcher);
+
+        Assert.Equal(503, refused.Status);
+        Assert.Equal(503, replay.Status);
+        Assert.Equal("runner_unavailable", replay.Body.GetProperty("code").GetString());
+        Assert.Equal(200, replacement.Status);
+        Assert.Equal(2, dispatcher.Requests.Count);
+        Assert.Equal("test-generation", dispatcher.Requests[0].ProcessGeneration);
+        Assert.Equal("replacement-generation", dispatcher.Requests[1].ProcessGeneration);
+        Assert.NotEqual(dispatcher.Requests[0].OperationId, dispatcher.Requests[1].OperationId);
+
+        var staleCompletion = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).CompleteCompactAsync(
+            new CompleteCompactAgentSessionCommand(oldRequest.OperationId, "test-generation", Summary: "stale"));
+        await Assert.ThrowsAsync<StaleRuntimeSessionBindingException>(() => staleCompletion);
     }
 
     [Fact]
@@ -307,6 +391,16 @@ public sealed class AgentSessionRecoveryOrchestratorSpecs : IClassFixture<AgentS
         private readonly Queue<Func<SessionCommandRequest, CancellationToken, Task<SessionCommandResult>>> _responses = [];
 
         public List<SessionCommandRequest> Requests { get; } = [];
+        public string ProcessGeneration { get; set; } = "test-generation";
+
+        public Task<string> GetCurrentProcessGenerationAsync(string runnerId, CancellationToken ct = default) =>
+            Task.FromResult(ProcessGeneration);
+
+        public Task<bool> IsCurrentProcessGenerationAsync(
+            string runnerId,
+            string processGeneration,
+            CancellationToken ct = default) =>
+            Task.FromResult(string.Equals(ProcessGeneration, processGeneration, StringComparison.Ordinal));
 
         public void Enqueue(SessionCommandResult result) =>
             _responses.Enqueue((_, _) => Task.FromResult(result));
@@ -328,7 +422,7 @@ public sealed class AgentSessionRecoveryOrchestratorSpecs : IClassFixture<AgentS
             return response(request, ct);
         }
 
-        private static SessionCommandResult SuccessFor(SessionCommandRequest request) => request.Command switch
+        public static SessionCommandResult SuccessFor(SessionCommandRequest request) => request.Command switch
         {
             SessionCommandKind.Compact => new SessionCommandResult(Ok: true),
             SessionCommandKind.Reset => new SessionCommandResult(

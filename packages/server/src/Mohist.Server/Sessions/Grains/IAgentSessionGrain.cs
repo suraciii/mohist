@@ -33,8 +33,9 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command);
     Task<AgentSessionRecoveryResult> ResetAsync(ResetAgentSessionCommand command);
     Task<AgentSessionRecoveryResult?> GetCompletedRecoveryAsync(SessionCommandKind command, string? idempotencyKey = null);
-    Task<SessionCommandRequest> PrepareSessionCommandAsync(SessionCommandKind command, string? idempotencyKey = null);
-    Task<SessionCommandRequest> BeginResetAsync(string? idempotencyKey = null);
+    Task<SessionCommandRequest> PrepareSessionCommandAsync(SessionCommandKind command, string ownerProcessGeneration, string? idempotencyKey = null);
+    Task<SessionCommandRequest> BeginResetAsync(string ownerProcessGeneration, string? idempotencyKey = null);
+    Task<SessionCommandAdmissionOutcome> AdmitSessionCommandEffectAsync(string operationId, string ownerProcessGeneration);
     Task<AgentSessionRecoveryResult> CompleteCompactAsync(CompleteCompactAgentSessionCommand command);
     Task<AgentSessionRecoveryResult> CompleteResetAsync(CompleteResetAgentSessionCommand command);
     Task AbandonResetAsync(string operationId);
@@ -323,17 +324,26 @@ public sealed record ResetAgentSessionCommand(
     [property: Id(2)] string ReplacementRuntime = "opencode",
     [property: Id(3)] long? ExpectedBindingEpoch = null);
 
+public enum SessionCommandAdmissionOutcome
+{
+    Missing,
+    AdmittedNow,
+    AlreadyAdmitted,
+}
+
 [GenerateSerializer]
 public sealed record CompleteResetAgentSessionCommand(
     [property: Id(0)] string OperationId,
     [property: Id(1)] string ReplacementRuntimeSessionId,
-    [property: Id(2)] string ReplacementRuntime);
+    [property: Id(2)] string ReplacementRuntime,
+    [property: Id(3)] string OwnerProcessGeneration);
 
 [GenerateSerializer]
 public sealed record CompleteCompactAgentSessionCommand(
     [property: Id(0)] string OperationId,
-    [property: Id(1)] string? Summary = null,
-    [property: Id(2)] int? MaxSummaryChars = null);
+    [property: Id(1)] string OwnerProcessGeneration,
+    [property: Id(2)] string? Summary = null,
+    [property: Id(3)] int? MaxSummaryChars = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionFollowupReservation(

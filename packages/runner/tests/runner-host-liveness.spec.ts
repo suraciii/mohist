@@ -108,7 +108,6 @@ vi.mock('../src/server/runner-control-websocket.js', () => ({
     constructor(
       _serverUrl: string,
       _runnerId: string,
-      _runnerRoot: string,
       _buildGitHash: string | null,
       options: {
         onReconnected?: (id: string) => void

@@ -378,6 +378,20 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
     }
 
+    public async Task<bool> IsCurrentProcessGenerationAsync(string processGeneration)
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            return !string.IsNullOrEmpty(processGeneration)
+                && string.Equals(_state.State?.CurrentProcessGeneration, processGeneration, StringComparison.Ordinal);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
     public async Task<RunnerRuntimeReadinessSnapshot> ObserveRuntimeReadinessAsync(
         string? connectionGeneration,
         List<RuntimeReadinessWitness> witnesses)

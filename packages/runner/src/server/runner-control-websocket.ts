@@ -1,7 +1,4 @@
 import type { BuildInfo } from '../runtime/build-info.js'
-import type { CancelOperationJournalStore } from '../runtime/cancel-operation-journal.js'
-import type { FollowupOperationJournalStore } from '../runtime/followup-operation-journal.js'
-import type { SessionCommandJournalStore } from '../runtime/session-command-journal.js'
 import { runnerLogger } from '../system/logger.js'
 import type { AgentSessionRuntimeEventQueue } from './runtime-event-queue.js'
 import { RunnerControlDispatcher, type RunnerControlHandlers } from './runner-control-dispatcher.js'
@@ -26,9 +23,7 @@ export interface RunnerControlWebSocketClientOptions {
   random?: () => number
   onReconnected?: (connectionId: string) => void
   agentSessionRuntimeEventQueue?: AgentSessionRuntimeEventQueue | null
-  sessionCommandJournal?: SessionCommandJournalStore | null
-  followupOperationJournal?: FollowupOperationJournalStore | null
-  cancelOperationJournal?: CancelOperationJournalStore | null
+  processGeneration: string
   strictExecutionSourceValidation?: boolean
 }
 
@@ -58,7 +53,6 @@ export class RunnerControlWebSocketClient {
   private readonly factory: RunnerControlSocketFactory
   private readonly random: () => number
   private readonly eventQueue: AgentSessionRuntimeEventQueue | null
-  private readonly journals: Array<{ load(): Promise<void> }>
   private running = false
   private candidate: Connection | null = null
   private current: Connection | null = null
@@ -81,19 +75,14 @@ export class RunnerControlWebSocketClient {
   constructor(
     serverUrl: string,
     runnerId: string,
-    _runnerRoot: string,
     buildGitHash: string | null = null,
     private readonly options: RunnerControlWebSocketClientOptions,
     buildInfo: BuildInfo | null = null,
   ) {
-    this.url = buildControlUrl(serverUrl, runnerId, buildGitHash, buildInfo)
+    this.url = buildControlUrl(serverUrl, runnerId, options.processGeneration, buildGitHash, buildInfo)
     this.factory = options.socketFactory ?? createRunnerControlSocket
     this.random = options.random ?? Math.random
     this.eventQueue = options.agentSessionRuntimeEventQueue ?? null
-    this.journals = []
-    if (options.sessionCommandJournal) this.journals.push(options.sessionCommandJournal)
-    if (options.followupOperationJournal) this.journals.push(options.followupOperationJournal)
-    if (options.cancelOperationJournal) this.journals.push(options.cancelOperationJournal)
   }
 
   async start(signal?: AbortSignal): Promise<void> {
@@ -129,15 +118,6 @@ export class RunnerControlWebSocketClient {
     try {
       if (this.eventQueue) await Promise.race([this.eventQueue.recover(), opened])
       if (!this.ownsLifecycle(generation)) return await opened
-      for (const journal of this.journals) {
-        try {
-          await Promise.race([journal.load(), opened])
-        } catch (error) {
-          if (!this.ownsLifecycle(generation)) return await opened
-          log.error('control journal failed to load', { exception: error })
-        }
-        if (!this.ownsLifecycle(generation)) return await opened
-      }
       this.connect()
     } catch (error) {
       if (this.ownsLifecycle(generation)) this.startupReject?.(error)
@@ -489,6 +469,7 @@ export class RunnerControlWebSocketClient {
 export function buildControlUrl(
   serverUrl: string,
   runnerId: string,
+  processGeneration: string,
   buildGitHash: string | null,
   buildInfo: BuildInfo | null,
 ): string {
@@ -496,6 +477,7 @@ export function buildControlUrl(
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   url.pathname = `${url.pathname.replace(/\/$/, '')}/api/runner/${encodeURIComponent(runnerId)}/control`
   url.search = ''
+  url.searchParams.set('processGeneration', processGeneration)
   if (buildGitHash) url.searchParams.set('buildGitHash', buildGitHash)
   if (buildInfo?.component) url.searchParams.set('component', buildInfo.component)
   if (buildInfo?.version) url.searchParams.set('version', buildInfo.version)

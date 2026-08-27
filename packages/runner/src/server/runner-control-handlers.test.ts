@@ -1,16 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { SessionCommandJournalStore } from '../runtime/session-command-journal.js'
 import { createRunnerControlHandlers } from './runner-control-handlers.js'
 
 describe('createRunnerControlHandlers', () => {
   it('binds all nine methods to the existing transport-neutral domain handlers', async () => {
     const command = vi.fn(async () => ({ ok: true }))
-    const journal = {
-      load: vi.fn(async () => {}),
-      get: vi.fn(async () => null),
-      start: vi.fn(async () => {}),
-      complete: vi.fn(async () => {}),
-    } as unknown as SessionCommandJournalStore
     const statusChanged = vi.fn()
     const handlers = createRunnerControlHandlers({
       workspaceGit: {
@@ -20,7 +13,7 @@ describe('createRunnerControlHandlers', () => {
       workspaceRemoval: { runnerRoot: '/runner' },
       followup: {},
       cancel: {},
-      sessionCommand: { handler: command, journal },
+      sessionCommand: { handler: command },
       onWorkflowStatusChanged: statusChanged,
     })
     const query = {}
@@ -57,6 +50,7 @@ describe('createRunnerControlHandlers', () => {
         workDir: '/work',
         command: 'compact',
         operationId: 'command',
+        processGeneration: 'generation',
       }),
     ).resolves.toEqual({ ok: true })
     await handlers.workflowStatusChanged({ workflowRunId: 'run', status: 'Completed' })

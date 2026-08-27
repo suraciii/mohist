@@ -326,48 +326,43 @@ describe('follow-up attachment delivery', () => {
     expect(enqueue).not.toHaveBeenCalled()
   })
 
-  it('revokes a fresh Manager grant when a submitted follow-up is redelivered after terminal completion', async () => {
-    const boundary = {
-      hasExpired: () => false,
-      mask: (value: string) => value,
-      redact: (value: unknown) => value,
-      dispose: vi.fn(async () => undefined),
-    }
+  it('does not retain follow-up admission when the handler is recreated', async () => {
     const runtime = {
       ready: () => true,
-      followup: vi.fn(),
+      followup: vi.fn(async () => ({
+        ok: true as const,
+        value: { facts: {} },
+        diagnostics: [],
+      })),
     }
     const outbox = {
       ready: () => true,
       awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
-      enqueueBeforeExecution: vi.fn(),
-      enqueueProducedFact: vi.fn(),
+      enqueueBeforeExecution: vi.fn(async () => undefined),
+      enqueueProducedFact: vi.fn(async () => undefined),
     }
-    const journal = {
-      claim: vi.fn(async () => 'submitted' as const),
-      load: vi.fn(),
-      markSubmitted: vi.fn(),
-      release: vi.fn(),
-    }
-    const revoke = vi.fn(async () => undefined)
-    const receive = createFollowupHandler({
-      followupTargetResolver: () => ({
-        runtimeSessionId: 'runtime-1',
-        workDir: '/work',
-        projectId: '__mohist_slack_manager__',
-      }),
-      agentSessionRuntimeEventQueue: outbox as never,
-      piRuntime: runtime as never,
-      runnerRoot: '/tmp/runner',
-      createManagerExecutionBoundary: vi.fn(async () => boundary as never) as never,
-      followupOperationJournal: journal,
-      onManagerExecutionFinished: revoke,
-    })
+    const receive = (handler: ReturnType<typeof createFollowupHandler>) => handler(managerFollowupPayload())
+    const create = () =>
+      createFollowupHandler({
+        followupTargetResolver: () => ({
+          runtimeSessionId: 'runtime-1',
+          workDir: '/work',
+          projectId: '__mohist_slack_manager__',
+        }),
+        agentSessionRuntimeEventQueue: outbox as never,
+        piRuntime: runtime as never,
+        runnerRoot: '/tmp/runner',
+        createManagerExecutionBoundary: vi.fn(async () => ({
+          hasExpired: () => false,
+          mask: (value: string) => value,
+          redact: (value: unknown) => value,
+          dispose: vi.fn(async () => undefined),
+        })) as never,
+      })
 
-    expect(await receive(managerFollowupPayload())).toEqual({ accepted: true })
-    expect(boundary.dispose).toHaveBeenCalledOnce()
-    expect(revoke).toHaveBeenCalledWith('manager:session-1:operation-1')
-    expect(runtime.followup).not.toHaveBeenCalled()
+    await expect(receive(create())).resolves.toEqual({ accepted: true })
+    await expect(receive(create())).resolves.toEqual({ accepted: true })
+    expect(runtime.followup).toHaveBeenCalledTimes(2)
   })
 
   it('marks a successful Manager result as expiry recovery when the grant expired during execution', async () => {

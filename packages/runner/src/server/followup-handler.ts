@@ -44,7 +44,6 @@ import {
 } from './command-runtime.js'
 import type { PiRuntimeEvent, PiTurnObserver } from '../runtime/pi/index.js'
 import type { RuntimeTurnEvent, RuntimeTurnObserver } from '../runtime/opencode/index.js'
-import type { FollowupOperationJournalStore } from '../runtime/followup-operation-journal.js'
 import type { ServerConnection } from './connection.js'
 import { SkillResolver } from '../runtime/skill-resolver.js'
 import { ManagerExecutionBoundary } from '../runtime/manager-execution-boundary.js'
@@ -78,7 +77,6 @@ export interface FollowupHandlerDeps {
   managerExecutionRegistry?: ManagerExecutionRegistry | null
   onManagerExecutionFinished?: (executionId: string) => Promise<void> | void
   createManagerExecutionBoundary?: typeof ManagerExecutionBoundary.create
-  followupOperationJournal?: FollowupOperationJournalStore | null
   randomId?: () => string
   skillResolver?: SkillResolver
   strictExecutionSourceValidation?: boolean
@@ -141,7 +139,6 @@ async function handleFollowup(
   if (managerContext !== Boolean(payload.managerExecutionGrant)) return unavailable()
 
   const operationId = payload.operationId
-  const operationKey = operationId ? sessionTargetKey(sessionTarget) : null
 
   let target: FollowupTargetResolution
   try {
@@ -212,28 +209,6 @@ async function handleFollowup(
     ? [...resolvedSkills.skills, inlineSlackCollaborationSkill(slackContext)]
     : resolvedSkills.skills
 
-  if (operationId && operationKey && deps.followupOperationJournal) {
-    try {
-      const claim = await deps.followupOperationJournal.claim(operationKey, operationId)
-      if (claim === 'submitted') {
-        await managerExecution?.dispose().catch(() => undefined)
-        await revokeFinishedManagerExecution(payload.managerExecutionGrant?.executionId, deps)
-        return { accepted: true }
-      }
-      if (claim === 'claimed') {
-        await managerExecution?.dispose().catch(() => undefined)
-        return unavailable()
-      }
-    } catch (error) {
-      log.error('followup operation journal claim failed', {
-        exception: error,
-        session: sessionTarget.kind,
-      })
-      await managerExecution?.dispose().catch(() => undefined)
-      return unavailable()
-    }
-  }
-
   const attachmentDelivery = await deliverAcceptedAttachments(
     {
       projectId: sessionTarget.projectId,
@@ -264,9 +239,6 @@ async function handleFollowup(
       deps.randomId ?? defaultFollowupRecordId,
     )
   } catch (error) {
-    if (operationId && operationKey && deps.followupOperationJournal) {
-      await deps.followupOperationJournal.release(operationKey, operationId).catch(() => undefined)
-    }
     log.error('followup input admission failed', {
       exception: error,
       session: sessionTarget.kind,
@@ -405,17 +377,6 @@ async function handleFollowup(
         )
       },
     )
-    if (operationId && operationKey && deps.followupOperationJournal) {
-      try {
-        await deps.followupOperationJournal.markSubmitted(operationKey, operationId)
-      } catch (error) {
-        log.error('followup operation journal submission mark failed', {
-          exception: error,
-          session: sessionTarget.kind,
-        })
-        return unavailable()
-      }
-    }
     void completion.finally(async () => {
       if (managerExecution) {
         if (deps.managerExecutionRegistry) await deps.managerExecutionRegistry.dispose(managerExecution)

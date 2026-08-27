@@ -1,44 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { SessionCommandJournalEntry, SessionCommandJournalStore } from '../src/runtime/session-command-journal.js'
 import {
   createSessionCommandHandler,
   type SessionCommandError,
   type SessionCommandHandler,
-  type SessionCommandReconciler,
   type SessionCommandRequest,
   type SessionCommandResult,
 } from '../src/server/session-command-handler.js'
 
-class MemoryJournal implements SessionCommandJournalStore {
-  private readonly entries = new Map<string, SessionCommandJournalEntry>()
-
-  async load(): Promise<void> {}
-
-  async get(sessionId: string, operationId: string): Promise<SessionCommandJournalEntry | null> {
-    return this.entries.get(`${sessionId}:${operationId}`) ?? null
-  }
-
-  async start(request: SessionCommandRequest): Promise<SessionCommandJournalEntry> {
-    const key = `${request.sessionId}:${request.operationId}`
-    const existing = this.entries.get(key)
-    if (existing) return existing
-    const entry: SessionCommandJournalEntry = { request: { ...request }, state: 'started' }
-    this.entries.set(key, entry)
-    return entry
-  }
-
-  async complete(request: SessionCommandRequest, result: SessionCommandResult): Promise<void> {
-    const key = `${request.sessionId}:${request.operationId}`
-    this.entries.set(key, { request: { ...request }, state: 'completed', result: { ...result } })
-  }
-}
-
-function register(
-  handler: SessionCommandHandler | null,
-  journal = new MemoryJournal(),
-  reconcileStarted?: SessionCommandReconciler,
-) {
-  return createSessionCommandHandler({ handler, journal, reconcileStarted })
+function register(handler: SessionCommandHandler | null) {
+  return createSessionCommandHandler({ handler })
 }
 
 function request(command: 'compact' | 'reset', operationId = `${command}-1`): SessionCommandRequest {
@@ -50,48 +20,38 @@ function request(command: 'compact' | 'reset', operationId = `${command}-1`): Se
     workDir: '/work/project',
     command,
     operationId,
+    processGeneration: 'generation-1',
     ...(command === 'reset' ? { expectedRuntimeSessionId: 'runtime-1' } : {}),
   }
 }
 
 describe('SessionCommand contract', () => {
-  it('compact accepts the durable reservation and returns no new runtime id', async () => {
-    const fakeHandler = vi.fn(async (received: SessionCommandRequest): Promise<SessionCommandResult> => {
-      expect(Object.keys(received).sort()).toEqual([
-        'command',
-        'operationId',
-        'runnerId',
-        'runtime',
-        'runtimeSessionId',
-        'sessionId',
-        'workDir',
-      ])
-      return { ok: true }
-    })
-    const compact = request('compact')
+  it('compact returns no new runtime id', async () => {
+    const handler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: true }))
 
-    const result = await register(fakeHandler)(compact)
-
-    expect(fakeHandler).toHaveBeenCalledWith(compact)
-    expect(result).toEqual({ ok: true })
+    await expect(register(handler)(request('compact'))).resolves.toEqual({ ok: true })
+    expect(handler).toHaveBeenCalledOnce()
   })
 
   it('reset returns the replacement runtime session id', async () => {
-    const result = await register(async () => ({ ok: true, runtimeSessionId: 'runtime-2' }))(request('reset'))
-
-    expect(result).toEqual({ ok: true, runtimeSessionId: 'runtime-2' })
+    await expect(
+      register(async () => ({ ok: true, runtimeSessionId: 'runtime-2' }))(request('reset')),
+    ).resolves.toEqual({
+      ok: true,
+      runtimeSessionId: 'runtime-2',
+    })
   })
 
-  it.each(['compact', 'reset'] as const)('deduplicates concurrent %s delivery', async (command) => {
+  it.each(['compact', 'reset'] as const)('deduplicates concurrent %s delivery in one process', async (command) => {
     let release!: () => void
     const deferred = new Promise<void>((resolve) => {
       release = resolve
     })
-    const fakeHandler = vi.fn(async (): Promise<SessionCommandResult> => {
+    const handler = vi.fn(async (): Promise<SessionCommandResult> => {
       await deferred
       return command === 'compact' ? { ok: true } : { ok: true, runtimeSessionId: 'runtime-2' }
     })
-    const invoke = register(fakeHandler)
+    const invoke = register(handler)
     const commandRequest = request(command)
 
     const first = invoke(commandRequest)
@@ -106,7 +66,19 @@ describe('SessionCommand contract', () => {
             { ok: true, runtimeSessionId: 'runtime-2' },
           ],
     )
-    expect(fakeHandler).toHaveBeenCalledTimes(1)
+    expect(handler).toHaveBeenCalledOnce()
+  })
+
+  it('does not retain operation admission when the handler is recreated', async () => {
+    const firstHandler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: true }))
+    const recreatedHandler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: true }))
+    const commandRequest = request('compact', 'same-id-after-restart')
+
+    await expect(register(firstHandler)(commandRequest)).resolves.toEqual({ ok: true })
+    await expect(register(recreatedHandler)(commandRequest)).resolves.toEqual({ ok: true })
+
+    expect(firstHandler).toHaveBeenCalledOnce()
+    expect(recreatedHandler).toHaveBeenCalledOnce()
   })
 
   it('rejects a mismatched command that reuses an in-flight operation id', async () => {
@@ -131,68 +103,24 @@ describe('SessionCommand contract', () => {
     release()
 
     await expect(inFlightCompact).resolves.toEqual({ ok: true })
-    expect(handler).toHaveBeenCalledTimes(1)
-    expect(handler).toHaveBeenCalledWith(compact)
+    expect(handler).toHaveBeenCalledOnce()
   })
 
-  it.each(['compact', 'reset'] as const)('replays a completed %s after handler restart', async (command) => {
-    const journal = new MemoryJournal()
-    const commandRequest = request(command)
-    const firstHandler = vi.fn(
-      async (): Promise<SessionCommandResult> =>
-        command === 'compact' ? { ok: true } : { ok: true, runtimeSessionId: 'runtime-2' },
-    )
-    await register(firstHandler, journal)(commandRequest)
-
-    const restartedHandler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: false, error: 'unavailable' }))
-    const replay = await register(restartedHandler, journal)(commandRequest)
-
-    expect(replay).toEqual(command === 'compact' ? { ok: true } : { ok: true, runtimeSessionId: 'runtime-2' })
-    expect(restartedHandler).not.toHaveBeenCalled()
-  })
-
-  it('fails closed instead of replaying an invalid completed result', async () => {
-    const journal = new MemoryJournal()
-    const commandRequest = request('compact')
-    await journal.complete(commandRequest, { ok: true, error: 'missing' } as SessionCommandResult)
+  it('rejects a reset without the expected binding', async () => {
     const handler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: true }))
-
-    await expect(register(handler, journal)(commandRequest)).resolves.toEqual({ ok: false, error: 'unavailable' })
-    expect(handler).not.toHaveBeenCalled()
-  })
-
-  it('reconciles a started operation without blind execution', async () => {
-    const journal = new MemoryJournal()
-    const commandRequest = request('reset')
-    await journal.start(commandRequest)
-    const handler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: true, runtimeSessionId: 'runtime-2' }))
-
-    const unavailable = await register(handler, journal)(commandRequest)
-    expect(unavailable).toEqual({ ok: false, error: 'unavailable' })
-    expect(handler).not.toHaveBeenCalled()
-
-    const reconciled = await register(handler, journal, async () => ({
-      state: 'completed',
-      result: { ok: true, runtimeSessionId: 'runtime-2' },
-    }))(commandRequest)
-    expect(reconciled).toEqual({ ok: true, runtimeSessionId: 'runtime-2' })
-    expect(handler).not.toHaveBeenCalled()
-  })
-
-  it('rejects a reset without the reserved expected binding', async () => {
-    const fakeHandler = vi.fn(async (): Promise<SessionCommandResult> => ({ ok: true }))
     const invalid = { ...request('reset'), expectedRuntimeSessionId: 'runtime-stale' }
 
-    await expect(register(fakeHandler)(invalid)).resolves.toEqual({ ok: false, error: 'unavailable' })
-    expect(fakeHandler).not.toHaveBeenCalled()
+    await expect(register(handler)(invalid)).resolves.toEqual({ ok: false, error: 'unavailable' })
+    expect(handler).not.toHaveBeenCalled()
   })
 
-  it.each<SessionCommandError>(['conflict', 'missing', 'notStarted'])(
-    'persists the %s error vocabulary',
+  it.each<SessionCommandError>(['conflict', 'missing', 'notStarted', 'unavailable'])(
+    'preserves the %s error vocabulary',
     async (error) => {
-      const invoke = register(async () => ({ ok: false, error }))
-
-      await expect(invoke(request('compact'))).resolves.toEqual({ ok: false, error })
+      await expect(register(async () => ({ ok: false, error }))(request('compact'))).resolves.toEqual({
+        ok: false,
+        error,
+      })
     },
   )
 

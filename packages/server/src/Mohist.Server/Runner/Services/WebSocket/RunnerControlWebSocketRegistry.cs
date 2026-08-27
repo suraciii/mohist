@@ -14,7 +14,7 @@ using Mohist.Server.Infrastructure.Workspace;
 
 namespace Mohist.Server.Runner.Services.WebSocket;
 
-public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerControlTransport
+public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerControlTransport, IRunnerSessionCommandTransport
 {
     private static readonly IReadOnlyDictionary<string, (Type Params, Type Result, bool AllowsNull)> RequestMethods =
         new Dictionary<string, (Type, Type, bool)>(StringComparer.Ordinal)
@@ -53,6 +53,7 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
 
     internal Action<string, Guid>? InstallationWaiting { get; set; }
     internal Func<string, Guid, CancellationToken, Task>? InstallationAcquiredAsync { get; set; }
+    internal Func<string, string, CancellationToken, Task>? SessionCommandGenerationValidatedAsync { get; set; }
 
     internal bool TryReserve(Guid connectionId, out RunnerControlConnectionReservation reservation)
     {
@@ -91,9 +92,16 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
         RunnerControlHandshake handshake,
         CancellationToken ct)
     {
+        if (string.IsNullOrEmpty(handshake.ProcessGeneration))
+            throw new RunnerControlUnavailableException("Runner control processGeneration is required");
+        if (!await _grains.GetGrain<IRunnerGrain>(runnerId)
+                .IsCurrentProcessGenerationAsync(handshake.ProcessGeneration))
+            throw new RunnerControlUnavailableException("Runner control processGeneration is not current");
+
         var connection = new RunnerControlWebSocketConnection(
             runnerId,
             connectionId,
+            handshake.ProcessGeneration,
             socket,
             _timeProvider,
             _logs.CreateLogger<RunnerControlWebSocketConnection>());
@@ -111,6 +119,10 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
                     await InstallationAcquiredAsync(runnerId, connectionId, ct);
                 try
                 {
+                    if (!await _grains.GetGrain<IRunnerGrain>(runnerId)
+                            .IsCurrentProcessGenerationAsync(handshake.ProcessGeneration))
+                        throw new RunnerControlUnavailableException("Runner control processGeneration is not current");
+
                     Task? replacedFence = null;
                     if (_connections.TryGetValue(runnerId, out var replaced))
                         replacedFence = replaced.FenceAsync(WebSocketCloseStatus.NormalClosure, "Replaced");
@@ -197,6 +209,67 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
 
     public bool IsConnected(string runnerId) => HasReadyConnection(runnerId);
 
+    public async Task<bool> IsCurrentProcessGenerationAsync(
+        string runnerId,
+        string processGeneration,
+        CancellationToken ct = default)
+    {
+        if (!_connections.TryGetValue(runnerId, out var connection)
+            || !connection.IsAvailable
+            || !string.Equals(connection.ProcessGeneration, processGeneration, StringComparison.Ordinal))
+            return false;
+        return await _grains.GetGrain<IRunnerGrain>(runnerId)
+            .IsCurrentProcessGenerationAsync(processGeneration);
+    }
+
+    public async Task<string> GetCurrentProcessGenerationAsync(
+        string runnerId,
+        CancellationToken ct = default)
+    {
+        var generation = GetConnection(runnerId).ProcessGeneration;
+        return await IsCurrentProcessGenerationAsync(runnerId, generation, ct)
+            ? generation
+            : throw new RunnerControlUnavailableException("Runner control processGeneration is not current");
+    }
+
+    public async Task<TResult> SendRequestAsync<TParams, TResult>(
+        string runnerId,
+        string processGeneration,
+        string method,
+        TParams parameters,
+        CancellationToken ct = default)
+    {
+        var connection = GetConnection(runnerId, processGeneration);
+        if (!await _grains.GetGrain<IRunnerGrain>(runnerId)
+                .IsCurrentProcessGenerationAsync(processGeneration))
+            throw new RunnerControlUnavailableException("Runner control processGeneration is not current");
+        if (SessionCommandGenerationValidatedAsync is not null)
+            await SessionCommandGenerationValidatedAsync(runnerId, processGeneration, ct);
+        if (!_connections.TryGetValue(runnerId, out var current)
+            || !ReferenceEquals(current, connection)
+            || !connection.IsAvailable)
+            throw new RunnerControlUnavailableException(
+                $"Runner '{runnerId}' has no control connection for the supplied process generation");
+
+        var result = await connection.SendRequestAsync<TParams, TResult>(method, parameters, ct);
+        if (!_connections.TryGetValue(runnerId, out current)
+            || !ReferenceEquals(current, connection)
+            || !connection.IsAvailable
+            || !await _grains.GetGrain<IRunnerGrain>(runnerId)
+                .IsCurrentProcessGenerationAsync(processGeneration))
+            throw new RunnerControlUnavailableException("Runner control request result belongs to a stale process generation");
+        return result;
+    }
+
+    internal RunnerControlWebSocketConnection GetConnection(string runnerId, string processGeneration)
+    {
+        var connection = GetConnection(runnerId);
+        return string.Equals(connection.ProcessGeneration, processGeneration, StringComparison.Ordinal)
+            ? connection
+            : throw new RunnerControlUnavailableException(
+                $"Runner '{runnerId}' has no control connection for the supplied process generation");
+    }
+
     public Task<TResult> SendRequestAsync<TParams, TResult>(
         string runnerId,
         string method,
@@ -241,7 +314,7 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
     private bool HasReadyConnection(string runnerId) =>
         _connections.TryGetValue(runnerId, out var connection) && connection.IsAvailable;
 
-    private RunnerControlWebSocketConnection GetConnection(string runnerId) =>
+    internal RunnerControlWebSocketConnection GetConnection(string runnerId) =>
         _connections.TryGetValue(runnerId, out var connection)
             ? connection
             : throw new RunnerControlUnavailableException($"Runner '{runnerId}' has no control connection");
@@ -333,7 +406,8 @@ public sealed record RunnerControlHandshake(
     string? TreeHash,
     string? ArtifactDigest,
     string? ReleaseId,
-    long? Generation)
+    long? Generation,
+    string? ProcessGeneration)
 {
     public static RunnerControlHandshake FromQuery(IQueryCollection query) => new(
         Normalize(query["buildGitHash"]),
@@ -343,10 +417,13 @@ public sealed record RunnerControlHandshake(
         Normalize(query["treeHash"]),
         Normalize(query["artifactDigest"]),
         Normalize(query["releaseId"]),
-        long.TryParse(query["generation"], out var generation) && generation > 0 ? generation : null);
+        long.TryParse(query["generation"], out var generation) && generation > 0 ? generation : null,
+        Exact(query["processGeneration"]));
 
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string? Exact(string? value) => string.IsNullOrEmpty(value) ? null : value;
 }
 
 public sealed class RunnerControlUnavailableException(string message, Exception? inner = null)
@@ -374,6 +451,8 @@ internal sealed class RunnerControlWebSocketConnection
     private readonly string _runnerId;
     private readonly Guid _connectionId;
     private readonly System.Net.WebSockets.WebSocket _socket;
+
+    public string ProcessGeneration { get; }
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _log;
     private readonly Channel<byte[]> _outgoing = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(QueueCapacity)
@@ -398,12 +477,14 @@ internal sealed class RunnerControlWebSocketConnection
     public RunnerControlWebSocketConnection(
         string runnerId,
         Guid connectionId,
+        string processGeneration,
         System.Net.WebSockets.WebSocket socket,
         TimeProvider timeProvider,
         ILogger log)
     {
         _runnerId = runnerId;
         _connectionId = connectionId;
+        ProcessGeneration = processGeneration;
         _socket = socket;
         _timeProvider = timeProvider;
         _log = log;

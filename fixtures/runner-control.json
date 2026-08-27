@@ -363,7 +363,8 @@
           "command": "reset",
           "expectedRuntimeSessionId": "runtime_session_1",
           "operationId": "operation_command_1",
-          "projectId": "project_1"
+          "projectId": "project_1",
+          "processGeneration": "process-generation-1"
         }
       },
       "success": {

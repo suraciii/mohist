@@ -326,7 +326,8 @@ Rejected alternatives that may return:
   ([`conventions.md`](conventions.md#facts-claims-and-settlement)).
 - A durable report journal on the Runner: preserves completed results across a
   crash, but turns the Runner into a second durable authority; every crash
-  path becomes a consistency problem between two authorities.
+  path becomes a consistency problem between two authorities. The current
+  implementation has no such journal.
 - Waiting for predecessor delivery before admitting a follow-up turn: the
   Server must decide admission from recorded state alone; it must not wait
   for facts held only by the Runner.
@@ -387,10 +388,11 @@ Server refusal also drops the refused evidence. These gaps are accepted because
 evidence delivery never gates admission or work-result reporting, so the Server
 continues state arbitration from the facts it did receive.
 
-Gap: result preservation, operation idempotency journals, recovery receipts,
-and non-rebuildable workspace registries remain durable Runner state. Their
-removal is tracked separately; the runtime-event outbox, terminal task-log
-delivery store, and cleanup predecessor delivery waits have been removed.
+The Runner does not persist operation journals, recovery receipts, or
+terminal task-log delivery stores. Runtime events and task-log batches are
+bounded volatile queues: a live process retries them, but a process restart may
+lose undelivered evidence. Rebuildable workspace indexes may remain on disk and
+are never authoritative.
 
 ### Stop Operations Stay Available and Settle by Identity
 
@@ -416,16 +418,19 @@ the target Turn. A stop verdict records only what that witness confirms:
   the claim outstanding and is never recorded as a verdict. Once a verdict
   is recorded, every later redelivery returns it unchanged.
 
-Session commands such as Compact and Reset must be idempotent under their
-`operationId`: after a Runner restart the Runtime cannot answer whether the
-effect occurred, so the Server retries the unsettled operation under the same
-identity. Stop differs because its intent is checkable — whether the target
+Session commands such as Compact and Reset are idempotent under the Server's
+canonical operation identity. The Server records effect admission before
+Runner dispatch and retains a tombstone across restart. A completed identity
+replays its terminal outcome; an admitted identity without an outcome fails
+closed and is never dispatched again under that identity. A replacement
+Runner process may retry only with a new identity after process-generation
+validation. Stop differs because its intent is checkable — whether the target
 Turn still exists — while a Compact or Reset effect is not.
 
-Gap: the current handler accepts one runtime's abort acknowledgment as a
-confirmed stop, maps target-resolution failures and absent live targets to
-not-cancellable, returns redelivery verdicts without recording them, and
-leaves a corrupt journal permanently unavailable. Under the certainty
-vocabulary these are fabricate and estimate defects
+Stop remains settled by identity and Runtime witness. Unconfirmed delivery
+stays unavailable or stop-requested rather than being converted to idle; a
+provably absent target settles ended. Evidence delivery never gates cleanup or
+operation admission. Under the certainty vocabulary, fabricating a stop or
+estimating an operation outcome is a defect
 ([`conventions.md`](conventions.md#facts-claims-and-settlement)).
 

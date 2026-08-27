@@ -64,7 +64,6 @@ export class WorkExecutor {
     private piRuntime: PiRuntime | null = null,
     private readonly skillResolver: SkillResolver = new SkillResolver(),
     private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
-    private readonly workflowSessionSettleBudgetMs?: number,
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
@@ -314,7 +313,6 @@ export class WorkExecutor {
       openCodeRuntime: this.openCodeRuntime,
       agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
       runtimeEventRecordId: this.runtimeEventRecordId,
-      workflowSessionSettleBudgetMs: this.workflowSessionSettleBudgetMs,
     }
   }
 
