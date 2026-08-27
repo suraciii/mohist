@@ -27,12 +27,14 @@ changing a document in `design/`.
 - [agent-execution.md](agent-execution.md) — Mohist Agent, AgentJob, Action, SessionInput, AgentTurn, AgentSession, Runtime Session: unified execution ownership, activity and transcript DSL.
 - [agent-api.md](agent-api.md) - Versioned direct API for PAT-authenticated external callers: public state, retry identity, event resume, and disclosure boundaries.
 - [subagents.md](subagents.md) — Subagents and session trees: child launch under flat Agent, capability snapshot, parent-child link, terminal callback, cascade stop, and detach.
-- [scheduled-input.md](scheduled-input.md) — Scheduled input: durable intent, recovery wake-ups, and ordinary follow-up delivery are implemented; due delivery still waits for another path to restore a definitely missing Runtime binding instead of initiating confirmed-missing recovery.
+- [scheduled-input.md](scheduled-input.md) — Scheduled input: durable intent, wake-up and recovery, and ordinary follow-up delivery.
 - [slack.md](slack.md) — Slack integration component boundary: why the adapter is standalone and stateless, Session boundary trade-offs, reliability contract, implementation order; product behavior in `docs/slack.md`.
 - [event-routing.md](event-routing.md) — Agent event routing: project-scoped ordered routing table, expression matching + first-match/continue agent launch, replacing subscription priority arbitration.
 - [agent-supervision.md](agent-supervision.md) — Agent supervision presets: one command installs a supervisor agent and approval/failure routing rules; escalation via all-notifications-on + `[supervisor]` comment discipline, no escalate command or system-level rate limiting.
 - [agent-mentions.md](agent-mentions.md) — Comment mentions: `@` an agent name in an issue comment to launch it; third trigger path, zero config, mention is the routing decision.
 - [event-response.md](event-response.md) — Agent event response: response contract (at most once, current-state based, no serialization, visible failure, no self-response) and attribution (comment author, approval decidedBy).
+- [agent-subscriptions.md](agent-subscriptions.md) — Agent subscription contract: boundary, read states, writes and lifecycle for Agent event subscriptions.
+- [agent-runtime-reasoning-capability.md](agent-runtime-reasoning-capability.md) — Generic Agent reasoning capability: canonical execution tuple, versioned runtime catalog, one resolver with two adapters.
 - [issue-watch.md](issue-watch.md) — Issue watch: issue-level autopilot switch; watching/muted declarations, fixed event set, division of labor with the routing table.
 
 ## Runtime integration
@@ -49,17 +51,18 @@ changing a document in `design/`.
 - [workflow/variables.md](workflow/variables.md) — Workflow Variables: Project / Issue / Run resources, merging, live effect, `setVars` semantics.
 - [workflow/task-dispatch.md](workflow/task-dispatch.md) — Single authority for `with` / `expect` template evaluation timing: Server dispatch carries the original declaration and an immutable attempt snapshot; Runner renders once at the execution entry before calling the Action.
 - [workflow/recovery.md](workflow/recovery.md) — Failure recovery: recovery declarations, when matching, runner-built recovery tasks.
+- [workflow/plan-artifacts.md](workflow/plan-artifacts.md) — Plan artifacts: the task list, named artifacts, persistence and recovery, review as approval, prompt realignment, Web evidence surface.
 - [workflow/issue-coordination.md](workflow/issue-coordination.md) — Cross-aggregate interaction of Issue, WorkflowRun, Runner, Session.
 
 ## Supporting topics
 
 - [auth.md](auth.md) — Auth and identity: single admin plus service/agent principals, file and signed credentials, device authorization login, Runner machine credentials, Scope enforcement, and attribution.
 - [repositories.md](repositories.md) — Repository execution: Project resource authority, Issue binding, live dispatch resolution.
-- [workspace.md](workspaces.md) — Workspace: first-class persistent execution environment under a Project, with Origin resolution, named Runner materialization, binding affinity, archival, and reclamation; Workflow cross-Runner rematerialization and Slack channel-archive propagation remain gaps.
+- [workspaces.md](workspaces.md) — Workspace: first-class persistent execution environment under a Project, with Origin resolution, named Runner materialization, binding affinity, archival, and reclamation.
 - [hermes-webhook.md](hermes-webhook.md) — Hermes notification gateway: event types, payload, signature, delivery reliability.
-- [outbound-webhook.md](outbound-webhook.md) — Outbound webhook: implemented v1 general HTTP delivery with CloudEvents, event selection, configurable authentication, 2xx success, and failure inspection; retries, redelivery, attempt history, and Web management remain later capabilities.
-- [github-integration.md](github-integration.md) — GitHub integration: signed ingress, feed/close translation, and write-back are implemented; PR branch correlation, App identity, and failure inspection remain gaps; product behavior in [`docs/github.md`](../docs/github.md).
-- [issue-breakdown.md](issue-breakdown.md) — Composite Issue / sub-issue design: implemented parent-child model, status aggregation, composite advancement, and isolation constraints from Epic; multi-repo resources in `docs/repositories.md`.
+- [outbound-webhook.md](outbound-webhook.md) — Outbound webhook: Project-scoped HTTP delivery with CloudEvents, event selection, and configurable authentication.
+- [github-integration.md](github-integration.md) — GitHub integration: signed ingress, intake and close translation, and write-back; product behavior in [`docs/github.md`](../docs/github.md).
+- [composite-issues.md](composite-issues.md) — Composite Issue design: parent-child model, status aggregation, composite advancement, and isolation constraints from Epic; multi-repo resources in `docs/repositories.md`.
 - [issue-templates.md](issue-templates.md) — Body structure and design rationale of the three issue templates (Feature / Bug / Refactor).
 - [prompt-management.md](prompt-management.md) — Project-scoped Prompt, builtin fallback, Workflow key reference.
 - [runner.md](runner.md) — Runner and scheduling: each owner is its own dispatch ledger (no second copy, no reconcile), pull-only claim / poll / report, report verdicts, restart as ordinary failure with generation closeout, stop settles by identity.
@@ -74,7 +77,9 @@ changing a document in `design/`.
 
 - [decisions/issue-owns-epic-membership.md](decisions/issue-owns-epic-membership.md) — Issue holds the current Epic membership; Project-scoped number identity and cross-aggregate recovery flow.
 - [decisions/epic-status-revival.md](decisions/epic-status-revival.md) — Epic `done` auto-revival and `closed` link rejection.
-- [decisions/mobile-pwa.md](decisions/mobile-pwa.md) — Mobile Web UI as an installable PWA: decision record for a proposal that is not implemented.
+- [decisions/composite-issues.md](decisions/composite-issues.md) — Composite Issues: explicit owner-chosen decomposition, independent of the Epic axis.
+- [decisions/slack-adapter-go.md](decisions/slack-adapter-go.md) — The Slack adapter is a static Go binary; the accepted deltas from the Node implementation.
 - [decisions/one-ledger-no-reconciliation.md](decisions/one-ledger-no-reconciliation.md) — Why AgentJob dispatch has no staged copy or reconciliation loop.
 - [decisions/squashed-baseline.md](decisions/squashed-baseline.md) — Point-in-time record of the accepted schema deltas at the current migration squash baseline.
 - [decisions/workflow-run-profile-naming.md](decisions/workflow-run-profile-naming.md) — Why Run Variables retain the historical WorkflowRunProfile persistence name.
+- [decisions/workflow-agent-binding.md](decisions/workflow-agent-binding.md) — Workflow tasks bind Agents through the ordinary `mohist/agent` Action.

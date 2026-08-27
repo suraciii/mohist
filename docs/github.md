@@ -191,17 +191,18 @@ Issue's lineage, so subscribing to every event under Issue #42 includes it.
 See [`design/github-integration.md`](../design/github-integration.md) for design
 boundaries and protocol details.
 
-## Status
+## Implementation Gaps
 
 The target model above replaces the earlier one-way intake design. Implemented
 today: repository connection with signed ingress, the pre-command
-feed-by-label intake path, close withdrawal, Pull Request review Approval,
+label-based intake path, close withdrawal, Pull Request review Approval,
 best-effort progress write-back, Issues that explicitly run without a Workflow
 across Server, CLI, and Web, first-class mirror link visibility in CLI and Web,
 automatic ready-only mirroring with durable Pending intent and marker
 reconciliation, and two-way title and body sync with echo suppression. New
-feed-created issues no longer emit the `github-issue` origin label; historical
-feed-created links may retain that label as data. The link currently exposes a
+issues created through that intake path no longer emit the `github-issue`
+origin label; historical links created through it may retain that label as
+data. The link currently exposes a
 deliberately provisional `healthy` sync state and does not report write-back
 failures; real sync health belongs to the later recovery slice. Not yet
 implemented: GitHub-driven lifecycle for no-Workflow Issues, the `/mohist`

@@ -75,7 +75,7 @@ happy path; no artifact round-trip exists anywhere.
 
 Artifact upload serves exactly one purpose: evidence and audit. It is not an
 execution channel. A lost Workspace directory is an accepted loss (see
-[`../workspace.md`](../workspaces.md)): unpushed Repository work and
+[`../workspaces.md`](../workspaces.md)): unpushed Repository work and
 Workspace-local plan material are both gone, and the recovery is the existing
 `mo run rerun --from-stage plan`, which regenerates both. No artifact fetch
 or restore channel exists.

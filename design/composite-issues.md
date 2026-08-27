@@ -1,25 +1,9 @@
 # Composite Issues and Child Issues
 
-Product specs: [`docs/sub-issues.md`](../docs/sub-issues.md) and
+Product specs: [`docs/composite-issues.md`](../docs/composite-issues.md) and
 [`docs/repositories.md`](../docs/repositories.md). This document records the
-domain design, rationale, and constraints.
-
-## Decision History
-
-- An early proposal suggested automatic three-stage breakdown: Agent analysis,
-  an `issue-breakdown.json` artifact, Approval, and bulk child-Issue creation.
-  It was rejected, and automatic breakdown and bulk generation are Non-goals.
-  That decision remains: decomposition is always an explicit choice by the
-  owner or an External Agent acting for the owner.
-- The earlier conclusion that child Issues overlapped with Epic assumed one
-  Repository per Project. On 2026-07-15, multi-Repository resources introduced
-  a real need to execute one requirement across Repositories. The decomposition
-  axis, internal parts of one unit of work, is independent of the Epic axis,
-  product-goal organization and work supply.
-  - Epic members deliver independent value and are supplied serially to control
-    work in progress.
-  - Child Issues divide one unit of work. A partial result has no product value,
-    and startable children advance concurrently.
+domain design, rationale, and constraints. Decision rationale:
+[`decisions/composite-issues.md`](decisions/composite-issues.md).
 
 ## Model
 

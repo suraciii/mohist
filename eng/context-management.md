@@ -157,19 +157,8 @@ These rules govern every specification document, in `docs/`, `design/`, and
 
 ## Verification
 
-`npm run docs:check` gates documentation mechanics: Latin-script prose, link
-targets, and diagram fences. It must also gate that every decision record
-carries a Status line and an `## Alternatives considered` section. Reviewers
-enforce the placement and durability rules in this document; no gate can judge
-them.
-
-## Status
-
-- The existing records in `design/decisions/` predate the authoring contract.
-  They do not carry Status lines and do not follow the section skeleton.
-- Many `design/` documents predate the no-history rule and carry
-  `## Decision History` sections. The history belongs to decision records.
-- `npm run docs:check` does not yet gate the Status line or the
-  `## Alternatives considered` section of decision records.
-- `npm run docs:check` covers `docs/` and `design/` only. It must extend to
-  `eng/`.
+`npm run docs:check` gates documentation mechanics across `docs/`, `design/`,
+and `eng/`: Latin-script prose, link targets, and diagram fences. It also gates
+that every decision record carries a Status line and an `## Alternatives
+considered` section. Reviewers enforce the placement and durability rules in
+this document; no gate can judge them.

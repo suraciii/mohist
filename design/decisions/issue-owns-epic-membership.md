@@ -1,6 +1,8 @@
 # Issue Owns Epic Membership
 
-## Background
+Status: accepted
+
+## Problem
 
 The old model kept both random IDs and Project-scoped numbers for Issue and
 Epic. It stored Epic membership in an Epic-side relation table. Event routing
@@ -69,6 +71,15 @@ This domain has one specific fact: the current Epic of an Issue. `EpicNumber?`
 expresses it completely. `OwnerRef { Type, Id }` would introduce unused
 multiple ownership, cascading deletion, controller arbitration, and generic
 protocol while hiding domain language.
+
+## Alternatives considered
+
+**Keep the Epic-side membership relation table.** Rejected: it gives one fact
+two write authorities and forces binding, revision, and compensation protocols
+to synchronize the copies.
+
+**Adopt a generic owner or controller model.** Rejected per Decision 5: it
+introduces unused generic machinery and hides the domain language.
 
 ## Failure Recovery
 

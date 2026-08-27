@@ -103,7 +103,7 @@ recovery. The versioned Stage graph remains shared and immutable.
 The Workflow Workspace has a fixed root layout: the Repository checkout lives
 under `REPOS/<repository-name>/` and is the only tree that enters Git; plan
 and review material lives under `PLANS/`. See
-[`workspace.md`](../workspaces.md) and [Workspace](../../docs/workspaces.md).
+[`workspaces.md`](../workspaces.md) and [Workspace](../../docs/workspaces.md).
 The remote Workflow branch is the recovery point for Repository work. The Pull
 Request is a review projection of that branch. Before passing output to another
 Stage, Approval, or Pull Request operation, every Repository-modifying Stage

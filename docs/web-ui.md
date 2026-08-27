@@ -339,9 +339,6 @@ Current mobile support:
 - Board columns through stage tabs.
 - Readable basic Issue details.
 
-See [Mobile PWA and Push Notifications](../design/decisions/mobile-pwa.md) for
-the open decision record on a complete mobile Workflow.
-
 ---
 
 Implementation source: `packages/web/`.

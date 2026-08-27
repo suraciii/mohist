@@ -71,10 +71,6 @@ User Project
 - A Mohist Agent conversation from any client belongs in Agent API + AgentSession, not in provider
   adapter local state.
 - Skill install belongs in the CLI, not in Server.
-- Product design belongs in `docs/`, not in `design/`.
-- The domain model belongs in code, not in `design/`.
-- Architecture rules belong in `design/architecture.md`.
-- Builtin workflow content belongs in `*.workflow.yaml`, not in `design/`.
 
 ## Facts and decisions
 

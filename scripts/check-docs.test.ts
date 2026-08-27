@@ -18,6 +18,7 @@ function fixture(): string {
   write(root, 'CONTRIBUTING.md', '# Contributing\n')
   write(root, 'docs/README.md', '# Product documentation\n')
   write(root, 'design/README.md', '# Design documentation\n')
+  write(root, 'eng/README.md', '# Engineering practices\n')
   return root
 }
 
@@ -354,5 +355,54 @@ test('requires a directory README when a directory link has a fragment', () => {
     write(root, 'docs/README.md', '# Product documentation\n\n[Empty](empty/#heading)\n')
 
     assert.ok(rules(root).includes('markdown-heading-fragment-exists'))
+  })
+})
+
+test('gates eng/ documents with the same prose rules', () => {
+  withFixture((root) => {
+    write(root, 'eng/note.md', '# Note\n\n非拉丁文字。\n')
+
+    assert.ok(rules(root).includes('latin-script-prose-only'))
+  })
+})
+
+test('requires decision records to carry a Status line and an Alternatives section', () => {
+  withFixture((root) => {
+    write(root, 'design/decisions/plain.md', '# Plain\n\nText.\n')
+    const missing = rules(root)
+    assert.ok(missing.includes('decision-record-status'))
+    assert.ok(missing.includes('decision-record-alternatives'))
+  })
+
+  withFixture((root) => {
+    write(
+      root,
+      'design/decisions/complete.md',
+      [
+        '# Complete',
+        '',
+        'Status: accepted',
+        '',
+        '## Problem',
+        '',
+        'P.',
+        '',
+        '## Decision',
+        '',
+        'D.',
+        '',
+        '## Alternatives considered',
+        '',
+        'A.',
+        '',
+        '## Consequences',
+        '',
+        'C.',
+        '',
+      ].join('\n'),
+    )
+    const complete = rules(root)
+    assert.ok(!complete.includes('decision-record-status'))
+    assert.ok(!complete.includes('decision-record-alternatives'))
   })
 })

@@ -49,6 +49,65 @@ Mohist and enters only through an explicit `/mohist` command.
 
 _Avoid_: feed, intake label, origin snapshot
 
+## Work Management
+
+**Project**:
+One real product's scope and execution boundary. A Project declares its
+Repositories, configuration, and defaults, and its data is fully isolated from
+every other Project. It is not the user's collaboration workspace.
+
+**Repository**:
+A named execution resource declared by a Project: a git URL and a base branch,
+with one default per Project. Each Issue binds one target Repository that its
+execution must not change after work starts.
+
+**Issue**:
+One unit of work that can enter the production line. Its identity is its
+Project-scoped number; it has no second internal ID.
+
+**Composite Issue, parent Issue, child Issue**:
+An Issue with an explicit `parent` reference is a child Issue, and the
+referenced parent is a composite Issue. The parent tracks the complete
+requirement while each child moves through its own Workflow. Decomposition is
+always an explicit owner choice, never automatic.
+
+_Avoid_: sub-issue; the DSL surface is `--parent`, and the relationship terms
+are parent and child
+
+**Epic**:
+A product goal that continuously supplies linked Issues to the production
+line, advancing one ready Issue at a time. Epic membership is recorded on the
+Issue, and Epic progress is a query over current Issue state, not a second
+membership store.
+
+**Workflow**:
+The production line that advances a ready Issue from Plan to Done. Draft and
+Backlog belong to the Issue lifecycle, outside the Workflow, so requirement
+readiness and execution state cannot be confused.
+
+**WorkflowRun**:
+One execution of a Workflow for one Issue. It owns orchestration state and
+references the AgentJobs it launches; it owns no execution lifecycle itself.
+
+**Workflow Profile**:
+A Project resource that defines the stages, tasks, checks, recovery, and
+approval points of a Workflow. An Issue inherits the Project default or
+selects another Profile from the same Project.
+
+**Workflow Definition**:
+The YAML body of a Workflow Profile that declares its stages, tasks, checks,
+recovery, and template expressions.
+
+**Runner**:
+The execution-plane process that registers with a Server, claims dispatched
+work, materializes Workspace directories, executes resolved Agent work, and
+reports facts. It never interprets facts or decides production-line state.
+
+**Skill**:
+A reusable description of an Agent capability. An External Agent installs
+Mohist-distributed Skills to operate Mohist; a Mohist Agent's Skills are part
+of its configuration, fixed when work starts.
+
 ## Agent Execution
 
 **Action**:
