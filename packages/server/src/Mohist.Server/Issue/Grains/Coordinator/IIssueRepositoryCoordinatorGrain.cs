@@ -66,6 +66,7 @@ public enum IssueRepositoryBindingResultCode
     RepositoryMissingOnReopen = 9,
     RepositoryInvalid = 10,
     WorkflowProfileNotFound = 11,
+    WorkflowProfileLocked = 12,
 }
 
 [GenerateSerializer]

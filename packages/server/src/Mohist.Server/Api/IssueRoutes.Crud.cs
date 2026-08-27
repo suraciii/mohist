@@ -345,6 +345,10 @@ public static partial class IssueRoutes
                         return ApiResults.Conflict(
                             coordinatorResult.Message ?? "WorkflowProfile was not found",
                             "workflow-profile-not-found");
+                    case IssueRepositoryBindingResultCode.WorkflowProfileLocked:
+                        return ApiResults.Conflict(
+                            coordinatorResult.Message ?? "Workflow selection is locked",
+                            "workflow_profile_locked");
                     default:
                         return ApiResults.Conflict(
                             coordinatorResult.Message ?? "Repository change rejected");
@@ -407,6 +411,10 @@ public static partial class IssueRoutes
                         return ApiResults.Conflict(
                             coordinatorResult.Message ?? "WorkflowProfile was not found",
                             "workflow-profile-not-found");
+                    case IssueRepositoryBindingResultCode.WorkflowProfileLocked:
+                        return ApiResults.Conflict(
+                            coordinatorResult.Message ?? "Workflow selection is locked",
+                            "workflow_profile_locked");
                     default:
                         return ApiResults.Conflict(coordinatorResult.Message ?? "Issue update rejected");
                 }

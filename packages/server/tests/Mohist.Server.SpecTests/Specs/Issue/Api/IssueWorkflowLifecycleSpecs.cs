@@ -131,6 +131,68 @@ public class IssueWorkflowLifecycleSpecs
     }
 
     [Fact]
+    public async Task WorkflowSelectionPatch_ReplacesThePriorModeAndOmittedFieldsPreserveIt()
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"workflow-selection-{Guid.NewGuid():N}");
+        var created = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
+        {
+            title = "Selection transitions",
+            workflowProfileId = "mohist/local",
+        });
+
+        using (var toNone = await _client.PatchAsJsonAsync(
+                   $"/api/projects/{project.Id}/issues/{created.Number}",
+                   new { noWorkflow = true }))
+        {
+            toNone.EnsureSuccessStatusCode();
+        }
+        var noWorkflow = await GetIssueInfoAsync(project.Id, created.Number);
+        Assert.True(noWorkflow!.NoWorkflow);
+        Assert.Null(noWorkflow.WorkflowProfileId);
+
+        using (var toProfile = await _client.PatchAsJsonAsync(
+                   $"/api/projects/{project.Id}/issues/{created.Number}",
+                   new { workflowProfileId = "mohist/local" }))
+        {
+            toProfile.EnsureSuccessStatusCode();
+        }
+        var explicitProfile = await GetIssueInfoAsync(project.Id, created.Number);
+        Assert.False(explicitProfile!.NoWorkflow);
+        Assert.Equal("mohist/local", explicitProfile.WorkflowProfileId);
+
+        using (var unrelated = await _client.PatchAsJsonAsync(
+                   $"/api/projects/{project.Id}/issues/{created.Number}",
+                   new { title = "Selection preserved" }))
+        {
+            unrelated.EnsureSuccessStatusCode();
+        }
+        var preserved = await GetIssueInfoAsync(project.Id, created.Number);
+        Assert.False(preserved!.NoWorkflow);
+        Assert.Equal("mohist/local", preserved.WorkflowProfileId);
+    }
+
+    [Fact]
+    public async Task NoWorkflowIssue_AfterStartRejectsWorkflowSelectionWithStableConflict()
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"no-workflow-lock-{Guid.NewGuid():N}");
+        var created = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
+        {
+            title = "Locked external delivery",
+            isDraft = false,
+            noWorkflow = true,
+        });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{created.Number}/start");
+
+        using var response = await _client.PatchAsJsonAsync(
+            $"/api/projects/{project.Id}/issues/{created.Number}",
+            new { workflowProfileId = "mohist/local" });
+
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("workflow_profile_locked", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task StartIssue_WithIncompletePrerequisite_IsRejectedByWorkflowGate()
     {
         // Contract: POST /api/projects/{ref}/issues/{n}/start on an

@@ -961,8 +961,8 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         if (hasWorkflowProfile || hasNoWorkflow)
         {
             _issue.ReplaceWorkflowProfile(
-                hasWorkflowProfile ? command.WorkflowProfileId : _issue.WorkflowProfileId,
-                hasNoWorkflow ? command.NoWorkflow == true : _issue.NoWorkflow);
+                hasWorkflowProfile ? command.WorkflowProfileId : null,
+                hasNoWorkflow ? command.NoWorkflow == true : false);
         }
 
         if (hasParent)
@@ -1081,8 +1081,8 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         if (hasWorkflowProfile || hasNoWorkflow)
         {
             _issue.ReplaceWorkflowProfile(
-                hasWorkflowProfile ? data.WorkflowProfileId : _issue.WorkflowProfileId,
-                hasNoWorkflow ? data.NoWorkflow == true : _issue.NoWorkflow);
+                hasWorkflowProfile ? data.WorkflowProfileId : null,
+                hasNoWorkflow ? data.NoWorkflow == true : false);
         }
 
         if (hasParent)

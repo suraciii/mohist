@@ -1,6 +1,15 @@
 import { IssueStatus, type Issue } from '../../../entities/issue'
+import { Button } from '@/shared/ui/components/button'
 
-export function NoWorkflowPanel({ issue }: { issue: Issue }) {
+export function NoWorkflowPanel({
+  issue,
+  onMarkDone,
+  isMarkingDone = false,
+}: {
+  issue: Issue
+  onMarkDone?: () => void
+  isMarkingDone?: boolean
+}) {
   return (
     <section data-testid="no-workflow-panel" className="rounded-lg border border-border bg-card px-5 py-4">
       <h2 className="text-sm font-semibold text-foreground">No workflow</h2>
@@ -14,6 +23,11 @@ export function NoWorkflowPanel({ issue }: { issue: Issue }) {
             ? 'Mark it done when the work has been delivered, or close it when it will not be completed.'
             : 'The Issue is terminal and keeps its delivery history.'}
       </p>
+      {issue.status === IssueStatus.InProgress && onMarkDone && (
+        <Button className="mt-4" size="sm" onClick={onMarkDone} disabled={isMarkingDone}>
+          {isMarkingDone ? 'Marking done…' : 'Mark as done'}
+        </Button>
+      )}
     </section>
   )
 }

@@ -123,8 +123,8 @@ public sealed partial class Issue
     /// </summary>
     public void ReplaceWorkflowProfile(string? profileId, bool noWorkflow = false, DateTime? now = null)
     {
-        if (_hasWorkflowStarted)
-            throw new WorkflowProfileLockedException(Number, _workflowRunId);
+        if (_hasWorkflowStarted && _workflowRunId is null)
+            throw new WorkflowProfileLockedException(Number, workflowRunId: null);
         var next = NormalizeOptional(profileId);
         if (noWorkflow && next is not null)
             throw new ArgumentException("No Workflow and an explicit Workflow Profile are mutually exclusive");

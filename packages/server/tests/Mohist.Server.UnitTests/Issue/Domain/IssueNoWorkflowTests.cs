@@ -51,6 +51,44 @@ public sealed class IssueNoWorkflowTests
     }
 
     [Fact]
+    public void ReplaceWorkflowProfile_NoWorkflowClearsExplicitProfile()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create(
+            "project", 1, "Work", repositoryRef: "main", workflowProfileId: "mohist/github-pr");
+
+        issue.ReplaceWorkflowProfile(profileId: null, noWorkflow: true);
+
+        Assert.True(issue.NoWorkflow);
+        Assert.Null(issue.WorkflowProfileId);
+    }
+
+    [Fact]
+    public void ReplaceWorkflowProfile_ExplicitProfileClearsNoWorkflow()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create(
+            "project", 1, "Work", repositoryRef: "main", noWorkflow: true);
+
+        issue.ReplaceWorkflowProfile("mohist/local", noWorkflow: false);
+
+        Assert.False(issue.NoWorkflow);
+        Assert.Equal("mohist/local", issue.WorkflowProfileId);
+    }
+
+    [Fact]
+    public void ActiveWorkflowRun_CanSelectNextRunWorkflowMode()
+    {
+        var issue = Mohist.Server.Issue.Domain.Issue.Create(
+            "project", 1, "Work", repositoryRef: "main", isDraft: false);
+        issue.StartWorkflow("wr-active");
+
+        issue.ReplaceWorkflowProfile(profileId: null, noWorkflow: true);
+
+        Assert.True(issue.NoWorkflow);
+        Assert.Null(issue.WorkflowProfileId);
+        Assert.Equal("wr-active", issue.WorkflowRunId);
+    }
+
+    [Fact]
     public void ExplicitProfileAndNoWorkflow_AreMutuallyExclusive()
     {
         var issue = Mohist.Server.Issue.Domain.Issue.Create("project", 1, "Work", repositoryRef: "main");

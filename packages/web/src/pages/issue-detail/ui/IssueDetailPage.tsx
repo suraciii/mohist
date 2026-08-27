@@ -522,7 +522,13 @@ export function IssueDetailPage({ components, mutationDependencies }: IssueDetai
                 <CompositeParentOverview children={issue.children ?? []} summary={compositeSummary} />
               )}
 
-              {!isCompositeParent && issue.noWorkflow && <NoWorkflowPanel issue={issue} />}
+              {!isCompositeParent && issue.noWorkflow && (
+                <NoWorkflowPanel
+                  issue={issue}
+                  onMarkDone={() => mutations.markDoneMutation.mutate()}
+                  isMarkingDone={mutations.markDoneMutation.isPending}
+                />
+              )}
 
               {showWorkflowSections && (
                 <BranchBar
