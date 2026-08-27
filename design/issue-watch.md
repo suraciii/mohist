@@ -1,7 +1,3 @@
----
-status: converged
----
-
 # Issue Watch
 
 An Issue-level Agent watch declaration makes an Agent respond when the Issue

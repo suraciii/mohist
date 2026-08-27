@@ -1,7 +1,3 @@
----
-status: converged
----
-
 # Agent Event Routing
 
 A Mohist Agent responds to system events automatically through a

@@ -4,10 +4,8 @@
 contracts an implementation must preserve. It is written for developers and
 agents who implement the design, not for readers tracing the current code.
 
-Write all active design prose in English. Use short sentences, active voice, American spelling, and stable
-terms. Use ASD-STE100 writing rules as a target. Do not claim compliance. Keep domain identifiers, field
-names, API names, commands, serialized values, and code symbols as-is when their exact spelling is part of
-the contract. Use `must`, `may`, and `must not` for requirements, options, and prohibitions.
+Shared writing rules (language, diagrams, fences, tables, examples) live in
+[`../eng/context-management.md`](../eng/context-management.md#writing-rules).
 
 ## Writing a design spec
 
@@ -63,23 +61,13 @@ Do not let agents guess rules. Do not let the current code decide for the target
 
 ### Choose the right expression
 
-- Prefer short sentences. One sentence states one rule.
+- State one rule per sentence.
 - Prefer domain nouns and product nouns. Use technical nouns only in implementation design, and
   define terms a new reader may not know.
 - Use canonical names. Keep casing, singular/plural, and field paths consistent.
-- Draw diagrams in Mermaid when a boundary, ownership relation, dependency, sequence, hierarchy, or
-  state transition is easier to understand as a picture. Do not draw when prose is already clear.
-  Prefer `flowchart` and `sequenceDiagram`.
-- Use `text literal` for command output, syntax, protocols, pseudocode, data shapes, and other
-  preformatted text that is not a diagram. Bare `text` fences are invalid. The `text diagram` marker
-  is legacy: migrate a diagram to Mermaid when you touch its document.
-- Do not use raw HTML. Markdown is the only document markup.
-- Draw only real concepts. Give every arrow a meaning.
-- Write key rules in prose. Do not make a diagram the only source of truth.
 - Use pseudocode for definite computations.
 - Use minimal input/output examples when ambiguity must be resolved.
 - Make examples behave like tests. Keep only examples that distinguish between readings.
-- Ensure YAML, JSON, command, and API examples parse or run as written.
 
 ### Use the minimal structure
 

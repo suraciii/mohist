@@ -1,7 +1,3 @@
----
-status: converged
----
-
 # Comment Mentions
 
 Writing `@<agent-name>` in an Issue comment starts that Mohist Agent directly.

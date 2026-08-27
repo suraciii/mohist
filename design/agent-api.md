@@ -1,7 +1,3 @@
----
-status: shipped
----
-
 # External Agent API
 
 ## Purpose

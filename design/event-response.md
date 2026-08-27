@@ -1,7 +1,3 @@
----
-status: converged
----
-
 # Agent Event Response
 
 Event routing decides who responds; see

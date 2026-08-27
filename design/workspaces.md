@@ -1,7 +1,3 @@
----
-status: wip
----
-
 # Workspace
 
 A Workspace is a first-class named execution-environment resource under a
