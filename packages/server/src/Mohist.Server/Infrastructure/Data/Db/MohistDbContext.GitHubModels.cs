@@ -110,19 +110,28 @@ public partial class MohistDbContext
                 entity.Property(e => e.GithubCommentId)
                     .HasMaxLength(256)
                     .IsRequired();
+                entity.Property(e => e.OperationKey)
+                    .HasMaxLength(512)
+                    .IsRequired();
                 entity.Property(e => e.Marker)
                     .HasMaxLength(512)
                     .IsRequired();
                 entity.Property(e => e.Body)
                     .IsRequired();
                 entity.Property(e => e.PostedAt);
+                entity.Property(e => e.AttemptCount)
+                    .IsRequired();
+                entity.Property(e => e.NextAttemptAt);
+                entity.Property(e => e.LeaseUntil);
+                entity.Property(e => e.LastError);
+                entity.Property(e => e.FailedAt);
                 entity.Property(e => e.CreatedAt)
                     .IsRequired();
                 entity.Property(e => e.UpdatedAt)
                     .IsRequired();
-                entity.HasIndex(e => new { e.ConnectionId, e.GithubIssueNumber, e.GithubCommentId })
+                entity.HasIndex(e => new { e.ConnectionId, e.GithubIssueNumber, e.GithubCommentId, e.OperationKey })
                     .IsUnique()
-                    .HasDatabaseName("UX_GitHubCommandReplies_Connection_Issue_Comment");
+                    .HasDatabaseName("UX_GitHubCommandReplies_Connection_Issue_Comment_Operation");
             });
 
             modelBuilder.Entity<GitHubWriteBackFailureRow>(entity =>

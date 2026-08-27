@@ -60,14 +60,12 @@ public sealed class GitHubWriteBackHandlerTests
             return Task.CompletedTask;
         }
 
-        public Task<bool> HasCommentMarkerAsync(
+        public Task<IReadOnlyList<string>> FindCommentIdsByMarkerAsync(
             GitHubConnection connection,
             int githubIssueNumber,
             string marker,
             CancellationToken ct = default) =>
-            Task.FromResult(Comments.Any(comment => comment.ConnectionId == connection.Id
-                && comment.GithubIssueNumber == githubIssueNumber
-                && comment.Body.Contains(marker, StringComparison.Ordinal)));
+            Task.FromResult<IReadOnlyList<string>>([]);
 
         public Task ReplaceStateLabelAsync(
             GitHubConnection connection,

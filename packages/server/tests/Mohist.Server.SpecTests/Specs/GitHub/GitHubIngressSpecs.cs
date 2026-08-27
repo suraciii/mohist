@@ -75,7 +75,7 @@ public sealed class GitHubIngressSpecs(MohistIntegrationFixture fixture)
             "/api/projects", $"github-ingress-{Guid.NewGuid():N}", repoName: RepoName, gitUrl: $"https://github.com/{owner}/{RepoName}.git");
         var created = await Client.PostDataAsync<JsonElement>(
             $"/api/projects/{project.Id}/github-connections",
-            new { owner, repo = RepoName });
+            new { owner, repo = RepoName, pat = "github-pat" });
         return (project, created);
     }
 

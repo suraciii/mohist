@@ -215,6 +215,7 @@ public sealed class GitHubReviewApprovalSpecs
             owner,
             repo = RepoName,
             approvers,
+            pat = "github-pat",
         });
         var connectionId = created.GetProperty("id").GetString()!;
         var secret = created.GetProperty("webhookSecret").GetString()!;

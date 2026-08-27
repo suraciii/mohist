@@ -27,8 +27,8 @@ unambiguously determines its mirror location.
 
 Credentials stay out of the connection record and follow the existing
 [`ISecretStore`](../packages/server/src/Mohist.Server/Infrastructure/Security/Secrets/ISecretStore.cs)
-boundaries: an inbound signature secret and, for the current connection API, an
-optional fine-grained PAT with Issues read and write only. The Server stores the
+boundaries: an inbound signature secret and, for the current connection API, a
+required fine-grained PAT with Issues read and write only. The Server stores the
 PAT as a secret and never exposes it in connection reads. GitHub App
 installation-token exchange is not implemented yet. Direct Server calls to the
 GitHub API are limited to Issue and comment operations; git content operations

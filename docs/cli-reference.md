@@ -590,9 +590,9 @@ for the complete product semantics.
 Project Repository: the mirror of Issues, the `/mohist` command entry, and
 review-based Approval.
 
-- `mo github connect owner/repo [--repo <name>] [--approver <login> ...] [--pat <token>]`
+- `mo github connect owner/repo [--repo <name>] [--approver <login> ...] --pat <token>`
   connects a GitHub repository to the current Project. A fine-grained PAT with
-  Issues read/write permission can be supplied with `--pat` and is stored as a
+  Issues read/write permission is required through `--pat` and is stored as a
   server secret. It matches a registered
   Repository by git URL, or uses the explicit `--repo` name when the match is
   ambiguous, then prints the GitHub configuration checklist: webhook address,

@@ -1,8 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
-using Mohist.Server.GitHub.Ports;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
@@ -25,16 +23,13 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
 {
     private readonly IServiceScopeFactory _scopes;
     private readonly IGrainFactory _grains;
-    private readonly ILogger<GitHubIssueCommandHandler> _log;
 
     public GitHubIssueCommandHandler(
         IServiceScopeFactory scopes,
-        IGrainFactory grains,
-        ILogger<GitHubIssueCommandHandler> log)
+        IGrainFactory grains)
     {
         _scopes = scopes;
         _grains = grains;
-        _log = log;
     }
 
     public bool Filter(CloudEvent evt) =>
@@ -65,17 +60,18 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
         if (connection is null || connection.Status != GitHubConnectionStatus.Active)
             return;
 
-        var comments = sp.GetRequiredService<IGitHubCommentPort>();
         var replies = sp.GetRequiredService<GitHubCommandReplyStore>();
+        var delivery = sp.GetRequiredService<GitHubCommandReplyDeliveryService>();
         if (command.Verb is GitHubIssueCommandVerb.Unknown)
         {
             await ReplyAsync(
                 replies,
-                comments,
+                delivery,
                 projectId,
                 connection,
                 payload.IssueNumber,
                 payload.CommentId,
+                GitHubCommentKinds.CommandReplyUnknownVerb,
                 GitHubIssueCommandComments.UnknownVerb(command.RawVerb),
                 ct);
             return;
@@ -95,7 +91,7 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
             {
                 await StartAndReplyAsync(
                     replies,
-                    comments,
+                    delivery,
                     projectId,
                     connection,
                     payload,
@@ -103,15 +99,29 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
                     link.IssueNumber,
                     ct);
             }
-            else
+            else if (link.CommandRequested && existingIssue.Status == IssueStatus.InProgress)
             {
                 await ReplyAsync(
                     replies,
-                    comments,
+                    delivery,
                     projectId,
                     connection,
                     payload.IssueNumber,
                     payload.CommentId,
+                    GitHubCommentKinds.CommandReplyStarted,
+                    GitHubIssueCommandComments.Started(projectId, link.IssueNumber),
+                    ct);
+            }
+            else
+            {
+                await ReplyAsync(
+                    replies,
+                    delivery,
+                    projectId,
+                    connection,
+                    payload.IssueNumber,
+                    payload.CommentId,
+                    GitHubCommentKinds.CommandReplyAlreadyLinked,
                     GitHubIssueCommandComments.AlreadyLinked(projectId, link.IssueNumber),
                     ct);
             }
@@ -133,11 +143,12 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
             {
                 await ReplyAsync(
                     replies,
-                    comments,
+                    delivery,
                     projectId,
                     connection,
                     payload.IssueNumber,
                     payload.CommentId,
+                    GitHubCommentKinds.CommandReplyAlreadyLinked,
                     GitHubIssueCommandComments.AlreadyLinked(projectId, link.IssueNumber),
                     ct);
                 return;
@@ -168,7 +179,7 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
 
         await StartAndReplyAsync(
             replies,
-            comments,
+            delivery,
             projectId,
             connection,
             payload,
@@ -179,7 +190,7 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
 
     private async Task StartAndReplyAsync(
         GitHubCommandReplyStore replies,
-        IGitHubCommentPort comments,
+        GitHubCommandReplyDeliveryService delivery,
         string projectId,
         GitHubConnection connection,
         GitHubIssueCommentEventPayload payload,
@@ -192,11 +203,12 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
             await issueGrain.StartWorkAsync();
             await ReplyAsync(
                 replies,
-                comments,
+                delivery,
                 projectId,
                 connection,
                 payload.IssueNumber,
                 payload.CommentId,
+                GitHubCommentKinds.CommandReplyStarted,
                 GitHubIssueCommandComments.Started(projectId, issueNumber),
                 ct);
         }
@@ -204,11 +216,12 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
         {
             await ReplyAsync(
                 replies,
-                comments,
+                delivery,
                 projectId,
                 connection,
                 payload.IssueNumber,
                 payload.CommentId,
+                GitHubCommentKinds.CommandReplyStartFailed,
                 GitHubIssueCommandComments.StartFailed(ex.Message),
                 ct);
         }
@@ -216,11 +229,12 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
         {
             await ReplyAsync(
                 replies,
-                comments,
+                delivery,
                 projectId,
                 connection,
                 payload.IssueNumber,
                 payload.CommentId,
+                GitHubCommentKinds.CommandReplyStartFailed,
                 GitHubIssueCommandComments.StartFailed(ex.Message),
                 ct);
         }
@@ -228,51 +242,36 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
 
     private async Task ReplyAsync(
         GitHubCommandReplyStore replies,
-        IGitHubCommentPort comments,
+        GitHubCommandReplyDeliveryService delivery,
         string projectId,
         GitHubConnection connection,
         int githubIssueNumber,
         string githubCommentId,
+        string replyKind,
         string body,
         CancellationToken ct)
     {
+        var operationKey = GitHubCommentKinds.CommandReplyOperationKey(
+            connection.Id,
+            githubIssueNumber,
+            githubCommentId,
+            replyKind);
         var marker = GitHubCommentKinds.CommandReplyMarker(
             connection.Id,
             githubIssueNumber,
-            githubCommentId);
+            githubCommentId,
+            replyKind);
         var reply = await replies.GetOrCreateAsync(
             projectId,
             connection.Id,
             connection.RepositoryName,
             githubIssueNumber,
             githubCommentId,
+            operationKey,
             marker,
             body,
             ct);
-        if (reply.IsPosted)
-            return;
-        try
-        {
-            if (await comments.HasCommentMarkerAsync(connection, githubIssueNumber, reply.Marker, ct))
-            {
-                await replies.MarkPostedAsync(reply.Id, ct);
-                return;
-            }
-            await comments.PostCommentAsync(
-                connection,
-                githubIssueNumber,
-                GitHubMirrorMarker.Append(reply.Body, reply.Marker),
-                ct);
-            await replies.MarkPostedAsync(reply.Id, ct);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            _log.LogWarning(
-                ex,
-                "GitHub command reply for {Owner}/{Repo} issue #{GithubIssueNumber} could not be posted",
-                connection.Owner,
-                connection.Repo,
-                githubIssueNumber);
-        }
+        if (!reply.IsPosted && !reply.IsFailed)
+            await delivery.DeliverAsync(reply, force: true, ct: ct);
     }
 }

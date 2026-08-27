@@ -4773,6 +4773,26 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("OperationKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("FailedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset?>("PostedAt")
                         .HasColumnType("TEXT");
 
@@ -4791,9 +4811,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ConnectionId", "GithubIssueNumber", "GithubCommentId")
+                    b.HasIndex("ConnectionId", "GithubIssueNumber", "GithubCommentId", "OperationKey")
                         .IsUnique()
-                        .HasDatabaseName("UX_GitHubCommandReplies_Connection_Issue_Comment");
+                        .HasDatabaseName("UX_GitHubCommandReplies_Connection_Issue_Comment_Operation");
 
                     b.ToTable("GitHubCommandReplies", (string)null);
                 });

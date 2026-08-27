@@ -85,6 +85,19 @@ public sealed class CliGithubCommandSpecs
     }
 
     [Fact]
+    public async Task Connect_RequiresPatWithoutSendingRequest()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["github", "connect", "octocat/hello-world", "--project", "proj_test"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("--pat is required", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Connect_RemovedFeedOption_IsRejected()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
@@ -113,7 +126,7 @@ public sealed class CliGithubCommandSpecs
 
         var exit = await MohistCliCommands.RunAsync(
             http,
-            ["github", "connect", "octocat/hello-world", "--project", "proj_test", "--json", "id,ingressUrl"],
+            ["github", "connect", "octocat/hello-world", "--pat", "github-pat", "--project", "proj_test", "--json", "id,ingressUrl"],
             output,
             error,
             fs,

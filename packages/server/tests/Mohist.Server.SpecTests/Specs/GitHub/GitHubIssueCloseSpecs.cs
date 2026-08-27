@@ -44,6 +44,7 @@ public sealed class GitHubIssueCloseSpecs
         {
             ["owner"] = owner,
             ["repo"] = RepoName,
+            ["pat"] = "github-pat",
         };
         var created = await Client.PostDataAsync<JsonElement>($"/api/projects/{project.Id}/github-connections", body);
         return (project.Id, created.GetProperty("id").GetString()!, created.GetProperty("webhookSecret").GetString()!);

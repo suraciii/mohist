@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.GitHub.Domain;
@@ -125,7 +126,7 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
         await SendAsync(connection, url, HttpMethod.Post, JsonContent.Create(new JsonObject { ["body"] = body }), ct);
     }
 
-    public async Task<bool> HasCommentMarkerAsync(
+    public async Task<IReadOnlyList<string>> FindCommentIdsByMarkerAsync(
         GitHubConnection connection,
         int githubIssueNumber,
         string marker,
@@ -134,6 +135,7 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentException.ThrowIfNullOrWhiteSpace(marker);
         const int pageSize = 100;
+        var matches = new List<string>();
         var pat = await LoadPatAsync(connection, ct);
         for (var page = 1; ; page++)
         {
@@ -148,16 +150,27 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
 
             var items = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))?.AsArray();
             if (items is null || items.Count == 0)
-                return false;
+                break;
             foreach (var item in items)
             {
                 var commentBody = item?["body"]?.GetValue<string>();
-                if (commentBody?.Contains(marker, StringComparison.Ordinal) == true)
-                    return true;
+                if (commentBody?.Contains(marker, StringComparison.Ordinal) != true)
+                    continue;
+                var commentId = item?["id"];
+                var id = commentId?.GetValueKind() switch
+                {
+                    JsonValueKind.String => commentId.GetValue<string>(),
+                    JsonValueKind.Number => commentId.GetValue<long>().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    _ => null,
+                };
+                if (string.IsNullOrWhiteSpace(id))
+                    throw new InvalidOperationException("GitHub comment marker matched a comment without a valid id");
+                matches.Add(id);
             }
             if (items.Count < pageSize)
-                return false;
+                break;
         }
+        return matches;
     }
 
     public async Task ReplaceStateLabelAsync(

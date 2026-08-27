@@ -26,6 +26,25 @@ public sealed class GitHubConnectionUpdateSpecs
     private HttpClient Client => _fixture.Client;
 
     [Fact]
+    public async Task Create_WithoutPat_RejectsBeforeCreatingConnection()
+    {
+        var owner = $"octocat-{Guid.NewGuid():N}";
+        var project = await Client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
+            "/api/projects", $"github-credential-required-{Guid.NewGuid():N}", repoName: RepoName, gitUrl: $"https://github.com/{owner}/{RepoName}.git");
+
+        using var response = await Client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/github-connections",
+            new { owner, repo = RepoName });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        Assert.Equal("pat_required", body.GetProperty("code").GetString());
+        using var list = await Client.GetAsync($"/api/projects/{project.Id}/github-connections");
+        var listBody = JsonSerializer.Deserialize<JsonElement>(await list.Content.ReadAsStringAsync());
+        Assert.Empty(listBody.GetProperty("data").EnumerateArray());
+    }
+
+    [Fact]
     public async Task Create_WithPat_StoresCredentialForProductionPort()
     {
         var owner = $"octocat-{Guid.NewGuid():N}";
@@ -118,6 +137,7 @@ public sealed class GitHubConnectionUpdateSpecs
             owner,
             repo = RepoName,
             approvers,
+            pat = "github-pat",
         });
         return (project.Id, created.GetProperty("id").GetString()!, owner);
     }

@@ -46,8 +46,12 @@ internal static class GithubCommands
                 return CliExitCode.For(CliExitOutcome.UsageFailure);
             }
 
+            var patValue = ctx.GetValue(pat);
+            if (string.IsNullOrWhiteSpace(patValue))
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--pat is required to create an active GitHub connection.");
+
             var (data, exit) = await api.ConnectGitHubRepositoryAsync(
-                resolution.ProjectId, owner, repo, ctx.GetValue(approver), ctx.GetValue(pat)).ConfigureAwait(false);
+                resolution.ProjectId, owner, repo, ctx.GetValue(approver), patValue).ConfigureAwait(false);
             if (exit != 0 || data is null) return exit;
             if (selection.Kind == JsonSelectionKind.Selected)
                 return await new CliResultWriter(api.Invocation).WriteSuccessAsync(

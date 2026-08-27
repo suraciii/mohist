@@ -33,6 +33,8 @@ public sealed class GitHubIssueCommandSpecs
         fixture.Comments.Comments.Clear();
         fixture.Comments.StateLabels.Clear();
         fixture.Comments.Closes.Clear();
+        fixture.Comments.ConfirmationFailure = null;
+        fixture.Comments.PostThenThrow = false;
     }
 
     private HttpClient Client => _fixture.Client;
@@ -46,6 +48,7 @@ public sealed class GitHubIssueCommandSpecs
         {
             owner,
             repo = RepoName,
+            pat = "github-pat",
         });
         return (project.Id, created.GetProperty("id").GetString()!, created.GetProperty("webhookSecret").GetString()!, owner);
     }
@@ -132,6 +135,11 @@ public sealed class GitHubIssueCommandSpecs
             {
                 Id = row.Id,
                 PostedAt = row.PostedAt,
+                AttemptCount = row.AttemptCount,
+                NextAttemptAt = row.NextAttemptAt,
+                LeaseUntil = row.LeaseUntil,
+                FailedAt = row.FailedAt,
+                LastError = row.LastError,
                 Marker = row.Marker,
                 Body = row.Body,
             };
@@ -237,7 +245,7 @@ public sealed class GitHubIssueCommandSpecs
         var reply = Assert.Single(_fixture.Comments.Comments);
         Assert.Contains("不支持命令", reply.Body, StringComparison.Ordinal);
         Assert.Contains(
-            GitHubCommentKinds.CommandReplyMarker(connectionId, GithubIssueNumber, "1005"),
+            GitHubCommentKinds.CommandReplyMarker(connectionId, GithubIssueNumber, "1005", GitHubCommentKinds.CommandReplyUnknownVerb),
             reply.Body,
             StringComparison.Ordinal);
     }
@@ -257,24 +265,92 @@ public sealed class GitHubIssueCommandSpecs
     }
 
     [Fact]
-    public async Task CommandReplyFailure_IsRetriedWithoutDuplicateComment()
+    public async Task AmbiguousReplyMarker_FailsClosedWithoutPostingAnotherComment()
+    {
+        var (_, connectionId, secret, _) = await ConnectNewAsync();
+        var marker = GitHubCommentKinds.CommandReplyMarker(
+            connectionId,
+            GithubIssueNumber,
+            "1009",
+            GitHubCommentKinds.CommandReplyUnknownVerb);
+        _fixture.Comments.Comments.Add(new RecordingGitHubCommentPort.PostedComment(
+            connectionId,
+            GithubIssueNumber,
+            $"first\n\n{marker}"));
+        _fixture.Comments.Comments.Add(new RecordingGitHubCommentPort.PostedComment(
+            connectionId,
+            GithubIssueNumber,
+            $"second\n\n{marker}"));
+
+        await DeliverCommentAsync(connectionId, secret, "command-ambiguous", "/mohist stop", commentId: 1009);
+        await PumpAsync();
+
+        var reply = await LoadReplyAsync(connectionId, "1009");
+        Assert.NotNull(reply);
+        Assert.Null(reply!.PostedAt);
+        Assert.True(reply.IsFailed);
+        Assert.Contains("ambiguous", reply.LastError!, StringComparison.Ordinal);
+        Assert.Equal(2, _fixture.Comments.Comments.Count);
+    }
+
+    [Fact]
+    public async Task CommandReplyFailure_IsRetriedByHostedConsumerWithoutDuplicateComment()
     {
         var (projectId, connectionId, secret, owner) = await ConnectNewAsync();
         _fixture.Comments.ConfirmationFailure = new TimeoutException("simulated reply failure");
 
         await DeliverCommentAsync(connectionId, secret, "command-reply-failure-a", "/mohist start", commentId: 1008);
         await PumpAsync();
+        var failedReply = await LoadReplyAsync(connectionId, "1008");
+        Assert.NotNull(failedReply);
+        Assert.Equal(1, failedReply!.AttemptCount);
+        Assert.NotNull(failedReply.NextAttemptAt);
         Assert.Empty(_fixture.Comments.Comments);
 
         _fixture.Comments.ConfirmationFailure = null;
-        await DeliverCommentAsync(connectionId, secret, "command-reply-failure-b", "/mohist start", commentId: 1008);
-        await PumpAsync();
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var pending = await scope.ServiceProvider.GetRequiredService<GitHubCommandReplyStore>().ListPendingAsync();
+            Assert.Contains(pending, pendingReply => pendingReply.GithubCommentId == "1008");
+        }
+        var worker = _fixture.Services.GetRequiredService<GitHubCommandReplyDeliveryWorker>();
+        var processed = await worker.ProcessPendingAsync();
+        Assert.Equal(1, processed);
+        var retriedReply = await LoadReplyAsync(connectionId, "1008");
+        Assert.NotNull(retriedReply);
+        Assert.NotNull(retriedReply!.PostedAt);
 
         var link = await LoadLinkAsync(projectId, owner);
         Assert.NotNull(link);
         Assert.Equal(IssueStatus.InProgress, (await LoadIssueAsync(projectId, link!.IssueNumber))!.Status);
         Assert.Single(_fixture.Comments.Comments, comment =>
-            comment.Body.Contains(GitHubCommentKinds.CommandReplyMarker(connectionId, GithubIssueNumber, "1008"), StringComparison.Ordinal));
+            comment.Body.Contains(GitHubCommentKinds.CommandReplyMarker(connectionId, GithubIssueNumber, "1008", GitHubCommentKinds.CommandReplyStarted), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CommandReplyUnknownPostResult_ReconcilesMarkerWithoutDuplicateComment()
+    {
+        var (projectId, connectionId, secret, owner) = await ConnectNewAsync();
+        _fixture.Comments.PostThenThrow = true;
+
+        await DeliverCommentAsync(connectionId, secret, "command-reply-unknown-result", "/mohist stop", commentId: 1010);
+        await PumpAsync();
+
+        var pending = await LoadReplyAsync(connectionId, "1010");
+        Assert.NotNull(pending);
+        Assert.Null(pending!.PostedAt);
+        Assert.Equal(1, pending.AttemptCount);
+        Assert.Single(_fixture.Comments.Comments);
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        var worker = _fixture.Services.GetRequiredService<GitHubCommandReplyDeliveryWorker>();
+        Assert.Equal(1, await worker.ProcessPendingAsync());
+
+        var reconciled = await LoadReplyAsync(connectionId, "1010");
+        Assert.NotNull(reconciled!.PostedAt);
+        Assert.Single(_fixture.Comments.Comments);
+        Assert.Null(await LoadLinkAsync(projectId, owner));
     }
 
     [Fact]
@@ -293,6 +369,7 @@ public sealed class GitHubIssueCommandSpecs
         {
             owner,
             repo = RepoName,
+            pat = "github-pat",
         });
         var connectionId = created.GetProperty("id").GetString()!;
         var secret = created.GetProperty("webhookSecret").GetString()!;
@@ -321,7 +398,7 @@ public sealed class GitHubIssueCommandSpecs
 
         Assert.Equal(IssueStatus.InProgress, (await LoadIssueAsync(project.Id, link!.IssueNumber))!.Status);
         Assert.Single(_fixture.Comments.Comments, comment =>
-            comment.Body.Contains(GitHubCommentKinds.CommandReplyMarker(connectionId, GithubIssueNumber, "1006"), StringComparison.Ordinal));
+            comment.Body.Contains(GitHubCommentKinds.CommandReplyMarker(connectionId, GithubIssueNumber, "1006", GitHubCommentKinds.CommandReplyStarted), StringComparison.Ordinal));
     }
 
     [Fact]

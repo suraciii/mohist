@@ -45,12 +45,12 @@ GitHub coordinates: its mirror location is determined by its target repository.
 
 ```bash
 mo github connect owner/repo --pat <token>    # matched to a registered Repository by git URL
-mo github connect owner/repo --repo docs     # explicit when the match is ambiguous
+mo github connect owner/repo --repo docs --pat <token> # explicit when the match is ambiguous
 mo github list                               # every Repository and its connection state
 ```
 
 The guide prints the GitHub-side setup: a Repository webhook targeting the
-Mohist Server. The current connection API accepts a fine-grained PAT with Issues
+Mohist Server. The current connection API requires a fine-grained PAT with Issues
 read and write through `--pat` and stores it as a server secret; GitHub App
 installation-token exchange is not implemented yet. An optional approver list
 enables [Pull Request Review as Approval](#pull-request-review-as-approval).

@@ -17,10 +17,11 @@ public interface IGitHubCommentPort
         CancellationToken ct = default);
 
     /// <summary>
-    /// Finds a previously posted comment containing the exact marker. This
-    /// reconciles an unknown POST result before a retry can create a duplicate.
+    /// Lists the comment ids whose body contains the exact marker. This
+    /// reconciles an unknown POST result before a retry can create a duplicate;
+    /// callers must fail closed when more than one match is returned.
     /// </summary>
-    Task<bool> HasCommentMarkerAsync(
+    Task<IReadOnlyList<string>> FindCommentIdsByMarkerAsync(
         GitHubConnection connection,
         int githubIssueNumber,
         string marker,

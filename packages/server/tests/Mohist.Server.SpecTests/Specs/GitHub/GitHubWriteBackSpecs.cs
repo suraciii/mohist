@@ -46,6 +46,7 @@ public sealed class GitHubWriteBackSpecs
         {
             owner,
             repo = RepoName,
+            pat = "github-pat",
         });
         return (project.Id, created.GetProperty("id").GetString()!);
     }

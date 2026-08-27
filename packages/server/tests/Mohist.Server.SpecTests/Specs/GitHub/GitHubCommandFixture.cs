@@ -34,6 +34,7 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     public Exception? CreateFailure { get; set; }
     public Exception? FindFailure { get; set; }
     public Exception? ConfirmationFailure { get; set; }
+    public bool PostThenThrow { get; set; }
     public bool CreateThenThrow { get; set; }
     public int NextGithubIssueNumber { get; set; } = 900;
     public List<IssueClose> Closes { get; } = [];
@@ -90,17 +91,26 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     {
         if (ConfirmationFailure is not null) throw ConfirmationFailure;
         Comments.Add(new PostedComment(connection.Id, githubIssueNumber, body));
+        if (PostThenThrow)
+        {
+            PostThenThrow = false;
+            throw new TimeoutException("simulated unknown reply outcome");
+        }
         return Task.CompletedTask;
     }
 
-    public Task<bool> HasCommentMarkerAsync(
+    public Task<IReadOnlyList<string>> FindCommentIdsByMarkerAsync(
         GitHubConnection connection,
         int githubIssueNumber,
         string marker,
         CancellationToken ct = default) =>
-        Task.FromResult(Comments.Any(comment => comment.ConnectionId == connection.Id
-            && comment.GithubIssueNumber == githubIssueNumber
-            && comment.Body.Contains(marker, StringComparison.Ordinal)));
+        Task.FromResult<IReadOnlyList<string>>(Comments
+            .Select((comment, index) => (comment, index))
+            .Where(item => item.comment.ConnectionId == connection.Id
+                && item.comment.GithubIssueNumber == githubIssueNumber
+                && item.comment.Body.Contains(marker, StringComparison.Ordinal))
+            .Select(item => (item.index + 1).ToString())
+            .ToArray());
 
     public Task ReplaceStateLabelAsync(
         GitHubConnection connection,

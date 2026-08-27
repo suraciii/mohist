@@ -93,6 +93,14 @@ public sealed class GitHubConnectionStore : IScopedService
         var project = await db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == connection.ProjectId, ct)
             ?? throw new GitHubConnectionValidationException("project not found", "project_not_found");
         connection.RepositoryName = ResolveRepository(project.RepositoriesJson, connection.Owner, connection.Repo);
+        if (connection.IdentityKind != GitHubIdentityKind.Pat)
+            throw new GitHubConnectionValidationException(
+                "GitHub App identity is reserved for a future connection flow; provide a PAT",
+                "github_app_identity_not_supported");
+        if (string.IsNullOrWhiteSpace(pat))
+            throw new GitHubConnectionValidationException(
+                "pat is required for an active GitHub connection",
+                "pat_required");
 
         var duplicate = await db.GitHubConnections.AnyAsync(
             r => r.Owner == connection.Owner && r.Repo == connection.Repo, ct);
@@ -104,6 +112,11 @@ public sealed class GitHubConnectionStore : IScopedService
         connection.Status = GitHubConnectionStatus.Active;
         connection.CreatedAt = now;
         connection.UpdatedAt = now;
+        var apiSecretAddress = ApiSecretAddress(connection.ProjectId, connection.Id);
+        await _secretStore.StoreAsync(
+            apiSecretAddress,
+            Encoding.UTF8.GetBytes(pat),
+            ct);
         db.GitHubConnections.Add(ToRow(connection));
         try
         {
@@ -111,19 +124,18 @@ public sealed class GitHubConnectionStore : IScopedService
         }
         catch (DbUpdateException ex) when (IsOwnerRepoConflict(ex))
         {
+            await _secretStore.DeleteAsync(apiSecretAddress, CancellationToken.None);
             throw new GitHubConnectionConflictException(
                 $"GitHub repository '{connection.Owner}/{connection.Repo}' is already connected to a project", "github_repository_already_connected");
+        }
+        catch
+        {
+            await _secretStore.DeleteAsync(apiSecretAddress, CancellationToken.None);
+            throw;
         }
 
         var secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
         await _secretStore.StoreAsync(WebhookSecretAddress(connection.ProjectId, connection.Id), Encoding.UTF8.GetBytes(secret), ct);
-        if (!string.IsNullOrWhiteSpace(pat))
-        {
-            await _secretStore.StoreAsync(
-                ApiSecretAddress(connection.ProjectId, connection.Id),
-                Encoding.UTF8.GetBytes(pat),
-                ct);
-        }
         return secret;
     }
 
