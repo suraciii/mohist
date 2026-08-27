@@ -39,6 +39,8 @@ interface PendingDelivery {
   wakeRetry: (() => void) | null
 }
 
+type DeliveryResult = 'succeeded' | 'failed' | 'timed-out'
+
 export function createTaskLogDeliveryQueue(options: TaskLogDeliveryQueueOptions): TaskLogDeliveryQueue {
   return new InMemoryTaskLogDeliveryQueue(options)
 }
@@ -59,6 +61,8 @@ class InMemoryTaskLogDeliveryQueue implements TaskLogDeliveryQueue {
   private readonly groups = new Map<string, PendingDelivery[]>()
   private readonly draining = new Map<string, Promise<void>>()
   private readonly activeControllers = new Set<AbortController>()
+  private readonly activeUploads = new Set<Promise<boolean>>()
+  private readonly leasedWorks = new Set<string>()
   private size = 0
   private stopped = false
 
@@ -117,7 +121,7 @@ class InMemoryTaskLogDeliveryQueue implements TaskLogDeliveryQueue {
   }
 
   private kick(workId: string): void {
-    if (this.stopped || this.draining.has(workId)) return
+    if (this.stopped || this.draining.has(workId) || this.leasedWorks.has(workId)) return
     const drain = this.drain(workId).finally(() => {
       this.draining.delete(workId)
       if (!this.stopped && (this.groups.get(workId)?.length ?? 0) > 0) this.kick(workId)
@@ -131,7 +135,9 @@ class InMemoryTaskLogDeliveryQueue implements TaskLogDeliveryQueue {
       const entry = group?.[0]
       if (!group || !entry) return
       entry.attempts += 1
-      if (await this.deliver(entry.record)) {
+      const result = await this.deliver(workId, entry)
+      if (result === 'timed-out') return
+      if (result === 'succeeded') {
         this.retire(workId, entry)
         continue
       }
@@ -157,40 +163,73 @@ class InMemoryTaskLogDeliveryQueue implements TaskLogDeliveryQueue {
     }
   }
 
-  private async deliver(record: TaskLogDeliveryRecord): Promise<boolean> {
+  private async deliver(workId: string, entry: PendingDelivery): Promise<DeliveryResult> {
+    const record = entry.record
     const controller = new AbortController()
     this.activeControllers.add(controller)
     let timeout: ReturnType<typeof setTimeout> | null = null
-    try {
-      await Promise.race([
-        this.connection.uploadTaskLog(
-          record.ownerId,
-          record.workId,
-          record.batch,
-          controller.signal,
-          record.ownerKind,
-          record.terminal,
-        ),
-        new Promise<never>((_resolve, reject) => {
-          controller.signal.addEventListener(
-            'abort',
-            () => reject(controller.signal.reason ?? new Error('task-log upload aborted')),
-            { once: true },
-          )
-          timeout = setTimeout(
-            () => controller.abort(new Error(`task-log upload timed out after ${record.timeoutMs}ms`)),
-            Math.max(1, record.timeoutMs),
-          )
-          timeout.unref?.()
-        }),
-      ])
-      return true
-    } catch {
-      return false
-    } finally {
-      if (timeout) clearTimeout(timeout)
-      this.activeControllers.delete(controller)
+    const upload = this.connection
+      .uploadTaskLog(record.ownerId, record.workId, record.batch, controller.signal, record.ownerKind, record.terminal)
+      .then(
+        () => true,
+        () => false,
+      )
+    this.activeUploads.add(upload)
+    const settled = upload.then<DeliveryResult>((succeeded) => (succeeded ? 'succeeded' : 'failed'))
+    const deadline = new Promise<DeliveryResult>((resolve) => {
+      controller.signal.addEventListener('abort', () => resolve('failed'), { once: true })
+      timeout = setTimeout(
+        () => {
+          resolve('timed-out')
+          controller.abort(new Error(`task-log upload timed out after ${record.timeoutMs}ms`))
+        },
+        Math.max(1, record.timeoutMs),
+      )
+      timeout.unref?.()
+    })
+    const result = await Promise.race([settled, deadline])
+    if (timeout) clearTimeout(timeout)
+    this.activeControllers.delete(controller)
+    if (result !== 'timed-out') {
+      this.activeUploads.delete(upload)
+      return result
     }
+
+    this.leasedWorks.add(workId)
+    void upload.then((succeeded) => this.completeLateUpload(workId, entry, upload, succeeded))
+    return result
+  }
+
+  private completeLateUpload(
+    workId: string,
+    entry: PendingDelivery,
+    upload: Promise<boolean>,
+    succeeded: boolean,
+  ): void {
+    this.activeUploads.delete(upload)
+    this.leasedWorks.delete(workId)
+    if (this.stopped) return
+    const group = this.groups.get(workId)
+    if (!group || group[0] !== entry) return
+    if (succeeded) {
+      this.retire(workId, entry)
+      this.kick(workId)
+      return
+    }
+    if (entry.attempts >= this.maxAttempts) {
+      this.warn('task-log evidence dropped after bounded delivery attempts', {
+        ...fields(entry.record),
+        attempts: entry.attempts,
+      })
+      this.retire(workId, entry)
+      this.kick(workId)
+      return
+    }
+    entry.retry = setTimeout(() => {
+      entry.retry = null
+      this.kick(workId)
+    }, this.retryDelayMs)
+    entry.retry.unref?.()
   }
 
   private retire(workId: string, entry: PendingDelivery): void {

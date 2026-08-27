@@ -1,12 +1,15 @@
 # Design: Runtime Event Outbox Delivery Lease
 
+> Historical design archived after Issue #763 removed durable Runner evidence state. The scheduling-group lease remains the required process-local fence; references below to durable snapshots describe the superseded implementation rather than current authority.
+
 ## Decision
 
 The runner keeps a process-local lease keyed by
 `runtimeEventSchedulingKey(record)`. A lease holds the immutable batch sent to
-the transport. Durable outbox state remains the sole authority for replay;
-the lease is only a local fence against concurrent sends while the original
-request could still reach the Server.
+the transport. At the time of this design, durable outbox state was the replay authority.
+Issue #763 replaced it with bounded process-local queues that are discarded on
+restart. The lease remains a local fence against concurrent sends while the
+original request could still reach the Server.
 
 ## State Model
 

@@ -113,6 +113,15 @@ interface DeliveryGroup {
   retryAt: number
 }
 
+interface DeliveryLease {
+  readonly entries: readonly QueuedRecord[]
+  readonly controller: AbortController
+}
+
+type DeliveryAttemptResult =
+  | { readonly kind: 'settled'; readonly verdicts: readonly DeliveryVerdict[] }
+  | { readonly kind: 'timed-out' }
+
 interface InputReceiptWaiter {
   readonly promise: Promise<AgentSessionRuntimeEventReceipt>
   resolve(receipt: AgentSessionRuntimeEventReceipt): void
@@ -141,6 +150,7 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
   private readonly groups = new Map<string, DeliveryGroup>()
   private readonly readyGroups: string[] = []
   private readonly inputWaiters = new Map<string, InputReceiptWaiter>()
+  private readonly deliveryLeases = new Map<string, DeliveryLease>()
   private sequence = 0
   private evidenceSize = 0
   private admissionSize = 0
@@ -226,6 +236,8 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
     const waiters = [...this.inputWaiters.values()]
     this.inputWaiters.clear()
     for (const waiter of waiters) waiter.reject(new Error('runtime-event queue stopped'))
+    for (const lease of this.deliveryLeases.values()) lease.controller.abort(new Error('runtime-event queue stopped'))
+    this.deliveryLeases.clear()
   }
 
   private enqueue(record: RuntimeEventRecord, kick = true, admission = false): boolean {
@@ -268,6 +280,11 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
       const key = this.readyGroups.shift()!
       const group = this.groups.get(key)
       if (!group || group.records.length === 0) continue
+      if (this.deliveryLeases.has(key)) {
+        this.readyGroups.push(key)
+        unavailableVisits += 1
+        continue
+      }
       if (group.retryAt > Date.now()) {
         this.readyGroups.push(key)
         unavailableVisits += 1
@@ -275,24 +292,18 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
       }
 
       const batch = contiguousBatch(group.records, this.deliveryBatchSize)
-      const verdicts = await this.attempt(batch.map((entry) => entry.record))
-      let progressed = false
-      let retryable = false
-      for (let index = 0; index < batch.length; index += 1) {
-        const verdict = verdicts[index] ?? { kind: 'retryable' as const }
-        if (verdict.kind === 'retryable') {
-          retryable = true
-          break
-        }
-        const entry = batch[index]!
-        this.retire(group, entry, verdict.kind === 'accepted' ? verdict.receipt : null, verdict.kind === 'refused')
-        progressed = true
+      const attempt = await this.attempt(key, batch)
+      if (attempt.kind === 'timed-out') {
+        this.readyGroups.push(key)
+        unavailableVisits += 1
+        continue
       }
+      const progressed = this.applyVerdicts(group, batch, attempt.verdicts)
 
       if (group.records.length === 0) {
         this.groups.delete(key)
       } else {
-        group.retryAt = retryable || !progressed ? Date.now() + this.retryDelayMs : 0
+        group.retryAt = progressed ? 0 : Date.now() + this.retryDelayMs
         this.readyGroups.push(key)
       }
       // A successful group gets another turn only after the groups already
@@ -303,46 +314,91 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
     this.scheduleRetry()
   }
 
-  private async attempt(records: readonly RuntimeEventRecord[]): Promise<readonly DeliveryVerdict[]> {
+  private async attempt(key: string, entries: readonly QueuedRecord[]): Promise<DeliveryAttemptResult> {
+    const records = entries.map((entry) => entry.record)
     const controller = new AbortController()
+    const lease: DeliveryLease = { entries, controller }
+    this.deliveryLeases.set(key, lease)
     const stop = () => controller.abort(this.stopController.signal.reason)
     this.stopController.signal.addEventListener('abort', stop, { once: true })
-    const timeout = setTimeout(
-      () => controller.abort(new Error(`runtime-event delivery timed out after ${this.deliveryTimeoutMs}ms`)),
-      this.deliveryTimeoutMs,
-    )
-    timeout.unref?.()
-    const delivery = (async () => {
-      try {
-        const receipts = this.deliver.sendBatch
-          ? await this.deliver.sendBatch(records, controller.signal)
-          : await Promise.all(records.map((record) => this.deliver.send(record, controller.signal)))
-        return records.map((record, index) => deliveryVerdict(record, receipts[index] ?? []))
-      } catch (error) {
-        if (isPermanentRefusal(error)) {
-          for (const record of records) {
-            this.warn('runtime-event evidence permanently refused and dropped', {
-              recordId: record.id,
-              eventType: record.event.type,
-              status: error.status,
-              code: error.code,
-            })
-          }
-          return records.map(() => ({ kind: 'refused' }) as const)
-        }
-        return records.map(() => ({ kind: 'retryable' }) as const)
-      }
-    })()
-    const timed = new Promise<readonly DeliveryVerdict[]>((resolve) => {
-      const onAbort = () => resolve(records.map(() => ({ kind: 'retryable' }) as const))
-      controller.signal.addEventListener('abort', onAbort, { once: true })
+    let timeout: ReturnType<typeof setTimeout> | null = null
+    const delivery = this.performDelivery(records, controller.signal)
+    const deadline = new Promise<DeliveryAttemptResult>((resolve) => {
+      timeout = setTimeout(() => {
+        controller.abort(new Error(`runtime-event delivery timed out after ${this.deliveryTimeoutMs}ms`))
+        resolve({ kind: 'timed-out' })
+      }, this.deliveryTimeoutMs)
+      timeout.unref?.()
     })
-    try {
-      return await Promise.race([delivery, timed])
-    } finally {
-      clearTimeout(timeout)
-      this.stopController.signal.removeEventListener('abort', stop)
+    const settled = delivery.then<DeliveryAttemptResult>((verdicts) => ({ kind: 'settled', verdicts }))
+    const result = await Promise.race([settled, deadline])
+    if (timeout) clearTimeout(timeout)
+    this.stopController.signal.removeEventListener('abort', stop)
+    if (result.kind === 'settled') {
+      if (this.deliveryLeases.get(key) === lease) this.deliveryLeases.delete(key)
+      return result
     }
+
+    void delivery.then((verdicts) => this.completeLateDelivery(key, lease, verdicts))
+    return result
+  }
+
+  private async performDelivery(
+    records: readonly RuntimeEventRecord[],
+    signal: AbortSignal,
+  ): Promise<readonly DeliveryVerdict[]> {
+    try {
+      const receipts = this.deliver.sendBatch
+        ? await this.deliver.sendBatch(records, signal)
+        : await Promise.all(records.map((record) => this.deliver.send(record, signal)))
+      return records.map((record, index) => deliveryVerdict(record, receipts[index] ?? []))
+    } catch (error) {
+      if (isPermanentRefusal(error)) {
+        for (const record of records) {
+          this.warn('runtime-event evidence permanently refused and dropped', {
+            recordId: record.id,
+            eventType: record.event.type,
+            status: error.status,
+            code: error.code,
+          })
+        }
+        return records.map(() => ({ kind: 'refused' }) as const)
+      }
+      return records.map(() => ({ kind: 'retryable' }) as const)
+    }
+  }
+
+  private completeLateDelivery(key: string, lease: DeliveryLease, verdicts: readonly DeliveryVerdict[]): void {
+    if (this.deliveryLeases.get(key) !== lease) return
+    this.deliveryLeases.delete(key)
+    if (this.stopped) return
+    const group = this.groups.get(key)
+    if (!group) return
+    const progressed = this.applyVerdicts(group, lease.entries, verdicts)
+    if (group.records.length === 0) {
+      this.groups.delete(key)
+    } else {
+      group.retryAt = progressed ? 0 : Date.now() + this.retryDelayMs
+      if (!this.readyGroups.includes(key)) this.readyGroups.push(key)
+    }
+    this.scheduleRetry()
+    queueMicrotask(() => void this.kick())
+  }
+
+  private applyVerdicts(
+    group: DeliveryGroup,
+    entries: readonly QueuedRecord[],
+    verdicts: readonly DeliveryVerdict[],
+  ): boolean {
+    let progressed = false
+    for (let index = 0; index < entries.length; index += 1) {
+      const verdict = verdicts[index] ?? { kind: 'retryable' as const }
+      if (verdict.kind === 'retryable') break
+      const entry = entries[index]!
+      this.retire(group, entry, verdict.kind === 'accepted' ? verdict.receipt : null, verdict.kind === 'refused')
+      progressed = true
+    }
+    return progressed
   }
 
   private retire(
@@ -368,7 +424,9 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
 
   private scheduleRetry(): void {
     if (this.stopped || this.evidenceSize + this.admissionSize === 0 || this.retry) return
-    const retryAt = Math.min(...[...this.groups.values()].map((group) => group.retryAt || Date.now()))
+    const retryableGroups = [...this.groups.values()].filter((group) => !this.deliveryLeases.has(group.key))
+    if (retryableGroups.length === 0) return
+    const retryAt = Math.min(...retryableGroups.map((group) => group.retryAt || Date.now()))
     const delay = Math.max(0, retryAt - Date.now())
     this.retry = setTimeout(() => {
       this.retry = null

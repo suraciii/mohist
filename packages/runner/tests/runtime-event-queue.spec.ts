@@ -33,8 +33,7 @@ function input(id: string, sessionId: string): RuntimeEventRecord {
 }
 
 async function flush(): Promise<void> {
-  await Promise.resolve()
-  await Promise.resolve()
+  for (let index = 0; index < 8; index += 1) await Promise.resolve()
 }
 
 afterEach(() => {
@@ -118,17 +117,21 @@ describe('in-memory runtime event queue', () => {
     await queue.stop()
   })
 
-  it('bounds a never-settling group and advances unrelated groups', async () => {
+  it('leases a timed-out group until its late success while unrelated groups progress', async () => {
     vi.useFakeTimers()
     const delivered: string[] = []
+    let completeA!: (receipts: AgentSessionRuntimeEventReceipt[]) => void
+    const pendingA = new Promise<AgentSessionRuntimeEventReceipt[]>((resolve) => {
+      completeA = resolve
+    })
     const queue = createAgentSessionRuntimeEventQueue({
       deliveryTimeoutMs: 50,
-      retryDelayMs: 1_000,
+      retryDelayMs: 100,
       deliveryBatchSize: 1,
       deliver: {
         async send(record) {
           delivered.push(record.id)
-          if (record.id === 'A1') return await new Promise<AgentSessionRuntimeEventReceipt[]>(() => {})
+          if (record.id === 'A1') return await pendingA
           return []
         },
       },
@@ -138,9 +141,53 @@ describe('in-memory runtime event queue', () => {
     const drain = queue.kick()
     await vi.advanceTimersByTimeAsync(50)
     await drain
+    await vi.advanceTimersByTimeAsync(500)
 
     expect(delivered).toEqual(['A1', 'B1'])
     expect(queue.snapshot().map((record) => record.id)).toEqual(['A1'])
+    completeA([])
+    await flush()
+    expect(queue.snapshot()).toEqual([])
+    expect(delivered).toEqual(['A1', 'B1'])
+    await queue.stop()
+  })
+
+  it('retries only after a timed-out original delivery fails late', async () => {
+    vi.useFakeTimers()
+    const delivered: string[] = []
+    let failOriginal!: (error: Error) => void
+    const original = new Promise<AgentSessionRuntimeEventReceipt[]>((_resolve, reject) => {
+      failOriginal = reject
+    })
+    let calls = 0
+    const queue = createAgentSessionRuntimeEventQueue({
+      deliveryTimeoutMs: 50,
+      retryDelayMs: 100,
+      deliveryBatchSize: 1,
+      deliver: {
+        async send(record) {
+          delivered.push(record.id)
+          calls += 1
+          if (calls === 1) return await original
+          return []
+        },
+      },
+    })
+
+    await queue.enqueueProducedFact(event('A1', 'A'))
+    const drain = queue.kick()
+    await vi.advanceTimersByTimeAsync(50)
+    await drain
+    await vi.advanceTimersByTimeAsync(500)
+    expect(delivered).toEqual(['A1'])
+
+    failOriginal(new Error('late failure'))
+    await flush()
+    await vi.advanceTimersByTimeAsync(99)
+    expect(delivered).toEqual(['A1'])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(delivered).toEqual(['A1', 'A1'])
+    expect(queue.snapshot()).toEqual([])
     await queue.stop()
   })
 
