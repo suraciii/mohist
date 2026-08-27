@@ -92,6 +92,7 @@ Architecture and design documents are under [`design/`](design/README.md).
 - `packages/cli/`: `mo` CLI
 - `docs/`: user documentation
 - `design/`: architecture and design documentation
+- `eng/`: repository engineering practices
 
 ## Contributing
 

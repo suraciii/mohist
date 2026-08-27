@@ -9,6 +9,10 @@ This is an engineering practice of this repository, not a product
 specification. `docs/` and `design/` specify the Mohist product; `eng/`
 specifies how the repository itself is built, tested, and documented.
 
+This is an engineering practice of this repository, not a product
+specification. `docs/` and `design/` specify the Mohist product; `eng/`
+specifies how the repository itself is built, tested, and documented.
+
 ## Design Drivers
 
 Context management serves the agent. The repository is the primary context
@@ -52,14 +56,22 @@ format.
 One fact has one home. Other documents link to the home; they never restate
 the fact.
 
+The subject of a document fixes its layer:
+
+- **`docs/`** — the product specification: what the product must satisfy.
+  Written for users.
+- **`design/`** — the product design: why the system has its boundaries and
+  which contracts implementations must preserve. Written for developers.
+- **`eng/`** — repository engineering practices: how this repository itself
+  is built, tested, and documented. Written for contributors and agents.
+  These documents govern the repository, not the product.
+
+Cross-cutting homes:
+
 - **Root `AGENTS.md`** holds only rules that apply across the whole
   repository. Each rule links to the document that owns the detail.
 - **`CONTEXT.md`** is the single entry point for term definitions.
-- **`docs/`** holds the product specification: what the product must satisfy.
-- **`design/`** holds the design specification: why the boundaries exist and
-  which contracts implementations must preserve.
-- **`eng/`** holds repository engineering practices, such as this document.
-  They govern the repository, not the product.
+- **`README.md` files** index their directory.
 - **Scoped rule files are named `AGENTS.md`.** Agent tooling loads `AGENTS.md`
   files automatically when work enters their tree; a rules file that loads
   itself cannot be forgotten. Names such as `_agents.md` or `agents.md` hide
@@ -123,7 +135,7 @@ These rules govern every specification document, in `docs/`, `design/`, and
   claim compliance. Keep domain identifiers, field names, API names, commands,
   serialized values, and code symbols in their exact spelling. Use `must`,
   `may`, and `must not` for requirements, options, and prohibitions.
-- Keep terms consistent with [`CONTEXT.md`](../../CONTEXT.md). Define a term
+- Keep terms consistent with [`CONTEXT.md`](../CONTEXT.md). Define a term
   once and link to it.
 - State normative rules in prose, and use numbered steps for a linear
   procedure.
@@ -156,7 +168,13 @@ them.
 
 - The existing records in `design/decisions/` predate the authoring contract.
   They do not carry Status lines and do not follow the section skeleton.
+- Many `design/` documents predate the no-history rule and carry
+  `## Decision History` sections. The history belongs to decision records.
+- `design/slack-go-port.md` is a converged port plan, and
+  `eng/mohist/browser-acceptance.md` is a planned-work document that predates
+  the writing rules. Their durable facts belong to their owning documents;
+  the rest belongs to Issues.
 - `npm run docs:check` does not yet gate the Status line or the
   `## Alternatives considered` section of decision records.
 - `npm run docs:check` covers `docs/` and `design/` only. It must extend to
-  `eng/`; the existing `eng/` documents predate the writing rules.
+  `eng/`.

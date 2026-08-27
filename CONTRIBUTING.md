@@ -15,7 +15,7 @@ Thanks for your interest in mohist!
 1. Create a branch from master.
 2. Implement the change with tests for new behavior.
 3. Run the build, typecheck, and tests the change requires. Command details
-   live in `AGENTS.md` and `design/testing.md`.
+   live in `AGENTS.md` and `eng/testing.md`.
 4. Commit with [Conventional Commits](https://www.conventionalcommits.org/):
    `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`.
 5. Push and open a pull request into master, following the PR template.

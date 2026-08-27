@@ -8,7 +8,7 @@ Active development.
 - runner: TypeScript, Node (`packages/runner/`)
 - web: React 19 + Vite + TanStack Query (`packages/web/`)
 - cli: .NET, command `mo` (`packages/cli/`)
-- `docs/` user docs · `design/` developer design
+- `docs/` user docs · `design/` developer design · `eng/` repository engineering practices
 
 ## Engineering Principles
 
@@ -32,7 +32,7 @@ Active development.
 ## Specs
 
 - Write the spec before implementing: `docs/` = product spec, `design/` = design spec.
-- The repository holds durable context only; transient artifacts (plans, research notes, progress logs) belong to the Issue and the workspace, not git. Context layout and rules: `eng/mohist/context-management.md`.
+- The repository holds durable context only; transient artifacts (plans, research notes, progress logs) belong to the Issue and the workspace, not git. Context layout and rules: `eng/context-management.md`.
 - Body is the spec; the gap is the footnote.
 - This file holds only rules that apply across the whole repo. Narrow-scope technical details belong in code comments, not here.
 - Comments explain "why", never "what"; they never cite docs or issues.

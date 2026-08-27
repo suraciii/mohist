@@ -4,7 +4,7 @@
 satisfy. Write for users and Agents who do not read the source code.
 
 Shared writing rules (language, diagrams, fences, tables, examples) live in
-[`../eng/mohist/context-management.md`](../eng/mohist/context-management.md#writing-rules).
+[`../eng/context-management.md`](../eng/context-management.md#writing-rules).
 
 ## Rules
 
