@@ -81,7 +81,10 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"labels:   {labels}");
         var workflowProfileId = StringOf(data, "workflowProfileId");
         var noWorkflow = data["noWorkflow"]?.GetValue<bool>() == true;
-        _out.WriteLine($"workflow: {(noWorkflow ? "none" : workflowProfileId)}");
+        if (noWorkflow)
+            _out.WriteLine("workflow: none");
+        else if (!string.IsNullOrEmpty(workflowProfileId))
+            _out.WriteLine($"profile:  {workflowProfileId}");
         if (!string.IsNullOrEmpty(body))
             _out.WriteLine($"body:     {Truncate(body, BodySoftCap)}");
         var parentRef = data["parentIssueRef"] as JsonObject;

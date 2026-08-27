@@ -635,7 +635,7 @@ export function IssueDetailPage({ components, mutationDependencies }: IssueDetai
               {!isCompositeParent && (
                 <CollapsibleRailCard
                   testId="reference-rail-workflow-profile"
-                  title="Workflow"
+                  title="Workflow Profile"
                   forceCollapsed={isNarrowViewport}
                   summary={issue.noWorkflow ? 'none' : (issue.workflowProfileId ?? 'default')}
                 >
