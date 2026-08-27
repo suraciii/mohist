@@ -10,6 +10,7 @@ public sealed class GitHubIssueLink
     public int IssueNumber { get; set; }
     public string? MirrorMarker { get; set; }
     public bool MirrorCreateAttempted { get; set; }
+    public bool CommandRequested { get; set; }
     public IReadOnlySet<string> PostedComments { get; set; } = new HashSet<string>(StringComparer.Ordinal);
 
     /// <summary>
@@ -36,7 +37,27 @@ public sealed class GitHubIssueLink
 /// </summary>
 public static class GitHubCommentKinds
 {
-    public const string FeedRejected = "feed-rejected";
+    public const string CommandReplyUnknownVerb = "command-reply-unknown-verb";
+    public const string CommandReplyStarted = "command-reply-started";
+    public const string CommandReplyAlreadyLinked = "command-reply-already-linked";
+    public const string CommandReplyStartFailed = "command-reply-start-failed";
+
+    public static string CommandReply(string commentId) => $"command-reply:{commentId}";
+
+    public static string CommandReplyOperationKey(
+        string connectionId,
+        int githubIssueNumber,
+        string commentId,
+        string replyKind) =>
+        $"command-reply:{connectionId}:{githubIssueNumber}:{commentId}:{replyKind}";
+
+    public static string CommandReplyMarker(
+        string connectionId,
+        int githubIssueNumber,
+        string commentId,
+        string replyKind) =>
+        $"<!-- mohist:command-reply:{connectionId}:{githubIssueNumber}:{commentId}:{replyKind} -->";
+
     public const string MirrorCreated = "writeback-mirror-created";
     public const string WorkStarted = "writeback-work-started";
     public const string ApprovalRequested = "writeback-approval-requested";
@@ -48,8 +69,7 @@ public static class GitHubCommentKinds
 
 /// <summary>
 /// The mutually-exclusive <c>mohist:</c> state label family projected onto
-/// fed GitHub issues. The intake label must not use this prefix (enforced
-/// by <see cref="GitHubConnection.Validate"/>).
+/// linked GitHub issues.
 /// </summary>
 public static class GitHubStateLabels
 {

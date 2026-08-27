@@ -9,8 +9,6 @@ public sealed class GitHubConnectionRow
     public required string Owner { get; set; }
     public required string Repo { get; set; }
     public required string RepositoryName { get; set; }
-    public required string IntakeLabel { get; set; }
-    public required string FeedMode { get; set; }
     public required string ApproversJson { get; set; }
     public required string Status { get; set; }
     public required string IdentityKind { get; set; }

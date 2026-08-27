@@ -2137,8 +2137,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("StoredSecrets", null, t =>
                         {
                             t.HasCheckConstraint("CK_StoredSecrets_Kind", "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret', 'clientSecret', 'signingSecret', 'configurationAccessToken', 'configurationRefreshToken', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken', 'publicApiCursorKey')");
-                            t.HasCheckConstraint("CK_StoredSecrets_OwnerKindKind", "(\"OwnerKind\" = 'agent_connection' AND \"Kind\" IN ('appToken', 'botToken')) OR (\"OwnerKind\" = 'webhook_subscription' AND \"Kind\" = 'webhookSecret') OR (\"OwnerKind\" = 'slack_workspace_enrollment' AND \"Kind\" IN ('configurationAccessToken', 'configurationRefreshToken', 'appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR (\"OwnerKind\" = 'managed_slack_agent_app' AND \"Kind\" IN ('appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR (\"OwnerKind\" = 'server' AND \"Kind\" = 'publicApiCursorKey')");
-                            t.HasCheckConstraint("CK_StoredSecrets_OwnerKind", "\"OwnerKind\" IN ('agent_connection', 'webhook_subscription', 'slack_workspace_enrollment', 'managed_slack_agent_app', 'server')");
+                            t.HasCheckConstraint("CK_StoredSecrets_OwnerKindKind", "(\"OwnerKind\" = 'agent_connection' AND \"Kind\" IN ('appToken', 'botToken')) OR (\"OwnerKind\" = 'webhook_subscription' AND \"Kind\" = 'webhookSecret') OR (\"OwnerKind\" = 'slack_workspace_enrollment' AND \"Kind\" IN ('configurationAccessToken', 'configurationRefreshToken', 'appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR (\"OwnerKind\" = 'managed_slack_agent_app' AND \"Kind\" IN ('appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR (\"OwnerKind\" = 'github_connection' AND \"Kind\" = 'appToken') OR (\"OwnerKind\" = 'server' AND \"Kind\" = 'publicApiCursorKey')");
+                            t.HasCheckConstraint("CK_StoredSecrets_OwnerKind", "\"OwnerKind\" IN ('agent_connection', 'webhook_subscription', 'slack_workspace_enrollment', 'managed_slack_agent_app', 'github_connection', 'server')");
                         });
                 });
 
@@ -4636,11 +4636,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("FeedMode")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("IdentityKind")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -4652,11 +4647,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.Property<bool>("NeedsAttention")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("IntakeLabel")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("Owner")
                         .IsRequired()
@@ -4700,6 +4690,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("Id")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("CommandRequested")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
@@ -4748,6 +4741,81 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasFilter("\"GithubIssueNumber\" > 0");
 
                     b.ToTable("GitHubIssueLinks", (string)null);
+                });
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.GitHub.GitHubCommandReplyRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GithubCommentId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("GithubIssueNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Marker")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OperationKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("FailedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("PostedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RepositoryName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConnectionId", "GithubIssueNumber", "GithubCommentId", "OperationKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_GitHubCommandReplies_Connection_Issue_Comment_Operation");
+
+                    b.ToTable("GitHubCommandReplies", (string)null);
                 });
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.GitHub.GitHubWriteBackFailureRow", b =>
                 {

@@ -27,13 +27,12 @@ unambiguously determines its mirror location.
 
 Credentials stay out of the connection record and follow the existing
 [`ISecretStore`](../packages/server/src/Mohist.Server/Infrastructure/Security/Secrets/ISecretStore.cs)
-boundaries: an inbound signature secret per connection, one deployment-level
-GitHub App private key, and an optional fallback PAT with Issues read and write
-only. The Server holds no long-lived GitHub access token; installation tokens
-are exchanged on demand, restricted to the target repository, cached in memory,
-and never written to disk. Direct Server calls to the GitHub API are limited to
-Issue and comment operations; git content operations remain Runner-side through
-delivery-token issuance.
+boundaries: an inbound signature secret and, for the current connection API, a
+required fine-grained PAT with Issues read and write only. The Server stores the
+PAT as a secret and never exposes it in connection reads. GitHub App
+installation-token exchange is not implemented yet. Direct Server calls to the
+GitHub API are limited to Issue and comment operations; git content operations
+remain Runner-side through delivery-token issuance.
 
 ### GitHubIssueLink
 
@@ -156,18 +155,19 @@ Mirroring is reliable by reconciliation, not by queueing:
 
 ## Status
 
-Implemented today: signed ingress and normalization, the pre-command
-label-based intake path with its close withdrawal, Pull Request review Approval,
-best-effort write-back with durable failure records, the core no-Workflow Issue
-lifecycle, the GitHub mirror link visibility in the Issue read models, CLI, and
-Web, automatic ready-only mirroring with durable Pending intent and invisible
-marker reconciliation, and two-way title/body sync with equality echo
-suppression. New feed-created issues no longer emit the `github-issue` origin
-label; historical feed-created links may retain it as data. The current link projection
-uses a deliberately provisional `healthy` sync state; real sync-health
-reporting and reconcile-based recovery belong to the later recovery slice.
-Feed-by-label intake and its connection options are removed when the command
-entry lands.
+Implemented today: the #770 no-Workflow Issue lifecycle, #771 GitHub mirror
+visibility in the Issue read models, CLI, and Web, #772 automatic ready-only
+mirroring with durable Pending intent, invisible marker reconciliation, and
+two-way title/body sync with equality echo suppression, and #773 `/mohist start`
+command intake with GitHub permission gating, p0-p4 priority mapping,
+idempotent link creation, durable command replies, refusal replies, and
+reliable command reply recovery. Signed ingress and normalization, close
+withdrawal, Pull Request review Approval, and best-effort write-back with
+durable failure records are included. Connection creation configures a
+fine-grained PAT with Issues read/write when supplied; GitHub App identity
+remains unimplemented. Connection configuration contains only Repository
+binding, identity, and Approvers. The later sync-health and operator-recovery
+slice remains open.
 
 Open questions:
 

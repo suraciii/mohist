@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
 
@@ -13,6 +15,8 @@ public static class GitHubConnectionRoutes
         group.MapPost("", async (HttpContext context, GitHubConnectionCreateRequest request, GitHubConnectionStore store, CancellationToken ct) =>
         {
             if (request is null) return ApiResults.BadRequest("request body required");
+            if (request.AdditionalProperties is { Count: > 0 })
+                return ApiResults.BadRequest($"Unknown GitHub connection option '{request.AdditionalProperties.Keys.First()}'.", "unknown_option");
             var project = context.GetResolvedProject();
             var connection = new GitHubConnection
             {
@@ -20,13 +24,12 @@ public static class GitHubConnectionRoutes
                 ProjectId = project.Id,
                 Owner = request.Owner ?? string.Empty,
                 Repo = request.Repo ?? string.Empty,
-                IntakeLabel = string.IsNullOrWhiteSpace(request.IntakeLabel) ? GitHubIntakeLabel.Default : request.IntakeLabel.Trim(),
-                FeedMode = string.IsNullOrWhiteSpace(request.FeedMode) ? GitHubFeedMode.Start : request.FeedMode,
                 Approvers = request.Approvers ?? [],
+                IdentityKind = GitHubIdentityKind.Pat,
             };
             try
             {
-                var webhookSecret = await store.CreateAsync(connection, ct);
+                var webhookSecret = await store.CreateAsync(connection, request.Pat, ct);
                 return Results.Json(
                     new ApiResponse<GitHubConnectionDto>(true, ToDto(connection, webhookSecret)),
                     statusCode: StatusCodes.Status201Created);
@@ -62,6 +65,8 @@ public static class GitHubConnectionRoutes
         group.MapPatch("/{connectionId}", async (HttpContext context, string connectionId, GitHubConnectionUpdateRequest? request, GitHubConnectionStore store, CancellationToken ct) =>
         {
             if (request is null) return ApiResults.BadRequest("request body required");
+            if (request.AdditionalProperties is { Count: > 0 })
+                return ApiResults.BadRequest($"Unknown GitHub connection option '{request.AdditionalProperties.Keys.First()}'.", "unknown_option");
             var project = context.GetResolvedProject();
             try
             {
@@ -97,7 +102,7 @@ public static class GitHubConnectionRoutes
 
     private static GitHubConnectionDto ToDto(GitHubConnection connection, string? webhookSecret = null) => new(
         connection.Id, connection.ProjectId, connection.Owner, connection.Repo, connection.RepositoryName,
-        connection.IntakeLabel, connection.FeedMode, connection.Approvers.ToArray(), connection.Status,
+        connection.Approvers.ToArray(), connection.Status,
         connection.IdentityKind, connection.InstallationId, webhookSecret, connection.CreatedAt, connection.UpdatedAt);
 
     private static IResult MapError(Exception exception) => exception switch
@@ -110,15 +115,22 @@ public static class GitHubConnectionRoutes
 
 public sealed record GitHubConnectionDto(
     string Id, string ProjectId, string Owner, string Repo, string RepositoryName,
-    string IntakeLabel, string FeedMode, string[] Approvers, string Status,
+    string[] Approvers, string Status,
     string IdentityKind, string? InstallationId, string? WebhookSecret,
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 
 public sealed record GitHubConnectionCreateRequest(
     string? Owner,
     string? Repo,
-    string? FeedMode,
-    string? IntakeLabel,
-    string[]? Approvers);
+    string[]? Approvers,
+    string? Pat)
+{
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? AdditionalProperties { get; init; }
+}
 
-public sealed record GitHubConnectionUpdateRequest(string[]? Approvers);
+public sealed record GitHubConnectionUpdateRequest(string[]? Approvers)
+{
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? AdditionalProperties { get; init; }
+}

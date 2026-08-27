@@ -51,6 +51,7 @@ using Mohist.Server.Slack.Services;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Infrastructure.Slack.Ports;
 using Mohist.Server.GitHub.Ports;
+using Mohist.Server.GitHub.Infrastructure;
 using Mohist.Server.Webhooks;
 
 namespace Mohist.Server.Infrastructure.Hosting;
@@ -255,6 +256,9 @@ public static class MohistServiceRegistration
             client.DefaultRequestHeaders.UserAgent.ParseAdd("mohist");
         });
         services.AddScoped<IGitHubIssuePort>(sp => (IGitHubIssuePort)sp.GetRequiredService<IGitHubCommentPort>());
+        services.AddSingleton<GitHubCommandReplyDeliverySignal>();
+        services.AddSingleton<GitHubCommandReplyDeliveryWorker>();
+        services.AddHostedService(sp => sp.GetRequiredService<GitHubCommandReplyDeliveryWorker>());
 
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);

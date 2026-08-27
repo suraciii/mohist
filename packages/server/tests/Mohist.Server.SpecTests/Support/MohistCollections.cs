@@ -82,8 +82,8 @@ public class WorkflowRuntimeIntegrationCollection : ICollectionFixture<IsolatedM
 public class RepositoryDataUpgradeCollection
     : ICollectionFixture<Specs.Issue.Api.RepositoryDataUpgradeFixture>;
 
-[CollectionDefinition("GitHubFeed")]
-public class GitHubFeedCollection : ICollectionFixture<GitHubFeedFixture>;
+[CollectionDefinition("GitHubCommand")]
+public class GitHubCommandCollection : ICollectionFixture<GitHubCommandFixture>;
 
 // OTLP/query route specs share one OtlpRoutesWebApplicationFactory (web host
 // + in-memory silo). Tests reset the otel

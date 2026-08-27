@@ -64,6 +64,10 @@ public sealed class GitHubMirrorMigrationTests
             Assert.False(repositoryIndex.IsUnique);
         }
 
+        var connectionColumns = await ReadColumnsAsync(connection, "GitHubConnections");
+        Assert.DoesNotContain("FeedMode", connectionColumns);
+        Assert.DoesNotContain("IntakeLabel", connectionColumns);
+
         var linkColumns = await ReadColumnsAsync(connection, "GitHubIssueLinks");
         Assert.Contains("MirrorMarker", linkColumns);
         Assert.Contains("MirrorCreateAttempted", linkColumns);

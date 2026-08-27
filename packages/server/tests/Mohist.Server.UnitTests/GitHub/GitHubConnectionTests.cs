@@ -21,22 +21,8 @@ public sealed class GitHubConnectionTests
     }
 
     [Fact]
-    public void Validate_RejectsReservedIntakeLabelPrefix()
-    {
-        var connection = Valid();
-        connection.IntakeLabel = "mohist:in-progress";
-
-        var ex = Assert.Throws<GitHubConnectionValidationException>(() => connection.Validate(requireInstallationId: false));
-        Assert.Equal("intake_label_prefix_reserved", ex.Code);
-    }
-
-    [Fact]
     public void Validate_RejectsInvalidEnums()
     {
-        var feedMode = Valid();
-        feedMode.FeedMode = "instant";
-        Assert.Throws<GitHubConnectionValidationException>(() => feedMode.Validate(requireInstallationId: false));
-
         var status = Valid();
         status.Status = "archived";
         Assert.Throws<GitHubConnectionValidationException>(() => status.Validate(requireInstallationId: false));
@@ -50,6 +36,7 @@ public sealed class GitHubConnectionTests
     public void Validate_RequiresInstallationIdForAppIdentityWhenDemanded()
     {
         var connection = Valid();
+        connection.IdentityKind = GitHubIdentityKind.App;
 
         var ex = Assert.Throws<GitHubConnectionValidationException>(() => connection.Validate());
         Assert.Equal("installation_id_required", ex.Code);

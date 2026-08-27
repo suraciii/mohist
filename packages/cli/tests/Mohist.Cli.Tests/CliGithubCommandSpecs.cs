@@ -14,7 +14,6 @@ public sealed class CliGithubCommandSpecs
         owner = "octocat",
         repo = "hello-world",
         repositoryName = "hello-world",
-        feedMode = "start",
         approvers = new[] { "alice" },
         status = "active",
         webhookSecret = "top-secret-hex",
@@ -30,7 +29,7 @@ public sealed class CliGithubCommandSpecs
 
         Assert.Equal(0, exit);
         Assert.Contains("owner/repo", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("--feed-mode", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("--feed-mode", output.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
@@ -61,7 +60,7 @@ public sealed class CliGithubCommandSpecs
 
         var exit = await MohistCliCommands.RunAsync(
             http,
-            ["github", "connect", "octocat/hello-world", "--feed-mode", "backlog", "--approver", "alice", "--project", "proj_test"],
+            ["github", "connect", "octocat/hello-world", "--approver", "alice", "--pat", "github-pat", "--project", "proj_test"],
             output,
             error,
             fs,
@@ -74,14 +73,45 @@ public sealed class CliGithubCommandSpecs
         var body = JsonNode.Parse(request.Body!)!.AsObject();
         Assert.Equal("octocat", body["owner"]!.GetValue<string>());
         Assert.Equal("hello-world", body["repo"]!.GetValue<string>());
-        Assert.Equal("backlog", body["feedMode"]!.GetValue<string>());
         Assert.Equal("alice", body["approvers"]![0]!.GetValue<string>());
+        Assert.Equal("github-pat", body["pat"]!.GetValue<string>());
         var text = output.ToString();
+        Assert.DoesNotContain("github-pat", text, StringComparison.Ordinal);
         Assert.Contains("Payload URL:", text, StringComparison.Ordinal);
         Assert.Contains("/api/github-connections/ghconn_1/ingress", text, StringComparison.Ordinal);
         Assert.Contains("Secret:       top-secret-hex", text, StringComparison.Ordinal);
-        Assert.Contains("issues, pull_request_review, check_suite", text, StringComparison.Ordinal);
+        Assert.Contains("issues, issue_comment, pull_request_review, check_suite", text, StringComparison.Ordinal);
         Assert.DoesNotContain("top-secret-hex", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Connect_RequiresPatWithoutSendingRequest()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["github", "connect", "octocat/hello-world", "--project", "proj_test"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("--pat is required", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Connect_RemovedFeedOption_IsRejected()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["github", "connect", "octocat/hello-world", "--feed-mode", "backlog", "--project", "proj_test"],
+            output,
+            error,
+            fs,
+            executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
@@ -96,7 +126,7 @@ public sealed class CliGithubCommandSpecs
 
         var exit = await MohistCliCommands.RunAsync(
             http,
-            ["github", "connect", "octocat/hello-world", "--project", "proj_test", "--json", "id,ingressUrl"],
+            ["github", "connect", "octocat/hello-world", "--pat", "github-pat", "--project", "proj_test", "--json", "id,ingressUrl"],
             output,
             error,
             fs,
@@ -135,7 +165,6 @@ public sealed class CliGithubCommandSpecs
                 owner = "octocat",
                 repo = "hello-world",
                 repositoryName = "hello-world",
-                feedMode = "start",
                 approvers = new[] { "alice", "bob" },
                 status = "active",
                 webhookSecret = (string?)null,
@@ -174,7 +203,6 @@ public sealed class CliGithubCommandSpecs
                 owner = "octocat",
                 repo = "hello-world",
                 repositoryName = "hello-world",
-                feedMode = "start",
                 approvers = Array.Empty<string>(),
                 status = "active",
                 webhookSecret = (string?)null,

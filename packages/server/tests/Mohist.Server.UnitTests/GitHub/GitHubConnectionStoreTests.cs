@@ -91,7 +91,7 @@ public sealed class GitHubConnectionStoreTests
         var store = NewStore(database, secrets);
         var connection = Connection();
 
-        var secret = await store.CreateAsync(connection);
+        var secret = await store.CreateAsync(connection, pat: "github-pat");
 
         Assert.Equal("hello-world", connection.RepositoryName);
         Assert.Equal(GitHubConnectionStatus.Active, connection.Status);
@@ -99,6 +99,36 @@ public sealed class GitHubConnectionStoreTests
         var stored = await store.LoadWebhookSecretAsync("proj_1", connection.Id);
         Assert.NotNull(stored);
         Assert.Equal(64, stored.Length);
+    }
+
+    [Fact]
+    public async Task CreateAsync_RejectsMissingPatWithoutPersistingConnection()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var store = NewStore(database, new FakeSecretStore());
+        var connection = Connection();
+
+        var ex = await Assert.ThrowsAsync<GitHubConnectionValidationException>(
+            () => store.CreateAsync(connection));
+
+        Assert.Equal("pat_required", ex.Code);
+        Assert.Empty(await store.ListAsync("proj_1"));
+    }
+
+    [Fact]
+    public async Task CreateAsync_StoresConfiguredPatInConnectionSecret()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var secrets = new FakeSecretStore();
+        var store = NewStore(database, secrets);
+        var connection = Connection();
+
+        await store.CreateAsync(connection, pat: "github-pat");
+
+        var stored = await secrets.LoadAsync(
+            GitHubConnectionStore.ApiSecretAddress("proj_1", connection.Id));
+        Assert.Equal("github-pat", System.Text.Encoding.UTF8.GetString(stored!));
+        Assert.Equal(GitHubIdentityKind.Pat, connection.IdentityKind);
     }
 
     [Fact]
@@ -121,7 +151,7 @@ public sealed class GitHubConnectionStoreTests
         var store = NewStore(database, new FakeSecretStore());
 
         var connection = Connection();
-        await store.CreateAsync(connection);
+        await store.CreateAsync(connection, pat: "github-pat");
 
         Assert.Equal("Hello-World", connection.RepositoryName);
     }
@@ -132,9 +162,9 @@ public sealed class GitHubConnectionStoreTests
         var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
         var store = NewStore(database, new FakeSecretStore());
 
-        await store.CreateAsync(Connection());
+        await store.CreateAsync(Connection(), pat: "github-pat");
         var ex = await Assert.ThrowsAsync<GitHubConnectionConflictException>(
-            () => store.CreateAsync(Connection()));
+            () => store.CreateAsync(Connection(), pat: "github-pat"));
 
         Assert.Equal("github_repository_already_connected", ex.Code);
     }
@@ -146,7 +176,7 @@ public sealed class GitHubConnectionStoreTests
         var store = NewStore(database, new FakeSecretStore());
 
         var connection = Connection(owner: "OCTOCAT", repo: "Hello-World");
-        await store.CreateAsync(connection);
+        await store.CreateAsync(connection, pat: "github-pat");
 
         Assert.Equal("octocat", connection.Owner);
         Assert.Equal("hello-world", connection.Repo);
@@ -160,7 +190,7 @@ public sealed class GitHubConnectionStoreTests
 
         var connection = Connection();
         connection.Approvers = [" alice ", "Alice", "", "bob"];
-        await store.CreateAsync(connection);
+        await store.CreateAsync(connection, pat: "github-pat");
 
         Assert.Equal(["alice", "bob"], connection.Approvers);
         Assert.Equal(["alice", "bob"], (await store.GetAsync("proj_1", connection.Id))!.Approvers);
@@ -172,7 +202,7 @@ public sealed class GitHubConnectionStoreTests
         var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
         var store = NewStore(database, new FakeSecretStore());
         var connection = Connection();
-        await store.CreateAsync(connection);
+        await store.CreateAsync(connection, pat: "github-pat");
 
         var disabled = await store.SetStatusAsync("proj_1", connection.Id, GitHubConnectionStatus.Disabled);
         Assert.Equal(GitHubConnectionStatus.Disabled, disabled!.Status);
@@ -184,13 +214,55 @@ public sealed class GitHubConnectionStoreTests
     }
 
     [Fact]
+    public async Task SetStatusAsync_EnableRejectsDeletedPatAndLeavesConnectionDisabled()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var secrets = new FakeSecretStore();
+        var store = NewStore(database, secrets);
+        var connection = Connection();
+        await store.CreateAsync(connection, pat: "github-pat");
+        await store.SetStatusAsync("proj_1", connection.Id, GitHubConnectionStatus.Disabled);
+        await secrets.DeleteAsync(GitHubConnectionStore.ApiSecretAddress("proj_1", connection.Id));
+
+        var ex = await Assert.ThrowsAsync<GitHubConnectionValidationException>(() =>
+            store.SetStatusAsync("proj_1", connection.Id, GitHubConnectionStatus.Active));
+
+        Assert.Equal("pat_required", ex.Code);
+        Assert.Equal(
+            GitHubConnectionStatus.Disabled,
+            (await store.GetAsync("proj_1", connection.Id))!.Status);
+    }
+
+    [Fact]
+    public async Task SetStatusAsync_EnableRejectsBlankPatAndLeavesConnectionDisabled()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var secrets = new FakeSecretStore();
+        var store = NewStore(database, secrets);
+        var connection = Connection();
+        await store.CreateAsync(connection, pat: "github-pat");
+        await store.SetStatusAsync("proj_1", connection.Id, GitHubConnectionStatus.Disabled);
+        await secrets.StoreAsync(
+            GitHubConnectionStore.ApiSecretAddress("proj_1", connection.Id),
+            System.Text.Encoding.UTF8.GetBytes(" \t\r\n"));
+
+        var ex = await Assert.ThrowsAsync<GitHubConnectionValidationException>(() =>
+            store.SetStatusAsync("proj_1", connection.Id, GitHubConnectionStatus.Active));
+
+        Assert.Equal("pat_required", ex.Code);
+        Assert.Equal(
+            GitHubConnectionStatus.Disabled,
+            (await store.GetAsync("proj_1", connection.Id))!.Status);
+    }
+
+    [Fact]
     public async Task UpdateApproversAsync_ReplacesList_TrimsAndDeduplicates()
     {
         var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
         var store = NewStore(database, new FakeSecretStore());
         var connection = Connection();
         connection.Approvers = ["old-approver"];
-        await store.CreateAsync(connection);
+        await store.CreateAsync(connection, pat: "github-pat");
 
         var updated = await store.UpdateApproversAsync("proj_1", connection.Id, [" alice ", "Alice", "", "bob"]);
 
@@ -210,7 +282,7 @@ public sealed class GitHubConnectionStoreTests
             timeProvider);
         var connection = Connection();
         connection.Approvers = ["alice"];
-        await store.CreateAsync(connection);
+        await store.CreateAsync(connection, pat: "github-pat");
         timeProvider.Advance(TimeSpan.FromMinutes(5));
 
         var updated = await store.UpdateApproversAsync("proj_1", connection.Id, null);
@@ -227,7 +299,7 @@ public sealed class GitHubConnectionStoreTests
         var store = NewStore(database, new FakeSecretStore());
         var connection = Connection();
         connection.Approvers = ["alice"];
-        await store.CreateAsync(connection);
+        await store.CreateAsync(connection, pat: "github-pat");
 
         var updated = await store.UpdateApproversAsync("proj_1", connection.Id, []);
 
@@ -256,7 +328,7 @@ public sealed class GitHubConnectionStoreTests
             new FakeSecretStore(),
             timeProvider);
         var connection = Connection();
-        await store.CreateAsync(connection);
+        await store.CreateAsync(connection, pat: "github-pat");
         var before = (await store.GetAsync("proj_1", connection.Id))!.UpdatedAt;
         timeProvider.Advance(TimeSpan.FromMinutes(5));
 

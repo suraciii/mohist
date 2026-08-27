@@ -44,8 +44,6 @@ public class IssueApiSpecs
                 Owner = owner,
                 Repo = "mohist",
                 RepositoryName = "main",
-                IntakeLabel = "mohist",
-                FeedMode = "backlog",
                 ApproversJson = "[]",
                 Status = "active",
                 IdentityKind = "pat",

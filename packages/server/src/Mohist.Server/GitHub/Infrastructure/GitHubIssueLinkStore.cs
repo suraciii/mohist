@@ -42,9 +42,8 @@ public sealed class GitHubIssueLinkStore : IScopedService
 
     /// <summary>
     /// Finds the link for a Mohist issue. The write-back writer projects
-    /// progress from Mohist events and needs the reverse lookup; the feed
-    /// guarantees at most one link per Mohist issue (an issue is created
-    /// exactly once), so the first match is the one.
+    /// progress from Mohist events and needs the reverse lookup; the unique
+    /// issue index guarantees at most one link per Mohist issue.
     /// </summary>
     public async Task<GitHubIssueLink?> GetByIssueAsync(
         string projectId,
@@ -64,15 +63,16 @@ public sealed class GitHubIssueLinkStore : IScopedService
     /// <summary>
     /// First-writer-wins insert: the unique index on
     /// <c>(ProjectId, RepositoryName, GithubIssueNumber)</c> makes a
-    /// concurrent or redelivered feed deterministically lose to the
-    /// existing link, which is then returned. Returns the winning link in
-    /// both cases.
+    /// concurrent or redelivered mirror/command deterministically lose to
+    /// the existing link, which is then returned. Returns the winning link
+    /// in both cases.
     /// </summary>
     public async Task<GitHubIssueLink> CreateAsync(
         string projectId,
         string repositoryName,
         int githubIssueNumber,
         int issueNumber,
+        bool commandRequested = false,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
@@ -92,6 +92,7 @@ public sealed class GitHubIssueLinkStore : IScopedService
             IssueNumber = issueNumber,
             MirrorMarker = null,
             MirrorCreateAttempted = false,
+            CommandRequested = commandRequested,
             PostedCommentsJson = "[]",
             CreatedAt = now,
             UpdatedAt = now,
@@ -135,6 +136,7 @@ public sealed class GitHubIssueLinkStore : IScopedService
             IssueNumber = issueNumber,
             MirrorMarker = GitHubMirrorMarker.For(id),
             MirrorCreateAttempted = false,
+            CommandRequested = false,
             PostedCommentsJson = "[]",
             CreatedAt = now,
             UpdatedAt = now,
@@ -242,6 +244,7 @@ public sealed class GitHubIssueLinkStore : IScopedService
         IssueNumber = row.IssueNumber,
         MirrorMarker = row.MirrorMarker,
         MirrorCreateAttempted = row.MirrorCreateAttempted,
+        CommandRequested = row.CommandRequested,
         PostedComments = DeserializePosted(row.PostedCommentsJson),
         StateLabel = row.StateLabel,
         CreatedAt = row.CreatedAt,

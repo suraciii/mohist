@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace Mohist.Server.GitHub;
 
 /// <summary>
-/// The slice of a GitHub <c>issues</c> webhook payload the feed/close
+/// The slice of a GitHub <c>issues</c> webhook payload the linked-issue
 /// translators consume. Parsed from the verbatim event <c>data</c>; events
 /// without an issue number (malformed or unexpected shape) yield
 /// <c>null</c> and are skipped by the handlers.
@@ -52,30 +52,5 @@ public sealed record GitHubIssueEventPayload(
             ? login.GetString()
             : null;
         return new GitHubIssueEventPayload(issueNumber, title, body, labels, editorLogin);
-    }
-}
-
-/// <summary>
-/// Pure translation rules from GitHub event labels to Mohist issue fields.
-/// </summary>
-public static class GitHubIssueFeedTranslation
-{
-    /// <summary>
-    /// Maps a GitHub <c>p0</c>–<c>p4</c> label to the Mohist priority value;
-    /// returns <c>null</c> when the event carries none.
-    /// </summary>
-    public static string? MapPriority(IReadOnlyList<string> labels)
-    {
-        foreach (var label in labels)
-        {
-            var trimmed = label.Trim();
-            if (trimmed.Length == 2
-                && char.ToLowerInvariant(trimmed[0]) == 'p'
-                && trimmed[1] is >= '0' and <= '4')
-            {
-                return trimmed.ToLowerInvariant();
-            }
-        }
-        return null;
     }
 }

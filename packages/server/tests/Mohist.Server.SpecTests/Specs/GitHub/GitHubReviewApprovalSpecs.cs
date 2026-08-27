@@ -23,15 +23,15 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.GitHub;
 
-[Collection("GitHubFeed")]
+[Collection("GitHubCommand")]
 public sealed class GitHubReviewApprovalSpecs
 {
     private const string RepoName = "hello-world";
     private const string GitHubReviewHandlerIdentity = "Mohist.Server.GitHub.Subscriptions.GitHubPullRequestReviewHandler";
 
-    private readonly GitHubFeedFixture _fixture;
+    private readonly GitHubCommandFixture _fixture;
 
-    public GitHubReviewApprovalSpecs(GitHubFeedFixture fixture)
+    public GitHubReviewApprovalSpecs(GitHubCommandFixture fixture)
     {
         _fixture = fixture;
         fixture.Comments.Comments.Clear();
@@ -215,6 +215,7 @@ public sealed class GitHubReviewApprovalSpecs
             owner,
             repo = RepoName,
             approvers,
+            pat = "github-pat",
         });
         var connectionId = created.GetProperty("id").GetString()!;
         var secret = created.GetProperty("webhookSecret").GetString()!;

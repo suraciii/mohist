@@ -53,7 +53,7 @@ public sealed class GitHubIssueLinkStoreTests
         Assert.Equal("hello-world", created.RepositoryName);
         Assert.Equal(42, created.GithubIssueNumber);
         Assert.Equal(7, created.IssueNumber);
-        Assert.False(created.HasPostedComment(GitHubCommentKinds.FeedRejected));
+        Assert.False(created.HasPostedComment(GitHubCommentKinds.CommandReply("comment-1")));
 
         var loaded = await store.GetAsync("proj_1", "hello-world", 42);
         Assert.NotNull(loaded);
@@ -140,14 +140,14 @@ public sealed class GitHubIssueLinkStoreTests
         var store = NewStore(database);
         var link = await store.CreateAsync("proj_1", "hello-world", 42, 7);
 
-        await store.MarkCommentPostedAsync(link.Id, GitHubCommentKinds.FeedRejected);
+        await store.MarkCommentPostedAsync(link.Id, GitHubCommentKinds.CommandReply("comment-1"));
         var loaded = await store.GetAsync("proj_1", "hello-world", 42);
-        Assert.True(loaded!.HasPostedComment(GitHubCommentKinds.FeedRejected));
+        Assert.True(loaded!.HasPostedComment(GitHubCommentKinds.CommandReply("comment-1")));
 
-        await store.MarkCommentPostedAsync(link.Id, GitHubCommentKinds.FeedRejected);
+        await store.MarkCommentPostedAsync(link.Id, GitHubCommentKinds.CommandReply("comment-1"));
         await using var db = new MohistDbContext(database.Options);
         var row = await db.GitHubIssueLinks.SingleAsync();
-        Assert.Contains("\"feed-rejected\"", row.PostedCommentsJson);
+        Assert.Contains("\"command-reply:comment-1\"", row.PostedCommentsJson);
         Assert.Single(System.Text.Json.JsonSerializer.Deserialize<List<string>>(row.PostedCommentsJson)!);
     }
 

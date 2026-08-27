@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.GitHub.Domain;
@@ -11,10 +12,8 @@ namespace Mohist.Server.GitHub.Ports;
 /// <summary>
 /// Production comment port: talks to the GitHub REST issues endpoints with
 /// the connection's fine-grained PAT (<c>:api</c> secret, Issues read/write
-/// only). App-identity connections are not yet supported: the
-/// installation-token exchange is delivered with the full write-back
-/// writer. The caller treats failures as best-effort, so a
-/// not-yet-supported identity never blocks event processing.
+/// only). GitHub App installation-token exchange is not implemented yet;
+/// connection creation therefore uses PAT identity.
 /// </summary>
 public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
 {
@@ -125,6 +124,53 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
         ArgumentNullException.ThrowIfNull(connection);
         var url = $"/repos/{connection.Owner}/{connection.Repo}/issues/{githubIssueNumber}/comments";
         await SendAsync(connection, url, HttpMethod.Post, JsonContent.Create(new JsonObject { ["body"] = body }), ct);
+    }
+
+    public async Task<IReadOnlyList<string>> FindCommentIdsByMarkerAsync(
+        GitHubConnection connection,
+        int githubIssueNumber,
+        string marker,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentException.ThrowIfNullOrWhiteSpace(marker);
+        const int pageSize = 100;
+        var matches = new List<string>();
+        var pat = await LoadPatAsync(connection, ct);
+        for (var page = 1; ; page++)
+        {
+            var url = $"/repos/{connection.Owner}/{connection.Repo}/issues/{githubIssueNumber}/comments?per_page={pageSize}&page={page}";
+            using var request = BuildRequest(url, HttpMethod.Get, content: null, pat);
+            using var response = await _http.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                await LogFailureAsync(response, url, ct);
+                response.EnsureSuccessStatusCode();
+            }
+
+            var items = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))?.AsArray();
+            if (items is null || items.Count == 0)
+                break;
+            foreach (var item in items)
+            {
+                var commentBody = item?["body"]?.GetValue<string>();
+                if (commentBody?.Contains(marker, StringComparison.Ordinal) != true)
+                    continue;
+                var commentId = item?["id"];
+                var id = commentId?.GetValueKind() switch
+                {
+                    JsonValueKind.String => commentId.GetValue<string>(),
+                    JsonValueKind.Number => commentId.GetValue<long>().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    _ => null,
+                };
+                if (string.IsNullOrWhiteSpace(id))
+                    throw new InvalidOperationException("GitHub comment marker matched a comment without a valid id");
+                matches.Add(id);
+            }
+            if (items.Count < pageSize)
+                break;
+        }
+        return matches;
     }
 
     public async Task ReplaceStateLabelAsync(
