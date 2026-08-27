@@ -27,18 +27,14 @@ of facts that Epic can modify independently.
 
 ## Association and Migration
 
-```text diagram
-User / API -> Epic.LinkIssue(issueNumber)
-              Epic reads the Issue's current affiliation
-              Epic verifies it is not closed for a new association
-              Epic -> Issue.AssignEpic(epicNumber)
-                         |
-                         +-- transaction: Issue state + [IssueEpicChanged]
-
-[IssueEpicChanged]
-  +-> old Epic.Recompute
-  +-> new Epic.Recompute
-  +-> active WorkflowRun.UpdateIssueContext(current Issue context)
+```mermaid
+flowchart TD
+    U["User / API"] --> L["Epic.LinkIssue(issueNumber): reads current affiliation; verifies not closed for a new association"]
+    L --> A["Issue.AssignEpic(epicNumber)"]
+    A --> T["transaction: Issue state + IssueEpicChanged"]
+    E["IssueEpicChanged"] --> O["old Epic.Recompute"]
+    E --> N["new Epic.Recompute"]
+    E --> W["active WorkflowRun.UpdateIssueContext(current Issue context)"]
 ```
 
 `LinkIssue` first reads the Issue's current affiliation. If the Issue already belongs to this Epic,
@@ -64,22 +60,16 @@ redelivery therefore cannot write an old Epic number back.
 
 ## Epic Advances Issues
 
-```text diagram
-User -> Epic.Start
-          |
-          +-- transaction: Epic state + [EpicStarted]
-
-[EpicStarted] -> Epic.Advance
-Epic.Advance -> query current Issues -> candidate Issue.TryStartFromEpic(epicNumber)
-                                           |
-                                           +-- transaction: Issue state
-                                               + [IssueWorkStarted]
-
-[IssueWorkStarted] -> WorkflowRun.EnsureStarted(
-                        workflowRunId,
-                        { ProjectId, IssueNumber, EpicNumber? })
-                          |
-                          +-- transaction: WorkflowRun state + WorkflowRun events
+```mermaid
+flowchart TD
+    U["User"] --> S["Epic.Start"]
+    S --> T["transaction: Epic state + EpicStarted"]
+    ES["EpicStarted"] --> AD["Epic.Advance"]
+    AD --> Q["query current Issues"]
+    Q --> C["candidate Issue.TryStartFromEpic(epicNumber)"]
+    C --> T2["transaction: Issue state + IssueWorkStarted"]
+    IW["IssueWorkStarted"] --> ENS["WorkflowRun.EnsureStarted(workflowRunId, ProjectId + IssueNumber + EpicNumber?)"]
+    ENS --> T3["transaction: WorkflowRun state + WorkflowRun events"]
 ```
 
 The candidate query performed by Epic may be stale. `TryStartFromEpic` must recheck the current
@@ -96,22 +86,17 @@ before the response, or before handler acknowledgement.
 
 ## Workflow Results and Continued Advancement
 
-```text diagram
-Runner -> Report -> WorkflowRun
-                    +-- transaction: WorkflowRun state + [WorkflowRunCompleted]
-                    +-- transaction: WorkflowRun state + [WorkflowRunFailed]
-
-[WorkflowRunCompleted] -> Issue.Complete(expectedWorkflowRunId)
-[WorkflowRunFailed]    -> Issue.AbortWork(expectedWorkflowRunId)
-
-User -> Issue.MarkDone
-          +-- require leaf Issue in InProgress
-          +-- require bound WorkflowRun status Stopped or Completed
-          +-- transaction: Issue state + [IssueCompleted(completionKind=manual)]
-
-[IssueCompleted / IssueCancelled]
-  +-> Parent Issue.RecomputeComposite       (child Issue only)
-  +-> current Epic.Advance                  (when affiliated)
+```mermaid
+flowchart TD
+    R["Runner"] --> RP["Report"] --> WR["WorkflowRun"]
+    WR --> T1["transaction: WorkflowRun state + WorkflowRunCompleted"]
+    WR --> T2["transaction: WorkflowRun state + WorkflowRunFailed"]
+    WC["WorkflowRunCompleted"] --> IC["Issue.Complete(expectedWorkflowRunId)"]
+    WF["WorkflowRunFailed"] --> IA["Issue.AbortWork(expectedWorkflowRunId)"]
+    U["User"] --> MD["Issue.MarkDone: require leaf Issue InProgress; require bound run Stopped or Completed"]
+    MD --> T3["transaction: Issue state + IssueCompleted(completionKind=manual)"]
+    EV["IssueCompleted / IssueCancelled"] --> PR["parent Issue.RecomputeComposite (child Issue only)"]
+    EV --> EA["current Epic.Advance (when affiliated)"]
 ```
 
 Issue uses `expectedWorkflowRunId` to reject a late result from an old run. The next Epic advance is
@@ -147,11 +132,10 @@ contains exactly one aggregate.
 
 ## Session Ends Bound Workflow Work
 
-```text diagram
-Session settles an active Turn with a non-success terminal outcome
-  Session -> WorkflowRun.AbandonActiveWork(runnerId, workId, reason)
-               |
-               +-- transaction: WorkflowRun state
+```mermaid
+flowchart TD
+    S["Session settles an active Turn with a non-success terminal outcome"] --> A["WorkflowRun.AbandonActiveWork(runnerId, workId, reason)"]
+    A --> T["transaction: WorkflowRun state"]
 ```
 
 A Workflow-origin Session is bound to one WorkflowRun work item by `(runnerId, workId)`. When the
@@ -170,9 +154,10 @@ operation re-issues the same abandon; the WorkflowRun command is idempotent on i
 
 ## Session and AgentJob Propagate One Way per Call Stack
 
-```text diagram
-Session -> MarkUnknown -> AgentJob        (stop of the launch Turn unconfirmed)
-AgentJob --[job state fact]--> Session    (initial Turn settles asynchronously)
+```mermaid
+flowchart LR
+    S["Session"] -->|"MarkUnknown: stop of the launch Turn unconfirmed"| J["AgentJob"]
+    J -.->|"job state fact: initial Turn settles asynchronously"| S
 ```
 
 When the Session's stop recovery cannot confirm the stop of a launch Turn, Session synchronously

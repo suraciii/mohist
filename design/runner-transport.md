@@ -18,14 +18,16 @@ The current boundary has two channels:
 The migration keeps the HTTP channel and every business owner unchanged. It
 replaces SignalR with one authenticated, outbound WebSocket connection:
 
-```text diagram
-Before
-  Server <---- HTTP poll/report ---------------- Runner
-  Server <---- SignalR client results ---------- Runner
-
-After
-  Server <---- HTTP poll/report ---------------- Runner
-  Server <---- native WebSocket control -------- Runner
+```mermaid
+flowchart LR
+    subgraph Before
+        R1["Runner"] -->|"HTTP poll/report"| S1["Server"]
+        R1 -->|"SignalR client results"| S1
+    end
+    subgraph After
+        R2["Runner"] -->|"HTTP poll/report"| S2["Server"]
+        R2 -->|"native WebSocket control"| S2
+    end
 ```
 
 The target removes the SignalR Hub, SignalR Runner client, and SignalR-specific

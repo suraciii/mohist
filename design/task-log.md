@@ -21,10 +21,10 @@ turning high-volume process output into Workflow state.
 TaskLog belongs to Runner execution. It is associated with Workflow or Agent
 work but never stored inside WorkflowRun or AgentJob result state.
 
-```text diagram
-task execution -> ordered/redacted log sink -> bounded buffer -> TaskLog channel -> store
-       |
-       +---------------------------------------> WorkResult channel -> work owner
+```mermaid
+flowchart LR
+    T["task execution"] --> S["ordered/redacted log sink"] --> B["bounded buffer"] --> C["TaskLog channel"] --> ST["store"]
+    T --> W["WorkResult channel"] --> WO["work owner"]
 ```
 
 The two channels are separate facts. TaskLog may be associated with
@@ -33,17 +33,17 @@ boundary.
 
 ## Model
 
-```text diagram
+```text literal
 Work
- |-- status / message / output       <- final result
- |-- Artifacts                       <- produced files
- |-- AgentSession transcript         <- Agent conversation
- `-- TaskLog                         <- execution trace
-      `-- LogEntry[]
-           |-- seq        monotonic, cursor pagination + jump anchor
-           |-- timestamp
-           |-- source     workspace-prep | action:rebase | cleanup | ...
-           `-- text
+  status / message / output    # final result
+  Artifacts                    # produced files
+  AgentSession transcript      # Agent conversation
+  TaskLog                      # execution trace
+    LogEntry[]
+      seq        # monotonic, cursor pagination + jump anchor
+      timestamp
+      source     # workspace-prep | action:rebase | cleanup | ...
+      text
 ```
 
 stdout and stderr share one ordered stream. `source` preserves the meaningful

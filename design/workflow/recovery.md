@@ -55,15 +55,15 @@ The responsibility split is:
 The `recovery` configuration remains read-only. The number of recoveries left in the current round
 is execution state outside configuration and flows with the task in `recoveryRemaining`:
 
-```text diagram
-YAML budget: 2 --> TaskRun ------------> WorkItem / dispatch --> Runner tryRecovery
-                   Recovery (read-only)                          null -> budget
-                   RecoveryRemaining                                  |
-                         ^                                             | match and remaining > 0
-                         |                                             |
-                         +-- RuntimeTaskInput <-- addTasks <------------+
-                             retrySelf: original declaration,
-                             recoveryRemaining = remaining - 1
+```mermaid
+flowchart LR
+    Y["YAML budget: 2"] --> TR["TaskRun: Recovery (read-only), RecoveryRemaining"]
+    TR --> WI["WorkItem / dispatch"]
+    WI --> RT["Runner tryRecovery"]
+    RT -->|"null: budget unchanged"| TR
+    RT -->|"match and remaining > 0"| AT["addTasks"]
+    AT --> RTI["RuntimeTaskInput: retrySelf = original declaration, recoveryRemaining = remaining - 1"]
+    RTI --> TR
 ```
 
 - Runner `tryRecovery` is the sole read/write authority. The engine only passes this field through

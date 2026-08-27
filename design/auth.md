@@ -32,14 +32,15 @@ External Agent boundary builds on this model and is defined in
   for direct Agent PATs are credential boundaries, not roles, memberships, or a
   general ACL.
 
-```text diagram
-local administrator file -----------+
-browser or remote CLI session ------+--> Principal --> Scope --> product action
-service or Runner credential -------+
-integration credential -------------+
-direct Agent PAT --> Project grant -+
-
-external platform identity --> Connection or ingress policy --> product action
+```mermaid
+flowchart TD
+    L["local administrator file"] --> P["Principal"]
+    B["browser or remote CLI session"] --> P
+    S["service or Runner credential"] --> P
+    I["integration credential"] --> P
+    D["direct Agent PAT"] --> G["Project grant"] --> P
+    P --> SC["Scope"] --> A["product action"]
+    X["external platform identity"] --> CP["Connection or ingress policy"] --> A
 ```
 
 ## Identity Model

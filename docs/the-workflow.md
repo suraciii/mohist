@@ -147,17 +147,25 @@ mo issue archive <number>
 
 ## Complete State Machine
 
-```text diagram
-Draft --mark ready--> Backlog --start--> Plan
-Plan --approve--> Build --automatic--> Check
-Plan --reject--> Plan feedback + checks --approval--> Plan
-Check --approve--> Integrate --automatic--> Done
-Check --reject--> Check feedback + checks --approval--> Check
-
-Done --archive--> Archived
-
-Any stage --failure--> Blocked
-Blocked --retry/resume/rerun--> Workflow execution
+```mermaid
+stateDiagram-v2
+    Draft --> Backlog : mark ready
+    Backlog --> Plan : start
+    Plan --> Build : approve
+    Build --> Check : automatic
+    Plan --> Plan : reject (Plan feedback + checks, then approval again)
+    Check --> Integrate : approve
+    Integrate --> Done : automatic
+    Check --> Check : reject (Check feedback + checks, then approval again)
+    Done --> Archived : archive
+    Plan --> Blocked : failure
+    Build --> Blocked : failure
+    Check --> Blocked : failure
+    Integrate --> Blocked : failure
+    note right of Blocked
+        retry / resume / rerun returns execution
+        to the appropriate point in the Workflow.
+    end
 ```
 
 After a failure in any stage, use `mo run retry`, `mo run resume`, or

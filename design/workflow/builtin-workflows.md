@@ -45,9 +45,9 @@ mo issue create "..." --workflow-profile mohist/github-pr
 
 Both Workflows use the same main path:
 
-```text diagram
-plan -> approval -> build -> check -> approval -> integrate
-                                                   sequential, with project-integration lock
+```mermaid
+flowchart LR
+    P[plan] --> A1[approval] --> B[build] --> C[check] --> A2[approval] --> I["integrate: sequential, with project-integration lock"]
 ```
 
 - Every Stage prepares its Workspace explicitly, so no Task relies on a hidden

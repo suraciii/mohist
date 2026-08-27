@@ -39,13 +39,11 @@ Skills to call the execution surface. Exploration especially needs to be:
 
 The daily interaction can remain external while Mohist executes the Agent:
 
-```text diagram
-User + Slack Bot ---- Agent Connection ---- Mohist Agent + configured Skills
-                                                  |
-User + External Agent ---- Mohist Skill + mo -----+
-                                                  |
-                                                  v
-                              Issue / Workflow / AgentJob execution and record
+```mermaid
+flowchart TD
+    UB["User + Slack Bot"] -->|"Agent Connection"| MA["Mohist Agent + configured Skills"]
+    UE["User + External Agent"] -->|"Mohist Skill + mo"| MA
+    MA --> EX["Issue / Workflow / AgentJob execution and record"]
 ```
 
 ## Skills Distributed by Mohist

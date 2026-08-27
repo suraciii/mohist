@@ -44,23 +44,16 @@ record. The Web Inbox retains what happened; the Hermes HTTP request is one
 best-effort delivery attempt. Delivery failure never changes or blocks Issue,
 Workflow, AgentJob, or Approval state.
 
-```text diagram
-                            +--> [Web Inbox: durable history]
-                            |
-[Durable Mohist event] -----+
-                            |
-                            +--> [Mohist policy and renderer]
-                                      |
-                                      | signed JSON, one best-effort attempt
-                                      v
-                                [Hermes subscription]
-                                      |
-                                      v
-                                [Chat platform]
-
-Mohist owns: event, state, policy, rendered body
-Hermes owns: subscription, destination, platform delivery
+```mermaid
+flowchart TD
+    E["Durable Mohist event"] --> WI["Web Inbox: durable history"]
+    E --> PR["Mohist policy and renderer"]
+    PR -->|"signed JSON, one best-effort attempt"| HS["Hermes subscription"]
+    HS --> CP["Chat platform"]
 ```
+
+Mohist owns the event, state, policy, and rendered body. Hermes owns the
+subscription, destination, and platform delivery.
 
 The event bus provides at-least-once delivery to Mohist subscription handlers;
 see [Event Bus](eventbus.md). Once the Hermes handler accepts the event for
