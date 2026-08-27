@@ -17,14 +17,14 @@ const SYSTEM_TEMPLATES = [
     id: 'mohist/local',
     name: 'Mohist Local',
     description:
-      'Full Mohist pipeline for shipping user-visible changes end-to-end.\nStages: plan (proposal, specs, design, tasks, self-review) → build → check (AI review, merge readiness) → integrate (spec sync, archive, merge).\nRequires human approval at the plan and check stages, with the workflow merging the working branch into the project base branch on completion.\nTypical duration: 20-60 minutes for a focused change.\nBest suited for: new features, user-visible behavior changes, changes that need a design document or spec delta.\nNot suited for: simple bug fixes (use quick-fix), exploration or throwaway prototypes (use experiment), or pure refactors with no behavior change.',
+      'Default general-purpose Mohist pipeline: plan (Workspace plan artifacts) → build (task list, verification) → check (review evidence, merge readiness) → integrate (rebase, squash, push).\nRequires approval at the plan and check stages, then squashes and pushes the working branch directly into the repository base branch.\nTypical duration: 20-60 minutes for a focused change.\nNot suited for: trivial one-line fixes, throwaway spikes, or quick experiments — these do not warrant a full plan-check-integrate cycle.',
     isDefault: true,
   },
   {
     id: 'mohist/quick-fix',
     name: 'Mohist Quick Fix',
     description:
-      'Lightweight workflow for small, low-risk, fast-turnaround changes.\nSuited for: simple bug fixes, single-file or few-line corrections, trivial test updates, and obvious defects with a known fix.\nGoal is a fast, low-friction path: minimal planning artifacts, no design document, no spec delta, and lighter review.\nTypical duration: 5-15 minutes for a focused fix.\nNot suited for: new user-visible features (use mohist/local), exploration or throwaway prototypes (use experiment), or changes that need a design/spec delta (use mohist/local).',
+      'Lightweight workflow for small, low-risk, fast-turnaround changes.\nSuited for: simple bug fixes, single-file or few-line corrections, trivial test updates, and obvious defects with a known fix.\nGoal is a fast, low-friction path: minimal plan artifacts, no separate design record, and lighter review.\nTypical duration: 5-15 minutes for a focused fix.\nNot suited for: new user-visible features (use mohist/local), exploration or throwaway prototypes (use experiment), or changes that need a detailed plan or design decision (use mohist/local).',
     isDefault: false,
   },
   {
@@ -50,9 +50,9 @@ const DEFAULT_DETAIL = {
   isDefault: true,
   agentAction: 'mohist/opencode',
   agentRuntime: 'opencode' as const,
-  yaml: 'description: |\n  Full Mohist pipeline for shipping user-visible changes end-to-end.\nstages:\n  - stage: plan\n    tasks: []\n    checks: []\n',
+  yaml: 'description: |\n  Default general-purpose Mohist pipeline: plan (Workspace plan artifacts) → build (task list, verification) → check (review evidence, merge readiness) → integrate (rebase, squash, push).\nstages:\n  - stage: plan\n    tasks: []\n    checks: []\n',
   stages: [
-    { stage: 'plan', requiresApproval: true, tasks: ['proposal'], checks: [] },
+    { stage: 'plan', requiresApproval: true, tasks: ['plan'], checks: [] },
     { stage: 'build', requiresApproval: false, tasks: ['implement'], checks: [] },
   ],
 }
@@ -202,9 +202,9 @@ describe('WorkflowProfilesSection', () => {
       const defaultDescription = within(defaultCard).getByTestId('workflow-profile-mohist/local-description')
       expect(defaultDescription.className).toContain('whitespace-pre-line')
       expect(defaultDescription.textContent).toContain(
-        'Full Mohist pipeline for shipping user-visible changes end-to-end.',
+        'Default general-purpose Mohist pipeline: plan (Workspace plan artifacts) → build (task list, verification) → check (review evidence, merge readiness) → integrate (rebase, squash, push).',
       )
-      expect(defaultDescription.textContent).toContain('Best suited for: new features')
+      expect(defaultDescription.textContent).toContain('Not suited for: trivial one-line fixes')
 
       const quickFixCard = screen.getByTestId('workflow-profile-mohist/quick-fix')
       const quickFixDescription = within(quickFixCard).getByTestId('workflow-profile-mohist/quick-fix-description')
@@ -328,8 +328,10 @@ describe('WorkflowProfilesSection', () => {
       expect(description.className).toContain('whitespace-pre-line')
       expect(description.className).not.toContain('font-mono')
       expect(description.className).not.toContain('line-clamp')
-      expect(description.textContent).toContain('Full Mohist pipeline for shipping user-visible changes end-to-end.')
-      expect(description.textContent).toContain('Best suited for: new features')
+      expect(description.textContent).toContain(
+        'Default general-purpose Mohist pipeline: plan (Workspace plan artifacts)',
+      )
+      expect(description.textContent).toContain('Not suited for: trivial one-line fixes')
 
       expect(screen.getByText('Stages')).toBeInTheDocument()
       expect(screen.getByText('Shared Stage Definition (YAML)')).toBeInTheDocument()

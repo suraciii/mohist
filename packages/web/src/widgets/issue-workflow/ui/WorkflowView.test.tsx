@@ -229,25 +229,25 @@ function makeTimelineWithArtifacts(): WorkflowTimeline {
         tasks: [
           {
             id: 'plan-task-1',
-            title: 'Generate proposal',
+            title: 'Generate plan',
             uses: 'mohist/coder-agent',
             status: 'completed',
             startedAt: '2026-01-01T00:00:00.000Z',
             completedAt: '2026-01-01T00:02:30.000Z',
             durationMs: 150000,
             attempts: 1,
-            message: 'proposal generated',
+            message: 'plan generated',
             artifactSummaries: [
               {
                 artifactId: 'artifact-1',
-                path: 'proposal.md',
+                path: 'PLANS/PLAN.md',
                 kind: 'file',
                 size: 1234,
                 recordedAt: '2026-01-01T00:02:00.000Z',
               },
               {
                 artifactId: 'artifact-2',
-                path: 'design.md',
+                path: 'PLANS/DESIGN.md',
                 kind: 'file',
                 size: 5678,
                 recordedAt: '2026-01-01T00:02:30.000Z',
@@ -256,7 +256,7 @@ function makeTimelineWithArtifacts(): WorkflowTimeline {
           },
           {
             id: 'plan-task-2',
-            title: 'Write specs',
+            title: 'Organize research',
             uses: 'mohist/coder-agent',
             status: 'completed',
             startedAt: '2026-01-01T00:00:00.000Z',
@@ -267,7 +267,7 @@ function makeTimelineWithArtifacts(): WorkflowTimeline {
             artifactSummaries: [
               {
                 artifactId: 'artifact-3',
-                path: 'specs/',
+                path: 'RESEARCH/',
                 kind: 'directory',
                 size: 4096,
                 recordedAt: '2026-01-01T00:01:15.000Z',
@@ -287,7 +287,7 @@ function makeTimelineWithArtifacts(): WorkflowTimeline {
             artifactSummaries: [
               {
                 artifactId: 'artifact-4',
-                path: 'design.md',
+                path: 'PLANS/DESIGN.md',
                 kind: 'file',
                 size: 5678,
                 recordedAt: '2026-01-01T00:02:30.000Z',
@@ -854,11 +854,11 @@ describe('WorkflowView', () => {
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
       const taskRow = screen
-        .getByText('Generate proposal')
+        .getByText('Generate plan')
         .closest('[data-testid="workflow-task-item"]') as HTMLElement | null
       expect(taskRow).toBeInTheDocument()
-      expect(within(taskRow!).getByText('proposal.md')).toBeInTheDocument()
-      expect(within(taskRow!).getByText('design.md')).toBeInTheDocument()
+      expect(within(taskRow!).getByText('PLANS/PLAN.md')).toBeInTheDocument()
+      expect(within(taskRow!).getByText('PLANS/DESIGN.md')).toBeInTheDocument()
     })
 
     it('renders directory artifact chips with folder styling', () => {
@@ -867,10 +867,10 @@ describe('WorkflowView', () => {
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
       const taskRow = screen
-        .getByText('Write specs')
+        .getByText('Organize research')
         .closest('[data-testid="workflow-task-item"]') as HTMLElement | null
       expect(taskRow).toBeInTheDocument()
-      expect(within(taskRow!).getByText('specs/')).toBeInTheDocument()
+      expect(within(taskRow!).getByText('RESEARCH/')).toBeInTheDocument()
     })
 
     it('does not render artifact chips for running tasks', () => {
@@ -882,7 +882,7 @@ describe('WorkflowView', () => {
         .getByText('Create design')
         .closest('[data-testid="workflow-task-item"]') as HTMLElement | null
       expect(taskRow).toBeInTheDocument()
-      expect(within(taskRow!).queryByText('design.md')).not.toBeInTheDocument()
+      expect(within(taskRow!).queryByText('PLANS/DESIGN.md')).not.toBeInTheDocument()
     })
 
     it('does not render artifact chips for completed tasks without artifacts', () => {
@@ -895,7 +895,7 @@ describe('WorkflowView', () => {
         .closest('[data-testid="workflow-task-item"]') as HTMLElement | null
       expect(taskRow).toBeInTheDocument()
       expect(
-        within(taskRow!).queryByRole('button', { name: /proposal\.md|design\.md|specs\// }),
+        within(taskRow!).queryByRole('button', { name: /PLANS\/PLAN\.md|PLANS\/DESIGN\.md|RESEARCH\// }),
       ).not.toBeInTheDocument()
     })
 
@@ -904,7 +904,7 @@ describe('WorkflowView', () => {
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
-      const chip = screen.getByRole('button', { name: 'proposal.md' })
+      const chip = screen.getByRole('button', { name: 'PLANS/PLAN.md' })
       fireEvent.click(chip)
 
       await waitFor(() => {
@@ -912,7 +912,7 @@ describe('WorkflowView', () => {
       })
       const dialog = screen.getByRole('dialog')
       expect(dialog).toBeInTheDocument()
-      expect(within(dialog).getByText('proposal.md')).toBeInTheDocument()
+      expect(within(dialog).getByText('PLANS/PLAN.md')).toBeInTheDocument()
     })
 
     it('does not toggle the task row when a chip is clicked on an expand-capable task', () => {
@@ -920,15 +920,15 @@ describe('WorkflowView', () => {
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
-      // "Generate proposal" has both artifactSummaries and a message output, so canExpand is true
+      // "Generate plan" has both artifactSummaries and a message output, so canExpand is true
       // (via hasOutput). Clicking the chip should open the viewer without expanding the row.
-      const chip = screen.getByRole('button', { name: 'proposal.md' })
+      const chip = screen.getByRole('button', { name: 'PLANS/PLAN.md' })
       fireEvent.click(chip)
 
       // The expanded panel renders an "Artifacts" header (uppercase tracking-wide label) inside
       // a bg-muted block. The chip click should NOT trigger expansion, so the panel for the
-      // "Generate proposal" task body should not be visible.
-      expect(screen.queryByText('proposal generated')).not.toBeInTheDocument()
+      // "Generate plan" task body should not be visible.
+      expect(screen.queryByText('plan generated')).not.toBeInTheDocument()
 
       // The dialog, however, must be open.
       expect(screen.getByRole('dialog')).toBeInTheDocument()
@@ -939,8 +939,8 @@ describe('WorkflowView', () => {
 
       render(<WorkflowView issue={makeIssue({ workflowStage: WorkflowStage.Plan })} />)
 
-      const chip = screen.getByRole('button', { name: 'proposal.md' })
-      const disclosure = screen.getByRole('button', { name: 'Generate proposal' })
+      const chip = screen.getByRole('button', { name: 'PLANS/PLAN.md' })
+      const disclosure = screen.getByRole('button', { name: 'Generate plan' })
 
       expect(disclosure.contains(chip)).toBe(false)
       fireEvent.click(chip)

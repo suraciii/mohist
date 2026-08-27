@@ -4,14 +4,14 @@ import { projectTemplateOverrideQueryOptions } from '..'
 import { useMswServer } from '../../../../tests/support/msw'
 
 const PROJECT_ID = 'test-project'
-const KEY = 'proposal'
+const KEY = 'plan'
 
 const OVERRIDE_ROW = {
   projectId: PROJECT_ID,
   key: KEY,
-  displayName: 'Generate Proposal',
+  displayName: 'Plan Change',
   description: 'project override description',
-  tags: ['plan', 'openspec'],
+  tags: ['plan'],
   stage: 'plan',
   body: 'project override body',
   updatedAt: '2024-01-01T00:00:00.000Z',
@@ -31,9 +31,7 @@ const overrideHandler = vi.fn(({ request }: { request: Request }) => {
   return HttpResponse.json(overrideResponse, { status: overrideStatus })
 })
 
-useMswServer(
-  http.get('*/api/projects/:projectId/templates/:key/override', overrideHandler),
-)
+useMswServer(http.get('*/api/projects/:projectId/templates/:key/override', overrideHandler))
 
 beforeEach(() => {
   overrideResponse = { success: true, data: OVERRIDE_ROW }
@@ -48,9 +46,7 @@ describe('projectTemplateOverrideQueryOptions', () => {
 
     expect(result).toEqual(OVERRIDE_ROW)
     expect(overrideHandler).toHaveBeenCalledTimes(1)
-    expect(new URL(requestedUrls[0]!).pathname).toBe(
-      `/api/projects/${PROJECT_ID}/templates/${KEY}/override`,
-    )
+    expect(new URL(requestedUrls[0]!).pathname).toBe(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`)
   })
 
   it('does not retry a 404 and surfaces the API error', async () => {
@@ -76,8 +72,6 @@ describe('projectTemplateOverrideQueryOptions', () => {
 
     await projectTemplateOverrideQueryOptions(PROJECT_ID, customKey).queryFn()
 
-    expect(new URL(requestedUrls[0]!).pathname).toBe(
-      `/api/projects/${PROJECT_ID}/templates/${customKey}/override`,
-    )
+    expect(new URL(requestedUrls[0]!).pathname).toBe(`/api/projects/${PROJECT_ID}/templates/${customKey}/override`)
   })
 })

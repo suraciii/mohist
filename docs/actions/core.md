@@ -72,7 +72,7 @@ and the actual failure to standard output.
 Checks whether a file or directory exists at a relative workspace path.
 
 ```yaml
-- id: check-proposal
+- id: check-plan
   uses: core/artifact-exists
   with:
     path: PLANS/PLAN.md

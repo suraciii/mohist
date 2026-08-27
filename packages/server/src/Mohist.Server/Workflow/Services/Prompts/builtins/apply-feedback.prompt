@@ -17,7 +17,7 @@ This task exists because the user requested changes at the `${{ stage.name }}` a
 The feedback is the authoritative source. Read it through the CLI before making any other changes:
 
 ```bash
-mo issue feedback show ${{ issue.number }} --feedback ${{ work.approvalFeedback.id }} --project ${{ issue.projectId }} --output json
+mo run feedback view --issue ${{ issue.number }} --feedback ${{ work.approvalFeedback.id }} --project ${{ issue.projectId }} --json body
 ```
 
 ## Your Job

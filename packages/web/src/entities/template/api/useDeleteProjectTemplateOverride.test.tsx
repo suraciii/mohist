@@ -15,7 +15,7 @@ async function flush() {
 }
 
 const PROJECT_ID = 'test-project'
-const KEY = 'proposal'
+const KEY = 'plan'
 
 const defaultHandlers = [
   http.delete(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, () =>
@@ -61,25 +61,22 @@ describe('useDeleteProjectTemplateOverride hook', () => {
   it('issues DELETE /api/projects/{id}/templates/{key}/override with no body', async () => {
     const deleteRequests: { method: string; url: string; body: unknown }[] = []
     server.resetHandlers(
-      http.delete(
-        `/api/projects/${PROJECT_ID}/templates/${KEY}/override`,
-        async ({ request }) => {
-          let body: unknown = null
-          const text = await request.text()
-          if (text) {
-            try {
-              body = JSON.parse(text)
-            } catch {
-              body = text
-            }
+      http.delete(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, async ({ request }) => {
+        let body: unknown = null
+        const text = await request.text()
+        if (text) {
+          try {
+            body = JSON.parse(text)
+          } catch {
+            body = text
           }
-          deleteRequests.push({ method: request.method, url: request.url, body })
-          return HttpResponse.json({
-            success: true,
-            data: { message: `Override ${KEY} removed` },
-          })
-        },
-      ),
+        }
+        deleteRequests.push({ method: request.method, url: request.url, body })
+        return HttpResponse.json({
+          success: true,
+          data: { message: `Override ${KEY} removed` },
+        })
+      }),
     )
 
     const { result } = renderUseDelete(PROJECT_ID)
@@ -93,9 +90,7 @@ describe('useDeleteProjectTemplateOverride hook', () => {
 
     expect(deleteRequests).toHaveLength(1)
     expect(deleteRequests[0].method).toBe('DELETE')
-    expect(deleteRequests[0].url).toContain(
-      `/api/projects/${PROJECT_ID}/templates/${KEY}/override`,
-    )
+    expect(deleteRequests[0].url).toContain(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`)
     expect(deleteRequests[0].body).toBeNull()
   })
 
@@ -129,19 +124,14 @@ describe('useDeleteProjectTemplateOverride hook', () => {
     expect(result.result.current.isSuccess).toBe(true)
 
     const calls = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey)
-    const hasList = calls.some(
-      (k) => Array.isArray(k) && k[0] === 'project-templates' && k[1] === PROJECT_ID,
-    )
+    const hasList = calls.some((k) => Array.isArray(k) && k[0] === 'project-templates' && k[1] === PROJECT_ID)
     expect(hasList).toBe(true)
   })
 
   it('surfaces API errors from the DELETE response', async () => {
     server.resetHandlers(
       http.delete(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, () =>
-        HttpResponse.json(
-          { success: false, error: 'Server error', code: 'server_error' },
-          { status: 500 },
-        ),
+        HttpResponse.json({ success: false, error: 'Server error', code: 'server_error' }, { status: 500 }),
       ),
     )
 

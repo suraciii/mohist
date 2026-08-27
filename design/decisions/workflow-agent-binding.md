@@ -22,12 +22,12 @@ An executable Workflow task uses the existing `mohist/agent` Action. The task
 structure is unchanged — every task is `uses` plus `with`:
 
 ```yaml
-- id: proposal
+- id: plan
   uses: mohist/agent
   with:
     name: mohist/planner
     session: plan
-    prompt: ${{ prompts.proposal }}
+    prompt: ${{ prompts.plan }}
 ```
 
 Reasons:

@@ -21,7 +21,12 @@ beforeEach(() => {
   sessionsData = []
 })
 
-function session(overrides: Partial<WorkflowRunSession> & { usage?: Partial<NonNullable<WorkflowRunSession['usage']>>; eventSummary?: Partial<NonNullable<WorkflowRunSession['eventSummary']>> }): WorkflowRunSession {
+function session(
+  overrides: Partial<WorkflowRunSession> & {
+    usage?: Partial<NonNullable<WorkflowRunSession['usage']>>
+    eventSummary?: Partial<NonNullable<WorkflowRunSession['eventSummary']>>
+  },
+): WorkflowRunSession {
   const { usage: usageOverride, eventSummary: eventSummaryOverride, ...rest } = overrides
   return {
     id: rest.id ?? 'session-1',
@@ -76,7 +81,7 @@ describe('WorkflowSessionsPanel', () => {
         }),
         session({
           id: 's-plan',
-          sessionName: 'proposal-draft',
+          sessionName: 'plan-draft',
           stage: 'plan',
           status: 'completed',
           model: 'configured/PlanModel',
@@ -107,7 +112,7 @@ describe('WorkflowSessionsPanel', () => {
     expect(screen.getByText(/3 sessions/)).toBeInTheDocument()
     expect(screen.getByText(/640\.4k processed/)).toBeInTheDocument()
     expect(screen.getByText(/peak 49% review-repair/)).toBeInTheDocument()
-    expect(screen.getByText('proposal-draft')).toBeInTheDocument()
+    expect(screen.getByText('plan-draft')).toBeInTheDocument()
     expect(screen.getByText('review-repair')).toBeInTheDocument()
     expect(screen.getByText('compile-assets')).toBeInTheDocument()
     expect(screen.getAllByText('minimax/MiniMax-M3')).toHaveLength(2)
@@ -121,7 +126,7 @@ describe('WorkflowSessionsPanel', () => {
       sessions: [
         session({
           id: 's-plan-no-usage',
-          sessionName: 'proposal-draft',
+          sessionName: 'plan-draft',
           stage: 'plan',
           status: 'completed',
           createdAt: '2026-06-12T10:01:00.000Z',
@@ -143,7 +148,6 @@ describe('WorkflowSessionsPanel', () => {
 
     expect(container).toBeEmptyDOMElement()
   })
-
 })
 
 describe('issue-level usage aggregation', () => {
@@ -152,17 +156,26 @@ describe('issue-level usage aggregation', () => {
       isLoading: false,
       sessions: [
         session({
-          id: 's-plan', sessionName: 'plan', stage: 'plan', status: 'completed',
+          id: 's-plan',
+          sessionName: 'plan',
+          stage: 'plan',
+          status: 'completed',
           usage: { totalTokens: 100_000, costAmount: 0.05, costCurrency: 'USD' },
           createdAt: '2026-06-12T10:00:00.000Z',
         }),
         session({
-          id: 's-build', sessionName: 'build', stage: 'build', status: 'completed',
+          id: 's-build',
+          sessionName: 'build',
+          stage: 'build',
+          status: 'completed',
           usage: { totalTokens: 200_000, costAmount: 0.12, costCurrency: 'USD' },
           createdAt: '2026-06-12T10:01:00.000Z',
         }),
         session({
-          id: 's-check', sessionName: 'check', stage: 'check', status: 'completed',
+          id: 's-check',
+          sessionName: 'check',
+          stage: 'check',
+          status: 'completed',
           usage: { totalTokens: 50_000, costAmount: 0.03, costCurrency: 'EUR' },
           createdAt: '2026-06-12T10:02:00.000Z',
         }),
@@ -182,8 +195,22 @@ describe('issue-level usage aggregation', () => {
     setWorkflowRunSessions({
       isLoading: false,
       sessions: [
-        session({ id: 's-plan', sessionName: 'plan', stage: 'plan', status: 'completed', createdAt: '2026-06-12T10:00:00.000Z', usage: undefined }),
-        session({ id: 's-build', sessionName: 'build', stage: 'build', status: 'completed', createdAt: '2026-06-12T10:01:00.000Z', usage: undefined }),
+        session({
+          id: 's-plan',
+          sessionName: 'plan',
+          stage: 'plan',
+          status: 'completed',
+          createdAt: '2026-06-12T10:00:00.000Z',
+          usage: undefined,
+        }),
+        session({
+          id: 's-build',
+          sessionName: 'build',
+          stage: 'build',
+          status: 'completed',
+          createdAt: '2026-06-12T10:01:00.000Z',
+          usage: undefined,
+        }),
       ],
     })
 
@@ -202,24 +229,34 @@ describe('issue-level usage aggregation', () => {
       isLoading: false,
       sessions: [
         session({
-          id: 's-plan', sessionName: 'plan', stage: 'plan', status: 'completed',
+          id: 's-plan',
+          sessionName: 'plan',
+          stage: 'plan',
+          status: 'completed',
           usage: {
             totalTokens: 100_000,
-            costAmount: 0.05, costCurrency: 'USD',
+            costAmount: 0.05,
+            costCurrency: 'USD',
             cachedReadTokens: 30_000,
             thoughtTokens: 10_000,
-            contextWindowUsed: 50_000, contextWindowSize: 200_000,
+            contextWindowUsed: 50_000,
+            contextWindowSize: 200_000,
           },
           createdAt: '2026-06-12T10:00:00.000Z',
         }),
         session({
-          id: 's-build', sessionName: 'build', stage: 'build', status: 'completed',
+          id: 's-build',
+          sessionName: 'build',
+          stage: 'build',
+          status: 'completed',
           usage: {
             totalTokens: 200_000,
-            costAmount: 0.12, costCurrency: 'USD',
+            costAmount: 0.12,
+            costCurrency: 'USD',
             cachedReadTokens: 60_000,
             thoughtTokens: 20_000,
-            contextWindowUsed: 100_000, contextWindowSize: 200_000,
+            contextWindowUsed: 100_000,
+            contextWindowSize: 200_000,
           },
           createdAt: '2026-06-12T10:01:00.000Z',
         }),

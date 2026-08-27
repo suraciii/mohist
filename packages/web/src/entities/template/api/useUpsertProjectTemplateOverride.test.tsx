@@ -4,10 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
 import type { ReactNode } from 'react'
-import {
-  useUpsertProjectTemplateOverride,
-  type ProjectTemplateOverridePayload,
-} from '..'
+import { useUpsertProjectTemplateOverride, type ProjectTemplateOverridePayload } from '..'
 
 // react-query mutations (MSW-backed) resolve through notifyManager's scheduled
 // timers and fetch microtasks; advance the clock ourselves under fake timers
@@ -18,12 +15,12 @@ async function flush() {
 }
 
 const PROJECT_ID = 'test-project'
-const KEY = 'proposal'
+const KEY = 'plan'
 
 const PAYLOAD: ProjectTemplateOverridePayload = {
-  displayName: 'Updated Proposal',
+  displayName: 'Updated Plan',
   description: 'Updated description',
-  tags: ['plan', 'openspec'],
+  tags: ['plan'],
   stage: 'plan',
   body: 'updated body content',
 }
@@ -79,14 +76,11 @@ describe('useUpsertProjectTemplateOverride hook', () => {
   it('issues PUT /api/projects/{id}/templates/{key}/override with the payload', async () => {
     const putRequests: { method: string; url: string; body: unknown }[] = []
     server.resetHandlers(
-      http.put(
-        `/api/projects/${PROJECT_ID}/templates/${KEY}/override`,
-        async ({ request }) => {
-          const body = await request.json()
-          putRequests.push({ method: request.method, url: request.url, body })
-          return HttpResponse.json({ success: true, data: STORED_ROW })
-        },
-      ),
+      http.put(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, async ({ request }) => {
+        const body = await request.json()
+        putRequests.push({ method: request.method, url: request.url, body })
+        return HttpResponse.json({ success: true, data: STORED_ROW })
+      }),
     )
 
     const { result } = renderUseUpsert(PROJECT_ID)
@@ -100,9 +94,7 @@ describe('useUpsertProjectTemplateOverride hook', () => {
 
     expect(putRequests).toHaveLength(1)
     expect(putRequests[0].method).toBe('PUT')
-    expect(putRequests[0].url).toContain(
-      `/api/projects/${PROJECT_ID}/templates/${KEY}/override`,
-    )
+    expect(putRequests[0].url).toContain(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`)
     expect(putRequests[0].body).toEqual(PAYLOAD)
   })
 
@@ -136,15 +128,9 @@ describe('useUpsertProjectTemplateOverride hook', () => {
     expect(result.result.current.isSuccess).toBe(true)
 
     const calls = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey)
-    const hasList = calls.some(
-      (k) => Array.isArray(k) && k[0] === 'project-templates' && k[1] === PROJECT_ID,
-    )
+    const hasList = calls.some((k) => Array.isArray(k) && k[0] === 'project-templates' && k[1] === PROJECT_ID)
     const hasEntry = calls.some(
-      (k) =>
-        Array.isArray(k) &&
-        k[0] === 'project-template' &&
-        k[1] === PROJECT_ID &&
-        k[2] === KEY,
+      (k) => Array.isArray(k) && k[0] === 'project-template' && k[1] === PROJECT_ID && k[2] === KEY,
     )
     expect(hasList).toBe(true)
     expect(hasEntry).toBe(true)
@@ -153,10 +139,7 @@ describe('useUpsertProjectTemplateOverride hook', () => {
   it('surfaces API errors from the PUT response', async () => {
     server.resetHandlers(
       http.put(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, () =>
-        HttpResponse.json(
-          { success: false, error: 'Body is required', code: 'bad_request' },
-          { status: 400 },
-        ),
+        HttpResponse.json({ success: false, error: 'Body is required', code: 'bad_request' }, { status: 400 }),
       ),
     )
 

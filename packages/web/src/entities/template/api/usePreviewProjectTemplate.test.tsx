@@ -12,7 +12,7 @@ async function flush() {
 }
 
 const PROJECT_ID = 'test-project'
-const KEY = 'proposal'
+const KEY = 'plan'
 
 const VARIABLES = {
   issue: { number: 1, projectId: 'demo-project', title: 'Demo issue' },
@@ -22,7 +22,7 @@ const VARIABLES = {
 }
 
 const PREVIEW_RESPONSE = {
-  rendered: 'proposal body for issue 1 in openspec/changes/issue-1',
+  rendered: 'plan body for issue 1 in PLANS/PLAN.md',
   missingVariables: ['unknownVar'],
   depth: 1,
 }

@@ -1,7 +1,14 @@
 import { useMutation } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/shared/ui/components/button'
-import { issueDetailKeys, issueListKeys, IssueStatus, IssueHealth, WorkflowStage, startIssue } from '../../../entities/issue'
+import {
+  issueDetailKeys,
+  issueListKeys,
+  IssueStatus,
+  IssueHealth,
+  WorkflowStage,
+  startIssue,
+} from '../../../entities/issue'
 import type { Issue } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
 import { type DeliveryFailureKind } from '../../../shared/lib/delivery-failure'
@@ -47,7 +54,9 @@ export function DeliveryFailureBanner({
       </div>
       {failureKind === 'branch-invariant-violation' && (
         <div className="rounded bg-card/70 px-2 py-1 space-y-0.5 font-mono text-[11px]">
-          <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">Attribution: runner/action (not issue work)</div>
+          <div className="text-[10px] uppercase tracking-wide opacity-80 font-sans">
+            Attribution: runner/action (not issue work)
+          </div>
           {evidence?.boundary && (
             <div>
               <span className="font-sans opacity-70">boundary:</span> {evidence.boundary}
@@ -102,10 +111,7 @@ export function IntegrateFailurePanel({ issue }: { issue: Issue }) {
   let nextAction = 'Review the failure above and take action to resolve the issue.'
 
   if (blockedReason) {
-    if (blockedReason.includes('archive')) {
-      failingStep = 'Archive OpenSpec change'
-      nextAction = 'Check disk space and permissions. Retry the archive step or return to Build.'
-    } else if (blockedReason.includes('merge') || blockedReason.includes('Merge')) {
+    if (blockedReason.includes('merge') || blockedReason.includes('Merge')) {
       failingStep = 'Merge to target branch'
       nextAction = 'Resolve any merge conflicts and return to Build for re-check.'
     } else if (blockedReason.includes('health') || blockedReason.includes('final-health')) {
@@ -130,18 +136,12 @@ export function IntegrateFailurePanel({ issue }: { issue: Issue }) {
           </div>
         )}
         {(requirementHeader || mergeReason) && (
-          <div className="text-xs text-danger">
-            {requirementHeader || mergeReason}
-          </div>
+          <div className="text-xs text-danger">{requirementHeader || mergeReason}</div>
         )}
         {(healthCommand || healthSummary) && (
           <div className="rounded border border-danger-border bg-card/70 p-2 space-y-1">
-            {healthCommand && (
-              <div className="text-xs font-mono text-danger">{healthCommand}</div>
-            )}
-            {healthSummary && (
-              <div className="text-xs text-danger">{healthSummary}</div>
-            )}
+            {healthCommand && <div className="text-xs font-mono text-danger">{healthCommand}</div>}
+            {healthSummary && <div className="text-xs text-danger">{healthSummary}</div>}
             {healthLogExcerpt && (
               <div className="text-xs text-danger mt-1 font-mono whitespace-pre-wrap">{healthLogExcerpt}</div>
             )}
@@ -155,13 +155,7 @@ export function IntegrateFailurePanel({ issue }: { issue: Issue }) {
   )
 }
 
-export function SpecialStatePanel({
-  issue,
-  issueNumber,
-}: {
-  issue: Issue
-  issueNumber: number
-}) {
+export function SpecialStatePanel({ issue, issueNumber }: { issue: Issue; issueNumber: number }) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
 
@@ -177,11 +171,7 @@ export function SpecialStatePanel({
   if (issue.status === IssueStatus.Backlog) {
     return (
       <div className="flex justify-center py-4">
-        <Button
-          onClick={() => startMutation.mutate()}
-          disabled={startMutation.isPending}
-          className="px-6"
-        >
+        <Button onClick={() => startMutation.mutate()} disabled={startMutation.isPending} className="px-6">
           {startMutation.isPending ? 'Starting...' : 'Start'}
         </Button>
       </div>
@@ -195,9 +185,7 @@ export function SpecialStatePanel({
           <CrossIcon className="h-4 w-4 text-danger" />
           <span className="text-sm font-semibold text-danger">Needs Action</span>
         </div>
-        {issue.blockedReason && (
-          <p className="text-sm text-danger">{issue.blockedReason}</p>
-        )}
+        {issue.blockedReason && <p className="text-sm text-danger">{issue.blockedReason}</p>}
       </div>
     )
   }
