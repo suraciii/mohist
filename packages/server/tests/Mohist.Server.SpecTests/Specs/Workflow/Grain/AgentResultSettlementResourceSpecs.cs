@@ -60,7 +60,7 @@ public sealed partial class AgentResultSettlementSpecs
         var unknown = await LoadRunAsync(_workflowId!);
         var deadline = Assert.IsType<DateTimeOffset>(
             Assert.Single(unknown.CurrentStage().Tasks).AgentResultSettlement!.DeadlineAt);
-        _fixture.TimeProvider.Advance(deadline - _fixture.TimeProvider.GetUtcNow());
+        await AdvanceToAgentSettlementDeadlineAsync(deadline);
         await workflow.ReceiveReminder(WorkflowGrain.AgentResultSettlementReminderName, default);
 
         var blocked = await LoadRunAsync(_workflowId!);
