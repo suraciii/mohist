@@ -14,10 +14,10 @@ relationship among Agent, AgentJob, and AgentSession.
 The minimal configuration contains only a prompt:
 
 ```yaml
-- id: proposal
+- id: plan
   uses: mohist/opencode
   with:
-    prompt: ${{ prompts.proposal }}
+    prompt: ${{ prompts.plan }}
 ```
 
 To let a Project or Issue adjust OpenCode configuration, first set it in
@@ -36,11 +36,11 @@ Then bind `session` and `options` explicitly from the Workflow Profile:
 stages:
   - stage: plan
     tasks:
-      - id: proposal
+      - id: plan
         uses: mohist/opencode
         with:
           session: plan
-          prompt: ${{ prompts.proposal }}
+          prompt: ${{ prompts.plan }}
           options: ${{ vars.agent }}
 ```
 

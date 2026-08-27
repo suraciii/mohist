@@ -110,9 +110,17 @@ under `PLANS/` is uploaded as run artifacts for evidence and audit; it has no
 per-file recovery point, and a lost Workspace directory is recovered by
 rerunning from the plan Stage, which regenerates it.
 
-Repository-modifying Tasks, such as Git Actions and verify scripts, run with
-`working-directory: REPOS/<repository-name>`; Agents anchor at the Workspace
-root and see `REPOS/` and `PLANS/` side by side.
+Each Workflow dispatch has two directory boundaries. Its execution directory is
+the Workspace root unless the Task selects another Workspace-relative path with
+`working-directory`. Its Repository guard directory is always
+`REPOS/<repository-name>` for the Issue's target Repository. Branch stability,
+dirty-worktree detection, residual Git state, and Git cleanup inspect that
+Repository guard even when the Task executes from the Workspace root.
+
+Repository-only Tasks, such as Git Actions and verify scripts, use
+`working-directory: REPOS/<repository-name>`. Agents anchor at the Workspace
+root and see `REPOS/` and `PLANS/` side by side; this does not make the
+Workspace root a Git checkout or move Git guards away from the Repository.
 
 ## Lifecycle Endpoints
 

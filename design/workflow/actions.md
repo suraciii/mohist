@@ -61,6 +61,11 @@ The platform reserves two categories that do not appear in the manifest: the res
 declare, and the platform error codes `invalid-input`, `unexpected-error`, and `timeout`, which the
 engine produces and an Action cannot invent.
 
+`host.workDir` is only the Action execution directory. For a Workflow Workspace,
+Runner separately derives the target Repository guard directory from Workspace
+and Repository facts. Branch stability and clean-worktree enforcement use that
+guard directory even when `host.workDir` is the Workspace root.
+
 ### Implementation Interface and Host
 
 `run(inputs, host)` is the entire Action implementation surface. The default host contains only:
@@ -242,7 +247,7 @@ does not fail the task.
 ```yaml
 artifacts:
   files:
-    - path: docs/proposal.md
+    - path: PLANS/PLAN.md
 ```
 
 ### `expect`
@@ -368,8 +373,18 @@ the base branch, workflow branch, remote, and other context through `${{ reposit
 - `enable-github-pr-auto-merge` registers the merge method on a PR, then waits until
   GitHub performs the merge, reusing the same bounded polling and classification as
   `mohist/github-pr-checks`. It is idempotent when auto-merge is already enabled.
-  Failed checks return `error.code: pr-checks-failed` and merge conflicts return
-  `conflict`; the Profile declares recovery explicitly.
+  One attempt has one fixed 30-minute deadline; every external command, retry
+  delay, registration reconciliation, and poll consumes the remaining budget.
+  An explicit squash subject takes precedence. When it is absent, the Action
+  uses the PR title from the bounded PR read and performs no separate Issue-field
+  lookup. Failed checks return `error.code: pr-checks-failed` and merge conflicts
+  return `conflict`; the Profile declares recovery explicitly.
+
+`retry-safe` is a failure classification, not retry authority. It means that a
+new explicit attempt may repeat the operation after the current Task fails. A
+Profile does not automatically retry it unless it declares that policy, and the
+built-in Profiles deliberately do not. Host cancellation remains a platform
+cancellation and must not be normalized to `retry-safe`.
 
 Publishing, PR metadata, and merge registration are three independent tasks with independent failure
 boundaries. A push failure retries only push; a PR operation failure retries only that PR operation.

@@ -137,6 +137,12 @@ user and must be unique within the Project.
   durable record is the uploaded run artifact (see
   [`workflow/plan-artifacts.md`](workflow/plan-artifacts.md)). Workspaces for parallel
   Issues use separate directories with no shared checkout or dependency cache.
+- Workflow dispatch keeps its execution directory separate from its Repository
+  guard directory. The execution directory defaults to the Workspace root and
+  can be selected by the Task's `working-directory`; the guard directory is
+  derived from the target Repository as `REPOS/<repository-name>`. Branch
+  stability, residual Git state, dirty-worktree detection, and Git cleanup use
+  the guard directory regardless of where the Action or Agent executes.
 - Interactive path: an empty directory plus Repository access. The Agent
   organizes it according to convention; the platform creates no internal
   layout in advance.
@@ -173,10 +179,12 @@ invariant does not change.
 
 ### Prompt Anchoring
 
-For execution bound to a Workspace, the Runner injects a working-directory
-anchor containing the absolute path and the instruction "all Workspace files
-are here; do not search `$HOME`". AGENTS.md and prompt conventions define the
-internal layout; it is not platform schema.
+For execution bound to a Workspace, the Runner injects a Workspace-root anchor
+containing the absolute path and the instruction "all Workspace files are here;
+do not search `$HOME`". `working-directory` selects the Action execution
+directory; it does not redefine the Workspace root or the Repository guard.
+AGENTS.md and prompt conventions define the internal layout; it is not
+Workspace entity schema.
 
 ## Status
 

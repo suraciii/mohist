@@ -52,6 +52,10 @@ plan -> approval -> build -> check -> approval -> integrate
 
 - Every Stage prepares its Workspace explicitly, so no Task relies on a hidden
   directory or branch transition.
+- Agent work runs from the Workspace root so `PLANS/` and `REPOS/` are both in
+  scope. Repository-only Actions select `REPOS/<repository-name>` explicitly.
+  Runner applies branch and clean-worktree invariants to that Repository in
+  both cases; an Action execution directory is not the Git guard boundary.
 - Plan produces the named artifacts, including the task list, in one Agent
   session. There is no self-review Task: the approval point is the plan
   review.
@@ -134,6 +138,14 @@ Action's wait: a required check failing after Approval returns
 Stage uses; a merge conflict returns `conflict` and follows the rebase
 recovery. Enabling auto-merge on a Repository that disallows it is an ordinary
 Task failure.
+
+One auto-merge attempt has a fixed 30-minute absolute deadline covering
+prechecks, Pull Request reads, subject selection, the registration mutation,
+ambiguous-mutation reconciliation, polling, and retry delays. An explicit
+subject wins; otherwise the Action uses the title returned by its bounded Pull
+Request read. `retry-safe` reports that an explicit later retry is valid. It
+does not authorize an unattended Profile recovery, and host cancellation
+remains cancellation rather than becoming a retry request.
 
 - Pull Request checks appear at two explicit boundaries. The first runs after
   Check work so a failed external check becomes visible repair work before

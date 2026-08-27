@@ -238,7 +238,7 @@ Mohist then:
 
 1. Creates or reuses the named Workspace `issue-1` from the target Repository.
 2. Enters the **Plan** stage, where an Inline Agent analyzes the requirement and
-   produces the proposal, design, specs, and tasks.
+   produces the plan, design record, and executable task list under `PLANS/`.
 
 ## 10. Wait for Plan to Finish
 

@@ -62,7 +62,9 @@ Stages have stable evidence:
 
 - `PLANS/PLAN.md` — interpretation, scope, approach; the plan approval
   document.
-- `PLANS/DESIGN.md` — produced when the change involves design choices.
+- `PLANS/DESIGN.md` — technical decisions and rationale. The file always
+  exists; when no separate design is needed, it records that conclusion and
+  why.
 - `PLANS/REVIEW.md` — the Check Stage's review evidence.
 - `PLANS/tasks.json` — the task list above.
 
@@ -93,8 +95,10 @@ feedback loop.
 - The Check Stage still runs an independent review in its own Session, but it
   produces `REVIEW.md` as evidence. There is no verdict marker, no PASS/FAIL
   gate, and no auto-fix recovery loop; the verdict belongs to the approver. A
-  repair requested by the approver goes through the approval feedback Tasks,
-  which is now the single repair path.
+  repair requested by the approver goes through the configured approval
+  feedback Tasks, which are the single repair path. Rejection does not rerun
+  the Stage: feedback work runs in the rejected Stage's Session, Stage Checks
+  run again, and the same approval point reviews the repaired result.
 - Judgment loops carry no budget. Recovery loops are unattended and keep their
   budgets; every approval feedback round is initiated by a deciding actor, so
   the engine imposes no round limit.
@@ -102,17 +106,21 @@ feedback loop.
 ## Integrate: Auto-merge
 
 Integrate enables GitHub auto-merge on the approved Pull Request. The
-registration Action then waits until GitHub performs the merge, reusing the
-existing bounded check-polling machinery; this mirrors the previous merge
-Action, which already waited for checks internally. Merge timing and
-merge-time prerequisites are arbitrated by GitHub, which removes the
+registration Action then waits until GitHub performs the merge. One attempt
+has a fixed 30-minute absolute deadline covering every external operation and
+retry delay, including subject selection and ambiguous-registration
+reconciliation. An explicit squash subject wins; otherwise the Action uses the
+PR title returned by the bounded PR read. Merge timing and merge-time
+prerequisites are arbitrated by GitHub, which removes the
 `base-moved` and `protection-conflict` recovery branches that the synchronous
 merge required. A required check that fails after Approval is classified
 `pr-checks-failed` and repaired through the same declared recovery the Check
 Stage uses; a merge conflict is classified `conflict` and follows the rebase
 recovery. Enabling auto-merge on a Repository that disallows it is an ordinary
-Task failure (`auto-merge-unavailable`). The one-shot `github-pr-status`
-Stage Check with `expect: merged` remains as post-hoc verification.
+Task failure (`auto-merge-unavailable`). `retry-safe` makes a later explicit
+retry valid but does not trigger unattended recovery; cancellation remains
+cancellation. The one-shot `github-pr-status` Stage Check with `expect: merged`
+remains as post-hoc verification.
 
 `mohist/merge-github-pr` is removed with this change; no consumer remains.
 
