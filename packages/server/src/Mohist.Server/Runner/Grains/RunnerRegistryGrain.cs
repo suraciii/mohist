@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure;
+using Orleans.Concurrency;
 
 namespace Mohist.Server.Runner.Grains;
 
@@ -8,11 +9,16 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
     private readonly Dictionary<string, RunnerInfo> _runners = new();
     private readonly ILogger<RunnerRegistryGrain> _log;
     private readonly TimeProvider _timeProvider;
+    private readonly IGrainFactory _grainFactory;
 
-    public RunnerRegistryGrain(ILogger<RunnerRegistryGrain> log, TimeProvider timeProvider)
+    public RunnerRegistryGrain(
+        ILogger<RunnerRegistryGrain> log,
+        TimeProvider timeProvider,
+        IGrainFactory grainFactory)
     {
         _log = log;
         _timeProvider = timeProvider;
+        _grainFactory = grainFactory;
     }
 
     public Task RegisterAsync(RunnerInfo info)
@@ -143,8 +149,23 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
         return Task.FromResult<IReadOnlyList<RunnerInfo>>(_runners.Values.ToList());
     }
 
-    public Task<IReadOnlyList<RunnerInfo>> ListEligibleRunnersAsync(string projectId)
+    public async Task<IReadOnlyList<RunnerInfo>> ListEligibleRunnersAsync(string projectId)
     {
-        return Task.FromResult<IReadOnlyList<RunnerInfo>>(_runners.Values.ToList());
+        var eligible = new List<RunnerInfo>();
+        foreach (var runner in _runners.Values.ToList())
+        {
+            try
+            {
+                var authority = _grainFactory.GetGrain<IRunnerGrain>(runner.RunnerId);
+                if (await authority.IsPresenceLeaseActiveAsync())
+                    eligible.Add(runner);
+            }
+            catch (Exception ex)
+            {
+                _log.LogDebug(ex, "Runner {RunnerId} was unavailable while resolving eligibility", runner.RunnerId);
+            }
+        }
+
+        return eligible;
     }
 }

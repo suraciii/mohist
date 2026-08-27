@@ -18,7 +18,15 @@ public partial class WorkflowGrain
             || !string.Equals(activeWork.WorkId, workId, StringComparison.Ordinal)
             || !string.Equals(activeWork.ProcessGeneration, processGeneration, StringComparison.Ordinal))
             return WorkReportVerdict.Refused;
-        return await FailActiveWorkCoreAsync(activeWork, message);
+        _reportPersistenceWorkId = activeWork.WorkId;
+        try
+        {
+            return await FailActiveWorkCoreAsync(activeWork, message);
+        }
+        finally
+        {
+            _reportPersistenceWorkId = null;
+        }
     }
 
     private async Task<WorkReportVerdict> FailActiveWorkCoreAsync(WorkflowActiveWork activeWork, string message)
