@@ -1,11 +1,21 @@
 # GitHub
 
-The GitHub integration makes GitHub a requirement intake, progress board, and
-Approval source for Mohist. A GitHub Issue enters the production system as a
-requirement. Progress and results are written back to that Issue. A Pull
-Request review can decide an Approval. Mohist remains the sole authority for
-state; GitHub shows a projection of the production system, not a second copy of
-its state.
+The GitHub integration makes a connected GitHub repository the public mirror of
+a Mohist Project's work. Once a Repository is connected, every Mohist Issue
+targeting it has exactly one GitHub Issue as its mirror. A GitHub Issue, in
+contrast, belongs to GitHub alone until someone explicitly hands it to Mohist.
+
+The two directions follow different rules:
+
+- **Mohist to GitHub is passive.** Creating and updating a Mohist Issue
+  projects to its GitHub mirror automatically. Nobody asks for synchronization.
+- **GitHub to Mohist is imperative.** A GitHub Issue enters Mohist only through
+  an explicit command in a GitHub comment. Nothing is imported by labels or
+  filters.
+
+Mohist remains the authority for execution state. For a linked pair, the two
+sides keep title and body in sync, while Workflow state projects only from
+Mohist to GitHub.
 
 Delivery through a GitHub Pull Request during the Integrate stage is separate.
 See [Workflow Profiles](workflow-profiles.md) and
@@ -13,148 +23,180 @@ See [Workflow Profiles](workflow-profiles.md) and
 
 ## Mental Model
 
-- **GitHub owns what is wanted; Mohist owns producing it.** A GitHub Issue is a
-  requirement. Mohist executes and tracks it after intake.
-- **Three GitHub actions drive the production system:** Applying a feed label
-  supplies a requirement, a Pull Request review decides an Approval, and
-  closing an Issue withdraws the requirement.
-- **Mohist leaves a GitHub record:** State labels, comments at important
-  moments, and closing the Issue on completion.
-- **Mohist records work under a separate bot identity:** Comments, labels, and
-  Pull Requests are distinct from the administrator's manual work. Branch
-  protection therefore applies equally to production output because a bot
-  cannot approve its own Pull Request.
-- **A snapshot becomes independent:** Mohist copies the GitHub Issue title and
-  body when creating its Issue. After that, both evolve independently and do
-  not read changes back. Change the requirement on the Mohist Issue.
+- **The GitHub Issue is the superset.** Everything Mohist tracks is visible on
+  GitHub; not everything on GitHub is tracked by Mohist.
+- **A mirror, not a second issue tracker.** The mirror's number, URL, and sync
+  health are first-class facts of the Mohist Issue. An Agent reading
+  `mo issue view` never parses labels or constructs URLs to find it.
+- **One command brings work in.** `/mohist start` in a GitHub comment hands an
+  Issue to the Mohist Workflow.
+- **A linked pair shares content, not execution.** Title and body synchronize
+  in both directions. Stage, Approval, and Run state project only outward.
+- **A Workflow is optional.** An Issue without a Workflow Profile runs no
+  production line; when linked, its lifecycle follows the GitHub Issue. See
+  [Issue Management](issues.md).
 
-## Connecting a Repository
+## Connecting Repositories
 
-First register the Repository with the Project; see
-[Repositories](repositories.md). Then create a Connection:
+A GitHub connection binds one GitHub repository to one registered Repository of
+the Project; see [Repositories](repositories.md). A Project that declares
+several repositories can hold several connections. An Issue never carries
+GitHub coordinates: its mirror location is determined by its target repository.
 
 ```bash
-mo github connect owner/repo
+mo github connect owner/repo                 # matched to a registered Repository by git URL
+mo github connect owner/repo --repo docs     # explicit when the match is ambiguous
+mo github list                               # every Repository and its connection state
 ```
 
-Mohist matches the URL to a registered Repository resource. If no resource
-matches, the command explains that it must be registered first. The guide
-prints steps for two GitHub-side configurations:
+The guide prints the GitHub-side setup: a Repository webhook targeting the
+Mohist Server, and the identity Mohist uses on GitHub — a deployment-specific
+GitHub App (recommended, short-lived repository-scoped tokens) or a
+fine-grained PAT with Issues read and write as fallback. An optional approver
+list enables [Pull Request Review as Approval](#pull-request-review-as-approval).
 
-1. **Event delivery:** Add a Repository webhook that targets the Mohist Server
-   URL so GitHub actions reach Mohist in real time.
-2. **GitHub identity:** Configure the identity used by Mohist on GitHub in one
-   of two forms:
+Disabling a connection pauses mirroring and synchronization. Existing links
+stay visible on Issues and show the paused state. Enabling re-projects every
+linked Issue once. A connection cannot be deleted.
 
-   - **GitHub App, recommended:** Install a deployment-specific bot such as
-     `your-mohist[bot]` in the Repository. Mohist obtains short-lived,
-     Repository-scoped tokens as needed instead of retaining a long-lived
-     GitHub access token. Write-back and delivery, including push and Pull
-     Request creation, use the bot identity. Runner does not retain GitHub
-     credentials.
-   - **Fine-grained PAT, fallback:** Give it only Issues read and write access
-     for write-back. It cannot modify code. Clone, push, and Pull Request
-     delivery continue to use the Runner's existing Git credential; see
-     [Runner Guide](runner.md). Records appear under the administrator or
-     Runner account.
+## The Mirror: Mohist to GitHub
 
-Optional configuration:
+When a new Issue's target repository is connected, Mohist creates the GitHub
+mirror as part of creation and records a permanent one-to-one link. A Draft is
+not mirrored; the mirror appears when the Issue is marked ready. The creating
+side owns the initial content: a mirror created from Mohist takes the Mohist
+title and body.
 
-- **Feed label:** Defaults to `mohist`. Applying it supplies the requirement.
-- **Feed mode:** Starts work immediately by default. Use `--feed-mode backlog`
-  to create only a backlog Issue for a later manual start.
-- **Approver list:** Empty and disabled by default. Only Pull Request reviews
-  from listed GitHub users decide an Approval.
+After creation, the mirror carries:
 
-One GitHub Repository can connect to only one Project. A Project can connect to
-several Repositories.
+- **Title and body**, kept in sync in both directions; see
+  [Linked Pairs](#linked-pairs).
+- **Lifecycle projection.** Completing or cancelling the Mohist Issue closes
+  the mirror with the matching reason.
+- **Workflow progress** as the mutually exclusive `mohist:*` state labels
+  (`in-progress`, `awaiting-approval`, `blocked`, `done`) and four low-volume
+  milestone comments: mirror confirmation with the Mohist Issue link, arrival
+  at an Approval point, completion with a delivery summary and Pull Request
+  link, and cancellation with a reason.
 
-## Requirement Intake by Label
+Never mirrored: Mohist comments, labels, priority, model and runtime
+configuration, prerequisites, Epic membership, and Workspace or Session facts.
 
-Applying the feed label to a GitHub Issue creates a corresponding Mohist Issue.
-Mohist copies its title and body, selects the Repository bound to the
-Connection, maps labels `p0` through `p4` to Mohist priority, and ignores other
-labels. The default feed mode starts work immediately, without leaving GitHub.
+A mirror failure never blocks the production system. See
+[Sync Health and Recovery](#sync-health-and-recovery).
+
+## Handing a GitHub Issue to Mohist
+
+A comment starting with `/mohist` on an Issue in a connected repository is a
+command. The first verb is:
+
+```text literal
+/mohist start
+```
+
+It creates the Mohist Issue from the GitHub title and body, records the link,
+and starts the Workflow with the Project's default Profile — one utterance for
+what `mo issue create` plus `mo issue start` do. GitHub labels `p0` through
+`p4` map to Mohist priority at this moment.
 
 Rules:
 
-- **A GitHub Issue is supplied once.** Removing and reapplying the label does
-  not create a duplicate.
-- **Origin is traceable.** The Mohist Issue links to its GitHub origin.
-- **Withdrawal cancels work.** Closing the GitHub Issue cancels the Mohist
-  Issue if it is not complete. The production system does not continue work
-  after the requester withdraws it.
-- **Repository permission controls intake.** Anyone who can apply labels can
-  supply a requirement. Mohist adds no additional intake list. The separate
-  list controls only Approvals.
+- **Permission comes from GitHub.** Only a commenter GitHub reports as a
+  repository owner, member, or collaborator can hand work in. Other commands
+  are ignored.
+- **Idempotent.** A repeated `/mohist start` on an already-linked Issue replies
+  with the existing Mohist Issue link and starts nothing.
+- **The bot answers in place.** The confirmation reply carries the Mohist Issue
+  link; a refusal replies with the reason, such as an unavailable Repository.
+- **Comments stay on GitHub.** Command comments and ordinary discussion never
+  enter the Mohist comment thread.
 
-## Progress Write-back
+The verb vocabulary is shared with `mo`. Future GitHub-side commands reuse the
+same domain verbs (`stop`, `retry`, …) with comment replies instead of flags
+and JSON output.
 
-Mohist projects progress from an Issue with a GitHub origin back to that GitHub
-Issue.
+## Linked Pairs
 
-**State labels** use the mutually exclusive `mohist:` prefix, with at most one
-present at a time:
+Title and body of a linked pair synchronize in both directions. An edit whose
+content equals the current value is the echo of Mohist's own write and is
+ignored; a real edit updates the other side and is attributed in the Issue
+timeline (`github:<login>` or the Mohist caller). An edit arriving while a
+Workflow runs updates the Issue record but does not retroactively change the
+running Workflow's input.
 
-- `mohist:in-progress` — the production system is running.
-- `mohist:awaiting-approval` — work is waiting at an Approval point.
-- `mohist:blocked` — work is blocked and needs intervention.
-- `mohist:done` — work is complete; the GitHub Issue closes at the same time.
+Lifecycle depends on whether the Issue runs a Workflow:
 
-Mohist writes four types of low-volume comments: intake confirmation with the
-Mohist Issue link, arrival at an Approval point, completion with a delivery
-summary and Pull Request link, and cancellation with a reason. Failure details
-go through a notification channel; see
-[Hermes Notifications](hermes-notifications.md). They are not repeated on
-GitHub.
+- **Without a Workflow**, the GitHub Issue drives. Close as completed marks the
+  Issue Done; close as not planned cancels it; reopening returns a cancelled
+  Issue to the backlog. Reopening a completed Issue does not erase the
+  delivery — Mohist suggests creating a follow-up Issue instead.
+- **With a Workflow**, Mohist drives. Closing the GitHub Issue before the
+  Integrate stage withdraws the requirement and cancels the work. Once the Run
+  reaches Integrate, a GitHub close — including the automatic close caused by
+  merging a linked Pull Request — is a delivery echo and is ignored. Mohist
+  never places GitHub closing keywords in Pull Request bodies; the write-back
+  closes the mirror after the Workflow completes.
 
-A write-back failure does not block production. GitHub is a progress board, not
-the production state. Mohist records the failure for inspection.
+Two existing Issues can be paired by hand, with the Mohist side as the content
+source:
+
+```bash
+mo issue github link 42 owner/repo#817
+mo issue github unlink 42    # stops synchronization; both sides keep existing
+```
+
+## Sync Health and Recovery
+
+Every link is either healthy or carries the last synchronization error, shown
+on the Issue in CLI and Web. One reconcile verb repairs a link — creating a
+missing mirror, pushing the current Mohist state, and clearing the error:
+
+```bash
+mo issue github sync 42
+```
+
+State-label write-backs also heal themselves at the next Workflow milestone.
 
 ## Pull Request Review as Approval
 
-When a Connection has an approver list, a Check Approval point accepts GitHub
-Pull Request reviews. An **Approve** review approves. A **Request changes**
-review rejects, using the review body as the reason. A **Comment** review has
-no Approval action.
-
-- Only a review by a listed GitHub user counts. An empty list disables the
-  capability.
-- The Approval record attributes the GitHub user. `mo run approve` attributes
-  its authenticated caller instead.
-- This applies to Check Approval points for code review. A Plan Approval occurs
-  before a Pull Request exists and does not use this path.
-- Mohist decides from state at event arrival. It does not reverse a decision if
-  a review is later dismissed or becomes stale after a push.
+When a connection has an approver list, a Check Approval point accepts GitHub
+Pull Request reviews. An **Approve** review approves; a **Request changes**
+review rejects with the review body as the reason; a **Comment** review has no
+Approval action. Only reviews by listed GitHub users count, and the Approval
+record attributes the GitHub user. Mohist decides from state at event arrival
+and does not reverse a decision if a review is later dismissed.
 
 ## GitHub Events and Event Routing
 
-After a Connection is established, GitHub actions such as label changes,
-closure, review, and Pull Request check results reach Mohist as events in real
-time. [Event routing](event-routing.md) expressions can subscribe directly. A
-rule can, for example, ask a supervising Agent to inspect a newly failing Pull
-Request check. A GitHub event with an origin link belongs to the corresponding
-Issue lineage, so subscribing to every event under Issue #42 includes it.
+GitHub actions on a connected repository — comments, edits, closure, reviews,
+check results — reach Mohist as events in real time and can feed
+[Event routing](event-routing.md). An event on a linked Issue belongs to that
+Issue's lineage, so subscribing to every event under Issue #42 includes it.
 
 ## Non-goals
 
-- **Bidirectional synchronization:** GitHub title and body edits are not read
-  back. State projects only from Mohist to GitHub. Two state authorities would
-  diverge.
-- **GitHub Projects:** Mohist does not read or write board columns or custom
-  fields. A Projects Status field belongs to a board, and one Issue can have
-  different status in two boards. That conflicts with Mohist as sole state
-  authority. GitHub labels and Issue state already appear naturally in a
-  Projects board.
-- **Agent triggers from GitHub comment mentions:** Evaluate this in a later
-  phase when a real requirement exists.
-- **Hierarchy mapping:** GitHub sub-issues and milestones do not map to Mohist
-  child Issues or Epics. Manage requirement hierarchy in Mohist.
-- **Runtime control on GitHub:** Exceptional operations such as pause, stop,
-  and retry remain in Mohist interfaces such as CLI, Web, Slack, and suggested
-  notification actions.
+- **Bulk backfill.** Connecting a repository does not mass-create mirrors for
+  existing Issues; `mo issue github sync` reconciles on demand.
+- **Comment synchronization.** GitHub discussion is not imported; Mohist
+  comments are not published. The bot's own milestone and command replies are
+  the only Mohist-authored comments.
+- **Rich GitHub fields.** Assignees, milestones, GitHub Projects, and sub-issue
+  hierarchy are not read or written. The `p0`–`p4` priority mapping at hand-in
+  is the only label read.
+- **Runtime control on GitHub.** Beyond `/mohist` verbs, exceptional operations
+  such as pause, stop, and retry remain in Mohist interfaces.
 
 ---
 
 See [`design/github-integration.md`](../design/github-integration.md) for design
 boundaries and protocol details.
+
+## Status
+
+The target model above replaces the earlier one-way intake design. Implemented
+today: repository connection with signed ingress, feed-by-label intake, close
+withdrawal, Pull Request review Approval, and best-effort progress write-back.
+Not yet implemented: automatic mirroring of Mohist Issues, the `/mohist`
+command entry, two-way title and body sync, first-class link visibility in CLI
+and Web, and reconcile-based recovery. Feed-by-label intake and its connection
+options are removed when the command entry lands.

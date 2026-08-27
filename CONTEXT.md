@@ -40,6 +40,15 @@ takeover, with direct configuration, launch, and continuation of Mohist Agents.
 It is neither the user's daily collaboration workspace nor the primary
 interaction entry point.
 
+**GitHub Mirror**:
+The one GitHub Issue that Mohist creates and maintains for a Mohist Issue whose
+target Repository is connected to GitHub. Mirroring is automatic and passive;
+title and body synchronize in both directions, while execution state projects
+only from Mohist outward. A GitHub Issue without a link is not tracked by
+Mohist and enters only through an explicit `/mohist` command.
+
+_Avoid_: feed, intake label, origin snapshot
+
 ## Agent Execution
 
 **Action**:
