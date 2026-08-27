@@ -9,9 +9,10 @@ import {
 function event(id: string, sessionId: string, type = id): RuntimeEventRecord {
   return {
     id,
-    producerFamily: 'binding-reconcile',
+    producerFamily: 'session-followup',
     target: { kind: 'session', sessionId },
     runtimeSessionId: `runtime-${sessionId}`,
+    sessionTurnId: `turn-${sessionId}`,
     work: null,
     event: { type, payload: {} },
     acknowledgementPolicy: 'successful-response',

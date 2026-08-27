@@ -782,6 +782,4 @@ describe('RunnerHost', () => {
       await run.catch(() => undefined)
     }
   })
-
-
 })

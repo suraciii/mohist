@@ -106,7 +106,6 @@ function createExecutor(
     piRuntime as never,
     undefined,
     null,
-    undefined,
     25,
   )
   return { executor, outbox }

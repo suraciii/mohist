@@ -184,7 +184,6 @@ export class RunnerHost {
     })
     this.namedWorkspaceRegistry = new NamedWorkspaceRegistry(options.runnerRoot)
     this.agentSessionRuntimeEventQueue = createAgentSessionRuntimeEventQueue({
-      filePath: `${options.runnerRoot}/${RUNTIME_EVENT_OUTBOX_FILE}`,
       deliver: createServerRuntimeEventDelivery({
         connection: this.connection,
       }),
@@ -721,10 +720,7 @@ export class RunnerHost {
       awaitingAck: this.awaitingAck.keys(),
       runtimeReadiness: runtimeReadinessWitnesses(this.openCodeRuntime, this.piRuntime, this.piRuntimeGeneration),
       connectionId: this.control.getConnectionId(),
-      admissionReady:
-        this.providerPolicyDiagnostic === null &&
-        this.terminalTaskLogDelivery.ready() &&
-        this.agentSessionRuntimeEventQueue.ready(),
+      admissionReady: this.providerPolicyDiagnostic === null,
       deploymentEpoch: this.connection.deploymentEpoch,
     })
   }

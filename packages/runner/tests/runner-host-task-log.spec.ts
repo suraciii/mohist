@@ -502,9 +502,6 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     expect(reportCall[1].status).toBe('failed')
     expect(reportCall[1].message).toBe('boom')
   })
-
-
-
 })
 
 describe('TaskLogCollector incremental flush through RunnerHost', () => {

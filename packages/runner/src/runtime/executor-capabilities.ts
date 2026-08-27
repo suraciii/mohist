@@ -23,13 +23,7 @@ import { hasUnconfirmedCleanup, parseModelIdentifier } from './opencode/index.js
 import { resolveIssueFields, type IssueFields } from '../actions/issue-fields.js'
 import type { SkillResolver } from './skill-resolver.js'
 import { buildExecutionEnvelope } from './execution-envelope.js'
-import {
-  CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE,
-  cleanupDeliveryWaitFailureMessage,
-  cleanupPredecessorTarget,
-  isCleanupDeliveryWaitTimeout,
-  waitForCleanupPredecessorDelivery,
-} from './cleanup-turn-admission.js'
+import { cleanupPredecessorTarget } from './cleanup-turn-admission.js'
 
 export interface ExecutorCapabilityDeps {
   readonly connection: ServerConnection
@@ -38,7 +32,6 @@ export interface ExecutorCapabilityDeps {
   readonly openCodeRuntime: OpenCodeRuntime | null
   readonly agentSessionRuntimeEventQueue: AgentSessionRuntimeEventQueue | null
   readonly runtimeEventRecordId: () => string
-  readonly cleanupTerminalFactDeliveryBudgetMs?: number
   readonly workflowSessionSettleBudgetMs?: number
 }
 
@@ -130,34 +123,6 @@ function buildAgentTurnCapability(
           taskRunId: work.taskRunId,
           cleanupAttempt,
         }) !== null
-      if (self.connection && work.projectId) {
-        try {
-          await waitForCleanupPredecessorDelivery(
-            self.agentSessionRuntimeEventQueue,
-            {
-              projectId: work.projectId,
-              workflowRunId: work.workflowRunId,
-              sessionName,
-              workId: work.workId,
-              taskRunId: work.taskRunId,
-              cleanupAttempt,
-            },
-            signal,
-            self.cleanupTerminalFactDeliveryBudgetMs,
-          )
-        } catch (error) {
-          if (isCleanupDeliveryWaitTimeout(error)) {
-            return runtimeActionFailure(
-              CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE,
-              cleanupDeliveryWaitFailureMessage(error, work),
-            )
-          }
-          return runtimeActionFailure(
-            'session-binding-failed',
-            `Failed to wait for Workflow cleanup predecessor delivery: ${errorMessage(error)}`,
-          )
-        }
-      }
       let binding: {
         agentSessionId: string
         runtimeSessionId: string | null
@@ -613,7 +578,6 @@ async function runPiAgentTurn(
     runtimeEventRecordId: deps.runtimeEventRecordId,
     runnerId: deps.connection.runnerId,
     cleanupAttempt,
-    cleanupTerminalFactDeliveryBudgetMs: deps.cleanupTerminalFactDeliveryBudgetMs,
     with: request.session ? { session: request.session } : undefined,
     preparedPrompt: composePiPrompt(request.prompt, work.parentIssueContext),
     preparedOptions: request.options,

@@ -20,12 +20,6 @@ import { buildExecutionEnvelope } from '../runtime/execution-envelope.js'
 import type { AgentExecutionDefinition } from '../core/types.js'
 import { WorkflowAgentSessionReporter } from './workflow-agent-session-reporter.js'
 import type { AgentSessionRuntimeEventQueue } from '../server/runtime-event-queue.js'
-import {
-  CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE,
-  cleanupDeliveryWaitFailureMessage,
-  isCleanupDeliveryWaitTimeout,
-  waitForCleanupPredecessorDelivery,
-} from '../runtime/cleanup-turn-admission.js'
 
 export const PI_USES = 'mohist/pi'
 export const PI_TURN_DURATION_MS = 60 * 60 * 1000
@@ -52,7 +46,6 @@ interface ActionInvocationContext {
   runtimeEventQueue?: AgentSessionRuntimeEventQueue | null
   runtimeEventRecordId?: () => string
   cleanupAttempt?: number | null
-  cleanupTerminalFactDeliveryBudgetMs?: number
   preparedPrompt?: string
   preparedOptions?: PiOptions
   log?: TaskLogger | null
@@ -121,36 +114,6 @@ export async function piAction(
 
   const sessionName = sessionNameFromContext(context)
   const canBind = !!context.serverConnection && !!context.projectId
-  if (canBind) {
-    try {
-      await waitForCleanupPredecessorDelivery(
-        context.runtimeEventQueue,
-        {
-          projectId: context.projectId,
-          workflowRunId: context.workflowRunId,
-          sessionName,
-          workId: context.workId,
-          taskRunId: context.taskRunId,
-          cleanupAttempt: context.cleanupAttempt,
-        },
-        context.signal,
-        context.cleanupTerminalFactDeliveryBudgetMs,
-      )
-    } catch (error) {
-      if (isCleanupDeliveryWaitTimeout(error)) {
-        return fail(
-          CLEANUP_TERMINAL_FACT_DELIVERY_TIMEOUT_CODE,
-          cleanupDeliveryWaitFailureMessage(error, { workId: context.workId }),
-          { exitCode: 1, turnFact: { finalAssistantText: null } },
-        )
-      }
-      return fail(
-        'session-binding-failed',
-        `Failed to wait for Workflow cleanup predecessor delivery: ${actionErrorMessage(error)}`,
-        { exitCode: 1, turnFact: { finalAssistantText: null } },
-      )
-    }
-  }
   let runtimeSessionId: string | null = null
   let expectedRuntime: string | null = null
   let expectedRuntimeSessionId: string | null = null

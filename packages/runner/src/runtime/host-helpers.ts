@@ -85,9 +85,7 @@ export function syncOpenCodeWorkOwners(
   if (runtime) runtime.setWorkOwners(openCodeOwners(inFlight, awaitingAck))
 }
 
-export function isOpenCodeReadyForClaim(
-  runtime: OpenCodeRuntime | null,
-): boolean {
+export function isOpenCodeReadyForClaim(runtime: OpenCodeRuntime | null): boolean {
   return runtime !== null && runtime.ready()
 }
 
@@ -170,10 +168,7 @@ export function currentCatalogRevision(
   return null
 }
 
-export function createHostTaskLogDeps(
-  connection: ServerConnection,
-  options: RunnerOptions,
-): HostTaskLogDeps {
+export function createHostTaskLogDeps(connection: ServerConnection, options: RunnerOptions): HostTaskLogDeps {
   return { connection, options }
 }
 

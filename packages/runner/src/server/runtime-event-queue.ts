@@ -423,5 +423,9 @@ function isPermanentRefusal(error: unknown): error is RuntimeEventDeliveryError 
   return false
 }
 
-export { runtimeEventDeliveryKey, runtimeEventSchedulingKey, workflowExecutionIdentity } from './runtime-event-queue-identity.js'
+export {
+  runtimeEventDeliveryKey,
+  runtimeEventSchedulingKey,
+  workflowExecutionIdentity,
+} from './runtime-event-queue-identity.js'
 export type { WorkflowRuntimeEventExecutionIdentity } from './runtime-event-queue-identity.js'

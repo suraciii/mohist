@@ -7,12 +7,9 @@
  * `opencodeAction` so the action's `openWorkflowAgentSession` /
  * `attachWorkflowAgentSession` still work.
  */
-import { vi } from "vitest"
-import type { ServerConnection, AgentSessionRuntimeEventReceipt } from "../../src/server/connection.js"
-import type {
-  AgentSessionRuntimeEventQueue,
-  RuntimeEventRecord,
-} from "../../src/server/runtime-event-queue.js"
+import { vi } from 'vitest'
+import type { ServerConnection, AgentSessionRuntimeEventReceipt } from '../../src/server/connection.js'
+import type { AgentSessionRuntimeEventQueue, RuntimeEventRecord } from '../../src/server/runtime-event-queue.js'
 
 export interface OutboxHandles {
   /** Outbox-shaped object accepted by `ActionContext.agentSessionRuntimeEventQueue`. */
@@ -43,10 +40,10 @@ export function makeRecordingOutbox(): OutboxHandles {
       records.push(internal)
     },
     async awaitInputReceipt(recordId) {
-      if (!inputAccepted) throw new Error("session.input was not acknowledged")
+      if (!inputAccepted) throw new Error('session.input was not acknowledged')
       const record = records.find((candidate) => candidate.id === recordId)
       return {
-        type: "session.input",
+        type: 'session.input',
         inputDeliveryId: recordId,
         agentTurnId: `turn-${recordId}`,
         agentSessionId: record?.work?.agentSessionId ?? undefined,
@@ -74,15 +71,20 @@ export function makeRecordingOutbox(): OutboxHandles {
   // when acceptance is enabled and an empty array otherwise.
   const connection: ServerConnection = {
     async openWorkflowAgentSession() {
-      return { runtimeSessionId: "ses_bound", workDir: "/tmp/work" }
+      return { runtimeSessionId: 'ses_bound', workDir: '/tmp/work' }
     },
     async attachWorkflowAgentSession() {},
-    async workflowAgentSessionRuntimeEvents(_projectId: string, _workflowRunId: string, _sessionName: string, body: unknown): Promise<AgentSessionRuntimeEventReceipt[]> {
+    async workflowAgentSessionRuntimeEvents(
+      _projectId: string,
+      _workflowRunId: string,
+      _sessionName: string,
+      body: unknown,
+    ): Promise<AgentSessionRuntimeEventReceipt[]> {
       const runtimeEvents = (body as { runtimeEvents: Array<{ type: string }> }).runtimeEvents ?? []
       if (runtimeEvents.some((event) => rejectTypes.has(event.type))) {
-        throw new Error(`rejected: ${runtimeEvents[0]?.type ?? "?"}`)
+        throw new Error(`rejected: ${runtimeEvents[0]?.type ?? '?'}`)
       }
-      if (!inputAccepted && runtimeEvents.some((event) => event.type === "session.input")) return []
+      if (!inputAccepted && runtimeEvents.some((event) => event.type === 'session.input')) return []
       return runtimeEvents.map((event) => ({ type: event.type }))
     },
   } as unknown as ServerConnection

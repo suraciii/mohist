@@ -439,13 +439,11 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
       connected.resolve()
     })
     const controller = new AbortController()
-    const host = new RunnerHost(
-      {
-        ...hostOptions(),
-        pollIntervalMs: QUIET_INTERVAL_MS,
-        heartbeatIntervalMs: POLL_INTERVAL_MS,
-      },
-    )
+    const host = new RunnerHost({
+      ...hostOptions(),
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: POLL_INTERVAL_MS,
+    })
     const run = host.run(controller.signal)
     try {
       await connected.promise

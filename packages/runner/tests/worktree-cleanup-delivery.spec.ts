@@ -402,7 +402,6 @@ describe('worktree cleanup before delivery', () => {
     expect(agentResult.message).toMatch(/untracked=\[src\/never-clean\.ts\]/)
   })
 
-
   it('treats Pi-backed tasks as agent-backed for cleanup', async (resources) => {
     const worktree = createFakeWorktree()
     installExecutorGit(resources, worktree)

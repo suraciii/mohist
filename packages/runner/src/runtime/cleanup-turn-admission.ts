@@ -31,7 +31,13 @@ export function cleanupPredecessorTarget(input: CleanupTurnAdmissionInput): Clea
       cleanupAttempt - 1,
     )
   }
-  return { projectId, workflowRunId: input.workflowRunId, sessionName: input.sessionName, cleanupAttempt, precedingCleanupOperationId }
+  return {
+    projectId,
+    workflowRunId: input.workflowRunId,
+    sessionName: input.sessionName,
+    cleanupAttempt,
+    precedingCleanupOperationId,
+  }
 }
 
 export function isPositiveCleanupAttempt(value: number | null | undefined): value is number {
