@@ -166,6 +166,7 @@ Business error codes:
 - `config-error`: GitHub configuration is missing or invalid.
 - `pr-state-conflict`: the Pull Request is in a conflicting state.
 - `enable-failed`: enabling auto-merge failed.
+- `aborted`: the Action was cancelled by the host.
 
 ## `mohist/github-pr-status`
 

@@ -11,6 +11,7 @@ export type GitHubPrErrorCode =
   | 'conflict'
   | 'auto-merge-unavailable'
   | 'enable-failed'
+  | 'aborted'
 
 export interface GitHubPrStep {
   name: string

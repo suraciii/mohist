@@ -26,10 +26,27 @@ describe('local Git Action manifests', () => {
     expect(inputs('mohist/enable-github-pr-auto-merge')).toMatchObject({
       repositoryUrl: { required: true },
       prNumber: { required: true },
+      subject: { types: ['string'] },
     })
+    expect(inputs('mohist/enable-github-pr-auto-merge')).not.toHaveProperty('subjectFrom')
+    const autoMerge = registry.resolve('mohist/enable-github-pr-auto-merge')
+    if (autoMerge.kind !== 'definition') throw new Error('Missing mohist/enable-github-pr-auto-merge')
+    expect(autoMerge.definition.manifest.capabilities).toBeUndefined()
     expect(registry.resolve('mohist/openspec-tasks').kind).toBe('unknown')
     expect(registry.resolve('mohist/archive-change').kind).toBe('unknown')
     expect(registry.resolve('mohist/merge-github-pr').kind).toBe('unknown')
+  })
+
+  it('rejects the removed auto-merge subjectFrom input', () => {
+    const resolved = createDefaultRegistry().resolve('mohist/enable-github-pr-auto-merge')
+    if (resolved.kind !== 'definition') throw new Error('Missing mohist/enable-github-pr-auto-merge')
+    expect(
+      validateActionInput(resolved.definition.manifest, {
+        repositoryUrl: 'https://github.com/o/r.git',
+        prNumber: 42,
+        subjectFrom: 'issue.title',
+      }),
+    ).toMatchObject({ kind: 'failure', error: { code: 'invalid-input' } })
   })
 
   it('keeps engine-sourced task-list and rebase inputs out of the public catalog', () => {
