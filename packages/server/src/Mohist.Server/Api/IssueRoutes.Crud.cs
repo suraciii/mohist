@@ -71,6 +71,8 @@ public static partial class IssueRoutes
                 return ApiResults.BadRequest(agentConfigError!, "invalid_agent_config");
 
             var requestedWorkflowProfileId = req.WorkflowProfileId;
+            if (req.NoWorkflow == true && !string.IsNullOrWhiteSpace(requestedWorkflowProfileId))
+                return ApiResults.BadRequest("noWorkflow and workflowProfileId are mutually exclusive", "workflow_selection_conflict");
             if (!string.IsNullOrWhiteSpace(requestedWorkflowProfileId)
                 && !await profileProvider.ContainsAsync(project.Id, requestedWorkflowProfileId))
                 return ApiResults.BadRequest($"Unknown workflow profile '{req.WorkflowProfileId}'", "unknown_workflow_profile");
@@ -106,6 +108,7 @@ public static partial class IssueRoutes
                         IsDraft: req.IsDraft ?? true,
                         AttachmentIds: req.AttachmentIds,
                         WorkflowProfileId: requestedWorkflowProfileId,
+                        NoWorkflow: req.NoWorkflow == true,
                         PrerequisiteNumbers: req.PrerequisiteNumbers,
                         ParentIssueNumber: req.ParentIssueNumber),
                     commandId: commandId,
@@ -226,9 +229,12 @@ public static partial class IssueRoutes
             if (TryValidateAgentConfigForbiddenKeys(req.Raw, "agentConfig", out var agentConfigError) is false)
                 return ApiResults.BadRequest(agentConfigError!, "invalid_agent_config");
 
-            // Workflow profile id: any present non-null value must refer to a
-            // known registered profile. Null means "clear to inherit default"
-            // and is part of the established three-state semantics.
+            if (req.Contains(nameof(UpdateIssueRequest.WorkflowProfileId))
+                && req.Contains(nameof(UpdateIssueRequest.NoWorkflow))
+                && req.NoWorkflow == true
+                && !string.IsNullOrWhiteSpace(req.WorkflowProfileId))
+                return ApiResults.BadRequest("noWorkflow and workflowProfileId are mutually exclusive", "workflow_selection_conflict");
+
             var workflowProfileIdForUpdate = req.WorkflowProfileId;
             if (req.Contains(nameof(UpdateIssueRequest.WorkflowProfileId))
                 && !string.IsNullOrWhiteSpace(req.WorkflowProfileId))
@@ -285,6 +291,7 @@ public static partial class IssueRoutes
                             IsDraft: req.IsDraft,
                             AttachmentIds: req.AttachmentIds,
                             WorkflowProfileId: workflowProfileIdForUpdate,
+                            NoWorkflow: req.NoWorkflow,
                             PresentFields: req.Fields,
                             Title: req.Title,
                             ParentIssueNumber: req.ParentIssueNumber),
@@ -338,6 +345,10 @@ public static partial class IssueRoutes
                         return ApiResults.Conflict(
                             coordinatorResult.Message ?? "WorkflowProfile was not found",
                             "workflow-profile-not-found");
+                    case IssueRepositoryBindingResultCode.WorkflowProfileLocked:
+                        return ApiResults.Conflict(
+                            coordinatorResult.Message ?? "Workflow selection is locked",
+                            "workflow_profile_locked");
                     default:
                         return ApiResults.Conflict(
                             coordinatorResult.Message ?? "Repository change rejected");
@@ -349,7 +360,8 @@ public static partial class IssueRoutes
                 return ApiResults.Ok(info);
             }
 
-            if (req.Contains(nameof(UpdateIssueRequest.WorkflowProfileId)))
+            if (req.Contains(nameof(UpdateIssueRequest.WorkflowProfileId))
+                || req.Contains(nameof(UpdateIssueRequest.NoWorkflow)))
             {
                 var currentIssue = await issuesQuery.GetDomainAsync(project.Id, number);
                 if (currentIssue?.RepositoryRef is null)
@@ -371,6 +383,7 @@ public static partial class IssueRoutes
                             IsDraft: req.IsDraft,
                             AttachmentIds: req.AttachmentIds,
                             WorkflowProfileId: workflowProfileIdForUpdate,
+                            NoWorkflow: req.NoWorkflow,
                             PresentFields: req.Fields,
                             Title: req.Title,
                             ParentIssueNumber: req.ParentIssueNumber),
@@ -398,6 +411,10 @@ public static partial class IssueRoutes
                         return ApiResults.Conflict(
                             coordinatorResult.Message ?? "WorkflowProfile was not found",
                             "workflow-profile-not-found");
+                    case IssueRepositoryBindingResultCode.WorkflowProfileLocked:
+                        return ApiResults.Conflict(
+                            coordinatorResult.Message ?? "Workflow selection is locked",
+                            "workflow_profile_locked");
                     default:
                         return ApiResults.Conflict(coordinatorResult.Message ?? "Issue update rejected");
                 }
@@ -418,7 +435,8 @@ public static partial class IssueRoutes
                     AttachmentIds: req.AttachmentIds,
                     PresentFields: req.Fields,
                     WorkflowProfileId: workflowProfileIdForUpdate,
-                    ParentIssueNumber: req.ParentIssueNumber));
+                    ParentIssueNumber: req.ParentIssueNumber,
+                    NoWorkflow: req.NoWorkflow));
             }
             catch (IssueDomain.WorkflowProfileLockedException ex)
             {

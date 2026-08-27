@@ -15,6 +15,7 @@ public sealed partial class Issue
         string? risk = null,
         bool isDraft = true,
         string? workflowProfileId = null,
+        bool noWorkflow = false,
         string? commandId = null,
         long? expectedRevision = null,
         DateTime? now = null)
@@ -35,6 +36,7 @@ public sealed partial class Issue
             RepositoryRef = canonicalRepository,
             IsDraft = isDraft,
             WorkflowProfileId = workflowProfileId,
+            NoWorkflow = noWorkflow,
             RepositoryBindingRevision = NextRevision(0, expectedRevision),
             LastRepositoryCommand = commandId is null
                 ? null
@@ -54,9 +56,9 @@ public sealed partial class Issue
             Labels: issue.SnapshotLabels(),
             Risk: risk,
             RepositoryRef: canonicalRepository));
-        if (!string.IsNullOrWhiteSpace(workflowProfileId))
+        if (!string.IsNullOrWhiteSpace(workflowProfileId) || noWorkflow)
         {
-            issue.RecordEvent(new IssueWorkflowProfileChanged(issue.WorkflowProfileId));
+            issue.RecordEvent(new IssueWorkflowProfileChanged(issue.WorkflowProfileId, issue.NoWorkflow));
         }
         return issue;
     }
@@ -116,19 +118,21 @@ public sealed partial class Issue
     }
 
     /// <summary>
-    /// Replace the issue-level workflow profile selection. <c>null</c>
-    /// clears the selection so reads fall back to project/system default.
-    /// Caller is responsible for validating that <paramref name="profileId"/>
-    /// (when non-null) refers to a known workflow profile; the aggregate
-    /// only stores the value.
+    /// Replace the Issue's Workflow selection. A null Profile inherits the
+    /// Project default unless <paramref name="noWorkflow"/> is true.
     /// </summary>
-    public void ReplaceWorkflowProfile(string? profileId, DateTime? now = null)
+    public void ReplaceWorkflowProfile(string? profileId, bool noWorkflow = false, DateTime? now = null)
     {
+        if (_hasWorkflowStarted && _workflowRunId is null)
+            throw new WorkflowProfileLockedException(Number, workflowRunId: null);
         var next = NormalizeOptional(profileId);
-        if (string.Equals(_workflowProfileId, next, StringComparison.Ordinal)) return;
+        if (noWorkflow && next is not null)
+            throw new ArgumentException("No Workflow and an explicit Workflow Profile are mutually exclusive");
+        if (string.Equals(_workflowProfileId, next, StringComparison.Ordinal) && _noWorkflow == noWorkflow) return;
         _workflowProfileId = next;
+        _noWorkflow = noWorkflow;
         Touch(now);
-        RecordEvent(new IssueWorkflowProfileChanged(_workflowProfileId));
+        RecordEvent(new IssueWorkflowProfileChanged(_workflowProfileId, _noWorkflow));
     }
 
     public void SetDraft(bool isDraft, DateTime? now = null)
@@ -145,6 +149,26 @@ public sealed partial class Issue
     {
         if (_status == IssueStatus.InProgress || _status == IssueStatus.Done || _status == IssueStatus.Cancelled)
             throw new InvalidOperationException($"Issue #{Number} has started and can no longer change draft state");
+    }
+
+    public void StartWithoutWorkflow(
+        IReadOnlySet<int>? undeliveredPrerequisites,
+        DateTime? now = null)
+    {
+        var blocker = StartBlocker(undeliveredPrerequisites);
+        if (blocker is IssueStartBlocker.Draft)
+            throw new IssueStartBlockedException(blocker, $"Issue #{Number} is still a draft and cannot be started");
+        if (blocker is IssueStartBlocker.WaitingFor waiting)
+            throw new IssueStartBlockedException(blocker, $"Issue #{Number} is waiting for prerequisite issue #{waiting.PrerequisiteNumber}");
+        if (!_noWorkflow)
+            throw new InvalidOperationException($"Issue #{Number} has not selected no Workflow");
+        if (_status != IssueStatus.Backlog)
+            throw new InvalidOperationException($"Issue #{Number} is {_status}, only Backlog can start");
+        _status = IssueStatus.InProgress;
+        _hasWorkflowStarted = true;
+        _repositoryBindingRevision = NextRevision(_repositoryBindingRevision, null);
+        Touch(now);
+        RecordEvent(new IssueWorkStarted(null, WorkflowProfileId: null, NoWorkflow: true));
     }
 
     public void StartWorkflow(string wrId, DateTime? now = null) =>
@@ -474,6 +498,9 @@ public sealed partial class Issue
 
         if (_status != IssueStatus.InProgress)
             throw new InvalidOperationException($"Issue #{Number} is {_status}, only InProgress can complete");
+
+        if (_noWorkflow && _workflowRunId is null)
+            return CompleteCore(workflowRunId: null, IssueCompletionKinds.Manual, now);
 
         var workflowRunId = _workflowRunId
             ?? throw new InvalidOperationException($"Issue #{Number} has no workflow run to complete");

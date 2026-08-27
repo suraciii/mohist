@@ -62,7 +62,8 @@ public abstract record RepositoryCommandPayload
         string[]? AttachmentIds,
         string? WorkflowProfileId,
         int[]? PrerequisiteNumbers,
-        int? ParentIssueNumber = null) : RepositoryCommandPayload
+        int? ParentIssueNumber = null,
+        bool NoWorkflow = false) : RepositoryCommandPayload
     {
         public override string Kind => RepositoryCommandPayloadKinds.Create;
     }
@@ -82,7 +83,8 @@ public abstract record RepositoryCommandPayload
         IReadOnlySet<string>? PresentFields,
         string? Title,
         int? ParentIssueNumber = null,
-        string? Risk = null) : RepositoryCommandPayload
+        string? Risk = null,
+        bool? NoWorkflow = null) : RepositoryCommandPayload
     {
         public override string Kind => RepositoryCommandPayloadKinds.Change;
     }

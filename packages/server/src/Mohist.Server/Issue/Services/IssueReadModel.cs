@@ -41,6 +41,7 @@ public class IssueReadModel
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? WorkflowProfileId { get; set; } = IssueWorkflowProfiles.LocalId;
     public string? WorkflowProfileMode { get; set; }
+    public bool NoWorkflow { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
     public IssueCommentDto[] Comments { get; set; } = [];
     public AttachmentInfo[] Attachments { get; set; } = [];

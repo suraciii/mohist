@@ -51,6 +51,7 @@ public class IssueBindingParticipantProxy : Grain, IIssueBindingParticipant
                 payload.IsDraft,
                 payload.AttachmentIds,
                 payload.WorkflowProfileId,
+                payload.NoWorkflow,
                 payload.PrerequisiteNumbers,
                 payload.ParentIssueNumber,
                 commandId,
@@ -90,7 +91,8 @@ public class IssueBindingParticipantProxy : Grain, IIssueBindingParticipant
                     payload.WorkflowProfileId,
                     payload.PresentFields,
                     payload.ParentIssueNumber,
-                    payload.Risk),
+                    payload.Risk,
+                    payload.NoWorkflow),
                 commandId,
                 expectedRevision);
         }

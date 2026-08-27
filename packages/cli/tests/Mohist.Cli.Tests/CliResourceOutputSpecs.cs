@@ -128,7 +128,7 @@ public sealed class CliResourceOutputSpecs
                 "number", "title", "body", "status", "health", "projectId", "projectName", "labels", "priority", "risk",
                 "model", "modelVariant", "agentConfig", "stageModels", "stageModelVariants", "createdAt", "updatedAt",
                 "archivedAt", "completedAt", "approvalState", "blockedReason", "attention", "workflowRunId", "workflowStage",
-                "workflowStatus", "workflowStageProgress", "workflowProfileId", "workflowProfileMode", "prerequisiteNumbers",
+                "workflowStatus", "workflowStageProgress", "workflowProfileId", "workflowProfileMode", "noWorkflow", "prerequisiteNumbers",
                 "comments", "attachments", "prereq", "isDraft", "canStart", "canBeParent", "blocker", "repositoryName",
                 "repository", "repositoryProblem", "github", "epic", "parentIssueRef", "childIssuesSummary", "children", "feedback",
                 "watching", "muted",

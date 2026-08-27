@@ -31,6 +31,8 @@ public sealed class IssueWorkflowStartHandler : ICloudEventHandler<IssueWorkStar
             throw new InvalidOperationException($"IssueWorkStarted event '{evt.Id}' has no project-scoped issue number.");
         }
 
+        if (evt.Data.NoWorkflow || string.IsNullOrWhiteSpace(evt.Data.WorkflowRunId)) return;
+
         await using var scope = _scopes.CreateAsyncScope();
         var issues = scope.ServiceProvider.GetRequiredService<IIssueStore>();
         var issue = await issues.LoadAsync(GrainKey.Issue(new IssueKey(context.ProjectId, context.IssueNumber)));

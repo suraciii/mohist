@@ -57,6 +57,7 @@ import { IssueCommitsSection } from './sections/IssueCommitsSection'
 import { IssueCommentsSection } from './sections/IssueCommentsSection'
 import { MobileActionBar } from './MobileActionBar'
 import { ApprovalReviewPackage } from './ApprovalReviewPackage'
+import { NoWorkflowPanel } from './NoWorkflowPanel'
 
 export interface IssueDetailPageComponents {
   EventTimelinePanel: ComponentType<EventTimelinePanelProps>
@@ -321,7 +322,7 @@ export function IssueDetailPage({ components, mutationDependencies }: IssueDetai
   const showDecisionSurface = !isNarrowViewport && (decision !== null || issueOnlyContext !== null)
   const showMobileActionBar = isNarrowViewport && !isApproval
   const showMobileReservedBar = isNarrowViewport && (isApproval || showMobileActionBar)
-  const showWorkflowSections = !isCompositeParent
+  const showWorkflowSections = !isCompositeParent && !issue.noWorkflow
 
   return (
     <>
@@ -521,6 +522,14 @@ export function IssueDetailPage({ components, mutationDependencies }: IssueDetai
                 <CompositeParentOverview children={issue.children ?? []} summary={compositeSummary} />
               )}
 
+              {!isCompositeParent && issue.noWorkflow && (
+                <NoWorkflowPanel
+                  issue={issue}
+                  onMarkDone={() => mutations.markDoneMutation.mutate()}
+                  isMarkingDone={mutations.markDoneMutation.isPending}
+                />
+              )}
+
               {showWorkflowSections && (
                 <BranchBar
                   issueNumber={issueNumber}
@@ -628,16 +637,20 @@ export function IssueDetailPage({ components, mutationDependencies }: IssueDetai
                   testId="reference-rail-workflow-profile"
                   title="Workflow Profile"
                   forceCollapsed={isNarrowViewport}
-                  summary={issue.workflowProfileId ?? 'default'}
+                  summary={issue.noWorkflow ? 'none' : (issue.workflowProfileId ?? 'default')}
                 >
-                  <div className="space-y-4">
-                    <div data-testid="issue-workflow-profile-control-frame">
-                      <WorkflowProfileControl issue={issue} embedded />
+                  {issue.noWorkflow ? (
+                    <p className="text-sm text-muted-foreground">This Issue runs without a Workflow.</p>
+                  ) : (
+                    <div className="space-y-4">
+                      <div data-testid="issue-workflow-profile-control-frame">
+                        <WorkflowProfileControl issue={issue} embedded />
+                      </div>
+                      <div data-testid="workflow-profile-editor-frame">
+                        <IssueWorkflowProfileEditor issueNumber={issueNumber} embedded />
+                      </div>
                     </div>
-                    <div data-testid="workflow-profile-editor-frame">
-                      <IssueWorkflowProfileEditor issueNumber={issueNumber} embedded />
-                    </div>
-                  </div>
+                  )}
                 </CollapsibleRailCard>
               )}
 

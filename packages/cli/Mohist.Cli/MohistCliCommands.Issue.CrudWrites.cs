@@ -20,6 +20,7 @@ internal static partial class IssueCommands
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
         var modelVariantOpt = new Option<string?>("--model-variant") { Description = "Reasoning variant bound to --model (e.g. low/medium/high/max)" };
         var workflowProfileOpt = new Option<string?>("--workflow-profile") { Description = "Workflow profile ID" };
+        var noWorkflowOpt = new Option<bool>("--no-workflow") { Description = "Run this Issue without a Workflow" };
         var repositoryOpt = new Option<string?>("--repo") { Description = "Target repository name in multi-repository projects" };
         var stageModelsOpt = new Option<string?>("--stage-models") { Description = "Per-stage model map as inline JSON" };
         var stageModelsFileOpt = new Option<string?>("--stage-models-file") { Description = "Read the per-stage model map from a JSON file, or - for stdin" };
@@ -38,6 +39,7 @@ internal static partial class IssueCommands
         cmd.Options.Add(modelOpt);
         cmd.Options.Add(modelVariantOpt);
         cmd.Options.Add(workflowProfileOpt);
+        cmd.Options.Add(noWorkflowOpt);
         cmd.Options.Add(repositoryOpt);
         cmd.Options.Add(stageModelsOpt);
         cmd.Options.Add(stageModelsFileOpt);
@@ -46,6 +48,11 @@ internal static partial class IssueCommands
         cmd.Options.Add(readyOpt);
         cmd.Options.Add(draftOpt);
         cmd.Options.Add(jsonOpt);
+        cmd.Validators.Add(result =>
+        {
+            if (result.GetResult(workflowProfileOpt) is not null && result.GetResult(noWorkflowOpt) is not null)
+                result.AddError("--workflow-profile and --no-workflow are mutually exclusive.");
+        });
         cmd.SetAction(ctx =>
         {
             var title = ctx.GetValue(titleArg);
@@ -59,6 +66,7 @@ internal static partial class IssueCommands
             var model = ctx.GetValue(modelOpt);
             var modelVariant = ctx.GetValue(modelVariantOpt);
             var workflowProfile = ctx.GetValue(workflowProfileOpt);
+            var noWorkflow = ctx.GetValue(noWorkflowOpt);
             var repository = ctx.GetValue(repositoryOpt);
             var stageModels = ctx.GetValue(stageModelsOpt);
             var stageModelsFile = ctx.GetValue(stageModelsFileOpt);
@@ -68,10 +76,13 @@ internal static partial class IssueCommands
             var draft = ctx.GetValue(draftOpt);
             var selection = JsonSelection.Parse(IssueDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
             var workflowProfileProvided = ctx.GetResult(workflowProfileOpt) is not null;
+            var noWorkflowProvided = IsOptionProvided(ctx, noWorkflowOpt);
             return CreateAsync();
 
             async Task<int> CreateAsync()
             {
+                if (workflowProfileProvided && noWorkflowProvided)
+                    return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--workflow-profile and --no-workflow are mutually exclusive");
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(IssueDescriptor, selection);
                 var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
@@ -94,7 +105,9 @@ internal static partial class IssueCommands
                 var bodyText = ((BodyInputResolver.Result.Success)resolvedBody).Body;
 
                 var (effectiveBody, effectiveWorkflow, effectiveRisk) =
-                    ApplyFrontmatter(api.Error, bodyText, bodyFile, workflowProfile, risk);
+                    ApplyFrontmatter(api.Error, bodyText, bodyFile, noWorkflow ? null : workflowProfile, risk);
+                if (noWorkflow && effectiveWorkflow is not null)
+                    api.Error.WriteLine($"note: --no-workflow overrides frontmatter recommended_workflow '{effectiveWorkflow}'");
 
                 object? stageModelsPayload = null;
                 if (ctx.GetResult(stageModelsOpt) is not null || ctx.GetResult(stageModelsFileOpt) is not null)
@@ -137,7 +150,9 @@ internal static partial class IssueCommands
                     ["isDraft"] = isDraft,
                     ["parentIssueNumber"] = parent,
                 };
-                if (workflowProfileProvided || effectiveWorkflow is not null)
+                if (noWorkflowProvided)
+                    payload["noWorkflow"] = true;
+                else if (workflowProfileProvided || effectiveWorkflow is not null)
                     payload["workflowProfileId"] = workflowProfileProvided
                         ? (string.IsNullOrWhiteSpace(workflowProfile) ? null : workflowProfile)
                         : effectiveWorkflow;
@@ -226,7 +241,8 @@ internal static partial class IssueCommands
         var modelOpt = new Option<string?>("--model") { Description = "Model to use" };
         var modelVariantOpt = new Option<string?>("--model-variant") { Description = "Reasoning variant bound to --model (e.g. low/medium/high/max)" };
         var workflowProfileOpt = new Option<string?>("--workflow-profile") { Description = "Workflow profile ID" };
-        var inheritWorkflowProfileOpt = new Option<bool>("--inherit-workflow-profile") { Description = "Clear the explicit Profile and inherit the Project default (mutually exclusive with --workflow-profile)" };
+        var inheritWorkflowProfileOpt = new Option<bool>("--inherit-workflow-profile") { Description = "Clear the explicit Profile and inherit the Project default" };
+        var noWorkflowOpt = new Option<bool>("--no-workflow") { Description = "Run this Issue without a Workflow" };
         var repositoryOpt = new Option<string?>("--repo") { Description = "Target repository name for an eligible reassignment" };
         var stageModelsOpt = new Option<string?>("--stage-models") { Description = "Per-stage model map as inline JSON" };
         var stageModelsFileOpt = new Option<string?>("--stage-models-file") { Description = "Read the per-stage model map from a JSON file, or - for stdin" };
@@ -247,6 +263,7 @@ internal static partial class IssueCommands
         cmd.Options.Add(modelVariantOpt);
         cmd.Options.Add(workflowProfileOpt);
         cmd.Options.Add(inheritWorkflowProfileOpt);
+        cmd.Options.Add(noWorkflowOpt);
         cmd.Options.Add(repositoryOpt);
         cmd.Options.Add(stageModelsOpt);
         cmd.Options.Add(stageModelsFileOpt);
@@ -257,8 +274,9 @@ internal static partial class IssueCommands
         cmd.Options.Add(jsonOpt);
         cmd.Validators.Add(result =>
         {
-            if (result.GetResult(workflowProfileOpt) is not null && result.GetResult(inheritWorkflowProfileOpt) is not null)
-                result.AddError("--workflow-profile and --inherit-workflow-profile are mutually exclusive.");
+            var selections = new[] { result.GetResult(workflowProfileOpt), result.GetResult(inheritWorkflowProfileOpt), result.GetResult(noWorkflowOpt) }.Count(value => value is not null);
+            if (selections > 1)
+                result.AddError("--workflow-profile, --inherit-workflow-profile, and --no-workflow are mutually exclusive.");
         });
         cmd.SetAction(ctx =>
         {
@@ -275,6 +293,7 @@ internal static partial class IssueCommands
             var modelVariant = ctx.GetValue(modelVariantOpt);
             var workflowProfile = ctx.GetValue(workflowProfileOpt);
             var inheritWorkflowProfile = ctx.GetValue(inheritWorkflowProfileOpt);
+            var noWorkflow = ctx.GetValue(noWorkflowOpt);
             var repository = ctx.GetValue(repositoryOpt);
             var ready = ctx.GetValue(readyOpt);
             var draft = ctx.GetValue(draftOpt);
@@ -294,6 +313,7 @@ internal static partial class IssueCommands
             var modelVariantProvided = ctx.GetResult(modelVariantOpt) is not null;
             var workflowProfileProvided = ctx.GetResult(workflowProfileOpt) is not null;
             var inheritWorkflowProfileProvided = IsOptionProvided(ctx, inheritWorkflowProfileOpt);
+            var noWorkflowProvided = IsOptionProvided(ctx, noWorkflowOpt);
             var repositoryProvided = ctx.GetResult(repositoryOpt) is not null;
             var stageModelsProvided = ctx.GetResult(stageModelsOpt) is not null;
             var stageModelsFileProvided = ctx.GetResult(stageModelsFileOpt) is not null;
@@ -305,9 +325,9 @@ internal static partial class IssueCommands
 
             async Task<int> UpdateAsync()
             {
-                if (workflowProfileProvided && inheritWorkflowProfileProvided)
+                if ((workflowProfileProvided ? 1 : 0) + (inheritWorkflowProfileProvided ? 1 : 0) + (noWorkflowProvided ? 1 : 0) > 1)
                     return CommandHelpHook.RenderUsageFailure(
-                        ctx, api.Error, "--workflow-profile and --inherit-workflow-profile are mutually exclusive");
+                        ctx, api.Error, "--workflow-profile, --inherit-workflow-profile, and --no-workflow are mutually exclusive");
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(IssueDescriptor, selection);
                 var draftState = MohistCliCommands.ResolveDraftFlagState(ready, draft);
@@ -390,10 +410,16 @@ internal static partial class IssueCommands
                 if (workflowProfileProvided)
                 {
                     payload["workflowProfileId"] = string.IsNullOrWhiteSpace(workflowProfile) ? null : workflowProfile;
+                    payload["noWorkflow"] = false;
                 }
                 else if (inheritWorkflowProfile)
                 {
                     payload["workflowProfileId"] = null;
+                    payload["noWorkflow"] = false;
+                }
+                else if (noWorkflow)
+                {
+                    payload["noWorkflow"] = true;
                 }
 
                 if (stageModelsProvided || stageModelsFileProvided)

@@ -145,6 +145,7 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
   const [repositoryName, setRepositoryName] = useState<string | null>(null)
   const [parentIssueNumber, setParentIssueNumber] = useState<number | null>(null)
   const [workflowProfileId, setWorkflowProfileId] = useState<string | null>(null)
+  const [noWorkflow, setNoWorkflow] = useState(false)
   const [workflowTouched, setWorkflowTouched] = useState(false)
   const [risk, setRisk] = useState<string | null>(null)
   const [riskTouched, setRiskTouched] = useState(false)
@@ -204,9 +205,11 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
   const recommendedWorkflowProfileId =
     recommendation && recommendationIsEnabled && !workflowTouched ? recommendation.workflow : null
   const { effectiveTemplateId: defaultProfileId } = useEffectiveDefaultWorkflowProfile()
-  const submittedWorkflowProfileId = workflowTouched
-    ? workflowProfileId
-    : (recommendedWorkflowProfileId ?? defaultProfileId ?? null)
+  const submittedWorkflowProfileId = noWorkflow
+    ? null
+    : workflowTouched
+      ? workflowProfileId
+      : (recommendedWorkflowProfileId ?? defaultProfileId ?? null)
   const effectiveRisk = riskTouched ? risk : frontmatterRisk
 
   useEffect(() => {
@@ -215,9 +218,11 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
     }
   }, [selectedTemplate])
 
-  const workflowSelectValue = workflowTouched
-    ? (workflowProfileId ?? '')
-    : (recommendedWorkflowProfileId ?? defaultProfileId ?? '')
+  const workflowSelectValue = noWorkflow
+    ? '__none__'
+    : workflowTouched
+      ? (workflowProfileId ?? '')
+      : (recommendedWorkflowProfileId ?? defaultProfileId ?? '')
   const selectedWorkflowRuntime = getWorkflowProfileAgentRuntime(workflowProfiles, workflowSelectValue || null)
 
   const mutation = useMutation({
@@ -234,6 +239,7 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
         ...(projectId ? { projectId } : {}),
         priority,
         ...(repositoryName ? { repositoryName } : {}),
+        ...(noWorkflow ? { noWorkflow: true } : {}),
         ...(submittedWorkflowProfileId ? { workflowProfileId: submittedWorkflowProfileId } : {}),
         ...(effectiveRisk ? { risk: effectiveRisk } : {}),
         ...(prerequisiteNumbers.length > 0 ? { prerequisiteNumbers } : {}),
@@ -269,6 +275,7 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
     setRepositoryName(null)
     setParentIssueNumber(null)
     setWorkflowProfileId(null)
+    setNoWorkflow(false)
     setWorkflowTouched(false)
     setRisk(null)
     setRiskTouched(false)
@@ -349,12 +356,15 @@ function CreateIssueDialogContent({ open, onClose }: Props) {
               aria-label="Workflow"
               value={workflowSelectValue}
               onChange={(e) => {
-                setWorkflowProfileId(e.target.value || null)
+                const value = e.target.value
+                setNoWorkflow(value === '__none__')
+                setWorkflowProfileId(value === '__none__' ? null : value || null)
                 setWorkflowTouched(true)
               }}
               className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
             >
               {profileOptions.length === 0 && <option value="">Default</option>}
+              <option value="__none__">No workflow</option>
               {profileOptions.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.displayName}

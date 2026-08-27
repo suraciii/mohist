@@ -154,15 +154,15 @@ Mirroring is reliable by reconciliation, not by queueing:
 ## Status
 
 Implemented today: signed ingress and normalization, feed-by-label intake with
-its close withdrawal, Pull Request review Approval, and best-effort write-back
-with durable failure records. The target model replaces label intake with the
-`/mohist` command entry and adds automatic mirroring, two-way content sync,
-automatic mirroring and two-way content sync. Link visibility is implemented:
-the detail and bounded list read models batch-project repository, number, URL,
-and a deliberately provisional `healthy` sync state for CLI and Web. The
-placeholder does not inspect or summarize write-back failures; real sync-health
-reporting and reconcile-based recovery belong to the later recovery slice. Feed-by-label intake, its connection
-options, and the `github-issue` origin
+its close withdrawal, Pull Request review Approval, best-effort write-back with
+durable failure records, the core no-Workflow Issue lifecycle, and the GitHub
+mirror link visibility in the Issue read models, CLI, and Web. The target model
+replaces label intake with the `/mohist` command entry and adds automatic
+mirroring, two-way content sync, GitHub-driven lifecycle for no-Workflow Issues,
+and reconcile-based recovery. The current link projection uses a deliberately
+provisional `healthy` sync state; real sync-health reporting and
+reconcile-based recovery belong to the later recovery slice. Feed-by-label
+intake, its connection options, and the `github-issue` origin
 label are removed when the command entry lands.
 
 Open questions:

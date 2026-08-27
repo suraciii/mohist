@@ -79,6 +79,7 @@ public interface IIssueGrain : IGrainWithStringKey
         bool isDraft,
         string[]? attachmentIds,
         string? workflowProfileId,
+        bool noWorkflow,
         int[]? prerequisiteNumbers,
         int? parentIssueNumber,
         string commandId,
@@ -134,7 +135,8 @@ public sealed record IssueChangeRepositoryCommand(
     [property: Id(7)] string? WorkflowProfileId,
     [property: Id(8)] IReadOnlySet<string>? PresentFields,
     [property: Id(9)] int? ParentIssueNumber,
-    [property: Id(10)] string? Risk = null);
+    [property: Id(10)] string? Risk = null,
+    [property: Id(11)] bool? NoWorkflow = null);
 
 [GenerateSerializer]
 public sealed record IssueWorkflowStatus(

@@ -196,6 +196,15 @@ public class IssueRepositoryCoordinatorGrain : Grain, IIssueRepositoryCoordinato
                 pending.CapturedRevision,
                 ex.Message);
         }
+        catch (WorkflowProfileLockedException ex)
+        {
+            await ClearFenceAsync(commandId);
+            return new IssueRepositoryBindingResult(
+                IssueRepositoryBindingResultCode.WorkflowProfileLocked,
+                payload.RepositoryName,
+                pending.CapturedRevision,
+                ex.Message);
+        }
         catch (Exception)
         {
             await ClearFenceAsync(commandId);
