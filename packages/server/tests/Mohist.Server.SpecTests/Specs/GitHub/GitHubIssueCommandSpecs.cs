@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -325,6 +326,45 @@ public sealed class GitHubIssueCommandSpecs
         Assert.Equal(IssueStatus.InProgress, (await LoadIssueAsync(projectId, link!.IssueNumber))!.Status);
         Assert.Single(_fixture.Comments.Comments, comment =>
             comment.Body.Contains(GitHubCommentKinds.CommandReplyMarker(connectionId, GithubIssueNumber, "1008", GitHubCommentKinds.CommandReplyStarted), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task DisabledConnectionRetainsPendingReplyUntilEnabled()
+    {
+        var (projectId, connectionId, secret, owner) = await ConnectNewAsync();
+        _fixture.Comments.ConfirmationFailure = new TimeoutException("simulated reply failure");
+
+        await DeliverCommentAsync(connectionId, secret, "command-reply-disabled", "/mohist start", commentId: 1012);
+        await PumpAsync();
+        var failed = await LoadReplyAsync(connectionId, "1012");
+        Assert.NotNull(failed);
+        Assert.Null(failed!.PostedAt);
+        Assert.Empty(_fixture.Comments.Comments);
+
+        using (var disabled = await Client.PostAsync(
+            $"/api/projects/{projectId}/github-connections/{connectionId}/disable", JsonContent.Create(new { })))
+            disabled.EnsureSuccessStatusCode();
+
+        _fixture.Comments.ConfirmationFailure = null;
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        var worker = _fixture.Services.GetRequiredService<GitHubCommandReplyDeliveryWorker>();
+        await worker.ProcessPendingAsync();
+        Assert.Empty(_fixture.Comments.Comments);
+        var retained = await LoadReplyAsync(connectionId, "1012");
+        Assert.NotNull(retained);
+        Assert.Null(retained!.PostedAt);
+        Assert.Null(retained.LeaseUntil);
+        Assert.False(retained.IsFailed);
+
+        using (var enabled = await Client.PostAsync(
+            $"/api/projects/{projectId}/github-connections/{connectionId}/enable", JsonContent.Create(new { })))
+            enabled.EnsureSuccessStatusCode();
+
+        Assert.Equal(1, await worker.ProcessPendingAsync());
+        var delivered = await LoadReplyAsync(connectionId, "1012");
+        Assert.NotNull(delivered!.PostedAt);
+        Assert.Single(_fixture.Comments.Comments, comment =>
+            comment.Body.Contains(GitHubCommentKinds.CommandReplyMarker(connectionId, GithubIssueNumber, "1012", GitHubCommentKinds.CommandReplyStarted), StringComparison.Ordinal));
     }
 
     [Fact]

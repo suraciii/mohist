@@ -274,6 +274,7 @@ public static class MohistServiceRegistration
         services.AddOptions<GitHubCommandReplyDeliveryOptions>();
         services.AddSingleton<GitHubCommandReplyDeliveryWorker>();
         services.AddHostedService(sp => sp.GetRequiredService<GitHubCommandReplyDeliveryWorker>());
+        services.AddOptions<GitHubIssueCommentOperationRecoveryOptions>();
         services.AddSingleton<GitHubIssueCommentOperationRecoveryWorker>();
         services.AddHostedService(sp => sp.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>());
         services.AddSingleton<GitHubConnectionReprojectionWorker>();

@@ -40,6 +40,8 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     public bool PostThenThrow { get; set; }
     public TaskCompletionSource? PostEntered { get; set; }
     public TaskCompletionSource? ReleasePost { get; set; }
+    public TaskCompletionSource? FindEntered { get; set; }
+    public TaskCompletionSource? ReleaseFind { get; set; }
     public Exception? UpdateFailure { get; set; }
     public Queue<Exception> UpdateFailures { get; } = new();
     public Exception? LabelFailure { get; set; }
@@ -145,18 +147,23 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         }
     }
 
-    public Task<IReadOnlyList<string>> FindCommentIdsByMarkerAsync(
+    public async Task<IReadOnlyList<string>> FindCommentIdsByMarkerAsync(
         GitHubConnection connection,
         int githubIssueNumber,
         string marker,
-        CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<string>>(Comments
+        CancellationToken ct = default)
+    {
+        FindEntered?.TrySetResult();
+        if (ReleaseFind is not null)
+            await ReleaseFind.Task.WaitAsync(ct);
+        return Comments
             .Select((comment, index) => (comment, index))
             .Where(item => item.comment.ConnectionId == connection.Id
                 && item.comment.GithubIssueNumber == githubIssueNumber
                 && item.comment.Body.Contains(marker, StringComparison.Ordinal))
             .Select(item => (item.index + 1).ToString())
-            .ToArray());
+            .ToArray();
+    }
 
     public Task ReplaceStateLabelAsync(
         GitHubConnection connection,
@@ -270,6 +277,11 @@ public sealed class GitHubCommandFixture : IAsyncLifetime
                 // pass explicitly. Do not let the autonomous hosted loop
                 // consume a due row before the assertion does.
                 services.Configure<GitHubCommandReplyDeliveryOptions>(options =>
+                    options.HostedWorkerEnabled = false);
+                // Recovery is also driven explicitly by these specs. Leaving
+                // its safety loop running would race fake-clock assertions
+                // against the same durable operation rows.
+                services.Configure<GitHubIssueCommentOperationRecoveryOptions>(options =>
                     options.HostedWorkerEnabled = false);
                 // The same fake-clock rule applies to event ingress: PumpAsync
                 // is the explicit dispatch boundary for these lifecycle specs.

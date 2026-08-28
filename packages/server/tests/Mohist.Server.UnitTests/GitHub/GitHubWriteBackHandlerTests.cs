@@ -158,6 +158,7 @@ public sealed class GitHubWriteBackHandlerTests
             services.AddSingleton<IDbContextFactory<MohistDbContext>>(new TestDbContextFactory(Options));
             services.AddSingleton<TimeProvider>(new FakeTimeProvider(Now));
             services.AddSingleton<ISecretStore>(new FakeSecretStore());
+            services.AddSingleton<GitHubConnectionGate>();
             services.AddSingleton<IGitHubCommentPort>(Port);
             services.AddScoped<GitHubIssueLinkStore>();
             services.AddScoped<GitHubConnectionStore>();

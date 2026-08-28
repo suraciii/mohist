@@ -32,6 +32,7 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
     private readonly IEventStore _events;
     private readonly IGitHubIssuePort _issuePort;
     private readonly IGitHubCommentPort _commentPort;
+    private readonly GitHubConnectionGate _gate;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<GitHubIssueSynchronizationService> _log;
 
@@ -44,6 +45,7 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         IEventStore events,
         IGitHubIssuePort issuePort,
         IGitHubCommentPort commentPort,
+        GitHubConnectionGate gate,
         TimeProvider timeProvider,
         ILogger<GitHubIssueSynchronizationService> log)
     {
@@ -55,6 +57,7 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         _events = events;
         _issuePort = issuePort;
         _commentPort = commentPort;
+        _gate = gate;
         _timeProvider = timeProvider;
         _log = log;
     }
@@ -202,13 +205,14 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         link = await _links.EnsureMirrorMarkerAsync(link.Id, ct) ?? link;
         try
         {
-            await _issuePort.UpdateIssueAsync(
-                connection,
-                githubIssueNumber,
-                issue.Title,
-                issue.Body ?? string.Empty,
-                link.MirrorMarker ?? GitHubMirrorMarker.For(link.Id),
-                ct);
+            await SendInsideGateAsync(connection, (current, token) =>
+                _issuePort.UpdateIssueAsync(
+                    current,
+                    githubIssueNumber,
+                    issue.Title,
+                    issue.Body ?? string.Empty,
+                    link.MirrorMarker ?? GitHubMirrorMarker.For(link.Id),
+                    token), ct);
             await PostConfirmationAsync(connection, link, ct);
             await ProjectCurrentStateAsync(connection, issue, link, ct);
             return await _links.ClearErrorAsync(link.Id, ct) ?? link;
@@ -252,6 +256,41 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
         return succeeded;
     }
 
+    /// <summary>
+    /// Send fence shared by every outbound projection: runs inside the
+    /// connection gate and re-reads the connection, so a Disable that wins
+    /// the gate stops the send. Callers treat the thrown
+    /// <c>github_connection_disabled</c> as retain-and-stop, never retry
+    /// accounting.
+    /// </summary>
+    private async Task<T> SendInsideGateAsync<T>(
+        GitHubConnection connection,
+        Func<GitHubConnection, CancellationToken, Task<T>> send,
+        CancellationToken ct)
+    {
+        return await _gate.EnterAsync(connection.Id, async token =>
+        {
+            var current = await _connections.GetByIdAsync(connection.Id, token);
+            if (current is null || current.Status != GitHubConnectionStatus.Active)
+                throw new GitHubSynchronizationException(
+                    "github_connection_disabled",
+                    "GitHub connection is disabled");
+            return await send(current, token);
+        }, ct);
+    }
+
+    private async Task SendInsideGateAsync(
+        GitHubConnection connection,
+        Func<GitHubConnection, CancellationToken, Task> send,
+        CancellationToken ct)
+    {
+        await SendInsideGateAsync<object?>(connection, async (current, token) =>
+        {
+            await send(current, token);
+            return null;
+        }, ct);
+    }
+
     private async Task UpdateMirrorContentAsync(
         GitHubConnection connection,
         GitHubIssueLink link,
@@ -260,13 +299,14 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
     {
         try
         {
-            await _issuePort.UpdateIssueAsync(
-                connection,
-                link.GithubIssueNumber,
-                issue.Title,
-                issue.Body ?? string.Empty,
-                link.MirrorMarker ?? GitHubMirrorMarker.For(link.Id),
-                ct);
+            await SendInsideGateAsync(connection, (current, token) =>
+                _issuePort.UpdateIssueAsync(
+                    current,
+                    link.GithubIssueNumber,
+                    issue.Title,
+                    issue.Body ?? string.Empty,
+                    link.MirrorMarker ?? GitHubMirrorMarker.For(link.Id),
+                    token), ct);
         }
         catch (HttpRequestException ex) when (
             ex.StatusCode == HttpStatusCode.NotFound
@@ -289,6 +329,20 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
     {
         if (!link.IsPending)
             return link;
+        // The whole reconcile-or-create sequence runs inside the send fence:
+        // probe, reservation, and create observe one connection status, so a
+        // Disable either precedes the probe or waits for the settled mirror.
+        return await SendInsideGateAsync(connection, (
+            current, token) => EnsureMirrorCoreAsync(current, issue, link, eventType, token), ct);
+    }
+
+    private async Task<GitHubIssueLink?> EnsureMirrorCoreAsync(
+        GitHubConnection connection,
+        DomainIssue issue,
+        GitHubIssueLink link,
+        string eventType,
+        CancellationToken ct)
+    {
         var marker = link.MirrorMarker;
         if (string.IsNullOrWhiteSpace(marker))
             throw new GitHubSynchronizationException("github_mirror_marker_missing", "Pending GitHub mirror has no reconciliation marker");
@@ -459,12 +513,24 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
 
         try
         {
-            await _commentPort.PostCommentAsync(
-                connection,
-                link.GithubIssueNumber,
-                GitHubMirrorMarker.Append(body, marker),
-                ct);
-            await _links.MarkCommentPostedAsync(link.Id, commentKey, link.GithubIssueNumber, ct);
+            await SendInsideGateAsync(connection, async (current, token) =>
+            {
+                await _commentPort.PostCommentAsync(
+                    current,
+                    link.GithubIssueNumber,
+                    GitHubMirrorMarker.Append(body, marker),
+                    token);
+                await _links.MarkCommentPostedAsync(link.Id, commentKey, link.GithubIssueNumber, token);
+            }, ct);
+        }
+        catch (GitHubSynchronizationException ex) when (
+            ex.Code == "github_connection_disabled"
+            && !ct.IsCancellationRequested)
+        {
+            // Disabled won the fence: retain the reservation for enable
+            // recovery instead of recording a retry.
+            await _links.ReleaseCommentOperationLeaseAsync(link.Id, commentKey, ct);
+            throw;
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -484,7 +550,11 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
     {
         if (string.Equals(link.StateLabel, stateLabel, StringComparison.Ordinal))
             return;
-        await _commentPort.ReplaceStateLabelAsync(connection, link.GithubIssueNumber, stateLabel, ct);
+        // Idempotent replacement: a Disable that wins the fence stops this
+        // projection; the next event, explicit sync, or enable reprojection
+        // sends the current label again.
+        await SendInsideGateAsync(connection, (current, token) =>
+            _commentPort.ReplaceStateLabelAsync(current, link.GithubIssueNumber, stateLabel, token), ct);
         await _links.SetStateLabelAsync(link.Id, stateLabel, ct);
     }
 
@@ -513,8 +583,22 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
 
         try
         {
-            await _commentPort.CloseIssueAsync(connection, link.GithubIssueNumber, stateReason, ct);
-            await _links.MarkCommentPostedAsync(link.Id, closeKey, link.GithubIssueNumber, ct);
+            await SendInsideGateAsync(connection, async (current, token) =>
+            {
+                await _commentPort.CloseIssueAsync(
+                    current,
+                    link.GithubIssueNumber,
+                    stateReason,
+                    token);
+                await _links.MarkCommentPostedAsync(link.Id, closeKey, link.GithubIssueNumber, token);
+            }, ct);
+        }
+        catch (GitHubSynchronizationException ex) when (
+            ex.Code == "github_connection_disabled"
+            && !ct.IsCancellationRequested)
+        {
+            await _links.ReleaseCommentOperationLeaseAsync(link.Id, closeKey, ct);
+            throw;
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {

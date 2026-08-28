@@ -47,6 +47,7 @@ public sealed class GitHubCommandReplyDeliveryService : IScopedService
 
     private readonly GitHubCommandReplyStore _replies;
     private readonly GitHubConnectionStore _connections;
+    private readonly GitHubConnectionGate _gate;
     private readonly IGitHubCommentPort _comments;
     private readonly GitHubCommandReplyDeliverySignal _signal;
     private readonly ILogger<GitHubCommandReplyDeliveryService> _log;
@@ -54,12 +55,14 @@ public sealed class GitHubCommandReplyDeliveryService : IScopedService
     public GitHubCommandReplyDeliveryService(
         GitHubCommandReplyStore replies,
         GitHubConnectionStore connections,
+        GitHubConnectionGate gate,
         IGitHubCommentPort comments,
         GitHubCommandReplyDeliverySignal signal,
         ILogger<GitHubCommandReplyDeliveryService> log)
     {
         _replies = replies;
         _connections = connections;
+        _gate = gate;
         _comments = comments;
         _signal = signal;
         _log = log;
@@ -94,41 +97,60 @@ public sealed class GitHubCommandReplyDeliveryService : IScopedService
             if (connection is null)
                 throw new InvalidOperationException($"GitHub connection '{claimed.ConnectionId}' no longer exists");
             if (connection.Status != GitHubConnectionStatus.Active)
-                throw new InvalidOperationException($"GitHub connection '{connection.Id}' is disabled");
+            {
+                await ReleaseClaimForDisabledAsync(claimed.Id, ct).ConfigureAwait(false);
+                return;
+            }
 
-            var matches = await _comments
-                .FindCommentIdsByMarkerAsync(
-                    connection,
+            // Send fence: the marker probe and the POST observe one connection
+            // status, so a Disable that commits first retains the reply and
+            // this delivery stops without a remote send.
+            var delivered = await _gate.EnterAsync(connection.Id, async token =>
+            {
+                var current = await _connections.GetByIdAsync(connection.Id, token).ConfigureAwait(false);
+                if (current is null || current.Status != GitHubConnectionStatus.Active)
+                    return false;
+
+                var matches = await _comments
+                    .FindCommentIdsByMarkerAsync(
+                        current,
+                        claimed.GithubIssueNumber,
+                        claimed.Marker,
+                        token)
+                    .ConfigureAwait(false);
+                if (matches.Count > 1)
+                {
+                    await _replies.RecordFailureAsync(
+                        claimed.Id,
+                        "reply marker matched multiple GitHub comments; delivery is ambiguous",
+                        terminal: true,
+                        ct).ConfigureAwait(false);
+                    _log.LogError(
+                        "GitHub command reply {ReplyId} is ambiguous: marker matched {MatchCount} comments",
+                        claimed.Id,
+                        matches.Count);
+                    return true;
+                }
+
+                if (matches.Count == 1)
+                {
+                    await _replies.MarkPostedAsync(claimed.Id, ct).ConfigureAwait(false);
+                    return true;
+                }
+
+                await _comments.PostCommentAsync(
+                    current,
                     claimed.GithubIssueNumber,
-                    claimed.Marker,
-                    ct)
-                .ConfigureAwait(false);
-            if (matches.Count > 1)
-            {
-                await _replies.RecordFailureAsync(
-                    claimed.Id,
-                    "reply marker matched multiple GitHub comments; delivery is ambiguous",
-                    terminal: true,
-                    ct).ConfigureAwait(false);
-                _log.LogError(
-                    "GitHub command reply {ReplyId} is ambiguous: marker matched {MatchCount} comments",
-                    claimed.Id,
-                    matches.Count);
-                return;
-            }
-
-            if (matches.Count == 1)
-            {
+                    GitHubMirrorMarker.Append(claimed.Body, claimed.Marker),
+                    token).ConfigureAwait(false);
                 await _replies.MarkPostedAsync(claimed.Id, ct).ConfigureAwait(false);
+                return true;
+            }, ct).ConfigureAwait(false);
+            if (!delivered)
+            {
+                await ReleaseClaimForDisabledAsync(claimed.Id, ct).ConfigureAwait(false);
                 return;
             }
-
-            await _comments.PostCommentAsync(
-                connection,
-                claimed.GithubIssueNumber,
-                GitHubMirrorMarker.Append(claimed.Body, claimed.Marker),
-                ct).ConfigureAwait(false);
-            await _replies.MarkPostedAsync(claimed.Id, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -146,6 +168,23 @@ public sealed class GitHubCommandReplyDeliveryService : IScopedService
                 "GitHub command reply {ReplyId} delivery failed; durable retry remains pending",
                 claimed.Id);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Clears an in-flight claim lease without a failure record. The disabled
+    /// boundary: the reply stays pending for the next delivery pass after the
+    /// connection is re-enabled, with no attempt-count penalty.
+    /// </summary>
+    private async Task ReleaseClaimForDisabledAsync(string replyId, CancellationToken ct)
+    {
+        try
+        {
+            await _replies.ReleaseLeaseAsync(replyId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Could not release the lease of GitHub command reply {ReplyId}", replyId);
         }
     }
 

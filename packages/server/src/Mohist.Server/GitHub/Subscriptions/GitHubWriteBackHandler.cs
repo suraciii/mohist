@@ -82,37 +82,39 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
                 link.IssueNumber, link.Id);
             return;
         }
-        var connection = await sp.GetRequiredService<GitHubConnectionStore>()
+        var connections = sp.GetRequiredService<GitHubConnectionStore>();
+        var connection = await connections
             .GetByRepositoryAsync(context.ProjectId, link.RepositoryName, ct);
         if (connection is null || connection.Status != GitHubConnectionStatus.Active)
             return;
+        var gate = sp.GetRequiredService<GitHubConnectionGate>();
 
         switch (evt.Type)
         {
             case EventCatalog.ReverseDns.IssueWorkStarted:
-                await SetStateLabelAsync(sp, connection, link, GitHubStateLabels.InProgress, evt.Type, ct);
-                await PostCommentAsync(sp, connection, link, GitHubCommentKinds.WorkStarted,
+                await SetStateLabelAsync(sp, gate, connections, connection, link, GitHubStateLabels.InProgress, evt.Type, ct);
+                await PostCommentAsync(sp, gate, connections, connection, link, GitHubCommentKinds.WorkStarted,
                     GitHubWriteBackComments.WorkStarted(link.IssueNumber), evt.Type, ct);
                 break;
             case EventCatalog.ReverseDns.StageApprovalRequested:
-                await SetStateLabelAsync(sp, connection, link, GitHubStateLabels.AwaitingApproval, evt.Type, ct);
-                await PostCommentAsync(sp, connection, link, GitHubCommentKinds.ApprovalRequested,
+                await SetStateLabelAsync(sp, gate, connections, connection, link, GitHubStateLabels.AwaitingApproval, evt.Type, ct);
+                await PostCommentAsync(sp, gate, connections, connection, link, GitHubCommentKinds.ApprovalRequested,
                     GitHubWriteBackComments.ApprovalRequested(link.IssueNumber), evt.Type, ct);
                 break;
             case EventCatalog.ReverseDns.WorkflowRunFailed:
-                await SetStateLabelAsync(sp, connection, link, GitHubStateLabels.Blocked, evt.Type, ct);
+                await SetStateLabelAsync(sp, gate, connections, connection, link, GitHubStateLabels.Blocked, evt.Type, ct);
                 break;
             case EventCatalog.ReverseDns.IssueCompleted:
                 var prUrl = await FindDeliveryPullRequestUrlAsync(sp, connection, link, evt.Type, ct);
-                await PostCommentAsync(sp, connection, link, GitHubCommentKinds.Completed,
+                await PostCommentAsync(sp, gate, connections, connection, link, GitHubCommentKinds.Completed,
                     GitHubWriteBackComments.Completed(link.IssueNumber, prUrl), evt.Type, ct);
-                await SetStateLabelAsync(sp, connection, link, GitHubStateLabels.Done, evt.Type, ct);
-                await CloseAsync(sp, connection, link, "completed", GitHubCommentKinds.ClosedCompleted, evt.Type, ct);
+                await SetStateLabelAsync(sp, gate, connections, connection, link, GitHubStateLabels.Done, evt.Type, ct);
+                await CloseAsync(sp, gate, connections, connection, link, "completed", GitHubCommentKinds.ClosedCompleted, evt.Type, ct);
                 break;
             case EventCatalog.ReverseDns.IssueCancelled:
-                await PostCommentAsync(sp, connection, link, GitHubCommentKinds.Cancelled,
+                await PostCommentAsync(sp, gate, connections, connection, link, GitHubCommentKinds.Cancelled,
                     GitHubWriteBackComments.Cancelled(link.IssueNumber, ReadCancelledReason(evt)), evt.Type, ct);
-                await CloseAsync(sp, connection, link, "not_planned", GitHubCommentKinds.ClosedNotPlanned, evt.Type, ct);
+                await CloseAsync(sp, gate, connections, connection, link, "not_planned", GitHubCommentKinds.ClosedNotPlanned, evt.Type, ct);
                 break;
         }
     }
@@ -143,6 +145,8 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
 
     private async Task SetStateLabelAsync(
         IServiceProvider sp,
+        GitHubConnectionGate gate,
+        GitHubConnectionStore connections,
         GitHubConnection connection,
         GitHubIssueLink link,
         string stateLabel,
@@ -153,10 +157,22 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
             return;
         try
         {
-            await sp.GetRequiredService<IGitHubCommentPort>()
-                .ReplaceStateLabelAsync(connection, link.GithubIssueNumber, stateLabel, ct);
-            await sp.GetRequiredService<GitHubIssueLinkStore>()
-                .SetStateLabelAsync(link.Id, stateLabel, ct);
+            // Same send fence as comments and closes: the label write is
+            // idempotent, so a Disable that wins the gate stops this
+            // projection and the next event or enable reprojection re-projects
+            // the current label.
+            await gate.EnterAsync(connection.Id, async token =>
+            {
+                var current = await connections.GetByIdAsync(connection.Id, token);
+                if (current is null || current.Status != GitHubConnectionStatus.Active)
+                    throw new GitHubSynchronizationException(
+                        "github_connection_disabled",
+                        "GitHub connection is disabled");
+                await sp.GetRequiredService<IGitHubCommentPort>()
+                    .ReplaceStateLabelAsync(current, link.GithubIssueNumber, stateLabel, token);
+                await sp.GetRequiredService<GitHubIssueLinkStore>()
+                    .SetStateLabelAsync(link.Id, stateLabel, token);
+            }, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -166,6 +182,8 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
 
     private async Task PostCommentAsync(
         IServiceProvider sp,
+        GitHubConnectionGate gate,
+        GitHubConnectionStore connections,
         GitHubConnection connection,
         GitHubIssueLink link,
         string commentKey,
@@ -185,13 +203,33 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
             return;
         try
         {
-            await sp.GetRequiredService<IGitHubCommentPort>()
-                .PostCommentAsync(
-                    connection,
-                    link.GithubIssueNumber,
-                    GitHubMirrorMarker.Append(body, marker),
-                    ct);
-            await links.MarkCommentPostedAsync(link.Id, commentKey, link.GithubIssueNumber, ct);
+            // The gate re-reads Active before the port call. A Disable that
+            // commits after this event was accepted cannot be followed by
+            // this send; the reservation stays pending for recovery after
+            // enable. A send that won the gate settles inside it, so a
+            // waiting Disable commits only after the posted bookkeeping.
+            var posted = await gate.EnterAsync(connection.Id, async token =>
+            {
+                var current = await connections.GetByIdAsync(connection.Id, token);
+                if (current is null || current.Status != GitHubConnectionStatus.Active)
+                    return false;
+                await sp.GetRequiredService<IGitHubCommentPort>()
+                    .PostCommentAsync(
+                        current,
+                        link.GithubIssueNumber,
+                        GitHubMirrorMarker.Append(body, marker),
+                        token);
+                await links.MarkCommentPostedAsync(link.Id, commentKey, link.GithubIssueNumber, token);
+                return true;
+            }, ct);
+            if (!posted)
+            {
+                // Disabled won the gate: clear the reserve-time lease so the
+                // reservation is claimable as soon as the connection is
+                // re-enabled, instead of waiting out the lease.
+                await links.ReleaseCommentOperationLeaseAsync(link.Id, commentKey, ct);
+                return;
+            }
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -205,6 +243,8 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
 
     private async Task CloseAsync(
         IServiceProvider sp,
+        GitHubConnectionGate gate,
+        GitHubConnectionStore connections,
         GitHubConnection connection,
         GitHubIssueLink link,
         string stateReason,
@@ -223,9 +263,21 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
             return;
         try
         {
-            await sp.GetRequiredService<IGitHubCommentPort>()
-                .CloseIssueAsync(connection, link.GithubIssueNumber, stateReason, ct);
-            await links.MarkCommentPostedAsync(link.Id, closeKey, link.GithubIssueNumber, ct);
+            var closed = await gate.EnterAsync(connection.Id, async token =>
+            {
+                var current = await connections.GetByIdAsync(connection.Id, token);
+                if (current is null || current.Status != GitHubConnectionStatus.Active)
+                    return false;
+                await sp.GetRequiredService<IGitHubCommentPort>()
+                    .CloseIssueAsync(current, link.GithubIssueNumber, stateReason, token);
+                await links.MarkCommentPostedAsync(link.Id, closeKey, link.GithubIssueNumber, token);
+                return true;
+            }, ct);
+            if (!closed)
+            {
+                await links.ReleaseCommentOperationLeaseAsync(link.Id, closeKey, ct);
+                return;
+            }
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {

@@ -21,7 +21,7 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.GitHub;
 
 [Collection("GitHubCommand")]
-public sealed class GitHubSyncSpecs
+public sealed partial class GitHubSyncSpecs
 {
     private const string RepositoryName = "hello-world";
     private readonly GitHubCommandFixture _fixture;
@@ -42,6 +42,8 @@ public sealed class GitHubSyncSpecs
         fixture.Comments.PostThenThrow = false;
         fixture.Comments.PostEntered = null;
         fixture.Comments.ReleasePost = null;
+        fixture.Comments.FindEntered = null;
+        fixture.Comments.ReleaseFind = null;
         fixture.Comments.UpdateFailure = null;
         fixture.Comments.UpdateFailures.Clear();
         fixture.Comments.LabelFailure = null;
@@ -381,8 +383,13 @@ public sealed class GitHubSyncSpecs
             disabled.EnsureSuccessStatusCode();
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        var marker = GitHubCommentOperationMarker.For(link.Id, commentKey);
+        var markerCountBeforeRecovery = _fixture.Comments.Comments.Count(comment =>
+            comment.Body.Contains(marker, StringComparison.Ordinal));
         var worker = _fixture.Services.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>();
-        Assert.Equal(0, await worker.ProcessPendingAsync());
+        await worker.ProcessPendingAsync();
+        Assert.Equal(markerCountBeforeRecovery, _fixture.Comments.Comments.Count(comment =>
+            comment.Body.Contains(marker, StringComparison.Ordinal)));
         Assert.Equal(
             GitHubCommentOperationStatus.Reserved,
             await LoadOperationStatusAsync(link.Id, commentKey));
@@ -394,9 +401,14 @@ public sealed class GitHubSyncSpecs
         Assert.True(await worker.ProcessPendingAsync() >= 1);
         var recovered = await LoadLinkAsync(projectId, issueNumber);
         Assert.True(recovered!.HasPostedComment(commentKey));
+        Assert.Equal(1, _fixture.Comments.Comments.Count(comment =>
+            comment.Body.Contains(marker, StringComparison.Ordinal)));
         Assert.Equal(
             GitHubCommentOperationStatus.Posted,
             await LoadOperationStatusAsync(link.Id, commentKey));
+        await worker.ProcessPendingAsync();
+        Assert.Equal(1, _fixture.Comments.Comments.Count(comment =>
+            comment.Body.Contains(marker, StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -417,8 +429,14 @@ public sealed class GitHubSyncSpecs
             disabled.EnsureSuccessStatusCode();
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        var closesBeforeRecovery = _fixture.Comments.Closes.Count(close =>
+            close.GithubIssueNumber == link.GithubIssueNumber
+                && close.StateReason == "completed");
         var worker = _fixture.Services.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>();
-        Assert.Equal(0, await worker.ProcessPendingAsync());
+        await worker.ProcessPendingAsync();
+        Assert.Equal(closesBeforeRecovery, _fixture.Comments.Closes.Count(close =>
+            close.GithubIssueNumber == link.GithubIssueNumber
+                && close.StateReason == "completed"));
         Assert.Equal(
             GitHubCommentOperationStatus.Reserved,
             await LoadOperationStatusAsync(link.Id, closeKey));
@@ -430,9 +448,16 @@ public sealed class GitHubSyncSpecs
         Assert.True(await worker.ProcessPendingAsync() >= 1);
         var recovered = await LoadLinkAsync(projectId, issueNumber);
         Assert.True(recovered!.HasPostedComment(closeKey));
+        Assert.Equal(1, _fixture.Comments.Closes.Count(close =>
+            close.GithubIssueNumber == link.GithubIssueNumber
+                && close.StateReason == "completed"));
         Assert.Equal(
             GitHubCommentOperationStatus.Posted,
             await LoadOperationStatusAsync(link.Id, closeKey));
+        await worker.ProcessPendingAsync();
+        Assert.Equal(1, _fixture.Comments.Closes.Count(close =>
+            close.GithubIssueNumber == link.GithubIssueNumber
+                && close.StateReason == "completed"));
     }
 
     [Fact]
