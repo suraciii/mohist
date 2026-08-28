@@ -43,21 +43,87 @@ the Project; see [Repositories](repositories.md). A Project that declares
 several repositories can hold several connections. An Issue never carries
 GitHub coordinates: its mirror location is determined by its target repository.
 
-```bash
-mo github connect owner/repo --pat <token>    # matched to a registered Repository by git URL
-mo github connect owner/repo --repo docs --pat <token> # explicit when the match is ambiguous
-mo github list                               # every Repository and its connection state
+The target connection uses the one GitHub App owned by the Mohist deployment:
+
+- The deployment owns the App credential. The CLI, Web client, Repository
+  configuration, and connection response never carry the App private key.
+- Mohist discovers the App installation for the selected Repository and verifies
+  that the installation can access it. The connection records the verified
+  installation and the repository's stable GitHub identity, not only its
+  changeable owner and name.
+- If no valid installation exists, Mohist returns the App installation URL. The
+  operator installs the App, selects the Repository in GitHub, and retries.
+- A connection becomes `Active` only after that verification. Outbound Server
+  calls use short-lived installation tokens; the operator never enters or sees
+  those tokens.
+- The existing per-connection signed Repository webhook remains the inbound
+  event boundary. The GitHub App does not introduce a global webhook path.
+- Runner `gh` authentication remains a separate credential boundary for git and
+  Pull Request operations. Server installation tokens are not Runner
+  credentials.
+
+```mermaid
+sequenceDiagram
+    participant O as Operator
+    participant M as Mohist
+    participant G as GitHub
+    O->>M: Start connection for Repository
+    M->>G: Discover and verify installation for Repository
+    alt no valid installation
+        G-->>M: Missing, suspended, removed, or out of scope
+        M-->>O: Return App install URL and retry guidance
+        O->>G: Install App and select Repository
+        O->>M: Retry connection
+        M->>G: Discover and verify installation again
+    end
+    G-->>M: Verified installation and stable repository identity
+    M->>M: Bind Repository to verified installation
+    M-->>O: Mark connection Active
 ```
 
-The guide prints the GitHub-side setup: a Repository webhook targeting the
-Mohist Server. The current connection API requires a fine-grained PAT with Issues
-read and write through `--pat` and stores it as a server secret; GitHub App
-installation-token exchange is not implemented yet. An optional approver list
-enables [Pull Request Review as Approval](#pull-request-review-as-approval).
+An optional approver list enables
+[Pull Request Review as Approval](#pull-request-review-as-approval).
 
-Disabling a connection pauses mirroring and synchronization. Existing links
-stay visible on Issues and show the paused state. Enabling re-projects every
-linked Issue once. A connection cannot be deleted.
+## Connection Lifecycle
+
+An `Active` connection can mirror Issues and receive events through its signed
+Repository webhook. An operator may disable it, or Mohist may disable it when
+the installation is suspended, removed, or no longer includes the bound
+Repository. `Disabled` pauses projection and marks reconnect-required when the
+installation must be repaired. Links, pending mirror creation, and other
+pending durable work remain available for recovery; Mohist does not delete the
+connection's history.
+
+When the App contract is introduced, every existing PAT-backed connection
+becomes `Disabled` with reconnect-required status. The operator must reconnect
+through the App. Mohist does not convert a PAT, fall back to a PAT, or discard
+existing links and pending work.
+
+A short-lived installation token is replaced when it expires. Token refresh does
+not change an otherwise valid connection's state. If installation verification
+fails, the connection follows the disabled recovery path.
+
+```mermaid
+flowchart TD
+    S["Connection request"] --> D["Discover App installation"]
+    D --> V{"Repository access verified?"}
+    V -->|"no"| I["Not Active: install or reconnect required"]
+    I --> D
+    V -->|"yes"| A["Active"]
+    A -->|"operator disables"| X["Disabled: projection paused"]
+    A -->|"installation suspended, removed, or scope changed"| X
+    P["Existing PAT connection"] --> X
+    X -->|"retain links and pending durable work"| R["Recovery state"]
+    R -->|"operator repairs installation and retries"| D
+```
+
+The existing connection listing remains the operator's view of every Repository
+and its connection state:
+
+```bash
+mo github list
+```
+
 
 ## The Mirror: Mohist to GitHub
 
@@ -175,6 +241,20 @@ Issue's lineage, so subscribing to every event under Issue #42 includes it.
 
 ## Non-goals
 
+- **Runtime implementation.** This issue defines the target contract; it does
+  not implement the GitHub App flow.
+- **GitHub OAuth user tokens or device flow.** The connection uses the
+  deployment-owned GitHub App, not a user's GitHub identity.
+- **Web connection management UI.** The target contract does not add a Web
+  setup surface.
+- **Multiple GitHub App configurations in one Mohist deployment.** One
+  deployment owns one App credential.
+- **GitHub App global webhook ingress.** The existing per-connection signed
+  Repository webhook remains the inbound boundary.
+- **Replacement of Runner `gh` authentication.** Runner git and Pull Request
+  actions keep their separate host-local `gh` credential.
+- **Automatic conversion of a PAT into an App installation.** PAT-backed
+  connections require an operator-led App reconnect.
 - **Bulk backfill.** Connecting a repository does not mass-create mirrors for
   existing Issues; `mo issue github sync` reconciles on demand.
 - **Comment synchronization.** GitHub discussion is not imported; Mohist
@@ -195,7 +275,8 @@ boundaries and protocol details.
 
 ### Implemented behavior
 
-The current implementation provides:
+The following behavior is shipped today. The current PAT connection is listed
+explicitly below; it is not the target GitHub App contract.
 
 - No-Workflow GitHub Issue lifecycle, including `completed` versus
   `not_planned` close reasons, reopening cancelled Issues to the backlog, and
@@ -224,10 +305,21 @@ The current implementation provides:
   healthy only after current projection succeeds.
 - New feed-created Issues no longer emit the `github-issue` origin label.
   Historical feed-created links may retain that label as data.
-- Connection setup uses a fine-grained PAT with Issues read and write. The
-  connection surface contains only Repository binding, identity, and
-  Approvers.
+- **Current connection credential:** a fine-grained PAT with Issues read and
+  write is stored as a server secret. The connection surface contains only
+  Repository binding, identity, and Approvers.
 
-### Remaining gaps
+### Target behavior not yet shipped
 
-- GitHub App identity and installation-token exchange are not implemented.
+The decided target is the one-deployment GitHub App contract described in
+[Connecting Repositories](#connecting-repositories) and
+[Connection Lifecycle](#connection-lifecycle). It is not shipped by the current
+runtime.
+
+### Implementation Gaps
+
+- The runtime does not yet own one deployment-wide GitHub App credential,
+  discover and verify installations, return the App install URL, mint and
+  refresh short-lived installation tokens, or perform the PAT cutover. Until
+  this gap closes, PAT behavior is current-only behavior. Existing PAT-backed
+  connections have not yet been disabled for App reconnection.
