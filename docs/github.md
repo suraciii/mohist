@@ -230,16 +230,16 @@ State-label write-backs also heal themselves at the next Workflow milestone.
 
 When a connection has an approver list, GitHub Pull Request reviews can provide
 a decision only at the **Check Approval Point** for the active WorkflowRun
-associated with that Pull Request. When the built-in GitHub PR Workflow creates
-or reuses the Pull Request, the WorkflowRun records its already-bound Repository
-and Pull Request number in its write-once Pull Request identity. Replaying the
-same identity is idempotent; a conflicting Pull Request number is rejected.
-This is WorkflowRun state, not a new resource or DSL construct. Review translation
-reads this immutable identity rather than branch names, mutable Run Variables, or a
-Pull Request URL. Profile Actions may still receive `vars.github.pr.number` as an
-explicit carrier, and the Profile may retain `vars.github.pr.url` for presentation.
-These Variables do not establish or change the identity. Mohist rejects a conflicting
-number before dispatch. An **Approve** review maps to Approve. A **Request changes**
+associated with that Pull Request. The WorkflowRun records its Pull Request
+identity the first time a `github.pr.number` carrier reaches it through the
+Workflow grain, from a Runner `setVars` PATCH or an Agent Job `setVars`. The
+identity is write-once. Repeating the same number is idempotent; a conflicting
+Pull Request number is rejected. This is WorkflowRun state, not a new resource or
+DSL construct. Review translation reads this immutable identity rather than branch
+names, mutable Run Variables, or a Pull Request URL. Profile Actions may still
+receive `vars.github.pr.number` as an explicit carrier, and the Profile may retain
+`vars.github.pr.url` for presentation. Mohist rejects a conflicting number before
+dispatch. An **Approve** review maps to Approve. A **Request changes**
 review maps to Request Changes and uses the review body as Approval Feedback when
 that action is available. A
 **Comment** review has no decision. Only reviews by listed GitHub users count,

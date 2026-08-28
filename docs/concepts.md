@@ -215,11 +215,6 @@ presentation alias and does not change ownership. See
 Current WorkflowRun source, status, and recovery reads still consult live Profile
 data in some paths, and current Profile update guards still inspect active Runs.
 `WorkflowRun.Feedback` retains resolved Approval Feedback in an unbounded list.
-The built-in Profile stores the Pull Request number and URL as mutable Run Variables,
-and later Action inputs read the number without an immutable
-WorkflowRun Pull Request identity guard. Review translation currently parses PR
-head branch naming (`mo/issue-*`) instead of resolving that identity; it does not
-route through `github.pr.url`.
 
 ## Skill
 

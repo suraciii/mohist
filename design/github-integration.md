@@ -96,15 +96,15 @@ exactly once per pair — at mirror creation, at `/mohist start`, or at manual
 ### WorkflowRun Pull Request Identity
 
 WorkflowRun owns one write-once Pull Request identity: its already-bound
-Repository and the Pull Request number. The identity is recorded when the
-create-or-reuse Pull Request operation first succeeds. Replaying that operation
-with the same identity is idempotent; a conflicting Pull Request number is
-rejected. This identity is part of WorkflowRun state, not a new resource or DSL
-construct, and it is the authority for GitHub review correlation. The Profile may
-pass `vars.github.pr.number` to Action inputs and retain `vars.github.pr.url` for
-presentation, but those Variables are not identity and cannot establish or change
-it. Before dispatch, WorkflowRun rejects a Pull Request number that conflicts with
-the identity. The Pull Request Review Translator reads the immutable identity.
+Repository and the Pull Request number. The run records the identity the first
+time a `github.pr.number` carrier reaches it through the Workflow grain, from a
+Runner `setVars` PATCH or an Agent Job `setVars`. Repeating the same number is
+idempotent; a conflicting Pull Request number is rejected. This identity is part
+of WorkflowRun state, not a new resource or DSL construct, and it is the authority
+for GitHub review correlation. The Profile may pass `vars.github.pr.number` to
+Action inputs and retain `vars.github.pr.url` for presentation. Before dispatch,
+WorkflowRun rejects a Pull Request number that conflicts with the identity. The
+Pull Request Review Translator reads the immutable identity.
 
 ## The Direction Contract
 
@@ -235,15 +235,15 @@ permission.
 
 ### Pull Request Review Translator
 
-No separate GitHub review entity is introduced. When the built-in GitHub PR
-Workflow creates or reuses the Pull Request, the WorkflowRun records its
-already-bound Repository and Pull Request number in the write-once Pull Request
-identity. A same-identity replay is idempotent; a conflicting Pull Request
-number is rejected. Review translation reads this immutable identity rather than
-branch names, mutable Run Variables, or a Pull Request URL. Profile Actions may
-still receive `vars.github.pr.number` as an explicit carrier, and the Profile may
-retain `vars.github.pr.url` for presentation. These Variables do not establish or
-change the identity, and WorkflowRun rejects a conflicting number before dispatch.
+No separate GitHub review entity is introduced. The WorkflowRun records its
+Pull Request identity the first time a `github.pr.number` carrier reaches it
+through the Workflow grain, from a Runner `setVars` PATCH or an Agent Job
+`setVars`. The identity is write-once. Repeating the same number is idempotent; a
+conflicting Pull Request number is rejected. Review translation reads this
+immutable identity rather than branch names, mutable Run Variables, or a Pull
+Request URL. Profile Actions may still receive `vars.github.pr.number` as an
+explicit carrier, and the Profile may retain `vars.github.pr.url` for
+presentation. WorkflowRun rejects a conflicting number before dispatch.
 
 GitHub reviews decide only the Check Approval Point. The translator maps GitHub
 **Approve** to Approve and GitHub **Request changes** to Request Changes with the

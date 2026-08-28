@@ -6,6 +6,7 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.TestSupport;
@@ -186,6 +187,8 @@ public class RunnerWorkflowStatusRouterSpecs
             Task.FromResult(new Mohist.Server.Workflow.Grains.WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned));
         public Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration) =>
             Task.FromResult<WorkItem?>(null);
+        public Task<VariableBundle> PatchVariablesAsync(VariableBundle patch) => Task.FromResult(patch);
+        public Task ValidateDispatchAsync(WorkDispatch dispatch) => Task.CompletedTask;
         public Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch) =>
             Task.FromResult<WorkDispatch?>(dispatch);
         public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> FailActiveWorkAsync(

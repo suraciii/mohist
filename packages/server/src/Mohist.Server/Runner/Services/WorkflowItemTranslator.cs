@@ -78,6 +78,46 @@ public sealed class WorkflowItemTranslator : IScopedService
             $"Unsupported work item variant '{item.WorkType}' for workflow '{workflowRunId}'");
     }
 
+    internal async Task<WorkDispatch> TranslateToDispatchPreviewAsync(
+        WorkItem item,
+        string workflowRunId,
+        WorkflowRun run)
+    {
+        if (!item.IsTask && !item.IsChecks)
+            throw new InvalidOperationException(
+                $"Unsupported work item variant '{item.WorkType}' for workflow '{workflowRunId}'");
+
+        var workId = item.Id ?? throw new InvalidOperationException(
+            $"Workflow work item for workflow '{workflowRunId}' is missing work id");
+        var workType = item.IsTask ? "task" : "checks";
+        var title = item.IsTask ? item.Title ?? string.Empty : "Stage checks";
+        var payload = await BuildPayloadAsync(
+            item.Stage,
+            workId,
+            workType,
+            title,
+            item.IsTask ? WorkflowDispatchHelpers.TaskAttempt(workId) : 1,
+            workflowRunId,
+            run);
+        var prompts = await _promptResolver.LoadPromptsAsync(workflowRunId);
+        if (prompts.Count > 0)
+        {
+            var promptsMap = new Dictionary<string, object>(StringComparer.Ordinal);
+            foreach (var p in prompts)
+                promptsMap[p.Key] = p.Body;
+            payload["prompts"] = JSON.SerializeToElement(promptsMap);
+        }
+
+        return new WorkDispatch(
+            WorkflowRunId: workflowRunId,
+            WorkId: workId,
+            Uses: item.Uses,
+            Variables: JSON.Serialize(payload),
+            WorkType: workType,
+            Stage: item.Stage,
+            Title: title);
+    }
+
     /// <summary>
     /// Resolves only the runtime identities needed for admission. This is a
     /// read-only projection: it must not claim the workflow task or persist a

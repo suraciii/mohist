@@ -59,6 +59,8 @@ public class WorkflowRunRow
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
     public int? IssueNumber { get; set; }
 
+    public int? PullRequestNumber { get; set; }
+
     public string? ActiveWorkId { get; set; }
 
     public string? ActiveWorkerId { get; set; }
