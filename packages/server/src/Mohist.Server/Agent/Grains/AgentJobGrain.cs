@@ -952,15 +952,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             TimeSpan.FromMilliseconds(-1));
     }
 
-    private async Task EvaluatePendingAsync()
-    {
-        if (string.IsNullOrWhiteSpace(State.RunnerId)
-            || string.IsNullOrWhiteSpace(_ledger?.DispatchJson))
-        {
-            await TryAdmitAsync();
-        }
-    }
-
     private bool JobTimeoutExceeded()
     {
         return State.RunnerId is not null

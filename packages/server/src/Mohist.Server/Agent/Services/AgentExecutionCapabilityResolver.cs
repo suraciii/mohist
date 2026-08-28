@@ -167,12 +167,8 @@ public static class AgentExecutionCapabilityResolver
         // `incompatible_execution_configuration`. A catalog that lists
         // explicit models still rejects any model that is not on the
         // list as a deterministic incompatibility.
-        if (tuple.Model is not null)
-        {
-            if (catalog.Models is { Length: > 0 }
-                && !Contains(catalog.Models, tuple.Model, StringComparison.OrdinalIgnoreCase))
-                return false;
-        }
+        if (!RuntimeCatalogCompatibility.AcceptsModel(tuple.Runtime, catalog, tuple.Model))
+            return false;
 
         if (tuple.ReasoningEffort is not null)
         {
@@ -190,9 +186,7 @@ public static class AgentExecutionCapabilityResolver
         // explicit per-model variant definitions. An empty variant map
         // means the runtime validates the variant at execution time,
         // matching the model-validation rule above.
-        if (tuple.Variant is not null
-            && catalog.Variants is { Count: > 0 }
-            && !ContainsForModel(catalog.Variants, tuple.Model, tuple.Variant))
+        if (!RuntimeCatalogCompatibility.AcceptsVariant(tuple.Runtime, catalog, tuple.Model, tuple.Variant))
             return false;
 
         return true;
