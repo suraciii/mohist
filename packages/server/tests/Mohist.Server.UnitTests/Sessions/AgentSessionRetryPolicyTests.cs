@@ -17,6 +17,7 @@ public sealed class AgentSessionRetryPolicyTests
     [InlineData("runtime-unavailable")]
     [InlineData("rate-limited")]
     [InlineData("probe-timeout")]
+    [InlineData("skill-not-found")]
     [InlineData("retry-safe")]
     public void RecordedRetryableCategory_IsRetryable(string category) =>
         Assert.True(AgentSessionRetryPolicy.IsRetryable(category));

@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
@@ -16,6 +17,8 @@ using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
@@ -64,6 +67,103 @@ public sealed class SlackDmSessionMappingIngressSpecs
             connection.ProjectId, connection.Id, "D-DM-MAP");
 
         Assert.False(string.IsNullOrEmpty(sessionId));
+    }
+
+    [Theory]
+    [InlineData(AgentJobFailureReasons.RunnerUnavailable)]
+    [InlineData("skill-not-found")]
+    public async Task Retry_safe_failed_initial_launch_recovers_and_accepts_followup_once(string failureCategory)
+    {
+        var connection = await CreateConnectionAsync();
+        const string conversationId = "D-DM-MISSING-RUNTIME";
+        const string followupTs = "1710000000.000150";
+
+        using (var first = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+        {
+            isDirectMessage = true,
+            teamId = connection.WorkspaceTeamId,
+            conversationId,
+            messageTs = "1710000000.000100",
+            senderSlackUserId = "U_OWNER",
+            text = "first task",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
+        }))
+        {
+            first.EnsureSuccessStatusCode();
+        }
+
+        string failedSessionId;
+        await using (var failScope = _fixture.Services.CreateAsyncScope())
+        {
+            failedSessionId = (await failScope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>()
+                .GetCurrentSessionIdAsync(connection.ProjectId, connection.Id, conversationId))!;
+        }
+        var failedSession = _fixture.Grains.GetGrain<IAgentSessionGrain>(failedSessionId);
+        var failedInitial = await failedSession.GetInitialLaunchAsync();
+        Assert.NotNull(failedInitial?.Turn?.JobId);
+        await failedSession.MarkInitialTurnTerminalAsync(
+            failedInitial!.Turn!.JobId!,
+            AgentTurnStatus.Failed,
+            new AgentTurnResult(
+                FailureReason: "failed before execution started",
+                FailureCategory: failureCategory));
+
+        async Task<JsonElement> PostFollowupAsync(string messageTs, string text)
+        {
+            using var response = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+            {
+                isDirectMessage = true,
+                teamId = connection.WorkspaceTeamId,
+                conversationId,
+                messageTs,
+                senderSlackUserId = "U_OWNER",
+                text,
+                leaseId = _connectionLeases[connection.Id],
+                adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
+            });
+            var responseText = await response.Content.ReadAsStringAsync();
+            Assert.True(response.IsSuccessStatusCode, $"Slack follow-up returned {(int)response.StatusCode}: {responseText}");
+            using var document = JsonDocument.Parse(responseText);
+            return document.RootElement.GetProperty("data").Clone();
+        }
+
+        var followups = await Task.WhenAll(
+            PostFollowupAsync(followupTs, "more details"),
+            PostFollowupAsync("1710000000.000151", "one more constraint"));
+        var firstFollowup = followups[0];
+        Assert.Equal("accepted", firstFollowup.GetProperty("kind").GetString());
+        Assert.Equal("none", firstFollowup.GetProperty("responseOwner").GetString());
+        var replacementSessionId = firstFollowup.GetProperty("sessionId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(replacementSessionId));
+        Assert.NotEqual(failedSessionId, replacementSessionId);
+        Assert.All(followups, followup =>
+        {
+            Assert.Equal("accepted", followup.GetProperty("kind").GetString());
+            Assert.Equal(replacementSessionId, followup.GetProperty("sessionId").GetString());
+        });
+
+        var replay = await PostFollowupAsync(followupTs, "more details");
+        Assert.Equal("already_accepted", replay.GetProperty("kind").GetString());
+        Assert.Equal(replacementSessionId, replay.GetProperty("sessionId").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var deliveries = await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == connection.Id
+                && row.DispatchRef == $"slack-followup-rejected:T123/{conversationId}/{followupTs}")
+            .ToListAsync();
+        Assert.Empty(deliveries);
+        Assert.Equal(replacementSessionId, await scope.ServiceProvider
+            .GetRequiredService<SlackDmSessionMappingStore>()
+            .GetCurrentSessionIdAsync(connection.ProjectId, connection.Id, conversationId));
+        Assert.Equal(2, await db.AgentJobs.CountAsync(row =>
+            row.State.Contains(connection.ProjectId) && row.State.Contains(connection.AgentId)));
+        var replacementInputs = await _fixture.Grains.GetGrain<IAgentSessionGrain>(replacementSessionId!)
+            .ListInputsAsync();
+        Assert.Equal(3, replacementInputs.Count);
+        Assert.Single(replacementInputs, input => input.Text == "more details");
+        Assert.Single(replacementInputs, input => input.Text == "one more constraint");
     }
 
     [Fact]

@@ -42,6 +42,12 @@ import { getOpenCodeRuntimeFactory, type OpenCodeRuntime } from './opencode/inde
 import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from './pi/index.js'
 import { workKey } from './work-key.js'
 import { loadBuildInfo } from './build-info.js'
+import {
+  discoverOpencodeModels,
+  mergeOpencodeModelCatalogs,
+  opencodeModelCatalogsEqual,
+  type OpencodeModelCatalog,
+} from './opencode-models.js'
 export { getRunnerBuildGitHash } from './build-info.js'
 import type { DispatchWorkItem, PolledDispatch } from '../core/types.js'
 import type { WorkItemResult } from '../core/types.js'
@@ -84,6 +90,8 @@ import {
 export { startTaskLogFlushTrigger } from './host-task-log.js'
 
 const log = runnerLogger.child('host')
+const INITIAL_EMPTY_MODEL_CATALOG_RETRY_MS = 5_000
+const MAX_EMPTY_MODEL_CATALOG_RETRY_MS = 5 * 60_000
 
 export interface ReportResult {
   workflowRunId?: string | null
@@ -111,9 +119,11 @@ export class RunnerHost {
   private readonly cleanup: ReturnType<typeof createHostCleanup>
   private readonly cleanupConvergenceIntervalMs: number
   private readonly cleanupLoopIntervalMs: number
+  private readonly modelRediscoveryIntervalMs: number
   private readonly workflowSessionTurnCoordinator = new WorkflowSessionTurnCoordinator()
   private readonly buildGitHash: string | null
   private readonly buildInfo: ReturnType<typeof loadBuildInfo>
+  private opencodeModelCatalog: OpencodeModelCatalog = { models: [], variants: {} }
 
   /**
    * Shared OpenCode runtime handle. Constructed in
@@ -153,6 +163,7 @@ export class RunnerHost {
   ) {
     this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
     this.cleanupLoopIntervalMs = Math.max(1000, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
+    this.modelRediscoveryIntervalMs = Math.max(60_000, Math.floor(options.modelRediscoveryIntervalMs ?? 30 * 60_000))
     const build = loadBuildInfo()
     this.buildInfo = build
     this.buildGitHash = build.gitHash
@@ -323,6 +334,7 @@ export class RunnerHost {
       await this.loadAgentSessionRuntimeEventQueue(signal)
       await this.initializeSharedConnection(signal)
       await this.connectRunner(signal)
+      void this.recoverEmptyModelCatalog(signal)
       // Kick a non-blocking drain: an unavailable server does not gate
       // startup; queued evidence retries while this process remains alive.
       if (this.agentSessionRuntimeEventQueue.ready()) {
@@ -343,6 +355,10 @@ export class RunnerHost {
         this.cleanupConvergenceIntervalMs,
       )
       const cleanupTimer = setInterval(() => void this.cleanup.runCleanupOnce(signal), this.cleanupLoopIntervalMs)
+      const modelRediscoveryTimer = setInterval(
+        () => void this.runModelRediscoveryOnce(signal),
+        this.modelRediscoveryIntervalMs,
+      )
       try {
         await this.runWorkerPool(signal)
       } finally {
@@ -350,6 +366,7 @@ export class RunnerHost {
         clearInterval(selfCheck)
         clearInterval(convergenceTimer)
         clearInterval(cleanupTimer)
+        clearInterval(modelRediscoveryTimer)
         await this.shutdownSharedConnection()
         await this.taskLogDeliveryQueue.stop()
         await this.shutdownConnection()
@@ -385,6 +402,39 @@ export class RunnerHost {
       await this.observeManagerDeploymentEpoch()
     } catch (error) {
       log.error('immediate runner heartbeat failed', { exception: error })
+    }
+  }
+
+  private async recoverEmptyModelCatalog(signal: AbortSignal): Promise<void> {
+    let retryDelayMs = INITIAL_EMPTY_MODEL_CATALOG_RETRY_MS
+    const maxRetryDelayMs = Math.min(MAX_EMPTY_MODEL_CATALOG_RETRY_MS, this.modelRediscoveryIntervalMs)
+    while (!signal.aborted) {
+      if (await this.runModelRediscoveryOnce(signal)) return
+      try {
+        await this.waitForConnectionRetry(retryDelayMs, signal)
+      } catch (error) {
+        if (!signal.aborted) log.error('opencode model recovery wait failed', { exception: error })
+        return
+      }
+      retryDelayMs = Math.min(retryDelayMs * 2, maxRetryDelayMs)
+    }
+  }
+
+  private async runModelRediscoveryOnce(signal: AbortSignal): Promise<boolean> {
+    try {
+      const discovered = await discoverOpencodeModels(signal)
+      if (discovered.models.length === 0) return false
+      const next = discovered.complete ? discovered : mergeOpencodeModelCatalogs(this.opencodeModelCatalog, discovered)
+      if (opencodeModelCatalogsEqual(this.opencodeModelCatalog, next)) return true
+      this.opencodeModelCatalog = {
+        models: [...next.models],
+        variants: Object.fromEntries(Object.entries(next.variants).map(([model, variants]) => [model, [...variants]])),
+      }
+      await this.sendImmediateHeartbeat()
+      return true
+    } catch (error) {
+      if (!signal.aborted) log.error('opencode model rediscovery failed', { exception: error })
+      return false
     }
   }
 
@@ -715,6 +765,7 @@ export class RunnerHost {
         this.actions.catalog(),
         () => this.control.getConnectionId(),
         this.processGeneration,
+        this.opencodeModelCatalog,
       ),
       this.openCodeRuntime?.ready() === true,
     )

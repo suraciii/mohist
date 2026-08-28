@@ -63,6 +63,7 @@ import {
   parseAttachmentDescriptors,
   type DeliveredAttachment,
 } from '../runtime/attachment-delivery.js'
+import { BindingRecoveryCoordinator, resolveOrRecoverBinding } from '../runtime/binding-recovery.js'
 
 const log = runnerLogger.child('session')
 
@@ -80,6 +81,7 @@ export interface FollowupHandlerDeps {
   randomId?: () => string
   skillResolver?: SkillResolver
   strictExecutionSourceValidation?: boolean
+  bindingRecoveryCoordinator?: BindingRecoveryCoordinator | null
 }
 
 export interface FollowupDeliveryResult {
@@ -91,14 +93,16 @@ export function createFollowupHandler(
   deps: FollowupHandlerDeps,
 ): (payload: ReceiveFollowupPayload | null | undefined) => Promise<FollowupDeliveryResult> {
   const inFlight = new Map<string, Promise<FollowupDeliveryResult>>()
+  const bindingRecoveryCoordinator = deps.bindingRecoveryCoordinator ?? new BindingRecoveryCoordinator()
+  const handlerDeps = { ...deps, bindingRecoveryCoordinator }
   return async (payload: ReceiveFollowupPayload | null | undefined) => {
     const key = followupOperationKey(payload)
-    if (!key) return await handleFollowup(payload, deps)
+    if (!key) return await handleFollowup(payload, handlerDeps)
 
     const existing = inFlight.get(key)
     if (existing) return await existing
 
-    const operation = handleFollowup(payload, deps)
+    const operation = handleFollowup(payload, handlerDeps)
     inFlight.set(key, operation)
     try {
       return await operation
@@ -193,8 +197,68 @@ async function handleFollowup(
     return unavailable()
   }
 
-  const selectedTarget = target
+  let selectedTarget = target
   const connection = deps.connection ?? null
+  const runnerId = deps.runnerId ?? null
+  if (!managerContext && connection && runnerId) {
+    const expected = {
+      runnerId: binding.runnerId,
+      runtime: handle.kind,
+      runtimeSessionId: target.runtimeSessionId,
+      workDir: target.workDir,
+    } as const
+    const recovery = await resolveOrRecoverBinding({
+      runnerId,
+      expected,
+      runtime: handle,
+      probe: async (candidate) => {
+        const result =
+          handle.kind === 'opencode'
+            ? await handle.runtime.resolveSession({
+                target: {
+                  runtime: 'opencode',
+                  runtimeSessionId: candidate.runtimeSessionId,
+                  workDir: candidate.workDir,
+                },
+              })
+            : await handle.runtime.resolveSession({
+                target: {
+                  runtime: 'pi',
+                  runtimeSessionId: candidate.runtimeSessionId,
+                  workDir: candidate.workDir,
+                },
+              })
+        return result.ok
+          ? { ok: true, activeTurn: result.value.activeTurn }
+          : { ok: false, kind: result.error.kind, message: result.error.message }
+      },
+      replace: async (current, replacement) => {
+        const body = {
+          expectedRunnerId: current.runnerId,
+          expectedRuntime: current.runtime,
+          expectedRuntimeSessionId: current.runtimeSessionId,
+          replacementRuntimeSessionId: replacement.runtimeSessionId,
+          expectedQueuedTurnId: payload.turnId,
+        }
+        const signal = new AbortController().signal
+        if (sessionTarget.kind === 'workflow') {
+          await connection.recoverMissingWorkflowAgentSession(
+            sessionTarget.projectId,
+            sessionTarget.workflowRunId,
+            sessionTarget.sessionName,
+            body,
+            signal,
+          )
+        } else {
+          await connection.recoverMissingAgentSession(sessionTarget.projectId, sessionTarget.sessionId, body, signal)
+        }
+      },
+      recoveryKey: `${sessionTargetId(sessionTarget)}:${expected.runtimeSessionId ?? 'unbound'}`,
+      coordinator: deps.bindingRecoveryCoordinator ?? undefined,
+    })
+    if (!recovery.ok || !recovery.binding.runtimeSessionId) return unavailable()
+    selectedTarget = { ...target, runtimeSessionId: recovery.binding.runtimeSessionId }
+  }
 
   const definition = sessionTarget.kind === 'generic' ? target.definition : undefined
   const resolvedSkills = await (deps.skillResolver ?? new SkillResolver()).resolve(

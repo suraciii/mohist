@@ -356,6 +356,29 @@ public sealed class AgentExecutionCapabilityResolverTests
     }
 
     [Fact]
+    public void OpenCodeDiscoveredCatalog_RemainsAHintForExplicitModelAndVariant()
+    {
+        var catalog = new RuntimeCatalogEntry(
+            Models: ["openai/discovered-model"],
+            Variants: new Dictionary<string, string[]>
+            {
+                ["openai/discovered-model"] = ["high"],
+            },
+            SupportsReasoningEffort: false,
+            Complete: true,
+            CapabilityRevision: "test-opencode-discovered-v1");
+
+        var result = AgentExecutionCapabilityResolver.Resolve(
+            "opencode",
+            "openai/operator-configured-model",
+            null,
+            "operator-configured-variant",
+            [new AgentExecutionCapabilitySnapshot("runner-a", "opencode", catalog)]);
+
+        Assert.Equal(AgentExecutionCapabilityDisposition.Supported, result.Disposition);
+    }
+
+    [Fact]
     public void OpenCodeProductionShape_RejectsExplicitEffortDeterministically()
     {
         // The shipped OpenCode catalog reports the explicit effort

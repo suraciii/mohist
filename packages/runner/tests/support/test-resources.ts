@@ -1,13 +1,14 @@
-import { AsyncLocalStorage } from "node:async_hooks"
-import { withRunnerResources, type RunnerFileSystem, type RunnerResourceContext } from "../../src/system/filesystem.js"
-import type { GitRunner } from "../../src/runtime/git-probe.js"
-import type { PiRuntime } from "../../src/runtime/pi/index.js"
-import type { PiRuntimeFactory } from "../../src/runtime/pi/factory.js"
-import type { ExternalProcessPolicy } from "../../src/system/process-policy.js"
-import type { RunnerLogger } from "../../src/system/logger.js"
-import { installReadyOpenCodeRuntimeFactory, type OpenCodeRuntimeTestResources } from "./opencode-runtime-factory.js"
-import { createLoggerCapture } from "./logger-test.js"
-import { MemoryFileSystem } from "./memory-filesystem.js"
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { withRunnerResources, type RunnerFileSystem, type RunnerResourceContext } from '../../src/system/filesystem.js'
+import type { GitRunner } from '../../src/runtime/git-probe.js'
+import type { PiRuntime } from '../../src/runtime/pi/index.js'
+import type { PiRuntimeFactory } from '../../src/runtime/pi/factory.js'
+import type { ExternalProcessPolicy } from '../../src/system/process-policy.js'
+import type { RunnerLogger } from '../../src/system/logger.js'
+import type { OpencodeModelDiscovery } from '../../src/runtime/opencode-models.js'
+import { installReadyOpenCodeRuntimeFactory, type OpenCodeRuntimeTestResources } from './opencode-runtime-factory.js'
+import { createLoggerCapture } from './logger-test.js'
+import { MemoryFileSystem } from './memory-filesystem.js'
 
 interface TestResourceState {
   readonly fileSystem: RunnerFileSystem
@@ -18,38 +19,44 @@ interface TestResourceState {
 const testResourceStorage = new AsyncLocalStorage<TestResourceState>()
 const missingBuildInfoFileSystem = {
   exists: () => false,
-  readText: (path: string) => { throw new Error(`unexpected build info read: ${path}`) },
+  readText: (path: string) => {
+    throw new Error(`unexpected build info read: ${path}`)
+  },
 }
 const emptyEnvironment: Readonly<Record<string, string | undefined>> = Object.freeze({})
 const denyExternalProcess: ExternalProcessPolicy = {
-  assertAllowed(label) { throw new Error(`external process forbidden in runner test: ${label}`) },
+  assertAllowed(label) {
+    throw new Error(`external process forbidden in runner test: ${label}`)
+  },
   register() {},
 }
 const denyTransport = {
-  fetch: async () => { throw new Error("network transport forbidden in runner test") },
+  fetch: async () => {
+    throw new Error('network transport forbidden in runner test')
+  },
 }
 
 export function currentTestResourceState(): TestResourceState {
   const state = testResourceStorage.getStore()
-  if (!state) throw new Error("runner test resource context is not active")
+  if (!state) throw new Error('runner test resource context is not active')
   return state
 }
 
 export async function withTestRunnerResources<T>(
   body: (fileSystem: RunnerFileSystem) => Promise<T>,
-  resources: Omit<RunnerResourceContext, "fileSystem"> & { fileSystem?: RunnerFileSystem } = {},
+  resources: Omit<RunnerResourceContext, 'fileSystem'> & { fileSystem?: RunnerFileSystem } = {},
 ): Promise<T> {
   const fileSystem = resources.fileSystem ?? new MemoryFileSystem()
   const state: TestResourceState = { fileSystem, tempDirs: [], nextTempId: 1 }
   const logger = resources.logger ?? createLoggerCapture()
   const scopedResources: RunnerResourceContext = new Proxy(resources, {
     get(target, property, receiver) {
-      if (property === "fileSystem") return fileSystem
-      if (property === "logger") return target.logger ?? logger
-      if (property === "buildInfoFileSystem") return target.buildInfoFileSystem ?? missingBuildInfoFileSystem
-      if (property === "environment") return target.environment ?? emptyEnvironment
-      if (property === "externalProcessPolicy") return target.externalProcessPolicy ?? denyExternalProcess
-      if (property === "transport") return target.transport ?? denyTransport
+      if (property === 'fileSystem') return fileSystem
+      if (property === 'logger') return target.logger ?? logger
+      if (property === 'buildInfoFileSystem') return target.buildInfoFileSystem ?? missingBuildInfoFileSystem
+      if (property === 'environment') return target.environment ?? emptyEnvironment
+      if (property === 'externalProcessPolicy') return target.externalProcessPolicy ?? denyExternalProcess
+      if (property === 'transport') return target.transport ?? denyTransport
       return Reflect.get(target, property, receiver)
     },
   })
@@ -69,6 +76,7 @@ export interface DefaultRunnerTestResources extends OpenCodeRuntimeTestResources
   logger: RunnerLogger
   externalProcessPolicy: ExternalProcessPolicy
   piRuntimeFactory: PiRuntimeFactory
+  opencodeModelDiscovery: OpencodeModelDiscovery
   gitRunner: GitRunner
 }
 
@@ -82,19 +90,25 @@ export function createDefaultRunnerTestResources(): DefaultRunnerTestResources {
       },
       register() {},
     },
-    piRuntimeFactory: () => ({
-      start: async () => ({ ok: true, value: { ready: true, diagnostic: null, catalog: { models: [] } }, diagnostics: [] }),
-      ready: () => true,
-      diagnostic: () => null,
-      catalog: () => ({ models: [] }),
-      shutdown: async () => {},
-    } as never),
+    piRuntimeFactory: () =>
+      ({
+        start: async () => ({
+          ok: true,
+          value: { ready: true, diagnostic: null, catalog: { models: [] } },
+          diagnostics: [],
+        }),
+        ready: () => true,
+        diagnostic: () => null,
+        catalog: () => ({ models: [] }),
+        shutdown: async () => {},
+      }) as never,
+    opencodeModelDiscovery: async () => ({ models: [], variants: {}, complete: false }),
     gitRunner: async () => ({
       success: false,
       exitCode: 128,
-      stdout: "",
-      stderr: "not a git repository",
-      combinedOutput: "not a git repository",
+      stdout: '',
+      stderr: 'not a git repository',
+      combinedOutput: 'not a git repository',
     }),
   }
 }
@@ -127,9 +141,9 @@ export async function cleanupTestTempDirs(): Promise<void> {
     }
   }
   if (errors.length === 1) throw errors[0]
-  if (errors.length > 1) throw new AggregateError(errors, "Failed to clean test temp directories")
+  if (errors.length > 1) throw new AggregateError(errors, 'Failed to clean test temp directories')
 }
 
 function isAbsentPathError(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
 }

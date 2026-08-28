@@ -24,20 +24,22 @@ function it(name: string, body: (fileSystem: MemoryFileSystem) => Promise<void> 
 }
 
 describe('SkillResolver', () => {
-  it('uses workdir, home, then configured roots in order', async (fileSystem) => {
+  it('uses workdir, home, configured roots, then managed Mohist skills in order', async (fileSystem) => {
     const base = '/virtual/mohist-skills'
     const work = join(base, 'work')
     const home = join(base, 'home')
     const extra = join(base, 'extra')
+    const managed = join(home, '.mohist', 'cli', 'skill-data')
     await skill(fileSystem, join(work, '.agents', 'skills'), 'first', 'work')
     await skill(fileSystem, join(home, '.agents', 'skills'), 'second', 'home')
     await skill(fileSystem, extra, 'third', 'extra')
+    await skill(fileSystem, managed, 'managed', 'managed')
     await skill(fileSystem, join(work, '.agents', 'skills'), 'same', 'work-wins')
     await skill(fileSystem, join(home, '.agents', 'skills'), 'same', 'home-loses')
     await skill(fileSystem, extra, 'same', 'extra-loses')
 
     const result = await new SkillResolver({ homeDir: home, environment: { MOHIST_SKILL_ROOTS: extra } }).resolve(
-      ['same', 'second', 'third'],
+      ['same', 'second', 'third', 'managed'],
       work,
     )
     expect(result).toEqual({
@@ -46,6 +48,7 @@ describe('SkillResolver', () => {
         { name: 'same', instructions: 'work-wins' },
         { name: 'second', instructions: 'home' },
         { name: 'third', instructions: 'extra' },
+        { name: 'managed', instructions: 'managed' },
       ],
     })
   })

@@ -965,109 +965,6 @@ public static partial class SlackConnectionRoutes
         SlackAttachmentBinding? AttachmentBinding = null);
 
     /// <summary>
-    /// Routes a normal DM into the current session of the conversation
-    /// rather than minting a new one. The session grain's idempotent
-    /// accept is keyed by the Slack message identity (same format as the
-    /// launch path so both layers of dedup collapse to one input); the
-    /// dispatcher then pumps the queued turn the same way the HTTP
-    /// follow-up route does. Exceptions raised by the grain during accept
-    /// are translated to a deterministic Slack response kind so the
-    /// ingress can post a coherent reply instead of crashing the call.
-    /// </summary>
-    private static async Task<FollowupRouteResult> RouteFollowupAsync(
-        string projectId,
-        Agent.Domain.AgentConnection connection,
-        SlackMessageIdentity identity,
-        IReadOnlyList<SlackIngressFile> files,
-        string currentSessionId,
-        string prompt,
-        string idempotencyKey,
-        AgentSessionInputProvenance provenance,
-        SlackAttachmentInputBinder attachmentBinder,
-        IGrainFactory grains,
-        AgentSessionFollowupDispatcher followupDispatcher,
-        CancellationToken ct)
-    {
-        var preMintedInputId = AgentLaunchCoordinatorCodec.StableToken(
-            $"{currentSessionId}\n{idempotencyKey}\nfollowup-input");
-        var attachmentBinding = await attachmentBinder.PrepareAsync(
-            projectId,
-            connection,
-            identity,
-            currentSessionId,
-            preMintedInputId,
-            files,
-            ct);
-        if (string.IsNullOrWhiteSpace(prompt) && attachmentBinding.AcceptedCount == 0)
-        {
-            await attachmentBinder.RollbackAsync(
-                projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
-            return new FollowupRouteResult(
-                "followup_rejected", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
-        }
-
-        var grain = grains.GetGrain<IAgentSessionGrain>(currentSessionId);
-        AgentSessionFollowupAcceptResult accept;
-        try
-        {
-            accept = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
-                Text: prompt,
-                Source: "agent-session-followup",
-                IdempotencyKey: idempotencyKey,
-                Attachments: attachmentBinding.AcceptedDescriptors,
-                PreMintedInputId: preMintedInputId,
-                AttachmentResults: attachmentBinding.Results,
-                Provenance: provenance));
-        }
-        catch (RuntimeSessionMissingException)
-        {
-            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
-            return new FollowupRouteResult("runtime_session_missing", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
-        }
-        catch (RecoveryOperationInProgressException)
-        {
-            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
-            return new FollowupRouteResult("recovery_in_progress", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
-        }
-        catch (AgentSessionFollowupCapacityExceededException)
-        {
-            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
-            return new FollowupRouteResult("capacity_exceeded", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
-        }
-        catch (StopOperationInProgressException)
-        {
-            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
-            return new FollowupRouteResult("stop_in_progress", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
-        }
-        catch (SessionActivityUnknownException)
-        {
-            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
-            return new FollowupRouteResult("session_activity_unknown", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
-        }
-        catch (FollowupConcurrencyLimitException)
-        {
-            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
-            return new FollowupRouteResult("concurrency_limit", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
-        }
-        catch (InvalidOperationException)
-        {
-            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
-            return new FollowupRouteResult("followup_rejected", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
-        }
-
-        await followupDispatcher.DispatchNextAsync(projectId, currentSessionId, ct);
-
-        if (accept.AlreadyAccepted)
-            return new FollowupRouteResult("already_accepted", "already_accepted", currentSessionId, accept.InputId, accept.TurnId, attachmentBinding);
-        var status = accept.TurnStatus switch
-        {
-            AgentTurnStatus.Executing => "executing",
-            _ => "queued",
-        };
-        return new FollowupRouteResult("accepted", status, currentSessionId, accept.InputId, accept.TurnId, attachmentBinding);
-    }
-
-    /// <summary>
     /// Translates the follow-up verdict into the Bot's reply text. The
     /// <c>alreadyExisted</c> flag from the inbox store takes priority so a
     /// redelivered Slack message still produces the original "already
@@ -1084,10 +981,33 @@ public static partial class SlackConnectionRoutes
             "already_accepted" => "This message was already accepted.",
             "executing" => "Continuing. Running now.",
             "queued" => "Continuing. Will resume after the current step finishes.",
-            "rejected" => "Could not continue the session. Please try again or start a new task.",
+            "rejected" => "Could not continue this Session safely. Please try again after its execution state is reconciled.",
             _ => "Continuing.",
         };
     }
+
+    private static string BuildFollowupRejectionReply(bool isDirectMessage) =>
+        isDirectMessage
+            ? "This Session cannot continue automatically because its execution state is unresolved. Reconcile or reset it in Mohist, then send the message again."
+            : "This Session cannot continue automatically because its execution state is unresolved. Reconcile or reset it in Mohist, then mention the Bot again.";
+
+    private static async Task EnqueueFollowupRejectionAsync(
+        SlackOutboxStore outbox,
+        string projectId,
+        Agent.Domain.AgentConnection connection,
+        SlackMessageIdentity identity,
+        string? threadTs,
+        bool isDirectMessage,
+        CancellationToken ct) =>
+        await EnqueueRequiredReplyAsync(
+            outbox,
+            projectId,
+            connection,
+            identity.ConversationId,
+            BuildFollowupRejectionReply(isDirectMessage),
+            $"slack-followup-rejected:{identity.AsKey()}",
+            ct,
+            threadTs);
 
     /// <summary>
     /// Leading marker that the Owner uses to start a brand new task
@@ -1401,6 +1321,8 @@ public static partial class SlackConnectionRoutes
             });
         }
 
+        route = await RecoverRetrySafeDmLaunchAsync(req, accepted, route, ct);
+
         var idempotencyKey = $"slack:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
         var followupResult = await RouteFollowupAsync(
             projectId,
@@ -1414,6 +1336,7 @@ public static partial class SlackConnectionRoutes
             req.AttachmentBinder,
             req.Grains,
             req.FollowupDispatcher,
+            allowPendingInitialLaunch: true,
             ct);
         await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueReceivedAsync(
             projectId, connection.Id, req.Identity, body.ThreadTs, ct);
@@ -1443,6 +1366,13 @@ public static partial class SlackConnectionRoutes
                 blocks,
                 ct);
         }
+        var responseOwner = SlackIngressResponseOwners.None;
+        if (followupResult.Status == "rejected")
+        {
+            await EnqueueFollowupRejectionAsync(
+                req.Outbox, projectId, connection, req.Identity, body.ThreadTs, isDirectMessage: true, ct);
+            responseOwner = SlackIngressResponseOwners.Server;
+        }
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
         return ApiResults.Ok(new
         {
@@ -1451,6 +1381,7 @@ public static partial class SlackConnectionRoutes
             inputId = followupResult.InputId,
             turnId = followupResult.TurnId,
             followup = true,
+            responseOwner,
         });
     }
 
@@ -1535,6 +1466,7 @@ public static partial class SlackConnectionRoutes
             req.AttachmentBinder,
             req.Grains,
             req.FollowupDispatcher,
+            allowPendingInitialLaunch: false,
             ct);
         await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueReceivedAsync(
             projectId, connection.Id, req.Identity, body.ThreadTs, ct);
@@ -1564,6 +1496,13 @@ public static partial class SlackConnectionRoutes
                 blocks,
                 ct);
         }
+        var responseOwner = SlackIngressResponseOwners.None;
+        if (followupResult.Status == "rejected")
+        {
+            await EnqueueFollowupRejectionAsync(
+                req.Outbox, projectId, connection, req.Identity, body.ThreadTs, isDirectMessage: false, ct);
+            responseOwner = SlackIngressResponseOwners.Server;
+        }
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
         return ApiResults.Ok(new
         {
@@ -1573,6 +1512,7 @@ public static partial class SlackConnectionRoutes
             turnId = followupResult.TurnId,
             followup = true,
             threadRoot = body.ThreadTs ?? body.MessageTs,
+            responseOwner,
         });
     }
 }

@@ -453,6 +453,9 @@ export interface RunnerOptions {
    * batches are smaller but the rail tolerates more slack.
    */
   taskLogIncrementalUploadTimeoutMs?: number
+
+  /** Best-effort OpenCode catalog refresh cadence. Defaults to 30 minutes. */
+  modelRediscoveryIntervalMs?: number
 }
 
 export interface RuntimeCatalogEntry {

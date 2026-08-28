@@ -176,6 +176,8 @@ public sealed partial class AgentSessionGrain
             }
             return session.MarkTurnTerminal(turn.Id, terminal.Value, null, now);
         }
+        if (!string.IsNullOrWhiteSpace(AgentSessionJsonHelper.GetStringProp(payload, "agentJobId")))
+            return session.SetActivity(activity, now);
         var events = new List<AgentSessionEvent>(session.SetActivity(activity, now));
         events.AddRange(MarkCurrentNonLaunchTurnTerminal(session, terminal.Value, now));
         return events;
@@ -211,7 +213,9 @@ public sealed partial class AgentSessionGrain
         DateTime now)
     {
         var current = FindCurrentNonLaunchTurn(session);
-        return current is null ? [] : session.MarkTurnTerminal(current.Id, terminal, null, now);
+        return current?.Status == AgentTurnStatus.Executing
+            ? session.MarkTurnTerminal(current.Id, terminal, null, now)
+            : [];
     }
 
     private static AgentTurnRecord? FindCurrentNonLaunchTurn(AgentSession session)
