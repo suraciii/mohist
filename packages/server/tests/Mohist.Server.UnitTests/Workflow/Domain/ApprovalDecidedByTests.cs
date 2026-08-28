@@ -30,7 +30,10 @@ public class ApprovalDecidedByTests
                 [new("draft", "Draft", "spec/task")],
                 [new("plan-ok", "Plan OK", "spec/check")],
                 RequiresApproval: true)
-        ]);
+        ],
+        Approval: new ApprovalConfig(new ApprovalFeedbackConfig([
+            new TaskDefinition("apply-feedback", "Apply approval feedback", "spec/task")
+        ])));
 
     [Fact]
     public void Approve_StampsDecidedByInApprovalStatus()
@@ -127,7 +130,8 @@ public class ApprovalDecidedByTests
     {
         var run = BuildAwaitingApprovalRun();
 
-        run.RequestChanges("needs more detail", "fb_1", DateTimeOffset.UnixEpoch, Operator);
+        run.RequestChanges("needs more detail", "fb_1", DateTimeOffset.UnixEpoch, Operator,
+            [new TaskDefinition("apply-feedback", "Apply approval feedback", "spec/task")]);
 
         var current = run.CurrentStage();
         Assert.NotNull(current.ApprovalStatus);
@@ -140,7 +144,8 @@ public class ApprovalDecidedByTests
     {
         var run = BuildAwaitingApprovalRun();
 
-        var events = run.RequestChanges("needs more detail", "fb_1", DateTimeOffset.UnixEpoch, Operator);
+        var events = run.RequestChanges("needs more detail", "fb_1", DateTimeOffset.UnixEpoch, Operator,
+            [new TaskDefinition("apply-feedback", "Apply approval feedback", "spec/task")]);
 
         var resolved = events
             .Select(WorkflowEventSerializer.Unwrap)
@@ -155,7 +160,8 @@ public class ApprovalDecidedByTests
     {
         var run = BuildAwaitingApprovalRun();
 
-        var events = run.RequestChanges("needs more detail", "fb_1", DateTimeOffset.UnixEpoch, Operator);
+        var events = run.RequestChanges("needs more detail", "fb_1", DateTimeOffset.UnixEpoch, Operator,
+            [new TaskDefinition("apply-feedback", "Apply approval feedback", "spec/task")]);
 
         var unwrapped = events.Select(WorkflowEventSerializer.Unwrap).ToList();
         Assert.Single(unwrapped.OfType<FeedbackRequested>());
@@ -167,7 +173,8 @@ public class ApprovalDecidedByTests
     {
         var run = BuildAwaitingApprovalRun();
 
-        var events = run.RequestChanges("needs more detail", "fb_1", DateTimeOffset.UnixEpoch);
+        var events = run.RequestChanges("needs more detail", "fb_1", DateTimeOffset.UnixEpoch,
+            feedbackTasks: [new TaskDefinition("apply-feedback", "Apply approval feedback", "spec/task")]);
 
         var current = run.CurrentStage();
         Assert.NotNull(current.ApprovalStatus?.RespondedAt);

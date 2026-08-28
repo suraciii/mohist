@@ -357,8 +357,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         var normalizedOperator = ApprovalOperatorValidation.Normalize(decidedBy);
         var normalizedDisplayName = ApprovalOperatorValidation.Normalize(displayName);
         var stage = _run.CurrentStage();
-        var approval = await _definitionResolver.LoadApprovalConfigAsync(GrainKey);
-        var feedbackTasks = WorkflowRunExtensions.ResolveFeedbackTasks(approval?.Feedback?.Tasks, stage.Id);
+        var definition = ResolveBoundDefinition(_run);
+        var feedbackTasks = definition.Approval?.Feedback?.Tasks;
         var feedbackId = CreateFeedbackId();
         var events = _run.RequestChanges(body, feedbackId, Now(), normalizedOperator, feedbackTasks, normalizedDisplayName);
         _log.LogInformation("Workflow {Id} requested changes at stage={Stage} by {Operator}: feedback={FeedbackId}", GrainKey, stage.Id, normalizedOperator, feedbackId);
@@ -850,6 +850,23 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     }
 
     private DateTimeOffset Now() => _timeProvider.GetUtcNow();
+
+    private static WorkflowDefinition ResolveBoundDefinition(WorkflowRun run)
+    {
+        if (string.IsNullOrWhiteSpace(run.BoundWorkflowDefinitionJson))
+            throw new InvalidOperationException($"Workflow '{run.Id}' has no bound workflow definition");
+
+        try
+        {
+            return WorkflowYamlSerializer.FromJson(run.BoundWorkflowDefinitionJson);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"Workflow '{run.Id}' has an unreadable bound workflow definition",
+                ex);
+        }
+    }
 
     private static string CreateFeedbackId() => $"fb_{Guid.NewGuid():N}";
 }

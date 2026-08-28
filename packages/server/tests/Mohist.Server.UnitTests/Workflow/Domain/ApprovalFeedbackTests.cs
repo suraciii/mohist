@@ -20,13 +20,27 @@ public partial class ApprovalFeedbackTests
 
     private const string TestOperator = "operator-1";
 
+    private static IReadOnlyList<TaskDefinition> ConfiguredFeedbackTasks() =>
+    [
+        new TaskDefinition(
+            "apply-feedback",
+            "Apply approval feedback",
+            "mohist/agent",
+            new Dictionary<string, JsonElement?>
+            {
+                ["name"] = JsonSerializer.SerializeToElement("mohist/builder"),
+                ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.apply-feedback }}"),
+            })
+    ];
+
     private static WorkflowDefinition ApprovalStageDefinition() =>
         new([
             new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
                 [new("plan-ok", "Plan OK", "spec/check")],
                 RequiresApproval: true)
-        ]);
+        ],
+        Approval: new ApprovalConfig(new ApprovalFeedbackConfig(ConfiguredFeedbackTasks())));
 
     private static WorkflowRun BuildAwaitingApprovalRun()
     {
@@ -51,7 +65,7 @@ public partial class ApprovalFeedbackTests
         Assert.Equal(StageRunStatus.AwaitingApproval, current.Status);
         Assert.Equal(WorkflowRunStatus.AwaitingApproval, run.Status);
 
-        run.RequestChanges("please add a section on retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator);
+        run.RequestChanges("please add a section on retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
 
         Assert.Single(run.Feedback);
         var feedback = run.Feedback[0];
@@ -78,7 +92,7 @@ public partial class ApprovalFeedbackTests
     {
         var run = BuildAwaitingApprovalRun();
 
-        run.RequestChanges("needs more detail", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator);
+        run.RequestChanges("needs more detail", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
 
         Assert.NotEqual(WorkflowRunStatus.Failed, run.Status);
         Assert.Null(run.Failure);
@@ -94,7 +108,7 @@ public partial class ApprovalFeedbackTests
         var current = run.CurrentStage();
         current.Checks[0].Message = "all green";
 
-        run.RequestChanges("revise", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator);
+        run.RequestChanges("revise", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
 
         var feedbackTask = current.Tasks.Last();
         Assert.Equal("apply-feedback", feedbackTask.DefinitionId);
@@ -145,10 +159,10 @@ public partial class ApprovalFeedbackTests
     public void ApprovalFeedback_RoundTripsThroughWorkflowRunJson()
     {
         var run = BuildAwaitingApprovalRun();
-        run.RequestChanges("add a quick start", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator);
+        run.RequestChanges("add a quick start", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
 
         var run2 = BuildAwaitingApprovalRun();
-        run2.RequestChanges("and a troubleshooting section", NextFeedbackId(run2), DateTimeOffset.UnixEpoch, TestOperator);
+        run2.RequestChanges("and a troubleshooting section", NextFeedbackId(run2), DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
         run.Feedback.Add(run2.Feedback[0]);
 
         var json = JsonSerializer.Serialize(run, JsonOptions);
@@ -206,9 +220,9 @@ public partial class ApprovalFeedbackTests
     public void Approve_StillWorks_AfterAnonymousRequestChanges()
     {
         var run = BuildAwaitingApprovalRun();
-        run.RequestChanges("first revision", NextFeedbackId(run), DateTimeOffset.UnixEpoch);
+        run.RequestChanges("first revision", NextFeedbackId(run), DateTimeOffset.UnixEpoch, feedbackTasks: ConfiguredFeedbackTasks());
 
-        // The apply-feedback runtime task added by RequestChanges needs to be
+        // The configured feedback runtime task added by RequestChanges needs to be
         // completed (Pending → Running → Completed) before the stage is ready
         // for approval again. Drive it through the full lifecycle and pass
         // the checks before asserting AwaitingApproval.
@@ -231,7 +245,7 @@ public partial class ApprovalFeedbackTests
     public void IsCurrentStageRetryableFailure_FalseWhenStageIsInActiveFeedbackLoop()
     {
         var run = BuildAwaitingApprovalRun();
-        run.RequestChanges("revise", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator);
+        run.RequestChanges("revise", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
 
         Assert.False(run.IsCurrentStageRetryableFailure());
     }
@@ -273,18 +287,18 @@ public partial class ApprovalFeedbackTests
         Assert.Equal(WorkflowRunStatus.AwaitingApproval, run.Status);
         Assert.False(run.IsCurrentStageRetryableFailure());
 
-        run.RequestChanges("revise", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator);
+        run.RequestChanges("revise", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
         Assert.Equal(WorkflowRunStatus.Ready, run.Status);
         Assert.False(run.IsCurrentStageRetryableFailure());
     }
 
     [Fact]
-    public void RequestChanges_WithoutFeedbackTaskOverride_UsesBuiltInApplyFeedbackDefault()
+    public void RequestChanges_UsesConfiguredFeedbackTaskWithoutSynthesizingSession()
     {
         var run = BuildAwaitingApprovalRun();
         var current = run.CurrentStage();
 
-        run.RequestChanges("apply default", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator);
+        run.RequestChanges("apply configured feedback", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
 
         var feedbackTask = current.Tasks.Last();
         Assert.Equal("apply-feedback", feedbackTask.DefinitionId);
@@ -292,22 +306,60 @@ public partial class ApprovalFeedbackTests
         Assert.Equal("Apply approval feedback", feedbackTask.Title);
         Assert.NotNull(feedbackTask.WithInput);
         Assert.Equal("mohist/builder", feedbackTask.WithInput!["name"]?.GetString());
-        Assert.Equal("plan", feedbackTask.WithInput!["session"]?.GetString());
+        Assert.False(feedbackTask.WithInput.ContainsKey("session"));
         Assert.False(feedbackTask.WithInput.ContainsKey("options"));
     }
 
-    [Fact]
-    public void ResolveFeedbackTasks_NullConfig_ReturnsBuiltInDefault()
-    {
-        var task = Assert.Single(WorkflowRunExtensions.ResolveFeedbackTasks(null, "check"));
+    public static IEnumerable<object[]> InvalidFeedbackTaskCases() =>
+    [
+        new object[] { null!, "at least one configured task" },
+        new object[] { Array.Empty<TaskDefinition>(), "at least one configured task" },
+        new object[] { new List<TaskDefinition> { null! }, "at index 0 is required" },
+        new object[] { new List<TaskDefinition> { new TaskDefinition(" ", "Feedback", "spec/task") }, "requires id" },
+        new object[]
+        {
+            new List<TaskDefinition>
+            {
+                new TaskDefinition("duplicate", "Feedback", "spec/task"),
+                new TaskDefinition("duplicate", "Feedback again", "spec/task"),
+            },
+            "is duplicated",
+        },
+        new object[] { new List<TaskDefinition> { new TaskDefinition("feedback", "Feedback", " ") }, "requires uses" },
+    ];
 
-        Assert.Equal("apply-feedback", task.Id);
-        Assert.Equal("Apply approval feedback", task.Title);
-        Assert.Equal("mohist/agent", task.Uses);
-        Assert.NotNull(task.With);
-        Assert.Equal("mohist/builder", task.With!["name"]?.GetString());
-        Assert.Equal("check", task.With!["session"]?.GetString());
-        Assert.False(task.With.ContainsKey("options"));
+    [Theory]
+    [MemberData(nameof(InvalidFeedbackTaskCases))]
+    public void RequestChanges_InvalidFeedbackTasks_ThrowsAndLeavesRunUnchanged(
+        IReadOnlyList<TaskDefinition>? feedbackTasks,
+        string expectedMessage)
+    {
+        var run = BuildAwaitingApprovalRun();
+        var current = run.CurrentStage();
+        var beforeRun = JsonSerializer.Serialize(run, JsonOptions);
+        var beforeApproval = JsonSerializer.Serialize(current.ApprovalStatus, JsonOptions);
+        var beforeStage = JsonSerializer.Serialize(current, JsonOptions);
+        var beforeTasks = JsonSerializer.Serialize(current.Tasks, JsonOptions);
+        var beforeChecks = JsonSerializer.Serialize(current.Checks, JsonOptions);
+        var beforeFeedback = JsonSerializer.Serialize(run.Feedback, JsonOptions);
+
+        IReadOnlyList<WorkflowEvent>? events = null;
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            events = run.RequestChanges(
+                "cannot apply",
+                NextFeedbackId(run),
+                DateTimeOffset.UnixEpoch,
+                TestOperator,
+                feedbackTasks));
+
+        Assert.Contains(expectedMessage, ex.Message);
+        Assert.Null(events);
+        Assert.Equal(beforeRun, JsonSerializer.Serialize(run, JsonOptions));
+        Assert.Equal(beforeApproval, JsonSerializer.Serialize(current.ApprovalStatus, JsonOptions));
+        Assert.Equal(beforeStage, JsonSerializer.Serialize(current, JsonOptions));
+        Assert.Equal(beforeTasks, JsonSerializer.Serialize(current.Tasks, JsonOptions));
+        Assert.Equal(beforeChecks, JsonSerializer.Serialize(current.Checks, JsonOptions));
+        Assert.Equal(beforeFeedback, JsonSerializer.Serialize(run.Feedback, JsonOptions));
     }
 
     [Fact]
@@ -367,29 +419,9 @@ public partial class ApprovalFeedbackTests
     }
 
     [Fact]
-    public void ResolveFeedbackTasks_ConfigWithoutSession_FillsSessionFromStage()
+    public void RequestChanges_PreservesConfiguredSession()
     {
-        var config = new TaskDefinition(
-            Id: "apply-feedback",
-            Title: "Apply approval feedback",
-            Uses: "mohist/agent",
-            With: new Dictionary<string, System.Text.Json.JsonElement?>
-            {
-                ["name"] = JsonSerializer.SerializeToElement("mohist/builder"),
-                ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.apply-feedback }}"),
-            });
-
-        var task = Assert.Single(WorkflowRunExtensions.ResolveFeedbackTasks([config], "plan"));
-
-        Assert.Equal("apply-feedback", task.Id);
-        Assert.NotNull(task.With);
-        Assert.Equal("plan", task.With!["session"]?.GetString());
-        Assert.True(task.With.ContainsKey("prompt"));
-    }
-
-    [Fact]
-    public void ResolveFeedbackTasks_ConfigWithSession_PreservesConfiguredSession()
-    {
+        var run = BuildAwaitingApprovalRun();
         var config = new TaskDefinition(
             Id: "apply-feedback",
             Title: "Apply approval feedback",
@@ -401,9 +433,10 @@ public partial class ApprovalFeedbackTests
                 ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.apply-feedback }}"),
             });
 
-        var task = Assert.Single(WorkflowRunExtensions.ResolveFeedbackTasks([config], "plan"));
+        run.RequestChanges("apply with named session", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator, [config]);
 
-        Assert.Equal("custom-session", task.With!["session"]?.GetString());
+        var feedbackTask = run.CurrentStage().Tasks.Last();
+        Assert.Equal("custom-session", feedbackTask.WithInput!["session"]?.GetString());
     }
 
     [Fact]
@@ -455,7 +488,7 @@ public partial class ApprovalFeedbackTests
     public void ResolveFeedback_OpenFeedback_TransitionsToResolved()
     {
         var run = BuildAwaitingApprovalRun();
-        run.RequestChanges("explain retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator);
+        run.RequestChanges("explain retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
         var feedbackId = run.Feedback[0].Id;
         var current = run.CurrentStage();
         var feedbackTask = current.Tasks.Last(t => t.DefinitionId == "apply-feedback");
@@ -476,7 +509,7 @@ public partial class ApprovalFeedbackTests
     public void ResolveFeedback_UnknownFeedbackId_ReturnsNull()
     {
         var run = BuildAwaitingApprovalRun();
-        run.RequestChanges("explain retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator);
+        run.RequestChanges("explain retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
 
         var resolved = run.ResolveFeedback("fb_missing", "apply-feedback.1", JSON.DeserializeElement("\"summary\""), DateTimeOffset.UnixEpoch);
 
@@ -487,7 +520,7 @@ public partial class ApprovalFeedbackTests
     public void ResolveFeedback_AlreadyResolved_IsIdempotent()
     {
         var run = BuildAwaitingApprovalRun();
-        run.RequestChanges("explain retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator);
+        run.RequestChanges("explain retry semantics", NextFeedbackId(run), DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
         var feedbackId = run.Feedback[0].Id;
         var feedbackTask = run.CurrentStage().Tasks.Last(t => t.DefinitionId == "apply-feedback");
         run.StartTask(feedbackTask.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
