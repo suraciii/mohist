@@ -257,14 +257,25 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
         CancellationToken ct)
     {
         if (_connections is not null)
-            await _connections.MarkInstallationUnavailableAsync(
-                connection.ProjectId,
-                connection.Id,
-                exception.StatusCode == HttpStatusCode.Unauthorized
-                    ? "github_app_token_rejected"
-                    : "github_app_permission_denied",
-                "The GitHub App installation cannot access this Repository. Repair the installation scope, then reconnect.",
-                ct);
+        {
+            try
+            {
+                await _connections.MarkInstallationUnavailableAsync(
+                    connection.ProjectId,
+                    connection.Id,
+                    exception.StatusCode == HttpStatusCode.Unauthorized
+                        ? "github_app_token_rejected"
+                        : "github_app_permission_denied",
+                    "The GitHub App installation cannot access this Repository. Repair the installation scope, then reconnect.",
+                    ct);
+            }
+            catch (Exception markException) when (!ct.IsCancellationRequested)
+            {
+                _log.LogWarning(markException,
+                    "Could not persist GitHub App installation attention for connection {ConnectionId}",
+                    connection.Id);
+            }
+        }
     }
 
     private async Task MarkInstallationUnavailableAsync(
@@ -273,14 +284,25 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
         CancellationToken ct)
     {
         if (_connections is not null)
-            await _connections.MarkInstallationUnavailableAsync(
-                connection.ProjectId,
-                connection.Id,
-                status == HttpStatusCode.Unauthorized
-                    ? "github_app_token_rejected"
-                    : "github_app_permission_denied",
-                "The GitHub App installation cannot access this Repository. Repair the installation scope, then reconnect.",
-                ct);
+        {
+            try
+            {
+                await _connections.MarkInstallationUnavailableAsync(
+                    connection.ProjectId,
+                    connection.Id,
+                    status == HttpStatusCode.Unauthorized
+                        ? "github_app_token_rejected"
+                        : "github_app_permission_denied",
+                    "The GitHub App installation cannot access this Repository. Repair the installation scope, then reconnect.",
+                    ct);
+            }
+            catch (Exception markException) when (!ct.IsCancellationRequested)
+            {
+                _log.LogWarning(markException,
+                    "Could not persist GitHub App installation attention for connection {ConnectionId}",
+                    connection.Id);
+            }
+        }
     }
 
     private static bool IsCredentialFailure(GitHubRemoteRequestException exception) =>
