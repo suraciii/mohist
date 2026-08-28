@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -323,6 +324,43 @@ public sealed class GitHubSyncSpecs
         Assert.True(link!.HasPostedComment(GitHubCommentKinds.MirrorCreated));
         Assert.Single(_fixture.Comments.Comments,
             comment => comment.GithubIssueNumber == link.GithubIssueNumber);
+    }
+
+    [Fact]
+    public async Task CredentialFailureRetainsCommentReservationUntilReconnection()
+    {
+        var (projectId, issueNumber, connectionId) = await CreateMirroredIssueAsync();
+        await ClearProjectionBookkeepingAsync(projectId, issueNumber);
+        _fixture.Comments.Comments.Clear();
+        _fixture.Comments.ConfirmationFailure = new GitHubRemoteRequestException(
+            "GitHub permission denied",
+            HttpStatusCode.Forbidden);
+
+        await DispatchContentChangeAsync(projectId, issueNumber);
+
+        var link = (await LoadLinkAsync(projectId, issueNumber))!;
+        Assert.Equal(
+            GitHubCommentOperationStatus.Reserved,
+            await LoadOperationStatusAsync(link.Id, GitHubCommentKinds.MirrorCreated));
+
+        using (var disabled = await _fixture.Client.PostAsync(
+            $"/api/projects/{projectId}/github-connections/{connectionId}/disable", JsonContent.Create(new { })))
+            disabled.EnsureSuccessStatusCode();
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(5));
+        var worker = _fixture.Services.GetRequiredService<GitHubIssueCommentOperationRecoveryWorker>();
+        Assert.Equal(0, await worker.ProcessPendingAsync());
+        Assert.Equal(
+            GitHubCommentOperationStatus.Reserved,
+            await LoadOperationStatusAsync(link.Id, GitHubCommentKinds.MirrorCreated));
+
+        _fixture.Comments.ConfirmationFailure = null;
+        using (var enabled = await _fixture.Client.PostAsync(
+            $"/api/projects/{projectId}/github-connections/{connectionId}/enable", JsonContent.Create(new { })))
+            enabled.EnsureSuccessStatusCode();
+        Assert.True(await worker.ProcessPendingAsync() >= 1);
+        Assert.Equal(
+            GitHubCommentOperationStatus.Posted,
+            await LoadOperationStatusAsync(link.Id, GitHubCommentKinds.MirrorCreated));
     }
 
     [Fact]

@@ -5,7 +5,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
-using Mohist.Server.SystemInfo;
+using Mohist.Server.GitHub.Domain;
+using Mohist.Server.Infrastructure.Security.Secrets;
 
 namespace Mohist.Server.GitHub.Ports;
 
@@ -45,10 +46,16 @@ public sealed class GitHubAppNotConfiguredException : Exception
     }
 }
 
-public sealed class GitHubAppInstallationException : Exception
+public sealed class GitHubAppInstallationException : GitHubRemoteRequestException
 {
-    public GitHubAppInstallationException(string message, string code, object? details = null, Exception? inner = null)
-        : base(message, inner)
+    public GitHubAppInstallationException(
+        string message,
+        string code,
+        object? details = null,
+        HttpStatusCode? statusCode = null,
+        bool isRateLimited = false,
+        Exception? inner = null)
+        : base(message, statusCode, isRateLimited, inner)
     {
         Code = code;
         Details = details;
@@ -62,13 +69,13 @@ public sealed class GitHubAppClient : IGitHubAppClient
 {
     private readonly HttpClient _http;
     private readonly IOptions<GitHubAppOptions> _options;
-    private readonly IFileSystem _files;
+    private readonly ISecretKeyFileOperations _files;
     private readonly TimeProvider _time;
 
     public GitHubAppClient(
         HttpClient http,
         IOptions<GitHubAppOptions> options,
-        IFileSystem files,
+        ISecretKeyFileOperations files,
         TimeProvider time)
     {
         _http = http;
@@ -84,7 +91,7 @@ public sealed class GitHubAppClient : IGitHubAppClient
     {
         var normalizedOwner = owner.Trim();
         var normalizedRepo = repo.Trim();
-        var jwt = CreateAppJwt();
+        var jwt = await CreateAppJwtAsync(ct);
         using var installation = await SendAsync(
             $"/repos/{Uri.EscapeDataString(normalizedOwner)}/{Uri.EscapeDataString(normalizedRepo)}/installation",
             HttpMethod.Get,
@@ -93,14 +100,10 @@ public sealed class GitHubAppClient : IGitHubAppClient
         if (installation.StatusCode == HttpStatusCode.NotFound)
             throw InstallationRequired(normalizedOwner, normalizedRepo);
         if (!installation.IsSuccessStatusCode)
-        {
-            if (installation.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw InstallationRequired(normalizedOwner, normalizedRepo);
-            throw await RemoteFailureAsync(installation, "github_app_installation_lookup_failed", ct);
-        }
+            throw await DiscoveryFailureAsync(installation, normalizedOwner, normalizedRepo, "github_app_installation_lookup_failed", ct);
 
         var installationNode = await ParseObjectAsync(installation, ct);
-        var installationId = StringValue(installationNode, "id");
+        var installationId = IdentifierValue(installationNode, "id");
         if (string.IsNullOrWhiteSpace(installationId))
             throw new GitHubAppInstallationException(
                 "GitHub returned an installation without an id.",
@@ -114,9 +117,7 @@ public sealed class GitHubAppClient : IGitHubAppClient
             ct);
         if (!repository.IsSuccessStatusCode)
         {
-            if (repository.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-                throw InstallationRequired(normalizedOwner, normalizedRepo);
-            throw await RemoteFailureAsync(repository, "github_app_repository_verification_failed", ct);
+            throw await DiscoveryFailureAsync(repository, normalizedOwner, normalizedRepo, "github_app_repository_verification_failed", ct);
         }
 
         var repositoryNode = await ParseObjectAsync(repository, ct);
@@ -140,7 +141,7 @@ public sealed class GitHubAppClient : IGitHubAppClient
         using var response = await SendAsync(
             $"/app/installations/{Uri.EscapeDataString(installationId)}/access_tokens",
             HttpMethod.Post,
-            CreateAppJwt(),
+            await CreateAppJwtAsync(ct),
             ct);
         if (!response.IsSuccessStatusCode)
             throw await RemoteFailureAsync(response, "github_app_token_exchange_failed", ct);
@@ -155,20 +156,57 @@ public sealed class GitHubAppClient : IGitHubAppClient
         return new GitHubInstallationToken(token, expiresAt);
     }
 
-    private string CreateAppJwt()
+    private async Task<string> CreateAppJwtAsync(CancellationToken ct)
     {
         var options = _options.Value;
         if (!options.IsConfigured)
             throw new GitHubAppNotConfiguredException();
-        if (!_files.Exists(options.PrivateKeyPath!))
-            throw new GitHubAppInstallationException(
-                "The configured GitHub App private key was not found.",
-                "github_app_private_key_missing");
 
-        using var rsa = RSA.Create();
+        var path = options.PrivateKeyPath!;
+        if (!_files.FileExists(path))
+            throw new GitHubAppInstallationException(
+                "The configured GitHub App private key was not found. Configure a regular owner-only key file.",
+                "github_app_private_key_missing");
         try
         {
-            rsa.ImportFromPem(_files.ReadAllText(options.PrivateKeyPath!));
+            if (_files.IsReparsePoint(path))
+                throw new GitHubAppInstallationException(
+                    "The configured GitHub App private key must not be a symbolic link.",
+                    "github_app_private_key_symlink");
+            if (!OperatingSystem.IsWindows())
+            {
+                var mode = _files.GetUnixFileMode(path);
+                const UnixFileMode forbidden = UnixFileMode.OtherRead
+                    | UnixFileMode.OtherWrite
+                    | UnixFileMode.OtherExecute
+                    | UnixFileMode.GroupRead
+                    | UnixFileMode.GroupWrite
+                    | UnixFileMode.GroupExecute;
+                if ((mode & forbidden) != 0)
+                    throw new GitHubAppInstallationException(
+                        "The configured GitHub App private key must be readable only by its owner (mode 0600).",
+                        "github_app_private_key_permissions");
+            }
+
+            var pem = Encoding.UTF8.GetString(await _files.ReadAllBytesAsync(path, ct));
+            using var rsa = RSA.Create();
+            rsa.ImportFromPem(pem);
+
+            var now = _time.GetUtcNow();
+            var header = Base64Url(JsonSerializer.SerializeToUtf8Bytes(new { alg = "RS256", typ = "JWT" }));
+            var payload = Base64Url(JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                iat = now.AddSeconds(-60).ToUnixTimeSeconds(),
+                exp = now.AddMinutes(9).ToUnixTimeSeconds(),
+                iss = options.AppId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            }));
+            var unsigned = Encoding.UTF8.GetBytes($"{header}.{payload}");
+            var signature = rsa.SignData(unsigned, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            return $"{header}.{payload}.{Base64Url(signature)}";
+        }
+        catch (GitHubAppInstallationException)
+        {
+            throw;
         }
         catch (Exception ex) when (ex is ArgumentException or CryptographicException)
         {
@@ -177,18 +215,13 @@ public sealed class GitHubAppClient : IGitHubAppClient
                 "github_app_private_key_invalid",
                 inner: ex);
         }
-
-        var now = _time.GetUtcNow();
-        var header = Base64Url(JsonSerializer.SerializeToUtf8Bytes(new { alg = "RS256", typ = "JWT" }));
-        var payload = Base64Url(JsonSerializer.SerializeToUtf8Bytes(new
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            iat = now.AddSeconds(-60).ToUnixTimeSeconds(),
-            exp = now.AddMinutes(9).ToUnixTimeSeconds(),
-            iss = options.AppId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-        }));
-        var unsigned = Encoding.UTF8.GetBytes($"{header}.{payload}");
-        var signature = rsa.SignData(unsigned, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        return $"{header}.{payload}.{Base64Url(signature)}";
+            throw new GitHubAppInstallationException(
+                "The configured GitHub App private key could not be read. Check the path and owner-only permissions.",
+                "github_app_private_key_unreadable",
+                inner: ex);
+        }
     }
 
     private async Task<HttpResponseMessage> SendAsync(string url, HttpMethod method, string bearer, CancellationToken ct)
@@ -216,16 +249,68 @@ public sealed class GitHubAppClient : IGitHubAppClient
         }
     }
 
+    private async Task<GitHubAppInstallationException> DiscoveryFailureAsync(
+        HttpResponseMessage response,
+        string owner,
+        string repo,
+        string fallbackCode,
+        CancellationToken ct)
+    {
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return InstallationRequired(owner, repo);
+        var detail = await response.Content.ReadAsStringAsync(ct);
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+            return new GitHubAppInstallationException(
+                "The GitHub App credentials were rejected. Check the App ID and private key.",
+                "github_app_credential_rejected",
+                new { status = (int)response.StatusCode, detail },
+                response.StatusCode);
+        if (response.StatusCode == HttpStatusCode.Forbidden)
+        {
+            var rateLimited = IsRateLimited(response);
+            return new GitHubAppInstallationException(
+                rateLimited
+                    ? "GitHub rate limited App discovery. Wait and retry."
+                    : "The GitHub App cannot access this Repository. Update the App Repository scope, then retry.",
+                rateLimited ? "github_app_rate_limited" : "github_app_permission_denied",
+                new { status = (int)response.StatusCode, detail },
+                response.StatusCode,
+                rateLimited);
+        }
+        return new GitHubAppInstallationException(
+            $"GitHub App request failed with status {(int)response.StatusCode}.",
+            fallbackCode,
+            new { status = (int)response.StatusCode, detail },
+            response.StatusCode);
+    }
+
     private static async Task<GitHubAppInstallationException> RemoteFailureAsync(
         HttpResponseMessage response,
         string code,
         CancellationToken ct)
     {
         var detail = await response.Content.ReadAsStringAsync(ct);
-        var message = response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized
-            ? "The GitHub App cannot access this Repository. Install the App or update its Repository scope, then retry."
-            : $"GitHub App request failed with status {(int)response.StatusCode}.";
-        return new GitHubAppInstallationException(message, code, new { status = (int)response.StatusCode, detail });
+        var status = response.StatusCode;
+        var rateLimited = status == HttpStatusCode.TooManyRequests
+            || status == HttpStatusCode.Forbidden && IsRateLimited(response);
+        var credentialRejected = status == HttpStatusCode.Unauthorized;
+        var permissionDenied = status == HttpStatusCode.Forbidden && !rateLimited;
+        return new GitHubAppInstallationException(
+            credentialRejected
+                ? "The GitHub App credentials were rejected. Check the App ID and private key."
+                : rateLimited
+                    ? "GitHub rate limited the App request. Wait and retry."
+                    : permissionDenied
+                        ? "The GitHub App cannot access this Repository. Update the App Repository scope, then retry."
+                        : $"GitHub App request failed with status {(int)status}.",
+            credentialRejected
+                ? "github_app_credential_rejected"
+                : rateLimited
+                    ? "github_app_rate_limited"
+                    : permissionDenied ? "github_app_permission_denied" : code,
+            new { status = (int)status, detail },
+            status,
+            rateLimited);
     }
 
     private GitHubAppInstallationException InstallationRequired(string owner, string repo) =>
@@ -238,8 +323,51 @@ public sealed class GitHubAppClient : IGitHubAppClient
                 action = $"Install the App or add {owner}/{repo} to its scope, then retry.",
             });
 
-    private static string? StringValue(JsonObject node, string key) =>
-        node[key]?.GetValue<string>();
+    private static string? StringValue(JsonObject node, string key)
+    {
+        var value = node[key];
+        if (value is null) return null;
+        try
+        {
+            return value.GetValueKind() == JsonValueKind.String
+                ? value.GetValue<string>()
+                : null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static string? IdentifierValue(JsonObject node, string key)
+    {
+        var value = node[key];
+        if (value is null) return null;
+        try
+        {
+            return value.GetValueKind() switch
+            {
+                JsonValueKind.String => value.GetValue<string>(),
+                JsonValueKind.Number => value.GetValue<long>().ToString(System.Globalization.CultureInfo.InvariantCulture),
+                _ => null,
+            };
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsRateLimited(HttpResponseMessage response)
+    {
+        if (response.Headers.TryGetValues("Retry-After", out var retryAfter)
+            && retryAfter.Any(value =>
+                int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var seconds) && seconds >= 0
+                || DateTimeOffset.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out _)))
+            return true;
+        return response.Headers.TryGetValues("X-RateLimit-Remaining", out var remaining)
+            && remaining.Any(value => long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var count) && count == 0);
+    }
 
     private static string Base64Url(byte[] bytes) =>
         Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
@@ -255,10 +383,17 @@ public sealed class GitHubInstallationTokenProvider : IGitHubInstallationTokenPr
 {
     private sealed record CachedToken(string AccessToken, DateTimeOffset ExpiresAt);
 
+    private sealed class Gate
+    {
+        public SemaphoreSlim Semaphore { get; } = new(1, 1);
+        public int Users { get; set; }
+    }
+
     private readonly IGitHubAppClient _client;
     private readonly TimeProvider _time;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CachedToken> _cache = new(StringComparer.Ordinal);
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _gates = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Gate> _gates = new(StringComparer.Ordinal);
+    private readonly object _gatesLock = new();
 
     public GitHubInstallationTokenProvider(IGitHubAppClient client, TimeProvider time)
     {
@@ -271,19 +406,26 @@ public sealed class GitHubInstallationTokenProvider : IGitHubInstallationTokenPr
         if (_cache.TryGetValue(installationId, out var cached) && !IsStale(cached))
             return new GitHubInstallationToken(cached.AccessToken, cached.ExpiresAt);
 
-        var gate = _gates.GetOrAdd(installationId, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(ct);
+        var gate = AddGateUser(installationId);
         try
         {
-            if (_cache.TryGetValue(installationId, out cached) && !IsStale(cached))
-                return new GitHubInstallationToken(cached.AccessToken, cached.ExpiresAt);
-            var fresh = await _client.CreateInstallationTokenAsync(installationId, ct);
-            _cache[installationId] = new CachedToken(fresh.AccessToken, fresh.ExpiresAt);
-            return fresh;
+            await gate.Semaphore.WaitAsync(ct);
+            try
+            {
+                if (_cache.TryGetValue(installationId, out cached) && !IsStale(cached))
+                    return new GitHubInstallationToken(cached.AccessToken, cached.ExpiresAt);
+                var fresh = await _client.CreateInstallationTokenAsync(installationId, ct);
+                _cache[installationId] = new CachedToken(fresh.AccessToken, fresh.ExpiresAt);
+                return fresh;
+            }
+            finally
+            {
+                gate.Semaphore.Release();
+            }
         }
         finally
         {
-            gate.Release();
+            RemoveGateUser(installationId, gate);
         }
     }
 
@@ -293,6 +435,35 @@ public sealed class GitHubInstallationTokenProvider : IGitHubInstallationTokenPr
             && string.Equals(cached.AccessToken, accessToken, StringComparison.Ordinal))
         {
             _cache.TryRemove(installationId, out _);
+        }
+    }
+
+    private Gate AddGateUser(string installationId)
+    {
+        lock (_gatesLock)
+        {
+            if (!_gates.TryGetValue(installationId, out var gate))
+            {
+                gate = new Gate();
+                _gates.Add(installationId, gate);
+            }
+            gate.Users++;
+            return gate;
+        }
+    }
+
+    private void RemoveGateUser(string installationId, Gate gate)
+    {
+        lock (_gatesLock)
+        {
+            gate.Users--;
+            if (gate.Users == 0
+                && _gates.TryGetValue(installationId, out var current)
+                && ReferenceEquals(current, gate))
+            {
+                _gates.Remove(installationId);
+                gate.Semaphore.Dispose();
+            }
         }
     }
 

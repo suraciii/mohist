@@ -198,7 +198,17 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
         if (string.IsNullOrWhiteSpace(connection.InstallationId))
             throw new InvalidOperationException($"GitHub connection '{connection.Id}' has no installation identity");
 
-        var token = await _tokens.GetAsync(connection.InstallationId, ct);
+        GitHubInstallationToken token;
+        try
+        {
+            token = await _tokens.GetAsync(connection.InstallationId, ct);
+        }
+        catch (GitHubRemoteRequestException exception)
+            when (IsCredentialFailure(exception))
+        {
+            await MarkInstallationUnavailableAsync(connection, exception, ct);
+            throw;
+        }
         var response = await SendOnceAsync(url, method, contentFactory, token.AccessToken, ct);
         if (response.StatusCode != HttpStatusCode.Unauthorized)
             return await HandleAuthFailureAsync(connection, url, response, ct);
@@ -220,19 +230,16 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
             return response;
         var detail = await response.Content.ReadAsStringAsync(ct);
         _log.LogWarning("GitHub request to {Url} failed with {Status}: {Detail}", url, (int)response.StatusCode, detail);
-        if (response.StatusCode is HttpStatusCode.Unauthorized
-            || response.StatusCode is HttpStatusCode.Forbidden && !IsRateLimited(response))
-        {
-            if (_connections is not null)
-                await _connections.MarkInstallationUnavailableAsync(
-                connection.ProjectId,
-                connection.Id,
-                response.StatusCode == HttpStatusCode.Unauthorized ? "github_app_token_rejected" : "github_app_permission_denied",
-                "The GitHub App installation cannot access this Repository. Repair the installation scope, then reconnect.",
-                ct);
-        }
+        var rateLimited = IsRateLimited(response);
         var status = response.StatusCode;
+        if (IsCredentialFailure(status, rateLimited))
+            await MarkInstallationUnavailableAsync(connection, status, ct);
         response.Dispose();
+        if (status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden || rateLimited)
+            throw new GitHubRemoteRequestException(
+                $"GitHub request failed with status {(int)status}.",
+                status,
+                rateLimited);
         throw new HttpRequestException($"GitHub request failed with status {(int)status}.", null, status);
     }
 
@@ -244,8 +251,55 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
         return await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
     }
 
-    private static bool IsRateLimited(HttpResponseMessage response) =>
-        response.Headers.Contains("Retry-After") || response.Headers.Contains("X-RateLimit-Remaining");
+    private async Task MarkInstallationUnavailableAsync(
+        GitHubConnection connection,
+        GitHubRemoteRequestException exception,
+        CancellationToken ct)
+    {
+        if (_connections is not null)
+            await _connections.MarkInstallationUnavailableAsync(
+                connection.ProjectId,
+                connection.Id,
+                exception.StatusCode == HttpStatusCode.Unauthorized
+                    ? "github_app_token_rejected"
+                    : "github_app_permission_denied",
+                "The GitHub App installation cannot access this Repository. Repair the installation scope, then reconnect.",
+                ct);
+    }
+
+    private async Task MarkInstallationUnavailableAsync(
+        GitHubConnection connection,
+        HttpStatusCode status,
+        CancellationToken ct)
+    {
+        if (_connections is not null)
+            await _connections.MarkInstallationUnavailableAsync(
+                connection.ProjectId,
+                connection.Id,
+                status == HttpStatusCode.Unauthorized
+                    ? "github_app_token_rejected"
+                    : "github_app_permission_denied",
+                "The GitHub App installation cannot access this Repository. Repair the installation scope, then reconnect.",
+                ct);
+    }
+
+    private static bool IsCredentialFailure(GitHubRemoteRequestException exception) =>
+        IsCredentialFailure(exception.StatusCode, exception.IsRateLimited);
+
+    private static bool IsCredentialFailure(HttpStatusCode? status, bool isRateLimited) =>
+        status == HttpStatusCode.Unauthorized
+        || status == HttpStatusCode.Forbidden && !isRateLimited;
+
+    private static bool IsRateLimited(HttpResponseMessage response)
+    {
+        if (response.Headers.TryGetValues("Retry-After", out var retryAfter)
+            && retryAfter.Any(value =>
+                int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var seconds) && seconds >= 0
+                || DateTimeOffset.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out _)))
+            return true;
+        return response.Headers.TryGetValues("X-RateLimit-Remaining", out var remaining)
+            && remaining.Any(value => long.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var count) && count == 0);
+    }
 
     private static async Task<string> ReadSuccessAsync(HttpResponseMessage response, CancellationToken ct) =>
         await response.Content.ReadAsStringAsync(ct);

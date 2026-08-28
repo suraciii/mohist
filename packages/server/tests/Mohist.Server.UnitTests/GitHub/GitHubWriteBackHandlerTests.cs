@@ -537,4 +537,26 @@ public sealed class GitHubWriteBackHandlerTests
         var connection = await harness.ConnectionAsync();
         Assert.True(connection!.NeedsAttention);
     }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, false, true)]
+    [InlineData(HttpStatusCode.Forbidden, false, true)]
+    [InlineData(HttpStatusCode.Forbidden, true, false)]
+    public async Task NonIdempotentFailure_PreservesReservation(
+        HttpStatusCode status,
+        bool rateLimited,
+        bool needsAttention)
+    {
+        var harness = new Harness();
+        harness.Port.CommentFailure = new GitHubRemoteRequestException("GitHub failure", status, rateLimited);
+        var handler = await harness.NewHandlerAsync();
+
+        await handler.HandleAsync(Event(EventCatalog.ReverseDns.IssueWorkStarted), CancellationToken.None);
+
+        await using var db = new MohistDbContext(harness.Options);
+        var operation = await db.GitHubIssueCommentOperations.SingleAsync();
+        Assert.Equal(GitHubCommentOperationStatus.Reserved, operation.Status);
+        Assert.NotNull(operation.NextAttemptAt);
+        Assert.Equal(needsAttention, (await harness.ConnectionAsync())!.NeedsAttention);
+    }
 }

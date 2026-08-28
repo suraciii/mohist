@@ -12,9 +12,12 @@ public sealed class FakeGitHubAppClient : IGitHubAppClient
     public string InstallationId { get; set; } = "installation-test";
     public string RepositoryNodeId { get; set; } = "repository-node-test";
     public bool InstallationMissing { get; set; }
+    public Exception? DiscoveryFailure { get; set; }
 
     public Task<GitHubRepositoryInstallation> DiscoverInstallationAsync(string owner, string repo, CancellationToken ct = default)
     {
+        if (DiscoveryFailure is not null)
+            throw DiscoveryFailure;
         if (InstallationMissing)
             throw new GitHubAppInstallationException(
                 "The GitHub App is not installed for this Repository.",

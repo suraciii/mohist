@@ -33,6 +33,21 @@ public sealed class GitHubInstallationTokenProviderTests
     }
 
     [Fact]
+    public async Task ConcurrentRefreshAfterPreviousGateWasReleasedExchangesOnce()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var client = new FakeClient { TokenLifetime = TimeSpan.FromMinutes(2) };
+        var provider = new GitHubInstallationTokenProvider(client, time);
+        await provider.GetAsync("installation-1");
+        provider.Invalidate("installation-1", "token-1");
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => provider.GetAsync("installation-1")));
+
+        Assert.All(results, result => Assert.Equal("token-2", result.AccessToken));
+        Assert.Equal(2, client.ExchangeCount);
+    }
+
+    [Fact]
     public async Task InvalidateDoesNotRemoveReplacementToken()
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));

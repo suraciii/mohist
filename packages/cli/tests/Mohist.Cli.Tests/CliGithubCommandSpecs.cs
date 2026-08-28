@@ -64,6 +64,26 @@ public sealed class CliGithubCommandSpecs
     }
 
     [Fact]
+    public async Task Connect_PermissionFailurePrintsActionableErrorWithoutInstallUrl()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = false,
+                error = "The GitHub App cannot access this Repository. Update the App Repository scope, then retry.",
+                code = "github_app_permission_denied",
+                details = new { status = 403 },
+            }, HttpStatusCode.Conflict)));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["github", "connect", "octocat/hello-world", "--project", "proj_test"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Contains("github_app_permission_denied", error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("installationUrl", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task List_RequestsGitHubConnections()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();

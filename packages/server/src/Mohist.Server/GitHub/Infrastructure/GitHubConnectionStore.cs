@@ -111,6 +111,13 @@ public sealed class GitHubConnectionStore : IScopedService
                 throw new GitHubConnectionConflictException(
                     $"GitHub repository '{connection.Owner}/{connection.Repo}' is already connected to a project", "github_repository_already_connected");
 
+            var existingSecret = await _secretStore.LoadAsync(
+                WebhookSecretAddress(existing.ProjectId, existing.Id), ct);
+            if (existingSecret is null || existingSecret.Length == 0)
+                throw new GitHubConnectionValidationException(
+                    "The connection has no webhook secret; restore it from a database backup",
+                    "github_webhook_secret_missing");
+
             existing.Owner = connection.Owner;
             existing.Repo = connection.Repo;
             existing.RepositoryName = connection.RepositoryName;
@@ -125,13 +132,13 @@ public sealed class GitHubConnectionStore : IScopedService
             existing.LastErrorAt = null;
             existing.UpdatedAt = _timeProvider.GetUtcNow();
             await db.SaveChangesAsync(ct);
-            var existingSecret = await _secretStore.LoadAsync(
-                WebhookSecretAddress(existing.ProjectId, existing.Id), ct);
-            if (existingSecret is null || existingSecret.Length == 0)
-                throw new GitHubConnectionValidationException(
-                    "The connection has no webhook secret; restore it from a database backup",
-                    "github_webhook_secret_missing");
             connection.Id = existing.Id;
+            connection.Status = existing.Status;
+            connection.NeedsAttention = existing.NeedsAttention;
+            connection.NeedsReprojection = existing.NeedsReprojection;
+            connection.LastErrorCode = existing.LastErrorCode;
+            connection.LastErrorDetail = existing.LastErrorDetail;
+            connection.LastErrorAt = existing.LastErrorAt;
             connection.CreatedAt = existing.CreatedAt;
             connection.UpdatedAt = existing.UpdatedAt;
             return Encoding.UTF8.GetString(existingSecret);

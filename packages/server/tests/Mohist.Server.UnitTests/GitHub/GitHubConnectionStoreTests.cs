@@ -28,6 +28,7 @@ public sealed class GitHubConnectionStoreTests
     {
         private readonly Dictionary<SecretStoreAddress, byte[]> _secrets = [];
         public Func<SecretStoreAddress, Exception?>? StoreFailure { get; set; }
+        public Func<SecretStoreAddress, Exception?>? LoadFailure { get; set; }
 
         public Task StoreAsync(SecretStoreAddress address, byte[] plaintext, CancellationToken ct = default)
         {
@@ -37,8 +38,12 @@ public sealed class GitHubConnectionStoreTests
             return Task.CompletedTask;
         }
 
-        public Task<byte[]?> LoadAsync(SecretStoreAddress address, CancellationToken ct = default) =>
-            Task.FromResult(_secrets.TryGetValue(address, out var value) ? value : null);
+        public Task<byte[]?> LoadAsync(SecretStoreAddress address, CancellationToken ct = default)
+        {
+            var failure = LoadFailure?.Invoke(address);
+            if (failure is not null) throw failure;
+            return Task.FromResult(_secrets.TryGetValue(address, out var value) ? value : null);
+        }
         public Task<bool> DeleteAsync(SecretStoreAddress address, CancellationToken ct = default) => Task.FromResult(_secrets.Remove(address));
         public IReadOnlyDictionary<string, string> Redact(IReadOnlyDictionary<string, string> values) => values;
     }
@@ -122,9 +127,55 @@ public sealed class GitHubConnectionStoreTests
         var recoveredSecret = await store.CreateAsync(reconnect, Installation(reconnect));
         Assert.Equal(connection.Id, reconnect.Id);
         Assert.Equal(secret, recoveredSecret);
+        Assert.True(reconnect.NeedsReprojection);
         var current = await store.GetAsync("proj_1", connection.Id);
         Assert.False(current!.ReconnectRequired);
         Assert.Equal(GitHubConnectionStatus.Active, current.Status);
+    }
+
+    [Fact]
+    public async Task CreateAsync_ReconnectMissingWebhookSecretLeavesConnectionDisabled()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var secrets = new FakeSecretStore();
+        var store = NewStore(database, secrets);
+        var connection = Connection();
+        await store.CreateAsync(connection, Installation(connection));
+        await store.SetStatusAsync("proj_1", connection.Id, GitHubConnectionStatus.Disabled);
+        await secrets.DeleteAsync(GitHubConnectionStore.WebhookSecretAddress("proj_1", connection.Id));
+
+        var exception = await Assert.ThrowsAsync<GitHubConnectionValidationException>(() =>
+            store.CreateAsync(Connection(), Installation(connection)));
+
+        Assert.Equal("github_webhook_secret_missing", exception.Code);
+        var current = await store.GetAsync("proj_1", connection.Id);
+        Assert.Equal(GitHubConnectionStatus.Disabled, current!.Status);
+        Assert.Equal("installation-1", current.InstallationId);
+    }
+
+    [Fact]
+    public async Task CreateAsync_ReconnectSecretStoreFailureLeavesConnectionDisabled()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var secrets = new FakeSecretStore();
+        var store = NewStore(database, secrets);
+        var connection = Connection();
+        await store.CreateAsync(connection, Installation(connection));
+        await store.SetStatusAsync("proj_1", connection.Id, GitHubConnectionStatus.Disabled);
+        await using (var db = new MohistDbContext(database.Options))
+        {
+            var row = await db.GitHubConnections.SingleAsync();
+            row.ReconnectRequired = true;
+            await db.SaveChangesAsync();
+        }
+        secrets.LoadFailure = _ => new InvalidOperationException("secret store unavailable");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.CreateAsync(Connection(), Installation(connection)));
+
+        var current = await store.GetAsync("proj_1", connection.Id);
+        Assert.Equal(GitHubConnectionStatus.Disabled, current!.Status);
+        Assert.True(current.ReconnectRequired);
     }
 
     [Fact]
