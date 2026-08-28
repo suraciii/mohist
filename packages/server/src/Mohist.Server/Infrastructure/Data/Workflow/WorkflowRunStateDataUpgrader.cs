@@ -14,7 +14,7 @@ public sealed record WorkflowRunStateUpgradeResult(
     int WrittenCount,
     string? BackupPath);
 
-public static class WorkflowRunStateDataUpgrader
+public static partial class WorkflowRunStateDataUpgrader
 {
     public static async Task<WorkflowRunStateUpgradeResult> UpgradeAsync(
         MohistDbContext db,
@@ -28,22 +28,36 @@ public static class WorkflowRunStateDataUpgrader
             .ToListAsync(cancellationToken);
         var upgrades = new List<(string WorkflowRunId, string State)>();
         var diagnostics = new List<string>();
+        var interruptionRows = new List<string>();
 
         foreach (var row in rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var hasLegacyInterruption = ContainsLegacyInterruptionShape(row.State);
             try
             {
-                var state = MigrateLegacyWorkflowRunJson(row.State);
-                var run = JSON.Deserialize<WorkflowRun>(state);
+                var migration = MigrateLegacyWorkflowRunState(row.State);
+                var run = JSON.Deserialize<WorkflowRun>(migration.State);
                 if (run is null)
                     throw new InvalidOperationException("deserialized to null");
 
-                if (!string.Equals(state, row.State, StringComparison.Ordinal))
-                    upgrades.Add((row.WorkflowRunId, state));
+                if (migration.InterruptionClassifications.Count > 0)
+                {
+                    var classification = string.Join(",", migration.InterruptionClassifications);
+                    interruptionRows.Add($"WorkflowRun '{row.WorkflowRunId}': {classification}");
+                    logger?.LogInformation(
+                        "WorkflowRun State interruption preflight: workflowRunId={WorkflowRunId}, classification={Classification}",
+                        row.WorkflowRunId,
+                        classification);
+                }
+
+                if (!string.Equals(migration.State, row.State, StringComparison.Ordinal))
+                    upgrades.Add((row.WorkflowRunId, migration.State));
             }
             catch (Exception exception)
             {
+                if (hasLegacyInterruption)
+                    interruptionRows.Add($"WorkflowRun '{row.WorkflowRunId}': ambiguous");
                 diagnostics.Add($"WorkflowRun '{row.WorkflowRunId}': {exception.Message}");
             }
         }
@@ -54,8 +68,14 @@ public static class WorkflowRunStateDataUpgrader
                 "WorkflowRun State upgrade preflight failed: candidateCount={CandidateCount}, failureCount={FailureCount}",
                 upgrades.Count,
                 diagnostics.Count);
+            var affected = interruptionRows.Count == 0
+                ? string.Empty
+                : "Affected legacy interruption rows:\n"
+                    + string.Join("\n", interruptionRows)
+                    + "\n";
             throw new InvalidOperationException(
                 "WorkflowRun State data upgrade preflight failed:\n"
+                + affected
                 + string.Join("\n", diagnostics));
         }
 
@@ -179,30 +199,41 @@ public static class WorkflowRunStateDataUpgrader
         }
     }
 
-    internal static string MigrateLegacyWorkflowRunJson(string json)
+    internal static string MigrateLegacyWorkflowRunJson(string json) =>
+        MigrateLegacyWorkflowRunState(json).State;
+
+    private sealed record WorkflowRunStateMigration(
+        string State,
+        IReadOnlyList<string> InterruptionClassifications);
+
+    private static WorkflowRunStateMigration MigrateLegacyWorkflowRunState(string json)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         if (root.ValueKind != JsonValueKind.Object)
-            return json;
+            return new WorkflowRunStateMigration(json, []);
 
+        var interruption = BuildLegacyInterruptionPlan(root);
         var legacyRecovery = BuildLegacyRecoveryPlan(root);
         var legacyProfileId = ReadLegacyAnnotationProfileId(root);
-        var changed = root.TryGetProperty("claim", out _)
+        var changed = interruption.HasChanges
+            || root.TryGetProperty("claim", out _)
             || (root.TryGetProperty("assignment", out var assignment) && assignment.ValueKind == JsonValueKind.Object && assignment.TryGetProperty("runnerId", out _))
             || ContainsLegacyWorkflowActionAttemptnerId(root)
             || legacyRecovery.Count > 0
             || (!root.TryGetProperty("workflowProfileId", out _) && !string.IsNullOrWhiteSpace(legacyProfileId));
         if (!changed)
-            return json;
+            return new WorkflowRunStateMigration(json, []);
 
         using var buffer = new MemoryStream();
         using (var writer = new Utf8JsonWriter(buffer))
         {
-            WriteRunObject(root, writer, legacyRecovery, legacyProfileId);
+            WriteRunObject(root, writer, legacyRecovery, legacyProfileId, interruption);
         }
 
-        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+        return new WorkflowRunStateMigration(
+            Encoding.UTF8.GetString(buffer.ToArray()),
+            interruption.Classifications);
     }
 
     private sealed record LegacyRecoveryTask(
@@ -302,7 +333,8 @@ public static class WorkflowRunStateDataUpgrader
         JsonElement root,
         Utf8JsonWriter writer,
         IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery,
-        string? legacyProfileId)
+        string? legacyProfileId,
+        LegacyInterruptionPlan interruption)
     {
         writer.WriteStartObject();
         foreach (var property in root.EnumerateObject())
@@ -332,7 +364,7 @@ public static class WorkflowRunStateDataUpgrader
                 && property.Value.ValueKind == JsonValueKind.Array)
             {
                 writer.WritePropertyName(property.Name);
-                WriteStagesArray(property.Value, writer, legacyRecovery);
+                WriteStagesArray(property.Value, writer, legacyRecovery, interruption);
                 continue;
             }
 
@@ -389,7 +421,8 @@ public static class WorkflowRunStateDataUpgrader
     private static void WriteStagesArray(
         JsonElement stages,
         Utf8JsonWriter writer,
-        IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery)
+        IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery,
+        LegacyInterruptionPlan interruption)
     {
         writer.WriteStartArray();
         var stageIndex = 0;
@@ -405,11 +438,17 @@ public static class WorkflowRunStateDataUpgrader
             writer.WriteStartObject();
             foreach (var property in stage.EnumerateObject())
             {
+                if (interruption.StageChanges.Contains(stageIndex)
+                    && string.Equals(property.Name, "interruption", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 if (string.Equals(property.Name, "tasks", StringComparison.Ordinal)
                     && property.Value.ValueKind == JsonValueKind.Array)
                 {
                     writer.WritePropertyName(property.Name);
-                    WriteTasksArray(property.Value, writer, stageIndex, legacyRecovery);
+                    WriteTasksArray(property.Value, writer, stageIndex, legacyRecovery, interruption);
                     continue;
                 }
 
@@ -425,7 +464,8 @@ public static class WorkflowRunStateDataUpgrader
         JsonElement tasks,
         Utf8JsonWriter writer,
         int stageIndex,
-        IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery)
+        IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery,
+        LegacyInterruptionPlan interruption)
     {
         writer.WriteStartArray();
         var taskIndex = 0;
@@ -438,7 +478,7 @@ public static class WorkflowRunStateDataUpgrader
                 continue;
             }
 
-            WriteTaskObject(task, writer, stageIndex, taskIndex, legacyRecovery);
+            WriteTaskObject(task, writer, stageIndex, taskIndex, legacyRecovery, interruption);
             taskIndex++;
         }
         writer.WriteEndArray();
@@ -449,14 +489,31 @@ public static class WorkflowRunStateDataUpgrader
         Utf8JsonWriter writer,
         int stageIndex,
         int taskIndex,
-        IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery)
+        IReadOnlyDictionary<(int StageIndex, int TaskIndex), LegacyRecoveryNormalization> legacyRecovery,
+        LegacyInterruptionPlan interruption)
     {
         writer.WriteStartObject();
         var hasWorkerId = TryGetProperty(task, "workerId", out _);
         var normalized = legacyRecovery.TryGetValue((stageIndex, taskIndex), out var recovery);
+        var hasInterruptionChange = interruption.TaskChanges.TryGetValue(
+            (stageIndex, taskIndex),
+            out var interruptionChange);
         var wroteRecovery = false;
         foreach (var property in task.EnumerateObject())
         {
+            if (hasInterruptionChange
+                && string.Equals(property.Name, "interruption", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (interruptionChange == LegacyTaskInterruptionChange.FailInterruptedAttempt
+                && string.Equals(property.Name, "status", StringComparison.OrdinalIgnoreCase))
+            {
+                writer.WriteString(property.Name, "failed");
+                continue;
+            }
+
             if (normalized && string.Equals(property.Name, "recoveryRemaining", StringComparison.OrdinalIgnoreCase))
                 continue;
 

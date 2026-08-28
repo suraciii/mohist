@@ -61,8 +61,6 @@ export function StageStatusIcon({ status }: { status: string }) {
       return <CheckmarkIcon />
     case 'running':
       return <SpinnerIcon />
-    case 'recoverable-interrupted':
-      return <HourglassIcon />
     case 'failed':
       return <CrossIcon />
     case 'blocked':

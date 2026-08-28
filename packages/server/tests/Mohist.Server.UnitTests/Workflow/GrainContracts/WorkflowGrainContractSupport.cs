@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
@@ -167,7 +166,6 @@ internal static partial class WorkflowGrainContractSupport
             resolver,
             services.GetRequiredService<WorkflowVariableResolver>(),
             services.GetRequiredService<IWorkflowArtifactBindService>(),
-            Options.Create(new WorkflowOptions()),
             timeProvider,
             NullLogger<WorkflowGrain>.Instance,
             services.GetRequiredService<WorkflowItemTranslator>());

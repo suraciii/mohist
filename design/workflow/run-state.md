@@ -144,8 +144,3 @@ cost proportional to current facts rather than execution history.
 
 Retention for events, transcripts, and telemetry is a database-wide lifecycle
 concern. It must not expand WorkflowRun State or its read path.
-
-> **Implementation gap:** the current model still accepts interrupted Action
-> status, `WorkInterruption`, `recoverable-interrupted` presentation, and the
-> legacy runner-loss reminder. The cold-start migration and current-model
-> deletion described above are not yet implemented.

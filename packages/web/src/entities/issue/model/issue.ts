@@ -105,8 +105,6 @@ export interface WorkflowAttention {
   state?: string
   message?: string | null
   reasonCode?: string | null
-  workId?: string | null
-  ownerId?: string | null
   recoveryDeadlineAt?: string | null
 }
 

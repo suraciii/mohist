@@ -23,7 +23,6 @@ public sealed class StageRun
     public string? TerminalChecksWorkId { get; set; }
     public string? TerminalChecksWorkerId { get; set; }
     public string? TerminalChecksResultFingerprint { get; set; }
-    public WorkInterruption? Interruption { get; set; }
     public ApprovalStatus? ApprovalStatus { get; set; }
     public FailureDetails? Failure { get; set; }
 }
