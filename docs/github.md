@@ -84,7 +84,7 @@ sequenceDiagram
 ```
 
 An optional approver list enables
-[Pull Request Review as Approval](#pull-request-review-as-approval).
+[Pull Request Review at an Approval Point](#pull-request-review-at-an-approval-point).
 
 ## Connection Lifecycle
 
@@ -145,7 +145,7 @@ After creation, the mirror carries:
 - **Workflow progress** as the mutually exclusive `mohist:*` state labels
   (`in-progress`, `awaiting-approval`, `blocked`, `done`) and four low-volume
   milestone comments: mirror confirmation with the Mohist Issue link, arrival
-  at an Approval point, completion with a delivery summary and Pull Request
+  at an Approval Point, completion with a delivery summary and Pull Request
   link, and cancellation with a reason.
 
 Never mirrored: Mohist comments, labels, priority, model and runtime
@@ -226,14 +226,27 @@ mo issue github sync 42
 
 State-label write-backs also heal themselves at the next Workflow milestone.
 
-## Pull Request Review as Approval
+## Pull Request Review at an Approval Point
 
-When a connection has an approver list, a Check Approval point accepts GitHub
-Pull Request reviews. An **Approve** review approves; a **Request changes**
-review rejects with the review body as the reason; a **Comment** review has no
-Approval action. Only reviews by listed GitHub users count, and the Approval
-record attributes the GitHub user. Mohist decides from state at event arrival
-and does not reverse a decision if a review is later dismissed.
+When a connection has an approver list, GitHub Pull Request reviews can provide
+a decision only at the **Check Approval Point** for the active WorkflowRun
+associated with that Pull Request. When the built-in GitHub PR Workflow creates
+or reuses the Pull Request, the WorkflowRun records its already-bound Repository
+and Pull Request number in its write-once Pull Request identity. Replaying the
+same identity is idempotent; a conflicting Pull Request number is rejected.
+This is WorkflowRun state, not a new resource or DSL construct. Review translation
+reads this immutable identity rather than branch names, mutable Run Variables, or a
+Pull Request URL. Profile Actions may still receive `vars.github.pr.number` as an
+explicit carrier, and the Profile may retain `vars.github.pr.url` for presentation.
+These Variables do not establish or change the identity. Mohist rejects a conflicting
+number before dispatch. An **Approve** review maps to Approve. A **Request changes**
+review maps to Request Changes and uses the review body as Approval Feedback when
+that action is available. A
+**Comment** review has no decision. Only reviews by listed GitHub users count,
+and history attributes the GitHub user. Plan and custom Approval Points use
+ordinary Mohist decision surfaces. Mohist decides from state at event arrival
+and does not reverse a decision if a review is later dismissed. See [GitHub
+Integration Design](../design/github-integration.md).
 
 ## GitHub Events and Event Routing
 
@@ -288,7 +301,7 @@ The following behavior is shipped today.
   creation, p0-p4 priority mapping, refusal replies, and reliable command
   reply delivery.
 - Linked Issue lifecycle translation with the Integrate delivery-echo guard,
-  signed ingress, close withdrawal, Pull Request review Approval,
+  signed ingress, close withdrawal, Pull Request review decisions,
   best-effort progress write-back, and terminal follow-up behavior.
 - Healthy or error sync health with the last error in Server, CLI, and Web.
   `mo issue github sync` repairs a mirror, `link` pairs an existing Issue with

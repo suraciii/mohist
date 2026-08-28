@@ -4,9 +4,9 @@ The default Mohist Workflow separates five kinds of decisions that have
 different costs and failure boundaries. Plan tests the direction before code is
 changed. Build creates an isolated increment. Check creates evidence in a
 separate verification pass. Integrate alone changes the shared base branch.
-This separation keeps approval and recovery focused on the smallest uncertain
-boundary. See [Issue Management](issues.md) for all Issue operations, including
-create, start, approve, and recover. See
+This separation keeps Approval Points and recovery focused on the smallest
+uncertain boundary. See [Issue Management](issues.md) for all Issue operations,
+including create, start, approve, request changes, and recover. See
 [Workflow Profile](workflow-profiles.md) for custom stages, tasks, and approval
 policies.
 
@@ -35,7 +35,7 @@ mo issue start <number>          # Start the Workflow and enter Plan.
 
 The Plan stage's Mohist Agent interprets the requirements and plans the implementation. This
 is the least expensive stage in which to find a wrong direction. During a
-manual approval, focus on the plan document and the task list.
+manual Approval Point decision, focus on the plan document and the task list.
 
 Plan artifacts live in the Issue Workspace under `PLANS/`, outside the
 Repository checkout, so they never appear in the Pull Request or the
@@ -43,7 +43,7 @@ Repository history. See [Workspace](workspaces.md#layout) for the layout.
 Plan produces:
 
 - `PLANS/PLAN.md`: the interpretation, scope, motivation, and
-  proposed approach. This is the primary approval document.
+  proposed approach. This is the primary Approval Point document.
 - `PLANS/DESIGN.md`: technical decisions and rationale. The file always
   exists; when no separate design is needed, it states that conclusion and why.
 - `PLANS/tasks.json`: the machine-readable task list,
@@ -58,33 +58,33 @@ the Issue body, repository complexity, and model speed.
 
 ### After Plan
 
-The Workflow stops at an approval point and waits for an approve or reject
-decision:
+The Workflow stops at an Approval Point and waits for Approve or Request
+Changes:
 
 ```bash
 mo run approve --issue <number>   # Approve the plan and enter Build.
-mo run reject --issue <number> --message "Describe the required changes"  # Run Plan feedback work, then review again.
+mo run request-changes --issue <number> --message "Describe the required changes"
 ```
 
-Rejection dispatches the Profile's configured approval feedback Tasks in the
-Plan Session, reruns Plan Checks, and returns to the same approval point. It
-does not rerun the whole Plan Stage. The approver may be any authorized actor.
-See [Core Concepts: Approval](concepts.md#approval).
+Request Changes is shown only when the bound Definition declares Feedback
+Tasks. The approver may be any authorized actor. See
+[Core Concepts: Approval Point](concepts.md#approval-point) for the feedback
+sequence and ownership rules.
 
 ## Build
 
 Build turns the approved plan into small, reviewable changes. Keeping Build
-after plan approval avoids spending execution time on a rejected direction.
-The Workflow expands the approved task list into one Agent task per
+after Plan is Approved avoids spending execution time on a direction that still
+needs changes. The Workflow expands the approved task list into one Agent task per
 entry, executed in order; checking each increment and recording separate
 commits localizes failures and makes recovery understandable. Work remains
 isolated on the Issue branch until Integrate.
 
 ### After Build
 
-The built-in Profiles enter Check automatically and have no Build approval
-point. A custom Workflow Profile can require approval after Build and use the
-same configured approval feedback mechanism. See
+The built-in Profiles enter Check automatically and have no Build Approval
+Point. A custom Workflow Profile can require an Approval Point after Build and
+use the same configured Feedback Tasks. See
 [Workflow Definition Reference](workflow-definition.md) for the exact fields.
 
 ## Check
@@ -93,24 +93,24 @@ Check prevents Build's claim of completion from being its only evidence. It
 runs an independent verification pass: a separate Agent session reviews the
 diff and records the findings in `PLANS/REVIEW.md`, and external checks are
 confirmed where they exist. The review is
-evidence, not a verdict: the approve or reject decision belongs to the
-approver. A problem returns to Build before the shared base branch
-is involved.
+evidence, not a verdict: the Approve or Request Changes decision belongs to the
+approver. A problem returns to configured Feedback Tasks before the shared base
+branch is involved.
 
 ### After Check
 
-The Workflow stops at an approval point and waits for an approve or reject
-decision:
+The Workflow stops at an Approval Point and waits for Approve or Request
+Changes:
 
 ```bash
 mo run approve --issue <number>   # Enter Integrate.
-mo run reject --issue <number> --message "Describe the required changes"  # Run Check feedback work, then review again.
+mo run request-changes --issue <number> --message "Describe the required changes"
 ```
 
-Rejection dispatches configured feedback work in the Check Session, reruns
-Check Stage Checks, and returns to the same approval point. It does not rerun
-Build or the Check Stage. For a manual decision, read the review report and the
-diff.
+Request Changes runs the Feedback Tasks bound to this WorkflowRun. For a manual
+decision, read the review report and the diff. See
+[Core Concepts: Approval Point](concepts.md#approval-point) for the complete
+sequence.
 
 ## Integrate
 
@@ -125,7 +125,7 @@ the Workflow to recover from.
 The most common causes are:
 
 - The Repository does not allow auto-merge, or the token lacks permission.
-- A required Pull Request check failed after approval.
+- A required Pull Request check failed after Approve.
 
 The Issue becomes blocked and waits for intervention. See
 [Troubleshooting](troubleshooting.md).
@@ -151,12 +151,12 @@ mo issue archive <number>
 stateDiagram-v2
     Draft --> Backlog : mark ready
     Backlog --> Plan : start
-    Plan --> Build : approve
+    Plan --> Build : Approve
     Build --> Check : automatic
-    Plan --> Plan : reject (Plan feedback + checks, then approval again)
-    Check --> Integrate : approve
+    Plan --> Plan : Request Changes (Feedback Tasks + Checks, then same Approval Point)
+    Check --> Integrate : Approve
     Integrate --> Done : automatic
-    Check --> Check : reject (Check feedback + checks, then approval again)
+    Check --> Check : Request Changes (Feedback Tasks + Checks, then same Approval Point)
     Done --> Archived : archive
     Plan --> Blocked : failure
     Build --> Blocked : failure
@@ -178,7 +178,7 @@ execution health. These facts stay separate because one Stage can be waiting
 for capacity, executing, waiting for a decision, or stopped for recovery.
 Health is `active` when the Workflow is assigned and executing or advancing
 normally, `queued` when the Workflow has started but is waiting for Runner
-assignment, `attention` when an approval decision is required before execution
+assignment, `attention` when an Approval Point decision is required before execution
 can continue, `paused` when execution was stopped explicitly and remains
 resumable, `blocked` when the Workflow cannot continue without intervention,
 `cancelled` when the Issue was cancelled and will not run again, and `done`
@@ -190,18 +190,19 @@ The Web UI shows health as a colored dot on each Issue card.
 
 Action is required in four situations:
 
-1. Plan is complete and needs an approve or reject decision.
-2. Check is complete and needs an approve or reject decision.
+1. Plan is complete and needs an Approve or Request Changes decision at an Approval Point.
+2. Check is complete and needs an Approve or Request Changes decision at an Approval Point.
 3. The Issue is blocked and needs a retry, rerun, or stop decision.
 4. The Runner was lost and current work failed.
 
-The owner, a script, or a Mohist Agent may perform these actions. The Workflow
-only consumes the approval action and its result.
+The owner, a script, or a Mohist Agent may perform these actions. WorkflowRun
+owns the decision and resulting state.
 
 ## Customize the Workflow
 
 Change the default Workflow when it does not fit the project. A custom Profile
-can require approval after Build, skip Check, or add a Stage such as Deploy.
+can require an Approval Point after Build, skip Check, or add a Stage such as
+Deploy.
 [Workflow Definition Reference](workflow-definition.md) defines the Profile
 fields and their validation rules. See [Workflow Profile](workflow-profiles.md)
 for Profile selection.

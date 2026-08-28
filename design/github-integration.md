@@ -65,11 +65,11 @@ policy and owns no execution state.
 
 A connection contains the bound Repository resource name, current GitHub
 coordinates (`Owner`, `Repo`), the repository's stable GitHub identity, the
-verified installation identity, an optional Approvers list for review Approval,
-and `Active` or `Disabled` status. `(Owner, Repo)` is unique across the Server,
-and a Repository has at most one connection, so an Issue's target repository
-unambiguously determines its mirror location. The stable repository identity is
-authoritative when owner or repository name changes.
+verified installation identity, an optional Approvers list for Pull Request
+review decisions, and `Active` or `Disabled` status. `(Owner, Repo)` is unique
+across the Server, and a Repository has at most one connection, so an Issue's
+target repository unambiguously determines its mirror location. The stable
+repository identity is authoritative when owner or repository name changes.
 
 The connection never stores an App private key, installation token, or operator
 PAT. Its per-connection signed webhook secret remains a separate Server secret.
@@ -92,6 +92,19 @@ non-idempotent deliveries use their own intent or operation records; title/body
 and state-label projection use current-state replacement. The link is created
 exactly once per pair — at mirror creation, at `/mohist start`, or at manual
 `link` — and survives disable/enable cycles of its connection.
+
+### WorkflowRun Pull Request Identity
+
+WorkflowRun owns one write-once Pull Request identity: its already-bound
+Repository and the Pull Request number. The identity is recorded when the
+create-or-reuse Pull Request operation first succeeds. Replaying that operation
+with the same identity is idempotent; a conflicting Pull Request number is
+rejected. This identity is part of WorkflowRun state, not a new resource or DSL
+construct, and it is the authority for GitHub review correlation. The Profile may
+pass `vars.github.pr.number` to Action inputs and retain `vars.github.pr.url` for
+presentation, but those Variables are not identity and cannot establish or change
+it. Before dispatch, WorkflowRun rejects a Pull Request number that conflicts with
+the identity. The Pull Request Review Translator reads the immutable identity.
 
 ## The Direction Contract
 
@@ -219,6 +232,27 @@ existing Issue. Refusals — an unavailable Repository, an unknown verb — are
 answered with one reply comment. The translator is deterministic
 configuration-driven code; no Agent or prompt participates in parsing or
 permission.
+
+### Pull Request Review Translator
+
+No separate GitHub review entity is introduced. When the built-in GitHub PR
+Workflow creates or reuses the Pull Request, the WorkflowRun records its
+already-bound Repository and Pull Request number in the write-once Pull Request
+identity. A same-identity replay is idempotent; a conflicting Pull Request
+number is rejected. Review translation reads this immutable identity rather than
+branch names, mutable Run Variables, or a Pull Request URL. Profile Actions may
+still receive `vars.github.pr.number` as an explicit carrier, and the Profile may
+retain `vars.github.pr.url` for presentation. These Variables do not establish or
+change the identity, and WorkflowRun rejects a conflicting number before dispatch.
+
+GitHub reviews decide only the Check Approval Point. The translator maps GitHub
+**Approve** to Approve and GitHub **Request changes** to Request Changes with the
+review body as Approval Feedback when that action is available. Plan and custom
+Approval Points use ordinary Mohist decision surfaces. WorkflowRun validates
+that it still waits at Check Approval and that Request Changes is available from
+its bound Definition. The translator owns only this provider mapping; WorkflowRun
+owns Approval Point state and Feedback Task execution. Detailed durable routing
+mechanics remain a separate integration concern.
 
 ### Edit Translator
 

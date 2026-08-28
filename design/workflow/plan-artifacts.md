@@ -56,7 +56,7 @@ file-existence assertions.
 The Workflow binds four files as Task artifacts so the approver and later
 Stages have stable evidence:
 
-- `PLANS/PLAN.md` — interpretation, scope, approach; the plan approval
+- `PLANS/PLAN.md` — interpretation, scope, approach; the Plan Approval Point
   document.
 - `PLANS/DESIGN.md` — technical decisions and rationale. The file always
   exists; when no separate design is needed, it records that conclusion and
@@ -80,24 +80,23 @@ Workspace-local plan material are both gone, and the recovery is the existing
 `mo run rerun --from-stage plan`, which regenerates both. No artifact fetch
 or restore channel exists.
 
-## Review as Approval
+## Review at an Approval Point
 
-The Workflow has exactly one review mechanism: the approval point with its
-feedback loop.
+The Workflow has exactly one review mechanism: the Approval Point with its
+Approval Feedback sequence.
 
 - The plan Stage has no self-review Task. A same-session self-verdict
-  duplicated the plan approval with the same model and added a second repair
-  loop.
+  duplicated the Plan Approval Point with the same model and added a second
+  repair loop.
 - The Check Stage still runs an independent review in its own Session, but it
   produces `REVIEW.md` as evidence. There is no verdict marker, no PASS/FAIL
   gate, and no auto-fix recovery loop; the verdict belongs to the approver. A
-  repair requested by the approver goes through the configured approval
-  feedback Tasks, which are the single repair path. Rejection does not rerun
-  the Stage: feedback work runs in the rejected Stage's Session, Stage Checks
-  run again, and the same approval point reviews the repaired result.
-- Judgment loops carry no budget. Recovery loops are unattended and keep their
-  budgets; every approval feedback round is initiated by a deciding actor, so
-  the engine imposes no round limit.
+  repair requested by the approver goes through the configured Feedback Tasks,
+  which are the single repair path. See
+  [`definition.md`](definition.md#approval-feedback) for the authoritative
+  sequence and ownership rules.
+- Approval Feedback carries no automatic limit. Recovery loops are unattended
+  and keep their declared budgets.
 
 ## Integrate: Auto-merge
 
@@ -109,7 +108,7 @@ reconciliation. An explicit squash subject wins; otherwise the Action uses the
 PR title returned by the bounded PR read. Merge timing and merge-time
 prerequisites are arbitrated by GitHub, which removes the
 `base-moved` and `protection-conflict` recovery branches that the synchronous
-merge required. A required check that fails after Approval is classified
+merge required. A required check that fails after Approve is classified
 `pr-checks-failed` and repaired through the same declared recovery the Check
 Stage uses; a merge conflict is classified `conflict` and follows the rebase
 recovery. Enabling auto-merge on a Repository that disallows it is an ordinary
@@ -132,16 +131,16 @@ paths.
 
 ## Web Evidence Surface
 
-The Check approval UI currently parses `review.md` task output
+The Check Approval Point UI currently parses `review.md` task output
 (`ReviewSummary`, `ReviewReportModal`). It is rebound to the recorded
-`REVIEW.md` artifact, and the plan approval surface presents `PLAN.md` and the
-task list the same way, so each approval point shows the artifacts of its own
-Stage.
+`REVIEW.md` artifact, and the Plan Approval Point surface presents `PLAN.md`
+and the task list the same way, so each Approval Point shows the artifacts of
+its own Stage.
 
 ## Out of Scope
 
-- A Profile-declared automatic reviewer (`reviewer: agent`). Approval is a
-  judgment position; who fills it — a person, an external Agent, or
+- A Profile-declared automatic reviewer (`reviewer: agent`). An Approval Point
+  is a judgment position; who fills it — a person, an external Agent, or
   automation — stays outside the engine. This may be revisited after the
   simplified Workflow has production mileage.
 

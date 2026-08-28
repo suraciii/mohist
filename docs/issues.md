@@ -32,9 +32,10 @@ Without `--workflow-profile`, the Issue inherits the Project's default Profile.
 Use `--no-workflow` — mutually exclusive with `--workflow-profile` — when the
 work will be delivered outside the Mohist production line. Such an Issue runs
 no Workflow at all; see [Start an Issue](#start-an-issue). You may change the
-selection until the Issue starts. An active Workflow continues to use the
-Profile selected when it started. A new selection applies to the next run.
-Clearing an explicit selection restores inheritance from the Project default.
+selection until the Issue starts. An active WorkflowRun continues to use the
+complete Definition that it bound when it started. A new selection or Profile
+edit applies only to a future Run. Clearing an explicit selection restores
+inheritance from the Project default.
 
 ### Web UI Fallback
 
@@ -114,7 +115,7 @@ priority, and archived state are in [CLI Reference](cli-reference.md#issue).
 For a complete visual view or manual takeover, select an Issue card in the Web
 UI. The details page shows:
 
-- The current Stage, health, and approval state.
+- The current Stage, health, and Approval Point state.
 - The complete body and comments.
 - The GitHub mirror — number, link, and sync health — when the target
   repository is connected; see [GitHub](github.md).
@@ -122,7 +123,7 @@ UI. The details page shows:
 - The branch bar with the current branch state.
 - A diff and commit summary.
 - The latest Plan and Check artifacts.
-- Actions such as Start, Approve, Reject, Stop, and Retry.
+- Actions such as Start, Approve, Request Changes, Stop, and Retry.
 - AgentSessions that contain the Workflow execution conversations.
 
 ## Start an Issue
@@ -143,24 +144,25 @@ lifecycle; see [GitHub](github.md#linked-pairs).
 
 ## Respond to an Approval Point
 
-After Plan or Check, the Issue enters `awaiting approval`. The Workflow is
-stopped at an approval point and waits for an approve or reject decision:
+After Plan or Check, the Issue enters `awaiting approval`. The Workflow stops
+at an Approval Point and waits for Approve or Request Changes:
 
 ```bash
 mo run approve --issue 42     # Approve and enter the next Stage.
-mo run reject --issue 42 --message "Missing error handling in the plan"  # Run feedback work, then review again.
+mo run request-changes --issue 42 --message "Missing error handling in the plan"
 ```
 
-Approval and comment ownership comes from the authenticated identity. Mohist
-does not need or accept a self-declared identity. `--display-name` is an
-optional display alias and does not change ownership. The `reject` action must
-include a reason in `--message` or `-m`. The approver can be a person or
-automation. See [Core Concepts: Approval](concepts.md#approval). For longer context, add a
-comment first and make the short rejection message refer to it:
+Decision and comment ownership come from the authenticated identity.
+Mohist does not need or accept a self-declared identity. `--display-name` is an
+optional display alias and does not change ownership. Request Changes requires
+`--message` or `-m` and is available only when the bound Definition declares
+Feedback Tasks. The approver can be a person or automation. See
+[Core Concepts: Approval Point](concepts.md#approval-point). For longer context,
+add a comment first and make the short message refer to it:
 
 ```bash
-mo issue comment create 42 --display-name "Ada" --body "Reject because: missing error handling in the plan"
-mo run reject --issue 42 -m "See comment: missing error handling"
+mo issue comment create 42 --display-name "Ada" --body "Changes needed: add error handling to the plan"
+mo run request-changes --issue 42 -m "See comment: missing error handling"
 ```
 
 ## Comments

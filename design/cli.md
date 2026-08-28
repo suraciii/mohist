@@ -45,7 +45,7 @@ is independently addressable or users directly start operations from it.
   lifecycle.
 - `workflow` — WorkflowProfile: Project-scoped Workflow Definition entry point; does not represent
   one execution.
-- `run` — WorkflowRun: one Workflow execution and its approval, recovery, and termination actions.
+- `run` — WorkflowRun: one Workflow execution and its Approval Point decisions, recovery, and termination actions.
 - `agent` — Mohist Agent: reusable Agent scoped to a Project; AgentJob is a work child resource and
   Agent Connection is an external access child resource.
 - `session` — AgentSession: stable logical Session addressed uniformly regardless of origin.
@@ -77,11 +77,11 @@ WorkflowProfile. The first sentence of group help must say that it manages Workf
 users do not interpret it as WorkflowRun. A CLI short name introduces no new domain concept and
 does not change the ownership defined by [`domain-analysis.md`](domain-analysis.md).
 
-`workflow edit` modifies a Profile resource rather than configuration only for future Runs. The
-product [Workflow Profile specification](../docs/workflow-profiles.md#select-a-profile) defines
-Profile ID binding and when Definition and Variables changes take effect. CLI does not copy a
-second set of lifecycle rules. `workflow edit --help` must state that the operation can affect an
-active Run and link to `run --help` to distinguish a Profile from an execution.
+`workflow edit` modifies a Profile resource for future WorkflowRuns. The product
+[Workflow Profile specification](../docs/workflow-profiles.md#select-a-profile) defines Profile and
+Definition binding and the separate dispatch timing for Variables and Prompts. CLI does not copy a
+second set of lifecycle rules. `workflow edit --help` must state that an active Run keeps its bound
+Definition and link to `run --help` to distinguish a Profile from an execution.
 
 ### Canonical Ownership
 
@@ -92,8 +92,8 @@ show the Scope that owns the relationship in its path. It cannot masquerade as a
 referenced resource:
 
 - `issue start` begins one work item and obtains its current WorkflowRun. It is an Issue action.
-- `run approve/reject/retry/rerun/pause/resume/stop` changes WorkflowRun and is not duplicated under
-  `issue`.
+- `run approve/request-changes/retry/rerun/pause/resume/stop` changes WorkflowRun and is not
+  duplicated under `issue`.
 - `project workflow set-default` changes the Project's default Profile reference. `workflow`
   manages only the Profile collection. `issue create/edit --workflow-profile` changes an Issue's
   explicit selection and `issue edit --inherit-workflow-profile` clears it; the two flags are
@@ -216,9 +216,8 @@ its own repeated use cases appear.
   limit, and silently read local data when CLI points at a remote Server. Rejected: `query` uses
   the Server query capability. Direct database access during Server failure is a developer path.
 - **Give `run view` only `--json`.** There is one less source view, but callers cannot inspect the
-  Definition that will govern later Stages. Rejected: `run view --yaml` resolves the current
-  Definition of the Profile ID bound to the Run and parallels `workflow view --yaml` as a
-  resource-content view; it is not historical evidence.
+  Definition bound to the Run. Rejected: `run view --yaml` returns the complete bound Definition
+  and parallels `workflow view --yaml` as a resource-content view.
 - **Put `set-default` under the resource being made default as `repo set-default` or
   `workflow set-default`.** The path is shorter, but a default reference is Project state and two
   conventions are less derivable than one. Rejected: use `project repo set-default` and

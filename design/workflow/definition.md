@@ -5,7 +5,7 @@ status: implemented
 # Workflow Definition
 
 A Workflow Definition is the core content of a Workflow Profile: a YAML document that declares
-stages, tasks, checks, approval points, and recovery rules. It is one of the product's command
+stages, tasks, checks, Approval Points, and recovery rules. It is one of the product's command
 surfaces. [`docs/workflow-definition.md`](../../docs/workflow-definition.md) is authoritative for
 syntax and author-visible semantics. This document defines the semantic model and its single
 authoritative validator; it does not repeat the syntax.
@@ -18,8 +18,9 @@ The semantic model is separate from its carrier syntax. YAML is parsed into the 
 The engine, Runner, and validator operate on these types, not on a syntax tree.
 
 ```text literal
-WorkflowDefinition(Approval?, Stages[], Recoveries?)
-Approval(FeedbackTasks: Task[])
+WorkflowDefinition(ApprovalConfig?, Stages[], Recoveries?)
+ApprovalConfig(Feedback: ApprovalFeedbackConfig?)
+ApprovalFeedbackConfig(Tasks: Task[])
 Stage(Name, RequiresApproval = false, LockBehavior?, Resources[], Tasks[], Checks[])
 Task(Id, Uses, Title?, With?, Expect?, Artifacts?, SetVars?, Recovery?)
 Expect(Files[]: FileExpectation(Path),
@@ -36,8 +37,10 @@ Check(Id, Uses, Title?, With?)
 - `Expect` is a first-class construct at the task level and does not enter `With`. See
   [`actions.md`](actions.md) and [`task-dispatch.md`](task-dispatch.md) for the execution split
   between executor validation and synthesized promise output.
-- Approval feedback tasks are an ordered `Task[]`; they do not need a distinct type. The current
-  stage's checks run again after all feedback tasks complete.
+- `ApprovalConfig` and `ApprovalFeedbackConfig` are configuration-only types. Approval Feedback is
+  the record submitted to a WorkflowRun; it is not a Definition node.
+- Feedback Tasks are an ordered `Task[]`; they do not need a distinct type. The `approval` and
+  `feedback` nodes are configuration containers, not domain entities.
 
 ### Outside the Model
 
@@ -58,6 +61,31 @@ no Orleans or ASP.NET dependency. Orleans surrogates remain in Server, following
 and local `mo` validation run the same code.
 
 ## Semantics
+
+### Approval Feedback
+
+[`docs/concepts.md`](../../docs/concepts.md#approval-point) is authoritative for product behavior.
+The `approval.feedback` configuration declares Feedback Tasks for the Approval Feedback record
+submitted to a WorkflowRun. `ApprovalConfig` and `ApprovalFeedbackConfig` are configuration-only
+implementation types, not additional product concepts.
+
+- Request Changes is available only when the complete Definition bound to the WorkflowRun contains
+  a non-empty `approval.feedback.tasks` list.
+- Before the first aggregate mutation, WorkflowRun validates the request body, the current Approval
+  Point, and the complete declared Feedback Task list. It resolves that list only from the bound
+  Definition; it does not read a live Profile or synthesize a default. A validation failure changes
+  no Approval Point, Stage, Approval Feedback, Task, Check, WorkflowRun status, event, revision, or
+  other aggregate state.
+- WorkflowRun owns Approval Point and Approval Feedback state. AgentJob and AgentSession do not.
+- Request Changes creates an Approval Feedback record and TaskRun instances from the declared
+  Feedback Tasks in order. Mohist does not create a default Task or insert an Agent, prompt, Session,
+  timeout, or publication Task.
+- After all Feedback Tasks complete, the current Stage Checks run again. The same Approval Point
+  then waits for another decision. The original Stage Tasks do not run again.
+- The engine does not impose a Request Changes limit.
+- A `mohist/agent` Feedback Task follows the ordinary Action contract. It explicitly names its
+  Agent and can explicitly name a Session. Named Session reuse requires the same Agent and
+  Workspace. AgentJob owns execution, and AgentSession owns conversation continuity.
 
 ### Parsing Is Validation
 
@@ -107,7 +135,8 @@ stages[1].tasks[0].recovery.handlers[0]: handler must declare tasks or retrySelf
   only recursively validates template expressions in values.
 
 Profile validation requires every Agent task to use the literal `mohist/agent` Action with its
-`name` and `prompt` inputs, across Stage, Approval, recovery, and deferred task-default paths.
+`name` and `prompt` inputs, across Stage Tasks, Feedback Tasks, recovery, and deferred task-default
+paths.
 Runtime Actions such as `mohist/opencode` and `mohist/pi` are rejected in Profile `uses`. These are
 Profile composition rules and do not add a dynamic `uses` form to `TaskDefinition`.
 
@@ -134,19 +163,18 @@ semantic model against the Action catalog.
 
 ### Runtime Tasks
 
-`WorkflowDefinition` is not a complete execution plan, and `WorkflowRun` does not store a
-Definition snapshot. Run creation materializes the StageRun and approval facts required to advance
-the lifecycle. When each Stage initializes, it rereads the current Definition of the selected
-Profile. Later edits do not retroactively rewrite an initialized Stage. During a run, recovery,
-retry, approval feedback, and control commands such as `mo issue rebase`, which inserts
-`uses: mohist/rebase`, may all create new `TaskRun` instances. They use the same dispatch, report,
-and Variables resolution semantics.
+`WorkflowDefinition` is not a complete execution plan. WorkflowRun stores the complete validated
+Definition that it binds when it starts. Stage initialization, Approval Feedback, named recovery,
+and source views read that bound Definition. A later Profile edit affects only future WorkflowRuns.
+During a run, Stage Tasks, Feedback Tasks, and named recovery declarations come from the bound
+Definition. A control command such as `mo issue rebase` generates its own `uses: mohist/rebase` Task
+and may attach recovery selected from the bound Definition. All runtime-created Tasks use the same
+dispatch, result, and Variables-resolution contracts.
 
 Runtime-inserted tasks do not pass through Definition validation again. Runner-built recovery
-tasks come from a subtree of an already validated and materialized Definition. The producer of a
-task built by a Server control command is responsible for its validity. `mohist/task-list`
-uses its materialized `task.uses` default for every inserted task and rejects a source task that
-tries to replace it.
+tasks come from a subtree of the already validated bound Definition. The producer of a task built
+by a Server control command is responsible for its validity. `mohist/task-list` uses its bound
+`task.uses` default for every inserted task and rejects a source task that tries to replace it.
 
 ## Examples
 
@@ -186,7 +214,7 @@ that the selected Action and its inputs are available in the current Project.
 - Recovery matching, `recoveryRemaining` budget flow, and manual retry reconstruction:
   [`recovery.md`](recovery.md).
 - Merge algorithm and write API for `vars.*`: [`variables.md`](variables.md).
-- Profile resources, live Definition parsing, and APIs: [`profile.md`](profile.md).
+- Profile resources, complete Definition binding, and APIs: [`profile.md`](profile.md).
 - Built-in Profile tradeoffs and invariants: [`builtin-workflows.md`](builtin-workflows.md).
 
 ## Status

@@ -1,12 +1,12 @@
 # Workflow Definition Reference
 
 A Workflow Profile Definition is a YAML document. It declares the Stages that
-an Issue follows, the initial Tasks, Checks, approval points, and the rules that
+an Issue follows, the initial Tasks, Checks, Approval Points, and the rules that
 produce follow-up Tasks. This document is the complete syntax reference for a
 Definition. See [Workflow Profile](workflow-profiles.md) for Profile selection
 and management.
 
-During a run, retry, recovery, approval feedback, and control commands such as
+During a run, retry, recovery, Approval Feedback, and control commands such as
 `mo issue rebase` can produce additional Tasks. These Tasks belong to the
 current WorkflowRun and do not rewrite the Definition.
 
@@ -19,7 +19,7 @@ before Mohist parses the Definition described here.
 A Definition has only three top-level sections:
 
 ```yaml
-approval:      # Optional. Configures work created from rejected approvals.
+approval:      # Optional. Configures Approval Feedback work.
   feedback:
     tasks:     # Required when feedback is configured; non-empty and ordered.
       - <Task>
@@ -31,19 +31,19 @@ recoveries:    # Optional. Named recovery declarations reused by Tasks.
   <name>: <Recovery>
 ```
 
-When a rejected approval includes feedback, Mohist runs
-`approval.feedback.tasks` in order to apply it. The first Task usually
-continues the rejected Stage's session. Later Tasks can publish the repaired
-work. When all feedback Tasks finish, Mohist runs the Stage Checks again. The
-approver then sees the current, published work. Mohist does not create a default
-feedback Task, so a feedback request is rejected when the Profile does not
-declare one.
+`approval.feedback.tasks` declares the ordered Feedback Tasks for Approval
+Feedback. A non-empty list enables Request Changes for WorkflowRuns that bind
+this Definition. Each Task must explicitly declare all work that it needs,
+including any Agent, prompt, named Session, timeout, or publication step.
+Mohist does not add omitted work. See
+[Core Concepts: Approval Point](concepts.md#approval-point) for the execution
+order and decision rules.
 
 ## Stage
 
 ```yaml
 - stage: integrate          # Required. The Stage name.
-  requiresApproval: true    # Optional. Default: false. Wait for approval after the Stage.
+  requiresApproval: true    # Optional. Default: false. Wait at an Approval Point after the Stage.
   lockBehavior: sequential  # Optional. Run this Stage serially. Requires resources.
   resources:
     - project-integration   # A lock name. Only one Stage can hold a named lock at a time.
@@ -53,8 +53,8 @@ declare one.
     - <Check>
 ```
 
-See [Core Concepts: Approval](concepts.md#approval) for who can approve and how
-the decision is submitted.
+See [Core Concepts: Approval Point](concepts.md#approval-point) for the
+available decisions and who can submit them.
 
 ## Task
 
@@ -176,7 +176,7 @@ namespaces are listed below. A root reference not listed here is invalid.
 - `stage.name`: the current Stage name.
 - `work.*`: current work information, such as `work.id`, `work.type`,
   `work.title`, and `work.attempt`.
-- `work.approvalFeedback.*`: available only to approval feedback Tasks.
+- `work.approvalFeedback.*`: available only to Feedback Tasks.
   Information that triggered this work, such as `id`, `stage`, `createdAt`,
   and `summary`.
 - `issue.*`: Issue information, such as `issue.projectId`, `issue.number`,
@@ -248,7 +248,7 @@ approval:
         uses: mohist/agent
         with:
           name: mohist/builder
-          session: ${{ stage.name }}
+          session: feedback-${{ stage.name }}
           prompt: ${{ prompts.apply-feedback }}
 
 stages:

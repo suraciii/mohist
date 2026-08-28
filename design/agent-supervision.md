@@ -2,7 +2,7 @@
 
 The supervision preset turns "the owner delegates production-line operation to an Agent" into
 one command. It installs a supervision Agent and two routing rules in the Project. The Agent
-takes responsibility for approval decisions and terminal failure handling; the owner steps in
+takes responsibility for Approval Point decisions and terminal failure handling; the owner steps in
 only when the Agent stops.
 
 This document defines the preset content, installation semantics, and Agent behavior policy.
@@ -83,8 +83,9 @@ existing mechanisms:
    conclusion, actions already attempted, and the exact decision needed from the owner. The
    owner reads the comment from the notification and can continue from there.
 3. **Stopping is escalation.** The strongest escalation signal is that the Agent takes no further
-   action. The approval remains pending or the run remains failed, and the owner takes over using
-   the normal command surface (`approve` / `reject` / `retry` / `rerun`).
+   action. The supervisor stops its response and hands off; it does not execute `mo run stop`. The
+   Approval Point remains pending or the Run remains failed, and the owner takes over using the
+   normal command surface (`approve` / `request-changes` / `retry` / `rerun`).
 4. **Agent failure surfaces too.** When the response cannot start or fails while running, the
    default notification path includes `agent.job.failed`. The state "the owner thinks it is being
    handled, but it is not" must never be silent. See [`event-response.md`](event-response.md).
@@ -92,9 +93,10 @@ existing mechanisms:
 ### Behavior principles
 
 Preset text supplies identity, goal, boundaries, and a memory protocol. It leaves how to review,
-how to repair, and when to stop to the Agent's judgment. This is deliberate: whether an approval
-should pass and whether another repair is worthwhile are contextual decisions. Encoding them as
-a decision tree would reduce the Agent to a rule engine and prevent useful rework loops.
+how to repair, and when to stop to the Agent's judgment. This is deliberate: whether to select
+Approve or Request Changes at an Approval Point and whether another repair is worthwhile are
+contextual decisions. Encoding them as a decision tree would reduce the Agent to a rule engine and
+prevent useful rework loops.
 
 - **Goal:** keep the production line from waiting for a person. Resolve work at the Agent level
   whenever possible instead of passing it to the owner.
@@ -110,8 +112,9 @@ a decision tree would reduce the Agent to a rule engine and prevent useful rewor
   missing information, write a comment explaining the uncertainty and leave it to the owner.
 - **Delegation boundary:** the Agent owns "is this done correctly?"; the owner owns "should this
   be done?" The Agent only proposes terminal decisions such as abandoning an Issue (`close`),
-  stopping the whole run (`stop`), or changing the Issue objective. It does not execute them.
-  Identity instructions and auditing enforce this boundary; the system does not hard-code it.
+  stopping the whole run (`stop`), or changing the Issue objective. It does not execute them; when
+  it cannot continue, it stops its response and hands off to the owner. Identity instructions and
+  auditing enforce this boundary; the system does not hard-code it.
 - **Action surface:** use the same `mo` command surface and Issue workspace as a person. There is
   no privileged channel and no enumerated action allowlist. The only boundary is not changing
   Issues, configuration, or code unrelated to the current event.
@@ -121,7 +124,7 @@ types, while identity and Issue memory remain shared. Users may customize the to
 separate Agents for approval and repair and changing the Agent references in the rules; no new
 mechanism is required. In that topology, each Agent needs a distinguishable marker and each set
 of identity instructions must preserve the rule "read all supervision comments on the Issue
-first." Otherwise, neither side can see the rework loop between approval and repair.
+first." Otherwise, neither side can see the rework loop between Approval Feedback and repair.
 
 ### Preset policy and sources
 
@@ -153,10 +156,11 @@ The identity policy protects four boundaries:
 - A mention is one bounded task. Continued attention requires Issue watch; the preset does not
   pretend that an Agent process remains continuously active.
 
-The approval prompt asks the Agent to approve correct work, reject work that needs a specific
-change, or stop and hand a product-direction decision to the owner. The failure prompt runs only
-after automatic recovery is exhausted; it asks the Agent to use prior supervision comments,
-repair and retry when new progress is likely, or stop with a root-cause handoff when it is not.
+The approval prompt asks the Agent to approve correct work, select Request Changes with
+specific Approval Feedback, or Stop and hand a product-direction decision to the owner. The failure
+prompt runs only after automatic recovery is exhausted; it asks the Agent to use prior supervision
+comments, repair and retry when new progress is likely, or stop with a root-cause handoff when it is
+not.
 Both prompts require one `[supervisor]` comment so the next execution and the owner share the same
 reasoning trail.
 
@@ -187,8 +191,8 @@ exists, skipped: routing rule supervisor-failure
 
 Implemented: `mo agent install supervisor` idempotently creates the preset Agent and two
 tail-position routing rules by name; `mo issue watch` supports watching and muting; Agent response
-failures (`agent.job.failed`) enter the inbox and Hermes notifications; approval decisions record
-the display alias (`--display-name` -> `decidedBy`).
+failures (`agent.job.failed`) enter the inbox and Hermes notifications; authenticated identity owns
+approval and comment attribution, while `--display-name` is a presentation alias.
 
 Agent Skills are pinned into each execution definition. The preset adds no Skills override;
 discovery of the `mohist` skill still depends on the stub file in the execution workspace, so
