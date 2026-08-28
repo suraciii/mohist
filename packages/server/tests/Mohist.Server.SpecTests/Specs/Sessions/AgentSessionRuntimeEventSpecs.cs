@@ -135,7 +135,8 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
             memberId,
             $"message-{suffix}",
             enrollmentId,
-            $"thread-{suffix}");
+            $"thread-{suffix}",
+            AgentOriginMarkers.SlackManager);
 
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
@@ -160,8 +161,15 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
 
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         var transport = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
-        transport.Clear();
-        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
+        using var transportOwner = transport.CreateOwner(runnerId);
+        var delivered = new TaskCompletionSource<IReadOnlyList<object?>>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        transportOwner.SetInvocationResponseFactory("session.followup", arguments =>
+        {
+            delivered.TrySetResult(arguments);
+            return new RunnerFollowupDeliveryResult(true);
+        });
+
         await grain.OpenAsync(new OpenAgentSessionCommand(
             runnerId,
             "opencode",
@@ -169,106 +177,64 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
             Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [AgentSessionQueryMetadataKeys.ProjectId] = SlackDeliveryOwnerIds.ManagerProjectId,
-                [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
-                [AgentSessionQueryMetadataKeys.WorkflowRunId] = $"manager-recovery-workflow-{suffix}",
-                [AgentSessionQueryMetadataKeys.SessionName] = sessionId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-connection",
+                [AgentSessionQueryMetadataKeys.ConnectionId] = enrollmentId,
+                [AgentSessionQueryMetadataKeys.OriginMarker] = AgentOriginMarkers.SlackManager,
+                [GenericAgentSessionMetadata.AgentId] = "manager-agent",
             })));
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
             "manager-initial-input",
             "manager-initial-turn",
             "manager request",
-            "agent-launch",
+            "agent-connection",
             "manager-initial-job",
             Provenance: initialProvenance));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-initial-recovery"));
         await grain.MarkInitialTurnTerminalAsync("manager-initial-job", AgentTurnStatus.Unknown, null);
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.EnsureManagerCredentialExpiryRecoveryAsync();
-        await persistence.WaitAsync();
+        await persistence.WaitAsync(TestContext.Current.CancellationToken);
 
+        var recoveryTurnId = $"manager-recovery-turn:{sessionId}";
         var turns = await grain.ListTurnsAsync();
-        Assert.Contains(turns, turn => turn.Id == "manager-recovery-turn:" + sessionId && turn.Status == AgentTurnStatus.Queued);
+        Assert.Contains(turns, turn => turn.Id == recoveryTurnId && turn.Status == AgentTurnStatus.Queued);
 
-        // Register only after the initial unknown transition has completed.
-        // That transition may schedule a best-effort dispatch, but there is
-        // no eligible Runner while it runs; the manual delivery below then
-        // exercises the same wire payload without competing grant issuance.
-        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
             runnerId,
             ["spec/*"],
             "manager-recovery-runner",
             SlackDeliveryOwnerIds.ManagerProjectId,
             RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
 
-        await using (var scope = _fixture.Services.CreateAsyncScope())
+        try
         {
-            var dispatch = new AgentSessionFollowupDispatch(
-                TurnId: $"manager-recovery-turn:{sessionId}",
-                OperationId: $"system-turn:manager-recovery-turn:{sessionId}",
-                InputTexts: ["The previous Manager execution ended before its outcome was confirmed."],
-                InputId: $"manager-recovery-input:{sessionId}",
-                Provenance: initialProvenance,
-                DispatchId: $"followup:{sessionId}:system-turn:manager-recovery-turn:{sessionId}",
-                ExecutionSource: AgentExecutionSources.Slack);
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var dispatcher = scope.ServiceProvider.GetRequiredService<AgentSessionFollowupDispatcher>();
+            await dispatcher.DispatchForTurnAsync(
+                SlackDeliveryOwnerIds.ManagerProjectId,
+                sessionId,
+                recoveryTurnId,
+                TestContext.Current.CancellationToken);
+
+            var parameters = Assert.IsType<FollowupParams>(Assert.Single(
+                await delivered.Task.WaitAsync(TestContext.Current.CancellationToken)));
+            Assert.Equal(recoveryTurnId, parameters.TurnId);
+            Assert.Equal(AgentExecutionSources.Slack, parameters.ExecutionSource);
+            var grant = Assert.IsType<ManagerExecutionGrant>(parameters.ManagerExecutionGrant);
             var issuer = scope.ServiceProvider.GetRequiredService<ManagerExecutionCapabilityIssuer>();
-            var grant = issuer.Issue(new ManagerExecutionIssueRequest(
-                $"manager:{sessionId}:{dispatch.OperationId}",
-                new ManagerExecutionOrigin(
-                    workspaceId,
-                    $"conversation-{suffix}",
-                    $"thread-{suffix}",
-                    $"message-{suffix}",
-                    memberId,
-                    enrollmentId,
-                    sessionId,
-                    dispatch.OperationId),
-                _fixture.TimeProvider.GetUtcNow(),
-                ManagerExecutionCapabilityIssuer.DefaultLifetime));
             var validation = issuer.ValidatePresented(
                 grant.ManagementCredential,
                 ManagerExecutionLeaseKind.Management,
                 "workspace.status",
                 _fixture.TimeProvider.GetUtcNow());
             Assert.True(validation.Allowed, validation.Message);
-            var delivery = scope.ServiceProvider.GetRequiredService<IFollowupDeliveryDispatcher>();
-            var result = await delivery.DispatchAsync(new FollowupDeliveryRequest(
-                ProjectId: SlackDeliveryOwnerIds.ManagerProjectId,
-                SessionId: sessionId,
-                SourceKind: "agent-launch",
-                WorkflowRunId: null,
-                SessionName: null,
-                RunnerId: runnerId,
-                Runtime: "opencode",
-                RuntimeSessionId: "runtime-initial-recovery",
-                WorkDir: "/work",
-                Definition: null,
-                OperationId: dispatch.OperationId,
-                InputTexts: dispatch.InputTexts,
-                Attachments: dispatch.Attachments,
-                InputId: dispatch.InputId,
-                SlackExecutionContext: SlackExecutionContextFactory.Create(
-                    workspaceId,
-                    $"conversation-{suffix}",
-                    $"thread-{suffix}",
-                    $"message-{suffix}",
-                    memberId,
-                    enrollmentId,
-                    sessionId,
-                    dispatch.OperationId,
-                    projectId: SlackDeliveryOwnerIds.ManagerProjectId,
-                    ownerKind: SlackDeliveryOwnerKinds.Manager),
-                TurnId: dispatch.TurnId,
-                ExecutionSource: dispatch.ExecutionSource,
-                ManagerExecutionGrant: grant));
-            Assert.True(result.Accepted);
-
-            var invocation = Assert.Single(
-                transport.Invocations,
-                request => string.Equals(request.Method, "session.followup", StringComparison.Ordinal));
-            var parameters = Assert.IsType<FollowupParams>(Assert.Single(invocation.Arguments));
-            Assert.Equal("manager-recovery-turn:" + sessionId, parameters.TurnId);
-            Assert.Equal(grant, parameters.ManagerExecutionGrant);
-            Assert.False(string.IsNullOrWhiteSpace(grant.ManagementCredential));
             Assert.False(string.IsNullOrWhiteSpace(grant.ReplyCredential));
+            Assert.Single(transportOwner.Invocations);
+        }
+        finally
+        {
+            await runner.UnregisterAsync();
         }
     }
 
