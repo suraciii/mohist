@@ -869,6 +869,52 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
     }
 
     [Fact]
+    public async Task InitialRuntimeIdle_DoesNotCompleteQueuedFollowupBeforeDispatch()
+    {
+        const string runtimeSessionId = "runtime-initial-idle-before-followup";
+        var (grain, sessionId) = await CreateAttachedSessionAsync(runtimeSessionId);
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: "initial-idle-input",
+            TurnId: "initial-idle-turn",
+            Prompt: "initial prompt",
+            Source: "agent-launch",
+            JobId: "initial-idle-job"));
+        await grain.MarkInitialTurnExecutingAsync("initial-idle-job");
+        var followup = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "continue after the initial run",
+            Source: "agent-session-followup",
+            IdempotencyKey: "initial-idle-followup"));
+
+        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                """{"activity":"idle","status":"completed"}""") },
+            runtimeSessionId));
+        await persistence.WaitAsync();
+
+        var beforeTerminal = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(beforeTerminal);
+        Assert.Equal(
+            AgentTurnStatus.Queued,
+            beforeTerminal!.Status.Turns!.Single(turn => turn.Id == followup.TurnId).Status);
+        Assert.Contains(
+            beforeTerminal.Status.PendingFollowups!,
+            lease => lease.OperationId == followup.OperationId);
+
+        await grain.MarkInitialTurnTerminalAsync("initial-idle-job", AgentTurnStatus.Completed, null);
+
+        var request = Assert.Single(_fixture.FollowupDispatch.Requests);
+        Assert.Equal("project-1", request.ProjectId);
+        Assert.Equal(sessionId, request.SessionId);
+        var afterTerminal = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(afterTerminal);
+        Assert.Equal(
+            AgentTurnStatus.Queued,
+            afterTerminal!.Status.Turns!.Single(turn => turn.Id == followup.TurnId).Status);
+    }
+
+    [Fact]
     public async Task AcceptFollowup_IdempotencyKeyMismatch_Throws()
     {
         var (grain, _) = await CreateAttachedSessionAsync("runtime-idem-mismatch");

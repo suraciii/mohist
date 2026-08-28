@@ -211,7 +211,9 @@ public sealed partial class AgentSessionGrain
         DateTime now)
     {
         var current = FindCurrentNonLaunchTurn(session);
-        return current is null ? [] : session.MarkTurnTerminal(current.Id, terminal, null, now);
+        return current?.Status == AgentTurnStatus.Executing
+            ? session.MarkTurnTerminal(current.Id, terminal, null, now)
+            : [];
     }
 
     private static AgentTurnRecord? FindCurrentNonLaunchTurn(AgentSession session)

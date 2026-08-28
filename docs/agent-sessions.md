@@ -341,6 +341,11 @@ accept input during the current running Turn, the follow-up joins that Turn.
 Otherwise, it starts or waits for a later Turn. Neither path creates another
 AgentJob or changes the first launch result.
 
+A Runtime activity event without a Turn identity can settle only a follow-up
+that has already started executing. It cannot complete a queued follow-up that
+has not been dispatched. When an initial launch reaches terminal while a
+follow-up waits, Mohist keeps the follow-up queued and dispatches it next.
+
 Accepted input is never discarded or changed to rejected because execution
 later fails. When the waiting queue is full, Mohist rejects the new input before
 creating a live Input or Turn. Retrying that rejected intent with the same key
