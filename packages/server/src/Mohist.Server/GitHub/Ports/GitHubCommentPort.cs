@@ -198,26 +198,35 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
         if (string.IsNullOrWhiteSpace(connection.InstallationId))
             throw new InvalidOperationException($"GitHub connection '{connection.Id}' has no installation identity");
 
-        GitHubInstallationToken token;
-        try
-        {
-            token = await _tokens.GetAsync(connection.InstallationId, ct);
-        }
-        catch (GitHubRemoteRequestException exception)
-            when (IsCredentialFailure(exception))
-        {
-            await MarkInstallationUnavailableAsync(connection, exception, ct);
-            throw;
-        }
+        var token = await GetTokenAsync(connection, ct);
         var response = await SendOnceAsync(url, method, contentFactory, token.AccessToken, ct);
         if (response.StatusCode != HttpStatusCode.Unauthorized)
             return await HandleAuthFailureAsync(connection, url, response, ct);
 
         response.Dispose();
         _tokens.Invalidate(connection.InstallationId, token.AccessToken);
-        var refreshed = await _tokens.GetAsync(connection.InstallationId, ct);
+        var refreshed = await GetTokenAsync(connection, ct);
         response = await SendOnceAsync(url, method, contentFactory, refreshed.AccessToken, ct);
         return await HandleAuthFailureAsync(connection, url, response, ct);
+    }
+
+    private async Task<GitHubInstallationToken> GetTokenAsync(
+        GitHubConnection connection,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(connection.InstallationId))
+            throw new InvalidOperationException($"GitHub connection '{connection.Id}' has no installation identity");
+
+        try
+        {
+            return await _tokens.GetAsync(connection.InstallationId, ct);
+        }
+        catch (GitHubRemoteRequestException exception)
+            when (IsCredentialFailure(exception) || IsInstallationUnavailable(exception))
+        {
+            await MarkInstallationUnavailableAsync(connection, exception, ct);
+            throw;
+        }
     }
 
     private async Task<HttpResponseMessage> HandleAuthFailureAsync(
@@ -260,13 +269,12 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
         {
             try
             {
+                var (code, detail) = ClassifyInstallationFailure(exception);
                 await _connections.MarkInstallationUnavailableAsync(
                     connection.ProjectId,
                     connection.Id,
-                    exception.StatusCode == HttpStatusCode.Unauthorized
-                        ? "github_app_token_rejected"
-                        : "github_app_permission_denied",
-                    "The GitHub App installation cannot access this Repository. Repair the installation scope, then reconnect.",
+                    code,
+                    detail,
                     ct);
             }
             catch (Exception markException) when (!ct.IsCancellationRequested)
@@ -278,35 +286,54 @@ public sealed class GitHubCommentPort : IGitHubCommentPort, IGitHubIssuePort
         }
     }
 
-    private async Task MarkInstallationUnavailableAsync(
+    private Task MarkInstallationUnavailableAsync(
         GitHubConnection connection,
         HttpStatusCode status,
-        CancellationToken ct)
+        CancellationToken ct) =>
+        MarkInstallationUnavailableAsync(
+            connection,
+            new GitHubRemoteRequestException(
+                $"GitHub App request failed with status {(int)status}.",
+                status),
+            ct);
+
+    private static (string Code, string Detail) ClassifyInstallationFailure(
+        GitHubRemoteRequestException exception)
     {
-        if (_connections is not null)
+        if (exception is GitHubAppInstallationException appException)
         {
-            try
+            var detail = appException.Details is null
+                ? appException.Message
+                : $"{appException.Message} {JsonSerializer.Serialize(appException.Details)}";
+            return appException.Code switch
             {
-                await _connections.MarkInstallationUnavailableAsync(
-                    connection.ProjectId,
-                    connection.Id,
-                    status == HttpStatusCode.Unauthorized
-                        ? "github_app_token_rejected"
-                        : "github_app_permission_denied",
-                    "The GitHub App installation cannot access this Repository. Repair the installation scope, then reconnect.",
-                    ct);
-            }
-            catch (Exception markException) when (!ct.IsCancellationRequested)
-            {
-                _log.LogWarning(markException,
-                    "Could not persist GitHub App installation attention for connection {ConnectionId}",
-                    connection.Id);
-            }
+                "github_app_installation_required" => ("github_app_installation_required", detail),
+                "github_app_credential_rejected" => ("github_app_token_rejected", detail),
+                "github_app_permission_denied" => ("github_app_permission_denied", detail),
+                _ => (CodeForStatus(exception.StatusCode), detail),
+            };
         }
+
+        return (
+            CodeForStatus(exception.StatusCode),
+            exception.StatusCode == HttpStatusCode.Unauthorized
+                ? "The GitHub App token was rejected. Check the App credentials and installation scope, then reconnect."
+                : "The GitHub App installation cannot access this Repository. Repair the installation scope, then reconnect.");
     }
+
+    private static string CodeForStatus(HttpStatusCode? status) =>
+        status == HttpStatusCode.Unauthorized
+            ? "github_app_token_rejected"
+            : "github_app_permission_denied";
 
     private static bool IsCredentialFailure(GitHubRemoteRequestException exception) =>
         IsCredentialFailure(exception.StatusCode, exception.IsRateLimited);
+
+    private static bool IsInstallationUnavailable(GitHubRemoteRequestException exception) =>
+        exception is GitHubAppInstallationException
+        {
+            Code: "github_app_installation_required"
+        };
 
     private static bool IsCredentialFailure(HttpStatusCode? status, bool isRateLimited) =>
         status == HttpStatusCode.Unauthorized

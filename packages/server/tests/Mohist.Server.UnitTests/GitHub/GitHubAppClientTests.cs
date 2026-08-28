@@ -54,6 +54,35 @@ public sealed class GitHubAppClientTests
     }
 
     [Fact]
+    public async Task CreateInstallationToken_MapsRemovedInstallationToInstallGuidance()
+    {
+        using var rsa = RSA.Create(2048);
+        var error = await Assert.ThrowsAsync<GitHubAppInstallationException>(() =>
+            CreateClient(new ResponseHandler((HttpStatusCode.NotFound, "{}")), KeyFile(rsa.ExportRSAPrivateKeyPem()))
+                .CreateInstallationTokenAsync("123"));
+
+        Assert.Equal("github_app_installation_required", error.Code);
+        Assert.Equal(HttpStatusCode.NotFound, error.StatusCode);
+        Assert.Contains("removed", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("installationUrl", error.Details!.GetType().GetProperties().Select(property => property.Name));
+    }
+
+    [Fact]
+    public async Task DiscoverInstallation_PropagatesRemovedInstallationFromTokenExchange()
+    {
+        using var rsa = RSA.Create(2048);
+        var handler = new ResponseHandler(
+            (HttpStatusCode.OK, "{\"id\":123}"),
+            (HttpStatusCode.NotFound, "{}"));
+
+        var error = await Assert.ThrowsAsync<GitHubAppInstallationException>(() =>
+            CreateClient(handler, KeyFile(rsa.ExportRSAPrivateKeyPem())).DiscoverInstallationAsync("octocat", "hello-world"));
+
+        Assert.Equal("github_app_installation_required", error.Code);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
     public async Task DiscoverInstallation_DistinguishesPermissionFromRateLimit()
     {
         using var rsa = RSA.Create(2048);

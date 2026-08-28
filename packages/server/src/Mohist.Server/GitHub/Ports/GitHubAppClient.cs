@@ -143,6 +143,8 @@ public sealed class GitHubAppClient : IGitHubAppClient
             HttpMethod.Post,
             await CreateAppJwtAsync(ct),
             ct);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            throw InstallationRequiredForToken(installationId);
         if (!response.IsSuccessStatusCode)
             throw await RemoteFailureAsync(response, "github_app_token_exchange_failed", ct);
 
@@ -322,6 +324,17 @@ public sealed class GitHubAppClient : IGitHubAppClient
                 installationUrl = $"https://github.com/apps/{_options.Value.AppSlug}/installations/new",
                 action = $"Install the App or add {owner}/{repo} to its scope, then retry.",
             });
+
+    private GitHubAppInstallationException InstallationRequiredForToken(string installationId) =>
+        new(
+            "The GitHub App installation is missing or was removed. Install the App again, then reconnect.",
+            "github_app_installation_required",
+            new
+            {
+                installationUrl = $"https://github.com/apps/{_options.Value.AppSlug}/installations/new",
+                action = $"Restore installation {installationId}, then reconnect the Repository.",
+            },
+            HttpStatusCode.NotFound);
 
     private static string? StringValue(JsonObject node, string key)
     {
