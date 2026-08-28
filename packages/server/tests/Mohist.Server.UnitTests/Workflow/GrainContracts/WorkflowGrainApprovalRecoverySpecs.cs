@@ -1,8 +1,10 @@
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
@@ -128,6 +130,57 @@ public sealed class WorkflowGrainApprovalRecoverySpecs
     }
 
     [Fact]
+    public async Task RequestChanges_WithoutConfiguredFeedbackTasks_LeavesRunUnchanged()
+    {
+        var arrangement = await ArrangeAsync(
+            "wr-gate-no-feedback-config",
+            ApprovalStage() with { Approval = null });
+        await ReportPlanAsync(arrangement);
+
+        var before = await RequireRunAsync(arrangement);
+        var beforeJson = JsonSerializer.Serialize(before);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await arrangement.Grain.RequestChangesAsync("not applicable", "operator-1"));
+
+        var after = await RequireRunAsync(arrangement);
+        Assert.Equal(beforeJson, JsonSerializer.Serialize(after));
+        Assert.Equal(WorkflowRunStatus.AwaitingApproval, after.Status);
+        Assert.Equal(StageRunStatus.AwaitingApproval, after.CurrentStage().Status);
+        Assert.Empty(after.Feedback);
+    }
+
+    [Theory]
+    [InlineData("missing", "no bound workflow definition")]
+    [InlineData("corrupt", "unreadable bound workflow definition")]
+    public async Task RequestChanges_WithoutReadableBoundDefinition_LeavesRunAndEventsUnchanged(
+        string snapshotKind,
+        string expectedMessage)
+    {
+        var arrangement = await ArrangeAsync($"wr-gate-bound-feedback-{snapshotKind}");
+        await ReportPlanAsync(arrangement);
+
+        var persisted = await RequireRunAsync(arrangement);
+        persisted.BoundWorkflowDefinitionJson = snapshotKind == "missing" ? null : "not-json";
+        await arrangement.Store.SaveAsync(persisted);
+        var grain = await WorkflowGrainContractSupport.ReactivateAsync(arrangement, TimeProvider);
+
+        var before = await RequireRunAsync(arrangement);
+        var beforeJson = JsonSerializer.Serialize(before);
+        var beforeRevision = await ReadRevisionAsync(arrangement);
+        var beforeEventCount = (await arrangement.Events.ListAsync(arrangement.RunId)).Count;
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            grain.RequestChangesAsync("not applicable", "operator-1"));
+
+        Assert.Contains(expectedMessage, ex.Message, StringComparison.OrdinalIgnoreCase);
+        var after = await RequireRunAsync(arrangement);
+        Assert.Equal(beforeJson, JsonSerializer.Serialize(after));
+        Assert.Equal(beforeRevision, await ReadRevisionAsync(arrangement));
+        Assert.Equal(beforeEventCount, (await arrangement.Events.ListAsync(arrangement.RunId)).Count);
+    }
+
+    [Fact]
     public async Task CheckFails_DoesNotInjectRecoveryTask()
     {
         var arrangement = await ArrangeAsync(
@@ -228,6 +281,15 @@ public sealed class WorkflowGrainApprovalRecoverySpecs
     private static async Task<WorkflowRun> RequireRunAsync(WorkflowGrainArrangement arrangement) =>
         await arrangement.Store.LoadAsync(arrangement.RunId) ?? throw new InvalidOperationException("run missing");
 
+    private static async Task<long> ReadRevisionAsync(WorkflowGrainArrangement arrangement)
+    {
+        var factory = arrangement.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var row = await db.WorkflowRuns.FindAsync([arrangement.RunId]);
+        Assert.NotNull(row);
+        return db.Entry(row!).Property<long>("ETag").CurrentValue;
+    }
+
     private static WorkflowDefinition ApprovalStage() => new(
     [
         new StageDefinition(
@@ -239,5 +301,8 @@ public sealed class WorkflowGrainApprovalRecoverySpecs
             "build",
             [new("compile", "Compile", "spec/task")],
             [new("build-ok", "Build OK", "spec/check")]),
-    ]);
+    ],
+    Approval: new ApprovalConfig(new ApprovalFeedbackConfig([
+        new TaskDefinition("apply-feedback", "Apply approval feedback", "spec/task")
+    ])));
 }

@@ -195,7 +195,18 @@ public partial class WorkflowRunControlApiSpecs
         var definition = new WorkflowDefinition(
         [
             new StageDefinition("plan", [], [], RequiresApproval: true),
-        ]);
+        ],
+        Approval: new ApprovalConfig(new ApprovalFeedbackConfig([
+            new TaskDefinition(
+                "apply-feedback",
+                "Apply approval feedback",
+                "mohist/agent",
+                new Dictionary<string, JsonElement?>
+                {
+                    ["name"] = JsonSerializer.SerializeToElement("mohist/builder"),
+                    ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.apply-feedback }}"),
+                })
+        ])));
         await WorkflowApiTestSupport.SeedWorkflowProfileAsync(_connectionString, projectId, definition);
         var wrId = await _grains.GetGrain<IIssueGrain>(issueKey).StartWorkAsync();
         await DispatchEventsAsync();

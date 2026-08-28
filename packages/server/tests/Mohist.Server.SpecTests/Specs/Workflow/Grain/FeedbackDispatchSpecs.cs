@@ -28,7 +28,7 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task AwaitingApproval_RequestChanges_DeactivateThenDispatch_StillCarriesFeedbackContext()
     {
-        var workflow = await StartWorkflowAsync(ApprovalStage());
+        var workflow = await StartWorkflowAsync(ApprovalStageWithFeedback());
 
         var (draft, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, draft.WorkId, "completed");
@@ -58,4 +58,20 @@ public class FeedbackDispatchSpecs : WorkflowGrainSpecs
             "work.approvalFeedback object must still be present after workflow reactivation");
         Assert.Equal(feedbackId, feedbackEl.GetProperty("id").GetString());
     }
+
+    private static WorkflowDefinition ApprovalStageWithFeedback() =>
+        ApprovalStage() with
+        {
+            Approval = new ApprovalConfig(new ApprovalFeedbackConfig([
+                new TaskDefinition(
+                    "apply-feedback",
+                    "Apply approval feedback",
+                    "mohist/agent",
+                    new Dictionary<string, JsonElement?>
+                    {
+                        ["name"] = JsonSerializer.SerializeToElement("mohist/builder"),
+                        ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.apply-feedback }}"),
+                    })
+            ]))
+        };
 }

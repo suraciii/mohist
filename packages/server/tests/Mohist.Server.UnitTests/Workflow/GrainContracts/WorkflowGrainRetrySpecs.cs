@@ -608,9 +608,26 @@ public sealed class WorkflowGrainRetrySpecs
         var requestChangesAction = status.AvailableActions.Find(action => action.Name == "request-changes");
         Assert.NotNull(requestChangesAction);
         Assert.Equal("Request changes", requestChangesAction!.Label);
+        Assert.NotNull(status.AvailableActions.Find(action => action.Name == "stop"));
 
         // The legacy "reject" action must NOT be present.
         Assert.Null(status.AvailableActions.Find(action => action.Name == "reject"));
+    }
+
+    [Fact]
+    public async Task ApprovalRequested_WithoutFeedbackTasks_HidesRequestChangesButKeepsApprovalAndStop()
+    {
+        var arrangement = await ArrangeAsync(
+            "wr-retry-action-no-feedback",
+            ApprovalStage() with { Approval = null });
+        await DrivePlanToGateAsync(arrangement);
+
+        var status = await arrangement.Querier.GetStatusAsync(arrangement.RunId);
+        Assert.NotNull(status);
+        Assert.Equal("awaiting-approval", status!.Status);
+        Assert.NotNull(status.AvailableActions.Find(action => action.Name == "approve"));
+        Assert.NotNull(status.AvailableActions.Find(action => action.Name == "stop"));
+        Assert.Null(status.AvailableActions.Find(action => action.Name == "request-changes"));
     }
 
     [Fact]
@@ -687,5 +704,8 @@ public sealed class WorkflowGrainRetrySpecs
             "build",
             [new("compile", "Compile", "spec/task")],
             [new("build-ok", "Build OK", "spec/check")]),
-    ]);
+    ],
+    Approval: new ApprovalConfig(new ApprovalFeedbackConfig([
+        new TaskDefinition("apply-feedback", "Apply approval feedback", "spec/task")
+    ])));
 }

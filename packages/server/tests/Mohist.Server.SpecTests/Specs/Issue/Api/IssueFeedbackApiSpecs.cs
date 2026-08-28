@@ -11,6 +11,8 @@ using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Workflow.Services;
+using Mohist.Workflow.Definition;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
@@ -180,6 +182,21 @@ public class IssueFeedbackApiSpecs
                 respondedAt = (string?)null,
             }
             : null;
+        var definition = new WorkflowDefinition(
+        [
+            new StageDefinition(stage, [], [], RequiresApproval: true),
+        ],
+        Approval: new ApprovalConfig(new ApprovalFeedbackConfig([
+            new TaskDefinition(
+                "apply-feedback",
+                "Apply approval feedback",
+                "mohist/agent",
+                new Dictionary<string, JsonElement?>
+                {
+                    ["name"] = JsonSerializer.SerializeToElement("mohist/builder"),
+                    ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.apply-feedback }}"),
+                })
+        ])));
 
         var state = new
         {
@@ -229,6 +246,7 @@ public class IssueFeedbackApiSpecs
                 }
             },
             feedback = new object[] { },
+            boundWorkflowDefinitionJson = WorkflowYamlSerializer.ToJson(definition),
         };
 
         var row = existing ?? new WorkflowRunRow { WorkflowRunId = wrId };

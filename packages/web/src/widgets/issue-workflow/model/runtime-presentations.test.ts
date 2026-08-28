@@ -2,7 +2,19 @@ import { describe, expect, it } from 'vitest'
 import { IssueHealth, IssueStatus, WorkflowStage } from '../../../entities/issue'
 import { deriveRuntimeDecision, type RuntimeDecisionInput } from './derive-runtime-decision'
 
-function baseInput(overrides: Partial<RuntimeDecisionInput['issue']> = {}): RuntimeDecisionInput {
+function baseInput(
+  overrides: Partial<RuntimeDecisionInput['issue']> = {},
+  timeline: RuntimeDecisionInput['timeline'] = {
+    currentStage: WorkflowStage.Plan,
+    status: 'AwaitingApproval',
+    stages: [],
+    pendingWork: null,
+    availableActions: [
+      { name: 'approve', label: 'Approve', target: null },
+      { name: 'reject', label: 'Send back', target: null },
+    ],
+  },
+): RuntimeDecisionInput {
   return {
     issue: {
       status: IssueStatus.InProgress,
@@ -30,16 +42,7 @@ function baseInput(overrides: Partial<RuntimeDecisionInput['issue']> = {}): Runt
       blocker: null,
       ...overrides,
     },
-    timeline: {
-      currentStage: WorkflowStage.Plan,
-      status: 'AwaitingApproval',
-      stages: [],
-      pendingWork: null,
-      availableActions: [
-        { name: 'approve', label: 'Approve', target: null },
-        { name: 'reject', label: 'Send back', target: null },
-      ],
-    },
+    timeline,
   }
 }
 
@@ -58,6 +61,74 @@ describe('runtime-presentations approval pause copy', () => {
 
     expect(decision.nextAction).not.toMatch(/review and approve to continue/i)
     expect(decision.nextAction).toMatch(/approval decision is needed/i)
+  })
+})
+
+describe('runtime-presentations approval actions', () => {
+  const approvalTimeline = (names: string[]) => ({
+    currentStage: WorkflowStage.Plan,
+    status: 'AwaitingApproval',
+    stages: [],
+    pendingWork: null,
+    availableActions: names.map((name) => ({ name, label: name, target: null })),
+  })
+
+  it('enables approve, stop, and send back for the server action names', () => {
+    const decision = deriveRuntimeDecision(
+      baseInput(
+        {
+          recovery: {
+            currentWorkItem: null,
+            latestAttemptState: null,
+            workflowSummaryState: 'awaiting-approval',
+            allowedActions: [],
+          },
+        },
+        approvalTimeline(['approve', 'stop', 'request-changes']),
+      ),
+    )
+
+    expect(decision.actions.find((action) => action.kind === 'approve')?.enabled).toBe(true)
+    expect(decision.actions.find((action) => action.kind === 'stop')?.enabled).toBe(true)
+    expect(decision.actions.find((action) => action.kind === 'send-back')?.enabled).toBe(true)
+  })
+
+  it('leaves send back disabled when only approve and stop are available', () => {
+    const decision = deriveRuntimeDecision(
+      baseInput(
+        {
+          recovery: {
+            currentWorkItem: null,
+            latestAttemptState: null,
+            workflowSummaryState: 'awaiting-approval',
+            allowedActions: ['approve', 'stop'],
+          },
+        },
+        approvalTimeline(['approve', 'stop']),
+      ),
+    )
+
+    const sendBack = decision.actions.find((action) => action.kind === 'send-back')
+    expect(sendBack?.enabled).toBe(false)
+    expect(sendBack?.reason).toBe('Send-back is not available right now.')
+  })
+
+  it.each(['reject', 'send-back', 'send_back'])('keeps legacy %s enabled', (legacyAction) => {
+    const decision = deriveRuntimeDecision(
+      baseInput(
+        {
+          recovery: {
+            currentWorkItem: null,
+            latestAttemptState: null,
+            workflowSummaryState: 'awaiting-approval',
+            allowedActions: [legacyAction],
+          },
+        },
+        approvalTimeline([legacyAction]),
+      ),
+    )
+
+    expect(decision.actions.find((action) => action.kind === 'send-back')?.enabled).toBe(true)
   })
 })
 

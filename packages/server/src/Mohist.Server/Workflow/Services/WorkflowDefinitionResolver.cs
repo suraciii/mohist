@@ -236,9 +236,9 @@ public class WorkflowDefinitionResolver : IScopedService
     }
 
     /// <summary>
-    /// Returns the approval configuration (currently the feedback task config)
-    /// from the resolved template. Used by the grain's
-    /// <c>RequestChangesAsync</c> path.
+    /// Returns the approval configuration from the resolved template for
+    /// resolver callers. Workflow-run approval commands use their bound
+    /// definition snapshot instead.
     /// </summary>
     public async Task<ApprovalConfig?> LoadApprovalConfigAsync(string runId)
     {
