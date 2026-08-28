@@ -2,7 +2,7 @@
 
 Mohist supports long-running self-hosted work. After an Issue starts, its
 Workflow can run for minutes or hours, and the user should not need to watch the
-screen. Some moments still require attention: an Approval point is reached,
+screen. Some moments still require attention: an Approval Point is reached,
 execution fails, or the Issue finishes. Hermes notifications send these moments
 to a chat platform such as Telegram or WeChat. The user can see them on a phone
 and respond with a command so work can continue.
@@ -23,7 +23,7 @@ and respond with a command so work can continue.
 ## Notification Events
 
 Four of the five event types are enabled by default. On by default: an
-Approval point is waiting for a decision, the Workflow failed and blocked the
+Approval Point is waiting for a decision, the Workflow failed and blocked the
 Issue, the Issue completed, and an Agent response failed to handle its work.
 Off by default: the Issue started work, because the user usually started it
 and the notice is noise.
@@ -102,7 +102,7 @@ Reload Server after writing the configuration:
 mo update server
 ```
 
-For a direct end-to-end check, drive a real Issue to an Approval point or
+For a direct end-to-end check, drive a real Issue to an Approval Point or
 completion and verify that the chat platform receives the notification.
 
 If setup cannot reach Hermes, first check `hermes gateway status` and the health
@@ -115,9 +115,9 @@ subscription secret, and platforms without a home channel have an explicit
 
 Suggested actions in failure notifications map directly to recovery commands.
 After seeing that Issue 42 failed, run `mo run retry --issue 42` in any terminal,
-or ask an Agent in chat to do so. An Approval notification similarly maps to
-`mo run approve --issue 42` or
-`mo run reject --issue 42 --message "describe the required changes"`. See
+or ask an Agent in chat to do so. An Approval Point notification similarly maps
+to `mo run approve --issue 42` or, when Feedback Tasks are configured,
+`mo run request-changes --issue 42 --message "describe the required changes"`. See
 [Troubleshooting](troubleshooting.md) for the complete recovery map.
 
 ## WeChat Delivery Window

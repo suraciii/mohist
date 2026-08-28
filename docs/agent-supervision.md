@@ -1,17 +1,17 @@
 # Agent Supervision
 
-After an Issue enters a Workflow, stages require Approvals and failures require
-handling. Agent supervision delegates these front-line decisions to a Mohist
-Agent. It decides Approvals and analyzes or repairs failures. The user acts only
-when the Agent cannot continue.
+After an Issue enters a Workflow, Stages can reach Approval Points and failures
+require handling. Agent supervision delegates these front-line decisions to a
+Mohist Agent. It decides whether to Approve or Request Changes and analyzes or
+repairs failures. The user acts only when the Agent cannot continue.
 
 ## Mental Model
 
 - **The Agent is the front-line operator; the user handles exceptions.** The
-  Agent uses the same commands as the user to approve, reject, repair, and
-  retry. The user does not need to be present.
+  Agent uses the same commands as the user to approve, request changes, repair,
+  and retry. The user does not need to be present.
 - **A notification creates awareness, not a task.** The user still receives a
-  notice at an Approval point or Workflow failure. The actual call to action is
+  notice at an Approval Point or Workflow failure. The actual call to action is
   either the Agent's stop comment or production that remains stopped.
 - **Agent failures also notify the user.** A notice reports when the Agent
   cannot start or fails during its response. There is no silent state in which
@@ -42,7 +42,7 @@ mo skill install --path <repository-path>
 ## Issue Watch as an Autopilot Switch
 
 A watch is an Issue-level switch. The selected Agent responds when that Issue
-reaches an Approval point or a terminal failure. Its behavior matches Project
+reaches an Approval Point or a terminal failure. Its behavior matches Project
 supervision but applies only to that Issue.
 
 `mo issue view 42` shows who supervises the Issue:
@@ -68,17 +68,18 @@ Mentioning `@supervisor supervise and advance this Issue` in a comment also
 works. The Agent runs `mo issue watch add` to make the continuing watch
 explicit.
 
-## Approval Handling
+## Approval Point Handling
 
-At an Approval point, the Agent reads the Issue goal and stage artifacts. It
-approves when the artifacts serve the goal. It rejects when a required change
-remains and states the change clearly. Rejection creates a feedback task for
-automatic rework. The Agent receives the next Approval request and reviews
+At an Approval Point, the Agent reads the Issue goal and Stage artifacts. It
+selects Approve when the artifacts serve the goal. It selects Request Changes when a
+required change remains and states the change clearly. The bound Feedback Tasks
+apply the Approval Feedback, and the Agent reviews the same Approval Point
 again.
 
 The Agent does not decide a product-direction trade-off or a question for which
-it lacks information. It leaves the Approval waiting and writes a comment that
-explains the uncertainty. The waiting Approval is the user's signal to act.
+it lacks information. It leaves the Approval Point waiting and writes a comment
+that explains the uncertainty. The waiting Approval Point is the user's signal
+to act.
 
 ## Failure Handling
 
@@ -102,7 +103,7 @@ The Agent judges whether work is correct. The user decides whether work should
 continue.
 
 - **Agent:** Review artifacts, analyze failures, repair code, retry or rerun,
-  reject an Approval, and give rework feedback.
+  select Request Changes, and give Approval Feedback.
 - **User:** Close an Issue, stop the complete run, or change the Issue goal.
   These terminal or directional decisions are not delegated. The Agent can
   recommend them in a comment but cannot decide them.
@@ -111,9 +112,9 @@ continue.
 
 The user acts in three cases: the Agent stops and requests a decision in a
 comment, the Agent response fails and sends a notification, or production
-stalls and remains stopped. Use normal commands to approve, reject, or retry,
-and read comments for context first. The Agent does not lock state. The user can
-always act through the regular command surface. `watch remove` removes the Agent
+stalls and remains stopped. Use normal commands to approve, request changes, or
+retry, and read comments for context first. The Agent does not lock state. The
+user can always act through the regular command surface. `watch remove` removes the Agent
 from the Issue entirely.
 
 ## Customization
@@ -144,7 +145,7 @@ use `mo routing rule edit` to assign one rule to it. Observe two constraints:
   each can count its own interventions.
 - In each Agent's Instructions, require reading **all** supervision comments on
   the Issue before acting, not only comments by that Agent. Otherwise neither
-  side can see a loop between repeated rejection and repeated repair.
+  side can see repeated requests for changes that do not produce progress.
 
 ## Implementation Gaps
 

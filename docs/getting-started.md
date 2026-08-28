@@ -230,8 +230,8 @@ then select **Start**.
 Mohist then:
 
 1. Creates or reuses the named Workspace `issue-1` from the target Repository.
-2. Enters the **Plan** stage, where an Inline Agent analyzes the requirement and
-   produces the plan, design record, and executable task list under `PLANS/`.
+2. Enters the **Plan** stage, where a Mohist Agent Task analyzes the requirement
+   and produces the plan, design record, and executable task list under `PLANS/`.
 
 ## 10. Wait for Plan to Finish
 
@@ -244,15 +244,15 @@ model speed. You can:
 - Open the Web UI Issue details to see complete progress and execution evidence.
 
 After Plan finishes, the Issue stops in **awaiting approval**. The Workflow is
-waiting for an Approval decision.
+waiting for a decision at an Approval Point.
 
-## 11. Approve or Reject Plan
+## 11. Approve or Request Changes
 
 Ask the External Agent to summarize the Plan artifacts, risks, and
 recommendation. You can also open the Web UI Issue details to inspect the latest
 artifacts:
 
-- `PLANS/PLAN.md`: The Inline Agent's understanding of the requirement and its
+- `PLANS/PLAN.md`: The Mohist Agent's understanding of the requirement and its
   proposed approach
 - `PLANS/DESIGN.md`: Design decisions; the file always exists and states when no
   separate design is needed
@@ -265,25 +265,26 @@ mo run artifact list --issue 1
 mo run artifact get --issue 1 <artifact-id>
 ```
 
-Approve the output when it is sound. Reject it with a reason when it needs a
-change; the Inline Agent will plan again. This step handles a Workflow approval
-point. The operation can come from an External Agent, the Web UI, CLI, a Mohist
-Agent, or other automation. An External Agent or automation should provide
-attribution. A person who acts directly can omit it.
+Approve the output when it is sound. Select Request Changes with a reason when
+it needs revision. The configured Feedback Tasks apply the feedback, the Plan
+Checks run again, and the Workflow returns to the same Approval Point. The Plan
+Tasks do not run again. This action is available only when the bound
+Definition declares Feedback Tasks. The operation can come from an External
+Agent, the Web UI, CLI, a Mohist Agent, or other automation.
 
 ```bash
-mo run approve --issue 1                              # Approve
-mo run reject --issue 1 --message "Changes required"  # Reject
+mo run approve --issue 1                                       # Approve
+mo run request-changes --issue 1 --message "Changes required"  # Request Changes
 ```
 
 ## 12. Observe Build, Check, and Integrate
 
-After Approval, the Workflow advances automatically:
+After the Plan is approved, the Workflow advances automatically:
 
-- **Build**: An Inline Agent writes code and runs tests according to the
-  approved task list.
-- **Check**: A separate Inline Agent session reviews the output and records
-  its findings as evidence, then the stage waits for another Approval.
+- **Build**: A Mohist Agent writes code and runs tests according to the approved
+  task list.
+- **Check**: A separate Mohist Agent Task reviews the output and records its
+  findings as evidence, then the Stage waits at another Approval Point.
 - **Integrate**: Mohist enables auto-merge on the pull request and waits until
   it is merged.
 

@@ -171,9 +171,9 @@ enter the language.
 - `label`: `list`, `create`, `edit`, `delete`.
 - `workflow`: `list`, `view`, `create`, `edit`, `delete`, `validate`;
   `view --yaml` reads the raw Workflow Definition.
-- `run`: `list`, `view`, `watch`, `approve`, `reject`, `retry`, `rerun`,
-  `pause`, `resume`, `stop`; `view --yaml` reads the current Definition of the
-  Profile bound to the Run; `feedback list/view`;
+- `run`: `list`, `view`, `watch`, `approve`, `request-changes`, `retry`,
+  `rerun`, `pause`, `resume`, `stop`; `view --yaml` reads the complete Definition
+  bound to the Run; `feedback list/view`;
   `variable list/get/set/unset`, where `list/get --effective` reads merged
   values.
 - `agent`: `list`, `view`, `start`, `create`, `edit`, `archive`, `restore`,
@@ -268,20 +268,19 @@ step.
 `--parent`, and `--epic`. With `--json` field selection, one call can compare
 multiple Issues without an `issue view` call for each one.
 
-Approval, recovery, pause, and termination change the WorkflowRun and therefore
-exist only under `mo run`. Issue comments, prerequisites, templates, Variables,
+Approval Point decisions, recovery, pause, and termination change the WorkflowRun
+and therefore exist only under `mo run`. Issue comments, prerequisites, templates, Variables,
 diff, and commits remain under `mo issue` because they describe or support the
 work.
 
 ## Workflow Profile
 
 `mo workflow` manages Project-scoped Workflow Profiles. A WorkflowRun binds a
-Profile ID when it starts; it does not copy the Definition. Changing the Issue
-selection or Project default affects only future Runs. Editing the bound Profile
-affects an active Run. See
+Profile ID and complete Definition when it starts. Changing the Issue selection,
+Project default, or Profile Definition affects only future Runs. See
 [Workflow Profile: Select a Profile](workflow-profiles.md#select-a-profile) for
-the complete timing rules. `workflow edit --help` must state the effect on
-active Runs.
+the complete timing rules. `workflow edit --help` must state that active Runs
+keep their bound Definition.
 
 The Profile collection belongs to Workflow. The Project default and explicit
 Issue selection are references to a Profile and do not belong to the Profile.
@@ -336,10 +335,9 @@ it does not upload,
 restore, or select history. A Run-ID read is accepted only while the associated
 Issue is still bound to that Run.
 
-`mo run view --yaml` reads the current Definition of the Profile ID bound to
-the Run. It is not a historical Definition snapshot: editing other Profile
-structure can change later Stages, so this view can also change during the
-Run. The option is mutually exclusive with `--json`. Task views expose
+`mo run view --yaml` reads the complete Definition bound to the Run. It remains
+unchanged when the Profile is edited later. The option is mutually exclusive
+with `--json`. Task views expose
 `agentJobId` and `agentSessionId` for Agent-backed tasks so clients can
 navigate to the owning AgentJob and AgentSession.
 
@@ -587,7 +585,7 @@ for the complete product semantics.
 
 `mo github` manages the connection between a GitHub repository and a registered
 Project Repository: the mirror of Issues, the `/mohist` command entry, and
-review-based Approval.
+review-based Approval Point decisions.
 
 - `mo github connect owner/repo [--repo <name>] [--approver <login> ...]`
   connects a GitHub repository through the deployment's GitHub App. Mohist

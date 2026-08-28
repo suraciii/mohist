@@ -24,7 +24,7 @@ and its Agent-launch-origin AgentSession. Three authorities own its facts:
    key.
 2. **Use current state, not the event snapshot:** An event says what occurred.
    Before acting, the Agent must use the command surface to confirm current
-   state. For example, it confirms that a run still waits for an Approval.
+   state. For example, it confirms that a run still waits at an Approval Point.
    Domain commands reject stale state explicitly. Approving a run that no
    longer waits is rejected. The Agent treats rejection as a normal signal, not
    as an internal error to retry.
@@ -49,16 +49,16 @@ and its Agent-launch-origin AgentSession. Three authorities own its facts:
 Every Agent decision must be distinguishable from a person's action so an owner
 can take over from history.
 
-- A comment declares the Agent name through `--display-name`, by convention in
-  the supervision preset.
-- An Approval decision can declare `decidedBy`. Like comment author, it is a
-  declaration rather than authentication. `mo run approve` and
-  `mo run reject` accept `--display-name`. Decision events and read models
-  include the field when present. An Agent should provide attribution; direct
-  human action can omit it.
-- Manual Approve and Send Back in the Web UI do not require an actor. An
-  unsigned decision leaves `decidedBy` empty and does not synthesize `web`,
-  `owner`, or another value.
+- A comment records the authenticated Principal as its author. `--display-name`
+  is a presentation-only alias and cannot set or replace comment attribution.
+- A decision at an Approval Point records the authenticated Principal in `decidedBy`.
+  `--display-name` is a presentation-only alias and cannot set or replace
+  `decidedBy`. `mo run approve` and `mo run request-changes` accept it only for
+  presentation. Decision events and read models include the authenticated
+  identity and display name when present.
+- Manual Approve and Request Changes in the Web UI do not require an authenticated
+  actor. An unsigned decision leaves `decidedBy` empty and does not synthesize
+  `web`, `owner`, or another value.
 
 ### Non-goals
 
@@ -72,6 +72,7 @@ can take over from history.
 
 ## Status
 
-The `agent.job.failed` event and notification, optional Approval `decidedBy`,
-and Agent actor declaration are implemented. Guarantees 1 through 3 formalize
-existing launch-pipeline and domain-command behavior.
+The `agent.job.failed` event and notification, authenticated Principal
+attribution for comments and decisions at an Approval Point, and
+presentation-only display names are implemented. Guarantees 1 through 3
+formalize existing launch-pipeline and domain-command behavior.

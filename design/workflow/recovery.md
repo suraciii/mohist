@@ -200,11 +200,12 @@ recoveries:
 ```
 
 - The `recoveries` map is part of WorkflowDefinition and round-trips with the rest of the Profile.
-- A recovery trigger selects a named template from the Profile bound to the run. It does not build a
-  second recovery definition in application code.
+- A recovery trigger selects a named template from the complete Definition bound to the WorkflowRun.
+  It does not read the current Profile or build a second recovery definition in application code.
 - Workflow content is the single author of recovery `uses`, Prompt references, budget, and handler
-  order. Keeping application code limited to name selection lets a Profile upgrade change behavior
-  in one place and prevents a copied recovery path from drifting to the wrong Prompt.
+  order. Keeping application code limited to name selection lets a Profile edit change behavior for
+  future WorkflowRuns in one place and prevents a copied recovery path from drifting to the wrong
+  Prompt.
 - Naming convention: template names are lowercase and hyphen-separated, such as
   `rebase-conflicts` and `plan-conflicts`. Each built-in YAML file declares the templates it needs.
   Extract cross-Profile sharing into a separate file only after a third Profile or a second shared

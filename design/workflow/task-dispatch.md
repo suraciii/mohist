@@ -36,9 +36,9 @@ does **not** happen during Server dispatch:
   raw input, a Variables resource, or the complete dispatch context.
 
 Once dispatched, an attempt's context snapshot remains unchanged throughout that attempt. Later
-changes to Variables, Prompts, Profile Definition, or a Stage overlay affect only tasks not yet
-dispatched and later attempts, including retry, recovery continuation, and rerun-from-stage. They
-do not change an already dispatched attempt.
+changes to Variables or Prompts affect only Tasks not yet dispatched and later attempts, including
+retry, recovery continuation, and rerun-from-stage. A Profile edit affects only future
+WorkflowRuns because the current Run uses its complete bound Definition.
 
 ## Template Expression Rules
 
@@ -166,8 +166,8 @@ a non-retryable error.
 
 ### Parent Context for a Child-Issue Plan
 
-A child-Issue Plan task executed by an Inline Agent may receive the current parent
-Issue title and body as optional read-only context. Other Stages, Actions,
+A child-Issue Plan Mohist Agent Task may receive the current parent Issue title
+and body as optional read-only context. Other Stages, Actions,
 AgentJobs, and ordinary Issues do not receive it. Parent context is not persisted
 in WorkflowRun state, task input, Variables, or Prompts, and it creates no
 template namespace. The current child-Issue body remains authoritative for

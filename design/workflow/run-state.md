@@ -55,6 +55,12 @@ State is not:
   not truncation.
 - A normal active run must remain within hundreds of KiB. A State record above
   1 MiB violates the content boundary and is a defect, not a capacity request.
+- WorkflowRun State retains only Approval Feedback facts needed for the current
+  decision or execution. Resolved feedback history belongs in events and read
+  projections; it must not accumulate as an unbounded list in rewritten
+  aggregate State. Approval Feedback and Feedback Task behavior is defined in
+  [`definition.md`](definition.md#approval-feedback); this document defines only
+  its State boundary.
 
 ## Read and Write Cost
 

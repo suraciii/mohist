@@ -18,7 +18,8 @@ See [Workflow Health](the-workflow.md#health) for the meaning of each value.
 Each value maps to an operator action:
 
 - `active`: wait.
-- `paused`: approve, reject, or resume.
+- `attention`: approve or request changes when available.
+- `paused`: resume.
 - `blocked`: use a recovery action below.
 - `cancelled`: reopen when necessary.
 - `done`: accept or archive.
@@ -46,8 +47,8 @@ Each value maps to an operator action:
 Every recovery command preserves Issue history. State and artifacts remain
 unless the Issue is closed and archived.
 
-A retry restores the complete automatic recovery budget. When a review and
-repair loop exhausts that budget, retry starts a new budget.
+A retry restores the complete automatic recovery budget. Approval Feedback is
+not automatic recovery and has no Request Changes limit.
 
 ## Common Failure Modes
 
@@ -93,7 +94,8 @@ mo session list --issue <n>
 Resolve:
 
 - Edit the task list in `PLANS/tasks.json` and remove a blocked task.
-- Reject the Plan so the Agent plans again.
+- Request Changes at the Plan Approval Point so its Feedback Tasks revise the
+  output without rerunning the original Plan Tasks.
 - Split the Issue into smaller child Issues.
 
 ### 3. Check Review Reports Findings
@@ -106,8 +108,8 @@ findings on its own.
 
 Choose one action:
 
-- Reject with feedback so the Agent repairs the findings and the stage checks
-  run again.
+- Request Changes so the configured Feedback Tasks repair the findings and the
+  Stage Checks run again.
 - Approve the current output when the finding is not material.
 
 ### 4. Integrate Has a Merge Conflict
