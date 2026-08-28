@@ -134,4 +134,5 @@ does not add a separate timeout policy for each tool.
 [Action Contracts](README.md#shared-semantics-for-agent-execution-actions).
 The Pi Runtime can also return `incompatible-runtime` and `interrupted` through
 that shared contract. Skill resolution reports source category
-`skill_not_found`; the ActionResult and recovery code is `skill-not-found`.
+`skill_not_found`; the AgentJob task result and recovery code is
+`skill-not-found`.

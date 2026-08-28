@@ -133,8 +133,8 @@ defines:
   execution configuration.
 
 Runtime diagnostics and recorded execution evidence keep the established
-`unsupported_execution_configuration` category. The ActionResult uses
-`unsupported-execution-configuration` because Action business error codes use
+`unsupported_execution_configuration` category. The AgentJob task result uses
+`unsupported-execution-configuration` because business error codes use
 lowercase kebab-case. Skill resolution follows the same boundary:
-`skill_not_found` is the resolver category, while `skill-not-found` is the
-ActionResult and recovery code.
+`skill_not_found` is the resolver category, while `skill-not-found` is the task
+result and recovery code.
