@@ -418,7 +418,7 @@ describe('IssueDetailPage Artifacts ownership', () => {
           currentWorkItem: null,
           latestAttemptState: null,
           workflowSummaryState: 'awaiting-approval',
-          allowedActions: ['approve', 'reject'],
+          allowedActions: ['approve', 'request-changes'],
         },
       }),
     )

@@ -215,7 +215,7 @@ internal static class CommandPresentations
 
         AttachGroup(root, ["run"], CommandCapability.Automation, "Control and read WorkflowRuns",
             ("approve", "Pass the approval gate for a WorkflowRun"),
-            ("reject", "Reject a WorkflowRun at its approval gate"),
+            ("request-changes", "Request changes to a WorkflowRun at its approval gate"),
             ("retry", "Retry the current failure point of a WorkflowRun"),
             ("rerun", "Rerun a WorkflowRun"),
             ("pause", "Pause a WorkflowRun"),
@@ -583,9 +583,9 @@ internal static class CommandPresentations
                     CommandCapability.Automation, "Pass the approval gate for a WorkflowRun",
                     Boundary: "Address the Run by Run ID or `--issue <number>`. Project resolution only happens when --issue is used.",
                     JsonFields: RunCommands.RunControlDescriptor.Fields));
-                CommandPresentationCatalog.Attach(Find(group, "reject"), new CommandPresentation(
-                    CommandCapability.Automation, "Reject a Run at its approval gate",
-                    Boundary: "Reject requires a non-empty --message; the Run returns to the prior stage.",
+                CommandPresentationCatalog.Attach(Find(group, "request-changes"), new CommandPresentation(
+                    CommandCapability.Automation, "Request changes to a Run at its approval gate",
+                    Boundary: "Request changes requires a non-empty --message; the Run returns to the prior stage.",
                     JsonFields: RunCommands.RunControlDescriptor.Fields));
                 CommandPresentationCatalog.Attach(Find(group, "retry"), new CommandPresentation(
                     CommandCapability.Automation, "Retry the current failure point of a Run",

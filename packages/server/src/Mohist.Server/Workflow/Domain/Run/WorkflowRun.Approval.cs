@@ -68,29 +68,6 @@ public static partial class WorkflowRunExtensions
             return events;
         }
 
-        public IReadOnlyList<WorkflowEvent> Reject(string? reason, DateTimeOffset now, string? decidedBy = null, string? displayName = null)
-        {
-            var current = run.CurrentStage();
-            if (!current.IsAwaitingApproval)
-                throw new InvalidOperationException($"Stage {current.Id} is not awaiting approval");
-
-            current.ApprovalStatus = new ApprovalStatus(
-                "rejected",
-                current.ApprovalStatus!.RequestedAt,
-                now.ToString("O"),
-                decidedBy,
-                displayName);
-            current.Failure = new FailureDetails(FailureReason.ApprovalRejected, current.Id, Message: reason);
-            run.Failure = current.Failure;
-            current.Status = StageRunStatus.Failed;
-            run.Status = WorkflowRunStatus.Failed;
-            return [
-                new StageApprovalResolved(current.Id, ApprovalResult.Rejected, reason, decidedBy, displayName),
-                new StageFailed(current.Id, reason),
-                new WorkflowRunFailed(reason)
-            ];
-        }
-
         public IReadOnlyList<WorkflowEvent> RequestChanges(
             string body,
             string feedbackId,
@@ -141,7 +118,6 @@ public static partial class WorkflowRunExtensions
             events.AddRange(runtimeEvents);
 
             events.Add(new FeedbackRequested(current.Id, feedbackId, body));
-            events.Add(new StageApprovalResolved(current.Id, ApprovalResult.Rejected, body, decidedBy, displayName));
             return events;
         }
 
