@@ -589,21 +589,20 @@ for the complete product semantics.
 Project Repository: the mirror of Issues, the `/mohist` command entry, and
 review-based Approval.
 
-- `mo github connect owner/repo [--repo <name>] [--approver <login> ...] --pat <token>`
-  connects a GitHub repository to the current Project. A fine-grained PAT with
-  Issues read/write permission is required through `--pat` and is stored as a
-  server secret. It matches a registered
-  Repository by git URL, or uses the explicit `--repo` name when the match is
-  ambiguous, then prints the GitHub configuration checklist: webhook address,
-  content type, secret, and event subscriptions. One GitHub repository connects
-  to one Project Repository; connecting an already-connected repository
-  continues the existing connection.
+- `mo github connect owner/repo [--repo <name>] [--approver <login> ...]`
+  connects a GitHub repository through the deployment's GitHub App. Mohist
+  verifies the App installation and Repository scope, or returns an installation
+  URL and a retry action. It then prints the webhook address, content type,
+  secret, and event subscriptions. One GitHub repository connects to one
+  Project Repository; reconnecting an existing App binding is idempotent.
 - `mo github list` shows every Repository of the current Project and its
   connection state, including repositories without a connection.
 - `mo github view <connection>` and `mo github enable|disable <connection>`
-  inspect and control one connection. Disabling pauses mirroring and command
-  intake while keeping existing links visible; enabling re-projects every
-  linked Issue once. A connection cannot be deleted.
+  inspect and control one connection. Output includes installation identity,
+  attention, reprojection, reconnect-required state, and the last actionable
+  error. Disabling pauses mirroring and command intake while keeping existing
+  links visible; enabling verifies the installation and re-projects every linked
+  Issue once. A connection cannot be deleted.
 - Once connected, every non-Draft Mohist Issue targeting that Repository gets a
   GitHub mirror automatically; no per-Issue opt-in exists. A comment starting
   with `/mohist` on a GitHub Issue is a command from the shared verb

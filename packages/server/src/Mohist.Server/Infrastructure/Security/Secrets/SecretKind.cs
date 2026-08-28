@@ -14,6 +14,7 @@ public enum SecretKind
     CandidateBotToken = 9,
     CandidateAppToken = 10,
     PublicApiCursorKey = 11,
+    GitHubAppCredential = 12,
 }
 
 public static class SecretKinds
@@ -30,6 +31,7 @@ public static class SecretKinds
     public const string CandidateBotToken = "candidateBotToken";
     public const string CandidateAppToken = "candidateAppToken";
     public const string PublicApiCursorKey = "publicApiCursorKey";
+    public const string GitHubAppCredential = "githubAppCredential";
 
     public static string ToWire(SecretKind kind) => kind switch
     {
@@ -45,6 +47,7 @@ public static class SecretKinds
         SecretKind.CandidateBotToken => CandidateBotToken,
         SecretKind.CandidateAppToken => CandidateAppToken,
         SecretKind.PublicApiCursorKey => PublicApiCursorKey,
+        SecretKind.GitHubAppCredential => GitHubAppCredential,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
@@ -87,6 +90,9 @@ public static class SecretKinds
                 return true;
             case PublicApiCursorKey:
                 kind = SecretKind.PublicApiCursorKey;
+                return true;
+            case GitHubAppCredential:
+                kind = SecretKind.GitHubAppCredential;
                 return true;
             default:
                 kind = default;

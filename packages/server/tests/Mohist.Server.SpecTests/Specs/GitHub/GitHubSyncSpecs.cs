@@ -65,7 +65,7 @@ public sealed class GitHubSyncSpecs
         await PumpAsync();
 
         await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName, pat = "github-pat" });
+            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName });
 
         using var first = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{project.Id}/issues/{issueNumber}/github/sync", new { });
@@ -132,7 +132,7 @@ public sealed class GitHubSyncSpecs
             gitUrl: $"https://github.com/{owner}/{RepositoryName}.git");
         var connection = await _fixture.Client.PostDataAsync<JsonElement>(
             $"/api/projects/{project.Id}/github-connections",
-            new { owner, repo = RepositoryName, pat = "github-pat" });
+            new { owner, repo = RepositoryName });
         _fixture.Comments.CreateFailure = new InvalidOperationException("GitHub rejected issue creation");
         var issueNumber = await CreateIssueInProjectAsync(project.Id, isDraft: false);
         await PumpAsync();
@@ -164,7 +164,7 @@ public sealed class GitHubSyncSpecs
             gitUrl: $"https://github.com/{owner}/{RepositoryName}.git");
         await _fixture.Client.PostDataAsync<JsonElement>(
             $"/api/projects/{project.Id}/github-connections",
-            new { owner, repo = RepositoryName, pat = "github-pat" });
+            new { owner, repo = RepositoryName });
         _fixture.Comments.CreateIssueNumberOverride = 0;
         var issueNumber = await CreateIssueInProjectAsync(project.Id, isDraft: false);
         await PumpAsync();
@@ -648,7 +648,7 @@ public sealed class GitHubSyncSpecs
             gitUrl: $"https://github.com/{owner}/{RepositoryName}.git");
         var issueNumber = await CreateIssueInProjectAsync(project.Id, isDraft: true);
         await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName, pat = "github-pat" });
+            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName });
 
         const int githubIssueNumber = 817;
         _fixture.Comments.Issues[githubIssueNumber] = new GitHubIssueSnapshot(
@@ -681,7 +681,7 @@ public sealed class GitHubSyncSpecs
             gitUrl: $"https://github.com/{owner}/{RepositoryName}.git");
         var connection = await _fixture.Client.PostDataAsync<JsonElement>(
             $"/api/projects/{project.Id}/github-connections",
-            new { owner, repo = RepositoryName, pat = "github-pat" });
+            new { owner, repo = RepositoryName });
         _fixture.Comments.CreateFailure = new InvalidOperationException("hold mirror creation");
         var issueNumber = await CreateIssueInProjectAsync(project.Id, isDraft: false);
         await PumpAsync();
@@ -743,7 +743,7 @@ public sealed class GitHubSyncSpecs
             "/api/projects", $"github-sync-{Guid.NewGuid():N}", repoName: RepositoryName,
             gitUrl: $"https://github.com/{owner}/{RepositoryName}.git");
         var connection = await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName, pat = "github-pat" });
+            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName });
         var issueNumber = await CreateIssueInProjectAsync(project.Id, isDraft: false);
         await PumpAsync();
         return (project.Id, issueNumber, connection.GetProperty("id").GetString()!);

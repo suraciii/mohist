@@ -2136,8 +2136,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.ToTable("StoredSecrets", null, t =>
                         {
-                            t.HasCheckConstraint("CK_StoredSecrets_Kind", "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret', 'clientSecret', 'signingSecret', 'configurationAccessToken', 'configurationRefreshToken', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken', 'publicApiCursorKey')");
-                            t.HasCheckConstraint("CK_StoredSecrets_OwnerKindKind", "(\"OwnerKind\" = 'agent_connection' AND \"Kind\" IN ('appToken', 'botToken')) OR (\"OwnerKind\" = 'webhook_subscription' AND \"Kind\" = 'webhookSecret') OR (\"OwnerKind\" = 'slack_workspace_enrollment' AND \"Kind\" IN ('configurationAccessToken', 'configurationRefreshToken', 'appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR (\"OwnerKind\" = 'managed_slack_agent_app' AND \"Kind\" IN ('appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR (\"OwnerKind\" = 'github_connection' AND \"Kind\" = 'appToken') OR (\"OwnerKind\" = 'server' AND \"Kind\" = 'publicApiCursorKey')");
+                            t.HasCheckConstraint("CK_StoredSecrets_Kind", "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret', 'clientSecret', 'signingSecret', 'configurationAccessToken', 'configurationRefreshToken', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken', 'publicApiCursorKey', 'githubAppCredential')");
+                            t.HasCheckConstraint("CK_StoredSecrets_OwnerKindKind", "(\"OwnerKind\" = 'agent_connection' AND \"Kind\" IN ('appToken', 'botToken')) OR (\"OwnerKind\" = 'webhook_subscription' AND \"Kind\" = 'webhookSecret') OR (\"OwnerKind\" = 'slack_workspace_enrollment' AND \"Kind\" IN ('configurationAccessToken', 'configurationRefreshToken', 'appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR (\"OwnerKind\" = 'managed_slack_agent_app' AND \"Kind\" IN ('appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR (\"OwnerKind\" = 'github_connection' AND \"Kind\" = 'appToken') OR (\"OwnerKind\" = 'server' AND \"Kind\" IN ('publicApiCursorKey', 'githubAppCredential'))");
                             t.HasCheckConstraint("CK_StoredSecrets_OwnerKind", "\"OwnerKind\" IN ('agent_connection', 'webhook_subscription', 'slack_workspace_enrollment', 'managed_slack_agent_app', 'github_connection', 'server')");
                         });
                 });
@@ -4630,19 +4630,27 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("IdentityKind")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("InstallationId")
                         .HasColumnType("TEXT")
                         .HasMaxLength(256);
+
+                    b.Property<string>("LastErrorCode")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastErrorDetail")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastErrorAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<bool>("NeedsAttention")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("NeedsReprojection")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("ReconnectRequired")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Owner")
@@ -4665,6 +4673,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("RepositoryNodeId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -4679,6 +4691,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.HasIndex("ProjectId", "RepositoryName");
+
+                    b.HasIndex("RepositoryNodeId")
+                        .IsUnique()
+                        .HasFilter("\"RepositoryNodeId\" IS NOT NULL");
 
                     b.ToTable("GitHubConnections", (string)null);
                 });

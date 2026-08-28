@@ -123,7 +123,7 @@ public readonly record struct SecretStoreAddress
                 or SecretKind.CandidateBotToken
                 or SecretKind.CandidateAppToken,
             SecretOwnerAddress.ManagedSlackAgentApp => kind is SecretKind.ClientSecret or SecretKind.SigningSecret or SecretKind.AppToken or SecretKind.BotToken or SecretKind.PreviousBotToken or SecretKind.PreviousAppToken or SecretKind.CandidateBotToken or SecretKind.CandidateAppToken,
-            SecretOwnerAddress.Server => kind is SecretKind.PublicApiCursorKey,
+            SecretOwnerAddress.Server => kind is SecretKind.PublicApiCursorKey or SecretKind.GitHubAppCredential,
             _ => false,
         };
         if (!valid)

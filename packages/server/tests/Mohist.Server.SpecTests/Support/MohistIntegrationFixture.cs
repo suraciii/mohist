@@ -23,6 +23,7 @@ using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.PublicApi;
 using Mohist.Server.Infrastructure.Slack.Ports;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.GitHub.Ports;
 using Mohist.Server.Logging;
 using Mohist.Server.Otel;
 using Mohist.Server.Runner.Services;
@@ -337,6 +338,9 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 RemoveHostedService<PublicExecutionProjector>(services);
             }
 
+            services.RemoveAll<IGitHubAppClient>();
+            services.AddSingleton<FakeGitHubAppClient>();
+            services.AddSingleton<IGitHubAppClient>(provider => provider.GetRequiredService<FakeGitHubAppClient>());
             services.RemoveAll<IFileCredentialStore>();
             services.AddSingleton<IFileCredentialStore>(new InMemoryFileCredentialStore());
             for (var index = services.Count - 1; index >= 0; index--)

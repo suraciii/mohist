@@ -12,45 +12,44 @@ public sealed class GitHubConnectionTests
         Owner = "octocat",
         Repo = "hello-world",
         RepositoryName = "hello-world",
+        InstallationId = "installation-1",
+        RepositoryNodeId = "repo-node-1",
     };
 
     [Fact]
-    public void Validate_AcceptsDefaultConnection()
+    public void Validate_AcceptsVerifiedAppConnection()
     {
-        Valid().Validate(requireInstallationId: false);
+        Valid().Validate();
     }
 
     [Fact]
-    public void Validate_RejectsInvalidEnums()
-    {
-        var status = Valid();
-        status.Status = "archived";
-        Assert.Throws<GitHubConnectionValidationException>(() => status.Validate(requireInstallationId: false));
-
-        var identity = Valid();
-        identity.IdentityKind = "machine-user";
-        Assert.Throws<GitHubConnectionValidationException>(() => identity.Validate(requireInstallationId: false));
-    }
-
-    [Fact]
-    public void Validate_RequiresInstallationIdForAppIdentityWhenDemanded()
+    public void Validate_RejectsInvalidStatus()
     {
         var connection = Valid();
-        connection.IdentityKind = GitHubIdentityKind.App;
+        connection.Status = "archived";
+        Assert.Throws<GitHubConnectionValidationException>(() => connection.Validate());
+    }
 
+    [Fact]
+    public void Validate_RequiresInstallationAndRepositoryIdentity()
+    {
+        var connection = Valid();
+        connection.InstallationId = null;
         var ex = Assert.Throws<GitHubConnectionValidationException>(() => connection.Validate());
         Assert.Equal("installation_id_required", ex.Code);
 
-        connection.InstallationId = "123456";
-        connection.Validate();
+        connection.InstallationId = "installation-1";
+        connection.RepositoryNodeId = null;
+        ex = Assert.Throws<GitHubConnectionValidationException>(() => connection.Validate());
+        Assert.Equal("repository_node_id_required", ex.Code);
     }
 
     [Fact]
-    public void Validate_AllowsMissingInstallationIdForPatIdentity()
+    public void Validate_RejectsReconnectRequiredActiveConnection()
     {
         var connection = Valid();
-        connection.IdentityKind = GitHubIdentityKind.Pat;
-
-        connection.Validate();
+        connection.ReconnectRequired = true;
+        var ex = Assert.Throws<GitHubConnectionValidationException>(() => connection.Validate());
+        Assert.Equal("invalid_reconnect_state", ex.Code);
     }
 }
