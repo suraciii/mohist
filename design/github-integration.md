@@ -149,7 +149,8 @@ Repository. `Disabled` pauses outbound projection and retains all links and
 pending durable work. Mohist uses `Disabled` with reconnect-required status when
 GitHub suspends or removes the installation, or when the installation no longer
 includes the bound Repository. An operator disable uses the same pause and
-retention boundary.
+retention boundary. Connection deletion is unsupported. Disable and reconnect
+preserve the connection, links, pending durable work, and history.
 
 When the App contract is introduced, every PAT-backed connection is moved to
 `Disabled` with reconnect-required status. Reconnection must discover and verify
@@ -161,13 +162,16 @@ flowchart TD
     N["Connection request"] --> D["Discover App installation"]
     D --> V{"Access to bound Repository verified?"}
     V -->|"no"| U["Not Active: install or reconnect required"]
-    U -->|"return install URL"| D
+    U -->|"return install URL and actionable reason"| O["Operator"]
+    O -->|"install App or restore Repository scope in GitHub"| G["GitHub installation"]
+    G -->|"operator retries connection"| M["Mohist"]
+    M --> D
     V -->|"yes"| A["Active"]
     A -->|"operator disables"| X["Disabled"]
     A -->|"installation suspended, removed, or out of scope"| X
     P["Existing PAT connection"] -->|"App cutover"| X
-    X -->|"retain links and pending work"| R["Recovery records remain"]
-    R -->|"repair installation and retry"| D
+    X -->|"retain connection, links, pending work, and history"| R["Recovery records remain"]
+    R -->|"return install URL and actionable reason"| O
 ```
 
 ## Installation Token Semantics

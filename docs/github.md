@@ -90,9 +90,8 @@ An `Active` connection can mirror Issues and receive events through its signed
 Repository webhook. An operator may disable it, or Mohist may disable it when
 the installation is suspended, removed, or no longer includes the bound
 Repository. `Disabled` pauses projection and marks reconnect-required when the
-installation must be repaired. Links, pending mirror creation, and other
-pending durable work remain available for recovery; Mohist does not delete the
-connection's history.
+installation must be repaired. Connection deletion is unsupported. Disable and
+reconnect preserve the connection, links, pending durable work, and history.
 
 When the App contract is introduced, every existing PAT-backed connection
 becomes `Disabled` with reconnect-required status. The operator must reconnect
@@ -108,13 +107,16 @@ flowchart TD
     S["Connection request"] --> D["Discover App installation"]
     D --> V{"Repository access verified?"}
     V -->|"no"| I["Not Active: install or reconnect required"]
-    I --> D
+    I -->|"return install URL and actionable reason"| O["Operator"]
+    O -->|"install App or restore Repository scope in GitHub"| G["GitHub installation"]
+    G -->|"operator retries connection"| M["Mohist"]
+    M --> D
     V -->|"yes"| A["Active"]
     A -->|"operator disables"| X["Disabled: projection paused"]
     A -->|"installation suspended, removed, or scope changed"| X
     P["Existing PAT connection"] --> X
-    X -->|"retain links and pending durable work"| R["Recovery state"]
-    R -->|"operator repairs installation and retries"| D
+    X -->|"retain connection, links, pending work, and history"| R["Recovery state"]
+    R -->|"return install URL and actionable reason"| O
 ```
 
 The existing connection listing remains the operator's view of every Repository
