@@ -112,6 +112,9 @@ public static partial class WorkflowRunExtensions
                 RequiresApproval = current.RequiresApproval,
                 Status = StageRunStatus.Running,
             };
+            // Replacing stage execution removes its feedback tasks, so open obligations are stale; request facts remain in events.
+            run.Feedback.RemoveAll(feedback => feedback.Status == ApprovalFeedbackStatus.Open);
+            run.EnforceFeedbackBound();
             run.Stages[stageIdx] = newStage;
             run.Failure = null;
             ApplyWaitingForDispatchStatus(run, now);
@@ -162,6 +165,9 @@ public static partial class WorkflowRunExtensions
             }
 
             var target = run.Stages[targetIdx];
+            // Replacing stage execution removes its feedback tasks, so open obligations are stale; request facts remain in events.
+            run.Feedback.RemoveAll(feedback => feedback.Status == ApprovalFeedbackStatus.Open);
+            run.EnforceFeedbackBound();
             run.Stages[targetIdx] = new StageRun
             {
                 Id = target.Id,
