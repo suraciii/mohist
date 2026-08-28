@@ -134,9 +134,9 @@ fencing rules are defined in [Durable Outbound Operations](#durable-outbound-ope
 Durable tracking is required when replaying a request could create a duplicate.
 Mirror creation uses pending link intent and an invisible marker; milestone
 comments and closes use `GitHubIssueCommentOperation`; command replies use a
-separate reply ledger. Title/body and `mohist:*` label writes use current-state
-replacement and can be re-projected after an error. Marker reconciliation
-searches GitHub Issues in all states.
+separate reply ledger. Title/body and `mohist:*` label writes use idempotent
+current-state replacement and can be re-projected after an error. Marker
+reconciliation searches GitHub Issues in all states.
 
 ```mermaid
 flowchart LR
@@ -157,7 +157,7 @@ flowchart LR
         D5 -->|"new evidence is received"| D2
     end
 
-    subgraph CS["Current state projection"]
+    subgraph CS["Idempotent current state projection"]
         C0["Current title, body, or labels"] -->|"Issue event, sync, or enable"| C1["Send complete desired state"]
         C1 -->|"write succeeds"| C2["Persist projection"]
         C1 -->|"write fails or result is unknown"| C3["Record error and health"]
