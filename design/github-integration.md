@@ -115,43 +115,174 @@ Handlers subscribe to Issue and Workflow events and maintain the mirror through
 the connection identity:
 
 - **Mirror creation.** A non-Draft Issue whose target repository is connected
-  gets a pending link persisted before the GitHub create. The mirror body
-  carries one invisible, deterministic HTML marker owned by Mohist; it has no
-  visible footer. If the create result is unknown (timeout, 5xx), bounded
-  reconciliation searches all GitHub states for that marker. Exactly one match
-  is linked, multiple matches fail closed, and no match is not posted again
-  until reconciliation has completed. The backlink to Mohist lives in the
-  confirmation comment.
-- **Content sync.** Title and body edits project outward, subject to the same
-  content-equality rule that suppresses the returning echo.
+  gets a GitHub mirror. The mirror has no visible tracking footer, and the
+  confirmation comment links it back to Mohist.
+- **Content sync.** Title and body edits project outward. Content equality
+  suppresses the returning echo.
 - **Progress projection.** The mutually exclusive `mohist:*` state labels and
-  the four milestone comment classes (confirmation, Approval point, completion
-  with delivery summary and PR link, cancellation with reason), gated by the
-  link's bookkeeping so redelivery never repeats a milestone.
-- **Finalization.** Completion closes the mirror as completed; cancellation
+  the four milestone comment classes project Workflow progress.
+- **Finalization.** Completion closes the mirror as completed. Cancellation
   closes it as not planned.
 
-Two content rules protect the loop. Mohist never places GitHub closing keywords
-in Pull Request bodies, so delivery cannot close the mirror early. And the
-mirror body carries no visible tracking footer: its one invisible marker is
-stripped before content enters Mohist and retained on outbound writes, while
+Mohist never places GitHub closing keywords in Pull Request bodies, so delivery
+cannot close the mirror early. Durable operation, retry, reconciliation, and
+fencing rules are defined in [Durable Outbound Operations](#durable-outbound-operations).
 
-the backlink to Mohist lives in the confirmation comment.
+## Durable Outbound Operations
+
+GitHub can accept a request and lose its response. A retry can then create a
+second mirror or duplicate a comment. The integration therefore separates
+remote outcome certainty from local request execution and keeps each outbound
+intent recoverable.
+
+An outbound operation is one intended GitHub change. It may create or update a
+mirror, post a Mohist comment, replace the `mohist:` state label, close a
+mirror, or deliver a command reply. The operation is durable before any GitHub
+request is sent. It has one stable operation identity, one logical operation
+key, and one target identity. A mirror operation also carries the mirror
+incarnation that it targets.
+
+A mirror incarnation is one concrete GitHub Issue identity linked to one Mohist
+Issue. A mirror-create reservation defines the next incarnation and binds it
+when a confirmed create or exact marker probe identifies the GitHub Issue. A
+replacement mirror starts a new incarnation. A retry keeps the same operation
+identity and incarnation. A new logical change gets a new operation identity.
+Operations that target a source GitHub Issue use that Issue identity; operations
+that target a mirror use both the Issue identity and its incarnation.
+
+### Outcome certainty
+
+Every outbound result has exactly one certainty:
+
+- **Confirmed success.** The provider response or an exact remote probe proves
+  that the intended change is present. The operation is settled.
+- **Definite failure.** The provider proves that it rejected the request before
+  the remote state could change. The reservation may be released for a retry.
+- **Unknown.** A timeout, transport error, server error, or unusable response
+  cannot prove whether GitHub applied the change. The reservation stays in
+  place and must be reconciled before another request.
+- **Ambiguous.** Reconciliation returns conflicting, multiple, mismatched, or
+  incomplete evidence. The operation fails closed. It receives no automatic
+  retry or cleanup that could change the remote state.
+
+### Reserve before send
+
+Before any GitHub request, the system durably reserves the exact logical
+operation, target identity, mirror incarnation when applicable, and the probe
+needed to establish its result. The reservation is not success. Only the
+reservation owner may send the request, and a duplicate event that sees the
+same reserved or settled operation sends nothing.
+
+An unknown result never permits a blind retry. The system first runs the exact
+probe for that operation:
+
+- A mirror create or comment uses an exact marker probe on the intended GitHub
+  scope. One matching result confirms success. Zero matches proves no effect
+  was observed and permits a controlled retry of the same operation. Multiple
+  matches are ambiguous and fail closed.
+- A state-label operation uses a state probe against the exact target. The
+  expected `mohist:` label with no competing `mohist:` state label confirms
+  success. A missing expected label permits a controlled retry. Conflicting or
+  incomplete label state is ambiguous.
+- A close operation uses the exact target identity and its state. `closed` with
+  the exact intended `state_reason` confirms success. `open` permits a
+  controlled retry. A different close reason, a mismatched target, or an
+  incomplete state is ambiguous.
+
+A definite failure may release the reservation because the provider proved that
+no remote change occurred. The next attempt uses the same logical operation
+and current target. An unknown result retains the reservation until its probe
+proves success, proves no effect, or fails closed as ambiguous.
+
+### Incarnation fencing and reset
+
+Every completion, failure update, retry release, lease release, and cleanup
+must match the durable operation identity and the current target incarnation.
+A stale action is a no-op. It must not settle a newer operation, release or
+delete a newer reservation, change current mirror health, or modify a
+replacement mirror.
+
+Reset is an identity transition, not an ordinary retry. Only a 404 from the
+exact mirror content endpoint, for the currently linked target, may prove that
+the mirror identity is gone and start a reset. Reset fences the old
+incarnation, retires only its target-specific outbound bookkeeping, establishes
+a new mirror intent, and reprojects the current Mohist state. A definite
+mirror-create failure can release a pending reservation without a reset. An
+unknown mirror-create result keeps its reservation and requires the exact
+marker probe first.
+
+A 404 from a comment, state-label, close, or Pull Request endpoint does not
+prove that the mirror is gone. It must not reset or replace the mirror. The
+operation follows its own certainty and reconciliation rule instead.
+
+### Disable and enable
+
+`Disabled` is a pause, not a cancel or delete. It stops new sends and recovery,
+while preserving pending and unknown operations, their target, and current
+projection state. A request already sent may finish, but its completion remains
+subject to incarnation fencing. Disabling a connection must not lose pending
+work.
+
+When a connection becomes `Active`, pending operations resume under the same
+certainty and fencing rules. The system then reprojects every linked Issue
+from current Mohist state. Reprojection covers current content, state labels,
+required milestone comments, and terminal close state. It is idempotent and
+survives process restart.
+
+A link may report healthy only after its complete current-state projection is
+confirmed. An enabled connection clears its reprojection obligation only after
+every linked Issue meets that condition. A failed or ambiguous operation keeps
+the relevant error visible and leaves recovery pending.
+
+### State transitions
+
+1. `unreserved -> reserved`: persist the exact operation before sending.
+2. `reserved -> confirmed`: the response or exact probe proves the change.
+3. `reserved -> definite-failure`: the provider proves no remote change.
+4. `reserved -> unknown`: the response cannot prove the remote outcome.
+5. `unknown -> confirmed`: the exact probe finds the intended effect.
+6. `unknown -> reserved`: the exact probe proves no effect, so the same
+   operation may be sent again.
+7. `unknown -> ambiguous`: evidence conflicts, is multiple, or is incomplete;
+   fail closed.
+8. `reserved` or `unknown -> paused`: the connection becomes `Disabled`; keep
+   the operation.
+9. `paused -> reserved` or `unknown`: the connection becomes `Active`; resume
+   reconciliation and projection.
+10. `current incarnation -> reset`: the exact mirror content endpoint proves
+    the target is missing; fence the old incarnation and start a replacement.
+11. `stale completion or cleanup -> ignored`: the target or operation identity
+    no longer matches the current incarnation.
+
+### Test and review matrix
+
+- **Outcome certainty:** tests cover confirmed, definite, unknown, and
+  ambiguous results. Review checks that every unknown path probes before a
+  second request.
+- **Marker and state probes:** tests cover zero, one, and multiple marker
+  matches plus exact label and close-state results. Review checks that probes
+  use the intended target and all required state fields.
+- **Reservation and duplicate delivery:** tests prove reserve-before-send and
+  one remote write for duplicate events. Review checks that retries reuse the
+  same logical operation and never create a second unproven write.
+- **Incarnation and reset:** tests prove that reset fences old completion,
+  failure, lease release, and cleanup. Review checks that stale work cannot
+  settle, delete, or alter current-incarnation state.
+- **404 handling:** tests prove that only the mirror content endpoint can
+  trigger reset. Review checks that comment, label, close, and Pull Request
+  404s do not replace the mirror.
+- **Disable, enable, and health:** tests prove that Disabled retains work and
+  Active resumes it, reprojects every link, and clears health only after
+  complete current-state projection. Review checks restart recovery and
+  partial-failure behavior.
 
 ## Failure Model
 
-Mirroring is reliable by reconciliation, not by queueing:
-
-- A failed outbound operation records the error on the link and surfaces it in
-  CLI and Web. It never blocks the Workflow and never rolls back Issue state.
-- `mo issue github sync` is the single repair verb: it creates a missing
-  mirror, pushes current Mohist state, and clears the error. It is safe to run
-  at any time because every outbound operation is idempotent.
-- State-label projection is self-healing: each Workflow milestone replaces the
-  whole label set from current state.
-- Disabling a connection pauses all inbound translation and outbound mirroring;
-  enabling re-projects every linked Issue once. There is no connection
-  deletion, so a link never outlives its credentials.
+An outbound failure records the error on the link and surfaces it in CLI and
+Web. It never blocks the Workflow or rolls back Mohist Issue state. The
+`mo issue github sync` command is the operator repair path for a missing or
+failed mirror. All retry, reconciliation, fencing, pause, reset, and health
+rules are defined in [Durable Outbound Operations](#durable-outbound-operations).
 
 ## Status
 
@@ -173,15 +304,8 @@ health and the last error; issue-scoped `sync`, `link`, and `unlink` operations
 reconcile or pair mirrors, and connection disable/enable pauses translation and
 reprojects existing links. New feed-created Issues no longer emit the
 `github-issue` origin label; historical feed-created links may retain it as
-data. Connection creation configures a fine-grained PAT with Issues read/write
-when supplied; GitHub App identity remains unimplemented. Connection
-configuration contains only Repository binding, identity, and Approvers.
+data. Connection creation uses a fine-grained PAT with Issues read/write.
+Connection configuration contains only Repository binding, identity, and
+Approvers.
 
-Open questions:
-
-- With out-of-order delivery, a close can arrive before the command that
-  created the link; the command path re-checks GitHub state before starting, but
-  the acceptable stale window is unobserved in practice.
-- App installation tokens creating Pull Requests in repositories under personal
-  accounts may have compatibility limits despite long-running practices such as
-  Dependabot.
+The remaining gap is GitHub App identity and installation-token exchange.
