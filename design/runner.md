@@ -271,10 +271,22 @@ Presence has three refresh paths — register, poll, heartbeat — so a Runner
 stays visible while its process lives, even when it cannot complete a poll.
 Explicit unregister clears presence and closes out assigned work.
 
-`runner-lost` is a failure reason, not an owner state. The owner marks affected
-work failed: WorkflowRun enters its existing `Failed` state and projects the
-Issue as `blocked`; AgentJob symmetrically enters its existing `Failed` state.
-There is no `Interrupted` state.
+`runner-lost` is a closeout reason, not an owner state. The owner applies its
+ordinary failure transition: WorkflowRun marks the affected mechanical Action
+or checks batch failed and projects the Issue as `blocked`; AgentJob marks the
+Agent execution failed. There is no current `Interrupted` state, and closeout
+cannot redeliver or continue the same attempt.
+
+A Runtime/provider diagnostic named `interrupted` is only evidence used to form
+a report. It cannot bypass the closed report vocabulary or directly transition
+WorkflowRun or AgentJob. Likewise, managed-update `draining` fences new claims
+but proves no execution result.
+
+Legacy WorkflowRun State may still contain interrupted status or
+`WorkInterruption` fields until cold-start migration removes them. They are
+migration input only: no Runner closeout path may create, renew, or act on them.
+Historical interruption events follow the independent compatibility boundary in
+[`event-protocol.md`](event-protocol.md#historical-workflow-interruption-events).
 
 ## Restart and Crash Semantics
 
