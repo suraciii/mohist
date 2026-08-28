@@ -18,15 +18,18 @@ public sealed class GitHubConnectionStore : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ISecretStore _secretStore;
+    private readonly GitHubConnectionGate _gate;
     private readonly TimeProvider _timeProvider;
 
     public GitHubConnectionStore(
         IDbContextFactory<MohistDbContext> dbFactory,
         ISecretStore secretStore,
+        GitHubConnectionGate gate,
         TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
         _secretStore = secretStore;
+        _gate = gate;
         _timeProvider = timeProvider;
     }
 
@@ -184,7 +187,14 @@ public sealed class GitHubConnectionStore : IScopedService
     public async Task<GitHubConnection?> SetStatusAsync(string projectId, string id, string status, CancellationToken ct = default) =>
         (await SetStatusWithTransitionAsync(projectId, id, status, ct))?.Connection;
 
-    public async Task<GitHubConnectionStatusChange?> SetStatusWithTransitionAsync(
+    /// <summary>
+    /// Commits a status change inside the connection gate so an operator
+    /// Disable either commits before a gated send starts or waits for the
+    /// in-flight send to settle. Enable holds the gate only for the row
+    /// commit; reprojection runs afterwards in the caller and re-checks the
+    /// committed status.
+    /// </summary>
+    public Task<GitHubConnectionStatusChange?> SetStatusWithTransitionAsync(
         string projectId,
         string id,
         string status,
@@ -192,6 +202,15 @@ public sealed class GitHubConnectionStore : IScopedService
     {
         if (status is not (GitHubConnectionStatus.Active or GitHubConnectionStatus.Disabled))
             throw new GitHubConnectionValidationException("status must be one of active, disabled", "invalid_status");
+        return _gate.EnterAsync(id, token => SetStatusCoreAsync(projectId, id, status, token), ct);
+    }
+
+    private async Task<GitHubConnectionStatusChange?> SetStatusCoreAsync(
+        string projectId,
+        string id,
+        string status,
+        CancellationToken ct)
+    {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var existing = await db.GitHubConnections.AsNoTracking()
             .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct);
@@ -292,7 +311,23 @@ public sealed class GitHubConnectionStore : IScopedService
         CancellationToken ct = default) =>
         await SetAttentionAsync(projectId, id, true, code, detail, reconnect: true, ct);
 
-    private async Task<GitHubConnection?> SetAttentionAsync(
+    /// <summary>
+    /// The reconnect variant commits Disabled and therefore also runs inside
+    /// the connection gate. It is reached from inside a gated send's failure
+    /// handling, where the re-entrancy guard applies the commit inline.
+    /// </summary>
+    private Task<GitHubConnection?> SetAttentionAsync(
+        string projectId,
+        string id,
+        bool needsAttention,
+        string? code,
+        string? detail,
+        bool reconnect,
+        CancellationToken ct) =>
+        _gate.EnterAsync(id, token => SetAttentionCoreAsync(
+            projectId, id, needsAttention, code, detail, reconnect, token), ct);
+
+    private async Task<GitHubConnection?> SetAttentionCoreAsync(
         string projectId,
         string id,
         bool needsAttention,

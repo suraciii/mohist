@@ -67,7 +67,7 @@ public sealed class GitHubConnectionStoreTests
     }
 
     private static GitHubConnectionStore NewStore(TestDatabase database, FakeSecretStore secrets) =>
-        new(new TestDbContextFactory(database.Options), secrets, new FakeTimeProvider(Now));
+        new(new TestDbContextFactory(database.Options), secrets, new GitHubConnectionGate(), new FakeTimeProvider(Now));
 
     private static string RepositoriesJson(params string[] gitUrls) =>
         JSON.Serialize(gitUrls.Select(url => new RepositoryInfo { Name = url.Split('/').Last().Replace(".git", ""), GitUrl = url }).ToList());

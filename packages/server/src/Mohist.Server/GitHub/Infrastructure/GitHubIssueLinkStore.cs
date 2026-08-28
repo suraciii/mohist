@@ -11,7 +11,7 @@ namespace Mohist.Server.GitHub.Infrastructure;
 public sealed class GitHubIssueLinkStore : IScopedService
 {
     private static readonly TimeSpan OperationLeaseDuration = TimeSpan.FromMinutes(2);
-    private static readonly TimeSpan RetryBaseDelay = TimeSpan.FromSeconds(5);
+    public static readonly TimeSpan RetryBaseDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RetryMaxDelay = TimeSpan.FromMinutes(5);
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
@@ -526,6 +526,12 @@ public sealed class GitHubIssueLinkStore : IScopedService
             .ToList();
     }
 
+    /// <summary>
+    /// Claims one due operation only while its repository connection is
+    /// Active. The status predicate is part of the same conditional update as
+    /// the lease, so a concurrent Disable transition either wins before the
+    /// claim or observes the claim as the operation owner.
+    /// </summary>
     public async Task<GitHubIssueCommentOperation?> TryClaimCommentOperationAsync(
         string id,
         TimeSpan leaseDuration,
@@ -544,6 +550,15 @@ public sealed class GitHubIssueLinkStore : IScopedService
               AND "Status" = {GitHubCommentOperationStatus.Reserved}
               AND ("NextAttemptAt" IS NULL OR "NextAttemptAt" <= {now})
               AND ("LeaseUntil" IS NULL OR "LeaseUntil" <= {now})
+              AND EXISTS (
+                  SELECT 1
+                  FROM "GitHubIssueLinks" AS link
+                  INNER JOIN "GitHubConnections" AS connection
+                      ON connection."ProjectId" = link."ProjectId"
+                      AND connection."RepositoryName" = link."RepositoryName"
+                  WHERE link."Id" = "GitHubIssueCommentOperations"."LinkId"
+                    AND connection."Status" = {GitHubConnectionStatus.Active}
+              )
             """, ct);
         if (affected != 1)
             return null;
@@ -702,6 +717,29 @@ public sealed class GitHubIssueLinkStore : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await db.GitHubIssueCommentOperations
             .Where(operation => operation.Id == id
+                && operation.Status == GitHubCommentOperationStatus.Reserved)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(operation => operation.LeaseUntil, (DateTimeOffset?)null)
+                .SetProperty(operation => operation.UpdatedAt, _timeProvider.GetUtcNow()), ct);
+    }
+
+    /// <summary>
+    /// Clears the reserve-time lease of the reserved operation identified by
+    /// its link and comment key, keeping the reservation for recovery. Used
+    /// when a gated send observes a disabled connection: enable recovery can
+    /// claim the reservation without waiting for lease expiry.
+    /// </summary>
+    public async Task ReleaseCommentOperationLeaseAsync(
+        string linkId,
+        string commentKey,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(linkId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commentKey);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.GitHubIssueCommentOperations
+            .Where(operation => operation.LinkId == linkId
+                && operation.CommentKey == commentKey
                 && operation.Status == GitHubCommentOperationStatus.Reserved)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(operation => operation.LeaseUntil, (DateTimeOffset?)null)

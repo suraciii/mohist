@@ -213,7 +213,7 @@ public sealed class GitHubCommentPortTests
                 });
                 db.SaveChanges();
             }
-            Store = new GitHubConnectionStore(new TestDbContextFactory(options), new FakeSecretStore(), new FakeTimeProvider(Now));
+            Store = new GitHubConnectionStore(new TestDbContextFactory(options), new FakeSecretStore(), new GitHubConnectionGate(), new FakeTimeProvider(Now));
         }
 
         public void Dispose() => _keeper.Dispose();
