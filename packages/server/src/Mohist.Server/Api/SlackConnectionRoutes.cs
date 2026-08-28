@@ -1089,6 +1089,29 @@ public static partial class SlackConnectionRoutes
         };
     }
 
+    private static string BuildFollowupRejectionReply(bool isDirectMessage) =>
+        isDirectMessage
+            ? "This Session cannot continue because its Runtime Session is unavailable. Send `new task <your task>` to start fresh."
+            : "This Session cannot continue because its Runtime Session is unavailable. Mention the Bot in a new message to start fresh.";
+
+    private static async Task EnqueueFollowupRejectionAsync(
+        SlackOutboxStore outbox,
+        string projectId,
+        Agent.Domain.AgentConnection connection,
+        SlackMessageIdentity identity,
+        string? threadTs,
+        bool isDirectMessage,
+        CancellationToken ct) =>
+        await EnqueueRequiredReplyAsync(
+            outbox,
+            projectId,
+            connection,
+            identity.ConversationId,
+            BuildFollowupRejectionReply(isDirectMessage),
+            $"slack-followup-rejected:{identity.AsKey()}",
+            ct,
+            threadTs);
+
     /// <summary>
     /// Leading marker that the Owner uses to start a brand new task
     /// instead of continuing the DM conversation. Matched
@@ -1443,6 +1466,13 @@ public static partial class SlackConnectionRoutes
                 blocks,
                 ct);
         }
+        var responseOwner = SlackIngressResponseOwners.None;
+        if (followupResult.Status == "rejected")
+        {
+            await EnqueueFollowupRejectionAsync(
+                req.Outbox, projectId, connection, req.Identity, body.ThreadTs, isDirectMessage: true, ct);
+            responseOwner = SlackIngressResponseOwners.Server;
+        }
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
         return ApiResults.Ok(new
         {
@@ -1451,6 +1481,7 @@ public static partial class SlackConnectionRoutes
             inputId = followupResult.InputId,
             turnId = followupResult.TurnId,
             followup = true,
+            responseOwner,
         });
     }
 
@@ -1564,6 +1595,13 @@ public static partial class SlackConnectionRoutes
                 blocks,
                 ct);
         }
+        var responseOwner = SlackIngressResponseOwners.None;
+        if (followupResult.Status == "rejected")
+        {
+            await EnqueueFollowupRejectionAsync(
+                req.Outbox, projectId, connection, req.Identity, body.ThreadTs, isDirectMessage: false, ct);
+            responseOwner = SlackIngressResponseOwners.Server;
+        }
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
         return ApiResults.Ok(new
         {
@@ -1573,6 +1611,7 @@ public static partial class SlackConnectionRoutes
             turnId = followupResult.TurnId,
             followup = true,
             threadRoot = body.ThreadTs ?? body.MessageTs,
+            responseOwner,
         });
     }
 }

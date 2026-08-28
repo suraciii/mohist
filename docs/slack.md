@@ -320,16 +320,22 @@ question, the user answers directly.
 
 In a **channel**, a reply in the bound thread follows up the bound Session. In
 a **DM**, every ordinary message continues the one continuing Session, even
-after a Turn ends. The first version has no "new task" control in a DM; the
-Agent handles topic changes in the same context. Parallel work uses separate
+after a Turn ends. To intentionally start with a fresh Session, begin the DM
+with `new task` followed by the task text. Parallel work can also use separate
 channel threads.
 
-Follow-ups never create another AgentJob and keep the Session's context. Every
-message becomes a SessionInput with a stable identity. A follow-up received
+Follow-ups never create another AgentJob and keep the Session's context; only
+the explicit `new task` form creates independent work. Every accepted message
+becomes a SessionInput with a stable identity. A follow-up received
 during execution steers by default — it joins the current Turn or waits for the
 next — and only an explicit stop interrupts. Each Session has a bounded queue;
 at the boundary the Bot rejects new messages and asks the sender to retry
 later. Accepted input is never discarded to make room.
+
+If the continuing Session cannot accept a follow-up because it has no Runtime
+Session, Mohist posts one durable guidance reply instead of silently consuming
+the message. In a DM that reply tells the user to retry with `new task`; in a
+channel it tells the user to start a new mention or thread.
 
 One thread can host several Agents, each with an independent Session:
 

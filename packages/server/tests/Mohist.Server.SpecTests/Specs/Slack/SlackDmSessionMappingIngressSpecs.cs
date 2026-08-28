@@ -67,6 +67,65 @@ public sealed class SlackDmSessionMappingIngressSpecs
     }
 
     [Fact]
+    public async Task Missing_runtime_session_followup_enqueues_one_durable_guidance_reply()
+    {
+        var connection = await CreateConnectionAsync();
+        const string conversationId = "D-DM-MISSING-RUNTIME";
+        const string followupTs = "1710000000.000150";
+
+        using (var first = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+        {
+            isDirectMessage = true,
+            teamId = connection.WorkspaceTeamId,
+            conversationId,
+            messageTs = "1710000000.000100",
+            senderSlackUserId = "U_OWNER",
+            text = "first task",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
+        }))
+        {
+            first.EnsureSuccessStatusCode();
+        }
+
+        async Task<JsonElement> PostFollowupAsync()
+        {
+            using var response = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+            {
+                isDirectMessage = true,
+                teamId = connection.WorkspaceTeamId,
+                conversationId,
+                messageTs = followupTs,
+                senderSlackUserId = "U_OWNER",
+                text = "more details",
+                leaseId = _connectionLeases[connection.Id],
+                adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
+            });
+            response.EnsureSuccessStatusCode();
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            return document.RootElement.GetProperty("data").Clone();
+        }
+
+        var firstFollowup = await PostFollowupAsync();
+        Assert.Equal("runtime_session_missing", firstFollowup.GetProperty("kind").GetString());
+        Assert.Equal("server", firstFollowup.GetProperty("responseOwner").GetString());
+
+        var replay = await PostFollowupAsync();
+        Assert.Equal("runtime_session_missing", replay.GetProperty("kind").GetString());
+        Assert.Equal("server", replay.GetProperty("responseOwner").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var deliveries = await scope.ServiceProvider.GetRequiredService<MohistDbContext>().SlackOutboxRows
+            .Where(row => row.ConnectionId == connection.Id
+                && row.DispatchRef == $"slack-followup-rejected:T123/{conversationId}/{followupTs}")
+            .ToListAsync();
+        var delivery = Assert.Single(deliveries);
+        Assert.Equal(SlackOutboxKinds.UserAction, delivery.Kind);
+        var payload = SlackDeliveryPayload.Parse(delivery.PayloadJson);
+        Assert.Contains("new task <your task>", payload.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Ingress_redelivery_collapses_to_already_accepted()
     {
         var connection = await CreateConnectionAsync();
