@@ -200,7 +200,7 @@ public sealed class AuthResolutionSpecs(MohistIntegrationFixture fixture)
             "/api/projects", $"github-ingress-auth-{Guid.NewGuid():N}", repoName: RepoName, gitUrl: $"https://github.com/{owner}/{RepoName}.git");
         var created = await fixture.Client.PostDataAsync<JsonElement>(
             $"/api/projects/{project.Id}/github-connections",
-            new { owner, repo = RepoName, pat = "github-pat" });
+            new { owner, repo = RepoName });
         var connectionId = created.GetProperty("id").GetString()!;
         var secret = created.GetProperty("webhookSecret").GetString()!;
         var bytes = Encoding.UTF8.GetBytes(LabeledPayload);

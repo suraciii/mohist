@@ -85,6 +85,8 @@ public sealed class CliFieldContractTests
             [MohistCliApi.TableShape.WebhookSubscriptionList] = D<WebhookSubscriptionDto>(),
             [MohistCliApi.TableShape.WebhookSubscription] = D<WebhookSubscriptionDto>(),
             [MohistCliApi.TableShape.WebhookDeliveryFailureList] = D<WebhookDeliveryFailureDto>(),
+            [MohistCliApi.TableShape.GitHubConnectionList] = D<GitHubConnectionListDto>(),
+            [MohistCliApi.TableShape.GitHubConnection] = D<GitHubConnectionDto>(),
             [MohistCliApi.TableShape.ProjectTemplateList] = D<ProjectTemplateInfo>(),
             [MohistCliApi.TableShape.ProjectTemplateShow] = D<WorkflowProfileCollectionEntry>(),
             [MohistCliApi.TableShape.ProjectWorkflowProfile] = D<ProjectWorkflowProfileResponse>(),
@@ -120,6 +122,7 @@ public sealed class CliFieldContractTests
     [
         new(MohistCliApi.TableShape.SystemInfo, "degraded", DeviationKind.Local, "CLI emits degraded=true when the server is unavailable"),
         new(MohistCliApi.TableShape.SystemInfo, "cliVersion", DeviationKind.Local, "CLI emits its local version when the server is unavailable"),
+        new(MohistCliApi.TableShape.GitHubConnection, "ingressUrl", DeviationKind.Local, "CLI derives the webhook ingress URL from the connection id"),
         new(MohistCliApi.TableShape.AgentSessionSpawn, "inputId", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),
         new(MohistCliApi.TableShape.AgentSessionSpawn, "agentId", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),
         new(MohistCliApi.TableShape.AgentSessionSpawn, "agentName", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),

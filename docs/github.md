@@ -58,6 +58,8 @@ The target connection uses the one GitHub App owned by the Mohist deployment:
   those tokens.
 - The existing per-connection signed Repository webhook remains the inbound
   event boundary. The GitHub App does not introduce a global webhook path.
+  The App installation needs Issues read/write, Pull Requests read, and Metadata
+  read access.
 - Runner `gh` authentication remains a separate credential boundary for git and
   Pull Request operations. Server installation tokens are not Runner
   credentials.
@@ -93,10 +95,9 @@ Repository. `Disabled` pauses projection and marks reconnect-required when the
 installation must be repaired. Connection deletion is unsupported. Disable and
 reconnect preserve the connection, links, pending durable work, and history.
 
-When the App contract is introduced, every existing PAT-backed connection
-becomes `Disabled` with reconnect-required status. The operator must reconnect
-through the App. Mohist does not convert a PAT, fall back to a PAT, or discard
-existing links and pending work.
+Existing PAT-backed connections are `Disabled` with reconnect-required status.
+The operator must reconnect through the App. Mohist does not convert a PAT,
+fall back to a PAT, or discard existing links and pending work.
 
 A short-lived installation token is replaced when it expires. Token refresh does
 not change an otherwise valid connection's state. If installation verification
@@ -243,8 +244,6 @@ Issue's lineage, so subscribing to every event under Issue #42 includes it.
 
 ## Non-goals
 
-- **Runtime implementation.** This issue defines the target contract; it does
-  not implement the GitHub App flow.
 - **GitHub OAuth user tokens or device flow.** The connection uses the
   deployment-owned GitHub App, not a user's GitHub identity.
 - **Web connection management UI.** The target contract does not add a Web
@@ -277,8 +276,7 @@ boundaries and protocol details.
 
 ### Implemented behavior
 
-The following behavior is shipped today. The current PAT connection is listed
-explicitly below; it is not the target GitHub App contract.
+The following behavior is shipped today.
 
 - No-Workflow GitHub Issue lifecycle, including `completed` versus
   `not_planned` close reasons, reopening cancelled Issues to the backlog, and
@@ -307,21 +305,12 @@ explicitly below; it is not the target GitHub App contract.
   healthy only after current projection succeeds.
 - New feed-created Issues no longer emit the `github-issue` origin label.
   Historical feed-created links may retain that label as data.
-- **Current connection credential:** a fine-grained PAT with Issues read and
-  write is stored as a server secret. The connection surface contains only
-  Repository binding, identity, and Approvers.
+- **Current connection credential:** the deployment-owned GitHub App verifies
+  installations and mints short-lived installation tokens. Existing PAT-backed
+  connections require App reconnection. The connection surface contains
+  Repository binding, installation identity, status, attention, and recovery state.
 
-### Target behavior not yet shipped
+### Remaining gap
 
-The decided target is the one-deployment GitHub App contract described in
-[Connecting Repositories](#connecting-repositories) and
-[Connection Lifecycle](#connection-lifecycle). It is not shipped by the current
-runtime.
-
-### Implementation Gaps
-
-- The runtime does not yet own one deployment-wide GitHub App credential,
-  discover and verify installations, return the App install URL, mint and
-  refresh short-lived installation tokens, or perform the PAT cutover. Until
-  this gap closes, PAT behavior is current-only behavior. Existing PAT-backed
-  connections have not yet been disabled for App reconnection.
+- GitHub App identity is configured per deployment. User-level OAuth and
+  GitHub Enterprise Server are not supported.

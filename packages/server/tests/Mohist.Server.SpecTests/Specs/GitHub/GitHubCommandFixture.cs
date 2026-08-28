@@ -275,6 +275,9 @@ public sealed class GitHubCommandFixture : IAsyncLifetime
                 // is the explicit dispatch boundary for these lifecycle specs.
                 services.Configure<EventDispatcherOptions>(options =>
                     options.WorkerCount = 0);
+                services.RemoveAll<IGitHubAppClient>();
+                services.AddSingleton<FakeGitHubAppClient>();
+                services.AddSingleton<IGitHubAppClient>(provider => provider.GetRequiredService<FakeGitHubAppClient>());
                 services.RemoveAll<IGitHubCommentPort>();
                 services.RemoveAll<IGitHubIssuePort>();
                 services.AddSingleton<IGitHubCommentPort>(Comments);

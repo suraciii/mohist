@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
+using Mohist.Server.GitHub.Ports;
 
 namespace Mohist.Server.Api;
 
@@ -12,7 +13,7 @@ public static class GitHubConnectionRoutes
         var group = app.MapGroup("/api/projects/{projectRef}/github-connections")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
-        group.MapPost("", async (HttpContext context, GitHubConnectionCreateRequest request, GitHubConnectionStore store, CancellationToken ct) =>
+        group.MapPost("", async (HttpContext context, GitHubConnectionCreateRequest request, GitHubConnectionStore store, IGitHubAppClient app, CancellationToken ct) =>
         {
             if (request is null) return ApiResults.BadRequest("request body required");
             if (request.AdditionalProperties is { Count: > 0 })
@@ -24,12 +25,13 @@ public static class GitHubConnectionRoutes
                 ProjectId = project.Id,
                 Owner = request.Owner ?? string.Empty,
                 Repo = request.Repo ?? string.Empty,
+                RepositoryName = request.RepositoryName ?? string.Empty,
                 Approvers = request.Approvers ?? [],
-                IdentityKind = GitHubIdentityKind.Pat,
             };
             try
             {
-                var webhookSecret = await store.CreateAsync(connection, request.Pat, ct);
+                var installation = await app.DiscoverInstallationAsync(connection.Owner, connection.Repo, ct);
+                var webhookSecret = await store.CreateAsync(connection, installation, ct);
                 return Results.Json(
                     new ApiResponse<GitHubConnectionDto>(true, ToDto(connection, webhookSecret)),
                     statusCode: StatusCodes.Status201Created);
@@ -44,7 +46,17 @@ public static class GitHubConnectionRoutes
         {
             var project = context.GetResolvedProject();
             var connections = await store.ListAsync(project.Id, ct);
-            return ApiResults.Ok(connections.Select(c => ToDto(c)).ToArray());
+            var byRepository = connections.ToDictionary(c => c.RepositoryName, StringComparer.OrdinalIgnoreCase);
+            var rows = project.Repositories
+                .Select(repository => byRepository.TryGetValue(repository.Name, out var connection)
+                    ? ToListDto(connection)
+                    : GitHubConnectionListDto.Unconnected(project.Id, repository.Name))
+                .ToList();
+            rows.AddRange(connections
+                .Where(connection => !project.Repositories.Any(repository =>
+                    string.Equals(repository.Name, connection.RepositoryName, StringComparison.OrdinalIgnoreCase)))
+                .Select(ToListDto));
+            return ApiResults.Ok(rows.ToArray());
         });
 
         group.MapGet("/{connectionId}", async (HttpContext context, string connectionId, GitHubConnectionStore store, CancellationToken ct) =>
@@ -102,15 +114,29 @@ public static class GitHubConnectionRoutes
         }
     }
 
+    private static GitHubConnectionListDto ToListDto(GitHubConnection connection) => new(
+        connection.Id, connection.ProjectId, connection.Owner, connection.Repo, connection.RepositoryName,
+        connection.Approvers.ToArray(), connection.Status, connection.InstallationId, connection.RepositoryNodeId,
+        connection.ReconnectRequired, connection.NeedsAttention, connection.NeedsReprojection,
+        connection.LastErrorCode is null ? null : new GitHubConnectionErrorDto(
+            connection.LastErrorCode, connection.LastErrorDetail, connection.LastErrorAt),
+        connection.CreatedAt, connection.UpdatedAt);
+
     private static GitHubConnectionDto ToDto(GitHubConnection connection, string? webhookSecret = null) => new(
         connection.Id, connection.ProjectId, connection.Owner, connection.Repo, connection.RepositoryName,
         connection.Approvers.ToArray(), connection.Status,
-        connection.IdentityKind, connection.InstallationId, webhookSecret, connection.CreatedAt, connection.UpdatedAt);
+        connection.InstallationId, connection.RepositoryNodeId, connection.ReconnectRequired,
+        connection.NeedsAttention, connection.NeedsReprojection,
+        connection.LastErrorCode is null ? null : new GitHubConnectionErrorDto(
+            connection.LastErrorCode, connection.LastErrorDetail, connection.LastErrorAt),
+        webhookSecret, connection.CreatedAt, connection.UpdatedAt);
 
     private static IResult MapError(Exception exception) => exception switch
     {
         GitHubConnectionValidationException validation => ApiResults.Conflict(validation.Message, validation.Code),
         GitHubConnectionConflictException conflict => ApiResults.Conflict(conflict.Message, conflict.Code),
+        GitHubAppNotConfiguredException => ApiResults.Conflict("GitHub App identity is not configured on this Server.", "github_app_not_configured"),
+        GitHubAppInstallationException app => ApiResults.Conflict(app.Message, app.Code, app.Details),
         _ => throw exception,
     };
 }
@@ -118,14 +144,27 @@ public static class GitHubConnectionRoutes
 public sealed record GitHubConnectionDto(
     string Id, string ProjectId, string Owner, string Repo, string RepositoryName,
     string[] Approvers, string Status,
-    string IdentityKind, string? InstallationId, string? WebhookSecret,
-    DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+    string? InstallationId, string? RepositoryNodeId, bool ReconnectRequired,
+    bool NeedsAttention, bool NeedsReprojection, GitHubConnectionErrorDto? LastError,
+    string? WebhookSecret, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+
+public sealed record GitHubConnectionErrorDto(string Code, string? Detail, DateTimeOffset? OccurredAt);
+
+public sealed record GitHubConnectionListDto(
+    string? Id, string ProjectId, string? Owner, string? Repo, string RepositoryName,
+    string[] Approvers, string Status, string? InstallationId, string? RepositoryNodeId,
+    bool ReconnectRequired, bool NeedsAttention, bool NeedsReprojection,
+    GitHubConnectionErrorDto? LastError, DateTimeOffset? CreatedAt, DateTimeOffset? UpdatedAt)
+{
+    public static GitHubConnectionListDto Unconnected(string projectId, string repositoryName) =>
+        new(null, projectId, null, null, repositoryName, [], "unconnected", null, null, false, false, false, null, null, null);
+}
 
 public sealed record GitHubConnectionCreateRequest(
     string? Owner,
     string? Repo,
-    string[]? Approvers,
-    string? Pat)
+    string? RepositoryName,
+    string[]? Approvers)
 {
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? AdditionalProperties { get; init; }

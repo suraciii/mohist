@@ -133,7 +133,8 @@ public sealed class GitHubWriteBackHandlerTests
                     RepositoryName = "hello-world",
                     ApproversJson = "[]",
                     Status = GitHubConnectionStatus.Active,
-                    IdentityKind = GitHubIdentityKind.Pat,
+                    InstallationId = "installation-1",
+                    RepositoryNodeId = "repository-node-1",
                     NeedsAttention = false,
                     CreatedAt = Now,
                     UpdatedAt = Now,
@@ -215,8 +216,8 @@ public sealed class GitHubWriteBackHandlerTests
                 RepositoryName = row.RepositoryName,
                 Approvers = [],
                 Status = row.Status,
-                IdentityKind = row.IdentityKind,
                 InstallationId = row.InstallationId,
+                RepositoryNodeId = row.RepositoryNodeId,
                 NeedsAttention = row.NeedsAttention,
                 CreatedAt = row.CreatedAt,
                 UpdatedAt = row.UpdatedAt,
@@ -535,5 +536,27 @@ public sealed class GitHubWriteBackHandlerTests
         Assert.Equal("403", failure.ErrorCode);
         var connection = await harness.ConnectionAsync();
         Assert.True(connection!.NeedsAttention);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, false, true)]
+    [InlineData(HttpStatusCode.Forbidden, false, true)]
+    [InlineData(HttpStatusCode.Forbidden, true, false)]
+    public async Task NonIdempotentFailure_PreservesReservation(
+        HttpStatusCode status,
+        bool rateLimited,
+        bool needsAttention)
+    {
+        var harness = new Harness();
+        harness.Port.CommentFailure = new GitHubRemoteRequestException("GitHub failure", status, rateLimited);
+        var handler = await harness.NewHandlerAsync();
+
+        await handler.HandleAsync(Event(EventCatalog.ReverseDns.IssueWorkStarted), CancellationToken.None);
+
+        await using var db = new MohistDbContext(harness.Options);
+        var operation = await db.GitHubIssueCommentOperations.SingleAsync();
+        Assert.Equal(GitHubCommentOperationStatus.Reserved, operation.Status);
+        Assert.NotNull(operation.NextAttemptAt);
+        Assert.Equal(needsAttention, (await harness.ConnectionAsync())!.NeedsAttention);
     }
 }

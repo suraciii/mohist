@@ -271,7 +271,7 @@ public sealed class GitHubIssueMirrorSpecs
             "/api/projects", $"github-mirror-{Guid.NewGuid():N}", repoName: RepositoryName,
             gitUrl: $"https://github.com/{owner}/{RepositoryName}.git");
         var connection = await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName, pat = "github-pat" });
+            $"/api/projects/{project.Id}/github-connections", new { owner, repo = RepositoryName });
         var issueNumber = await CreateIssueInProjectAsync(project.Id, isDraft);
         return (project.Id, issueNumber, connection.GetProperty("id").GetString()!);
     }

@@ -38,12 +38,10 @@ different owner and lifecycle.
 
 ### Deployment GitHub App
 
-A Mohist deployment owns exactly one GitHub App credential. The App ID and
-private key are deployment secrets stored behind the existing
-[`ISecretStore`](../packages/server/src/Mohist.Server/Infrastructure/Security/Secrets/ISecretStore.cs)
-boundary. Only the Server GitHub integration uses them. The CLI, Web client,
-Project Repository configuration, connection response, and Runner never receive
-the private key.
+A Mohist deployment owns exactly one GitHub App credential. The App ID, slug,
+and protected private-key file are deployment configuration. Only the Server
+GitHub integration reads them. The CLI, Web client, Project Repository
+configuration, connection response, and Runner never receive the private key.
 
 The App credential authenticates installation discovery and short-lived
 installation-token minting. It does not replace the signed secret on the
@@ -121,7 +119,8 @@ identity and stable repository identity before marking the connection `Active`.
 
 The existing signed Repository webhook remains configured per connection. Its
 secret is verified at ingress and is independent of the App credential. The App
-does not add a global webhook endpoint.
+does not add a global webhook endpoint. The App installation requires Issues
+read/write, Pull Requests read, and the GitHub-provided Metadata read access.
 
 ```mermaid
 sequenceDiagram
@@ -152,10 +151,10 @@ includes the bound Repository. An operator disable uses the same pause and
 retention boundary. Connection deletion is unsupported. Disable and reconnect
 preserve the connection, links, pending durable work, and history.
 
-When the App contract is introduced, every PAT-backed connection is moved to
-`Disabled` with reconnect-required status. Reconnection must discover and verify
-the App installation. Mohist does not convert the PAT, use it as a fallback, or
-delete the connection's links and pending work.
+Existing PAT-backed connections are moved to `Disabled` with reconnect-required
+status. Reconnection discovers and verifies the App installation. Mohist does
+not convert the PAT, use it as a fallback, or delete the connection's links and
+pending work.
 
 ```mermaid
 flowchart TD
@@ -408,7 +407,6 @@ rules are defined in [Durable Outbound Operations](#durable-outbound-operations)
 
 ## Non-goals
 
-- Runtime implementation of the GitHub App flow.
 - GitHub OAuth user tokens or device flow.
 - Web connection management UI.
 - Multiple GitHub App configurations in one Mohist deployment.
@@ -418,36 +416,11 @@ rules are defined in [Durable Outbound Operations](#durable-outbound-operations)
 
 ## Status
 
-The behavior described above is the target design. The implementation shipped
-today covers #770 no-Workflow Issue lifecycle, #771 GitHub mirror visibility in
-the Issue read models, CLI, and Web, #772 automatic ready-only mirroring with
-durable Pending intent, invisible marker reconciliation, and two-way title/body
-sync with equality echo suppression, #773 `/mohist start` command intake with
-GitHub permission gating, p0-p4 priority mapping, idempotent link creation,
-durable command replies, refusal replies, and reliable command reply recovery,
-#774 linked lifecycle translation with the Integrate delivery-echo guard, and
-#775 reconcile-based recovery. Signed ingress and normalization, close
-withdrawal, Pull Request review Approval, and best-effort write-back with
-durable failure records are included. No-Workflow closes honor GitHub's
-`completed` versus `not_planned` reason, cancelled Issues reopen to backlog, and
-completed Issues remain terminal with one follow-up suggestion. The built-in
-GitHub PR path omits closing keywords from PR bodies; terminal write-back still
-closes mirrors. GitHub links persist healthy/error sync health and the last
-error; issue-scoped `sync`, `link`, and `unlink` operations reconcile or pair
-mirrors, and connection disable/enable pauses translation and reprojects
-existing links. New feed-created Issues no longer emit the `github-issue`
-origin label; historical feed-created links may retain it as data.
+The one-deployment GitHub App contract is implemented. Verified installation
+binding, short-lived installation tokens, token refresh, one-401 recovery,
+PAT cutover, connection recovery, and the existing #770–#775 GitHub native
+behavior use the App identity. The App credential is deployment-owned and is
+not exposed to CLI, Web, Repository configuration, or connection reads.
 
-### Current credential path
-
-The current runtime creates connections with a fine-grained PAT with Issues
-read/write. This is current-only behavior and is not the target App contract.
-
-### Target gap
-
-The one-deployment GitHub App contract is decided but not implemented. The
-runtime does not yet own the deployment App credential, discover and verify
-installations, return the install URL, mint or refresh short-lived installation
-tokens, or cut over existing PAT connections to `Disabled` with reconnect-required
-status while preserving links and pending work. No PAT-to-installation
-conversion or PAT fallback is allowed by the target design.
+Remaining limitations are GitHub user-level OAuth, multiple App configurations,
+GitHub Enterprise Server, global App webhooks, and Runner `gh` authentication.

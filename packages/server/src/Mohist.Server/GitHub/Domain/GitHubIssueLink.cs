@@ -76,6 +76,21 @@ public static class GitHubCommentOperationStatus
     public const string Ambiguous = "ambiguous";
 }
 
+public class GitHubRemoteRequestException : HttpRequestException
+{
+    public GitHubRemoteRequestException(
+        string message,
+        HttpStatusCode? statusCode,
+        bool isRateLimited = false,
+        Exception? inner = null)
+        : base(message, inner, statusCode)
+    {
+        IsRateLimited = isRateLimited;
+    }
+
+    public bool IsRateLimited { get; }
+}
+
 public static class GitHubRemoteOutcome
 {
     public static bool IsUnknown(Exception exception) => exception switch
@@ -84,10 +99,13 @@ public static class GitHubRemoteOutcome
         TimeoutException => true,
         TaskCanceledException => true,
         HttpRequestException { StatusCode: null } => true,
-        HttpRequestException { StatusCode: HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests } => true,
+        HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests } => true,
         HttpRequestException { StatusCode: >= HttpStatusCode.InternalServerError } => true,
         _ => false,
     };
+
+    public static bool IsRateLimited(Exception exception) =>
+        exception is GitHubRemoteRequestException { IsRateLimited: true };
 }
 
 /// <summary>

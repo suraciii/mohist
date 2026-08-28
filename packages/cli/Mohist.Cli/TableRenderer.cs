@@ -196,6 +196,12 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.WebhookDeliveryFailureList:
                 RenderWebhookDeliveryFailureList(data);
                 break;
+            case MohistCliApi.TableShape.GitHubConnectionList:
+                RenderGitHubConnectionList(data);
+                break;
+            case MohistCliApi.TableShape.GitHubConnection:
+                RenderGitHubConnection(data);
+                break;
             case MohistCliApi.TableShape.IssueArchiveCompleted:
                 RenderIssueArchiveCompleted(data);
                 break;

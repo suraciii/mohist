@@ -141,8 +141,12 @@ internal static class CommandPresentations
         AttachGroup(root, ["audit"], CommandCapability.Operations, "Inspect authentication events in newest-first order",
             ("list", "List authentication audit events"));
         AttachGroup(root, ["github"], CommandCapability.Operations, "Manage GitHub repository connections for a Project",
-            ("connect", "Connect a GitHub repository and print its webhook configuration"),
-            ("update", "Update a GitHub connection's approver list"));
+            ("connect", "Connect a GitHub repository through the deployment GitHub App"),
+            ("list", "List GitHub repository connections"),
+            ("view", "View a GitHub repository connection"),
+            ("update", "Update a GitHub connection's approver list"),
+            ("enable", "Enable a GitHub connection"),
+            ("disable", "Disable a GitHub connection"));
         AttachGroup(root, ["slack"], CommandCapability.Operations, "Manage Slack connections, Agent installations, and delivery recovery",
             ("setup", "Install or resume the workspace Slack App"),
             ("status", "Show the workspace Slack integration status"),
