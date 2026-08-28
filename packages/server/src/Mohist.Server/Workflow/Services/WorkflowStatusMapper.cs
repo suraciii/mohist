@@ -313,7 +313,9 @@ public static class WorkflowStatusMapper
         if (run.Status == WorkflowRunStatus.AwaitingApproval)
         {
             actions.Add(new AvailableActionView("approve", "Approve", null));
-            actions.Add(new AvailableActionView("request-changes", "Request changes", null));
+            actions.Add(new AvailableActionView("stop", "Stop workflow", null));
+            if (HasConfiguredFeedbackTasks(run))
+                actions.Add(new AvailableActionView("request-changes", "Request changes", null));
         }
 
         var failure = failureOverride ?? run.Failure;
@@ -342,6 +344,21 @@ public static class WorkflowStatusMapper
         }
 
         return actions;
+    }
+
+    private static bool HasConfiguredFeedbackTasks(WorkflowRun run)
+    {
+        if (string.IsNullOrWhiteSpace(run.BoundWorkflowDefinitionJson)) return false;
+
+        try
+        {
+            var definition = WorkflowYamlSerializer.FromJson(run.BoundWorkflowDefinitionJson);
+            return definition.Approval?.Feedback?.Tasks is { Count: > 0 };
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public static PendingWorkView? BuildPendingWork(WorkflowRun run)

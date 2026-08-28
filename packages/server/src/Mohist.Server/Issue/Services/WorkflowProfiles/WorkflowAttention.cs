@@ -14,13 +14,18 @@ public sealed class WorkflowAttention
     public DateTime RequestedAt { get; init; } = DateTime.UtcNow;
     public string[] AvailableActions { get; init; } = [];
 
-    public static WorkflowAttention ReviewRequired(string? workflowRunId, string? message = null) => new()
+    public static WorkflowAttention ReviewRequired(
+        string? workflowRunId,
+        string? message,
+        bool requestChangesAvailable) => new()
     {
         Reason = WorkflowAttentionReason.ReviewRequired,
         Message = message,
         Source = "workflow",
         WorkflowRunId = workflowRunId,
-        AvailableActions = ["approve", "request_changes"],
+        AvailableActions = requestChangesAvailable
+            ? ["approve", "stop", "request_changes"]
+            : ["approve", "stop"],
     };
 
     public static WorkflowAttention Blocked(string? workflowRunId, string? message = null) => new()

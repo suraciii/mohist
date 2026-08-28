@@ -173,6 +173,25 @@ public class MohistDefaultWorkflowProjectionTests
         Assert.Equal("attention", projection.Health);
         Assert.NotNull(projection.Attention);
         Assert.Equal(WorkflowAttentionReason.ReviewRequired, projection.Attention!.Reason);
+        Assert.Equal(["approve", "stop"], projection.Attention.AvailableActions);
+    }
+
+    [Fact]
+    public void AwaitingApproval_WithConfiguredRequestChanges_ProjectsRequestChangesAction()
+    {
+        var workflow = BuildAwaitingApprovalView("wr_1", "check") with
+        {
+            AvailableActions =
+            [
+                new AvailableActionView("approve", "Approve", null),
+                new AvailableActionView("stop", "Stop workflow", null),
+                new AvailableActionView("request-changes", "Request changes", null),
+            ]
+        };
+
+        var projection = MohistDefaultWorkflowProjection.ProjectWorkflowState(508, "Title", IssueStatus.InProgress, workflow);
+
+        Assert.Equal(["approve", "stop", "request_changes"], projection.Attention!.AvailableActions);
     }
 
     [Fact]

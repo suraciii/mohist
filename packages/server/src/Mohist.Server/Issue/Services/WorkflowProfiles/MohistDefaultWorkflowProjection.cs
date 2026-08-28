@@ -77,7 +77,15 @@ public static class MohistDefaultWorkflowProjection
     private static WorkflowAttention? ProjectAttention(WorkflowStatusView? workflow)
     {
         if (workflow?.Status == "awaiting-approval")
-            return WorkflowAttention.ReviewRequired(workflow.WorkflowRunId, $"Awaiting approval for {workflow.CurrentStage ?? "workflow"}");
+        {
+            var requestChangesAvailable = workflow.AvailableActions.Any(action =>
+                string.Equals(action.Name, "request-changes", StringComparison.Ordinal)
+                || string.Equals(action.Name, "request_changes", StringComparison.Ordinal));
+            return WorkflowAttention.ReviewRequired(
+                workflow.WorkflowRunId,
+                $"Awaiting approval for {workflow.CurrentStage ?? "workflow"}",
+                requestChangesAvailable);
+        }
         if (workflow?.Status == "failed")
             return WorkflowAttention.Blocked(workflow.WorkflowRunId, workflow.Failure?.Message ?? "Workflow failed");
         return null;

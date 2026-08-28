@@ -73,6 +73,25 @@ public sealed class GitHubReviewApprovalSpecs
     }
 
     [Fact]
+    public async Task ChangesRequestedReview_WithoutFeedbackTasks_SettlesAsNoOp()
+    {
+        var (projectId, connectionId, secret, issueNumber) =
+            await SetupAtCheckGateAsync(["alice"], includeFeedbackTasks: false);
+
+        await DeliverAsync(connectionId, secret, "review-changes-no-feedback-1", ReviewPayload(
+            "changes_requested", "alice", issueNumber, "Fix the naming"));
+        await PumpAsync();
+
+        var status = await LoadWorkflowStatusAsync(projectId, issueNumber);
+        var check = status!.Workflow!.Stages.Single(s => s.Stage == "check");
+        Assert.Equal("awaiting-approval", check.Status);
+        Assert.Null(check.ApprovalStatus!.Result);
+        Assert.Null(check.ApprovalStatus.DecidedBy);
+        Assert.True(check.Feedback is null || check.Feedback.Count == 0);
+        await AssertReviewSettledAsync(projectId, connectionId, "review-changes-no-feedback-1");
+    }
+
+    [Fact]
     public async Task CommentedReview_NoAction()
     {
         var (projectId, connectionId, secret, issueNumber) = await SetupAtCheckGateAsync(["alice"]);
@@ -204,12 +223,13 @@ public sealed class GitHubReviewApprovalSpecs
     }
 
     private async Task<(string ProjectId, string ConnectionId, string Secret, int IssueNumber)> SetupAtCheckGateAsync(
-        string[] approvers)
+        string[] approvers,
+        bool includeFeedbackTasks = true)
     {
         var owner = $"octocat-{Guid.NewGuid():N}";
         var project = await Client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
             "/api/projects", $"github-approval-{Guid.NewGuid():N}", repoName: RepoName, gitUrl: $"https://github.com/{owner}/{RepoName}.git");
-        await SeedCheckGateProfileAsync(project.Id);
+        await SeedCheckGateProfileAsync(project.Id, includeFeedbackTasks);
         var created = await Client.PostDataAsync<JsonElement>($"/api/projects/{project.Id}/github-connections", new
         {
             owner,
@@ -234,14 +254,27 @@ public sealed class GitHubReviewApprovalSpecs
     /// followed by an integrate stage) so the issue's run lands on the Check
     /// approval point without any runner.
     /// </summary>
-    private async Task SeedCheckGateProfileAsync(string projectId)
+    private async Task SeedCheckGateProfileAsync(string projectId, bool includeFeedbackTasks = true)
     {
         const string profileId = "spec/check-gate";
         var definition = new WorkflowDefinition(
         [
             new StageDefinition("check", [], [], RequiresApproval: true),
             new StageDefinition("integrate", [new TaskDefinition("finish", "Finish", "spec/noop")], []),
-        ]);
+        ],
+        Approval: includeFeedbackTasks
+            ? new ApprovalConfig(new ApprovalFeedbackConfig([
+                new TaskDefinition(
+                    "apply-feedback",
+                    "Apply approval feedback",
+                    "mohist/agent",
+                    new Dictionary<string, JsonElement?>
+                    {
+                        ["name"] = JsonSerializer.SerializeToElement("mohist/builder"),
+                        ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.apply-feedback }}"),
+                    })
+            ]))
+            : null);
         var yaml = WorkflowYamlSerializer.ToYaml(definition);
         await using var scope = _fixture.Services.CreateAsyncScope();
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();

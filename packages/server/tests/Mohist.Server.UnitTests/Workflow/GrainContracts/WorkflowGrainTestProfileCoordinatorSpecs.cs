@@ -129,13 +129,15 @@ internal sealed class WorkflowGrainTestProfileCoordinator(
                 .Select(stage => new BoundStageStructure(stage.Stage, stage.RequiresApproval))
                 .ToList(),
             payload.Metadata,
-            payload.Workspace);
+            payload.Workspace,
+            DefinitionJson: WorkflowYamlSerializer.ToJson(profile.Definition));
         var structure = new WorkflowStructure(
             bound.ProfileId,
             bound.Stages.Select(stage => new StageStructure(stage.Stage, stage.RequiresApproval)).ToList());
         var run = WorkflowRun.Create(payload.WorkflowRunId, structure, payload.Metadata.CreatedAt, payload.Metadata);
         run.ExplicitWorkflowProfileId = payload.ExplicitProfileId;
         run.Workspace = payload.Workspace;
+        run.BoundWorkflowDefinitionJson = bound.DefinitionJson;
         await runs.SaveAsync(run);
 
         return new WorkflowProfileReferenceResult(
@@ -154,7 +156,8 @@ internal sealed class WorkflowGrainTestProfileCoordinator(
         run.WorkflowProfileId ?? string.Empty,
         run.Stages.Select(stage => new BoundStageStructure(stage.Id, stage.RequiresApproval)).ToList(),
         run.Metadata,
-        run.Workspace);
+        run.Workspace,
+        DefinitionJson: run.BoundWorkflowDefinitionJson);
 
     public Task<WorkflowProfileReferenceResult> DeleteProfileAsync(
         WorkflowProfileCommandPayload.DeleteProfile payload,

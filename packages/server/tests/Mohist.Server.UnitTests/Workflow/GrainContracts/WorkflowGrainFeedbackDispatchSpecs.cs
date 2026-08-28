@@ -70,6 +70,27 @@ public sealed class WorkflowGrainFeedbackDispatchSpecs
     }
 
     [Fact]
+    public async Task AwaitingApproval_RequestChanges_UsesBoundFeedbackTasksAfterLiveProfileChanges()
+    {
+        var arrangement = await ArrangeAsync("wr-feedback-bound-definition");
+        await DrivePlanToGateAsync(arrangement);
+
+        await WorkflowGrainContractSupport.SeedTemplateAsync(
+            _fixture,
+            arrangement.ProjectId,
+            ApprovalStage() with { Approval = null },
+            TimeProvider.GetUtcNow());
+
+        var feedbackId = await arrangement.Grain.RequestChangesAsync("use the bound task", "operator-1");
+        var claimed = (await arrangement.AssignAndClaimAsync())!;
+        var feedbackTask = await ToDispatchAsync(arrangement, claimed);
+
+        Assert.Equal($"apply-feedback.1", feedbackTask.WorkId);
+        Assert.Equal("spec/task", feedbackTask.Uses);
+        Assert.Equal(feedbackId, ApprovalFeedbackElement(feedbackTask).GetProperty("id").GetString());
+    }
+
+    [Fact]
     public async Task AwaitingApproval_RequestChanges_ShortBodySummary_NotTruncated()
     {
         var arrangement = await ArrangeAsync("wr-feedback-short-summary");
@@ -126,9 +147,9 @@ public sealed class WorkflowGrainFeedbackDispatchSpecs
         var feedback = run.Feedback.Single(f => f.Id == feedbackId);
         Assert.Equal(ApprovalFeedbackStatus.Resolved, feedback.Status);
         Assert.Equal(feedbackTask.Id, feedback.ResolutionTaskId);
-        // The default feedback task uses mohist/opencode, so its structured
-        // output is not adapted to text under the new contract. The
-        // summary stays null while the feedback still resolves.
+        // This configured feedback task uses spec/task, so its structured
+        // output is not adapted to text. The summary stays null while the
+        // feedback still resolves.
         Assert.Null(feedback.ResolutionSummary);
         Assert.NotNull(feedback.ResolvedAt);
 

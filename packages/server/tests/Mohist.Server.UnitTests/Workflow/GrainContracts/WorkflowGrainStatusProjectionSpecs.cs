@@ -121,6 +121,9 @@ public sealed class WorkflowGrainStatusProjectionSpecs
         Assert.Equal("passed", planStage.Checks[0].Status);
         Assert.NotNull(planStage.ApprovalStatus);
         Assert.Null(planStage.ApprovalStatus.Result);
+        Assert.Contains(status.AvailableActions, action => action.Name == "approve");
+        Assert.Contains(status.AvailableActions, action => action.Name == "stop");
+        Assert.DoesNotContain(status.AvailableActions, action => action.Name == "request-changes");
     }
 
     [Fact]

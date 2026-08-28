@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  deriveRuntimeDecision,
-  type RuntimeDecisionInput,
-} from './derive-runtime-decision'
+import { deriveRuntimeDecision, type RuntimeDecisionInput } from './derive-runtime-decision'
 import { IssueHealth, IssueStatus, WorkflowStage } from '../../../entities/issue'
 
 function baseIssue(overrides: Partial<RuntimeDecisionInput['issue']> = {}): RuntimeDecisionInput['issue'] {
@@ -140,7 +137,7 @@ describe('deriveRuntimeDecision', () => {
     expect(decision.actions.find((a) => a.kind === 'approve')?.enabled).toBe(true)
     expect(decision.actions.find((a) => a.kind === 'send-back')?.enabled).toBe(true)
     expect(decision.primary?.kind).toBe('approve')
-    expect(decision.stopRecoverable).toBeNull()
+    expect(decision.stopRecoverable).toBe(false)
   })
 
   it('returns failed (not approval-required) when a Check stage has a failed script/health verification even when approval is awaiting', () => {

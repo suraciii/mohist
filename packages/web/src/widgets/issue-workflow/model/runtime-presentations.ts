@@ -39,7 +39,13 @@ function actionEnabled(allowed: Set<string>, kind: RuntimeActionKind): boolean {
     return allowed.has('approve')
   }
   if (kind === 'send-back') {
-    return allowed.has('reject') || allowed.has('send-back') || allowed.has('send_back')
+    return (
+      allowed.has('reject') ||
+      allowed.has('send-back') ||
+      allowed.has('send_back') ||
+      allowed.has('request-changes') ||
+      allowed.has('request_changes')
+    )
   }
   if (kind === 'retry') {
     return allowed.has('retry')
@@ -131,6 +137,7 @@ function buildApprovalActions(ctx: SummaryPresentationContext): RuntimeAvailable
       enabled: !ctx.isClosed && sendBackOffered,
       reason: sendBackOffered ? undefined : 'Send-back is not available right now.',
     },
+    buildStopAction(ctx),
   ]
 }
 
