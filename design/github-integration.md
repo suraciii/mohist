@@ -39,14 +39,15 @@ remain Runner-side through delivery-token issuance.
 A Server infrastructure integration record — analogous to a Slack conversation
 mapping, not an aggregate fact — mapping a Mohist Issue to its GitHub mirror
 one-to-one. It stores the GitHub Issue's stable node id alongside its current
-coordinates, carries the bookkeeping that makes every outbound operation
-idempotent (pending creation intent, invisible body marker, emitted milestone
-comments, current state label), and reports sync health: healthy, or the last
-synchronization error.
+coordinates, carries separate bookkeeping for pending mirror creation,
+delivered comments and closes, and the current state label, and reports sync
+health: healthy, or the last synchronization error.
 
-The link is the idempotency key for every inbound and outbound path. It is
-created exactly once per pair — at mirror creation, at `/mohist start`, or at
-manual `link` — and survives disable/enable cycles of its connection.
+The link identifies the pair and scopes its mirror bookkeeping. Durable
+non-idempotent deliveries use their own intent or operation records; title/body
+and state-label projection use current-state replacement. The link is created
+exactly once per pair — at mirror creation, at `/mohist start`, or at manual
+`link` — and survives disable/enable cycles of its connection.
 
 ## The Direction Contract
 
@@ -130,149 +131,170 @@ fencing rules are defined in [Durable Outbound Operations](#durable-outbound-ope
 
 ## Durable Outbound Operations
 
-GitHub can accept a request and lose its response. A retry can then create a
-second mirror or duplicate a comment. The integration therefore separates
-remote outcome certainty from local request execution and keeps each outbound
-intent recoverable.
+Not every outbound change uses a durable operation record. Reserve-before-send
+applies only where repeating a request could create a duplicate and the shipped
+path has durable intent or operation state.
 
-An outbound operation is one intended GitHub change. It may create or update a
-mirror, post a Mohist comment, replace the `mohist:` state label, close a
-mirror, or deliver a command reply. The operation is durable before any GitHub
-request is sent. It has one stable operation identity, one logical operation
-key, and one target identity. A mirror operation also carries the mirror
-incarnation that it targets.
-
-A mirror incarnation is one concrete GitHub Issue identity linked to one Mohist
-Issue. A mirror-create reservation defines the next incarnation and binds it
-when a confirmed create or exact marker probe identifies the GitHub Issue. A
-replacement mirror starts a new incarnation. A retry keeps the same operation
-identity and incarnation. A new logical change gets a new operation identity.
-Operations that target a source GitHub Issue use that Issue identity; operations
-that target a mirror use both the Issue identity and its incarnation.
+- **Mirror creation.** A pending link is saved before the first GitHub create
+  request. It carries one invisible HTML marker and a durable
+  `MirrorCreateAttempted` flag. This is mirror-create intent, not a general
+  outbound operation ledger. A marker search covers GitHub Issues in all states.
+  Before the first create attempt, zero exact matches permits one create after
+  the intent is atomically reserved. After a create request has been attempted,
+  zero exact matches does not authorize another create: the intent remains
+  unresolved, the link records an unknown synchronization error, and a later
+  sync or mirror event probes again. One exact match binds the link. Multiple
+  matches fail closed. A definite rejection can clear the attempted flag only
+  when the absence of a remote side effect is known.
+- **Comment and close delivery.** Supported Mohist milestone comments and
+  mirror closes use `GitHubIssueCommentOperation` rows. The row is reserved
+  before the request, stores the exact GitHub Issue number, and stores either a
+  comment marker and body or a close reason. A duplicate event that finds the
+  existing reservation or posted bookkeeping sends nothing. Comment recovery
+  searches the exact marker: one match settles the row, zero matches permits a
+  controlled post of the same comment, and multiple matches fail closed. Close
+  recovery reads the exact Issue state: the expected closed reason settles the
+  row, an open Issue permits the close request, and a different reason is
+  ambiguous. Incomplete or unsupported state remains unknown. Command replies
+  use a separate durable reply ledger and marker-based worker; they are not
+  `GitHubIssueCommentOperation` rows.
+- **Current-state projection.** Title and body writes send the complete current
+  Mohist values as an idempotent replacement. The mirror marker is included in
+  the body, but these writes have no comment-operation row and no marker probe
+  for their result. State-label writes replace the `mohist:` label family while
+  preserving other labels, then persist the projected label locally. These
+  writes also have no comment-operation row or marker probe. A failure records
+  durable write-back error and link health; a later event, explicit sync, or
+  connection enable can project the current desired value again.
 
 ### Outcome certainty
 
-Every outbound result has exactly one certainty:
+The following certainty model applies to mirror creation, durable comment and
+close delivery, and command replies:
 
 - **Confirmed success.** The provider response or an exact remote probe proves
-  that the intended change is present. The operation is settled.
-- **Definite failure.** The provider proves that it rejected the request before
-  the remote state could change. The reservation may be released for a retry.
+  that the intended change is present. The durable intent or operation is
+  settled.
+- **Definite failure.** The provider or integration knows that the request was
+  rejected before a remote side effect occurred. The intent or reservation may
+  be made retryable for a later attempt.
 - **Unknown.** A timeout, transport error, server error, or unusable response
-  cannot prove whether GitHub applied the change. The reservation stays in
-  place and must be reconciled before another request.
-- **Ambiguous.** Reconciliation returns conflicting, multiple, mismatched, or
-  incomplete evidence. The operation fails closed. It receives no automatic
-  retry or cleanup that could change the remote state.
+  cannot prove whether GitHub applied the change. The durable intent or
+  reservation stays in place and must be reconciled before another
+  non-idempotent request.
+- **Ambiguous.** Reconciliation returns multiple, conflicting, mismatched, or
+  incomplete evidence that cannot safely determine the result. The operation
+  fails closed and receives no automatic request that could create another
+  side effect.
+
+Title/body and state-label projection uses a different rule. Its request
+replaces the current desired state, so a later projection may repeat the same
+request after an unknown or recorded failure. It does not use the durable
+comment-operation ledger or a marker probe.
 
 ### Reserve before send
 
-Before any GitHub request, the system durably reserves the exact logical
-operation, target identity, mirror incarnation when applicable, and the probe
-needed to establish its result. The reservation is not success. Only the
-reservation owner may send the request, and a duplicate event that sees the
-same reserved or settled operation sends nothing.
+Mirror creation, supported comment and close delivery, and command replies
+persist intent or a reservation before sending a non-idempotent request. A
+reservation is not success. Only the reservation owner sends the request; a
+duplicate event uses the existing durable state instead.
 
-An unknown result never permits a blind retry. The system first runs the exact
-probe for that operation:
+For comment and close delivery, a definite failure releases the reservation
+only when the absence of a remote side effect is known. An unknown result keeps
+the reservation for reconciliation. Comment recovery uses the exact marker;
+close recovery uses the exact target Issue state and `state_reason`. A zero
+comment-marker match permits a controlled retry of that comment. It does not
+permit a second mirror create after a mirror create has already been attempted.
 
-- A mirror create or comment uses an exact marker probe on the intended GitHub
-  scope. One matching result confirms success. Zero matches proves no effect
-  was observed and permits a controlled retry of the same operation. Multiple
-  matches are ambiguous and fail closed.
-- A state-label operation uses a state probe against the exact target. The
-  expected `mohist:` label with no competing `mohist:` state label confirms
-  success. A missing expected label permits a controlled retry. Conflicting or
-  incomplete label state is ambiguous.
-- A close operation uses the exact target identity and its state. `closed` with
-  the exact intended `state_reason` confirms success. `open` permits a
-  controlled retry. A different close reason, a mismatched target, or an
-  incomplete state is ambiguous.
+### Target fencing and reset
 
-A definite failure may release the reservation because the provider proved that
-no remote change occurred. The next attempt uses the same logical operation
-and current target. An unknown result retains the reservation until its probe
-proves success, proves no effect, or fails closed as ambiguous.
+The target-fencing contract is limited to shipped durable comment and close
+operations. Their rows capture the GitHub Issue number at reservation time. The
+recovery worker compares that number with the link's current mirror before
+performing recovery. Completion updates link bookkeeping only for the current
+target, and recovery failure deletion uses the durable operation id. A stale
+recovery action therefore cannot settle or delete a later comment or close
+reservation for another mirror target.
 
-### Incarnation fencing and reset
+This contract does not claim an expected-target guard for state-label success,
+title/body success, or generic link error clearing. Those paths use current link
+bookkeeping and durable failure/health records rather than the comment/close
+operation fence.
 
-Every completion, failure update, retry release, lease release, and cleanup
-must match the durable operation identity and the current target incarnation.
-A stale action is a no-op. It must not settle a newer operation, release or
-delete a newer reservation, change current mirror health, or modify a
-replacement mirror.
-
-Reset is an identity transition, not an ordinary retry. Only a 404 from the
-exact mirror content endpoint, for the currently linked target, may prove that
-the mirror identity is gone and start a reset. Reset fences the old
-incarnation, retires only its target-specific outbound bookkeeping, establishes
-a new mirror intent, and reprojects the current Mohist state. A definite
-mirror-create failure can release a pending reservation without a reset. An
-unknown mirror-create result keeps its reservation and requires the exact
-marker probe first.
-
-A 404 from a comment, state-label, close, or Pull Request endpoint does not
-prove that the mirror is gone. It must not reset or replace the mirror. The
-operation follows its own certainty and reconciliation rule instead.
+Reset is allowed only after a 404 from the exact mirror content endpoint for
+the currently linked target. It clears the old mirror's comment and label
+bookkeeping, deletes its comment/close operation rows, and starts a pending
+mirror projection. A 404 from a comment, state-label, close, or Pull Request
+endpoint does not prove that the mirror is gone and must not reset or replace
+it.
 
 ### Disable and enable
 
-`Disabled` is a pause, not a cancel or delete. It stops new sends and recovery,
-while preserving pending and unknown operations, their target, and current
-projection state. A request already sent may finish, but its completion remains
-subject to incarnation fencing. Disabling a connection must not lose pending
-work.
+`Disabled` is a pause, not a cancel or delete. It blocks new mirror work,
+inbound translation, and recovery claims while preserving pending mirror
+intent, uncertain comment/close reservations, command reply rows, and current
+projection state. A request already sent may finish while the connection is
+disabled. A confirmed result can still settle when its target matches the
+current link; an unknown result remains retained for later reconciliation.
 
-When a connection becomes `Active`, pending operations resume under the same
-certainty and fencing rules. The system then reprojects every linked Issue
-from current Mohist state. Reprojection covers current content, state labels,
-required milestone comments, and terminal close state. It is idempotent and
-survives process restart.
-
-A link may report healthy only after its complete current-state projection is
-confirmed. An enabled connection clears its reprojection obligation only after
-every linked Issue meets that condition. A failed or ambiguous operation keeps
-the relevant error visible and leaves recovery pending.
+When a connection becomes `Active`, durable delivery recovery resumes and the
+connection records a reprojection obligation. Reprojection runs sync for every
+linked Issue from current Mohist state. It covers current title and body, state
+labels, required milestone comments, and terminal close state. The obligation
+is cleared only after every linked Issue succeeds, and it survives a process
+restart. A failed projection keeps the relevant error visible until a later
+successful projection clears it.
 
 ### State transitions
 
-1. `unreserved -> reserved`: persist the exact operation before sending.
-2. `reserved -> confirmed`: the response or exact probe proves the change.
-3. `reserved -> definite-failure`: the provider proves no remote change.
-4. `reserved -> unknown`: the response cannot prove the remote outcome.
-5. `unknown -> confirmed`: the exact probe finds the intended effect.
-6. `unknown -> reserved`: the exact probe proves no effect, so the same
-   operation may be sent again.
-7. `unknown -> ambiguous`: evidence conflicts, is multiple, or is incomplete;
-   fail closed.
-8. `reserved` or `unknown -> paused`: the connection becomes `Disabled`; keep
-   the operation.
-9. `paused -> reserved` or `unknown`: the connection becomes `Active`; resume
-   reconciliation and projection.
-10. `current incarnation -> reset`: the exact mirror content endpoint proves
-    the target is missing; fence the old incarnation and start a replacement.
-11. `stale completion or cleanup -> ignored`: the target or operation identity
-    no longer matches the current incarnation.
+Mirror creation follows these transitions:
+
+1. A pending intent with no attempted create performs an exact marker probe. If
+   no marker exists, it reserves the intent and sends the first create.
+2. An attempted create with an unknown result, an unusable success response, or
+   a later zero-match probe remains pending and records an unknown error. It
+   must probe again later and must not send another create.
+3. One exact marker match links the mirror. Multiple matches fail closed. A
+   known no-effect rejection releases the attempted flag for a later create.
+
+Durable comment and close delivery follows these transitions:
+
+1. No operation row becomes a reserved row before the request.
+2. A confirmed result becomes posted bookkeeping.
+3. A known no-effect failure releases or deletes the reservation.
+4. An unknown result retains or defers the reservation until recovery probes
+   the remote state.
+5. Ambiguous evidence becomes terminal ambiguous state with no automatic
+   request.
+
+Current-state projection sends the current title/body or state-label value as a
+replacement. A successful state-label request persists local label bookkeeping.
+A failure or unknown response records link error/health, and a later event,
+explicit sync, or enable reprojection sends the current desired value again.
 
 ### Test and review matrix
 
-- **Outcome certainty:** tests cover confirmed, definite, unknown, and
-  ambiguous results. Review checks that every unknown path probes before a
-  second request.
-- **Marker and state probes:** tests cover zero, one, and multiple marker
-  matches plus exact label and close-state results. Review checks that probes
-  use the intended target and all required state fields.
-- **Reservation and duplicate delivery:** tests prove reserve-before-send and
-  one remote write for duplicate events. Review checks that retries reuse the
-  same logical operation and never create a second unproven write.
-- **Incarnation and reset:** tests prove that reset fences old completion,
-  failure, lease release, and cleanup. Review checks that stale work cannot
-  settle, delete, or alter current-incarnation state.
+- **Mirror create:** tests cover the first zero-match probe, an attempted create
+  followed by zero, one, or multiple marker matches, definite no-effect
+  failure, and an unusable create response. Review checks that zero after an
+  attempted create never sends another create.
+- **Durable delivery:** tests cover reserve-before-send, duplicate delivery,
+  comment marker zero/one/multiple matches, close state and reason
+  reconciliation, and command reply marker recovery. Review checks that
+  unknown results are reconciled before another non-idempotent request.
+- **Current-state projection:** tests cover full title/body replacement,
+  content echo suppression, state-label replacement, preservation of other
+  labels, durable failure/health, and later reprojection. Review does not
+  assume an operation row or marker probe for these writes.
+- **Target fencing and reset:** tests prove that stale durable comment/close
+  recovery cannot settle or delete a reservation for another GitHub Issue
+  target. Review checks the stored target number and durable operation id.
 - **404 handling:** tests prove that only the mirror content endpoint can
   trigger reset. Review checks that comment, label, close, and Pull Request
   404s do not replace the mirror.
-- **Disable, enable, and health:** tests prove that Disabled retains work and
-  Active resumes it, reprojects every link, and clears health only after
+- **Disable, enable, and health:** tests prove that Disabled retains durable
+  work, already sent confirmed results can settle, Active resumes recovery,
+  reprojects every link, and clears the reprojection obligation only after
   complete current-state projection. Review checks restart recovery and
   partial-failure behavior.
 

@@ -215,11 +215,15 @@ The current implementation provides:
   stopping synchronization.
 - The GitHub PR workflow omits closing keywords from PR bodies. Terminal
   write-back still closes mirrors.
-- Unknown external outcomes are reconciled before retry. Ambiguous evidence
-  fails closed and remains visible as a synchronization error.
+- Mirror creation, durable milestone comment and close delivery, and command
+  replies reconcile unknown outcomes before another non-idempotent request.
+  Title/body and state-label writes replace the current desired state and can
+  be re-projected after a recorded error. Ambiguous evidence fails closed and
+  remains visible as a synchronization error.
 - Disabling a connection pauses inbound and outbound work without cancelling or
-  deleting pending work. Enabling resumes pending work and re-projects every
-  linked Issue. A link reports healthy only after its current projection
+  deleting pending work. A request already sent may settle a confirmed result
+  for its current target. Enabling resumes durable recovery and re-projects
+  every linked Issue. A link reports healthy only after its current projection
   completes.
 - New feed-created Issues no longer emit the `github-issue` origin label.
   Historical feed-created links may retain that label as data.
