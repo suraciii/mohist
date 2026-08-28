@@ -295,7 +295,7 @@ public record AddCommentRequest(string? DisplayName, string Body, string[]? Atta
 
 public record ApproveRequest(string? DisplayName = null);
 
-public record RejectWithAuthorRequest(string Message, string? DisplayName = null);
+public record RequestChangesRequest(string Message, string? DisplayName = null);
 
 public sealed record AttachmentUploadResponse(
     string Id,

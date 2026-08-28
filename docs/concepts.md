@@ -215,8 +215,6 @@ presentation alias and does not change ownership. See
 Current WorkflowRun source, status, and recovery reads still consult live Profile
 data in some paths, and current Profile update guards still inspect active Runs.
 `WorkflowRun.Feedback` retains resolved Approval Feedback in an unbounded list.
-The CLI, API, and supervision preset still expose legacy `reject` paths,
-and runtime emits duplicated terminal and nonterminal `Rejected` event semantics.
 The built-in Profile stores the Pull Request number and URL as mutable Run Variables,
 and later Action inputs read the number without an immutable
 WorkflowRun Pull Request identity guard. Review translation currently parses PR

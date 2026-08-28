@@ -295,7 +295,7 @@ describe('IssueDetailPage runtime decision surface', () => {
           currentWorkItem: null,
           latestAttemptState: null,
           workflowSummaryState: 'awaiting-approval',
-          allowedActions: ['approve', 'reject'],
+          allowedActions: ['approve', 'request-changes'],
         },
       }),
     )
@@ -324,7 +324,7 @@ describe('IssueDetailPage runtime decision surface', () => {
           currentWorkItem: null,
           latestAttemptState: null,
           workflowSummaryState: 'awaiting-approval',
-          allowedActions: ['approve', 'reject'],
+          allowedActions: ['approve', 'request-changes'],
         },
       }),
     )

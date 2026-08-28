@@ -20,7 +20,7 @@ describe('session timeline domain actions', () => {
   })
 
   it('maps shell and structured run actions to the same workflow reference', () => {
-    const shell = detectShellDomainAction('mo run approve wr_internal_123 --author supervisor')
+    const shell = detectShellDomainAction('mo run approve wr_internal_123 --display-name supervisor')
     const tool = detectToolDomainAction({
       callId: 'approve',
       name: 'mohist_run_approve',
@@ -37,7 +37,7 @@ describe('session timeline domain actions', () => {
   })
 
   it('does not infer a workflow run id from shell flags', () => {
-    const action = detectShellDomainAction('mo run approve --author wr_flag_value')
+    const action = detectShellDomainAction('mo run approve --display-name wr_flag_value')
 
     expect(action).toMatchObject({
       verb: '批准了',

@@ -293,16 +293,6 @@ public class WorkflowRunStatusTransitionTests
         Assert.Equal(StageRunStatus.Running, current.Status);
     }
 
-    [Fact]
-    public void Reject_LandsOnFailed()
-    {
-        var run = BuildAwaitingApprovalRun();
-
-        run.Reject("not enough detail", DateTimeOffset.UnixEpoch, "operator-1");
-
-        Assert.Equal(WorkflowRunStatus.Failed, run.Status);
-    }
-
     // Regression for issue #387: HasInFlightWork must only look at the
     // current stage. A completed prior stage may carry a stale
     // ChecksWorkId (left behind by a stage that has since advanced); that

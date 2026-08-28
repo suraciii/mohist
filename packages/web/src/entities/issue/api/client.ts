@@ -160,18 +160,6 @@ export function approveIssue(number: number, data: ApproveIssueInput, projectId?
   )
 }
 
-export interface RejectIssueInput {
-  displayName?: string | null
-  message: string
-}
-
-export function rejectIssue(number: number, data: RejectIssueInput, projectId?: string | null) {
-  return request<{ issue: Issue; message: string }>(projectApiPath(projectId, `/issues/${number}/reject`), {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
-}
-
 export interface CreateFeedbackRequest {
   stage: string
   body: string

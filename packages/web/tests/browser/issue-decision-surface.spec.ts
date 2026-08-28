@@ -461,7 +461,7 @@ test.describe('Issue decision surface browser layout', () => {
         currentWorkItem: null,
         latestAttemptState: 'awaiting-approval',
         workflowSummaryState: 'awaiting-approval',
-        allowedActions: ['approve', 'reject'],
+        allowedActions: ['approve', 'request-changes'],
       },
     })
     await mockIssueDetailApi(page, issue, [])
@@ -494,7 +494,7 @@ test.describe('Issue decision surface browser layout', () => {
         currentWorkItem: null,
         latestAttemptState: 'awaiting-approval',
         workflowSummaryState: 'approval-required',
-        allowedActions: ['approve', 'reject'],
+        allowedActions: ['approve', 'request-changes'],
       },
     })
     await mockIssueDetailApi(page, issue, [])
@@ -539,7 +539,7 @@ test.describe('Issue decision surface browser layout', () => {
         currentWorkItem: null,
         latestAttemptState: 'awaiting-approval',
         workflowSummaryState: 'approval-required',
-        allowedActions: ['approve', 'reject'],
+        allowedActions: ['approve', 'request-changes'],
       },
     })
     await mockIssueDetailApi(page, issue, [])
@@ -581,7 +581,7 @@ test.describe('Issue decision surface browser layout', () => {
         currentWorkItem: null,
         latestAttemptState: 'awaiting-approval',
         workflowSummaryState: 'approval-required',
-        allowedActions: ['approve', 'reject'],
+        allowedActions: ['approve', 'request-changes'],
       },
     })
     const longToken = 'x'.repeat(600)
@@ -641,7 +641,7 @@ test.describe('Issue decision surface browser layout', () => {
         currentWorkItem: null,
         latestAttemptState: 'awaiting-approval',
         workflowSummaryState: 'approval-required',
-        allowedActions: ['approve', 'reject'],
+        allowedActions: ['approve', 'request-changes'],
       },
     })
     await mockIssueDetailApi(page, issue, [], {
@@ -683,7 +683,7 @@ test.describe('Issue decision surface browser layout', () => {
         currentWorkItem: null,
         latestAttemptState: 'awaiting-approval',
         workflowSummaryState: 'approval-required',
-        allowedActions: ['approve', 'reject'],
+        allowedActions: ['approve', 'request-changes'],
       },
     })
     await mockIssueDetailApi(page, issue, sessions, {

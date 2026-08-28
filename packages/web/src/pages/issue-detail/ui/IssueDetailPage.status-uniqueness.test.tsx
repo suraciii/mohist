@@ -177,7 +177,7 @@ describe('IssueDetailPage status uniqueness — approval-required summary', () =
           currentWorkItem: null,
           latestAttemptState: null,
           workflowSummaryState: 'awaiting-approval',
-          allowedActions: ['approve', 'reject'],
+          allowedActions: ['approve', 'request-changes'],
         },
       }),
     )
@@ -432,7 +432,7 @@ describe('IssueDetailPage two paused meanings are distinguishable', () => {
           currentWorkItem: null,
           latestAttemptState: null,
           workflowSummaryState: 'awaiting-approval',
-          allowedActions: ['approve', 'reject'],
+          allowedActions: ['approve', 'request-changes'],
         },
       }),
     )

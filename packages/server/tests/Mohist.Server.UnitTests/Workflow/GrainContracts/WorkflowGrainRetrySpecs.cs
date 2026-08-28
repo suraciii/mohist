@@ -410,36 +410,32 @@ public sealed class WorkflowGrainRetrySpecs
     }
 
     [Fact]
-    public async Task PlanIsRejected_LegacyRejectRoutesToFeedbackLoop_RetryIsNotRejected()
+    public async Task PlanAtApproval_RequestChangesRoutesToFeedbackLoop_RetryIsNotAllowed()
     {
-        var arrangement = await ArrangeAsync("wr-retry-legacy-feedback", ApprovalStage());
+        var arrangement = await ArrangeAsync("wr-retry-request-changes", ApprovalStage());
         await DrivePlanToGateAsync(arrangement);
 
-        // Legacy reject no longer fails the workflow; it routes through
-        // the feedback loop. The workflow is Running, not Failed, so
-        // RetryAsync throws because Retry is reserved for failed runs.
-#pragma warning disable CS0618
+        // Request Changes does not fail the workflow; it routes through the
+        // feedback loop. The workflow is Running, not Failed, so RetryAsync
+        // throws because Retry is reserved for failed runs.
         await arrangement.Grain.RequestChangesAsync("needs rework", "operator-1");
-#pragma warning restore CS0618
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await arrangement.Grain.RetryAsync());
     }
 
     [Fact]
-    public async Task LegacyReject_UserViewsWorkflowStatus_FeedbackLoopIsObservable()
+    public async Task RequestChanges_UserViewsWorkflowStatus_FeedbackLoopIsObservable()
     {
-        var arrangement = await ArrangeAsync("wr-retry-legacy-status", ApprovalStage());
+        var arrangement = await ArrangeAsync("wr-retry-request-changes-status", ApprovalStage());
         await DrivePlanToGateAsync(arrangement);
 
-#pragma warning disable CS0618
         await arrangement.Grain.RequestChangesAsync("needs rework", "operator-1");
-#pragma warning restore CS0618
 
         var status = await arrangement.Querier.GetStatusAsync(arrangement.RunId);
         Assert.NotNull(status);
-        // After RequestChanges, the legacy approval is replaced with a
-        // feedback task the runner can pick up. With the runner still
+        // After RequestChanges, the approval is replaced with a feedback
+        // task the runner can pick up. With the runner still
         // assigned and dispatchable work queued, the run is Ready.
         Assert.Equal("ready", status!.Status);
 
@@ -449,7 +445,7 @@ public sealed class WorkflowGrainRetrySpecs
     }
 
     [Fact]
-    public void LegacyApprovalRejectedWithoutWorkflowFailure_UserViewsWorkflowStatus_RerunActionIsAvailable()
+    public void HistoricalApprovalRejectedWithoutWorkflowFailure_UserViewsWorkflowStatus_RerunActionIsAvailable()
     {
         var run = WorkflowRun.Create("legacy-approval-rejected", ApprovalStage(), DateTimeOffset.UnixEpoch);
         run.Start(DateTimeOffset.UnixEpoch);

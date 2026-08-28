@@ -11,7 +11,7 @@ function baseInput(
     pendingWork: null,
     availableActions: [
       { name: 'approve', label: 'Approve', target: null },
-      { name: 'reject', label: 'Send back', target: null },
+      { name: 'request-changes', label: 'Request changes', target: null },
     ],
   },
 ): RuntimeDecisionInput {
@@ -31,7 +31,7 @@ function baseInput(
         currentWorkItem: null,
         latestAttemptState: null,
         workflowSummaryState: 'awaiting-approval',
-        allowedActions: ['approve', 'reject'],
+        allowedActions: ['approve', 'request-changes'],
       },
       convergence: undefined,
       drift: undefined,
@@ -113,7 +113,7 @@ describe('runtime-presentations approval actions', () => {
     expect(sendBack?.reason).toBe('Send-back is not available right now.')
   })
 
-  it.each(['reject', 'send-back', 'send_back'])('keeps legacy %s enabled', (legacyAction) => {
+  it.each(['request-changes', 'request_changes'])('enables send back for canonical %s', (canonicalAction) => {
     const decision = deriveRuntimeDecision(
       baseInput(
         {
@@ -121,14 +121,32 @@ describe('runtime-presentations approval actions', () => {
             currentWorkItem: null,
             latestAttemptState: null,
             workflowSummaryState: 'awaiting-approval',
-            allowedActions: [legacyAction],
+            allowedActions: [canonicalAction],
           },
         },
-        approvalTimeline([legacyAction]),
+        approvalTimeline([canonicalAction]),
       ),
     )
 
     expect(decision.actions.find((action) => action.kind === 'send-back')?.enabled).toBe(true)
+  })
+
+  it.each(['reject', 'send-back', 'send_back'])('does not enable send back for obsolete %s', (obsoleteAction) => {
+    const decision = deriveRuntimeDecision(
+      baseInput(
+        {
+          recovery: {
+            currentWorkItem: null,
+            latestAttemptState: null,
+            workflowSummaryState: 'awaiting-approval',
+            allowedActions: [obsoleteAction],
+          },
+        },
+        approvalTimeline([obsoleteAction]),
+      ),
+    )
+
+    expect(decision.actions.find((action) => action.kind === 'send-back')?.enabled).toBe(false)
   })
 })
 

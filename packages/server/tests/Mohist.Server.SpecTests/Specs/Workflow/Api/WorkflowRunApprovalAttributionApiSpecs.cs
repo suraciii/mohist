@@ -49,12 +49,12 @@ public partial class WorkflowRunControlApiSpecs
     }
 
     [Fact]
-    public async Task Reject_WithoutDisplayName_AttributesToAuthenticatedPrincipal()
+    public async Task RequestChanges_WithoutDisplayName_AttributesToAuthenticatedPrincipal()
     {
         var (_, _, _, wrId) = await SeedAwaitingApprovalWorkflowAsync();
 
         var response = await _client.PostAsJsonAsync(
-            $"/api/workflow-runs/{wrId}/reject",
+            $"/api/workflow-runs/{wrId}/request-changes",
             new { message = "needs more detail" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

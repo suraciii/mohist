@@ -106,7 +106,7 @@ describe('deriveRuntimeDecision', () => {
           currentWorkItem: null,
           latestAttemptState: null,
           workflowSummaryState: 'awaiting-approval',
-          allowedActions: ['approve', 'reject'],
+          allowedActions: ['approve', 'request-changes'],
         },
       }),
       timeline: {
@@ -128,7 +128,7 @@ describe('deriveRuntimeDecision', () => {
         pendingWork: null,
         availableActions: [
           { name: 'approve', label: 'Approve', target: null },
-          { name: 'reject', label: 'Send back', target: null },
+          { name: 'request-changes', label: 'Request changes', target: null },
         ],
       },
     })

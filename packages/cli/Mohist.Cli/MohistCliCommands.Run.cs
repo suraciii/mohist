@@ -11,7 +11,7 @@ internal static partial class RunCommands
         [
             "workflowRunId",
             "approved",
-            "rejected",
+            "requested-changes",
             "retried",
             "rerun",
             "rerunFromStage",
@@ -52,7 +52,7 @@ internal static partial class RunCommands
         var run = new Command("run", "Workflow run navigation and control");
 
         run.Subcommands.Add(BuildApprove(api));
-        run.Subcommands.Add(BuildReject(api));
+        run.Subcommands.Add(BuildRequestChanges(api));
         run.Subcommands.Add(BuildRetry(api));
         run.Subcommands.Add(BuildRerun(api));
         run.Subcommands.Add(BuildPause(api));
@@ -206,17 +206,17 @@ internal static partial class RunCommands
     }
 
 
-    private static Command BuildReject(MohistCliApi api)
+    private static Command BuildRequestChanges(MohistCliApi api)
     {
         var cmd = new Command(
-            "reject",
-            "Reject the workflow run at its approval gate with a reason (use --message; required)");
+            "request-changes",
+            "Request changes to the workflow run at its approval gate (use --message; required)");
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
         var projectOpt = ProjectOptions();
         var messageOpt = new Option<string?>("--message", "-m")
         {
-            Description = "Reject reason / change request message (required, must not be empty)",
+            Description = "Request changes message (required, must not be empty)",
         };
         var displayNameOpt = new Option<string?>("--display-name")
         {
@@ -239,9 +239,9 @@ internal static partial class RunCommands
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             var json = ctx.GetValue(jsonOpt);
             var selection = JsonSelection.Parse(RunControlDescriptor, jsonProvided, json);
-            return RejectAsync();
+            return RequestChangesAsync();
 
-            async Task<int> RejectAsync()
+            async Task<int> RequestChangesAsync()
             {
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(RunControlDescriptor, selection);
@@ -268,13 +268,13 @@ internal static partial class RunCommands
 
                 return await api.PrintMutationResourceAsync(
                     HttpMethod.Post,
-                    WorkflowRunPath(resolvedRunId!, "/reject"),
+                    WorkflowRunPath(resolvedRunId!, "/request-changes"),
                     new { displayName = normalizedDisplayName, message },
                     RunControlDescriptor,
                     selection,
                     data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail),
                     successDataFallback: RunControlSuccessData(
-                        selection, resolvedRunId!, "rejected", displayName: normalizedDisplayName));
+                        selection, resolvedRunId!, "requested-changes", displayName: normalizedDisplayName));
             }
         });
         return cmd;

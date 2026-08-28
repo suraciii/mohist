@@ -128,15 +128,15 @@ public partial class WorkflowRunControlApiSpecs
     }
 
     [Fact]
-    public async Task CrossPath_RejectWithoutMessage_FailsBothRoutesWith400()
+    public async Task CrossPath_RequestChangesWithoutMessage_FailsBothRoutesWith400()
     {
         var (projectId, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
 
         var issueResponse = await _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/issues/{issueNumber}/reject",
+            $"/api/projects/{projectId}/issues/{issueNumber}/request-changes",
             new { displayName = "supervisor" });
         var runResponse = await _client.PostAsJsonAsync(
-            $"/api/workflow-runs/{wrId}/reject",
+            $"/api/workflow-runs/{wrId}/request-changes",
             new { displayName = "supervisor" });
 
         Assert.Equal(HttpStatusCode.BadRequest, issueResponse.StatusCode);

@@ -9,13 +9,15 @@ import { server } from '../../../../tests/support/msw'
 import { IssueDetailPage } from './IssueDetailPage'
 import { mockArtifactsError, mockIssue, mountIssueDetail } from './_issueDetailMsw'
 
-const projects: Project[] = [{
-  id: 'proj-1',
-  name: 'Project 1',
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-  repositories: [],
-}]
+const projects: Project[] = [
+  {
+    id: 'proj-1',
+    name: 'Project 1',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    repositories: [],
+  },
+]
 
 function makeIssue(overrides: Record<string, unknown> = {}) {
   return {
@@ -40,7 +42,11 @@ function makeIssue(overrides: Record<string, unknown> = {}) {
 }
 
 function TimelinePanel({ enabled }: EventTimelinePanelProps) {
-  return <div data-testid="test-timeline" data-enabled={enabled ? 'true' : 'false'}>Timeline ready</div>
+  return (
+    <div data-testid="test-timeline" data-enabled={enabled ? 'true' : 'false'}>
+      Timeline ready
+    </div>
+  )
 }
 
 function LocationProbe() {
@@ -48,9 +54,17 @@ function LocationProbe() {
   const navigate = useNavigate()
   return (
     <>
-      <output data-testid="location-value">{location.pathname}{location.search}{location.hash}</output>
-      <button type="button" onClick={() => navigate(-1)}>History back</button>
-      <button type="button" onClick={() => navigate(1)}>History forward</button>
+      <output data-testid="location-value">
+        {location.pathname}
+        {location.search}
+        {location.hash}
+      </output>
+      <button type="button" onClick={() => navigate(-1)}>
+        History back
+      </button>
+      <button type="button" onClick={() => navigate(1)}>
+        History forward
+      </button>
     </>
   )
 }
@@ -64,12 +78,12 @@ function renderPage(route: string) {
           <Routes>
             <Route
               path="/:projectName/issues/:number"
-              element={(
+              element={
                 <>
                   <IssueDetailPage components={{ EventTimelinePanel: TimelinePanel }} />
                   <LocationProbe />
                 </>
-              )}
+              }
             />
           </Routes>
         </ProjectProvider>
@@ -98,7 +112,9 @@ describe('IssueDetailPage fragment navigation', () => {
     await waitFor(() => expect(document.getElementById(id)).not.toBeNull())
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled())
     if (fragment === 'artifacts') expect(document.querySelectorAll('#artifacts')).toHaveLength(1)
-    expect(screen.getByTestId('location-value')).toHaveTextContent(`/project-scope/issues/14?from=notification#${fragment}`)
+    expect(screen.getByTestId('location-value')).toHaveTextContent(
+      `/project-scope/issues/14?from=notification#${fragment}`,
+    )
   })
 
   it('opens and enables Activity directly from the URL without a trigger click', async () => {
@@ -106,7 +122,9 @@ describe('IssueDetailPage fragment navigation', () => {
 
     expect(await screen.findByTestId('activity-dialog-content')).toHaveAttribute('id', 'activity')
     expect(screen.getByTestId('test-timeline')).toHaveAttribute('data-enabled', 'true')
-    expect(screen.getByTestId('location-value')).toHaveTextContent('/project-scope/issues/14?from=notification#activity')
+    expect(screen.getByTestId('location-value')).toHaveTextContent(
+      '/project-scope/issues/14?from=notification#activity',
+    )
   })
 
   it('exposes canonical same-issue links while preserving pathname and search', async () => {
@@ -161,20 +179,22 @@ describe('IssueDetailPage fragment navigation', () => {
   })
 
   it('assigns the sole artifacts target to unavailable approval evidence', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'check',
-      workflowStatus: 'paused',
-      workflowRunId: 'wr-1',
-      health: 'paused',
-      approvalState: { status: 'awaiting', stage: 'check', requestedAt: '2026-01-01T00:00:00Z' },
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: null,
-        workflowSummaryState: 'awaiting-approval',
-        allowedActions: ['approve', 'reject'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'check',
+        workflowStatus: 'paused',
+        workflowRunId: 'wr-1',
+        health: 'paused',
+        approvalState: { status: 'awaiting', stage: 'check', requestedAt: '2026-01-01T00:00:00Z' },
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: null,
+          workflowSummaryState: 'awaiting-approval',
+          allowedActions: ['approve', 'request-changes'],
+        },
+      }),
+    )
     mockArtifactsError()
     renderPage('/project-scope/issues/14#artifacts')
 
@@ -196,10 +216,12 @@ describe('IssueDetailPage fragment navigation', () => {
 
   it('fails safely when a composite parent has no requested workflow destination', async () => {
     const scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView')
-    mockIssue(makeIssue({
-      children: [{ number: 15, title: 'Child', status: 'backlog', health: 'active', repositoryName: null }],
-      childIssuesSummary: { count: 1, doneCount: 0, blockedCount: 0 },
-    }))
+    mockIssue(
+      makeIssue({
+        children: [{ number: 15, title: 'Child', status: 'backlog', health: 'active', repositoryName: null }],
+        childIssuesSummary: { count: 1, doneCount: 0, blockedCount: 0 },
+      }),
+    )
     renderPage('/project-scope/issues/14#workflow')
 
     expect(await screen.findByRole('heading', { name: 'Addressable issue' })).toBeInTheDocument()
