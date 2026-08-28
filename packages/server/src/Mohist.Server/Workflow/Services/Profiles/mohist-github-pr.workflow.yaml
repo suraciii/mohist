@@ -6,7 +6,7 @@ approval:
       uses: mohist/agent
       with:
         name: mohist/builder
-        session: ${{ stage.name }}
+        session: feedback-${{ stage.name }}
         prompt: ${{ prompts.apply-feedback }}
     - id: publish-feedback
       title: Publish feedback

@@ -215,12 +215,7 @@ presentation alias and does not change ownership. See
 Current WorkflowRun source, status, and recovery reads still consult live Profile
 data in some paths, and current Profile update guards still inspect active Runs.
 `WorkflowRun.Feedback` retains resolved Approval Feedback in an unbounded list.
-Executable built-in YAML still contains default Feedback Tasks and Stage-derived
-Sessions. Current Request Changes resolves feedback through live Profile data,
-synthesizes a default, and is offered without checking the bound Definition. It
-can mutate Approval Point, Stage, and Approval Feedback state before validating
-the resolved Task list, so failed validation can leave the in-memory aggregate
-changed. The CLI, API, and supervision preset still expose legacy `reject` paths,
+The CLI, API, and supervision preset still expose legacy `reject` paths,
 and runtime emits duplicated terminal and nonterminal `Rejected` event semantics.
 The built-in Profile stores the Pull Request number and URL as mutable Run Variables,
 and later Action inputs read the number without an immutable
