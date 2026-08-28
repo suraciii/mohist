@@ -141,11 +141,14 @@ reconciliation searches GitHub Issues in all states.
 ```mermaid
 flowchart LR
     subgraph MC["Mirror create intent"]
-        M0["Pending link"] -->|"marker probe finds zero before first attempt"| M1["Reserve intent"]
-        M1 -->|"first create request is sent"| M2["Create attempted"]
-        M2 -->|"one exact marker match"| M3["Link mirror"]
-        M2 -->|"zero marker matches after attempt"| M4["Keep unresolved"]
-        M2 -->|"multiple marker matches"| M5["Fail closed"]
+        M0["Pending link"] --> M1{"Exact marker probe"}
+        M1 -->|"zero before first create"| M2["Reserve intent"]
+        M1 -->|"one exact match"| M3["Link mirror"]
+        M1 -->|"multiple exact matches"| M4["Fail closed"]
+        M2 -->|"first create request is sent"| M5["Create attempted"]
+        M5 -->|"one exact marker match"| M3
+        M5 -->|"zero marker matches after attempt"| M6["Keep unresolved; no second create"]
+        M5 -->|"multiple marker matches"| M4
     end
 
     subgraph DD["Durable comment, close, or reply delivery"]
