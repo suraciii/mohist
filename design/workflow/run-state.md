@@ -45,9 +45,10 @@ State is not:
 - Every field in State must answer a current decision question about scheduling,
   retry, recovery, lock, or state presentation. A field retained only for
   possible future use does not enter State.
-- Content that grows with task or retry count must be budgeted per TaskRun. One
-  TaskRun carries only fields required for its own decisions and no complete
-  duplicate shared data such as every Prompt or all earlier task output.
+- Content that grows with task or retry count must be budgeted per
+  WorkflowActionAttempt. One attempt carries only fields required for its own
+  decisions and no complete duplicate shared data such as every Prompt or all
+  earlier task output.
 - A superseded or terminal attempt does not retain a dispatch snapshot.
   [`recovery.md`](recovery.md) determines the attempt count in a recovery chain.
   State adds no historical limit. Enforce size through the content boundary,
@@ -111,6 +112,27 @@ with incomplete migration cannot enter the service phase. Acceptance requires
 zero historical-conversion calls on the read path. Migration code can remain at
 the cold-start boundary while old database upgrade remains supported.
 
+### Historical interruption compatibility
+
+Canonical State has no interrupted Action status, task/stage
+`WorkInterruption`, or `recoverable-interrupted` projection. Those shapes are
+legacy startup-migration input only; they are not a live recovery mechanism and
+cannot authorize Runner redelivery, AgentJob launch, replacement execution, or
+a new deadline.
+
+The cold-start upgrader classifies legacy status and interruption fields from
+raw JSON before normal deserialization. It may remove an interruption or map an
+Action attempt to `Failed` only when persisted terminal facts identify that
+exact owning attempt or checks batch. A terminal WorkflowRun or Stage alone is
+not proof. An active, mismatched, malformed, or otherwise ambiguous row fails
+startup with zero writes rather than inventing a result, reason, timestamp,
+event, or state transition.
+
+Removing these fields from current State does not remove stored
+`TaskInterrupted` or `ChecksInterrupted` events. They remain readable history
+under [`event-protocol.md`](../event-protocol.md#historical-workflow-interruption-events)
+and never reconstruct current State.
+
 ## Status
 
 Dispatch snapshots are external to WorkflowRun State and follow the lifecycle
@@ -122,3 +144,8 @@ cost proportional to current facts rather than execution history.
 
 Retention for events, transcripts, and telemetry is a database-wide lifecycle
 concern. It must not expand WorkflowRun State or its read path.
+
+> **Implementation gap:** the current model still accepts interrupted Action
+> status, `WorkInterruption`, `recoverable-interrupted` presentation, and the
+> legacy runner-loss reminder. The cold-start migration and current-model
+> deletion described above are not yet implemented.

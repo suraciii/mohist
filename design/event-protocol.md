@@ -24,6 +24,21 @@ The Catalog answers only which stable event types exist. An event family and
 its structure determine lineage requirements; the Catalog does not duplicate
 an attribute schema for every type.
 
+### Historical Workflow interruption events
+
+`com.mohist.workflow.task.interrupted` and
+`com.mohist.workflow.checks.interrupted` remain stable historical event types.
+Retiring interrupted WorkflowRun current state does not remove their catalog
+entries, serializers, deserializers, queries, lineage, or historical
+presentation.
+
+These events record what an older Workflow implementation observed at production
+time. A consumer may present that occurrence as history, but cannot use it to
+reconstruct current WorkflowRun, WorkflowActionAttempt, or checks state; decide
+retry or recovery; or infer that current work is running. Current state comes
+only from the owning aggregate. After current interrupted state is retired, no
+new production path emits these event types.
+
 ## `source`: Emitting Entity
 
 The source uses the emitting entity's domain identity, such as
