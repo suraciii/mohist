@@ -192,6 +192,20 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
     expect(runtime.runTurnCalls).toHaveLength(0)
   })
 
+  it('maps a missing Skill resolver category to the declared result code', async () => {
+    const runtime = makeFakeRuntime()
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
+
+    const result = await executor.execute(
+      buildAgentJobWork({ with: { prompt: 'should not run', skills: ['missing-skill-for-error-catalog-spec'] } }),
+      new AbortController().signal,
+    )
+
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'skill-not-found' } })
+    expect(runtime.runTurnCalls).toHaveLength(0)
+  })
+
   vitestIt.each([
     ['success', null],
     [
@@ -929,9 +943,25 @@ describe('AgentJobExecutor work-result projection', () => {
 
     expect(workResult.status).toBe('failed')
     expect(workResult.error).toEqual({
-      code: 'unsupported_execution_configuration',
+      code: 'unsupported-execution-configuration',
       message: 'OpenCode does not support a reasoning effort',
     })
     expect((workResult.output as Record<string, unknown>).error).toBe('OpenCode does not support a reasoning effort')
+  })
+
+  it('promotes provider quota diagnostics to the non-recoverable result code', () => {
+    const result: RuntimeResult<RuntimeTurnResult> = {
+      ok: false,
+      error: {
+        kind: 'turn-failed',
+        message: 'quota exhausted',
+        diagnostics: [{ severity: 'error', code: 'provider-quota-exhausted', message: 'quota exhausted' }],
+      },
+      diagnostics: [],
+    }
+
+    const workResult = projectTurnToWorkItemResult(result, 'opencode', null, null)
+
+    expect(workResult.error).toEqual({ code: 'provider-quota-exhausted', message: 'quota exhausted' })
   })
 })

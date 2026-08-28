@@ -24,7 +24,7 @@ import type {
   ParsedModel,
 } from './agent-job-executor.js'
 import { knownBinding } from './agent-job-executor.js'
-import { mapOpenCodeErrorKind, mapPiErrorKind } from './error-kind-mapping.js'
+import { mapOpenCodeErrorKind, mapPiErrorKind, normalizeAgentRuntimeErrorCode } from './error-kind-mapping.js'
 
 const log = runnerLogger.child('job')
 
@@ -741,7 +741,7 @@ export function failureResult(
   return {
     status: 'failed',
     message,
-    error: { code, message },
+    error: { code: normalizeAgentRuntimeErrorCode(code, diagnostics), message },
     output: diagnostics ? buildAgentJobOutput(false, null, runtime, null, null, null, message, diagnostics) : undefined,
     exitCode: 1,
   }
@@ -797,7 +797,10 @@ export function projectTurnToWorkItemResult(
     return {
       status: 'failed',
       message: error.message,
-      error: { code: mapOpenCodeErrorKind(error.kind), message: error.message },
+      error: {
+        code: mapOpenCodeErrorKind(error.kind, [...error.diagnostics, ...result.diagnostics]),
+        message: error.message,
+      },
       output,
       exitCode: 1,
     }
@@ -829,7 +832,7 @@ export function projectPiTurnToWorkItemResult(
 ): WorkItemResult {
   if (!result.ok) {
     const error = result.error
-    const code = mapPiErrorKind(error.kind)
+    const code = mapPiErrorKind(error.kind, [...error.diagnostics, ...result.diagnostics])
     const hint = error.kind === 'missing-session' ? ('reset' as const) : undefined
     const output = buildAgentJobOutput(
       false,

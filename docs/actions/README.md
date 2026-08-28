@@ -191,32 +191,50 @@ unconfirmed instead of presenting a possibly running Session as safely idle.
 
 ### Shared Error Codes
 
-The two execution Actions share these business error codes. Their own pages
-list only additional codes.
+AgentJob normalizes backend, resolver, binding, and workspace failures at one
+Agent-to-Runner result boundary. Runtime diagnostics keep their source
+categories, while these failures use a declared business code below or the
+platform-owned `invalid-input`, `unexpected-error`, or `timeout`. An undeclared
+backend, resolver, binding, or workspace code becomes `unexpected-error`.
 
-- `runtime-unavailable`: backend execution capability is not ready or
-  available.
-- `session-workspace-mismatch`: the working directory does not match the
-  Session binding.
-- `session-binding-failed`: logical Session binding resolution or persistence
-  failed.
-- `session-reporting-failed`: Mohist could not confirm the Workflow
-  AgentSession input or final turn facts.
-- `runtime-session-missing`: the physical Session is missing, but this
-  operation cannot rebuild or resubmit safely.
-- `unavailable-runtime`: the backend reports that it is unavailable.
-- `turn-failed`: execution failed for a reason that has no more specific
-  declared code.
-- `skill-not-found`: an Agent Skill could not be resolved before execution.
-- `provider-quota-exhausted`: the provider reported exhausted quota, balance,
-  or billing.
+- `attachment-delivery-failed`: accepted attachments could not be delivered to
+  the execution workspace.
+- `conflict`: the Runtime rejected an operation because its Session state
+  conflicts with the request.
+- `generation-drain-timeout`: a quarantined Runtime generation did not drain
+  before replacement.
+- `incompatible-execution-configuration`: the selected Runtime cannot apply
+  the requested Agent execution configuration.
 - `incompatible-runtime`: the selected Runtime is incompatible with the
   request.
 - `interrupted`: execution was interrupted outside the normal deadline path.
+- `invalid-dispatch`: an AgentJob executor received work owned by another
+  execution boundary.
+- `manager-credential-expired`: Manager credentials expired before execution
+  completed.
+- `permission-required`: the Runtime requires permission to continue.
+- `provider-quota-exhausted`: the provider reported exhausted quota, balance,
+  or billing.
+- `runtime-session-missing`: the physical Session is missing, but this
+  operation cannot rebuild or resubmit safely.
+- `runtime-unavailable`: backend execution capability is not ready or
+  available.
+- `session-binding-failed`: logical Session binding resolution or persistence
+  failed.
+- `skill-not-found`: an Agent Skill could not be resolved before execution.
+- `turn-failed`: execution failed for a reason that has no more specific
+  declared code.
+- `unavailable-runtime`: the backend reports that it is unavailable.
+- `unsupported-execution-configuration`: the backend rejected an execution
+  option it cannot support.
+- `workspace-home-claimed`: the named Workspace is currently owned by another
+  Runner.
+- `workspace-materialization-failed`: the named Workspace could not be
+  materialized.
 
-## Implementation Gaps
-
-The OpenCode and Pi manifests do not yet declare every code above that their
-current execution paths can produce. Until the manifests and Action boundaries
-are aligned, standard normalization can convert those omissions to
-`unexpected-error`.
+Source categories remain diagnostic facts. In particular, `skill_not_found`
+and `unsupported_execution_configuration` are recorded in diagnostics, while
+task results use `skill-not-found` and
+`unsupported-execution-configuration`. Provider quota diagnostics are promoted
+to `provider-quota-exhausted` so recovery does not retry the same exhausted
+provider.
