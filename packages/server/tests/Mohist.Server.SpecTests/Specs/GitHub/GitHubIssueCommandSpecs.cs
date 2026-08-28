@@ -48,7 +48,6 @@ public sealed class GitHubIssueCommandSpecs
         {
             owner,
             repo = RepoName,
-            pat = "github-pat",
         });
         return (project.Id, created.GetProperty("id").GetString()!, created.GetProperty("webhookSecret").GetString()!, owner);
     }
@@ -369,7 +368,6 @@ public sealed class GitHubIssueCommandSpecs
         {
             owner,
             repo = RepoName,
-            pat = "github-pat",
         });
         var connectionId = created.GetProperty("id").GetString()!;
         var secret = created.GetProperty("webhookSecret").GetString()!;

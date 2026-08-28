@@ -28,6 +28,9 @@ public partial class MohistDbContext
                 entity.HasIndex(e => new { e.Owner, e.Repo })
                     .IsUnique();
                 entity.HasIndex(e => new { e.ProjectId, e.RepositoryName });
+                entity.HasIndex(e => e.RepositoryNodeId)
+                    .IsUnique()
+                    .HasFilter("\"RepositoryNodeId\" IS NOT NULL");
                 entity.Property(e => e.RepositoryName)
                     .HasMaxLength(256)
                     .IsRequired();
@@ -37,15 +40,20 @@ public partial class MohistDbContext
                 entity.Property(e => e.Status)
                     .HasMaxLength(32)
                     .IsRequired();
-                entity.Property(e => e.IdentityKind)
-                    .HasMaxLength(32)
-                    .IsRequired();
                 entity.Property(e => e.InstallationId)
                     .HasMaxLength(256);
+                entity.Property(e => e.RepositoryNodeId)
+                    .HasMaxLength(256);
+                entity.Property(e => e.ReconnectRequired)
+                    .IsRequired();
                 entity.Property(e => e.NeedsAttention)
                     .IsRequired();
                 entity.Property(e => e.NeedsReprojection)
                     .IsRequired();
+                entity.Property(e => e.LastErrorCode)
+                    .HasMaxLength(128);
+                entity.Property(e => e.LastErrorDetail);
+                entity.Property(e => e.LastErrorAt);
                 entity.Property(e => e.CreatedAt)
                     .IsRequired();
                 entity.Property(e => e.UpdatedAt)

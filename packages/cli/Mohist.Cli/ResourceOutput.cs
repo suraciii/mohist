@@ -52,7 +52,8 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.OtelTracesList or
             MohistCliApi.TableShape.WebhookSubscriptionList or
             MohistCliApi.TableShape.WebhookDeliveryFailureList or
-            MohistCliApi.TableShape.WorkspaceList => ResourceCardinality.Collection,
+            MohistCliApi.TableShape.WorkspaceList or
+            MohistCliApi.TableShape.GitHubConnectionList => ResourceCardinality.Collection,
             _ => ResourceCardinality.Single,
         };
 
@@ -66,6 +67,8 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.IssueList => ["number", "title", "status", "health", "projectId", "projectName", "labels", "priority", "risk", "createdAt", "updatedAt", "archivedAt", "completedAt", "approvalState", "blockedReason", "attention", "workflowRunId", "workflowStage", "workflowStatus", "workflowStageProgress", "workflowProfileId", "noWorkflow", "prerequisiteNumbers", "prereq", "isDraft", "canStart", "canBeParent", "blocker", "repositoryName", "repository", "repositoryProblem", "github", "epic", "parentIssueRef", "childIssuesSummary", "children", "watching", "muted"],
             MohistCliApi.TableShape.Issue => ["number", "title", "body", "status", "health", "projectId", "projectName", "labels", "priority", "risk", "model", "modelVariant", "agentConfig", "stageModels", "stageModelVariants", "createdAt", "updatedAt", "archivedAt", "completedAt", "approvalState", "blockedReason", "attention", "workflowRunId", "workflowStage", "workflowStatus", "workflowStageProgress", "workflowProfileId", "workflowProfileMode", "noWorkflow", "prerequisiteNumbers", "comments", "attachments", "prereq", "isDraft", "canStart", "canBeParent", "blocker", "repositoryName", "repository", "repositoryProblem", "github", "epic", "parentIssueRef", "childIssuesSummary", "children", "feedback", "watching", "muted"],
             MohistCliApi.TableShape.RepoList => ["name", "gitUrl", "baseBranch", "isDefault", "resolvedBaseBranch"],
+            MohistCliApi.TableShape.GitHubConnectionList => ["id", "projectId", "owner", "repo", "repositoryName", "approvers", "status", "installationId", "repositoryNodeId", "reconnectRequired", "needsAttention", "needsReprojection", "lastError", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.GitHubConnection => ["id", "projectId", "owner", "repo", "repositoryName", "approvers", "status", "installationId", "repositoryNodeId", "reconnectRequired", "needsAttention", "needsReprojection", "lastError", "webhookSecret", "ingressUrl", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.FeedbackList or MohistCliApi.TableShape.FeedbackShow =>
                 ["id", "workflowRunId", "stage", "body", "status", "createdAt", "resolution", "issueNumber"],
             MohistCliApi.TableShape.CommentShow => ["id", "projectId", "issueNumber", "body", "createdAt", "attachments", "author", "displayName"],

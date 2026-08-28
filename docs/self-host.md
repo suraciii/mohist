@@ -157,6 +157,30 @@ sudo -u mohist ssh-keygen -t ed25519
 # Add the public key as a deploy key in GitHub or GitLab.
 ```
 
+#### GitHub App configuration
+
+Server GitHub connections use one deployment-owned GitHub App. Configure these
+values before connecting a Repository:
+
+```text literal
+Mohist__GitHub__AppId=<GitHub App ID>
+Mohist__GitHub__AppSlug=<GitHub App slug>
+Mohist__GitHub__PrivateKeyPath=/path/to/protected/github-app.pem
+```
+
+The private key file must be readable only by the Server user. The App needs
+Issues read/write, Pull Requests read, and Metadata read access. Install the App
+for each account and select each Repository before running:
+
+```bash
+mo github connect owner/repo
+```
+
+Mohist returns an installation URL when the App is missing or does not include
+the Repository. Existing PAT-backed connections become disabled and require
+App reconnection. Back up the Mohist database before the migration because the
+PAT credential is removed and cannot be restored by an older binary alone.
+
 Operational constraints:
 
 - The Runner user must be able to push to the base branch.

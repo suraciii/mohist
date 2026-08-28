@@ -563,7 +563,8 @@ public sealed class GitHubIssueSynchronizationService : IScopedService
                     ? link.GithubIssueNumber
                     : null,
                 ct: ct);
-            if (ex is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden })
+            if (ex is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }
+                && !GitHubRemoteOutcome.IsRateLimited(ex))
                 await _connections.MarkNeedsAttentionAsync(connection.ProjectId, connection.Id, true, ct);
         }
         catch (Exception recordEx) when (!ct.IsCancellationRequested)

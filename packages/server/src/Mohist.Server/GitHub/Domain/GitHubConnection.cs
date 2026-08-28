@@ -9,24 +9,14 @@ public sealed class GitHubConnection
     public string RepositoryName { get; set; } = string.Empty;
     public IReadOnlyList<string> Approvers { get; set; } = [];
     public string Status { get; set; } = GitHubConnectionStatus.Active;
-    // GitHub App installation-token exchange is not implemented yet. PAT is
-    // therefore the only identity created by the current connection API.
-    public string IdentityKind { get; set; } = GitHubIdentityKind.Pat;
     public string? InstallationId { get; set; }
-
-    /// <summary>
-    /// Set when a write-back attempt hit an authentication/authorization
-    /// failure (401/403): the connection's GitHub identity needs operator
-    /// attention. Surfaced in the connection list; cleared by the operator
-    /// after fixing the credential.
-    /// </summary>
+    public string? RepositoryNodeId { get; set; }
+    public bool ReconnectRequired { get; set; }
     public bool NeedsAttention { get; set; }
-
-    /// <summary>
-    /// Set when an Active transition still has linked Issues to re-project.
-    /// The hosted reconciler clears it only after every link converges.
-    /// </summary>
     public bool NeedsReprojection { get; set; }
+    public string? LastErrorCode { get; set; }
+    public string? LastErrorDetail { get; set; }
+    public DateTimeOffset? LastErrorAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
@@ -38,10 +28,12 @@ public sealed class GitHubConnection
             throw new GitHubConnectionValidationException("repo is required", "repo_required");
         if (Status is not (GitHubConnectionStatus.Active or GitHubConnectionStatus.Disabled))
             throw new GitHubConnectionValidationException("status must be one of active, disabled", "invalid_status");
-        if (IdentityKind is not (GitHubIdentityKind.App or GitHubIdentityKind.Pat))
-            throw new GitHubConnectionValidationException("identityKind must be one of app, pat", "invalid_identity_kind");
-        if (requireInstallationId && IdentityKind == GitHubIdentityKind.App && string.IsNullOrWhiteSpace(InstallationId))
-            throw new GitHubConnectionValidationException("installationId is required when identityKind is 'app'", "installation_id_required");
+        if (requireInstallationId && string.IsNullOrWhiteSpace(InstallationId))
+            throw new GitHubConnectionValidationException("installationId is required", "installation_id_required");
+        if (requireInstallationId && string.IsNullOrWhiteSpace(RepositoryNodeId))
+            throw new GitHubConnectionValidationException("repositoryNodeId is required", "repository_node_id_required");
+        if (ReconnectRequired && Status != GitHubConnectionStatus.Disabled)
+            throw new GitHubConnectionValidationException("reconnectRequired connections must be disabled", "invalid_reconnect_state");
     }
 }
 
@@ -51,12 +43,6 @@ public static class GitHubConnectionStatus
 {
     public const string Active = "active";
     public const string Disabled = "disabled";
-}
-
-public static class GitHubIdentityKind
-{
-    public const string App = "app";
-    public const string Pat = "pat";
 }
 
 public sealed class GitHubConnectionValidationException(string message, string code) : Exception(message)

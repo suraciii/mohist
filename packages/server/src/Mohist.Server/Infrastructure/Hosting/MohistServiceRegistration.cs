@@ -248,6 +248,21 @@ public static class MohistServiceRegistration
         services.AddHostedService(sp => sp.GetRequiredService<ManagerDeploymentEpoch>());
         services.AddSingleton<ManagerExecutionCapabilityIssuer>();
 
+        services.AddOptions<GitHubAppOptions>()
+            .Bind(configuration.GetSection(GitHubAppOptions.SectionName))
+            .Validate(options =>
+            {
+                var values = new[] { options.AppId > 0, !string.IsNullOrWhiteSpace(options.AppSlug), !string.IsNullOrWhiteSpace(options.PrivateKeyPath) };
+                return values.All(value => value) || values.All(value => !value);
+            }, "GitHub App configuration must provide AppId, AppSlug, and PrivateKeyPath together.")
+            .ValidateOnStart();
+        services.AddHttpClient<IGitHubAppClient, GitHubAppClient>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.github.com");
+            client.Timeout = TimeSpan.FromSeconds(15);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("mohist");
+        });
+        services.AddSingleton<IGitHubInstallationTokenProvider, GitHubInstallationTokenProvider>();
         services.AddHttpClient<IGitHubCommentPort, GitHubCommentPort>(client =>
         {
             client.BaseAddress = new Uri("https://api.github.com");

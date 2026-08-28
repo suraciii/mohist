@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Mohist.Server.GitHub.Ports;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.GitHub.Domain;
@@ -80,106 +81,104 @@ public sealed class GitHubConnectionStore : IScopedService
 
     public async Task<string> CreateAsync(
         GitHubConnection connection,
-        string? pat = null,
+        GitHubRepositoryInstallation installation,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
-        connection.Owner = connection.Owner.Trim().ToLowerInvariant();
-        connection.Repo = connection.Repo.Trim().ToLowerInvariant();
+        ArgumentNullException.ThrowIfNull(installation);
+        connection.Owner = installation.Owner.Trim().ToLowerInvariant();
+        connection.Repo = installation.Repo.Trim().ToLowerInvariant();
+        connection.InstallationId = installation.InstallationId;
+        connection.RepositoryNodeId = installation.RepositoryNodeId;
+        connection.ReconnectRequired = false;
         connection.Approvers = NormalizeApprovers(connection.Approvers);
-        connection.Validate(requireInstallationId: false);
+        connection.Validate();
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var project = await db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == connection.ProjectId, ct)
             ?? throw new GitHubConnectionValidationException("project not found", "project_not_found");
-        connection.RepositoryName = ResolveRepository(project.RepositoriesJson, connection.Owner, connection.Repo);
-        if (connection.IdentityKind != GitHubIdentityKind.Pat)
-            throw new GitHubConnectionValidationException(
-                "GitHub App identity is reserved for a future connection flow; provide a PAT",
-                "github_app_identity_not_supported");
-        if (string.IsNullOrWhiteSpace(pat))
-            throw new GitHubConnectionValidationException(
-                "pat is required for an active GitHub connection",
-                "pat_required");
-
-        var duplicate = await db.GitHubConnections.AnyAsync(
+        connection.RepositoryName = ResolveRepository(project.RepositoriesJson, connection.Owner, connection.Repo, connection.RepositoryName);
+        var existing = await db.GitHubConnections.FirstOrDefaultAsync(
             r => r.Owner == connection.Owner && r.Repo == connection.Repo, ct);
-        if (duplicate)
-            throw new GitHubConnectionConflictException(
-                $"GitHub repository '{connection.Owner}/{connection.Repo}' is already connected to a project", "github_repository_already_connected");
+        if (existing is not null)
+        {
+            if (!existing.ReconnectRequired
+                && !string.Equals(existing.RepositoryNodeId, connection.RepositoryNodeId, StringComparison.Ordinal))
+                throw new GitHubConnectionConflictException(
+                    $"GitHub repository '{connection.Owner}/{connection.Repo}' is already connected to a project", "github_repository_already_connected");
+            if (!string.Equals(existing.ProjectId, connection.ProjectId, StringComparison.Ordinal)
+                || !string.Equals(existing.RepositoryName, connection.RepositoryName, StringComparison.Ordinal))
+                throw new GitHubConnectionConflictException(
+                    $"GitHub repository '{connection.Owner}/{connection.Repo}' is already connected to a project", "github_repository_already_connected");
+
+            var existingSecret = await _secretStore.LoadAsync(
+                WebhookSecretAddress(existing.ProjectId, existing.Id), ct);
+            if (existingSecret is null || existingSecret.Length == 0)
+                throw new GitHubConnectionValidationException(
+                    "The connection has no webhook secret; restore it from a database backup",
+                    "github_webhook_secret_missing");
+
+            existing.Owner = connection.Owner;
+            existing.Repo = connection.Repo;
+            existing.RepositoryName = connection.RepositoryName;
+            existing.InstallationId = connection.InstallationId;
+            existing.RepositoryNodeId = connection.RepositoryNodeId;
+            existing.Status = GitHubConnectionStatus.Active;
+            existing.ReconnectRequired = false;
+            existing.NeedsAttention = false;
+            existing.NeedsReprojection = true;
+            existing.LastErrorCode = null;
+            existing.LastErrorDetail = null;
+            existing.LastErrorAt = null;
+            existing.UpdatedAt = _timeProvider.GetUtcNow();
+            await db.SaveChangesAsync(ct);
+            connection.Id = existing.Id;
+            connection.Status = existing.Status;
+            connection.NeedsAttention = existing.NeedsAttention;
+            connection.NeedsReprojection = existing.NeedsReprojection;
+            connection.LastErrorCode = existing.LastErrorCode;
+            connection.LastErrorDetail = existing.LastErrorDetail;
+            connection.LastErrorAt = existing.LastErrorAt;
+            connection.CreatedAt = existing.CreatedAt;
+            connection.UpdatedAt = existing.UpdatedAt;
+            return Encoding.UTF8.GetString(existingSecret);
+        }
 
         var now = _timeProvider.GetUtcNow();
         connection.Status = GitHubConnectionStatus.Active;
         connection.NeedsReprojection = false;
         connection.CreatedAt = now;
         connection.UpdatedAt = now;
-        var apiSecretAddress = ApiSecretAddress(connection.ProjectId, connection.Id);
         var webhookSecretAddress = WebhookSecretAddress(connection.ProjectId, connection.Id);
         var webhookSecret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-
-        // Both secrets are written before the connection row. Any failure in
-        // either secret write or in the row insert compensates every resource,
-        // so an active connection can never outlive one of its credentials.
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
-            await _secretStore.StoreAsync(
-                apiSecretAddress,
-                Encoding.UTF8.GetBytes(pat),
-                ct);
-            await _secretStore.StoreAsync(
-                webhookSecretAddress,
-                Encoding.UTF8.GetBytes(webhookSecret),
-                ct);
-
+            if (_secretStore is AesGcmSecretStore aes)
+            {
+                await aes.StoreAtomicallyAsync(db, [new SecretStoreWrite(
+                    webhookSecretAddress, Encoding.UTF8.GetBytes(webhookSecret))], ct);
+            }
+            else
+            {
+                await _secretStore.StoreAsync(webhookSecretAddress, Encoding.UTF8.GetBytes(webhookSecret), ct);
+            }
             db.GitHubConnections.Add(ToRow(connection));
             await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
         }
         catch (DbUpdateException ex) when (IsOwnerRepoConflict(ex))
         {
-            await CompensateCreateAsync(connection, apiSecretAddress, webhookSecretAddress);
+            await transaction.RollbackAsync(CancellationToken.None);
             throw new GitHubConnectionConflictException(
                 $"GitHub repository '{connection.Owner}/{connection.Repo}' is already connected to a project", "github_repository_already_connected");
         }
         catch
         {
-            await CompensateCreateAsync(connection, apiSecretAddress, webhookSecretAddress);
+            await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
-
         return webhookSecret;
-    }
-
-    private async Task CompensateCreateAsync(
-        GitHubConnection connection,
-        SecretStoreAddress apiSecretAddress,
-        SecretStoreAddress webhookSecretAddress)
-    {
-        try
-        {
-            await _secretStore.DeleteAsync(webhookSecretAddress, CancellationToken.None);
-        }
-        catch
-        {
-            // Compensation is best effort; the original create failure is the
-            // actionable result and must not be hidden by cleanup failures.
-        }
-        try
-        {
-            await _secretStore.DeleteAsync(apiSecretAddress, CancellationToken.None);
-        }
-        catch
-        {
-        }
-        try
-        {
-            await using var db = await _dbFactory.CreateDbContextAsync(CancellationToken.None);
-            await db.GitHubConnections
-                .Where(row => row.ProjectId == connection.ProjectId && row.Id == connection.Id)
-                .ExecuteDeleteAsync(CancellationToken.None);
-        }
-        catch
-        {
-        }
     }
 
     public async Task<GitHubConnection?> SetStatusAsync(string projectId, string id, string status, CancellationToken ct = default) =>
@@ -201,11 +200,14 @@ public sealed class GitHubConnectionStore : IScopedService
             return new GitHubConnectionStatusChange(ToDomain(existing), false);
         if (status == GitHubConnectionStatus.Active)
         {
-            var pat = await _secretStore.LoadAsync(ApiSecretAddress(existing.ProjectId, existing.Id), ct);
-            if (pat is null || string.IsNullOrWhiteSpace(Encoding.UTF8.GetString(pat)))
+            if (existing.ReconnectRequired
+                || string.IsNullOrWhiteSpace(existing.InstallationId)
+                || string.IsNullOrWhiteSpace(existing.RepositoryNodeId))
+            {
                 throw new GitHubConnectionValidationException(
-                    "pat is required for an active GitHub connection",
-                    "pat_required");
+                    "Reconnect the GitHub App installation before enabling this connection",
+                    "github_app_reconnect_required");
+            }
         }
 
         var now = _timeProvider.GetUtcNow();
@@ -275,23 +277,42 @@ public sealed class GitHubConnectionStore : IScopedService
         return ToDomain(row);
     }
 
-    /// <summary>
-    /// Flips the NeedsAttention flag, set by the write-back writer when an
-    /// operation hit 401/403 (the connection's GitHub identity needs
-    /// operator attention). Clearing is an operator action and stays
-    /// outside this minimal loop.
-    /// </summary>
     public async Task<GitHubConnection?> MarkNeedsAttentionAsync(
         string projectId,
         string id,
         bool needsAttention,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        await SetAttentionAsync(projectId, id, needsAttention, null, null, reconnect: false, ct);
+
+    public async Task<GitHubConnection?> MarkInstallationUnavailableAsync(
+        string projectId,
+        string id,
+        string code,
+        string detail,
+        CancellationToken ct = default) =>
+        await SetAttentionAsync(projectId, id, true, code, detail, reconnect: true, ct);
+
+    private async Task<GitHubConnection?> SetAttentionAsync(
+        string projectId,
+        string id,
+        bool needsAttention,
+        string? code,
+        string? detail,
+        bool reconnect,
+        CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.GitHubConnections.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct);
         if (row is null) return null;
-        if (row.NeedsAttention == needsAttention) return ToDomain(row);
         row.NeedsAttention = needsAttention;
+        if (reconnect)
+        {
+            row.Status = GitHubConnectionStatus.Disabled;
+            row.ReconnectRequired = true;
+        }
+        row.LastErrorCode = code;
+        row.LastErrorDetail = detail;
+        row.LastErrorAt = code is null ? row.LastErrorAt : _timeProvider.GetUtcNow();
         row.UpdatedAt = _timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);
         return ToDomain(row);
@@ -303,14 +324,7 @@ public sealed class GitHubConnectionStore : IScopedService
     public static SecretStoreAddress WebhookSecretAddress(string projectId, string connectionId) =>
         new(projectId, $"{connectionId}:webhook", SecretKind.WebhookSecret);
 
-    /// <summary>
-    /// Fine-grained GitHub PAT (Issues read/write only). Stored per
-    /// connection and consumed by the current comment port.
-    /// </summary>
-    public static SecretStoreAddress ApiSecretAddress(string projectId, string connectionId) =>
-        new(new SecretOwnerAddress.GitHubConnection(projectId, connectionId), SecretKind.AppToken);
-
-    private static string ResolveRepository(string repositoriesJson, string owner, string repo)
+    private static string ResolveRepository(string repositoriesJson, string owner, string repo, string? requestedName)
     {
         var repositories = JSON.Deserialize<List<RepositoryInfo>>(repositoriesJson) ?? [];
         var target = GitRemoteUrlNormalizer.Fingerprint($"https://github.com/{owner}/{repo}");
@@ -320,6 +334,8 @@ public sealed class GitHubConnectionStore : IScopedService
         var match = repositories
             .Select(r => (Repository: r, Fingerprint: GitRemoteUrlNormalizer.Fingerprint(r.GitUrl)))
             .Where(pair => pair.Fingerprint is not null)
+            .Where(pair => string.IsNullOrWhiteSpace(requestedName)
+                || string.Equals(pair.Repository.Name, requestedName, StringComparison.OrdinalIgnoreCase))
             .FirstOrDefault(pair =>
                 pair.Fingerprint!.Fingerprint == target.Fingerprint
                 || string.Equals(pair.Fingerprint.Canonical, target.Canonical, StringComparison.OrdinalIgnoreCase));
@@ -343,10 +359,14 @@ public sealed class GitHubConnectionStore : IScopedService
         RepositoryName = row.RepositoryName,
         Approvers = DeserializeApprovers(row.ApproversJson),
         Status = row.Status,
-        IdentityKind = row.IdentityKind,
         InstallationId = row.InstallationId,
+        RepositoryNodeId = row.RepositoryNodeId,
+        ReconnectRequired = row.ReconnectRequired,
         NeedsAttention = row.NeedsAttention,
         NeedsReprojection = row.NeedsReprojection,
+        LastErrorCode = row.LastErrorCode,
+        LastErrorDetail = row.LastErrorDetail,
+        LastErrorAt = row.LastErrorAt,
         CreatedAt = row.CreatedAt,
         UpdatedAt = row.UpdatedAt,
     };
@@ -360,10 +380,14 @@ public sealed class GitHubConnectionStore : IScopedService
         RepositoryName = connection.RepositoryName,
         ApproversJson = SerializeApprovers(connection.Approvers),
         Status = connection.Status,
-        IdentityKind = connection.IdentityKind,
         InstallationId = connection.InstallationId,
+        RepositoryNodeId = connection.RepositoryNodeId,
+        ReconnectRequired = connection.ReconnectRequired,
         NeedsAttention = connection.NeedsAttention,
         NeedsReprojection = connection.NeedsReprojection,
+        LastErrorCode = connection.LastErrorCode,
+        LastErrorDetail = connection.LastErrorDetail,
+        LastErrorAt = connection.LastErrorAt,
         CreatedAt = connection.CreatedAt,
         UpdatedAt = connection.UpdatedAt,
     };

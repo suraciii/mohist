@@ -292,5 +292,6 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
         ex is HttpRequestException
         {
             StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden,
-        };
+        }
+        && !GitHubRemoteOutcome.IsRateLimited(ex);
 }

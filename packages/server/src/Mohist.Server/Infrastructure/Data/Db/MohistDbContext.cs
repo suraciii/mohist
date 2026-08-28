@@ -1693,7 +1693,7 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
                 "(\"OwnerKind\" = 'webhook_subscription' AND \"Kind\" = 'webhookSecret') OR " +
                 "(\"OwnerKind\" = 'slack_workspace_enrollment' AND \"Kind\" IN ('configurationAccessToken', 'configurationRefreshToken', 'appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR " +
                 "(\"OwnerKind\" = 'managed_slack_agent_app' AND \"Kind\" IN ('appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR (\"OwnerKind\" = 'github_connection' AND \"Kind\" = 'appToken') OR " +
-                "(\"OwnerKind\" = 'server' AND \"Kind\" = 'publicApiCursorKey')"));
+                "(\"OwnerKind\" = 'server' AND \"Kind\" IN ('publicApiCursorKey'))"));
             entity.HasIndex(e => new { e.OwnerKind, e.OwnerScope, e.OwnerId })
                 .HasDatabaseName("IX_StoredSecrets_Owner");
         });
