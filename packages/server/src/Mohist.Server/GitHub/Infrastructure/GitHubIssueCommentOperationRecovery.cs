@@ -26,6 +26,7 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
 
     private readonly GitHubIssueLinkStore _links;
     private readonly GitHubConnectionStore _connections;
+    private readonly GitHubConnectionGate _gate;
     private readonly IGitHubCommentPort _comments;
     private readonly IGitHubIssuePort _issues;
     private readonly TimeProvider _timeProvider;
@@ -34,6 +35,7 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
     public GitHubIssueCommentOperationRecoveryService(
         GitHubIssueLinkStore links,
         GitHubConnectionStore connections,
+        GitHubConnectionGate gate,
         IGitHubCommentPort comments,
         IGitHubIssuePort issues,
         TimeProvider timeProvider,
@@ -41,6 +43,7 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
     {
         _links = links;
         _connections = connections;
+        _gate = gate;
         _comments = comments;
         _issues = issues;
         _timeProvider = timeProvider;
@@ -56,10 +59,9 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
         foreach (var operation in pending)
         {
             ct.ThrowIfCancellationRequested();
-            // The store claim includes the Active connection predicate. Do not
-            // split this boundary into a status read followed by an
-            // unconditional lease update: Disable may win between those two
-            // operations.
+            // The Active predicate keeps idle work for disabled connections
+            // out of the claim; the send fence itself is the connection gate
+            // re-check inside RecoverAsync.
             var claimed = await _links.TryClaimCommentOperationAsync(operation.Id, LeaseDuration, ct);
             if (claimed is null)
                 continue;
@@ -159,16 +161,26 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
             return;
         }
 
-        await _comments.PostCommentAsync(
-            connection,
-            link.GithubIssueNumber,
-            GitHubMirrorMarker.Append(operation.Body, operation.Marker),
-            ct);
-        await _links.MarkCommentPostedAsync(
-            link.Id,
-            operation.CommentKey,
-            operation.GithubIssueNumber,
-            ct);
+        await _gate.EnterAsync(connection.Id, async token =>
+        {
+            // Re-read the connection inside the gate: a Disable that commits
+            // after the marker probe must win over this send. The thrown
+            // disabled marker releases the lease without an error record, so
+            // the reservation stays recoverable after enable.
+            var current = await _connections.GetByIdAsync(connection.Id, token);
+            if (current is null || current.Status != GitHubConnectionStatus.Active)
+                throw new GitHubSynchronizationException("github_connection_disabled", "GitHub connection is disabled");
+            await _comments.PostCommentAsync(
+                current,
+                link.GithubIssueNumber,
+                GitHubMirrorMarker.Append(operation.Body, operation.Marker),
+                token);
+            await _links.MarkCommentPostedAsync(
+                link.Id,
+                operation.CommentKey,
+                operation.GithubIssueNumber,
+                token);
+        }, ct);
     }
 
     private async Task RecoverCloseAsync(
@@ -226,16 +238,22 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
             throw new GitHubRemoteOutcomeUnknownException(
                 $"GitHub close reconciliation returned unsupported state '{snapshot.State}'");
 
-        await _comments.CloseIssueAsync(
-            connection,
-            link.GithubIssueNumber,
-            operation.StateReason,
-            ct);
-        await _links.MarkCommentPostedAsync(
-            link.Id,
-            operation.CommentKey,
-            operation.GithubIssueNumber,
-            ct);
+        await _gate.EnterAsync(connection.Id, async token =>
+        {
+            var current = await _connections.GetByIdAsync(connection.Id, token);
+            if (current is null || current.Status != GitHubConnectionStatus.Active)
+                throw new GitHubSynchronizationException("github_connection_disabled", "GitHub connection is disabled");
+            await _comments.CloseIssueAsync(
+                current,
+                link.GithubIssueNumber,
+                operation.StateReason,
+                token);
+            await _links.MarkCommentPostedAsync(
+                link.Id,
+                operation.CommentKey,
+                operation.GithubIssueNumber,
+                token);
+        }, ct);
     }
 
     private async Task HandleFailureAsync(

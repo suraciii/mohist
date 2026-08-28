@@ -154,6 +154,25 @@ public sealed class GitHubCommandReplyStore : IScopedService
         return ToDomain(row);
     }
 
+    /// <summary>
+    /// Clears an in-flight claim lease without recording a failure or
+    /// advancing the attempt count. This is the disabled-connection boundary:
+    /// the reply stays pending and is claimable right after the connection is
+    /// re-enabled.
+    /// </summary>
+    public async Task ReleaseLeaseAsync(string id, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.GitHubCommandReplies
+            .Where(reply => reply.Id == id
+                && reply.PostedAt == null
+                && reply.FailedAt == null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(reply => reply.LeaseUntil, (DateTimeOffset?)null)
+                .SetProperty(reply => reply.UpdatedAt, _timeProvider.GetUtcNow()), ct);
+    }
+
     public async Task<GitHubCommandReply?> MarkPostedAsync(
         string id,
         CancellationToken ct = default)

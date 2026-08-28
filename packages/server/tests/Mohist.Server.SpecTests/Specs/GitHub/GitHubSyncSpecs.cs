@@ -21,7 +21,7 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.GitHub;
 
 [Collection("GitHubCommand")]
-public sealed class GitHubSyncSpecs
+public sealed partial class GitHubSyncSpecs
 {
     private const string RepositoryName = "hello-world";
     private readonly GitHubCommandFixture _fixture;
@@ -42,6 +42,8 @@ public sealed class GitHubSyncSpecs
         fixture.Comments.PostThenThrow = false;
         fixture.Comments.PostEntered = null;
         fixture.Comments.ReleasePost = null;
+        fixture.Comments.FindEntered = null;
+        fixture.Comments.ReleaseFind = null;
         fixture.Comments.UpdateFailure = null;
         fixture.Comments.UpdateFailures.Clear();
         fixture.Comments.LabelFailure = null;

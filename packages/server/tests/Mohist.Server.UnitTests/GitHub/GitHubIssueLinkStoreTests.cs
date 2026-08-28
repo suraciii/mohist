@@ -238,6 +238,49 @@ public sealed class GitHubIssueLinkStoreTests
         Assert.Null(operation.LeaseUntil);
     }
 
+    [Fact]
+    public async Task ReleaseCommentOperationLeaseAsync_ByKeyClearsLeaseAndRetainsReservation()
+    {
+        var database = NewDatabase();
+        var store = NewStore(database);
+        var link = await store.CreateAsync("proj_1", "hello-world", 42, 7);
+        Assert.True(await store.TryReserveCommentAsync(
+            link.Id,
+            "gated-comment",
+            GitHubCommentOperationKind.Comment,
+            "retained while disabled",
+            stateReason: null));
+
+        await store.ReleaseCommentOperationLeaseAsync(link.Id, "gated-comment");
+
+        await using var db = new MohistDbContext(database.Options);
+        var operation = await db.GitHubIssueCommentOperations.SingleAsync(row => row.LinkId == link.Id);
+        Assert.Equal(GitHubCommentOperationStatus.Reserved, operation.Status);
+        Assert.Null(operation.LeaseUntil);
+    }
+
+    [Fact]
+    public async Task ReleaseCommentOperationLeaseAsync_ByKeyLeavesPostedBookkeepingUntouched()
+    {
+        var database = NewDatabase();
+        var store = NewStore(database);
+        var link = await store.CreateAsync("proj_1", "hello-world", 42, 7);
+        Assert.True(await store.TryReserveCommentAsync(
+            link.Id,
+            "posted-comment",
+            GitHubCommentOperationKind.Comment,
+            "already posted",
+            stateReason: null));
+        await store.MarkCommentPostedAsync(link.Id, "posted-comment");
+
+        await store.ReleaseCommentOperationLeaseAsync(link.Id, "posted-comment");
+
+        Assert.True((await store.GetByIdAsync(link.Id))!.HasPostedComment("posted-comment"));
+        await using var db = new MohistDbContext(database.Options);
+        var operation = await db.GitHubIssueCommentOperations.SingleAsync(row => row.LinkId == link.Id);
+        Assert.Equal(GitHubCommentOperationStatus.Posted, operation.Status);
+    }
+
     private static async Task<string> LoadOperationIdAsync(
         TestDatabase database,
         string linkId,
