@@ -548,6 +548,149 @@ describe('in-memory runtime event queue', () => {
     await queue.stop()
   })
 
+  it('keeps late retry evidence from an ended interval out of the next bounded interval', async () => {
+    vi.useFakeTimers()
+    let rejectFirst!: (error: unknown) => void
+    const firstDelivery = new Promise<AgentSessionRuntimeEventReceipt[]>((_resolve, reject) => {
+      rejectFirst = reject
+    })
+    let attempts = 0
+    const queue = createAgentSessionRuntimeEventQueue({
+      retryDelayMs: 100,
+      deliveryTimeoutMs: 1_000,
+      deliver: {
+        async send() {
+          attempts += 1
+          if (attempts === 1) return await firstDelivery
+          throw new Error('current interval retry')
+        },
+      },
+    })
+
+    await queue.enqueueBeforeExecution(input('interval-input', 'A'))
+    const firstController = new AbortController()
+    const first = queue.awaitInputReceipt!('interval-input', {
+      budgetMs: 100,
+      signal: firstController.signal,
+    })
+    const firstError = first.catch((error: unknown) => error)
+    await flush()
+    await vi.advanceTimersByTimeAsync(100)
+    await expect(firstError).resolves.toMatchObject({
+      classification: 'receipt-budget-exhausted',
+      attempts: 1,
+      retries: 0,
+      lastReason: 'no retry/refusal reason was observed',
+    })
+
+    const secondController = new AbortController()
+    const second = queue.awaitInputReceipt!('interval-input', {
+      budgetMs: 150,
+      signal: secondController.signal,
+    })
+    const secondError = second.catch((error: unknown) => error)
+    rejectFirst(new Error('old interval retry'))
+    await flush()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(attempts).toBe(2)
+    await vi.advanceTimersByTimeAsync(50)
+
+    const secondFailure = (await secondError) as { lastReason: string | null }
+    expect(secondFailure).toMatchObject({
+      classification: 'receipt-budget-exhausted',
+      attempts: 1,
+      retries: 0,
+      lastReason: expect.stringContaining('current interval retry'),
+    })
+    expect(secondFailure.lastReason).not.toContain('old interval retry')
+    expect(queue.snapshot().map((record) => record.id)).toEqual(['interval-input'])
+    await queue.stop()
+  })
+
+  it('does not create ownerless evidence when a late retryable verdict settles between intervals', async () => {
+    vi.useFakeTimers()
+    let rejectDelivery!: (error: unknown) => void
+    const delivery = new Promise<AgentSessionRuntimeEventReceipt[]>((_resolve, reject) => {
+      rejectDelivery = reject
+    })
+    const queue = createAgentSessionRuntimeEventQueue({
+      retryDelayMs: 1_000,
+      deliveryTimeoutMs: 1_000,
+      deliver: {
+        async send() {
+          return await delivery
+        },
+      },
+    })
+
+    await queue.enqueueBeforeExecution(input('ownerless-input', 'A'))
+    const firstController = new AbortController()
+    const first = queue.awaitInputReceipt!('ownerless-input', {
+      budgetMs: 50,
+      signal: firstController.signal,
+    })
+    const firstError = first.catch((error: unknown) => error)
+    await flush()
+    await vi.advanceTimersByTimeAsync(50)
+    await expect(firstError).resolves.toMatchObject({ classification: 'receipt-budget-exhausted', attempts: 1 })
+
+    rejectDelivery(new Error('late ownerless retry'))
+    await flush()
+
+    const secondController = new AbortController()
+    const second = queue.awaitInputReceipt!('ownerless-input', {
+      budgetMs: 100,
+      signal: secondController.signal,
+    })
+    const secondError = second.catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(100)
+
+    await expect(secondError).resolves.toMatchObject({
+      classification: 'receipt-budget-exhausted',
+      attempts: 0,
+      retries: 0,
+      lastReason: 'no retry/refusal reason was observed',
+    })
+    await queue.stop()
+  })
+
+  it('does not attribute an attempt admitted without a bounded interval to a later waiter', async () => {
+    vi.useFakeTimers()
+    let rejectDelivery!: (error: unknown) => void
+    const delivery = new Promise<AgentSessionRuntimeEventReceipt[]>((_resolve, reject) => {
+      rejectDelivery = reject
+    })
+    const queue = createAgentSessionRuntimeEventQueue({
+      retryDelayMs: 1_000,
+      deliveryTimeoutMs: 1_000,
+      deliver: {
+        async send() {
+          return await delivery
+        },
+      },
+    })
+
+    await queue.enqueueProducedFact(input('pre-interval-input', 'A'))
+    await flush()
+    const controller = new AbortController()
+    const receipt = queue.awaitInputReceipt!('pre-interval-input', {
+      budgetMs: 100,
+      signal: controller.signal,
+    })
+    const receiptError = receipt.catch((error: unknown) => error)
+    rejectDelivery(new Error('attempt started before interval'))
+    await flush()
+    await vi.advanceTimersByTimeAsync(100)
+
+    await expect(receiptError).resolves.toMatchObject({
+      classification: 'receipt-budget-exhausted',
+      attempts: 0,
+      retries: 0,
+      lastReason: 'no retry/refusal reason was observed',
+    })
+    await queue.stop()
+  })
+
   it('cancels only the bounded input waiter while the volatile queue keeps retrying', async () => {
     vi.useFakeTimers()
     const queue = createAgentSessionRuntimeEventQueue({

@@ -134,16 +134,26 @@ interface DeliveryGroup {
   retryAt: number
 }
 
+interface DeliveryAttemptEntry {
+  readonly queued: QueuedRecord
+  readonly inputReceiptGeneration: number | null
+}
+
 interface DeliveryLease {
-  readonly entries: readonly QueuedRecord[]
+  readonly entries: readonly DeliveryAttemptEntry[]
   readonly controller: AbortController
 }
 
 type DeliveryAttemptResult =
-  | { readonly kind: 'settled'; readonly verdicts: readonly DeliveryVerdict[] }
-  | { readonly kind: 'timed-out' }
+  | {
+      readonly kind: 'settled'
+      readonly entries: readonly DeliveryAttemptEntry[]
+      readonly verdicts: readonly DeliveryVerdict[]
+    }
+  | { readonly kind: 'timed-out'; readonly entries: readonly DeliveryAttemptEntry[] }
 
 interface MutableInputReceiptWaitEvidence {
+  readonly generation: number
   attempts: number
   lastReason: string | null
 }
@@ -155,6 +165,7 @@ interface InputReceiptWaiter {
   readonly bounded: boolean
   readonly budgetMs: number | null
   readonly startedAtMs: number | null
+  readonly evidenceGeneration: number | null
   timer: ReturnType<typeof setTimeout> | null
   cleanup: (() => void) | null
 }
@@ -185,6 +196,7 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
   private readonly inputReceiptEvidence = new Map<string, MutableInputReceiptWaitEvidence>()
   private readonly deliveryLeases = new Map<string, DeliveryLease>()
   private sequence = 0
+  private inputReceiptGeneration = 0
   private evidenceSize = 0
   private admissionSize = 0
   private draining: Promise<void> | null = null
@@ -245,6 +257,7 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
     const bounded = options !== undefined
     const budgetMs = bounded ? Math.max(0, options.budgetMs) : null
     const startedAtMs = bounded ? this.now() : null
+    const evidenceGeneration = bounded ? ++this.inputReceiptGeneration : null
     const waiter: InputReceiptWaiter = {
       promise,
       resolve,
@@ -252,10 +265,18 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
       bounded,
       budgetMs,
       startedAtMs,
+      evidenceGeneration,
       timer: null,
       cleanup: null,
     }
     this.inputWaiters.set(recordId, waiter)
+    if (evidenceGeneration !== null) {
+      this.inputReceiptEvidence.set(recordId, {
+        generation: evidenceGeneration,
+        attempts: 0,
+        lastReason: null,
+      })
+    }
     if (bounded) {
       waiter.timer = setTimeout(() => {
         if (this.inputWaiters.get(recordId) !== waiter) return
@@ -267,13 +288,12 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
           budgetMs ?? 0,
         )
         this.removeInputReceiptWaiter(recordId, waiter)
-        this.inputReceiptEvidence.delete(recordId)
         reject(error)
       }, budgetMs ?? 0)
+      waiter.timer.unref?.()
       const abort = () => {
         if (this.inputWaiters.get(recordId) !== waiter) return
         this.removeInputReceiptWaiter(recordId, waiter)
-        this.inputReceiptEvidence.delete(recordId)
         reject(new InputReceiptWaitCancelledError(recordId, options.signal.reason))
       }
       options.signal.addEventListener('abort', abort, { once: true })
@@ -281,7 +301,7 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
       if (options.signal.aborted) abort()
     }
     void this.kick().catch((error) => {
-      this.noteInputReasonForRecordById(recordId, error)
+      this.noteInputReasonForRecordById(recordId, evidenceGeneration, error)
       this.rejectInputReceipt(recordId, error, true)
     })
     return await promise
@@ -315,7 +335,6 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
     for (const [recordId, waiter] of waiters) {
       this.removeInputReceiptWaiter(recordId, waiter)
       waiter.reject(new Error('runtime-event queue stopped'))
-      this.inputReceiptEvidence.delete(recordId)
     }
     for (const lease of this.deliveryLeases.values()) lease.controller.abort(new Error('runtime-event queue stopped'))
     this.deliveryLeases.clear()
@@ -375,12 +394,15 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
       const batch = contiguousBatch(group.records, this.deliveryBatchSize)
       const attempt = await this.attempt(key, batch)
       if (attempt.kind === 'timed-out') {
-        this.noteInputReason(batch, `retryable: runtime-event delivery timed out after ${this.deliveryTimeoutMs}ms`)
+        this.noteInputReason(
+          attempt.entries,
+          `retryable: runtime-event delivery timed out after ${this.deliveryTimeoutMs}ms`,
+        )
         this.readyGroups.push(key)
         unavailableVisits += 1
         continue
       }
-      const progressed = this.applyVerdicts(group, batch, attempt.verdicts)
+      const progressed = this.applyVerdicts(group, attempt.entries, attempt.verdicts)
 
       if (group.records.length === 0) {
         this.groups.delete(key)
@@ -396,9 +418,13 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
     this.scheduleRetry()
   }
 
-  private async attempt(key: string, entries: readonly QueuedRecord[]): Promise<DeliveryAttemptResult> {
+  private async attempt(key: string, queuedEntries: readonly QueuedRecord[]): Promise<DeliveryAttemptResult> {
+    const entries = queuedEntries.map((queued): DeliveryAttemptEntry => {
+      const inputReceiptGeneration = this.activeInputReceiptGeneration(queued.record.id)
+      return { queued, inputReceiptGeneration }
+    })
     for (const entry of entries) this.noteInputAttempt(entry)
-    const records = entries.map((entry) => entry.record)
+    const records = entries.map((entry) => entry.queued.record)
     const controller = new AbortController()
     const lease: DeliveryLease = { entries, controller }
     this.deliveryLeases.set(key, lease)
@@ -409,11 +435,11 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
     const deadline = new Promise<DeliveryAttemptResult>((resolve) => {
       timeout = setTimeout(() => {
         controller.abort(new Error(`runtime-event delivery timed out after ${this.deliveryTimeoutMs}ms`))
-        resolve({ kind: 'timed-out' })
+        resolve({ kind: 'timed-out', entries })
       }, this.deliveryTimeoutMs)
       timeout.unref?.()
     })
-    const settled = delivery.then<DeliveryAttemptResult>((verdicts) => ({ kind: 'settled', verdicts }))
+    const settled = delivery.then<DeliveryAttemptResult>((verdicts) => ({ kind: 'settled', entries, verdicts }))
     const result = await Promise.race([settled, deadline])
     if (timeout) clearTimeout(timeout)
     this.stopController.signal.removeEventListener('abort', stop)
@@ -471,18 +497,23 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
 
   private applyVerdicts(
     group: DeliveryGroup,
-    entries: readonly QueuedRecord[],
+    entries: readonly DeliveryAttemptEntry[],
     verdicts: readonly DeliveryVerdict[],
   ): boolean {
     let progressed = false
     for (let index = 0; index < entries.length; index += 1) {
       const verdict = verdicts[index] ?? { kind: 'retryable' as const, reason: 'retryable: no delivery verdict' }
-      const entry = entries[index]!
+      const attemptEntry = entries[index]!
       if (verdict.kind === 'retryable') {
-        this.noteInputReasonForRecord(entry.record, verdict.reason)
+        this.noteInputReasonForRecord(attemptEntry, verdict.reason)
         break
       }
-      this.retire(group, entry, verdict.kind === 'accepted' ? verdict.receipt : null, verdict.kind === 'refused')
+      this.retire(
+        group,
+        attemptEntry.queued,
+        verdict.kind === 'accepted' ? verdict.receipt : null,
+        verdict.kind === 'refused',
+      )
       progressed = true
     }
     return progressed
@@ -538,6 +569,10 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
     waiter.timer = null
     waiter.cleanup?.()
     waiter.cleanup = null
+    if (waiter.evidenceGeneration !== null) {
+      const evidence = this.inputReceiptEvidence.get(recordId)
+      if (evidence?.generation === waiter.evidenceGeneration) this.inputReceiptEvidence.delete(recordId)
+    }
   }
 
   private inputReceiptEvidenceFor(recordId: string): InputReceiptWaitEvidence {
@@ -549,28 +584,34 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
     }
   }
 
-  private noteInputAttempt(entry: QueuedRecord): void {
-    if (!requiresInputReceipt(entry.record)) return
-    const evidence = this.inputReceiptEvidence.get(entry.record.id) ?? { attempts: 0, lastReason: null }
+  private noteInputAttempt(entry: DeliveryAttemptEntry): void {
+    if (!requiresInputReceipt(entry.queued.record) || entry.inputReceiptGeneration === null) return
+    const evidence = this.inputReceiptEvidence.get(entry.queued.record.id)
+    if (evidence?.generation !== entry.inputReceiptGeneration) return
     evidence.attempts += 1
-    this.inputReceiptEvidence.set(entry.record.id, evidence)
   }
 
-  private noteInputReason(entries: readonly QueuedRecord[], reason: unknown): void {
-    for (const entry of entries) this.noteInputReasonForRecord(entry.record, reason)
+  private noteInputReason(entries: readonly DeliveryAttemptEntry[], reason: unknown): void {
+    for (const entry of entries) this.noteInputReasonForRecord(entry, reason)
   }
 
-  private noteInputReasonForRecord(record: RuntimeEventRecord, reason: unknown): void {
-    if (!requiresInputReceipt(record)) return
-    const evidence = this.inputReceiptEvidence.get(record.id) ?? { attempts: 0, lastReason: null }
+  private noteInputReasonForRecord(entry: DeliveryAttemptEntry, reason: unknown): void {
+    if (!requiresInputReceipt(entry.queued.record) || entry.inputReceiptGeneration === null) return
+    const evidence = this.inputReceiptEvidence.get(entry.queued.record.id)
+    if (evidence?.generation !== entry.inputReceiptGeneration) return
     evidence.lastReason = typeof reason === 'string' ? reason : structuredInputReason(reason)
-    this.inputReceiptEvidence.set(record.id, evidence)
   }
 
-  private noteInputReasonForRecordById(recordId: string, reason: unknown): void {
-    const evidence = this.inputReceiptEvidence.get(recordId) ?? { attempts: 0, lastReason: null }
+  private noteInputReasonForRecordById(recordId: string, generation: number | null, reason: unknown): void {
+    if (generation === null) return
+    const evidence = this.inputReceiptEvidence.get(recordId)
+    if (evidence?.generation !== generation) return
     evidence.lastReason = structuredInputReason(reason)
-    this.inputReceiptEvidence.set(recordId, evidence)
+  }
+
+  private activeInputReceiptGeneration(recordId: string): number | null {
+    const waiter = this.inputWaiters.get(recordId)
+    return waiter?.bounded ? waiter.evidenceGeneration : null
   }
 
   private has(recordId: string): boolean {
