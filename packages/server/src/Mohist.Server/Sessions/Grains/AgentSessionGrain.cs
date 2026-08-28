@@ -247,7 +247,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     {
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
-        EnsureSessionIdleForRecovery(session);
+        EnsureSessionRecoverableBeforeInputSubmission(session, command.ExpectedQueuedTurnId);
         var now = Now();
         var events = session.RebindRuntimeSession(
             new AgentRuntimeBinding(command.ExpectedRunnerId, command.ExpectedRuntime, command.ExpectedRuntimeSessionId),

@@ -90,6 +90,8 @@ import {
 export { startTaskLogFlushTrigger } from './host-task-log.js'
 
 const log = runnerLogger.child('host')
+const INITIAL_EMPTY_MODEL_CATALOG_RETRY_MS = 5_000
+const MAX_EMPTY_MODEL_CATALOG_RETRY_MS = 5 * 60_000
 
 export interface ReportResult {
   workflowRunId?: string | null
@@ -332,7 +334,7 @@ export class RunnerHost {
       await this.loadAgentSessionRuntimeEventQueue(signal)
       await this.initializeSharedConnection(signal)
       await this.connectRunner(signal)
-      void this.runModelRediscoveryOnce(signal)
+      void this.recoverEmptyModelCatalog(signal)
       // Kick a non-blocking drain: an unavailable server does not gate
       // startup; queued evidence retries while this process remains alive.
       if (this.agentSessionRuntimeEventQueue.ready()) {
@@ -403,19 +405,36 @@ export class RunnerHost {
     }
   }
 
-  private async runModelRediscoveryOnce(signal: AbortSignal): Promise<void> {
+  private async recoverEmptyModelCatalog(signal: AbortSignal): Promise<void> {
+    let retryDelayMs = INITIAL_EMPTY_MODEL_CATALOG_RETRY_MS
+    const maxRetryDelayMs = Math.min(MAX_EMPTY_MODEL_CATALOG_RETRY_MS, this.modelRediscoveryIntervalMs)
+    while (!signal.aborted) {
+      if (await this.runModelRediscoveryOnce(signal)) return
+      try {
+        await this.waitForConnectionRetry(retryDelayMs, signal)
+      } catch (error) {
+        if (!signal.aborted) log.error('opencode model recovery wait failed', { exception: error })
+        return
+      }
+      retryDelayMs = Math.min(retryDelayMs * 2, maxRetryDelayMs)
+    }
+  }
+
+  private async runModelRediscoveryOnce(signal: AbortSignal): Promise<boolean> {
     try {
       const discovered = await discoverOpencodeModels(signal)
-      if (discovered.models.length === 0) return
+      if (discovered.models.length === 0) return false
       const next = discovered.complete ? discovered : mergeOpencodeModelCatalogs(this.opencodeModelCatalog, discovered)
-      if (opencodeModelCatalogsEqual(this.opencodeModelCatalog, next)) return
+      if (opencodeModelCatalogsEqual(this.opencodeModelCatalog, next)) return true
       this.opencodeModelCatalog = {
         models: [...next.models],
         variants: Object.fromEntries(Object.entries(next.variants).map(([model, variants]) => [model, [...variants]])),
       }
       await this.sendImmediateHeartbeat()
+      return true
     } catch (error) {
       if (!signal.aborted) log.error('opencode model rediscovery failed', { exception: error })
+      return false
     }
   }
 

@@ -332,10 +332,19 @@ next — and only an explicit stop interrupts. Each Session has a bounded queue;
 at the boundary the Bot rejects new messages and asks the sender to retry
 later. Accepted input is never discarded to make room.
 
-If the continuing Session cannot accept a follow-up because it has no Runtime
-Session, Mohist posts one durable guidance reply instead of silently consuming
-the message. In a DM that reply tells the user to retry with `new task`; in a
-channel it tells the user to start a new mention or thread.
+Runtime failure does not end the Slack conversation. When the initial Job is
+still waiting for its first Runtime binding, Mohist durably queues the DM input
+behind it. When that Job has definitely failed for a retry-safe infrastructure
+reason, Mohist retries the recorded work with its original execution snapshot,
+switches the DM mapping to the replacement Session, and then accepts the current
+message there as a follow-up. Slack redelivery resolves to the same retry and
+the same SessionInput.
+
+An idle Session whose physical Runtime Session is confirmed missing is recovered
+on the same Runner and logical AgentSession before the follow-up is dispatched.
+Mohist does not automatically replay input when execution is active or its
+effects are unknown; those states remain blocked for explicit reconciliation.
+`new task` is an intentional conversation command, never an error-recovery step.
 
 One thread can host several Agents, each with an independent Session:
 

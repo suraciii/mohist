@@ -499,9 +499,28 @@ Three rules follow:
 DM is the exception. Slack DM users do not organize work by thread; treating
 each message as new work would split a continuous thought into separate jobs.
 Server stores one current AgentSession per Connection DM conversation and every
-normal message continues it. The first version provides no "new task" operation
-inside DM. Parallel work uses separate channel threads, each with an
+normal message continues it. `new task <prompt>` is the explicit opt-in to an
+independent AgentJob and Session; infrastructure recovery must never require
+that grammar. Parallel work can also use separate channel threads, each with an
 independent Session.
+
+DM continuation follows a fail-closed recovery state machine:
+
+- an initial launch that is still pending accepts the message as an ordered
+  follow-up with the initial-launch allowance;
+- a terminal initial Turn with a retry-safe failure category enters the durable
+  Agent retry path using the failed Session and Turn as its convergence key,
+  then conditionally moves the inbox route and DM mapping to the replacement
+  Session before accepting that message there;
+- an idle, confirmed-missing physical Runtime Session is replaced on the same
+  Runner while retaining the logical AgentSession;
+- active, unknown, stale, or mismatched bindings never authorize replay.
+
+The inbox route is the crash-recovery fence. A retry must resolve its durable
+replacement before route migration. The conditional route update prevents a
+concurrent redelivery from overwriting a newer Session, and the follow-up's
+stable Slack idempotency key prevents duplicate SessionInput records after the
+migration.
 
 Different Mohist Servers do not share thread routing.
 

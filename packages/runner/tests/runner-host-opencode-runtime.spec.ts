@@ -17,6 +17,7 @@ import type { RunnerFileSystem } from '../src/system/filesystem.js'
 import type { ExternalProcessPolicy } from '../src/system/process-policy.js'
 import type { RunnerLogger } from '../src/system/logger.js'
 import { createLoggerCapture } from './support/logger-test.js'
+import type { OpencodeModelDiscovery } from '../src/runtime/opencode-models.js'
 
 const POLL_INTERVAL_MS = 10
 const QUIET_INTERVAL_MS = 60_000
@@ -181,6 +182,7 @@ interface HostTestResources extends OpenCodeRuntimeTestResources {
   logger: RunnerLogger
   externalProcessPolicy: ExternalProcessPolicy
   piRuntimeFactory?: () => PiRuntime
+  opencodeModelDiscovery?: OpencodeModelDiscovery
 }
 
 function it(name: string, body: (resources: HostTestResources) => Promise<void>): void {
@@ -282,6 +284,47 @@ function expectedActionCatalog() {
 }
 
 describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
+  it('retries an empty startup model catalog and publishes the recovered catalog', async (resources) => {
+    const discovery = vi
+      .fn<OpencodeModelDiscovery>()
+      .mockResolvedValueOnce({ models: [], variants: {}, complete: false })
+      .mockResolvedValueOnce({
+        models: ['openai/gpt-5.5'],
+        variants: { 'openai/gpt-5.5': ['high'] },
+        complete: true,
+      })
+    resources.opencodeModelDiscovery = discovery
+    const connected = deferred<void>()
+    connect.mockImplementation(async () => connected.resolve())
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      ...hostOptions(),
+      pollIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+    try {
+      await connected.promise
+      await vi.advanceTimersByTimeAsync(0)
+      expect(discovery).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(4_999)
+      expect(discovery).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(discovery).toHaveBeenCalledTimes(2)
+      expect(heartbeat.mock.calls.at(-1)?.[0]).toMatchObject({
+        runtimeCatalogs: {
+          opencode: {
+            models: ['openai/gpt-5.5'],
+            variants: { 'openai/gpt-5.5': ['high'] },
+          },
+        },
+      })
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+    }
+  })
+
   it('keeps polling for new work after an unowned runtime has cooled down', async (resources) => {
     const installed = installFakeOpenCodeRuntimeFactory(resources)
     const connected = deferred<void>()

@@ -131,6 +131,56 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
     }
 
     [Fact]
+    public async Task MissingRecovery_SealedQueuedFollowup_RebindsBeforeInputSubmission()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-missing-before-followup");
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "continue after recovery",
+            Source: "agent-session-followup",
+            IdempotencyKey: "recover-queued-followup"));
+        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+        Assert.Equal(accepted.TurnId, dispatch?.TurnId);
+        var beforeRecovery = Assert.IsType<AgentSession>(await _fixture.StateStore.LoadAsync(sessionId));
+        var pending = Assert.Single(beforeRecovery.Status.PendingFollowups!);
+        Assert.Equal(accepted.TurnId, pending.TurnId);
+        Assert.True(pending.Dispatching);
+        Assert.True(pending.PayloadSealed);
+        Assert.Equal(AgentSessionActivity.Idle, beforeRecovery.Status.Activity);
+
+        var recovered = await grain.RecoverMissingRuntimeSessionAsync(new RecoverMissingRuntimeSessionCommand(
+            "runner-1",
+            "opencode",
+            "runtime-missing-before-followup",
+            "runtime-replacement-before-followup",
+            accepted.TurnId));
+
+        Assert.Equal("runtime-replacement-before-followup", recovered.AgentSessionId);
+        Assert.Equal(AgentTurnStatus.Queued, (await grain.ListTurnsAsync()).Single().Status);
+    }
+
+    [Fact]
+    public async Task MissingRecovery_ExecutingFollowup_RejectsWithoutChangingBinding()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-active-followup");
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "already submitted",
+            Source: "agent-session-followup",
+            IdempotencyKey: "active-followup"));
+        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+        await grain.MarkFollowupTurnExecutingAsync(dispatch!.OperationId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            grain.RecoverMissingRuntimeSessionAsync(new RecoverMissingRuntimeSessionCommand(
+                "runner-1",
+                "opencode",
+                "runtime-active-followup",
+                "runtime-must-not-apply",
+                accepted.TurnId)));
+
+        Assert.Equal("runtime-active-followup", (await grain.GetAsync())?.AgentSessionId);
+    }
+
+    [Fact]
     public async Task Reset_ConcurrentBeginsReuseOneReservationAndReturnOneCompletion()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-before-reset");

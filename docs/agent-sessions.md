@@ -505,11 +505,18 @@ and replaces the missing binding without changing the AgentSession or replaying
 prior input. Ambiguous or unsafe absence still blocks because it cannot prove
 that an old effect did not occur.
 
-AgentJob launch and idle Follow-up do not yet enter that same recovery boundary.
-The initial AgentJob Turn is already queued before missing-binding recovery can
-run. Reconnect reconciliation can also replace a binding for non-idle work
-without the complete proof that an old effect is absent. Callers must therefore
-not treat those paths as permission to replay input.
+Slack DM continuation queues behind an initial AgentJob that has not bound a
+Runtime yet. If the initial Turn instead reached a retry-safe terminal failure,
+Slack enters the durable Agent retry path, moves its conversation mapping to the
+resolved replacement Session, and accepts the triggering message there exactly
+once. This recovers a definitely failed launch; it is not permission to replay
+an active or unknown effect.
+
+Queued Follow-up now enters the same physical Runtime missing-binding recovery
+boundary before its input is submitted. Generic AgentJob launch does not yet
+enter that boundary. Reconnect reconciliation can also replace a binding for
+non-idle work without the complete proof that an old effect is absent. Callers
+must therefore not treat those paths as permission to replay input.
 
 Recovery does not yet prove the active owner and absence of an earlier effect
 at every boundary. This limits convergence across Runner handoff without making
