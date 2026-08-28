@@ -39,14 +39,15 @@ remain Runner-side through delivery-token issuance.
 A Server infrastructure integration record — analogous to a Slack conversation
 mapping, not an aggregate fact — mapping a Mohist Issue to its GitHub mirror
 one-to-one. It stores the GitHub Issue's stable node id alongside its current
-coordinates, carries the bookkeeping that makes every outbound operation
-idempotent (pending creation intent, invisible body marker, emitted milestone
-comments, current state label), and reports sync health: healthy, or the last
-synchronization error.
+coordinates, carries separate bookkeeping for pending mirror creation,
+delivered comments and closes, and the current state label, and reports sync
+health: healthy, or the last synchronization error.
 
-The link is the idempotency key for every inbound and outbound path. It is
-created exactly once per pair — at mirror creation, at `/mohist start`, or at
-manual `link` — and survives disable/enable cycles of its connection.
+The link identifies the pair and scopes its mirror bookkeeping. Durable
+non-idempotent deliveries use their own intent or operation records; title/body
+and state-label projection use current-state replacement. The link is created
+exactly once per pair — at mirror creation, at `/mohist start`, or at manual
+`link` — and survives disable/enable cycles of its connection.
 
 ## The Direction Contract
 
@@ -115,43 +116,139 @@ Handlers subscribe to Issue and Workflow events and maintain the mirror through
 the connection identity:
 
 - **Mirror creation.** A non-Draft Issue whose target repository is connected
-  gets a pending link persisted before the GitHub create. The mirror body
-  carries one invisible, deterministic HTML marker owned by Mohist; it has no
-  visible footer. If the create result is unknown (timeout, 5xx), bounded
-  reconciliation searches all GitHub states for that marker. Exactly one match
-  is linked, multiple matches fail closed, and no match is not posted again
-  until reconciliation has completed. The backlink to Mohist lives in the
-  confirmation comment.
-- **Content sync.** Title and body edits project outward, subject to the same
-  content-equality rule that suppresses the returning echo.
+  gets a GitHub mirror. The mirror has no visible tracking footer, and the
+  confirmation comment links it back to Mohist.
+- **Content sync.** Title and body edits project outward. Content equality
+  suppresses the returning echo.
 - **Progress projection.** The mutually exclusive `mohist:*` state labels and
-  the four milestone comment classes (confirmation, Approval point, completion
-  with delivery summary and PR link, cancellation with reason), gated by the
-  link's bookkeeping so redelivery never repeats a milestone.
-- **Finalization.** Completion closes the mirror as completed; cancellation
+  the four milestone comment classes project Workflow progress.
+- **Finalization.** Completion closes the mirror as completed. Cancellation
   closes it as not planned.
 
-Two content rules protect the loop. Mohist never places GitHub closing keywords
-in Pull Request bodies, so delivery cannot close the mirror early. And the
-mirror body carries no visible tracking footer: its one invisible marker is
-stripped before content enters Mohist and retained on outbound writes, while
+Mohist never places GitHub closing keywords in Pull Request bodies, so delivery
+cannot close the mirror early. Durable operation, retry, reconciliation, and
+fencing rules are defined in [Durable Outbound Operations](#durable-outbound-operations).
 
-the backlink to Mohist lives in the confirmation comment.
+## Durable Outbound Operations
+
+Durable tracking is required when replaying a request could create a duplicate.
+Mirror creation uses pending link intent and an invisible marker; milestone
+comments and closes use `GitHubIssueCommentOperation`; command replies use a
+separate reply ledger. Title/body and `mohist:*` label writes use idempotent
+current-state replacement and can be re-projected after an error. Marker
+reconciliation searches GitHub Issues in all states.
+
+```mermaid
+flowchart LR
+    subgraph MC["Mirror create intent"]
+        M0["Pending link"] --> M1{"Exact marker probe"}
+        M1 -->|"zero before first create"| M2["Reserve intent"]
+        M1 -->|"one exact match"| M3["Link mirror"]
+        M1 -->|"multiple exact matches"| M4["Fail closed"]
+        M2 -->|"first create request is sent"| M5["Create attempted"]
+        M5 -->|"one exact marker match"| M3
+        M5 -->|"zero marker matches after attempt"| M6["Keep unresolved; no second create"]
+        M5 -->|"multiple marker matches"| M4
+    end
+
+    subgraph DD["Durable comment, close, or reply delivery"]
+        D0["No durable record"] -->|"delivery is requested"| D1["Reserve intent or operation"]
+        D1 -->|"request is sent"| D2["Await evidence"]
+        D2 -->|"provider or probe confirms change"| D3["Settle delivery"]
+        D2 -->|"result may have applied"| D4["Retain for reconciliation"]
+        D4 -->|"reconciliation proves safe retry"| D5["Send same delivery"]
+        D5 -->|"new evidence is received"| D2
+    end
+
+    subgraph CS["Idempotent current state projection"]
+        C0["Current title, body, or labels"] -->|"Issue event, sync, or enable"| C1["Send complete desired state"]
+        C1 -->|"write succeeds"| C2["Persist projection"]
+        C1 -->|"write fails or result is unknown"| C3["Record error and health"]
+        C3 -->|"later event, sync, or enable"| C1
+    end
+```
+
+### Outcome certainty
+
+```mermaid
+flowchart TD
+    E["Provider response or reconciliation evidence"] --> K{"What can be proven?"}
+    K -->|"remote change is present"| S["Confirmed success"]
+    K -->|"rejected before remote side effect"| F["Definite no effect failure"]
+    K -->|"remote effect may exist"| U["Unknown"]
+    K -->|"evidence conflicts or is incomplete"| A["Ambiguous"]
+
+    S -->|"settle intent or operation"| T["Done"]
+    F -->|"no effect is known"| R0["Retryable record"]
+    U -->|"retain intent or reservation"| H["Reconcile later"]
+    A -->|"no automatic request"| X["Fail closed"]
+
+    H -->|"mirror create: one exact marker"| S
+    H -->|"mirror create: zero markers after an attempt"| Z["Unresolved mirror intent: no second create"]
+    H -->|"comment, close, or reply permits same delivery"| R1["Controlled same delivery retry"]
+    Z -->|"later sync or mirror event"| H
+    R1 -->|"request result is observed"| K
+```
+
+### Disable and enable
+
+```mermaid
+sequenceDiagram
+    participant C as Connection
+    participant W as Durable work
+    participant R as Recovery
+    participant G as GitHub
+
+    C->>C: becomes Disabled
+    C-->>W: pause claims; retain pending and unknown work
+    Note over C,W: Sent requests may settle only for the current target
+    C->>C: becomes Active
+    C->>R: resume recovery and record reprojection obligation
+    R->>G: reconcile retained deliveries
+    G-->>R: return marker or state evidence
+    R->>G: project current title, body, labels, comments, and close state
+    alt any projection fails
+        G-->>R: report failure
+        R-->>C: keep error and obligation
+    else every linked projection succeeds
+        G-->>R: confirm all current projections
+        R-->>C: clear obligation; mark links healthy
+    end
+```
+
+### Invariants
+
+- **Fencing.** Durable comment/close recovery carries the operation ID and
+  GitHub Issue number. Stale recovery cannot settle or delete another target's
+  reservation. Current-state writes use replacement semantics, not this fence.
+- **Reset and 404.** Only a 404 from the exact mirror content endpoint for the
+  current target can reset and replace a mirror. A 404 from comment, label,
+  close, or Pull Request endpoints cannot reset it.
+- **Health.** A link is healthy only after current projection succeeds. Disabled
+  work remains durable; enable resumes recovery. Errors remain visible until a
+  later successful projection clears them.
+
+### Required evidence
+
+- Mirror create: first-attempt zero/one/multiple marker matches, no-effect
+  rejection, unusable response, and proof that zero after an attempt never
+  sends another create.
+- Durable delivery: reserve-before-send, duplicate delivery, comment/close
+  state reconciliation, reply recovery, and proof that unknown results are not
+  blindly resent.
+- Current-state projection: title/body replacement, echo suppression,
+  state-label replacement and preservation, durable error/health, and later
+  reprojection.
+- Recovery safety: stale target, endpoint-specific 404, Disabled retention,
+  restart recovery, and complete enable reprojection.
 
 ## Failure Model
 
-Mirroring is reliable by reconciliation, not by queueing:
-
-- A failed outbound operation records the error on the link and surfaces it in
-  CLI and Web. It never blocks the Workflow and never rolls back Issue state.
-- `mo issue github sync` is the single repair verb: it creates a missing
-  mirror, pushes current Mohist state, and clears the error. It is safe to run
-  at any time because every outbound operation is idempotent.
-- State-label projection is self-healing: each Workflow milestone replaces the
-  whole label set from current state.
-- Disabling a connection pauses all inbound translation and outbound mirroring;
-  enabling re-projects every linked Issue once. There is no connection
-  deletion, so a link never outlives its credentials.
+An outbound failure records the error on the link and surfaces it in CLI and
+Web. It never blocks the Workflow or rolls back Mohist Issue state. The
+`mo issue github sync` command is the operator repair path for a missing or
+failed mirror. All retry, reconciliation, fencing, pause, reset, and health
+rules are defined in [Durable Outbound Operations](#durable-outbound-operations).
 
 ## Status
 
@@ -173,15 +270,8 @@ health and the last error; issue-scoped `sync`, `link`, and `unlink` operations
 reconcile or pair mirrors, and connection disable/enable pauses translation and
 reprojects existing links. New feed-created Issues no longer emit the
 `github-issue` origin label; historical feed-created links may retain it as
-data. Connection creation configures a fine-grained PAT with Issues read/write
-when supplied; GitHub App identity remains unimplemented. Connection
-configuration contains only Repository binding, identity, and Approvers.
+data. Connection creation uses a fine-grained PAT with Issues read/write.
+Connection configuration contains only Repository binding, identity, and
+Approvers.
 
-Open questions:
-
-- With out-of-order delivery, a close can arrive before the command that
-  created the link; the command path re-checks GitHub state before starting, but
-  the acceptable stale window is unobserved in practice.
-- App installation tokens creating Pull Requests in repositories under personal
-  accounts may have compatibility limits despite long-running practices such as
-  Dependabot.
+The remaining gap is GitHub App identity and installation-token exchange.

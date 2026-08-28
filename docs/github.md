@@ -191,28 +191,43 @@ Issue's lineage, so subscribing to every event under Issue #42 includes it.
 See [`design/github-integration.md`](../design/github-integration.md) for design
 boundaries and protocol details.
 
-## Implementation Gaps
+## Implementation Status
 
-The target model above replaces the earlier one-way intake design. Implemented
-today: #770 no-Workflow Issue lifecycle, #771 first-class GitHub mirror link
-visibility in CLI and Web, #772 automatic ready-only mirroring with durable
-Pending intent, marker reconciliation, and two-way title and body sync with
-echo suppression, #773 `/mohist start` command intake with GitHub permission
-gating, idempotent link creation, p0-p4 priority mapping, refusal replies, and
-reliable command reply delivery, #774 linked Issue lifecycle translation
-with the Integrate delivery-echo guard, and #775 reconcile-based operator
-recovery. Repository connection with signed ingress, close withdrawal, Pull
-Request review Approval, best-effort progress write-back, and terminal
-follow-up behavior are included. No-Workflow GitHub closes honor `completed`
-versus `not_planned`, cancelled Issues reopen to backlog, and completed Issues
-remain terminal. The GitHub PR workflow omits closing keywords from PR bodies;
-terminal write-back still closes mirrors. GitHub links expose healthy/error sync
-health and the last error in Server, CLI, and Web; `mo issue github sync`
-repairs a mirror, `link` pairs existing Issues with Mohist as content source,
-and `unlink` preserves both sides while stopping synchronization. Disabling a
-connection pauses inbound and outbound work; enabling it re-projects existing
-links once. New feed-created Issues no longer emit the `github-issue` origin
-label; historical feed-created links may retain that label as data. Connection
-creation configures a fine-grained PAT with Issues read/write when supplied;
-GitHub App identity remains unimplemented. The connection surface contains
-only Repository binding, identity, and Approvers.
+### Implemented behavior
+
+The current implementation provides:
+
+- No-Workflow GitHub Issue lifecycle, including `completed` versus
+  `not_planned` close reasons, reopening cancelled Issues to the backlog, and
+  keeping completed Issues terminal.
+- First-class GitHub mirror visibility in Server, CLI, and Web; automatic
+  ready-only mirroring; two-way title and body synchronization; and echo
+  suppression.
+- `/mohist start` command intake with GitHub permission gating, idempotent link
+  creation, p0-p4 priority mapping, refusal replies, and reliable command
+  reply delivery.
+- Linked Issue lifecycle translation with the Integrate delivery-echo guard,
+  signed ingress, close withdrawal, Pull Request review Approval,
+  best-effort progress write-back, and terminal follow-up behavior.
+- Healthy or error sync health with the last error in Server, CLI, and Web.
+  `mo issue github sync` repairs a mirror, `link` pairs an existing Issue with
+  Mohist as the content source, and `unlink` preserves both sides while
+  stopping synchronization.
+- The GitHub PR workflow omits closing keywords from PR bodies. Terminal
+  write-back still closes mirrors.
+- Mirror creation, milestone delivery, and command replies reconcile uncertain
+  outcomes before retry. Title/body and state-label writes resend current
+  values after errors; ambiguous results remain visible as synchronization
+  errors.
+- Disabling a connection pauses synchronization without cancelling pending
+  work. Enabling resumes recovery and re-projects linked Issues; links become
+  healthy only after current projection succeeds.
+- New feed-created Issues no longer emit the `github-issue` origin label.
+  Historical feed-created links may retain that label as data.
+- Connection setup uses a fine-grained PAT with Issues read and write. The
+  connection surface contains only Repository binding, identity, and
+  Approvers.
+
+### Remaining gaps
+
+- GitHub App identity and installation-token exchange are not implemented.
