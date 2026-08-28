@@ -54,7 +54,6 @@ export interface MobileActionBarProps {
   controller: IssueDecisionActionController
   summary:
     | 'running'
-    | 'recoverable-interrupted'
     | 'queued'
     | 'approval-required'
     | 'blocked'

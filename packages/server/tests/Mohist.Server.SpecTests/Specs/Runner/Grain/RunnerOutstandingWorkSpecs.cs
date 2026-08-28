@@ -23,7 +23,6 @@ public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
         var task = Assert.Single(run.Stages.Single().Tasks);
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);
         Assert.Equal(WorkflowActionAttemptStatus.Failed, task.Status);
-        Assert.Null(task.Interruption);
         Assert.Equal("runner-lost", run.Failure?.Message);
     }
 

@@ -78,36 +78,6 @@ describe('isIntegrateFailure', () => {
   })
 })
 
-describe('deriveAttentionItems — recoverable interruption rule', () => {
-  it('surfaces a recoverable interruption with reason and deadline instead of failure treatment', () => {
-    const items = deriveAttentionItems(
-      [
-        makeIssue({
-          number: 17,
-          status: IssueStatus.InProgress,
-          workflowStage: WorkflowStage.Build,
-          attention: {
-            reason: 'recoverable-interrupted',
-            state: 'recoverable-interrupted',
-            reasonCode: 'runner-lost',
-            recoveryDeadlineAt: '2026-08-15T01:15:00Z',
-          },
-        }),
-      ],
-      NO_AGENT,
-    )
-
-    expect(items).toEqual([
-      {
-        kind: 'recoverable-interrupted',
-        issueNumber: 17,
-        label: 'Recoverable interruption',
-        detail: 'runner-lost; recovery deadline 2026-08-15T01:15:00Z',
-      },
-    ])
-  })
-})
-
 describe('deriveAttentionItems — approval-pending rule', () => {
   it('surfaces an awaiting approval as "Approval needed" with title as detail', () => {
     const items = deriveAttentionItems(
@@ -609,7 +579,7 @@ describe('deriveAttentionItems — runner-unavailable suppresses capacity-limite
 
 describe('deriveAttentionItems — union is exhaustive', () => {
   it('the kind set is exactly the union of issue and runner kinds (no others)', () => {
-    const issueKinds = new Set(['approval-needed', 'integration-failed', 'recoverable-interrupted', 'blocked'])
+    const issueKinds = new Set(['approval-needed', 'integration-failed', 'blocked'])
     const runnerKinds = new Set(['runner-unavailable', 'runner-capacity-limited'])
 
     const samples: Array<{ input: AttentionItem[]; expected: Set<string> }> = [
@@ -648,7 +618,6 @@ describe('deriveAttentionItems — union is exhaustive', () => {
       'approval-needed',
       'blocked',
       'integration-failed',
-      'recoverable-interrupted',
       'runner-capacity-limited',
       'runner-unavailable',
     ])

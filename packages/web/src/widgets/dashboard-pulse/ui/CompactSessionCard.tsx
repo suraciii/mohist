@@ -176,7 +176,7 @@ function issueAttentionTreatment(item: IssueAttentionItem): {
   family: 'danger' | 'warning'
   container: string
 } {
-  if (item.kind === 'approval-needed' || item.kind === 'recoverable-interrupted') {
+  if (item.kind === 'approval-needed') {
     return {
       family: 'warning',
       container: 'border border-warning-border bg-warning-subtle text-warning',

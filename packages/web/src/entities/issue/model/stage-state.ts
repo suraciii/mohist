@@ -2,23 +2,8 @@ import type { WorkflowStage } from './issue'
 import type { WorkflowArtifactSummary, WorkflowTaskRequiredFile } from './artifact'
 import type { BaseDriftInfo } from './drift'
 
-export type StageTaskStatus =
-  | 'pending'
-  | 'running'
-  | 'recoverable-interrupted'
-  | 'completed'
-  | 'failed'
-  | 'skipped'
-  | 'blocked'
-  | 'interrupted'
-export type StageCheckStatus =
-  | 'pending'
-  | 'running'
-  | 'recoverable-interrupted'
-  | 'completed'
-  | 'passed'
-  | 'failed'
-  | 'error'
+export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'blocked'
+export type StageCheckStatus = 'pending' | 'running' | 'completed' | 'passed' | 'failed' | 'error'
 
 /**
  * Tracks the wire status of a workflow stage as emitted by
@@ -29,7 +14,6 @@ export type StageCheckStatus =
 export type StageStateStatus =
   | 'pending'
   | 'running'
-  | 'recoverable-interrupted'
   | 'awaiting-approval'
   | 'completed'
   | 'passed'
@@ -71,14 +55,6 @@ export interface WorkflowExecutionError {
   message: string
 }
 
-export interface WorkInterruption {
-  reasonCode: string
-  workId: string
-  ownerId: string
-  recordedAt: string
-  recoveryDeadlineAt: string
-}
-
 export interface StageTaskState {
   taskId: string
   title: string
@@ -100,7 +76,6 @@ export interface StageTaskState {
   causedBy?: StageTaskCause
   requiredFiles?: WorkflowTaskRequiredFile[]
   classification?: 'UserFacing' | 'Orchestration'
-  interruption?: WorkInterruption | null
   agentJobId?: string | null
   agentSessionId?: string | null
 }
@@ -116,7 +91,6 @@ export interface StageCheckState {
   lastRunAt: string | null
   origin?: WorkItemOrigin | null
   updatedAt: string
-  interruption?: WorkInterruption | null
 }
 
 export interface StageApprovalState {
@@ -129,7 +103,6 @@ export interface StageApprovalState {
 export interface StageStateRead {
   stage: WorkflowStage
   status: StageStateStatus
-  interruption?: WorkInterruption | null
   tasks: StageTaskState[]
   checks: StageCheckState[]
   approval: StageApprovalState | null

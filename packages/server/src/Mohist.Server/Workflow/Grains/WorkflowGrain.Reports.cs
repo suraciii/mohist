@@ -100,7 +100,6 @@ public partial class WorkflowGrain
     {
         RejectIfRunReloadRequired();
         if (_run is null) return WorkReportVerdict.Refused;
-        await ReconcileRunnerLossRecoveryAsync();
         if (!string.Equals(report.WorkId, workId, StringComparison.Ordinal)
             || string.IsNullOrWhiteSpace(report.ActionAttemptId))
             return WorkReportVerdict.Refused;
@@ -120,9 +119,6 @@ public partial class WorkflowGrain
                 : WorkReportVerdict.Refused;
         }
 
-        var hadRunnerLossInterruption = _run.Stages.SelectMany(stage => stage.Tasks)
-            .Single(task => string.Equals(task.Id, activeWork.ActionAttemptId, StringComparison.Ordinal))
-            .Interruption is not null;
         var effectiveReport = report;
         if (report.Status == TaskReportStatus.Succeeded)
         {
@@ -140,7 +136,6 @@ public partial class WorkflowGrain
 
         var artifactUploadIds = effectiveReport.ArtifactUploadIds?.ToArray();
         effectiveReport = await ValidateTaskReportArtifactsAsync(activeWork, effectiveReport);
-        _run.ClearWorkInterruption(activeWork.WorkId, workerId);
         var events = await _workLifecycle.ApplyTaskReportAsync(
             _run, effectiveReport, activeWork.Item.Stage, activeWork.ActionAttemptId);
         if (artifactUploadIds is { Length: > 0 } && effectiveReport.Artifacts is { Count: > 0 })
@@ -155,8 +150,6 @@ public partial class WorkflowGrain
             finally { _reportPersistenceWorkId = null; }
         }
         await DeleteSnapshotBestEffortAsync(activeWork.WorkId);
-        if (hadRunnerLossInterruption)
-            await ReconcileRunnerLossRecoveryAsync(removeReminderWhenClear: true);
         return WorkReportVerdict.Accepted;
     }
 
@@ -209,8 +202,6 @@ public partial class WorkflowGrain
         RejectIfRunReloadRequired();
         if (_run is null) return WorkReportVerdict.Refused;
 
-        await ReconcileRunnerLossRecoveryAsync();
-
         var terminalStage = _run.Stages.SingleOrDefault(stage =>
             string.Equals(stage.TerminalChecksWorkId, workId, StringComparison.Ordinal));
         if (terminalStage is not null)
@@ -234,17 +225,13 @@ public partial class WorkflowGrain
             GrainKey, report.Stage, report.Results.Count);
 
         var currentStage = _run.CurrentStage();
-        var hadRunnerLossInterruption = currentStage.Interruption is not null;
         currentStage.TerminalChecksWorkId = workId;
         currentStage.TerminalChecksWorkerId = workerId;
         currentStage.TerminalChecksResultFingerprint = report.TerminalResultFingerprint;
-        _run.ClearWorkInterruption(workId, workerId);
         var events = await _workLifecycle.ApplyCheckReportAsync(_run, report);
         _workLifecycle.RequeueRunningChecks(_run);
 
         await CommitAsync(events);
-        if (hadRunnerLossInterruption)
-            await ReconcileRunnerLossRecoveryAsync(removeReminderWhenClear: true);
         return WorkReportVerdict.Accepted;
     }
 

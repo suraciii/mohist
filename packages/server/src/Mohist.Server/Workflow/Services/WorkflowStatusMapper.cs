@@ -40,7 +40,6 @@ public static class WorkflowStatusMapper
         WorkflowActionAttemptStatus.Completed => "completed",
         WorkflowActionAttemptStatus.Failed => "failed",
         WorkflowActionAttemptStatus.Cancelled => "cancelled",
-        WorkflowActionAttemptStatus.Interrupted => "interrupted",
         _ => throw new SwitchExpressionException($"No wire mapping for WorkflowActionAttemptStatus value {status}"),
     };
 
@@ -58,11 +57,8 @@ public static class WorkflowStatusMapper
     {
         if (run is null) return null;
 
-        var interruption = FindCurrentInterruption(run);
-
         var stages = run.Stages.Select((s, i) =>
         {
-            var stageInterruption = FindStageInterruption(s);
             var stageFailure = s.Failure is not null
                 ? new FailureStatusView(
                     s.Failure.Reason.ToString(),
@@ -75,7 +71,7 @@ public static class WorkflowStatusMapper
 
             return new StageStatusView(
                 s.Id,
-                DeriveStageStatus(s, stageInterruption),
+                WireStatus(s.Status),
                 i,
                 MapTasks(s, definition),
                 MapChecks(s, definition),
@@ -83,8 +79,7 @@ public static class WorkflowStatusMapper
                     ? new ApprovalStatusView(s.ApprovalStatus.Result, s.ApprovalStatus.RequestedAt, s.ApprovalStatus.RespondedAt, s.ApprovalStatus.DecidedBy, s.ApprovalStatus.DisplayName)
                     : null,
                 stageFailure,
-                MapFeedback(run, s.Id),
-                MapInterruption(stageInterruption));
+                MapFeedback(run, s.Id));
         }).ToList();
 
         var pending = BuildPendingWork(run);
@@ -103,7 +98,7 @@ public static class WorkflowStatusMapper
         var actions = BuildAvailableActions(run, effectiveFailure);
         return new WorkflowStatusView(
             run.Id,
-            interruption is not null ? "recoverable-interrupted" : WireStatus(run.Status),
+            WireStatus(run.Status),
             run.CurrentStageId,
             stages,
             pending,
@@ -111,44 +106,8 @@ public static class WorkflowStatusMapper
             actions,
             run.AssignedTo,
             run.Metadata is null ? null : new MetadataView(run.Metadata.Name, run.Metadata.Labels, run.Metadata.Annotations, run.Metadata.CreatedAt),
-            MapInterruption(interruption),
             MapVerificationLanes(run));
     }
-
-    private static string DeriveTaskStatus(WorkflowActionAttempt task) =>
-        task.Status == WorkflowActionAttemptStatus.Running && task.Interruption is not null
-            ? "recoverable-interrupted"
-            : WireStatus(task.Status);
-
-    private static string DeriveStageStatus(
-        StageRun stage,
-        WorkInterruption? interruption) =>
-        stage.Status == StageRunStatus.Running && interruption is not null
-            ? "recoverable-interrupted"
-            : WireStatus(stage.Status);
-
-    private static WorkInterruption? FindCurrentInterruption(WorkflowRun run)
-    {
-        if (run.CurrentStageId is not { } currentStageId)
-            return null;
-
-        var current = run.Stages.FirstOrDefault(stage => stage.Id == currentStageId);
-        return current?.RunningTask?.Interruption ?? current?.Interruption;
-    }
-
-    private static WorkInterruption? FindStageInterruption(StageRun stage) =>
-        stage.Interruption
-        ?? stage.Tasks.FirstOrDefault(task => task.Status == WorkflowActionAttemptStatus.Running)?.Interruption;
-
-    private static WorkInterruptionView? MapInterruption(WorkInterruption? interruption) =>
-        interruption is null
-            ? null
-            : new WorkInterruptionView(
-                interruption.ReasonCode,
-                interruption.WorkId,
-                interruption.OwnerId,
-                interruption.RecordedAt,
-                interruption.RecoveryDeadlineAt);
 
     /// <summary>
     /// Build the verification-lane projection. Returns <c>null</c> for
@@ -279,7 +238,7 @@ public static class WorkflowStatusMapper
                     t.Id,
                     t.Title,
                     t.Uses,
-                    DeriveTaskStatus(t),
+                    WireStatus(t.Status),
                     t.RequiredFiles,
                     t.Classification,
                     WorkflowActionAttemptExtensions.ExtractSessionName(t.WithInput),
@@ -290,7 +249,6 @@ public static class WorkflowStatusMapper
                         : null,
                     Output: MapTaskOutput(t.Output),
                     Error: t.Error,
-                    Interruption: MapInterruption(t.Interruption),
                     Lane: MapTaskLane(t),
                     AgentJobId: t.AgentJobId,
                     AgentSessionId: t.AgentSessionId))
@@ -306,8 +264,7 @@ public static class WorkflowStatusMapper
                 "pending",
                 WorkflowActionAttemptExtensions.ExtractRequiredFiles(t.Expect),
                 WorkflowActionAttemptExtensions.DeriveClassification(t.Uses, null),
-                WorkflowActionAttemptExtensions.ExtractSessionName(t.With),
-                Interruption: null))
+                WorkflowActionAttemptExtensions.ExtractSessionName(t.With)))
             .ToList();
     }
 
@@ -331,18 +288,14 @@ public static class WorkflowStatusMapper
     {
         if (stage.Checks.Count > 0)
         {
-            var interruption = MapInterruption(stage.Interruption);
             return stage.Checks
                 .Select(c => new CheckStatusView(
                     c.Name,
                     c.Title,
                     c.Uses,
-                    c.Status == StageCheckStatus.Running && interruption is not null
-                        ? "recoverable-interrupted"
-                        : WireStatus(c.Status),
+                    WireStatus(c.Status),
                     c.Message,
-                    c.Error,
-                    interruption))
+                    c.Error))
                 .ToList();
         }
 

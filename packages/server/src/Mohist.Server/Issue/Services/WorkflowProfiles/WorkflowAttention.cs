@@ -8,8 +8,6 @@ public sealed class WorkflowAttention
     public string State { get; init; } = "attention";
     public string? Message { get; init; }
     public string? ReasonCode { get; init; }
-    public string? WorkId { get; init; }
-    public string? OwnerId { get; init; }
     public DateTimeOffset? RecoveryDeadlineAt { get; init; }
     public string Source { get; init; } = "system";
     public string? WorkflowRunId { get; init; }
@@ -57,20 +55,4 @@ public sealed class WorkflowAttention
         AvailableActions = ["stop"],
     };
 
-    public static WorkflowAttention RecoverableInterrupted(
-        string? workflowRunId,
-        WorkInterruptionView interruption) => new()
-    {
-        Reason = WorkflowAttentionReason.RecoverableInterrupted,
-        State = "recoverable-interrupted",
-        Message = $"Recoverable interruption: {interruption.ReasonCode}",
-        ReasonCode = interruption.ReasonCode,
-        WorkId = interruption.WorkId,
-        OwnerId = interruption.OwnerId,
-        RecoveryDeadlineAt = interruption.RecoveryDeadlineAt,
-        Source = "workflow",
-        WorkflowRunId = workflowRunId,
-        RequestedAt = interruption.RecordedAt.UtcDateTime,
-        AvailableActions = [],
-    };
 }

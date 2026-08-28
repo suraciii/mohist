@@ -346,10 +346,6 @@ public static class GrainTestConfig
             opts.DispatchRetryBound = TimeSpan.FromSeconds(5);
             opts.JobTimeout = TimeSpan.FromSeconds(10);
         });
-        // WorkflowOptions is retained as a binding anchor; the former
-        // WorkCompletionTimeout knob has been removed (no server-side
-        // work-completion wall clock under the reconciliation model).
-        siloBuilder.Services.Configure<WorkflowOptions>(_ => { });
     }
 
     private sealed class NoopTranscriptEventPublisher : ITranscriptEventPublisher

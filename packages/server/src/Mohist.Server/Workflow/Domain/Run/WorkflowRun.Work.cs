@@ -254,7 +254,7 @@ public static partial class WorkflowRunExtensions
 
             var current = run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId);
             if (current is null) return null;
-            var task = current.Tasks.FirstOrDefault(t => t.Status is not (WorkflowActionAttemptStatus.Completed or WorkflowActionAttemptStatus.Failed or WorkflowActionAttemptStatus.Cancelled or WorkflowActionAttemptStatus.Interrupted));
+            var task = current.Tasks.FirstOrDefault(t => t.Status is not (WorkflowActionAttemptStatus.Completed or WorkflowActionAttemptStatus.Failed or WorkflowActionAttemptStatus.Cancelled));
             if (task is not null)
             {
                 if (!VerificationLaneGate.IsClaimableLaneTask(run, task))
@@ -297,7 +297,7 @@ public static partial class WorkflowRunExtensions
                 throw new InvalidOperationException("Cannot add runtime task to stage " + stage + "; current stage is " + current.Id);
 
             var runningIndex = current.Tasks.FindIndex(t => t.Status == WorkflowActionAttemptStatus.Running);
-            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (WorkflowActionAttemptStatus.Completed or WorkflowActionAttemptStatus.Failed or WorkflowActionAttemptStatus.Cancelled or WorkflowActionAttemptStatus.Interrupted));
+            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (WorkflowActionAttemptStatus.Completed or WorkflowActionAttemptStatus.Failed or WorkflowActionAttemptStatus.Cancelled));
             var insertIndex = runningIndex >= 0
                 ? runningIndex + 1
                 : firstIncompleteIndex >= 0
@@ -361,7 +361,7 @@ public static partial class WorkflowRunExtensions
             }
 
             var runningIndex = current.Tasks.FindIndex(t => t.Status == WorkflowActionAttemptStatus.Running);
-            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (WorkflowActionAttemptStatus.Completed or WorkflowActionAttemptStatus.Failed or WorkflowActionAttemptStatus.Cancelled or WorkflowActionAttemptStatus.Interrupted));
+            var firstIncompleteIndex = current.Tasks.FindIndex(t => t.Status is not (WorkflowActionAttemptStatus.Completed or WorkflowActionAttemptStatus.Failed or WorkflowActionAttemptStatus.Cancelled));
             var insertIndex = runningIndex >= 0
                 ? runningIndex + 1
                 : firstIncompleteIndex >= 0

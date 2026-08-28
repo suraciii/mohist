@@ -61,26 +61,28 @@ afterEach(() => {
 
 describe('IssueDetailPage status uniqueness — running summary', () => {
   it('renders exactly one runtime summary in the headline and no header runtime pill', async () => {
-    mockIssue(makeIssue({
-      status: IssueStatus.InProgress,
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: IssueHealth.Active,
-      workflowStageProgress: {
-        stage: 'build',
-        total: 5,
-        completed: 2,
-        running: 1,
-        failed: 0,
-        currentTaskTitle: 'Implement decision surface',
-      },
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Implement decision surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: IssueStatus.InProgress,
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: IssueHealth.Active,
+        workflowStageProgress: {
+          stage: 'build',
+          total: 5,
+          completed: 2,
+          running: 1,
+          failed: 0,
+          currentTaskTitle: 'Implement decision surface',
+        },
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Implement decision surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -101,26 +103,28 @@ describe('IssueDetailPage status uniqueness — running summary', () => {
   })
 
   it('embeds the current task into the headline text and never renders a separate current-task pill', async () => {
-    mockIssue(makeIssue({
-      status: IssueStatus.InProgress,
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: IssueHealth.Active,
-      workflowStageProgress: {
-        stage: 'build',
-        total: 5,
-        completed: 2,
-        running: 1,
-        failed: 0,
-        currentTaskTitle: 'Implement decision surface',
-      },
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Implement decision surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: IssueStatus.InProgress,
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: IssueHealth.Active,
+        workflowStageProgress: {
+          stage: 'build',
+          total: 5,
+          completed: 2,
+          running: 1,
+          failed: 0,
+          currentTaskTitle: 'Implement decision surface',
+        },
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Implement decision surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -133,14 +137,16 @@ describe('IssueDetailPage status uniqueness — running summary', () => {
 
 describe('IssueDetailPage status uniqueness — queued summary', () => {
   it('renders the queued summary once in the headline without a stage or current task when no progress exists', async () => {
-    mockIssue(makeIssue({
-      status: IssueStatus.Backlog,
-      workflowStage: null,
-      workflowStatus: null,
-      workflowRunId: null,
-      health: IssueHealth.Active,
-      blocker: { kind: 'waiting-for', issue: { number: 9, title: 'Prereq' } },
-    }))
+    mockIssue(
+      makeIssue({
+        status: IssueStatus.Backlog,
+        workflowStage: null,
+        workflowStatus: null,
+        workflowRunId: null,
+        health: IssueHealth.Active,
+        blocker: { kind: 'waiting-for', issue: { number: 9, title: 'Prereq' } },
+      }),
+    )
 
     renderPage()
 
@@ -157,22 +163,24 @@ describe('IssueDetailPage status uniqueness — queued summary', () => {
 
 describe('IssueDetailPage status uniqueness — approval-required summary', () => {
   it('renders the approval-required summary once in the headline and uses product-language copy that does not assume the viewer is the approver', async () => {
-    mockIssue(makeIssue({
-      status: IssueStatus.InProgress,
-      workflowStage: 'check',
-      health: IssueHealth.Paused,
-      approvalState: {
-        status: 'awaiting',
-        stage: 'check',
-        requestedAt: '2026-01-01T00:00:00.000Z',
-      },
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: null,
-        workflowSummaryState: 'awaiting-approval',
-        allowedActions: ['approve', 'reject'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: IssueStatus.InProgress,
+        workflowStage: 'check',
+        health: IssueHealth.Paused,
+        approvalState: {
+          status: 'awaiting',
+          stage: 'check',
+          requestedAt: '2026-01-01T00:00:00.000Z',
+        },
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: null,
+          workflowSummaryState: 'awaiting-approval',
+          allowedActions: ['approve', 'reject'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -189,15 +197,17 @@ describe('IssueDetailPage status uniqueness — approval-required summary', () =
 
 describe('IssueDetailPage status uniqueness — blocked summary', () => {
   it('renders the blocked summary once in the headline without header runtime badge duplication', async () => {
-    mockIssue(makeIssue({
-      status: IssueStatus.InProgress,
-      workflowStage: 'build',
-      workflowStatus: 'failed',
-      health: IssueHealth.Blocked,
-      blockedReason: 'Manual stop requested.',
-      recovery: null,
-      convergence: null,
-    }))
+    mockIssue(
+      makeIssue({
+        status: IssueStatus.InProgress,
+        workflowStage: 'build',
+        workflowStatus: 'failed',
+        health: IssueHealth.Blocked,
+        blockedReason: 'Manual stop requested.',
+        recovery: null,
+        convergence: null,
+      }),
+    )
 
     renderPage()
 
@@ -206,46 +216,24 @@ describe('IssueDetailPage status uniqueness — blocked summary', () => {
     const page = screen.getByTestId('issue-detail-page-container')
     expect(page.querySelectorAll('[data-testid="runtime-status-pill"]')).toHaveLength(0)
   })
-
-  it('identifies a manually stopped / interrupted workflow as a stop/recovery situation, not awaiting approval', async () => {
-    mockIssue(makeIssue({
-      status: IssueStatus.InProgress,
-      workflowStage: 'build',
-      workflowStatus: 'interrupted',
-      health: IssueHealth.Blocked,
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'interrupted',
-        workflowSummaryState: 'interrupted',
-        allowedActions: ['retry', 'resume', 'rerun', 'stop'],
-      },
-    }))
-
-    renderPage()
-
-    await waitFor(() => screen.getByTestId('issue-decision-surface'))
-    const headline = screen.getByTestId('status-headline')
-    expect(headline.dataset.summary).toBe('blocked')
-    const rationale = screen.getByTestId('decision-rationale').textContent ?? ''
-    expect(rationale).toMatch(/stopped manually|resume or rerun/i)
-    expect(rationale).not.toMatch(/awaiting approval|pending review|your review/i)
-  })
 })
 
 describe('IssueDetailPage status uniqueness — failed summary', () => {
   it('renders the failed summary once in the headline without a separate runtime badge row', async () => {
-    mockIssue(makeIssue({
-      status: IssueStatus.InProgress,
-      workflowStage: 'build',
-      workflowStatus: 'failed',
-      health: IssueHealth.Active,
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build something' },
-        latestAttemptState: 'failed',
-        workflowSummaryState: 'waiting-for-recovery',
-        allowedActions: ['retry', 'rerun', 'start'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: IssueStatus.InProgress,
+        workflowStage: 'build',
+        workflowStatus: 'failed',
+        health: IssueHealth.Active,
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build something' },
+          latestAttemptState: 'failed',
+          workflowSummaryState: 'waiting-for-recovery',
+          allowedActions: ['retry', 'rerun', 'start'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -258,14 +246,16 @@ describe('IssueDetailPage status uniqueness — failed summary', () => {
 
 describe('IssueDetailPage status uniqueness — done summary', () => {
   it('renders the done summary once in the headline for an archived done issue', async () => {
-    mockIssue(makeIssue({
-      number: 264,
-      status: IssueStatus.Done,
-      workflowStage: 'done',
-      workflowStatus: 'completed',
-      archivedAt: '2026-06-25T10:00:00Z',
-      health: IssueHealth.Done,
-    }))
+    mockIssue(
+      makeIssue({
+        number: 264,
+        status: IssueStatus.Done,
+        workflowStage: 'done',
+        workflowStatus: 'completed',
+        archivedAt: '2026-06-25T10:00:00Z',
+        health: IssueHealth.Done,
+      }),
+    )
 
     renderPage()
 
@@ -279,27 +269,41 @@ describe('IssueDetailPage status uniqueness — done summary', () => {
 
 describe('IssueDetailPage composite parent issue-only status', () => {
   it('renders one issue-only status statement and no workflow stage or current task', async () => {
-    mockIssue(makeIssue({
-      number: 14,
-      status: IssueStatus.InProgress,
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      workflowRunId: 'wr_composite_1',
-      health: IssueHealth.Active,
-      children: [
-        { number: 12, title: 'Server refactor', status: IssueStatus.Done, health: IssueHealth.Done, repositoryName: 'server' },
-        { number: 13, title: 'Web portal upgrade', status: IssueStatus.InProgress, health: IssueHealth.Blocked, repositoryName: 'web' },
-      ],
-      childIssuesSummary: {
-        hasChildren: true,
-        count: 2,
-        backlogCount: 0,
-        inProgressCount: 1,
-        doneCount: 1,
-        cancelledCount: 0,
-        blockedCount: 1,
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        number: 14,
+        status: IssueStatus.InProgress,
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        workflowRunId: 'wr_composite_1',
+        health: IssueHealth.Active,
+        children: [
+          {
+            number: 12,
+            title: 'Server refactor',
+            status: IssueStatus.Done,
+            health: IssueHealth.Done,
+            repositoryName: 'server',
+          },
+          {
+            number: 13,
+            title: 'Web portal upgrade',
+            status: IssueStatus.InProgress,
+            health: IssueHealth.Blocked,
+            repositoryName: 'web',
+          },
+        ],
+        childIssuesSummary: {
+          hasChildren: true,
+          count: 2,
+          backlogCount: 0,
+          inProgressCount: 1,
+          doneCount: 1,
+          cancelledCount: 0,
+          blockedCount: 1,
+        },
+      }),
+    )
 
     renderPage()
 
@@ -314,26 +318,34 @@ describe('IssueDetailPage composite parent issue-only status', () => {
   })
 
   it('does not fetch workflow data or render workflow controls for a composite parent', async () => {
-    mockIssue(makeIssue({
-      number: 14,
-      status: IssueStatus.InProgress,
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      workflowRunId: 'wr_composite_2',
-      health: IssueHealth.Active,
-      children: [
-        { number: 12, title: 'Server refactor', status: IssueStatus.Done, health: IssueHealth.Done, repositoryName: 'server' },
-      ],
-      childIssuesSummary: {
-        hasChildren: true,
-        count: 1,
-        backlogCount: 0,
-        inProgressCount: 0,
-        doneCount: 1,
-        cancelledCount: 0,
-        blockedCount: 0,
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        number: 14,
+        status: IssueStatus.InProgress,
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        workflowRunId: 'wr_composite_2',
+        health: IssueHealth.Active,
+        children: [
+          {
+            number: 12,
+            title: 'Server refactor',
+            status: IssueStatus.Done,
+            health: IssueHealth.Done,
+            repositoryName: 'server',
+          },
+        ],
+        childIssuesSummary: {
+          hasChildren: true,
+          count: 1,
+          backlogCount: 0,
+          inProgressCount: 0,
+          doneCount: 1,
+          cancelledCount: 0,
+          blockedCount: 0,
+        },
+      }),
+    )
 
     const { container } = renderPage()
 
@@ -345,16 +357,18 @@ describe('IssueDetailPage composite parent issue-only status', () => {
 
 describe('IssueDetailPage IssueDetailsCard status uniqueness', () => {
   it('does not render Issue Stage or Workflow Stage rows in the Details card', async () => {
-    mockIssue(makeIssue({
-      status: IssueStatus.InProgress,
-      workflowStage: 'check',
-      repository: {
-        name: 'master',
-        baseBranch: 'master',
-        gitUrl: 'https://github.com/suraciii/mohist.git',
-      },
-      projectName: 'mohist-local',
-    }))
+    mockIssue(
+      makeIssue({
+        status: IssueStatus.InProgress,
+        workflowStage: 'check',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        projectName: 'mohist-local',
+      }),
+    )
 
     renderPage()
 
@@ -364,26 +378,28 @@ describe('IssueDetailPage IssueDetailsCard status uniqueness', () => {
   })
 
   it('still renders parent/child relationships, project, repository name, base branch, and Git URL', async () => {
-    mockIssue(makeIssue({
-      status: IssueStatus.InProgress,
-      workflowStage: 'check',
-      parentIssueRef: { number: 13, title: 'Parent issue' },
-      childIssuesSummary: {
-        hasChildren: true,
-        count: 2,
-        backlogCount: 0,
-        inProgressCount: 1,
-        doneCount: 1,
-        cancelledCount: 0,
-        blockedCount: 0,
-      },
-      projectName: 'mohist-local',
-      repository: {
-        name: 'master',
-        baseBranch: 'master',
-        gitUrl: 'https://github.com/suraciii/mohist.git',
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: IssueStatus.InProgress,
+        workflowStage: 'check',
+        parentIssueRef: { number: 13, title: 'Parent issue' },
+        childIssuesSummary: {
+          hasChildren: true,
+          count: 2,
+          backlogCount: 0,
+          inProgressCount: 1,
+          doneCount: 1,
+          cancelledCount: 0,
+          blockedCount: 0,
+        },
+        projectName: 'mohist-local',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+      }),
+    )
 
     renderPage()
 
@@ -394,28 +410,32 @@ describe('IssueDetailPage IssueDetailsCard status uniqueness', () => {
     expect(within(detailsMetadata).getByText('mohist-local')).toBeTruthy()
     expect(within(detailsMetadata).getByTestId('repository-name')).toHaveTextContent('master')
     expect(within(detailsMetadata).getByTestId('repository-base-branch')).toHaveTextContent('master')
-    expect(within(detailsMetadata).getByTestId('repository-git-url')).toHaveTextContent('https://github.com/suraciii/mohist.git')
+    expect(within(detailsMetadata).getByTestId('repository-git-url')).toHaveTextContent(
+      'https://github.com/suraciii/mohist.git',
+    )
   })
 })
 
 describe('IssueDetailPage two paused meanings are distinguishable', () => {
   it('uses approval-pending language for an approval pause, not stop/recovery language', async () => {
-    mockIssue(makeIssue({
-      status: IssueStatus.InProgress,
-      workflowStage: 'check',
-      health: IssueHealth.Paused,
-      approvalState: {
-        status: 'awaiting',
-        stage: 'check',
-        requestedAt: '2026-01-01T00:00:00.000Z',
-      },
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: null,
-        workflowSummaryState: 'awaiting-approval',
-        allowedActions: ['approve', 'reject'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: IssueStatus.InProgress,
+        workflowStage: 'check',
+        health: IssueHealth.Paused,
+        approvalState: {
+          status: 'awaiting',
+          stage: 'check',
+          requestedAt: '2026-01-01T00:00:00.000Z',
+        },
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: null,
+          workflowSummaryState: 'awaiting-approval',
+          allowedActions: ['approve', 'reject'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -423,27 +443,5 @@ describe('IssueDetailPage two paused meanings are distinguishable', () => {
     const rationale = screen.getByTestId('decision-rationale').textContent ?? ''
     expect(rationale).toMatch(/approval.*pending|pending.*approval/i)
     expect(rationale).not.toMatch(/stopped manually|interrupted/i)
-  })
-
-  it('uses stop/recovery language for a manually stopped workflow, not approval-pending language', async () => {
-    mockIssue(makeIssue({
-      status: IssueStatus.InProgress,
-      workflowStage: 'build',
-      workflowStatus: 'interrupted',
-      health: IssueHealth.Blocked,
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'interrupted',
-        workflowSummaryState: 'interrupted',
-        allowedActions: ['retry', 'resume', 'rerun', 'stop'],
-      },
-    }))
-
-    renderPage()
-
-    await waitFor(() => screen.getByTestId('issue-decision-surface'))
-    const rationale = screen.getByTestId('decision-rationale').textContent ?? ''
-    expect(rationale).toMatch(/stopped manually|resume or rerun/i)
-    expect(rationale).not.toMatch(/approval.*pending|awaiting.*review/i)
   })
 })

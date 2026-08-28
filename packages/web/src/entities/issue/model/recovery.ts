@@ -1,4 +1,4 @@
-export type WorkItemAttemptState = 'running' | 'completed' | 'failed' | 'interrupted'
+export type WorkItemAttemptState = 'running' | 'completed' | 'failed'
 
 /**
  * Client-side projection derived from server `WorkflowRunStatus`
