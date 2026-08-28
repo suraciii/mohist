@@ -181,6 +181,42 @@ public sealed class WorkflowGrainFeedbackDispatchSpecs
     }
 
     [Fact]
+    public async Task AwaitingApproval_RequestChanges_FailedFeedbackTask_RetryCompletesAndResolvesFeedback()
+    {
+        var arrangement = await ArrangeAsync("wr-feedback-retry-resolves");
+        await DrivePlanToGateAsync(arrangement);
+
+        var feedbackId = await arrangement.Grain.RequestChangesAsync("explain the retry semantics", "operator-1");
+
+        var failedTask = (await arrangement.AssignAndClaimAsync())!;
+        await arrangement.ReportTaskResultAsync(
+            failedTask,
+            output: null,
+            addTasks: null,
+            status: TaskReportStatus.Failed,
+            detail: "could not apply changes");
+
+        await arrangement.Grain.RetryAsync();
+
+        var retriedTask = (await arrangement.AssignAndClaimAsync())!;
+        Assert.StartsWith("apply-feedback.2", retriedTask.Id);
+        var pendingRun = await RequireRunAsync(arrangement);
+        var pendingRetry = pendingRun.CurrentStage().Tasks.Single(task => task.Id == retriedTask.Id);
+        Assert.Equal(feedbackId, pendingRetry.CausedByFeedbackId);
+        Assert.Equal(failedTask.Id, pendingRetry.CausedByFailedTaskId);
+
+        await arrangement.ReportTaskResultAsync(retriedTask, output: null, addTasks: null);
+
+        var run = await RequireRunAsync(arrangement);
+        var feedback = run.Feedback.Single(f => f.Id == feedbackId);
+        Assert.Equal(ApprovalFeedbackStatus.Resolved, feedback.Status);
+        Assert.Equal(retriedTask.Id, feedback.ResolutionTaskId);
+        Assert.True(run.Feedback.Count <= 10);
+        Assert.DoesNotContain(run.Feedback, candidate =>
+            candidate.Id == feedbackId && candidate.Status == ApprovalFeedbackStatus.Open);
+    }
+
+    [Fact]
     public async Task AwaitingApproval_RequestChanges_FeedbackTaskCompletesWithoutSummary_StillResolves()
     {
         var arrangement = await ArrangeAsync("wr-feedback-no-summary");

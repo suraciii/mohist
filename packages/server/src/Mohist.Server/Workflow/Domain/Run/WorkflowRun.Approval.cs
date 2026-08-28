@@ -8,6 +8,7 @@ namespace Mohist.Server.Workflow.Domain.Run;
 public static partial class WorkflowRunExtensions
 {
     public const int FeedbackSummaryMaxLength = 100;
+    private const int FeedbackRetentionLimit = 10;
     private const string Ellipsis = "\u2026";
 
     public static string BuildFeedbackSummary(string? body)
@@ -106,6 +107,7 @@ public static partial class WorkflowRunExtensions
                 CreatedAt: now);
 
             run.Feedback.Add(feedback);
+            run.EnforceFeedbackBound();
 
             var events = new List<WorkflowEvent>();
 
@@ -119,6 +121,28 @@ public static partial class WorkflowRunExtensions
 
             events.Add(new FeedbackRequested(current.Id, feedbackId, body));
             return events;
+        }
+
+        // Keep rewritten aggregate State bounded to limit write amplification from resolved history.
+        private void EnforceFeedbackBound()
+        {
+            while (run.Feedback.Count > FeedbackRetentionLimit)
+            {
+                var oldestResolvedIndex = -1;
+                for (var index = 0; index < run.Feedback.Count; index++)
+                {
+                    var feedback = run.Feedback[index];
+                    if (feedback.Status != ApprovalFeedbackStatus.Resolved)
+                        continue;
+                    if (oldestResolvedIndex < 0
+                        || feedback.CreatedAt < run.Feedback[oldestResolvedIndex].CreatedAt)
+                        oldestResolvedIndex = index;
+                }
+
+                if (oldestResolvedIndex < 0)
+                    break;
+                run.Feedback.RemoveAt(oldestResolvedIndex);
+            }
         }
 
         private static void ValidateFeedbackTasks(IReadOnlyList<TaskDefinition>? feedbackTasks)
@@ -149,10 +173,22 @@ public static partial class WorkflowRunExtensions
             var feedbackTasks = run.CurrentStage().Tasks
                 .Where(task => task.CausedByFeedbackId == feedbackId)
                 .ToList();
-            if (feedbackTasks.Count == 0 || feedbackTasks.Any(task => task.Status != WorkflowActionAttemptStatus.Completed))
+            if (feedbackTasks.Count == 0)
                 return null;
 
-            var summary = ResolveFeedbackSummary(feedbackTasks, output);
+            // A retry preserves the failed attempt for history; only each feedback lineage tail can settle the request.
+            var supersededTaskIds = feedbackTasks
+                .Where(task => run.CurrentStage().Tasks.Any(candidate => candidate.CausedByFailedTaskId == task.Id))
+                .Select(task => task.Id)
+                .ToHashSet(StringComparer.Ordinal);
+            var currentFeedbackTasks = feedbackTasks
+                .Where(task => !supersededTaskIds.Contains(task.Id))
+                .ToList();
+            if (currentFeedbackTasks.Count == 0
+                || currentFeedbackTasks.Any(task => task.Status != WorkflowActionAttemptStatus.Completed))
+                return null;
+
+            var summary = ResolveFeedbackSummary(currentFeedbackTasks, output);
 
             var resolved = feedback with
             {
@@ -163,7 +199,11 @@ public static partial class WorkflowRunExtensions
             };
 
             var idx = run.Feedback.FindIndex(f => f.Id == feedbackId);
-            if (idx >= 0) run.Feedback[idx] = resolved;
+            if (idx >= 0)
+            {
+                run.Feedback[idx] = resolved;
+                run.EnforceFeedbackBound();
+            }
             return resolved;
         }
     }

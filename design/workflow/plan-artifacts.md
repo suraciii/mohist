@@ -95,8 +95,9 @@ Approval Feedback sequence.
   which are the single repair path. See
   [`definition.md`](definition.md#approval-feedback) for the authoritative
   sequence and ownership rules.
-- Approval Feedback carries no automatic limit. Recovery loops are unattended
-  and keep their declared budgets.
+- Approval Feedback supports unlimited Request Changes cycles. State retains
+  only a bounded window of up to 10 feedback entries. Recovery loops are
+  unattended and keep their declared budgets.
 
 ## Integrate: Auto-merge
 

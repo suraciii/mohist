@@ -55,10 +55,14 @@ State is not:
   not truncation.
 - A normal active run must remain within hundreds of KiB. A State record above
   1 MiB violates the content boundary and is a defect, not a capacity request.
-- WorkflowRun State retains only Approval Feedback facts needed for the current
-  decision or execution. Resolved feedback history belongs in events and read
-  projections; it must not accumulate as an unbounded list in rewritten
-  aggregate State. Approval Feedback and Feedback Task behavior is defined in
+- WorkflowRun State retains an Approval Feedback list capped at 10 entries total.
+  An open feedback consumes one slot. Eviction removes the oldest resolved
+  entries and never an open entry. Rerun and rerun-from-stage discard stale open
+  feedback obligations when they replace or reset stage execution; request facts
+  remain in events. Resolved feedback beyond the window is intentionally not
+  archived in full: events retain request and task-completion facts, but
+  resolution details of evicted cycles are not reconstructable. Approval
+  Feedback and Feedback Task behavior is defined in
   [`definition.md`](definition.md#approval-feedback); this document defines only
   its State boundary.
 

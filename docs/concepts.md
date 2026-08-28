@@ -214,7 +214,6 @@ presentation alias and does not change ownership. See
 
 Current WorkflowRun source, status, and recovery reads still consult live Profile
 data in some paths, and current Profile update guards still inspect active Runs.
-`WorkflowRun.Feedback` retains resolved Approval Feedback in an unbounded list.
 
 ## Skill
 
