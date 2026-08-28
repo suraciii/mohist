@@ -1,15 +1,7 @@
 import type { AgentStatus } from '../../../entities/agent'
 import type { Issue, WorkflowTimeline } from '../../../entities/issue'
 
-export type RuntimeSummary =
-  | 'running'
-  | 'recoverable-interrupted'
-  | 'queued'
-  | 'approval-required'
-  | 'blocked'
-  | 'failed'
-  | 'done'
-  | 'cancelled'
+export type RuntimeSummary = 'running' | 'queued' | 'approval-required' | 'blocked' | 'failed' | 'done' | 'cancelled'
 
 export type RuntimeActionKind = 'approve' | 'send-back' | 'retry' | 'resume' | 'rerun' | 'stop' | 'start'
 

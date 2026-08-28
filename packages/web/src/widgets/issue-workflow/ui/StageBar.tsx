@@ -15,13 +15,12 @@ export function getStageStatus(
   stage: WorkflowStage,
   stageStateMap: Map<string, StageStateRead>,
   issue: Issue,
-): 'pending' | 'running' | 'recoverable-interrupted' | 'completed' | 'failed' | 'blocked' | 'awaiting-approval' {
+): 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'awaiting-approval' {
   const stageState = stageStateMap.get(stage)
   const stageOrder = WORKFLOW_STAGES.indexOf(stage)
   const currentStageIdx = issue.workflowStage ? WORKFLOW_STAGES.indexOf(issue.workflowStage) : -1
 
   if (stageState) {
-    if (stageState.status === 'recoverable-interrupted') return 'recoverable-interrupted'
     if (stageState.status === 'running') return 'running'
     if (stageState.status === 'awaiting-approval') return 'awaiting-approval'
     if (stageState.status === 'completed' || stageState.status === 'passed') return 'completed'
@@ -81,7 +80,6 @@ export function workflowTimelineToStageStateMap(
         origin: task.uses ? { source: 'runtime', uses: task.uses } : null,
         requiredFiles: task.requiredFiles,
         classification: task.classification,
-        interruption: task.interruption,
         agentJobId: task.agentJobId,
         agentSessionId: task.agentSessionId,
       })),
@@ -95,14 +93,12 @@ export function workflowTimelineToStageStateMap(
         lastRunAt: check.completedAt ?? check.startedAt,
         origin: check.uses ? { source: 'runtime', uses: check.uses } : null,
         updatedAt: check.completedAt ?? check.startedAt ?? '',
-        interruption: check.interruption,
       })),
       approval: stage.approval,
       attempts: 1,
       startedAt: stage.startedAt,
       completedAt: stage.completedAt,
       updatedAt: stage.completedAt ?? stage.startedAt ?? '',
-      interruption: stage.interruption,
     })
   }
 

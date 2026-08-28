@@ -137,7 +137,6 @@ public class WorkflowQuerier : IScopedService, IWorkflowStatusReader
                     DurationMs: task.DurationMs,
                     Output: task.Output,
                     Error: task.Error,
-                    Interruption: task.Interruption,
                     Lane: task.Lane);
             }
         }

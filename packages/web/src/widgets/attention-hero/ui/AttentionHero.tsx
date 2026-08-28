@@ -46,11 +46,7 @@ function isApprovalItem(item: AttentionItem): boolean {
 }
 
 function attentionTreatment(item: AttentionItem): AttentionTreatment {
-  return item.kind === 'approval-needed' ||
-    item.kind === 'runner-capacity-limited' ||
-    item.kind === 'recoverable-interrupted'
-    ? warningTreatment
-    : dangerTreatment
+  return item.kind === 'approval-needed' || item.kind === 'runner-capacity-limited' ? warningTreatment : dangerTreatment
 }
 
 function attentionSummaryTreatment(items: AttentionItem[]): AttentionTreatment {

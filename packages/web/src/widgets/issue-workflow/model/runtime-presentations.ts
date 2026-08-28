@@ -171,23 +171,6 @@ const PRESENTATIONS: Record<RuntimeSummary, SummaryPresentation> = {
     nextAction: () => 'No user action required right now.',
     actions: buildRunningActions,
   },
-  'recoverable-interrupted': {
-    headline: (ctx) => {
-      if (ctx.currentTask) return `Recoverable interruption: ${ctx.currentTask.title}`
-      return `Workflow recovering (${formatStageLabelForCtx(ctx)})`
-    },
-    rationale: (ctx) =>
-      ctx.issue?.attention?.message ??
-      ctx.issue?.attention?.reasonCode ??
-      'The runner was interrupted while active work was in progress.',
-    nextAction: (ctx) => {
-      const deadline = ctx.issue?.attention?.recoveryDeadlineAt
-      return deadline
-        ? `Wait for the original runner to recover before ${deadline}.`
-        : 'Wait for the original runner to recover.'
-    },
-    actions: () => [],
-  },
   queued: {
     headline: (ctx) => `Waiting to start (${formatStageLabelForCtx(ctx)})`,
     rationale: (ctx) => ctx.waitReason ?? 'The workflow is waiting to start.',
@@ -221,12 +204,7 @@ const PRESENTATIONS: Record<RuntimeSummary, SummaryPresentation> = {
       const issue = ctx.issue
       if (issue?.blockedReason) return issue.blockedReason
       if (issue?.convergence?.blockedReason) return issue.convergence.blockedReason
-      const recovery = issue?.recovery
-      if (
-        recovery?.latestAttemptState === 'interrupted' ||
-        issue?.workflowStatus?.toLowerCase() === 'interrupted' ||
-        issue?.workflowStatus?.toLowerCase() === 'stopped'
-      ) {
+      if (issue?.workflowStatus?.toLowerCase() === 'stopped') {
         return 'Execution stopped manually. Resume or rerun to continue.'
       }
       return 'The workflow is blocked and needs an action to continue.'

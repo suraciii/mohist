@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { IssueHealth, IssueStatus, WorkflowStage } from '../../../entities/issue'
-import type { WorkflowRecoverySummary } from '../../../entities/issue/model/recovery'
 import { deriveRuntimeDecision, type RuntimeDecisionInput } from './derive-runtime-decision'
 
 function baseInput(overrides: Partial<RuntimeDecisionInput['issue']> = {}): RuntimeDecisionInput {
@@ -62,49 +61,6 @@ describe('runtime-presentations approval pause copy', () => {
   })
 })
 
-describe('runtime-presentations interrupted / manually stopped copy', () => {
-  it('identifies a manually stopped workflow as a stop/recovery situation', () => {
-    const decision = deriveRuntimeDecision(baseInput({
-      status: IssueStatus.InProgress,
-      workflowStage: WorkflowStage.Build,
-      workflowStatus: 'interrupted',
-      health: IssueHealth.Blocked,
-      approvalState: undefined,
-      blockedReason: undefined,
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'interrupted',
-        workflowSummaryState: 'waiting-for-recovery' as WorkflowRecoverySummary,
-        allowedActions: ['retry', 'resume', 'rerun', 'stop'],
-      },
-    }))
-
-    expect(decision.summary).toBe('blocked')
-    expect(decision.rationale).toMatch(/stopped manually|resume or rerun/i)
-    expect(decision.rationale).not.toMatch(/approval decision is pending|awaiting approval|your review/i)
-  })
-
-  it('does not describe an interrupted workflow as awaiting approval', () => {
-    const decision = deriveRuntimeDecision(baseInput({
-      status: IssueStatus.InProgress,
-      workflowStage: WorkflowStage.Build,
-      workflowStatus: 'interrupted',
-      health: IssueHealth.Blocked,
-      approvalState: undefined,
-      blockedReason: undefined,
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'interrupted',
-        workflowSummaryState: 'waiting-for-recovery' as WorkflowRecoverySummary,
-        allowedActions: ['retry', 'resume', 'rerun', 'stop'],
-      },
-    }))
-
-    expect(decision.rationale.toLowerCase()).not.toContain('awaiting')
-    expect(decision.rationale.toLowerCase()).not.toContain('approval')
-  })
-})
-
 describe('runtime-presentations summary precedence is unchanged', () => {
   it('preserves running summary when an active agent exists with no failed checks', () => {
     const decision = deriveRuntimeDecision({
@@ -144,14 +100,16 @@ describe('runtime-presentations summary precedence is unchanged', () => {
   })
 
   it('preserves done summary when the workflow is in the done stage', () => {
-    const decision = deriveRuntimeDecision(baseInput({
-      status: IssueStatus.Done,
-      workflowStage: WorkflowStage.Done,
-      workflowStatus: 'completed',
-      health: IssueHealth.Done,
-      approvalState: undefined,
-      recovery: undefined,
-    }))
+    const decision = deriveRuntimeDecision(
+      baseInput({
+        status: IssueStatus.Done,
+        workflowStage: WorkflowStage.Done,
+        workflowStatus: 'completed',
+        health: IssueHealth.Done,
+        approvalState: undefined,
+        recovery: undefined,
+      }),
+    )
 
     expect(decision.summary).toBe('done')
   })

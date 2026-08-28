@@ -29,7 +29,6 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration);
     Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch);
     Task<WorkReportVerdict> FailActiveWorkAsync(string workerId, string workId, string processGeneration, string message);
-    Task<WorkReportVerdict> InterruptActiveWorkAsync(string workerId, string reason);
     Task<WorkReportVerdict> AbandonActiveWorkAsync(string workerId, string workId, string reason);
     Task<WorkReportVerdict> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error);
     Task<WorkReportVerdict> ReceiveTaskReportAsync(

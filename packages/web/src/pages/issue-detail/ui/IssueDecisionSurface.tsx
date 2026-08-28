@@ -11,7 +11,6 @@ export interface IssueDecisionSurfaceProps {
   actions: ReadonlyArray<IssueDecisionAction>
   summary:
     | 'running'
-    | 'recoverable-interrupted'
     | 'queued'
     | 'approval-required'
     | 'blocked'
@@ -38,7 +37,6 @@ interface SummaryPresentation {
 
 const SUMMARY_PRESENTATION: Record<IssueDecisionSurfaceProps['summary'], SummaryPresentation> = {
   running: { label: 'Running', tone: 'blue' },
-  'recoverable-interrupted': { label: 'Recovering', tone: 'amber' },
   queued: { label: 'Queued', tone: 'violet' },
   'approval-required': { label: 'Approval required', tone: 'amber' },
   blocked: { label: 'Blocked', tone: 'orange' },

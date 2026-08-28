@@ -22,21 +22,7 @@ public sealed record WorkflowStatusView(
     List<AvailableActionView> AvailableActions,
     string? AssignedTo = null,
     MetadataView? Metadata = null,
-    WorkInterruptionView? Interruption = null,
     VerificationLanesView? VerificationLanes = null);
-
-/// <summary>
-/// Read-only projection of the durable interruption fact. The workflow and
-/// task state machines remain Running while this value is present; consumers
-/// use it to distinguish recoverable work from healthy running or failure.
-/// </summary>
-[GenerateSerializer]
-public sealed record WorkInterruptionView(
-    string ReasonCode,
-    string WorkId,
-    string OwnerId,
-    DateTimeOffset RecordedAt,
-    DateTimeOffset RecoveryDeadlineAt);
 
 [GenerateSerializer]
 public sealed record StageStatusView(
@@ -47,8 +33,7 @@ public sealed record StageStatusView(
     List<CheckStatusView> Checks,
     ApprovalStatusView? ApprovalStatus,
     FailureStatusView? Failure,
-    IReadOnlyList<StageFeedbackView>? Feedback = null,
-    WorkInterruptionView? Interruption = null);
+    IReadOnlyList<StageFeedbackView>? Feedback = null);
 
 [GenerateSerializer]
 public sealed record StageFeedbackView(
@@ -123,7 +108,6 @@ public sealed record TaskStatusView(
     long? DurationMs = null,
     JsonElement? Output = null,
     ExecutionError? Error = null,
-    WorkInterruptionView? Interruption = null,
     TaskLaneView? Lane = null,
     string? AgentJobId = null,
     string? AgentSessionId = null);
@@ -135,8 +119,7 @@ public sealed record CheckStatusView(
     string? Uses,
     string Status,
     string? Message,
-    ExecutionError? Error = null,
-    WorkInterruptionView? Interruption = null);
+    ExecutionError? Error = null);
 
 [GenerateSerializer]
 public sealed record PendingWorkView(

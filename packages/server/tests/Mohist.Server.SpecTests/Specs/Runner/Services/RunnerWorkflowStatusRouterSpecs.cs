@@ -193,8 +193,6 @@ public class RunnerWorkflowStatusRouterSpecs
             string workId,
             string processGeneration,
             string message) => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
-        public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> InterruptActiveWorkAsync(string workerId, string reason)
-            => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
         public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> AbandonActiveWorkAsync(string workerId, string workId, string reason)
             => Task.FromResult(Mohist.Server.Runner.Grains.WorkReportVerdict.Refused);
         public Task<Mohist.Server.Runner.Grains.WorkReportVerdict> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error)

@@ -30,7 +30,10 @@ function mockMatchMedia(narrow: boolean) {
     dispatchEvent: vi.fn(),
     onchange: null,
   }
-  vi.stubGlobal('matchMedia', vi.fn(() => mql))
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn(() => mql),
+  )
   setScopedValue(window, 'innerWidth', narrow ? 375 : 1280)
 }
 
@@ -86,14 +89,16 @@ afterEach(() => {
 
 describe('IssueDecisionSurface — control workspace (active execution)', () => {
   it('shows identity, stage, progress, primary owner action, and slots within the control region', async () => {
-    mockIssue(baseIssue({
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
     mockWorkspaceStatus({ branch: 'feature/issue-14', baseBranch: 'master', hasConflicts: false, canRebase: true })
 
     renderPage()
@@ -106,21 +111,23 @@ describe('IssueDecisionSurface — control workspace (active execution)', () => 
   })
 
   it('shows approval state, awaiting stage, approve+send-back together with evidence reachable from control region', async () => {
-    mockIssue(baseIssue({
-      workflowStage: 'check',
-      health: 'paused',
-      approvalState: {
-        status: 'awaiting',
-        stage: 'check',
-        requestedAt: '2026-01-01T00:00:00.000Z',
-      },
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: null,
-        workflowSummaryState: 'awaiting-approval',
-        allowedActions: ['approve', 'reject'],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        workflowStage: 'check',
+        health: 'paused',
+        approvalState: {
+          status: 'awaiting',
+          stage: 'check',
+          requestedAt: '2026-01-01T00:00:00.000Z',
+        },
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: null,
+          workflowSummaryState: 'awaiting-approval',
+          allowedActions: ['approve', 'reject'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -134,21 +141,23 @@ describe('IssueDecisionSurface — control workspace (active execution)', () => 
   })
 
   it('opens send-back feedback form within the same decision context without navigating away', async () => {
-    mockIssue(baseIssue({
-      workflowStage: 'check',
-      health: 'paused',
-      approvalState: {
-        status: 'awaiting',
-        stage: 'check',
-        requestedAt: '2026-01-01T00:00:00.000Z',
-      },
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: null,
-        workflowSummaryState: 'awaiting-approval',
-        allowedActions: ['approve', 'reject'],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        workflowStage: 'check',
+        health: 'paused',
+        approvalState: {
+          status: 'awaiting',
+          stage: 'check',
+          requestedAt: '2026-01-01T00:00:00.000Z',
+        },
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: null,
+          workflowSummaryState: 'awaiting-approval',
+          allowedActions: ['approve', 'reject'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -166,18 +175,20 @@ describe('IssueDecisionSurface — control workspace (active execution)', () => 
   })
 
   it('shows blocked summary and recovery actions (retry/resume/rerun) inside the control region', async () => {
-    mockIssue(baseIssue({
-      workflowStage: 'build',
-      workflowStatus: 'failed',
-      health: 'blocked',
-      blockedReason: 'Runner lost while work was active.',
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'failed',
-        workflowSummaryState: 'waiting-for-recovery',
-        allowedActions: ['retry', 'resume', 'rerun'],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        workflowStage: 'build',
+        workflowStatus: 'failed',
+        health: 'blocked',
+        blockedReason: 'Runner lost while work was active.',
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: 'failed',
+          workflowSummaryState: 'waiting-for-recovery',
+          allowedActions: ['retry', 'resume', 'rerun'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -187,40 +198,21 @@ describe('IssueDecisionSurface — control workspace (active execution)', () => 
       expect(within(surface).getByTestId(`decision-action-${kind}`)).toBeInTheDocument()
     }
   })
-
-  it('reports interrupted as blocked in the header summary and exposes a stop/recovery rationale that is not framed as awaiting approval', async () => {
-    mockIssue(baseIssue({
-      workflowStatus: 'interrupted',
-      health: 'blocked',
-      blockedReason: 'Runner lost while work was active.',
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'interrupted',
-        workflowSummaryState: 'waiting-for-recovery',
-        allowedActions: ['retry', 'resume', 'rerun'],
-      },
-    }))
-
-    renderPage()
-
-    const surface = await waitFor(() => screen.getByTestId('issue-decision-surface'))
-    expect(surface.dataset.summary).toBe('blocked')
-    const rationale = within(surface).getByTestId('decision-rationale').textContent ?? ''
-    expect(rationale.toLowerCase()).not.toMatch(/approval/i)
-  })
 })
 
 describe('IssueDecisionSurface — control workspace (terminal states)', () => {
   it('shows identity and queued situation without fabricated stage, progress, or runtime actions', async () => {
-    mockIssue(baseIssue({
-      status: 'backlog',
-      workflowStage: null,
-      workflowStatus: null,
-      workflowRunId: null,
-      health: 'active',
-      canStart: true,
-      blocker: null,
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'backlog',
+        workflowStage: null,
+        workflowStatus: null,
+        workflowRunId: null,
+        health: 'active',
+        canStart: true,
+        blocker: null,
+      }),
+    )
 
     renderPage()
 
@@ -236,14 +228,16 @@ describe('IssueDecisionSurface — control workspace (terminal states)', () => {
       runnerAvailable: false,
       runnerMessage: 'No runner is connected. Start a runner before this issue can run.',
     })
-    mockIssue(baseIssue({
-      status: 'backlog',
-      workflowStage: null,
-      workflowStatus: null,
-      workflowRunId: null,
-      health: 'active',
-      canStart: true,
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'backlog',
+        workflowStage: null,
+        workflowStatus: null,
+        workflowRunId: null,
+        health: 'active',
+        canStart: true,
+      }),
+    )
 
     renderPage()
 
@@ -255,18 +249,20 @@ describe('IssueDecisionSurface — control workspace (terminal states)', () => {
   })
 
   it('shows the terminal Done state with no start/stop/approve/retry/resume/rerun actions offered', async () => {
-    mockIssue(baseIssue({
-      status: 'done',
-      workflowStage: 'done',
-      workflowStatus: 'done',
-      health: 'done',
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'completed',
-        workflowSummaryState: 'completed',
-        allowedActions: [],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'done',
+        workflowStage: 'done',
+        workflowStatus: 'done',
+        health: 'done',
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: 'completed',
+          workflowSummaryState: 'completed',
+          allowedActions: [],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -279,19 +275,21 @@ describe('IssueDecisionSurface — control workspace (terminal states)', () => {
   })
 
   it('shows archived banner, identity, terminal Done state, and no active workflow controls', async () => {
-    mockIssue(baseIssue({
-      status: 'done',
-      workflowStage: 'done',
-      workflowStatus: 'completed',
-      archivedAt: '2026-06-25T10:00:00Z',
-      health: 'done',
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'completed',
-        workflowSummaryState: 'completed',
-        allowedActions: [],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'done',
+        workflowStage: 'done',
+        workflowStatus: 'completed',
+        archivedAt: '2026-06-25T10:00:00Z',
+        health: 'done',
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: 'completed',
+          workflowSummaryState: 'completed',
+          allowedActions: [],
+        },
+      }),
+    )
 
     renderPage()
 

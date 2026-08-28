@@ -17,7 +17,7 @@ namespace Mohist.Server.Workflow.Domain.Run;
 /// (e.g. a <c>WorkflowRun</c> may be <c>Running</c> while no <c>WorkflowActionAttempt</c>
 /// is <c>Running</c>).
 /// </summary>
-public enum WorkflowActionAttemptStatus { Pending, Running, Completed, Failed, Cancelled, Interrupted }
+public enum WorkflowActionAttemptStatus { Pending, Running, Completed, Failed, Cancelled }
 
 public sealed class WorkflowActionAttempt
 {
@@ -35,7 +35,6 @@ public sealed class WorkflowActionAttempt
     public string? ProcessGeneration { get; set; }
     public string? WorkId { get; set; }
     public TerminalLogOwnership? TerminalLogOwnership { get; set; }
-    public WorkInterruption? Interruption { get; set; }
     public string? AgentInvocationId { get; set; }
     public string? AgentJobId { get; set; }
     public string? AgentSessionId { get; set; }

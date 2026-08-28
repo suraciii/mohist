@@ -80,7 +80,7 @@ public sealed record AgentJobWorkflowTerminalEventData(
         ArgumentException.ThrowIfNullOrWhiteSpace(WorkId);
         ArgumentException.ThrowIfNullOrWhiteSpace(Stage);
         ArgumentException.ThrowIfNullOrWhiteSpace(RequestFingerprint);
-        if (Status is not ("completed" or "failed" or "cancelled" or "interrupted"))
+        if (Status is not ("completed" or "failed" or "cancelled"))
             throw new InvalidOperationException($"Invalid Workflow Agent terminal status '{Status}'.");
     }
 }

@@ -1,6 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Events;
@@ -20,7 +19,7 @@ using Orleans.Runtime;
 
 namespace Mohist.Server.Workflow.Grains;
 
-public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext
+public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContext, IRemindable
 {
     private WorkflowRun? _run;
     private string? _cachedAssignedWorkerId;
@@ -41,7 +40,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private readonly WorkflowItemTranslator? _workflowItemTranslator;
     private readonly IWorkflowReportPersistenceFailureInjector _reportPersistenceFailures;
     private readonly WorkflowRunVariablesStore? _runVariablesStore;
-    private readonly TimeSpan _runnerLossRecoveryTimeout;
 
     internal WorkflowGrain(
         Orleans.Runtime.IGrainContext context,
@@ -51,7 +49,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         WorkflowDefinitionResolver definitionResolver,
         WorkflowVariableResolver variableResolver,
         IWorkflowArtifactBindService artifactBindService,
-        IOptions<WorkflowOptions> options,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log,
         WorkflowItemTranslator? workflowItemTranslator = null,
@@ -73,7 +70,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _workflowItemTranslator = workflowItemTranslator;
         _reportPersistenceFailures = reportPersistenceFailures ?? NoopWorkflowReportPersistenceFailureInjector.Instance;
         _runVariablesStore = runVariablesStore;
-        _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(options.Value.RunnerLossRecoveryTimeout);
     }
 
     private string GrainKey => this.GetPrimaryKeyString();
@@ -84,7 +80,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         WorkflowDefinitionResolver definitionResolver,
         WorkflowVariableResolver variableResolver,
         IWorkflowArtifactBindService artifactBindService,
-        IOptions<WorkflowOptions> options,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log,
         WorkflowItemTranslator? workflowItemTranslator = null,
@@ -105,7 +100,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _workflowItemTranslator = workflowItemTranslator;
         _reportPersistenceFailures = reportPersistenceFailures ?? NoopWorkflowReportPersistenceFailureInjector.Instance;
         _runVariablesStore = runVariablesStore;
-        _runnerLossRecoveryTimeout = ValidateRunnerLossRecoveryTimeout(options.Value.RunnerLossRecoveryTimeout);
     }
 
     WorkflowRun? IWorkflowGrainContext.RunOrNull => _run;
@@ -130,8 +124,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         _runReloadRequired = false;
 
         await ClearStoppedRunStaleApprovalGateAsync(ct);
-
-        await ReconcileRunnerLossRecoveryAsync();
         await ReconcileWorkflowAgentHandoffsAsync();
 
         _cachedAssignedWorkerId = _run?.Assignment?.WorkerId;
@@ -858,14 +850,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     }
 
     private DateTimeOffset Now() => _timeProvider.GetUtcNow();
-
-    private static TimeSpan ValidateRunnerLossRecoveryTimeout(TimeSpan timeout)
-    {
-        if (timeout <= TimeSpan.FromMinutes(2))
-            throw new InvalidOperationException(
-                "Workflow RunnerLossRecoveryTimeout must be longer than the two-minute runner presence timeout.");
-        return timeout;
-    }
 
     private static string CreateFeedbackId() => $"fb_{Guid.NewGuid():N}";
 }

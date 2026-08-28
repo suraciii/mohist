@@ -2,6 +2,7 @@ using System.Data;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.UnitTests.Support;
@@ -212,6 +213,81 @@ public sealed class WorkflowRunStateDataUpgraderSpecs
         Assert.Equal(ConnectionState.Closed, source.State);
     }
 
+    [Fact]
+    public async Task UpgradeAsync_RetiresOnlyProvableTaskAndChecksInterruptions()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        const string failedTaskId = "wr_interrupted_task";
+        const string terminalChecksId = "wr_interrupted_checks";
+        await InsertAsync(database,
+            new WorkflowRunRow { WorkflowRunId = failedTaskId, State = ProvablyFailedInterruptedTaskState(failedTaskId) },
+            new WorkflowRunRow { WorkflowRunId = terminalChecksId, State = ProvablyTerminalChecksInterruptionState(terminalChecksId) });
+
+        await using var db = database.CreateContext();
+        var result = await WorkflowRunStateDataUpgrader.UpgradeAsync(
+            db,
+            backup: static (_, _) => Task.FromResult("verified-test-backup"));
+
+        Assert.Equal(2, result.CandidateCount);
+        Assert.Equal(2, result.WrittenCount);
+
+        var taskRow = await LoadAsync(database, failedTaskId);
+        using (var json = JsonDocument.Parse(taskRow.State))
+        {
+            var task = json.RootElement.GetProperty("stages")[0].GetProperty("tasks")[0];
+            Assert.Equal("failed", task.GetProperty("status").GetString());
+            Assert.False(task.TryGetProperty("interruption", out _));
+            Assert.Equal("job-1", task.GetProperty("agentJobId").GetString());
+            Assert.Equal("session-1", task.GetProperty("agentSessionId").GetString());
+            Assert.Equal("failure output", task.GetProperty("output").GetString());
+        }
+
+        var checksRow = await LoadAsync(database, terminalChecksId);
+        using (var json = JsonDocument.Parse(checksRow.State))
+            Assert.False(json.RootElement.GetProperty("stages")[0].TryGetProperty("interruption", out _));
+
+        Assert.NotNull(JSON.Deserialize<Mohist.Server.Workflow.Domain.Run.WorkflowRun>(taskRow.State));
+        Assert.NotNull(JSON.Deserialize<Mohist.Server.Workflow.Domain.Run.WorkflowRun>(checksRow.State));
+        Assert.Equal(2, await ETagAsync(database, failedTaskId));
+        Assert.Equal(2, await ETagAsync(database, terminalChecksId));
+
+        var second = await WorkflowRunStateDataUpgrader.UpgradeAsync(db);
+        Assert.Equal(0, second.CandidateCount);
+        Assert.Equal(0, second.WrittenCount);
+        Assert.Equal(taskRow.State, (await LoadAsync(database, failedTaskId)).State);
+        Assert.Equal(checksRow.State, (await LoadAsync(database, terminalChecksId)).State);
+        Assert.Equal(2, await ETagAsync(database, failedTaskId));
+        Assert.Equal(2, await ETagAsync(database, terminalChecksId));
+    }
+
+    [Fact]
+    public async Task UpgradeAsync_AmbiguousInterruptionReportsEveryAffectedRunInStableOrderAndWritesNothing()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        const string firstId = "wr_interruption_a";
+        const string secondId = "wr_interruption_b";
+        var first = AmbiguousRunningInterruptionState(firstId);
+        var second = AmbiguousRunningInterruptionState(secondId);
+        await InsertAsync(database,
+            new WorkflowRunRow { WorkflowRunId = secondId, State = second },
+            new WorkflowRunRow { WorkflowRunId = firstId, State = first });
+
+        await using var db = database.CreateContext();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            WorkflowRunStateDataUpgrader.UpgradeAsync(
+                db,
+                backup: static (_, _) => throw new InvalidOperationException("backup must not run")));
+
+        Assert.Contains($"WorkflowRun '{firstId}': ambiguous", error.Message);
+        Assert.Contains($"WorkflowRun '{secondId}': ambiguous", error.Message);
+        Assert.True(error.Message.IndexOf(firstId, StringComparison.Ordinal)
+            < error.Message.IndexOf(secondId, StringComparison.Ordinal));
+        Assert.Equal(first, (await LoadAsync(database, firstId)).State);
+        Assert.Equal(second, (await LoadAsync(database, secondId)).State);
+        Assert.Equal(1, await ETagAsync(database, firstId));
+        Assert.Equal(1, await ETagAsync(database, secondId));
+    }
+
     private static string LegacyState(string id) => $$"""
         {
           "id": "{{id}}",
@@ -262,6 +338,117 @@ public sealed class WorkflowRunStateDataUpgraderSpecs
     private static string CanonicalState(string id) => $$"""
         {"id":"{{id}}","metadata":{"createdAt":"1970-01-01T00:00:00+00:00"},"status":"Failed","stages":[]}
         """.Trim();
+
+    private static string ProvablyFailedInterruptedTaskState(string id) => $$"""
+        {
+          "id": "{{id}}",
+          "metadata": { "createdAt": "1970-01-01T00:00:00+00:00" },
+          "status": "failed",
+          "currentStageId": "build",
+          "failure": { "reason": "taskFailed", "stage": "build", "taskId": "build.1", "message": "runner-lost" },
+          "stages": [{
+            "id": "build",
+            "attempt": 1,
+            "requiresApproval": false,
+            "initialized": true,
+            "status": "failed",
+            "failure": { "reason": "taskFailed", "stage": "build", "taskId": "build.1", "message": "runner-lost" },
+            "tasks": [{
+              "id": "build.1",
+              "definitionId": "build",
+              "attempt": 1,
+              "title": "Build",
+              "uses": "mohist/agent",
+              "status": "interrupted",
+              "startedAt": "2026-08-01T00:00:00+00:00",
+              "finishedAt": "2026-08-01T00:01:00+00:00",
+              "workerId": "runner-1",
+              "workId": "work-1",
+              "agentJobId": "job-1",
+              "agentSessionId": "session-1",
+              "output": "failure output",
+              "error": { "code": "runner-lost", "message": "runner-lost" },
+              "interruption": {
+                "reasonCode": "runner-lost",
+                "workId": "work-1",
+                "ownerId": "{{id}}",
+                "recordedAt": "2026-08-01T00:00:30+00:00",
+                "recoveryDeadlineAt": "2026-08-01T00:15:30+00:00"
+              }
+            }],
+            "checks": []
+          }]
+        }
+        """;
+
+    private static string ProvablyTerminalChecksInterruptionState(string id) => $$"""
+        {
+          "id": "{{id}}",
+          "metadata": { "createdAt": "1970-01-01T00:00:00+00:00" },
+          "status": "failed",
+          "currentStageId": "check",
+          "stages": [{
+            "id": "check",
+            "attempt": 1,
+            "requiresApproval": false,
+            "initialized": true,
+            "status": "failed",
+            "tasks": [],
+            "checksWorkId": null,
+            "terminalChecksWorkId": "checks:check",
+            "terminalChecksWorkerId": "runner-1",
+            "terminalChecksResultFingerprint": "fingerprint-1",
+            "interruption": {
+              "reasonCode": "runner-lost",
+              "workId": "checks:check",
+              "ownerId": "{{id}}",
+              "recordedAt": "2026-08-01T00:00:30+00:00",
+              "recoveryDeadlineAt": "2026-08-01T00:15:30+00:00"
+            },
+            "checks": [{
+              "name": "verify",
+              "title": "Verify",
+              "status": "failed",
+              "finishedAt": "2026-08-01T00:01:00+00:00"
+            }]
+          }]
+        }
+        """;
+
+    private static string AmbiguousRunningInterruptionState(string id) => $$"""
+        {
+          "id": "{{id}}",
+          "metadata": { "createdAt": "1970-01-01T00:00:00+00:00" },
+          "status": "running",
+          "currentStageId": "build",
+          "stages": [{
+            "id": "build",
+            "attempt": 1,
+            "requiresApproval": false,
+            "initialized": true,
+            "status": "running",
+            "tasks": [{
+              "id": "build.1",
+              "definitionId": "build",
+              "attempt": 1,
+              "title": "Build",
+              "uses": "core/script",
+              "status": "running",
+              "startedAt": "2026-08-01T00:00:00+00:00",
+              "workerId": "runner-1",
+              "workId": "work-1",
+              "interruption": {
+                "reasonCode": "runner-lost",
+                "workId": "work-1",
+                "ownerId": "{{id}}",
+                "recordedAt": "2026-08-01T00:00:30+00:00",
+                "recoveryDeadlineAt": "2026-08-01T00:15:30+00:00"
+              }
+            }],
+            "checks": []
+          }]
+        }
+        """;
 
     private static async Task InsertAsync(TestSqliteDatabase database, params WorkflowRunRow[] rows)
     {

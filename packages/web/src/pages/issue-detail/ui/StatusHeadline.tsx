@@ -33,13 +33,6 @@ interface SummaryPresentation {
 }
 
 const SUMMARY_PRESENTATION: Record<RuntimeSummary, SummaryPresentation> = {
-  'recoverable-interrupted': {
-    label: 'Recovering',
-    fillClassName: 'bg-warning-subtle',
-    borderClassName: 'border-warning-border',
-    iconClassName: 'text-warning',
-    icon: AlertCircleIcon,
-  },
   running: {
     label: 'Running',
     fillClassName: 'bg-info-subtle',

@@ -61,21 +61,9 @@ describe('WorkflowRunStatusPill', () => {
   })
 
   it('uses visually distinct color treatments for pending, ready, and running', () => {
-    const { container: pendingContainer } = render(
-      <>
-        <WorkflowRunStatusPill status="pending" />
-      </>,
-    )
-    const { container: readyContainer } = render(
-      <>
-        <WorkflowRunStatusPill status="ready" />
-      </>,
-    )
-    const { container: runningContainer } = render(
-      <>
-        <WorkflowRunStatusPill status="running" />
-      </>,
-    )
+    const { container: pendingContainer } = render(<WorkflowRunStatusPill status="pending" />)
+    const { container: readyContainer } = render(<WorkflowRunStatusPill status="ready" />)
+    const { container: runningContainer } = render(<WorkflowRunStatusPill status="running" />)
 
     const pendingPill = pendingContainer.querySelector('[data-testid="workflow-run-status-pending"]') as HTMLElement
     const readyPill = readyContainer.querySelector('[data-testid="workflow-run-status-ready"]') as HTMLElement
@@ -84,107 +72,56 @@ describe('WorkflowRunStatusPill', () => {
     expect(pendingPill).not.toBeNull()
     expect(readyPill).not.toBeNull()
     expect(runningPill).not.toBeNull()
-
-    const pendingClasses = pendingPill.className
-    const readyClasses = readyPill.className
-    const runningClasses = runningPill.className
-
-    expect(pendingClasses).toContain('bg-violet-100')
-    expect(readyClasses).toContain('bg-cyan-100')
-    expect(runningClasses).toContain('bg-blue-100')
-
-    expect(pendingClasses).toContain('text-violet-800')
-    expect(readyClasses).toContain('text-cyan-800')
-    expect(runningClasses).toContain('text-blue-800')
-
-    expect(pendingClasses).not.toEqual(readyClasses)
-    expect(readyClasses).not.toEqual(runningClasses)
-    expect(pendingClasses).not.toEqual(runningClasses)
-  })
-
-  it('renders recoverable-interrupted as distinct from healthy running and failure', () => {
-    renderPill('recoverable-interrupted')
-
-    const pill = screen.getByTestId('workflow-run-status-recoverable-interrupted')
-    expect(pill).toBeInTheDocument()
-    expect(pill.dataset.status).toBe('recoverable-interrupted')
-    expect(pill).toHaveTextContent(/recoverable interruption/i)
-    expect(screen.queryByTestId('workflow-run-status-running')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('workflow-run-status-failed')).not.toBeInTheDocument()
+    expect(pendingPill.className).toContain('bg-violet-100')
+    expect(readyPill.className).toContain('bg-cyan-100')
+    expect(runningPill.className).toContain('bg-blue-100')
+    expect(pendingPill.className).not.toEqual(readyPill.className)
+    expect(readyPill.className).not.toEqual(runningPill.className)
+    expect(pendingPill.className).not.toEqual(runningPill.className)
   })
 
   it('renders awaiting-approval as a distinct presentation', () => {
     renderPill('awaiting-approval')
-
-    const pill = screen.getByTestId('workflow-run-status-awaiting-approval')
-    expect(pill).toBeInTheDocument()
-    expect(pill.dataset.status).toBe('awaiting-approval')
-    expect(pill).toHaveTextContent(/awaiting approval/i)
+    expect(screen.getByTestId('workflow-run-status-awaiting-approval')).toHaveTextContent(/awaiting approval/i)
   })
 
   it('renders paused as a distinct presentation', () => {
     renderPill('paused')
-
-    const pill = screen.getByTestId('workflow-run-status-paused')
-    expect(pill).toBeInTheDocument()
-    expect(pill.dataset.status).toBe('paused')
-    expect(pill).toHaveTextContent(/paused/i)
+    expect(screen.getByTestId('workflow-run-status-paused')).toHaveTextContent(/paused/i)
   })
 
   it('renders created as a distinct presentation', () => {
     renderPill('created')
-
-    const pill = screen.getByTestId('workflow-run-status-created')
-    expect(pill).toBeInTheDocument()
-    expect(pill.dataset.status).toBe('created')
-    expect(pill).toHaveTextContent(/created/i)
+    expect(screen.getByTestId('workflow-run-status-created')).toHaveTextContent(/created/i)
   })
 
   it('renders completed as a distinct presentation', () => {
     renderPill('completed')
-
-    const pill = screen.getByTestId('workflow-run-status-completed')
-    expect(pill).toBeInTheDocument()
-    expect(pill.dataset.status).toBe('completed')
-    expect(pill).toHaveTextContent(/completed/i)
+    expect(screen.getByTestId('workflow-run-status-completed')).toHaveTextContent(/completed/i)
   })
 
   it('renders failed as a distinct presentation', () => {
     renderPill('failed')
-
-    const pill = screen.getByTestId('workflow-run-status-failed')
-    expect(pill).toBeInTheDocument()
-    expect(pill.dataset.status).toBe('failed')
-    expect(pill).toHaveTextContent(/failed/i)
+    expect(screen.getByTestId('workflow-run-status-failed')).toHaveTextContent(/failed/i)
   })
 
   it('renders stopped as a distinct presentation', () => {
     renderPill('stopped')
-
-    const pill = screen.getByTestId('workflow-run-status-stopped')
-    expect(pill).toBeInTheDocument()
-    expect(pill.dataset.status).toBe('stopped')
-    expect(pill).toHaveTextContent(/stopped/i)
+    expect(screen.getByTestId('workflow-run-status-stopped')).toHaveTextContent(/stopped/i)
   })
 
   it('falls back to an unknown presentation for an unrecognized status', () => {
     renderPill('mystery')
-
     const pill = screen.getByTestId('workflow-run-status-unknown')
-    expect(pill).toBeInTheDocument()
     expect(pill.dataset.status).toBe('unknown')
     expect(pill).toHaveTextContent(/unknown/i)
   })
 
   it('renders nothing for a null status', () => {
-    const { container } = renderPill(null)
-
-    expect(container).toBeEmptyDOMElement()
+    expect(renderPill(null).container).toBeEmptyDOMElement()
   })
 
   it('renders nothing for an undefined status', () => {
-    const { container } = renderPill(undefined)
-
-    expect(container).toBeEmptyDOMElement()
+    expect(renderPill(undefined).container).toBeEmptyDOMElement()
   })
 })

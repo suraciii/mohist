@@ -483,7 +483,7 @@ function NeedsAttentionSummary({ items }: { items: AttentionItem[] }) {
 }
 
 function attentionFamily(item: Extract<AttentionItem, { issueNumber: number }>): 'danger' | 'warning' {
-  return item.kind === 'approval-needed' || item.kind === 'recoverable-interrupted' ? 'warning' : 'danger'
+  return item.kind === 'approval-needed' ? 'warning' : 'danger'
 }
 function RunnerUnavailableBanner({
   agentStatus,

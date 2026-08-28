@@ -1,5 +1,4 @@
-using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Runner.Grains;
+using Orleans.Runtime;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -7,80 +6,25 @@ public partial class WorkflowGrain
 {
     public const string RunnerLossRecoveryReminderName = "runner-loss-recovery";
 
-    private static readonly TimeSpan RunnerLossRecoveryReminderPeriod = TimeSpan.FromDays(1);
-
-    public async Task<WorkReportVerdict> InterruptActiveWorkAsync(string workerId, string reason)
+    public async Task ReceiveReminder(string reminderName, TickStatus status)
     {
-        RejectIfRunReloadRequired();
-        if (_run is null || string.IsNullOrWhiteSpace(workerId))
-            return WorkReportVerdict.Refused;
-
-        var reasonCode = string.IsNullOrWhiteSpace(reason) ? "runner-lost" : reason.Trim();
-        var now = Now();
-        var update = _run.RecordWorkInterruption(
-            GrainKey,
-            workerId,
-            reasonCode,
-            now,
-            now + _runnerLossRecoveryTimeout);
-        if (update == WorkInterruptionUpdate.Rejected)
-            return WorkReportVerdict.Refused;
-
-        if (update == WorkInterruptionUpdate.Updated)
-            await CommitAsync([]);
-
-        await ReconcileRunnerLossRecoveryAsync();
-        return WorkReportVerdict.Accepted;
-    }
-
-    private async Task ReconcileRunnerLossRecoveryAsync(bool removeReminderWhenClear = false)
-    {
-        if (_run is null)
+        if (!string.Equals(reminderName, RunnerLossRecoveryReminderName, StringComparison.Ordinal))
             return;
 
-        var interruption = _run.CurrentWorkInterruption();
-        if (interruption is null)
+        try
         {
-            // Directly constructed grains used by production-contract tests do
-            // not have an Orleans reminder registry. There is no persisted
-            // interruption to reconcile on that activation, so cleanup is
-            // only requested after a report cleared an armed interruption.
-            if (removeReminderWhenClear)
-                await RemoveRunnerLossRecoveryReminderAsync();
-            return;
+            var reminder = await this.GetReminder(RunnerLossRecoveryReminderName);
+            if (reminder is not null)
+                await this.UnregisterReminder(reminder);
         }
-
-        var now = Now();
-        if (interruption.RecoveryDeadlineAt > now)
+        catch (Exception ex)
         {
-            await EnsureRunnerLossRecoveryReminderAsync(interruption.RecoveryDeadlineAt);
-            return;
+            // The existing periodic reminder is the retry trigger. Cleanup must
+            // never create Workflow state or another reminder.
+            _log.LogWarning(ex,
+                "Workflow {Id} could not retire legacy reminder {ReminderName}; a later delivery will retry",
+                GrainKey,
+                RunnerLossRecoveryReminderName);
         }
-
-        var events = _run.FailInterruptedWorkIfDue(now);
-        if (events.Count == 0)
-            return;
-
-        await CommitAsync(events);
-        await RemoveRunnerLossRecoveryReminderAsync();
-    }
-
-    protected virtual Task EnsureRunnerLossRecoveryReminderAsync(DateTimeOffset deadline)
-    {
-        var due = deadline - Now();
-        if (due <= TimeSpan.Zero)
-            due = TimeSpan.FromMilliseconds(1);
-
-        return this.RegisterOrUpdateReminder(
-            RunnerLossRecoveryReminderName,
-            due,
-            RunnerLossRecoveryReminderPeriod);
-    }
-
-    protected virtual async Task RemoveRunnerLossRecoveryReminderAsync()
-    {
-        var reminder = await this.GetReminder(RunnerLossRecoveryReminderName);
-        if (reminder is not null)
-            await this.UnregisterReminder(reminder);
     }
 }
