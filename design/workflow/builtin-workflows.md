@@ -5,8 +5,7 @@ The authoritative definitions are
 and
 [`mohist-github-pr.workflow.yaml`](../../packages/server/src/Mohist.Server/Workflow/Services/Profiles/mohist-github-pr.workflow.yaml).
 A `mohist/*` Profile appears in every Project, but the current Mohist version
-owns it. An upgrade changes future Stage initialization; it does not rewrite an
-initialized Stage or dispatched Task.
+owns it. An upgrade affects only WorkflowRuns that start after the upgrade.
 
 A built-in Profile source cannot be modified or deleted. A Project may configure
 a binding explicitly declared by that source without copying it. Create a
@@ -57,16 +56,17 @@ flowchart LR
   Runner applies branch and clean-worktree invariants to that Repository in
   both cases; an Action execution directory is not the Git guard boundary.
 - Plan produces the named artifacts, including the task list, in one Agent
-  session. There is no self-review Task: the approval point is the plan
+  session. There is no self-review Task: the Approval Point is the plan
   review.
 - Build expands the approved task list and verifies each increment.
   Check records an independent review as evidence; the verdict belongs to the
   approver. See [`plan-artifacts.md`](plan-artifacts.md) for the review boundary.
-- Approval feedback is ordered work in the rejected Stage's Session. This keeps
-  feedback and repair context together and makes the next approval inspect the
-  repaired result. The engine imposes no round limit: every feedback round is
-  initiated by a deciding actor, unlike unattended recovery loops, which keep
-  their budgets.
+- Approval Feedback follows the contracts in
+  [`definition.md`](definition.md#approval-feedback). Each built-in Agent
+  Feedback Task explicitly uses `mohist/agent` with the Agent `mohist/builder`
+  and Session name `feedback-${{ stage.name }}`. Mechanical Feedback Tasks such
+  as `publish-feedback` remain ordinary explicit Tasks and do not use
+  `mohist/agent`.
 - Recovery belongs beside the Task whose failure it understands. A rebase
   conflict or CI failure is handled explicitly; no hidden recovery hook runs
   at a Stage boundary.
@@ -77,11 +77,11 @@ See [`recovery.md`](recovery.md) for recovery and
 ## `mohist/local`
 
 This is the shortest delivery path and has no GitHub dependency or Pull Request.
-Because no remote approval point proves mergeability, Check verifies that the Issue
-branch can merge before asking for Approval. Integrate then rebases and
+Because no remote Approval Point proves mergeability, Check verifies that the Issue
+branch can merge before reaching the Approval Point. Integrate then rebases and
 squashes onto the current base and pushes. Keeping the mergeability check
-before Approval prevents a stale branch from turning an approved result into a
-predictable Integrate failure.
+before the Approval Point prevents a stale branch from turning an approved
+result into a predictable Integrate failure.
 
 Repository health checks remain explicit Tasks. Their recovery is limited to
 the formatting or patch problem they detect and cannot become a general repair
@@ -89,15 +89,16 @@ hook.
 
 ## `mohist/github-pr`
 
-This Profile opens a draft Pull Request after Plan, marks it ready after Check
-Approval, and enables auto-merge during Integrate. Runner host must have an
-authenticated `gh` CLI for the target Repository, and the Repository must allow
-auto-merge.
+This Profile opens a draft Pull Request after Plan, marks it ready after an
+approver selects Approve at the Check Approval Point, and enables auto-merge during
+Integrate. The Runner host must have an authenticated `gh` CLI for the target
+Repository, and the Repository must allow auto-merge.
 
-Every inline Agent task uses `mohist/agent` with a named built-in Agent; the
-Agent definition selects the execution backend and model. Plan, Build, Check,
-Integrate, Approval feedback, and recovery all use the same binding. The
-versioned Stage graph remains shared and immutable.
+Every Agent Task in this Profile uses `mohist/agent` with a named built-in
+Agent; the Agent definition selects the execution backend and model. Agent-backed
+Plan, Build, Check, Feedback, and recovery Tasks use the same binding. Mechanical
+Tasks such as publication remain ordinary explicit Tasks. The complete bound
+Definition fixes the Stage graph for each WorkflowRun.
 
 The Workflow Workspace has a fixed root layout: the Repository checkout lives
 under `REPOS/<repository-name>/` and is the only tree that enters Git; plan
@@ -105,34 +106,37 @@ and review material lives under `PLANS/`. See
 [`workspaces.md`](../workspaces.md) and [Workspace](../../docs/workspaces.md).
 The remote Workflow branch is the recovery point for Repository work. The Pull
 Request is a review projection of that branch. Before passing output to another
-Stage, Approval, or Pull Request operation, every Repository-modifying Stage
+Stage, Approval Point, or Pull Request operation, every Repository-modifying Stage
 explicitly pushes current HEAD to the Workflow branch. Plan material is not
 pushed; it is uploaded as run artifacts. The Profile orders these tasks. Runner
 only executes and reports facts. There is no implicit Stage hook.
 
 ### Pull Request Boundary
 
-Plan publishes the branch and creates or reuses one draft Pull Request. Its
-identity is stored once as Workflow Runtime Variables so later Stages address
-the same external review object. Issue title and body remain the source for Pull
-Request metadata; copying them into Workflow metadata would create another
-authority.
+Plan publishes the branch and creates or reuses one draft Pull Request. WorkflowRun
+records its already-bound Repository and Pull Request number once as the write-once
+identity for GitHub review correlation. The Profile passes `vars.github.pr.number`
+to later Pull Request Action inputs and retains `vars.github.pr.url` for presentation.
+These Variables are carriers only. They do not establish or change the identity, and
+WorkflowRun rejects a conflicting number before dispatch. Issue title and body remain
+the source for Pull Request metadata; copying them into Workflow metadata would
+create another authority.
 
 Build publishes verified output because the Workspace is rebuildable and a
 later Stage may start from a fresh one. Check publishes the reviewed result, marks the Pull Request
 ready, and verifies external checks. Integrate enables auto-merge on the same
 Pull Request; the registration Action waits until GitHub performs the merge.
 
-Approval feedback is ordered work: the Agent applies feedback, pushes current
-HEAD, and then reruns Stage Checks. The Pull Request and recoverable branch
-contain feedback output before the next Approval.
+The Profile declares ordered Feedback Tasks for the Agent change and the later
+push. The Pull Request and recoverable branch contain the feedback output before
+the Run returns to the same Approval Point.
 
 ### Recovery and Invariants
 
 Auto-merge moves merge arbitration to GitHub. The synchronous merge's
 base-movement and protection-race recovery branches no longer exist. The
 merge-time failures the Workflow still owns are classified by the registration
-Action's wait: a required check failing after Approval returns
+Action's wait: a required check failing after an approver selects Approve returns
 `pr-checks-failed` and takes the same declared fix-and-push recovery the Check
 Stage uses; a merge conflict returns `conflict` and follows the rebase
 recovery. Enabling auto-merge on a Repository that disallows it is an ordinary
@@ -149,7 +153,7 @@ remains cancellation rather than becoming a retry request.
 - Pull Request checks appear at two explicit boundaries. The first runs after
   Check work so a failed external check becomes visible repair work before
   delivery. The second is the Integrate merge wait: external state that changed
-  after Approval cannot silently bypass the delivery approval point.
+  after an approver selects Approve cannot silently bypass the delivery Approval Point.
 - Exact Task IDs, Action inputs, failure codes, ordering, and recovery behavior
   belong only to the authoritative Profile YAML linked above.
 - Every publish and Pull Request side effect is an explicit task. No implicit

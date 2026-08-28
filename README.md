@@ -65,7 +65,7 @@ begins at Plan only after the Issue is ready and explicitly started.
 
 Multiple Issues advance concurrently and independently. Key stages, such as
 Plan and Check, stop at approval points. The Workflow continues after it
-receives an `approve` or `reject` decision. See
+receives an `Approve` or `Request Changes` decision. See
 [Workflow Profile](docs/workflow-profiles.md).
 
 ## Event Responses

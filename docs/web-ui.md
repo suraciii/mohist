@@ -8,7 +8,7 @@ evidence, change configuration, or take over manually when an external entry
 point is unavailable.
 
 Fallback does not mean incomplete. Critical operations such as start, approve,
-reject, recover, stop, and configure must be available. A Mohist Agent must also
+request changes, recover, stop, and configure must be available. A Mohist Agent must also
 be configurable and usable for direct conversation. Mohist remains the state
 authority for every operation. The Web UI adds no separate state or rules.
 
@@ -65,7 +65,7 @@ enough to choose what to inspect next. Priority, label, title search, and sort
 controls narrow that decision; their URL state is shareable so two people can
 review the same view.
 
-**Needs attention** elevates blocked work and pending Approvals above ordinary
+**Needs attention** elevates blocked work and pending Approval Points above ordinary
 progress. Runner unavailability remains a separate warning because it is a
 system constraint that can affect many Issues, not a new state inferred for
 each Issue. An Issue may still start and wait for Runner capacity.
@@ -93,7 +93,8 @@ them. Layout does not change their meaning or the available operations.
 
 The buttons follow the authoritative state. Backlog offers Start. Running
 shows a running indicator and Force Stop, because a Mohist Agent is executing
-and can be stopped forcibly. Awaiting Approval offers Approve and Reject.
+and can be stopped forcibly. Awaiting an Approval Point offers Approve and,
+only when the bound Definition declares Feedback Tasks, Request Changes.
 Blocked offers Retry, Resume, Rerun, and Stop, and the page emphasizes the
 recommended action available now. Done offers Close and Archive.
 
@@ -209,7 +210,7 @@ easy to scan, while required intervention must be immediately visible.
   with what result. Examples: "Edited `runtime.rs` (+12/-3)" and "Ran tests:
   passed." Arguments, complete output, and diff are collapsed by default.
 - **Mohist operations appear as domain actions:** Commenting on an Issue,
-  deciding an Approval, and advancing a Workflow appear as domain actions with
+  deciding at an Approval Point, and advancing a Workflow appear as domain actions with
   links to their targets instead of being hidden in command output.
 - **Failure is prominent; reads are quiet:** Failed execution and actions that
   need judgment remain prominent. Routine reads and searches are subdued and

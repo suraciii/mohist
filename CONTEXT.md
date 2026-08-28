@@ -86,17 +86,18 @@ Backlog belong to the Issue lifecycle, outside the Workflow, so requirement
 readiness and execution state cannot be confused.
 
 **WorkflowRun**:
-One execution of a Workflow for one Issue. It owns orchestration state and
-references the AgentJobs it launches; it owns no execution lifecycle itself.
+One execution of a Workflow for one Issue. It owns orchestration state, binds
+one complete Workflow Definition when it starts, and references the AgentJobs
+it launches; it owns no Agent execution lifecycle itself.
 
 **Workflow Profile**:
-A Project resource that defines the stages, tasks, checks, recovery, and
-approval points of a Workflow. An Issue inherits the Project default or
+A Project resource that defines the stages, tasks, checks, recovery, Approval
+Points, and Feedback Tasks of a Workflow. An Issue inherits the Project default or
 selects another Profile from the same Project.
 
 **Workflow Definition**:
 The YAML body of a Workflow Profile that declares its stages, tasks, checks,
-recovery, and template expressions.
+Approval Points, Feedback Tasks, recovery, and template expressions.
 
 **Runner**:
 The execution-plane process that registers with a Server, claims dispatched
@@ -164,16 +165,19 @@ whether an AgentSession can accept more input.
 
 ## Workflow Decisions
 
-**Approval**:
-An `approve` or `reject` decision about the output of a Workflow stage. An
-approver signature is optional attribution rather than a validity condition;
-an unsigned Approval records no operator.
-
-**approval point**:
-A Workflow state that waits for an Approval before its output can continue
-through the pipeline.
+**Approval Point**:
+A Workflow state after a Stage that waits for an Approve or Request Changes
+decision before the output can continue through the pipeline.
 
 _Avoid_: quality gate
+
+**Approval Feedback**:
+The required-change description recorded when an approver selects Request
+Changes at an Approval Point.
+
+**Feedback Tasks**:
+The ordered Tasks declared in `approval.feedback.tasks` that apply Approval
+Feedback before the Workflow returns to the same Approval Point.
 
 ## Authentication and Access
 

@@ -80,9 +80,9 @@ purpose:
 - **Check**: A configured Mohist Agent reviews its output.
 - **Integrate**: Mohist merges the branch into the base branch.
 
-Some stages, Plan and Check by default, enter an **approval point** after
-completion. They wait for an `approve` or `reject` decision. The approver does
-not have to be a specific type of actor. See [Approval](#approval).
+Some stages, Plan and Check by default, enter an **Approval Point** after
+completion. They wait for an Approve or Request Changes decision. The approver
+does not have to be a specific type of actor. See [Approval Point](#approval-point).
 
 See [The Workflow](the-workflow.md) for the complete state machine.
 
@@ -93,7 +93,7 @@ Profiles** and select one default Profile. An Issue can inherit the default or
 select another Profile in the same Project.
 
 A Profile defines stages, task ordering, the Mohist Agent used by each executable
-task, checks, recovery, and Approval. It does not copy Agent configuration,
+task, checks, Feedback Tasks, recovery, and Approval Points. It does not copy Agent configuration,
 Variables, or Prompt bodies. Project, Issue, and Run Variables merge by scope.
 Prompts are configured only in the Project.
 
@@ -153,7 +153,8 @@ An AgentSession is not an Agent or a work result. It records the messages,
 context, usage, Activity, and current Runtime Session for a conversation. An
 AgentJob owns every top-level Agent execution, including a `mohist/agent`
 Workflow task. The
-WorkflowRun keeps only orchestration state and the AgentJob reference. Subsequent
+WorkflowRun keeps orchestration state, its complete bound Definition, and the
+AgentJob reference. Subsequent
 input continues the same AgentSession but does not rewrite the AgentJob. Each
 accepted input in an AgentSession is a SessionInput. One continuous Runtime
 processing period is an AgentTurn. One AgentTurn can process multiple
@@ -163,29 +164,69 @@ share one state.
 See [Agents and AgentSessions](agent-sessions.md) for the complete relationship
 and [Slack](slack.md) for Slack behavior.
 
-## Approval
+## Approval Point
 
-An Approval is an `approve` or `reject` decision about the output of a Workflow
-stage. A completed stage can enter an approval point and wait for an approver to
-decide whether the output can continue. The approver does not have to be a
-person. Approval is a role position in the production line.
+An Approval Point waits for one of two decisions about the current Stage
+output:
 
-Several mechanisms can provide a decision at an approval point:
+- **Approve** completes the Stage and lets the Workflow advance.
+- **Request Changes** records Approval Feedback and starts the configured
+  Feedback Tasks. It is nonterminal and does not fail the Approval Point.
 
-- Automated checks can verify tests, lint results, and artifact completeness.
-- A Mohist Agent or script can read evidence and invoke `approve` or `reject`.
-- The owner can invoke `approve` or `reject` when human judgment is necessary.
+Request Changes is available only when the active WorkflowRun's complete
+bound Workflow Definition contains a non-empty `approval.feedback.tasks` list.
+Before recording the decision, WorkflowRun validates the request, the current
+Approval Point, and the complete declared Feedback Task list from that bound
+Definition. A validation failure changes no Approval Point, Stage, Approval
+Feedback, Task, Check, WorkflowRun status, event, revision, or other Run state.
+There is no separate Reject decision. Mohist does not create a default Feedback
+Task or add an Agent, prompt, Session, timeout, or publication step. Stop is
+terminal when the Run must not continue.
 
-The Workflow does not distinguish these sources. A Mohist Agent, CLI, Web UI,
-or external automation decides who initiates Approval. The Approval result is
-still only `approve` or `reject`.
+Mohist applies Approval Feedback in this order:
 
-Authentication identity determines attribution for Approvals and comments. The
-history records the caller identity, such as you, a machine, or an Agent, rather
-than a claimed identity. `--display-name` is only a presentation alias. It lets
-the interface show a friendly name and does not affect attribution. The Mohist
-authentication layer resolves attribution; the caller does not declare it. See
+1. Run the declared Feedback Tasks in order.
+2. Run the current Stage Checks again.
+3. Return to the same Approval Point.
+
+The original Stage Tasks do not run again. Mohist does not limit how many
+times an approver can select Request Changes.
+
+Each `mohist/agent` Task explicitly names its Agent and can name a Session.
+Mohist reuses a named Session only when the Agent and Workspace are the same.
+An omitted Session requests no named reuse. AgentJob owns execution, and
+AgentSession owns conversation continuity. WorkflowRun owns Approval Point
+state.
+
+The complete bound Definition controls the Stages, Approval Feedback, and
+recovery behavior for the complete WorkflowRun. Later Profile edits affect
+only future WorkflowRuns. Variables and Prompt bodies keep their separate
+dispatch-time behavior; see [Workflow Profile](workflow-profiles.md) and
+[Workflow Definition Reference](workflow-definition.md).
+
+An approver can be a person, a Mohist Agent, a script, or external automation.
+All use the same Approve and Request Changes actions. Authentication identity
+determines attribution for decisions and comments. `--display-name` is only a
+presentation alias and does not change ownership. See
 [Authentication and Access](auth.md).
+
+### Implementation Gaps
+
+Current WorkflowRun source, status, and recovery reads still consult live Profile
+data in some paths, and current Profile update guards still inspect active Runs.
+`WorkflowRun.Feedback` retains resolved Approval Feedback in an unbounded list.
+Executable built-in YAML still contains default Feedback Tasks and Stage-derived
+Sessions. Current Request Changes resolves feedback through live Profile data,
+synthesizes a default, and is offered without checking the bound Definition. It
+can mutate Approval Point, Stage, and Approval Feedback state before validating
+the resolved Task list, so failed validation can leave the in-memory aggregate
+changed. The CLI, API, and supervision preset still expose legacy `reject` paths,
+and runtime emits duplicated terminal and nonterminal `Rejected` event semantics.
+The built-in Profile stores the Pull Request number and URL as mutable Run Variables,
+and later Action inputs read the number without an immutable
+WorkflowRun Pull Request identity guard. Review translation currently parses PR
+head branch naming (`mo/issue-*`) instead of resolving that identity; it does not
+route through `github.pr.url`.
 
 ## Skill
 
