@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Orleans;
@@ -540,10 +541,57 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         return item;
     }
 
+    public async Task<VariableBundle> PatchVariablesAsync(VariableBundle patch)
+    {
+        EnsureRun();
+        if (_runVariablesStore is null)
+            throw new InvalidOperationException("Workflow variable storage is unavailable");
+
+        var variables = await _runVariablesStore.PatchVariablesAsync(GrainKey, patch);
+        var pullRequestNumber = WorkflowRunExtensions.ReadPullRequestNumber(variables.Vars);
+        if (pullRequestNumber is not null)
+            _run!.AssignPullRequestIdentity(pullRequestNumber.Value);
+
+        return variables;
+    }
+
+    public Task ValidateDispatchAsync(WorkDispatch dispatch)
+    {
+        EnsureRun();
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(dispatch.Variables))
+            {
+                using var document = JsonDocument.Parse(dispatch.Variables);
+                var vars = document.RootElement.TryGetProperty("vars", out var value)
+                    ? value
+                    : (JsonElement?)null;
+                var number = WorkflowRunExtensions.ReadPullRequestNumber(vars);
+                if (number is not null)
+                    _run.ValidatePullRequestNumber(number.Value);
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new WorkflowDispatchRejectedException(
+                ex.Message,
+                new ExecutionError("pull_request_identity_conflict", ex.Message));
+        }
+        catch (JsonException ex)
+        {
+            throw new WorkflowDispatchRejectedException(
+                "Workflow dispatch variables are not valid JSON.",
+                new ExecutionError("invalid_dispatch_variables", ex.Message));
+        }
+
+        return Task.CompletedTask;
+    }
+
     public async Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch)
     {
         RejectIfRunReloadRequired();
         if (_run is null || !_run.IsAssignedTo(workerId)) return null;
+        await ValidateDispatchAsync(dispatch);
         var active = _run.FindActiveWork(workId, workerId);
         if (active is null || !active.IsTask) return null;
         if (!string.Equals(dispatch.WorkflowRunId, GrainKey, StringComparison.Ordinal)

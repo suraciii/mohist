@@ -63,6 +63,29 @@ public sealed class WorkflowRunQuerier
     }
 
     /// <summary>
+    /// Returns run ids carrying the projected Pull Request number in the
+    /// requested Project. The caller loads each state to verify its immutable
+    /// repository context and current approval point.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> FindByPullRequestAsync(
+        string projectId,
+        int pullRequestNumber,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(projectId) || pullRequestNumber <= 0)
+            return [];
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.WorkflowRuns
+            .AsNoTracking()
+            .Where(row => row.MetadataProjectId == projectId
+                && row.PullRequestNumber == pullRequestNumber)
+            .OrderBy(row => row.WorkflowRunId)
+            .Select(row => row.WorkflowRunId)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
     /// Epic #44: returns workflow runs bound to <paramref name="workerId"/>
     /// and sitting in <c>Ready</c> (assigned, dispatchable work, no in-flight
     /// work), ordered by <c>ReadySince ASC</c> for round-robin fairness. A run

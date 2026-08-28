@@ -326,6 +326,25 @@ internal static class WorkflowDefinitionRules
                 AddError(errors, emittedPaths,
                     $"{setVarsPath}.{key}",
                     $"setVars value must be an output.* path (got '{value}')");
+                continue;
+            }
+
+            // Dotted traversal treats every segment literally; empty segments
+            // would otherwise mean different things to the runner and the grain.
+            var sourcePath = value["output.".Length..];
+            if (sourcePath.Length == 0 || sourcePath.Split('.').Any(string.IsNullOrEmpty))
+            {
+                AddError(errors, emittedPaths,
+                    $"{setVarsPath}.{key}",
+                    $"setVars source path '{value}' contains an empty segment");
+                continue;
+            }
+
+            if (key.Split('.').Any(string.IsNullOrEmpty))
+            {
+                AddError(errors, emittedPaths,
+                    $"{setVarsPath}.{key}",
+                    $"setVars key '{key}' contains an empty segment");
             }
         }
     }

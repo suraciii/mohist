@@ -171,6 +171,232 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task WorkflowAgentAction_SetVarsWithPullRequestCarrier_RecordsNestedIdentity()
+    {
+        await ClearBacklogAsync();
+        _workflowId = $"workflow-agent-set-vars-pr-{Guid.NewGuid():N}";
+        var projectId = TestProjectId(_workflowId);
+        _runnerId = await RegisterRunnerAsync();
+        var workflow = Grains.GetGrain<IWorkflowGrain>(_workflowId);
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [
+                new TaskDefinition(
+                    "build",
+                    "Build",
+                    "mohist/agent",
+                    new Dictionary<string, System.Text.Json.JsonElement?>
+                    {
+                        ["name"] = Json("mohist/builder"),
+                        ["prompt"] = Json("Build the change."),
+                    },
+                    SetVars: new Dictionary<string, string>
+                    {
+                        ["github.pr.number"] = "output.result.number",
+                    })
+            ], [])
+        ]);
+        await SeedWorkflowTemplateAsync(_workflowId, definition, projectId);
+        var repository = new WorkflowRepositoryContext(
+            "web",
+            "https://github.com/octocat/hello-world.git",
+            "master");
+        await workflow.EnsureStartedAsync(
+            new WorkflowIssueContext(projectId, 1, null),
+            new WorkflowStartSnapshot(repository, null));
+        Assert.Equal(WorkflowAssignmentStatus.Assigned,
+            (await workflow.AssignWorkerAsync(_runnerId)).Status);
+
+        Assert.Null(await workflow.ClaimNextAsync(_runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var dispatch = await PollWorkAsync(_runnerId);
+        await ReportAsync(_runnerId, dispatch.Work, new WorkResult(
+            "completed",
+            Output: System.Text.Json.JsonSerializer.SerializeToElement(new
+            {
+                result = new { number = 42 },
+            })));
+
+        await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
+        var variables = await scope.ServiceProvider.GetRequiredService<WorkflowRunVariablesStore>()
+            .GetVariablesAsync(_workflowId);
+        Assert.Equal(42, variables.Vars!.Value
+            .GetProperty("github")
+            .GetProperty("pr")
+            .GetProperty("number")
+            .GetInt32());
+
+        var run = await LoadRunAsync(_workflowId);
+        Assert.Equal(42, run.PullRequestIdentity!.Number);
+        Assert.Equal(repository, run.PullRequestIdentity.Repository);
+        Assert.Equal(WorkflowRunStatus.Completed, run.Status);
+    }
+
+    [Fact]
+    public async Task WorkflowAgentAction_SetVarsDirectNull_DeletesExistingTarget()
+    {
+        await ClearBacklogAsync();
+        _workflowId = $"workflow-agent-set-vars-direct-null-{Guid.NewGuid():N}";
+        var projectId = TestProjectId(_workflowId);
+        _runnerId = await RegisterRunnerAsync();
+        var workflow = Grains.GetGrain<IWorkflowGrain>(_workflowId);
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [
+                new TaskDefinition(
+                    "build",
+                    "Build",
+                    "mohist/agent",
+                    new Dictionary<string, System.Text.Json.JsonElement?>
+                    {
+                        ["name"] = Json("mohist/builder"),
+                        ["prompt"] = Json("Build the change."),
+                    },
+                    SetVars: new Dictionary<string, string>
+                    {
+                        ["settings"] = "output.result",
+                    })
+            ], [])
+        ]);
+        await SeedWorkflowTemplateAsync(_workflowId, definition, projectId);
+        var repository = new WorkflowRepositoryContext(
+            "web",
+            "https://github.com/octocat/hello-world.git",
+            "master");
+        await workflow.EnsureStartedAsync(
+            new WorkflowIssueContext(projectId, 1, null),
+            new WorkflowStartSnapshot(repository, null));
+        Assert.Equal(WorkflowAssignmentStatus.Assigned,
+            (await workflow.AssignWorkerAsync(_runnerId)).Status);
+        await workflow.PatchVariablesAsync(new VariableBundle(Vars: System.Text.Json.JsonSerializer.SerializeToElement(
+            new { settings = new { old = 1, keep = 2 } })));
+
+        Assert.Null(await workflow.ClaimNextAsync(_runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var dispatch = await PollWorkAsync(_runnerId);
+        await ReportAsync(_runnerId, dispatch.Work, new WorkResult(
+            "completed",
+            Output: System.Text.Json.JsonSerializer.SerializeToElement(new
+            {
+                result = (string?)null,
+            })));
+
+        await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
+        var variables = await scope.ServiceProvider.GetRequiredService<WorkflowRunVariablesStore>()
+            .GetVariablesAsync(_workflowId!);
+        Assert.False(variables.Vars!.Value.TryGetProperty("settings", out _));
+        Assert.Equal(WorkflowRunStatus.Completed, (await LoadRunAsync(_workflowId!)).Status);
+    }
+
+    [Fact]
+    public async Task WorkflowAgentAction_SetVarsNullLeafTarget_DeletesNestedProperty()
+    {
+        await ClearBacklogAsync();
+        _workflowId = $"workflow-agent-set-vars-null-target-{Guid.NewGuid():N}";
+        var projectId = TestProjectId(_workflowId);
+        _runnerId = await RegisterRunnerAsync();
+        var workflow = Grains.GetGrain<IWorkflowGrain>(_workflowId);
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [
+                new TaskDefinition(
+                    "build",
+                    "Build",
+                    "mohist/agent",
+                    new Dictionary<string, System.Text.Json.JsonElement?>
+                    {
+                        ["name"] = Json("mohist/builder"),
+                        ["prompt"] = Json("Build the change."),
+                    },
+                    SetVars: new Dictionary<string, string>
+                    {
+                        ["settings.old"] = "output.result",
+                    })
+            ], [])
+        ]);
+        await SeedWorkflowTemplateAsync(_workflowId, definition, projectId);
+        var repository = new WorkflowRepositoryContext(
+            "web",
+            "https://github.com/octocat/hello-world.git",
+            "master");
+        await workflow.EnsureStartedAsync(
+            new WorkflowIssueContext(projectId, 1, null),
+            new WorkflowStartSnapshot(repository, null));
+        Assert.Equal(WorkflowAssignmentStatus.Assigned,
+            (await workflow.AssignWorkerAsync(_runnerId)).Status);
+        await workflow.PatchVariablesAsync(new VariableBundle(Vars: System.Text.Json.JsonSerializer.SerializeToElement(
+            new { settings = new { old = 1, keep = 2 } })));
+
+        Assert.Null(await workflow.ClaimNextAsync(_runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var dispatch = await PollWorkAsync(_runnerId);
+        await ReportAsync(_runnerId, dispatch.Work, new WorkResult(
+            "completed",
+            Output: System.Text.Json.JsonSerializer.SerializeToElement(new
+            {
+                result = (string?)null,
+            })));
+
+        await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
+        var variables = await scope.ServiceProvider.GetRequiredService<WorkflowRunVariablesStore>()
+            .GetVariablesAsync(_workflowId!);
+        var settings = variables.Vars!.Value.GetProperty("settings");
+        Assert.False(settings.TryGetProperty("old", out _));
+        Assert.Equal(2, settings.GetProperty("keep").GetInt32());
+        Assert.Equal(WorkflowRunStatus.Completed, (await LoadRunAsync(_workflowId!)).Status);
+    }
+
+    [Fact]
+    public async Task WorkflowAgentAction_SetVarsNestedNullTarget_DeletesNestedProperty()
+    {
+        await ClearBacklogAsync();
+        _workflowId = $"workflow-agent-set-vars-null-{Guid.NewGuid():N}";
+        var projectId = TestProjectId(_workflowId);
+        _runnerId = await RegisterRunnerAsync();
+        var workflow = Grains.GetGrain<IWorkflowGrain>(_workflowId);
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [
+                new TaskDefinition(
+                    "build",
+                    "Build",
+                    "mohist/agent",
+                    new Dictionary<string, System.Text.Json.JsonElement?>
+                    {
+                        ["name"] = Json("mohist/builder"),
+                        ["prompt"] = Json("Build the change."),
+                    },
+                    SetVars: new Dictionary<string, string>
+                    {
+                        ["settings"] = "output.result",
+                    })
+            ], [])
+        ]);
+        await SeedWorkflowTemplateAsync(_workflowId, definition, projectId);
+        var repository = new WorkflowRepositoryContext(
+            "web",
+            "https://github.com/octocat/hello-world.git",
+            "master");
+        await workflow.EnsureStartedAsync(
+            new WorkflowIssueContext(projectId, 1, null),
+            new WorkflowStartSnapshot(repository, null));
+        Assert.Equal(WorkflowAssignmentStatus.Assigned,
+            (await workflow.AssignWorkerAsync(_runnerId)).Status);
+        await workflow.PatchVariablesAsync(new VariableBundle(Vars: System.Text.Json.JsonSerializer.SerializeToElement(
+            new { settings = new { old = 1, keep = 2 } })));
+
+        Assert.Null(await workflow.ClaimNextAsync(_runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var dispatch = await PollWorkAsync(_runnerId);
+        await ReportAsync(_runnerId, dispatch.Work, new WorkResult(
+            "completed",
+            Output: System.Text.Json.JsonSerializer.SerializeToElement(new
+            {
+                result = new { old = (string?)null, keep = 3 },
+            })));
+
+        await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
+        var variables = await scope.ServiceProvider.GetRequiredService<WorkflowRunVariablesStore>()
+            .GetVariablesAsync(_workflowId!);
+        var settings = variables.Vars!.Value.GetProperty("settings");
+        Assert.False(settings.TryGetProperty("old", out _));
+        Assert.Equal(3, settings.GetProperty("keep").GetInt32());
+        Assert.Equal(WorkflowRunStatus.Completed, (await LoadRunAsync(_workflowId!)).Status);
+    }
+
+    [Fact]
     public async Task BuiltInLocalProfile_CompletesPlanThroughIntegrate_WithAgentAndMechanicalOwnership()
     {
         await ClearGlobalRunnerRegistryAsync();

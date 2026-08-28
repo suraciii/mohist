@@ -31,7 +31,6 @@ public sealed class GitHubPullRequestReviewEventPayloadTests
 
         Assert.NotNull(payload);
         Assert.Equal(7, payload!.PullRequestNumber);
-        Assert.Equal("mo/issue-42", payload.HeadBranch);
         Assert.Equal("alice", payload.ReviewerLogin);
         Assert.Equal(GitHubPullRequestReviewState.Approved, payload.State);
         Assert.Equal("Looks good", payload.Body);
@@ -70,12 +69,13 @@ public sealed class GitHubPullRequestReviewEventPayloadTests
     }
 
     [Fact]
-    public void MissingHeadRef_DoesNotParse()
+    public void MissingHead_DoesNotAffectParsing()
     {
         var payload = GitHubPullRequestReviewEventPayload.Parse(
-            Payload(SubmittedReview.Replace("\"ref\": \"mo/issue-42\"", "\"ref\": \" \"")));
+            Payload(SubmittedReview.Replace(",\n            \"head\": { \"ref\": \"mo/issue-42\" }", string.Empty)));
 
-        Assert.Null(payload);
+        Assert.NotNull(payload);
+        Assert.Equal(7, payload!.PullRequestNumber);
     }
 
     [Fact]
@@ -95,28 +95,6 @@ public sealed class GitHubPullRequestReviewEventPayloadTests
 
         Assert.NotNull(payload);
         Assert.Null(payload!.Body);
-    }
-
-    [Theory]
-    [InlineData("mo/issue-42", 42)]
-    [InlineData("refs/heads/mo/issue-7", 7)]
-    public void Branch_ResolvesIssueNumber(string branch, int expected)
-    {
-        Assert.True(GitHubPullRequestReviewTranslation.TryParseIssueNumber(branch, out var issueNumber));
-        Assert.Equal(expected, issueNumber);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("mo/issue-")]
-    [InlineData("mo/issue-0")]
-    [InlineData("mo/issue-42-fix")]
-    [InlineData("feature/mo/issue-42")]
-    [InlineData("feature/foo")]
-    [InlineData("MO/issue-42")]
-    public void Branch_Unresolvable_Fails(string branch)
-    {
-        Assert.False(GitHubPullRequestReviewTranslation.TryParseIssueNumber(branch, out _));
     }
 
     [Fact]

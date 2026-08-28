@@ -6,11 +6,10 @@ namespace Mohist.Server.GitHub;
 /// The slice of a GitHub <c>pull_request_review</c> webhook payload the
 /// approval translator consumes. Only <c>submitted</c> deliveries parse
 /// (edited / dismissed carry no decision); the review state, reviewer
-/// login, review body, and the PR head branch are the only fields read.
+/// login, review body, and Pull Request number are the only fields read.
 /// </summary>
 public sealed record GitHubPullRequestReviewEventPayload(
     int PullRequestNumber,
-    string HeadBranch,
     string ReviewerLogin,
     string State,
     string? Body)
@@ -39,19 +38,15 @@ public sealed record GitHubPullRequestReviewEventPayload(
         }
         if (!element.TryGetProperty("pull_request", out var pullRequest) || pullRequest.ValueKind != JsonValueKind.Object)
             return null;
-        if (!pullRequest.TryGetProperty("head", out var head) || head.ValueKind != JsonValueKind.Object)
+        if (!pullRequest.TryGetProperty("number", out var numberValue)
+            || !numberValue.TryGetInt32(out var number)
+            || number <= 0)
             return null;
-        if (!head.TryGetProperty("ref", out var refValue) || string.IsNullOrWhiteSpace(refValue.GetString()))
-            return null;
-        var number = pullRequest.TryGetProperty("number", out var numberValue) && numberValue.TryGetInt32(out var prNumber)
-            ? prNumber
-            : 0;
         var body = review.TryGetProperty("body", out var bodyValue) && bodyValue.ValueKind == JsonValueKind.String
             ? bodyValue.GetString()
             : null;
         return new GitHubPullRequestReviewEventPayload(
             number,
-            refValue.GetString()!,
             login.GetString()!.Trim(),
             state.GetString()!,
             body);
@@ -71,26 +66,6 @@ public static class GitHubPullRequestReviewState
 /// </summary>
 public static class GitHubPullRequestReviewTranslation
 {
-    public const string BranchIssuePrefix = "mo/issue-";
-
-    public static bool TryParseIssueNumber(string branch, out int issueNumber)
-    {
-        issueNumber = 0;
-        if (string.IsNullOrWhiteSpace(branch))
-            return false;
-        var name = branch;
-        const string refsPrefix = "refs/heads/";
-        if (name.StartsWith(refsPrefix, StringComparison.Ordinal))
-            name = name[refsPrefix.Length..];
-        if (!name.StartsWith(BranchIssuePrefix, StringComparison.Ordinal))
-            return false;
-        var suffix = name[BranchIssuePrefix.Length..];
-        return suffix.Length > 0
-            && suffix.All(char.IsAsciiDigit)
-            && int.TryParse(suffix, out issueNumber)
-            && issueNumber > 0;
-    }
-
     public static string DecidedBy(string login) => $"github:{login}";
 
     public static string ChangeRequestReason(string? body) =>

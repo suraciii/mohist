@@ -117,10 +117,10 @@ Plan publishes the branch and creates or reuses one draft Pull Request. Workflow
 records its already-bound Repository and Pull Request number once as the write-once
 identity for GitHub review correlation. The Profile passes `vars.github.pr.number`
 to later Pull Request Action inputs and retains `vars.github.pr.url` for presentation.
-These Variables are carriers only. They do not establish or change the identity, and
-WorkflowRun rejects a conflicting number before dispatch. Issue title and body remain
-the source for Pull Request metadata; copying them into Workflow metadata would
-create another authority.
+The first `github.pr.number` carrier that reaches the Workflow grain records the
+write-once identity. Repeating the same number is idempotent; a conflicting number is
+rejected before dispatch. Issue title and body remain the source for Pull Request
+metadata; copying them into Workflow metadata would create another authority.
 
 Build publishes verified output because the Workspace is rebuildable and a
 later Stage may start from a fresh one. Check publishes the reviewed result, marks the Pull Request

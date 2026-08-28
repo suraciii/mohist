@@ -4383,6 +4383,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("INTEGER")
                         .HasComputedColumnSql("CAST(COALESCE(json_extract(State, '$.metadata.issueNumber'), json_extract(State, '$.Metadata.IssueNumber')) AS INTEGER)", true);
 
+                    b.Property<int?>("PullRequestNumber")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("MetadataProjectId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
@@ -4417,6 +4420,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("MetadataProjectId", "IssueNumber")
                         .HasDatabaseName("IX_WorkflowRuns_ProjectId_IssueNumber");
+
+                    b.HasIndex("MetadataProjectId", "PullRequestNumber")
+                        .HasDatabaseName("IX_WorkflowRuns_ProjectId_PullRequestNumber");
 
                     b.HasIndex("MetadataProjectId", "AttentionStatus", "CreatedAt")
                         .HasDatabaseName("IX_WorkflowRuns_ProjectId_AttentionStatus_CreatedAt");

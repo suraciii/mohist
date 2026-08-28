@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Runner.Grains;
@@ -190,7 +191,7 @@ public partial class WorkflowGrain
         if (output is not { ValueKind: JsonValueKind.Object })
             return new ExecutionError("set_vars_failed", "Agent output is not an object required by setVars.");
 
-        var values = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        var values = new JsonObject();
         foreach (var (target, source) in mappings)
         {
             var path = source.StartsWith("output.", StringComparison.Ordinal)
@@ -202,12 +203,18 @@ public partial class WorkflowGrain
                 if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(part, out current))
                     return new ExecutionError("set_vars_failed", $"setVars source '{source}' was not found in Agent output.");
             }
-            values[target] = current.Clone();
+            VariableJsonMerge.SetPath(values, target, current.Clone());
         }
-        await _runVariablesStore.PatchVariablesAsync(
-            GrainKey,
-            new VariableBundle(Vars: JsonSerializer.SerializeToElement(values)));
-        return null;
+        try
+        {
+            await PatchVariablesAsync(
+                new VariableBundle(Vars: JSON.DeserializeElement(values.ToJsonString())));
+            return null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new ExecutionError("set_vars_rejected", ex.Message);
+        }
     }
 
     private static JsonElement? ParseAgentOutput(string? output)
