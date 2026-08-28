@@ -344,7 +344,9 @@ AgentJob or changes the first launch result.
 A Runtime activity event without a Turn identity can settle only a follow-up
 that has already started executing. It cannot complete a queued follow-up that
 has not been dispatched. When an initial launch reaches terminal while a
-follow-up waits, Mohist keeps the follow-up queued and dispatches it next.
+follow-up waits, Mohist keeps the follow-up queued and dispatches it next. An
+AgentJob terminal close belongs to the launch and never settles a later
+follow-up, including when that close is replayed after the follow-up starts.
 
 Accepted input is never discarded or changed to rejected because execution
 later fails. When the waiting queue is full, Mohist rejects the new input before

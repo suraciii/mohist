@@ -915,6 +915,46 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
     }
 
     [Fact]
+    public async Task ReplayedInitialTerminalClose_DoesNotCompleteExecutingFollowup()
+    {
+        const string runtimeSessionId = "runtime-late-initial-terminal";
+        const string initialJobId = "late-initial-job";
+        var (grain, sessionId) = await CreateAttachedSessionAsync(runtimeSessionId);
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: "late-initial-input",
+            TurnId: "late-initial-turn",
+            Prompt: "initial prompt",
+            Source: "agent-launch",
+            JobId: initialJobId));
+        await grain.MarkInitialTurnTerminalAsync(initialJobId, AgentTurnStatus.Completed, null);
+        var followup = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "continue while an old terminal close replays",
+            Source: "agent-session-followup",
+            IdempotencyKey: "late-initial-followup"));
+        await grain.MarkTurnExecutingAsync(followup.TurnId);
+
+        await grain.AppendTerminalCloseAsync(new AppendTerminalCloseCommand(
+            SessionId: sessionId,
+            DeliveryId: "late-initial-terminal-delivery",
+            Status: "completed",
+            ExitCode: 0,
+            FailureReason: null,
+            FailureCategory: null,
+            RecordedAt: _fixture.TimeProvider.GetUtcNow(),
+            PayloadJson: $$"""{"agentJobId":"{{initialJobId}}"}""",
+            RuntimeSessionId: runtimeSessionId));
+
+        var state = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(state);
+        Assert.Equal(
+            AgentTurnStatus.Executing,
+            state!.Status.Turns!.Single(turn => turn.Id == followup.TurnId).Status);
+        Assert.Contains(
+            state.Status.PendingFollowups!,
+            lease => lease.OperationId == followup.OperationId);
+    }
+
+    [Fact]
     public async Task AcceptFollowup_IdempotencyKeyMismatch_Throws()
     {
         var (grain, _) = await CreateAttachedSessionAsync("runtime-idem-mismatch");

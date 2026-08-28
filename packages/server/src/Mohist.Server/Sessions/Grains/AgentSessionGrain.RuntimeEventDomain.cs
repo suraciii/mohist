@@ -176,6 +176,8 @@ public sealed partial class AgentSessionGrain
             }
             return session.MarkTurnTerminal(turn.Id, terminal.Value, null, now);
         }
+        if (!string.IsNullOrWhiteSpace(AgentSessionJsonHelper.GetStringProp(payload, "agentJobId")))
+            return session.SetActivity(activity, now);
         var events = new List<AgentSessionEvent>(session.SetActivity(activity, now));
         events.AddRange(MarkCurrentNonLaunchTurnTerminal(session, terminal.Value, now));
         return events;
