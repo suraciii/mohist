@@ -309,7 +309,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
     }
 
     [Fact]
-    public async Task Poll_CapacityRace_LeavesAgentJobPendingWhenCapacityRemainsFull()
+    public async Task Poll_CapacityRace_FailsAgentJobAfterAvailabilityDeadline()
     {
         await ClearGlobalRunnerRegistryAsync();
         var projectId = $"mixed-capacity-timeout-project-{Guid.NewGuid():N}";
@@ -337,7 +337,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.SpecTests.Specs.Work
         await job.ReceiveReminder("agent-job-recovery", new TickStatus(now, TimeSpan.FromSeconds(1), now));
 
         var terminal = await job.GetTerminalResultAsync();
-        Assert.Equal(AgentJobStatus.Pending, terminal.Status);
-        Assert.Null(terminal.FailureReason);
+        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
     }
 }

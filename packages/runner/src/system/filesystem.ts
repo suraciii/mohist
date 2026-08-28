@@ -29,6 +29,7 @@ import type {
   OpencodeProviderErrorDiagnosticFinder,
 } from '../runtime/opencode-log-diagnostics.js'
 import type { LockHolderProbe } from '../runtime/worktree-enforcement.js'
+import type { OpencodeModelDiscovery } from '../runtime/opencode-models.js'
 
 export interface RunnerFileInfo {
   kind: 'file' | 'directory' | 'symlink'
@@ -206,6 +207,7 @@ export interface RunnerResourceContext {
   readonly piRuntimeFactory?: PiRuntimeFactory
   readonly openCodeRuntimeFactory?: OpenCodeRuntimeFactory
   readonly opencodeProviderErrorDiagnosticFinder?: OpencodeProviderErrorDiagnosticFinder
+  readonly opencodeModelDiscovery?: OpencodeModelDiscovery
   readonly opencodeLogFileSystem?: OpencodeLogFileSystem
   readonly executorLockHolderProbe?: LockHolderProbe
   readonly worktreeClock?: () => number

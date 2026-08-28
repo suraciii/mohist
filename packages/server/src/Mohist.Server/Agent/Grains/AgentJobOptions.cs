@@ -1,12 +1,12 @@
 namespace Mohist.Server.Agent.Grains;
 
 /// <summary>
-/// Single configuration knob for the agent-job execution engine. All dispatch
-/// retry/backoff behavior and the grain-level job timeout are sourced from here
+/// Single configuration knob for the agent-job execution engine. Availability
+/// and execution timeouts are sourced from here
 /// so operational bounds can be tuned without code changes.
 /// </summary>
 /// <remarks>
-/// Documented defaults: backoff 1s → 60s cap, total retry bound 10 min,
+/// Documented defaults: availability bound 10 min,
 /// job timeout 10 min, and runner-loss recovery 15 min. Bind from
 /// <c>Mohist:AgentJob</c> in <c>~/.mohist/config.jsonc</c>.
 /// </remarks>

@@ -21,6 +21,7 @@ public static class AgentSessionRetryPolicy
         "runtime-unavailable",
         "rate-limited",
         "probe-timeout",
+        "skill-not-found",
         "retry-safe",
     };
 

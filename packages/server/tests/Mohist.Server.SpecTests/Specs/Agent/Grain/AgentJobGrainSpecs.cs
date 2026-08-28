@@ -447,6 +447,28 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task AssignedPendingJob_BoundExceeded_FailsAndCannotBeClaimedLate()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-ready-timeout-runner-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-ready-timeout-{Guid.NewGuid():N}");
+        await job.SubmitAsync(MakeInput("never claimed", projectId, "/tmp/agent-job-ready-timeout"));
+
+        await WaitForAsync(
+            () => job.GetRuntimeSnapshotAsync(),
+            snapshot => string.Equals(snapshot.RunnerId, runnerId, StringComparison.Ordinal),
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            "AgentJob receives its runner assignment");
+
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(6));
+
+        Assert.Null(await job.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var terminal = await job.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, terminal.FailureReason);
+    }
+
+    [Fact]
     public async Task SubmitAsync_GenericSession_NoEligibleRunner_StaysPendingAndKeepsSessionOpen()
     {
         await ClearGlobalRunnerRegistryAsync();

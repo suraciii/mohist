@@ -202,7 +202,8 @@ public sealed record RecoverMissingRuntimeSessionCommand(
     [property: Id(0)] string ExpectedRunnerId,
     [property: Id(1)] string ExpectedRuntime,
     [property: Id(2)] string ExpectedRuntimeSessionId,
-    [property: Id(3)] string ReplacementRuntimeSessionId);
+    [property: Id(3)] string ReplacementRuntimeSessionId,
+    [property: Id(4)] string? ExpectedQueuedTurnId = null);
 
 [GenerateSerializer]
 public sealed record ReconcileMissingBindingCommand(

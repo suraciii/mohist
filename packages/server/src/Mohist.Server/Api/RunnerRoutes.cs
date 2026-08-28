@@ -378,7 +378,11 @@ public static partial class RunnerRoutes
             try
             {
                 var session = await grain.RecoverMissingRuntimeSessionAsync(new RecoverMissingRuntimeSessionCommand(
-                    req.ExpectedRunnerId, req.ExpectedRuntime, req.ExpectedRuntimeSessionId, req.ReplacementRuntimeSessionId));
+                    req.ExpectedRunnerId,
+                    req.ExpectedRuntime,
+                    req.ExpectedRuntimeSessionId,
+                    req.ReplacementRuntimeSessionId,
+                    req.ExpectedQueuedTurnId));
                 return Results.Ok(ToRunnerGenericAgentSession(session));
             }
             catch (StaleRuntimeSessionBindingException ex)
@@ -703,7 +707,8 @@ public record MissingRuntimeSessionRecoveryRequest(
     string ExpectedRunnerId,
     string ExpectedRuntime,
     string ExpectedRuntimeSessionId,
-    string ReplacementRuntimeSessionId);
+    string ReplacementRuntimeSessionId,
+    string? ExpectedQueuedTurnId = null);
 public record WorkflowAgentSessionResetRequest(
     string ExpectedRunnerId,
     string ExpectedRuntime,

@@ -145,6 +145,67 @@ public sealed class SlackDmSessionMappingStore : IScopedService, IAgentConnectio
             """, ct);
     }
 
+    public async Task<string> ReplaceCurrentSessionAndInboxRouteAsync(
+        string projectId,
+        string connectionId,
+        string workspaceTeamId,
+        string slackUserId,
+        string dmConversationId,
+        string inboxId,
+        string expectedSessionId,
+        string replacementSessionId,
+        string messageTs,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(dmConversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(inboxId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedSessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replacementSessionId);
+
+        var now = _timeProvider.GetUtcNow();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var changed = await db.SlackProviderInboxRows
+            .Where(row => row.ProjectId == projectId
+                && row.ConnectionId == connectionId
+                && row.Id == inboxId
+                && row.RouteKind == SlackProviderInboxRouteKinds.Followup
+                && row.RouteSessionId == expectedSessionId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.RouteSessionId, replacementSessionId), ct);
+        if (changed == 0)
+        {
+            var persisted = await db.SlackProviderInboxRows.AsNoTracking()
+                .Where(row => row.ProjectId == projectId && row.ConnectionId == connectionId && row.Id == inboxId)
+                .Select(row => new { row.RouteKind, row.RouteSessionId })
+                .SingleOrDefaultAsync(ct);
+            if (persisted?.RouteKind != SlackProviderInboxRouteKinds.Followup
+                || !string.Equals(persisted.RouteSessionId, replacementSessionId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"Slack inbox entry {inboxId} resolved to a different recovery route.");
+            }
+        }
+
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "SlackDmSessionMappings" (
+                "Id", "ProjectId", "ConnectionId", "WorkspaceTeamId", "SlackUserId",
+                "DmConversationId", "CurrentSessionId", "CurrentMessageTs", "UpdatedAt")
+            VALUES (
+                {$"slkdmmp_{Guid.NewGuid():N}"}, {projectId}, {connectionId}, {workspaceTeamId}, {slackUserId},
+                {dmConversationId}, {replacementSessionId}, {messageTs}, {now})
+            ON CONFLICT("ConnectionId", "DmConversationId") DO UPDATE SET
+                "CurrentSessionId" = excluded."CurrentSessionId",
+                "CurrentMessageTs" = excluded."CurrentMessageTs",
+                "UpdatedAt" = excluded."UpdatedAt"
+            WHERE "SlackDmSessionMappings"."CurrentSessionId" = {expectedSessionId}
+                OR "SlackDmSessionMappings"."CurrentSessionId" = {replacementSessionId};
+            """, ct);
+        await transaction.CommitAsync(ct);
+        return replacementSessionId;
+    }
+
     /// <summary>
     /// Cascades provider rows for one Connection. Called from
     /// <c>AgentConnectionStore.DeleteAsync</c>; idempotent and tolerant

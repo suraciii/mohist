@@ -341,6 +341,13 @@ accept input during the current running Turn, the follow-up joins that Turn.
 Otherwise, it starts or waits for a later Turn. Neither path creates another
 AgentJob or changes the first launch result.
 
+A Runtime activity event without a Turn identity can settle only a follow-up
+that has already started executing. It cannot complete a queued follow-up that
+has not been dispatched. When an initial launch reaches terminal while a
+follow-up waits, Mohist keeps the follow-up queued and dispatches it next. An
+AgentJob terminal close belongs to the launch and never settles a later
+follow-up, including when that close is replayed after the follow-up starts.
+
 Accepted input is never discarded or changed to rejected because execution
 later fails. When the waiting queue is full, Mohist rejects the new input before
 creating a live Input or Turn. Retrying that rejected intent with the same key
@@ -505,11 +512,23 @@ and replaces the missing binding without changing the AgentSession or replaying
 prior input. Ambiguous or unsafe absence still blocks because it cannot prove
 that an old effect did not occur.
 
-AgentJob launch and idle Follow-up do not yet enter that same recovery boundary.
-The initial AgentJob Turn is already queued before missing-binding recovery can
-run. Reconnect reconciliation can also replace a binding for non-idle work
-without the complete proof that an old effect is absent. Callers must therefore
-not treat those paths as permission to replay input.
+Slack DM continuation queues behind an initial AgentJob that has not bound a
+Runtime yet. If the initial Turn instead reached a retry-safe terminal failure,
+Slack enters the durable Agent retry path, moves its conversation mapping to the
+resolved replacement Session, and accepts the triggering message there exactly
+once. This recovers a definitely failed launch; it is not permission to replay
+an active or unknown effect.
+
+Pre-execution Skill resolution is part of that retry-safe boundary. A missing
+Skill fails before a Runtime Session or model turn starts, so a later ordinary
+DM may resume through the durable replacement path after the Skill becomes
+available. It never requires the user to start a new task.
+
+Queued Follow-up now enters the same physical Runtime missing-binding recovery
+boundary before its input is submitted. Generic AgentJob launch does not yet
+enter that boundary. Reconnect reconciliation can also replace a binding for
+non-idle work without the complete proof that an old effect is absent. Callers
+must therefore not treat those paths as permission to replay input.
 
 Recovery does not yet prove the active owner and absence of an earlier effect
 at every boundary. This limits convergence across Runner handoff without making

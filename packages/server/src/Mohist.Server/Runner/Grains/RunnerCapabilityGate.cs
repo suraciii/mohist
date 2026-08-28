@@ -46,10 +46,16 @@ internal static class RunnerCapabilityGate
             && !string.Equals(catalog?.CapabilityRevision, expectation.CapabilityRevision, StringComparison.Ordinal))
             return false;
 
-        if (catalog is not null && !Contains(catalog.Models, expectation.Model))
+        if (catalog is not null
+            && !RuntimeCatalogCompatibility.AcceptsModel(expectation.Runtime, catalog, expectation.Model))
             return false;
         if (expectation.Variant is not null
-            && !Contains(catalog?.Variants, expectation.Model, expectation.Variant))
+            && (catalog is null
+                || !RuntimeCatalogCompatibility.AcceptsVariant(
+                    expectation.Runtime,
+                    catalog,
+                    expectation.Model,
+                    expectation.Variant)))
             return false;
         if (expectation.ReasoningEffort is not null
             && !Contains(catalog?.ReasoningEfforts, expectation.Model, expectation.ReasoningEffort))
@@ -81,9 +87,6 @@ internal static class RunnerCapabilityGate
 
         return null;
     }
-
-    private static bool Contains(string[]? values, string? expected) =>
-        expected is null || (values?.Any(value => string.Equals(value, expected, StringComparison.OrdinalIgnoreCase)) ?? false);
 
     private static bool Contains(
         Dictionary<string, string[]>? values,

@@ -50,6 +50,13 @@ flowchart TD
 
 `mo skill list` shows distributable Skills. Four are currently available.
 
+Mohist Agents resolve Skills from the execution workspace first, then the
+user's External Agent directory and explicitly configured Skill roots. Skills
+shipped by the installed Mohist version are the final fallback and come from
+the managed cache refreshed by `mo update`. A Project or user override can
+therefore replace a built-in Skill without making interaction workspaces copy
+the installed catalog.
+
 ### `mohist`
 
 This Skill operates Mohist and dispatches to scenario-specific Skills. It lets

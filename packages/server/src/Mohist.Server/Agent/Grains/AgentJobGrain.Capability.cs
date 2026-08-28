@@ -52,6 +52,8 @@ public sealed partial class AgentJobGrain
             return null;
         if (State.Status != AgentJobStatus.Pending)
             return null;
+        if (await FailReadyTimeoutIfExceededAsync())
+            return null;
         if (string.IsNullOrWhiteSpace(State.WorkId))
             return null;
 
