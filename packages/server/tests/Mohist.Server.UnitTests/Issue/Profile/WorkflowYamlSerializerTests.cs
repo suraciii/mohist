@@ -153,7 +153,7 @@ public class WorkflowYamlSerializerTests
         Assert.Contains("id: apply-feedback", yaml);
         Assert.Contains("title: Apply approval feedback", yaml);
         Assert.Contains("uses: mohist/agent", yaml);
-        Assert.Contains("session: ${{ stage.name }}", yaml);
+        Assert.Contains("session: feedback-${{ stage.name }}", yaml);
         Assert.Contains("prompt: ${{ prompts.apply-feedback }}", yaml);
 
         var reparsed = WorkflowYamlSerializer.FromYaml(yaml);

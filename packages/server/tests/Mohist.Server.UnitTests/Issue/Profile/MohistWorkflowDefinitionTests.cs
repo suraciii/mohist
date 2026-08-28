@@ -118,7 +118,7 @@ public class MohistWorkflowDefinitionTests
         Assert.Equal("mohist/agent", task.Uses);
         Assert.Equal("mohist/builder", task.With!["name"]!.Value.GetString());
         Assert.NotNull(task.With);
-        Assert.Equal("${{ stage.name }}", task.With!["session"]?.GetString());
+        Assert.Equal("feedback-${{ stage.name }}", task.With!["session"]?.GetString());
         Assert.Equal("${{ prompts.apply-feedback }}", task.With["prompt"]?.GetString());
         Assert.False(task.With!.ContainsKey("options"));
     }
