@@ -264,7 +264,7 @@ public sealed class CliHelpSpecs
     [InlineData(new[] { "run", "list", "--help" }, "issueNumber")]
     [InlineData(new[] { "run", "view", "--help" }, "currentStage")]
     [InlineData(new[] { "run", "approve", "--help" }, "status")]
-    [InlineData(new[] { "run", "reject", "--help" }, "status")]
+    [InlineData(new[] { "run", "request-changes", "--help" }, "status")]
     [InlineData(new[] { "run", "retry", "--help" }, "status")]
     [InlineData(new[] { "run", "rerun", "--help" }, "status")]
     [InlineData(new[] { "run", "pause", "--help" }, "status")]

@@ -7,7 +7,6 @@ import type { Project } from '../../../entities/project'
 import { IssueDetailPage } from './IssueDetailPage'
 import { mockIssue, mountIssueDetail } from './_issueDetailMsw'
 
-
 const projects: Project[] = [
   {
     id: 'proj-1',
@@ -73,18 +72,20 @@ describe('IssueDetailPage status-header — three-tier anchors', () => {
 
 describe('IssueDetailPage status-header — stickiness of StatusHeadline', () => {
   it('pins the StatusHeadline as the only sticky element at the top of the scroll container', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop', 'inspect'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop', 'inspect'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -110,18 +111,20 @@ describe('IssueDetailPage status-header — stickiness of StatusHeadline', () =>
   })
 
   it('does not pin the runtime decision surface (only the headline is sticky)', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop', 'inspect'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop', 'inspect'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -133,26 +136,28 @@ describe('IssueDetailPage status-header — stickiness of StatusHeadline', () =>
 
 describe('IssueDetailPage status-header — single glanceable region', () => {
   it('aggregates situation, stage, and progress in one region with the current task embedded in the headline text', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      workflowStageProgress: {
-        stage: 'build',
-        total: 5,
-        completed: 2,
-        running: 1,
-        failed: 0,
-        currentTaskTitle: 'Build decision surface',
-      },
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        workflowStageProgress: {
+          stage: 'build',
+          total: 5,
+          completed: 2,
+          running: 1,
+          failed: 0,
+          currentTaskTitle: 'Build decision surface',
+        },
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -171,14 +176,16 @@ describe('IssueDetailPage status-header — single glanceable region', () => {
   })
 
   it('shows the situation alone without fabricating a stage, progress, or current task when none exist (backlog)', async () => {
-    mockIssue(makeIssue({
-      status: 'backlog',
-      workflowStage: null,
-      workflowStatus: null,
-      workflowRunId: null,
-      health: 'active',
-      blocker: { kind: 'draft' },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'backlog',
+        workflowStage: null,
+        workflowStatus: null,
+        workflowRunId: null,
+        health: 'active',
+        blocker: { kind: 'draft' },
+      }),
+    )
 
     renderPage()
 
@@ -190,14 +197,16 @@ describe('IssueDetailPage status-header — single glanceable region', () => {
   })
 
   it('reflects the done situation with no active workflow controls for an archived done issue', async () => {
-    mockIssue(makeIssue({
-      number: 264,
-      status: 'done',
-      workflowStage: 'done',
-      workflowStatus: 'completed',
-      archivedAt: '2026-06-25T10:00:00Z',
-      health: 'done',
-    }))
+    mockIssue(
+      makeIssue({
+        number: 264,
+        status: 'done',
+        workflowStage: 'done',
+        workflowStatus: 'completed',
+        archivedAt: '2026-06-25T10:00:00Z',
+        health: 'done',
+      }),
+    )
 
     renderPage()
 
@@ -218,18 +227,20 @@ describe('IssueDetailPage status-header — single glanceable region', () => {
 
 describe('IssueDetailPage status-header — adjudicated situation variants', () => {
   it('reflects the running situation in the headline when the workflow is running', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -239,22 +250,24 @@ describe('IssueDetailPage status-header — adjudicated situation variants', () 
   })
 
   it('reflects the approval-required situation in the headline when approval is awaiting', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'check',
-      health: 'paused',
-      approvalState: {
-        status: 'awaiting',
-        stage: 'check',
-        requestedAt: '2026-01-01T00:00:00.000Z',
-      },
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: null,
-        workflowSummaryState: 'awaiting-approval',
-        allowedActions: ['approve', 'reject'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'check',
+        health: 'paused',
+        approvalState: {
+          status: 'awaiting',
+          stage: 'check',
+          requestedAt: '2026-01-01T00:00:00.000Z',
+        },
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: null,
+          workflowSummaryState: 'awaiting-approval',
+          allowedActions: ['approve', 'request-changes'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -264,14 +277,16 @@ describe('IssueDetailPage status-header — adjudicated situation variants', () 
   })
 
   it('reflects the done situation for an archived done issue', async () => {
-    mockIssue(makeIssue({
-      number: 264,
-      status: 'done',
-      workflowStage: 'done',
-      workflowStatus: 'completed',
-      archivedAt: '2026-06-25T10:00:00Z',
-      health: 'done',
-    }))
+    mockIssue(
+      makeIssue({
+        number: 264,
+        status: 'done',
+        workflowStage: 'done',
+        workflowStatus: 'completed',
+        archivedAt: '2026-06-25T10:00:00Z',
+        health: 'done',
+      }),
+    )
 
     renderPage()
 
@@ -282,19 +297,21 @@ describe('IssueDetailPage status-header — adjudicated situation variants', () 
 
 describe('IssueDetailPage status-header — single-badge invariant', () => {
   it('does not render a separate runtime status pill in the identity row (status is the headline)', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      priority: 'p1',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        priority: 'p1',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -306,18 +323,20 @@ describe('IssueDetailPage status-header — single-badge invariant', () => {
   })
 
   it('does not render a duplicate runtime summary label or icon row inside the runtime decision surface', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -330,23 +349,25 @@ describe('IssueDetailPage status-header — single-badge invariant', () => {
 
 describe('IssueDetailPage status-header — action surface anchoring', () => {
   it('anchors all seven runtime actions inside the status-header tier, not the reading flow or reference rail', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop', 'retry', 'rerun', 'resume'],
-      },
-      approvalState: {
-        status: 'awaiting',
-        stage: 'check',
-        requestedAt: '2026-01-01T00:00:00.000Z',
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop', 'retry', 'rerun', 'resume'],
+        },
+        approvalState: {
+          status: 'awaiting',
+          stage: 'check',
+          requestedAt: '2026-01-01T00:00:00.000Z',
+        },
+      }),
+    )
 
     renderPage()
 
@@ -363,7 +384,9 @@ describe('IssueDetailPage status-header — action surface anchoring', () => {
     expect(referenceRail.contains(surface)).toBe(false)
 
     for (const kind of ['approve', 'send-back', 'retry', 'resume', 'rerun', 'stop', 'start']) {
-      const actionIds = Array.from(screen.getByTestId('issue-detail-page-container').querySelectorAll(`[data-testid="decision-action-${kind}"]`))
+      const actionIds = Array.from(
+        screen.getByTestId('issue-detail-page-container').querySelectorAll(`[data-testid="decision-action-${kind}"]`),
+      )
       expect(actionIds.length).toBeLessThanOrEqual(1)
       for (const node of actionIds) {
         expect(headerTier.contains(node)).toBe(true)
@@ -376,18 +399,20 @@ describe('IssueDetailPage status-header — action surface anchoring', () => {
 
 describe('IssueDetailPage status-header — heaviest visual weight', () => {
   it('carries the sticky + fill + icon + border combination uniquely in the headline', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build it' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 

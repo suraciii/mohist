@@ -33,7 +33,7 @@ function makeIssue(number: number, approval: boolean) {
           currentWorkItem: null,
           latestAttemptState: null,
           workflowSummaryState: 'awaiting-approval',
-          allowedActions: ['approve', 'reject'],
+          allowedActions: ['approve', 'request-changes'],
         }
       : null,
     projectId: project.id,

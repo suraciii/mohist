@@ -8,7 +8,6 @@ import { IssueDetailPage } from './IssueDetailPage'
 import { mockAgentStatus, mockIssue, mountIssueDetail } from './_issueDetailMsw'
 import { setScopedValue } from '../../../../tests/support/scoped-property'
 
-
 const projects: Project[] = [
   {
     id: 'proj-1',
@@ -30,7 +29,10 @@ function mockMatchMedia(narrow: boolean, width = narrow ? 375 : 1280) {
     dispatchEvent: vi.fn(),
     onchange: null,
   }
-  vi.stubGlobal('matchMedia', vi.fn(() => mql))
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn(() => mql),
+  )
   setScopedValue(window, 'innerWidth', width)
 }
 
@@ -82,18 +84,20 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
   })
 
   it('running surfaces the decision sheet launcher with the primary label and opens the full action list', async () => {
-    mockIssue(baseIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -110,22 +114,24 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
   })
 
   it('approval-required surfaces direct approve and send-back without the mobile sheet', async () => {
-    mockIssue(baseIssue({
-      status: 'in_progress',
-      workflowStage: 'check',
-      health: 'paused',
-      approvalState: {
-        status: 'awaiting',
-        stage: 'check',
-        requestedAt: '2026-01-01T00:00:00.000Z',
-      },
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: null,
-        workflowSummaryState: 'awaiting-approval',
-        allowedActions: ['approve', 'reject'],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'in_progress',
+        workflowStage: 'check',
+        health: 'paused',
+        approvalState: {
+          status: 'awaiting',
+          stage: 'check',
+          requestedAt: '2026-01-01T00:00:00.000Z',
+        },
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: null,
+          workflowSummaryState: 'awaiting-approval',
+          allowedActions: ['approve', 'request-changes'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -136,18 +142,20 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
   })
 
   it('failed state exposes retry, resume, rerun, and ask agent in the mobile sheet', async () => {
-    mockIssue(baseIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'failed',
-      health: 'active',
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'failed',
-        workflowSummaryState: 'failed',
-        allowedActions: ['retry', 'resume', 'rerun', 'start', 'stop'],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'failed',
+        health: 'active',
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: 'failed',
+          workflowSummaryState: 'failed',
+          allowedActions: ['retry', 'resume', 'rerun', 'start', 'stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -161,14 +169,16 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
   })
 
   it('queued backlog (ready to start) exposes Start in the mobile sheet', async () => {
-    mockIssue(baseIssue({
-      status: 'backlog',
-      workflowStage: null,
-      workflowStatus: null,
-      workflowRunId: null,
-      health: 'active',
-      canStart: true,
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'backlog',
+        workflowStage: null,
+        workflowStatus: null,
+        workflowRunId: null,
+        health: 'active',
+        canStart: true,
+      }),
+    )
 
     renderPage()
 
@@ -179,16 +189,18 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
   })
 
   it('draft backlog surfaces disabled Start with the draft blocker reason and keeps the launcher enabled', async () => {
-    mockIssue(baseIssue({
-      status: 'backlog',
-      workflowStage: null,
-      workflowStatus: null,
-      workflowRunId: null,
-      health: 'active',
-      isDraft: true,
-      canStart: true,
-      blocker: { kind: 'draft' },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'backlog',
+        workflowStage: null,
+        workflowStatus: null,
+        workflowRunId: null,
+        health: 'active',
+        isDraft: true,
+        canStart: true,
+        blocker: { kind: 'draft' },
+      }),
+    )
 
     renderPage()
 
@@ -204,18 +216,20 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
   })
 
   it('prerequisite-blocked backlog exposes a visible Start reason with the prerequisite name', async () => {
-    mockIssue(baseIssue({
-      status: 'backlog',
-      workflowStage: null,
-      workflowStatus: null,
-      workflowRunId: null,
-      health: 'active',
-      canStart: true,
-      blocker: {
-        kind: 'waiting-for',
-        issue: { number: 9, title: 'Prepare spec' },
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'backlog',
+        workflowStage: null,
+        workflowStatus: null,
+        workflowRunId: null,
+        health: 'active',
+        canStart: true,
+        blocker: {
+          kind: 'waiting-for',
+          issue: { number: 9, title: 'Prepare spec' },
+        },
+      }),
+    )
 
     renderPage()
 
@@ -233,14 +247,16 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
       runnerAvailable: false,
       runnerMessage: 'No runner is connected. Start a runner before this issue can run.',
     })
-    mockIssue(baseIssue({
-      status: 'backlog',
-      workflowStage: null,
-      workflowStatus: null,
-      workflowRunId: null,
-      health: 'active',
-      canStart: true,
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'backlog',
+        workflowStage: null,
+        workflowStatus: null,
+        workflowRunId: null,
+        health: 'active',
+        canStart: true,
+      }),
+    )
 
     renderPage()
 
@@ -252,18 +268,20 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
   })
 
   it('done state keeps the no-action decision context reachable on mobile', async () => {
-    mockIssue(baseIssue({
-      status: 'done',
-      workflowStage: 'done',
-      workflowStatus: 'done',
-      health: 'done',
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'completed',
-        workflowSummaryState: 'completed',
-        allowedActions: [],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'done',
+        workflowStage: 'done',
+        workflowStatus: 'done',
+        health: 'done',
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: 'completed',
+          workflowSummaryState: 'completed',
+          allowedActions: [],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -275,19 +293,21 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
   })
 
   it('archived state keeps the no-action decision context reachable on mobile', async () => {
-    mockIssue(baseIssue({
-      status: 'done',
-      workflowStage: 'done',
-      workflowStatus: 'done',
-      health: 'done',
-      archivedAt: '2026-01-02T00:00:00Z',
-      recovery: {
-        currentWorkItem: null,
-        latestAttemptState: 'completed',
-        workflowSummaryState: 'completed',
-        allowedActions: [],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'done',
+        workflowStage: 'done',
+        workflowStatus: 'done',
+        health: 'done',
+        archivedAt: '2026-01-02T00:00:00Z',
+        recovery: {
+          currentWorkItem: null,
+          latestAttemptState: 'completed',
+          workflowSummaryState: 'completed',
+          allowedActions: [],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -298,18 +318,20 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
   })
 
   it('narrow viewport reserves bottom padding only when a decision surface exists', async () => {
-    mockIssue(baseIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -321,18 +343,20 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
   })
 
   it('stop on narrow opens the bottom-sliding sheet with confirmation and the sticky StatusHeadline remains visible', async () => {
-    mockIssue(baseIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop', 'force-stop'],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop', 'force-stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -361,18 +385,20 @@ describe('IssueDetailPage narrow-viewport decision surface reachability', () => 
 describe('IssueDetailPage narrow-viewport 768-1024px band (flush-bottom bar)', () => {
   it('at ~900px (narrow page, no global nav) the bar anchors flush to the bottom with no nav-offset', async () => {
     mockMatchMedia(true, 900)
-    mockIssue(baseIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -395,18 +421,20 @@ describe('IssueDetailPage narrow-viewport 768-1024px band (flush-bottom bar)', (
 
   it('does not reserve padding for the global nav on the content column when the bar is present', async () => {
     mockMatchMedia(true, 900)
-    mockIssue(baseIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -424,18 +452,20 @@ describe('IssueDetailPage desktop viewport restores IssueDecisionSurface and no 
   })
 
   it('desktop renders IssueDecisionSurface in the header tier and neither MobileActionBar nor ConfirmationDrawer in the DOM', async () => {
-    mockIssue(baseIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -453,18 +483,20 @@ describe('IssueDetailPage desktop viewport restores IssueDecisionSurface and no 
   })
 
   it('desktop does not reserve extra bottom padding for the bar', async () => {
-    mockIssue(baseIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      baseIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     renderPage()
 

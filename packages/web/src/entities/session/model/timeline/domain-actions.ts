@@ -17,7 +17,7 @@ const ACTIONS: ActionDefinition[] = [
   { argv: ['issue', 'comment', 'create'], verb: '评论了', requiresIssue: true },
   { argv: ['issue', 'start'], verb: '启动了', requiresIssue: true },
   { argv: ['run', 'approve'], verb: '批准了', requiresIssue: false },
-  { argv: ['run', 'reject'], verb: '拒绝了', requiresIssue: false },
+  { argv: ['run', 'request-changes'], verb: '请求修改了', requiresIssue: false },
   { argv: ['run', 'retry'], verb: '重试了', requiresIssue: false },
   { argv: ['run', 'rerun'], verb: '重新运行了', requiresIssue: false },
   { argv: ['run', 'pause'], verb: '暂停了', requiresIssue: false },
@@ -130,7 +130,7 @@ function extractWorkflowRunId(input: unknown): string | undefined {
 }
 
 function actionForArgv(argv: string[]): ActionDefinition | undefined {
-  return ACTIONS.find(action => action.argv.every((segment, index) => argv[index] === segment))
+  return ACTIONS.find((action) => action.argv.every((segment, index) => argv[index] === segment))
 }
 
 function toAction(

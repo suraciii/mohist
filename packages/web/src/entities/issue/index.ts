@@ -37,7 +37,6 @@ export {
   addComment,
   addPrerequisite,
   approveIssue,
-  rejectIssue,
   archiveAllCompleted,
   archiveIssue,
   cleanupIssueWorkspace,

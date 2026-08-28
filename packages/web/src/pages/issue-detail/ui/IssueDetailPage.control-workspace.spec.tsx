@@ -124,7 +124,7 @@ describe('IssueDecisionSurface — control workspace (active execution)', () => 
           currentWorkItem: null,
           latestAttemptState: null,
           workflowSummaryState: 'awaiting-approval',
-          allowedActions: ['approve', 'reject'],
+          allowedActions: ['approve', 'request-changes'],
         },
       }),
     )
@@ -154,7 +154,7 @@ describe('IssueDecisionSurface — control workspace (active execution)', () => 
           currentWorkItem: null,
           latestAttemptState: null,
           workflowSummaryState: 'awaiting-approval',
-          allowedActions: ['approve', 'reject'],
+          allowedActions: ['approve', 'request-changes'],
         },
       }),
     )

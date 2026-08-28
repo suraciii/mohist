@@ -48,11 +48,11 @@ public static partial class IssueRoutes
             return ApiResults.Ok();
         });
 
-        group.MapPost("/{number:int}/reject", async (
+        group.MapPost("/{number:int}/request-changes", async (
             HttpContext ctx,
             string projectRef,
             int number,
-            RejectWithAuthorRequest? req,
+            RequestChangesRequest? req,
             IGrainFactory grains,
             IssueQuerier issuesQuery,
             ICurrentUser currentUser) =>
@@ -63,7 +63,7 @@ public static partial class IssueRoutes
             if (displayName.Failure is { } failure)
                 return failure;
             if (string.IsNullOrWhiteSpace(req?.Message))
-                return ApiResults.BadRequest("Reject reason is required");
+                return ApiResults.BadRequest("Request changes message is required");
             var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.ActiveOnly);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;

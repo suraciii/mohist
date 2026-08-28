@@ -39,9 +39,9 @@ public static partial class WorkflowRoutes
             return ApiResults.Ok();
         });
 
-        app.MapPost("/api/workflow-runs/{workflowRunId}/reject", async (
+        app.MapPost("/api/workflow-runs/{workflowRunId}/request-changes", async (
             string workflowRunId,
-            RejectWithAuthorRequest? req,
+            RequestChangesRequest? req,
             IGrainFactory grains,
             WorkflowQuerier reader,
             ICurrentUser currentUser) =>
@@ -52,7 +52,7 @@ public static partial class WorkflowRoutes
             if (displayName.Failure is { } displayFailure)
                 return displayFailure;
             if (string.IsNullOrWhiteSpace(req?.Message))
-                return ApiResults.BadRequest("Reject reason is required");
+                return ApiResults.BadRequest("Request changes message is required");
             await grains.GetGrain<IWorkflowGrain>(workflowRunId).RequestChangesAsync(req.Message, currentUser.Principal.Id, displayName.Value);
             return ApiResults.Ok();
         });

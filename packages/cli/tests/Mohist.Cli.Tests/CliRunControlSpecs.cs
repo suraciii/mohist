@@ -6,7 +6,7 @@ using Xunit;
 namespace Mohist.Cli.Tests;
 
 // T-001 (issue-476): `mo run` is the single command tree for the seven
-// state-changing verbs (approve / reject / retry / rerun / pause /
+// state-changing verbs (approve / request-changes / retry / rerun / pause /
 // resume / stop). Every verb targets a run by either a positional
 // `<run-id>` or `--issue <number>`. These specs pin:
 //   * help shape — the seven verbs are listed, no `rerun-from-stage`
@@ -15,7 +15,7 @@ namespace Mohist.Cli.Tests;
 //   * `--issue` resolution — one-shot GET to the issue endpoint reads
 //     `workflowRunId`; a missing binding fails with a diagnostic
 //     naming the issue
-//   * `--message` validation for `reject`
+//   * `--message` validation for `request-changes`
 //   * `--from-stage` flag on `rerun`; blank values fail locally
 //   * `--yes` confirmation for the irreversible `stop`
 //   * server-error surfacing — message + stable code on stderr
@@ -39,7 +39,7 @@ public class CliRunControlSpecs
 
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
-        foreach (var verb in new[] { "approve", "reject", "retry", "rerun", "pause", "resume", "stop" })
+        foreach (var verb in new[] { "approve", "request-changes", "retry", "rerun", "pause", "resume", "stop" })
         {
             Assert.Contains($"{verb} ", stdout);
         }
@@ -449,16 +449,16 @@ public class CliRunControlSpecs
     }
 
     // ────────────────────────────────────────────────────────────────────
-    //  reject — --message required
+    //  request-changes — --message required
     // ────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Reject_MissingMessage_FailsLocallyWithExitOneAndNoHttp()
+    public async Task RequestChanges_MissingMessage_FailsLocallyWithExitOneAndNoHttp()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "reject", WrId, "--display-name", "supervisor"], output, error, fs, executor);
+            http, ["run", "request-changes", WrId, "--display-name", "supervisor"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -466,12 +466,12 @@ public class CliRunControlSpecs
     }
 
     [Fact]
-    public async Task Reject_BlankMessage_FailsLocallyWithExitOneAndNoHttp()
+    public async Task RequestChanges_BlankMessage_FailsLocallyWithExitOneAndNoHttp()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "reject", WrId, "--display-name", "supervisor", "--message", "   "], output, error, fs, executor);
+            http, ["run", "request-changes", WrId, "--display-name", "supervisor", "--message", "   "], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -479,7 +479,7 @@ public class CliRunControlSpecs
     }
 
     [Fact]
-    public async Task Reject_MissingAuthor_PostsMessageWithoutAttribution()
+    public async Task RequestChanges_MissingDisplayName_PostsMessageWithoutAttribution()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
             req.Method == HttpMethod.Post
@@ -487,7 +487,7 @@ public class CliRunControlSpecs
                 : null!);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "reject", WrId, "--message", "needs more detail"], output, error, fs, executor);
+            http, ["run", "request-changes", WrId, "--message", "needs more detail"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var body = JsonNode.Parse(handler.Requests.Single().Body!) as JsonObject;
@@ -497,12 +497,12 @@ public class CliRunControlSpecs
     }
 
     [Fact]
-    public async Task Reject_OverlongAuthor_FailsLocallyWithExitOneAndNoHttp()
+    public async Task RequestChanges_OverlongDisplayName_FailsLocallyWithExitOneAndNoHttp()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "reject", WrId, "--display-name", new string('a', 101), "--message", "needs more detail"],
+            http, ["run", "request-changes", WrId, "--display-name", new string('a', 101), "--message", "needs more detail"],
             output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
@@ -511,14 +511,14 @@ public class CliRunControlSpecs
     }
 
     [Fact]
-    public async Task Reject_WithMessage_PostsWithMessageInBody()
+    public async Task RequestChanges_WithMessage_PostsWithMessageInBody()
     {
         const string reason = "Rework the auth flow";
 
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post
-                && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/reject")
+                && req.RequestUri?.PathAndQuery == $"/api/workflow-runs/{WrId}/request-changes")
             {
                 return RecordingHttpHandler.Json(new { success = true, data = new { } });
             }
@@ -526,12 +526,12 @@ public class CliRunControlSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "reject", WrId, "--display-name", "supervisor", "--message", reason],
+            http, ["run", "request-changes", WrId, "--display-name", "supervisor", "--message", reason],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var postReq = handler.Requests.Single(r => r.Method == HttpMethod.Post);
-        Assert.Equal($"/api/workflow-runs/{WrId}/reject", postReq.RequestUri?.PathAndQuery);
+        Assert.Equal($"/api/workflow-runs/{WrId}/request-changes", postReq.RequestUri?.PathAndQuery);
         var body = JsonNode.Parse(postReq.Body!) as JsonObject;
         Assert.NotNull(body);
         Assert.Equal(reason, body!["message"]?.GetValue<string>());
@@ -539,12 +539,12 @@ public class CliRunControlSpecs
     }
 
     [Fact]
-    public async Task Reject_BothRunIdAndIssue_FailsLocallyWithoutHttp()
+    public async Task RequestChanges_BothRunIdAndIssue_FailsLocallyWithoutHttp()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "reject", WrId, "--issue", "42", "--message", "anything", "--display-name", "supervisor"],
+            http, ["run", "request-changes", WrId, "--issue", "42", "--message", "anything", "--display-name", "supervisor"],
             output, error, fs, executor);
 
         Assert.Equal(2, exitCode);
@@ -552,25 +552,25 @@ public class CliRunControlSpecs
     }
 
     [Fact]
-    public async Task Reject_ServerError_SurfacesMessageAndCode()
+    public async Task RequestChanges_ServerError_SurfacesMessageAndCode()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
         {
             if (req.Method == HttpMethod.Post)
                 return RecordingHttpHandler.JsonError(
-                    "Reject reason is required",
+                    "Request changes message is required",
                     code: "validation",
                     statusCode: HttpStatusCode.BadRequest);
             return null!;
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "reject", WrId, "--display-name", "supervisor", "--message", "anything"],
+            http, ["run", "request-changes", WrId, "--display-name", "supervisor", "--message", "anything"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         var stderr = error.ToString();
-        Assert.Contains("Reject reason is required", stderr);
+        Assert.Contains("Request changes message is required", stderr);
         Assert.Contains("validation", stderr);
     }
 
@@ -965,7 +965,7 @@ public class CliRunControlSpecs
 
     [Theory]
     [InlineData("approve")]
-    [InlineData("reject")]
+    [InlineData("request-changes")]
     [InlineData("retry")]
     [InlineData("rerun")]
     [InlineData("pause")]
@@ -982,7 +982,7 @@ public class CliRunControlSpecs
         var args = verb switch
         {
             "approve" => new[] { "run", verb, WrId, "--display-name", "supervisor" },
-            "reject" => new[] { "run", verb, WrId, "--display-name", "supervisor", "--message", "reason" },
+            "request-changes" => new[] { "run", verb, WrId, "--display-name", "supervisor", "--message", "reason" },
             _ => new[] { "run", verb, WrId },
         };
 

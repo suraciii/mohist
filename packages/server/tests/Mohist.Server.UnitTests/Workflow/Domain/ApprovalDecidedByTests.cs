@@ -98,34 +98,6 @@ public class ApprovalDecidedByTests
     }
 
     [Fact]
-    public void Reject_StampsDecidedByInApprovalStatus()
-    {
-        var run = BuildAwaitingApprovalRun();
-
-        run.Reject("needs more detail", DateTimeOffset.UnixEpoch, Operator);
-
-        var current = run.CurrentStage();
-        Assert.NotNull(current.ApprovalStatus);
-        Assert.Equal("rejected", current.ApprovalStatus!.Result);
-        Assert.Equal(Operator, current.ApprovalStatus.DecidedBy);
-    }
-
-    [Fact]
-    public void Reject_EmitsStageApprovalResolved_WithDecidedBy()
-    {
-        var run = BuildAwaitingApprovalRun();
-
-        var events = run.Reject("not enough detail", DateTimeOffset.UnixEpoch, Operator);
-
-        var resolved = events
-            .Select(WorkflowEventSerializer.Unwrap)
-            .OfType<StageApprovalResolved>()
-            .Single();
-        Assert.Equal(Operator, resolved.DecidedBy);
-        Assert.Equal(ApprovalResult.Rejected, resolved.Result);
-    }
-
-    [Fact]
     public void RequestChanges_StampsDecidedByInApprovalStatus()
     {
         var run = BuildAwaitingApprovalRun();
@@ -140,23 +112,7 @@ public class ApprovalDecidedByTests
     }
 
     [Fact]
-    public void RequestChanges_EmitsStageApprovalResolved_WithDecidedBy()
-    {
-        var run = BuildAwaitingApprovalRun();
-
-        var events = run.RequestChanges("needs more detail", "fb_1", DateTimeOffset.UnixEpoch, Operator,
-            [new TaskDefinition("apply-feedback", "Apply approval feedback", "spec/task")]);
-
-        var resolved = events
-            .Select(WorkflowEventSerializer.Unwrap)
-            .OfType<StageApprovalResolved>()
-            .Single();
-        Assert.Equal(Operator, resolved.DecidedBy);
-        Assert.Equal(ApprovalResult.Rejected, resolved.Result);
-    }
-
-    [Fact]
-    public void RequestChanges_EmitsFeedbackRequested_AlongsideStageApprovalResolved()
+    public void RequestChanges_EmitsFeedbackRequested_WithoutStageApprovalResolved()
     {
         var run = BuildAwaitingApprovalRun();
 
@@ -165,7 +121,7 @@ public class ApprovalDecidedByTests
 
         var unwrapped = events.Select(WorkflowEventSerializer.Unwrap).ToList();
         Assert.Single(unwrapped.OfType<FeedbackRequested>());
-        Assert.Single(unwrapped.OfType<StageApprovalResolved>());
+        Assert.DoesNotContain(unwrapped, e => e is StageApprovalResolved);
     }
 
     [Fact]
@@ -179,10 +135,8 @@ public class ApprovalDecidedByTests
         var current = run.CurrentStage();
         Assert.NotNull(current.ApprovalStatus?.RespondedAt);
         Assert.Null(current.ApprovalStatus?.DecidedBy);
-        Assert.Null(events
-            .Select(WorkflowEventSerializer.Unwrap)
-            .OfType<StageApprovalResolved>()
-            .Single()
-            .DecidedBy);
+        Assert.DoesNotContain(events
+            .Select(WorkflowEventSerializer.Unwrap),
+            e => e is StageApprovalResolved);
     }
 }

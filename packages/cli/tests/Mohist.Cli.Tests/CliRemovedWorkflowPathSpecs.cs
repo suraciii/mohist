@@ -8,6 +8,7 @@ public class CliRemovedWorkflowPathSpecs
     [Theory]
     [InlineData("approve")]
     [InlineData("reject")]
+    [InlineData("request-changes")]
     [InlineData("retry")]
     [InlineData("rerun")]
     [InlineData("rerun-from-stage")]
