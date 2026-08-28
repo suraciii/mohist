@@ -175,7 +175,10 @@ public static partial class WorkflowRunExtensions
                 failedTask.ToDefinition(),
                 stage.Attempt,
                 run.Stages.SelectMany(candidate => candidate.Tasks),
-                causedByFailedTaskId: failedTask.Lane is not null ? failedTask.Id : null);
+                // Retry keeps the failed attempt for history; preserve its feedback owner so completion can resolve the request.
+                causedByFeedbackId: failedTask.CausedByFeedbackId,
+                // Feedback retries also need a lineage edge so resolution can ignore the superseded failed attempt.
+                causedByFailedTaskId: failedTask.CausedByFeedbackId is not null || failedTask.Lane is not null ? failedTask.Id : null);
             var failedTaskIndex = stage.Tasks.IndexOf(failedTask);
             stage.Tasks.Insert(failedTaskIndex + 1, newTask);
             stage.Failure = null;

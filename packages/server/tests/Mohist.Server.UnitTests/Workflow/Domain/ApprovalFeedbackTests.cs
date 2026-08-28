@@ -57,6 +57,44 @@ public partial class ApprovalFeedbackTests
         return run;
     }
 
+    private static void ReinitializeAwaitingApprovalStage(WorkflowRun run, DateTimeOffset now)
+    {
+        run.InitializeStage(
+            [new("draft", "Draft", "spec/task")],
+            [new("plan-ok", "Plan OK", "spec/check")],
+            now);
+        var task = run.CurrentStage().Tasks.Single();
+        run.StartTask(task.Id, "worker-1", "test-process-generation", now);
+        run.CompleteTask(now.AddSeconds(1));
+        run.PassCheck(new CheckResult("plan-ok", CheckResultStatus.Passed), now.AddSeconds(2));
+        Assert.Equal(StageRunStatus.AwaitingApproval, run.CurrentStage().Status);
+    }
+
+    private static void CompleteFeedbackCycle(WorkflowRun run, int cycle)
+    {
+        var requestAt = DateTimeOffset.UnixEpoch.AddMinutes(cycle);
+        var feedbackId = $"fb_cycle_{cycle}";
+        run.RequestChanges(
+            $"feedback {cycle}",
+            feedbackId,
+            requestAt,
+            TestOperator,
+            ConfiguredFeedbackTasks());
+
+        var feedbackTask = run.CurrentStage().Tasks.Last(task => task.CausedByFeedbackId == feedbackId);
+        run.StartTask(feedbackTask.Id, "worker-1", "test-process-generation", requestAt);
+        run.CompleteTask(requestAt.AddSeconds(1));
+        var resolved = run.ResolveFeedback(
+            feedbackId,
+            feedbackTask.Id,
+            JSON.DeserializeElement($"\"resolved feedback {cycle}\""),
+            requestAt.AddSeconds(2));
+
+        Assert.NotNull(resolved);
+        run.PassCheck(new CheckResult("plan-ok", CheckResultStatus.Passed), requestAt.AddSeconds(3));
+        Assert.Equal(StageRunStatus.AwaitingApproval, run.CurrentStage().Status);
+    }
+
     [Fact]
     public void RequestChanges_CreatesOpenFeedback_AndResumesStageAsRunning()
     {
@@ -123,6 +161,164 @@ public partial class ApprovalFeedbackTests
             Assert.Equal(StageCheckStatus.Pending, c.Status);
             Assert.Null(c.Message);
         });
+    }
+
+    [Fact]
+    public void FeedbackRetention_AfterTwelveRequestResolveCycles_RetainsTenMostRecentEntries()
+    {
+        var run = BuildAwaitingApprovalRun();
+
+        for (var cycle = 1; cycle <= 12; cycle++)
+            CompleteFeedbackCycle(run, cycle);
+
+        var expectedIds = Enumerable.Range(3, 10).Select(cycle => $"fb_cycle_{cycle}");
+
+        Assert.Equal(10, run.Feedback.Count);
+        Assert.Equal(expectedIds, run.Feedback.OrderBy(feedback => feedback.CreatedAt).Select(feedback => feedback.Id));
+        Assert.All(run.Feedback, feedback => Assert.Equal(ApprovalFeedbackStatus.Resolved, feedback.Status));
+    }
+
+    [Fact]
+    public void FeedbackRetention_NeverEvictsOpenFeedback_WhenResolvedEntriesAreAvailable()
+    {
+        var run = BuildAwaitingApprovalRun();
+        for (var cycle = 1; cycle <= 10; cycle++)
+        {
+            run.Feedback.Add(new ApprovalFeedback(
+                Id: $"resolved-{cycle}",
+                WorkflowRunId: run.Id,
+                Stage: "plan",
+                Body: $"resolved {cycle}",
+                Status: ApprovalFeedbackStatus.Resolved,
+                CreatedAt: DateTimeOffset.UnixEpoch.AddMinutes(cycle)));
+        }
+        run.Feedback.Add(new ApprovalFeedback(
+            Id: "open-existing",
+            WorkflowRunId: run.Id,
+            Stage: "plan",
+            Body: "open existing",
+            Status: ApprovalFeedbackStatus.Open,
+            CreatedAt: DateTimeOffset.UnixEpoch.AddMinutes(11)));
+
+        run.RequestChanges(
+            "open new",
+            "open-new",
+            DateTimeOffset.UnixEpoch.AddMinutes(12),
+            TestOperator,
+            ConfiguredFeedbackTasks());
+
+        Assert.Contains(run.Feedback, feedback => feedback.Id == "open-existing");
+        Assert.Contains(run.Feedback, feedback => feedback.Id == "open-new");
+        Assert.Equal(2, run.Feedback.Count(feedback => feedback.Status == ApprovalFeedbackStatus.Open));
+        Assert.Equal(10, run.Feedback.Count);
+    }
+
+    [Fact]
+    public void FeedbackRetention_RemovesOldestResolvedEntriesByCreatedAt()
+    {
+        var run = BuildAwaitingApprovalRun();
+        for (var cycle = 11; cycle >= 1; cycle--)
+        {
+            run.Feedback.Add(new ApprovalFeedback(
+                Id: $"resolved-{cycle}",
+                WorkflowRunId: run.Id,
+                Stage: "plan",
+                Body: $"resolved {cycle}",
+                Status: ApprovalFeedbackStatus.Resolved,
+                CreatedAt: DateTimeOffset.UnixEpoch.AddMinutes(cycle)));
+        }
+
+        run.RequestChanges(
+            "open new",
+            "open-new",
+            DateTimeOffset.UnixEpoch.AddMinutes(12),
+            TestOperator,
+            ConfiguredFeedbackTasks());
+
+        Assert.DoesNotContain(run.Feedback, feedback => feedback.Id is "resolved-1" or "resolved-2");
+        Assert.Equal(
+            Enumerable.Range(3, 9).Select(cycle => $"resolved-{cycle}").Append("open-new"),
+            run.Feedback.OrderBy(feedback => feedback.CreatedAt).Select(feedback => feedback.Id));
+    }
+
+    [Fact]
+    public void ResolveFeedback_ReplacingOpenEntry_EnforcesFeedbackBound()
+    {
+        var run = BuildAwaitingApprovalRun();
+        var feedbackId = "fb_oldest-open";
+        run.RequestChanges("oldest feedback", feedbackId, DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
+
+        for (var cycle = 1; cycle <= 10; cycle++)
+        {
+            run.Feedback.Add(new ApprovalFeedback(
+                Id: $"open-{cycle}",
+                WorkflowRunId: run.Id,
+                Stage: "plan",
+                Body: $"open {cycle}",
+                Status: ApprovalFeedbackStatus.Open,
+                CreatedAt: DateTimeOffset.UnixEpoch.AddMinutes(cycle)));
+        }
+
+        Assert.Equal(11, run.Feedback.Count);
+        Assert.All(run.Feedback, feedback => Assert.Equal(ApprovalFeedbackStatus.Open, feedback.Status));
+
+        var task = run.CurrentStage().Tasks.Single(feedbackTask => feedbackTask.CausedByFeedbackId == feedbackId);
+        run.StartTask(task.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
+        run.CompleteTask(DateTimeOffset.UnixEpoch.AddSeconds(1), advance: false);
+
+        var resolved = run.ResolveFeedback(
+            feedbackId,
+            task.Id,
+            JSON.DeserializeElement("\"resolved oldest feedback\""),
+            DateTimeOffset.UnixEpoch.AddSeconds(2));
+
+        Assert.NotNull(resolved);
+        Assert.Equal(ApprovalFeedbackStatus.Resolved, resolved!.Status);
+        Assert.Equal(10, run.Feedback.Count);
+        Assert.DoesNotContain(run.Feedback, feedback => feedback.Id == feedbackId);
+        Assert.All(run.Feedback, feedback => Assert.Equal(ApprovalFeedbackStatus.Open, feedback.Status));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RerunAfterFailedFeedbackTask_DiscardsStaleOpenFeedback(bool fromStage)
+    {
+        var run = BuildAwaitingApprovalRun();
+        for (var cycle = 1; cycle <= 10; cycle++)
+        {
+            run.Feedback.Add(new ApprovalFeedback(
+                Id: $"resolved-{cycle}",
+                WorkflowRunId: run.Id,
+                Stage: "plan",
+                Body: $"resolved {cycle}",
+                Status: ApprovalFeedbackStatus.Resolved,
+                CreatedAt: DateTimeOffset.UnixEpoch.AddMinutes(cycle)));
+        }
+
+        const string staleFeedbackId = "fb_stale";
+        run.RequestChanges("stale feedback", staleFeedbackId, DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
+        var failedTask = run.CurrentStage().Tasks.Single(task => task.CausedByFeedbackId == staleFeedbackId);
+        run.StartTask(failedTask.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
+        run.FailTask(new TaskResult("failed", "feedback task failed"), DateTimeOffset.UnixEpoch.AddSeconds(1));
+
+        if (fromStage)
+            run.RerunFromStage("plan", DateTimeOffset.UnixEpoch.AddSeconds(2));
+        else
+            run.Rerun(DateTimeOffset.UnixEpoch.AddSeconds(2));
+
+        Assert.DoesNotContain(run.Feedback, feedback => feedback.Id == staleFeedbackId);
+        Assert.DoesNotContain(run.Feedback, feedback => feedback.Status == ApprovalFeedbackStatus.Open);
+        Assert.True(run.Feedback.Count <= 10);
+
+        ReinitializeAwaitingApprovalStage(run, DateTimeOffset.UnixEpoch.AddMinutes(20));
+        const string freshFeedbackId = "fb_fresh";
+        run.RequestChanges("fresh feedback", freshFeedbackId, DateTimeOffset.UnixEpoch.AddMinutes(20), TestOperator, ConfiguredFeedbackTasks());
+
+        Assert.DoesNotContain(run.Feedback, feedback => feedback.Id == staleFeedbackId);
+        Assert.Contains(run.Feedback, feedback =>
+            feedback.Id == freshFeedbackId && feedback.Status == ApprovalFeedbackStatus.Open);
+        Assert.True(run.Feedback.Count <= 10);
     }
 
     [Fact]
