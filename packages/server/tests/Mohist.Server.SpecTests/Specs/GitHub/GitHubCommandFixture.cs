@@ -271,6 +271,11 @@ public sealed class GitHubCommandFixture : IAsyncLifetime
                 // consume a due row before the assertion does.
                 services.Configure<GitHubCommandReplyDeliveryOptions>(options =>
                     options.HostedWorkerEnabled = false);
+                // Recovery is also driven explicitly by these specs. Leaving
+                // its safety loop running would race fake-clock assertions
+                // against the same durable operation rows.
+                services.Configure<GitHubIssueCommentOperationRecoveryOptions>(options =>
+                    options.HostedWorkerEnabled = false);
                 // The same fake-clock rule applies to event ingress: PumpAsync
                 // is the explicit dispatch boundary for these lifecycle specs.
                 services.Configure<EventDispatcherOptions>(options =>

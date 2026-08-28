@@ -526,6 +526,12 @@ public sealed class GitHubIssueLinkStore : IScopedService
             .ToList();
     }
 
+    /// <summary>
+    /// Claims one due operation only while its repository connection is
+    /// Active. The status predicate is part of the same conditional update as
+    /// the lease, so a concurrent Disable transition either wins before the
+    /// claim or observes the claim as the operation owner.
+    /// </summary>
     public async Task<GitHubIssueCommentOperation?> TryClaimCommentOperationAsync(
         string id,
         TimeSpan leaseDuration,
@@ -544,6 +550,15 @@ public sealed class GitHubIssueLinkStore : IScopedService
               AND "Status" = {GitHubCommentOperationStatus.Reserved}
               AND ("NextAttemptAt" IS NULL OR "NextAttemptAt" <= {now})
               AND ("LeaseUntil" IS NULL OR "LeaseUntil" <= {now})
+              AND EXISTS (
+                  SELECT 1
+                  FROM "GitHubIssueLinks" AS link
+                  INNER JOIN "GitHubConnections" AS connection
+                      ON connection."ProjectId" = link."ProjectId"
+                      AND connection."RepositoryName" = link."RepositoryName"
+                  WHERE link."Id" = "GitHubIssueCommentOperations"."LinkId"
+                    AND connection."Status" = {GitHubConnectionStatus.Active}
+              )
             """, ct);
         if (affected != 1)
             return null;

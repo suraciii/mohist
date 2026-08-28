@@ -4,6 +4,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.GitHub;
 using Mohist.Server.UnitTests.Support;
 using Xunit;
 
@@ -192,6 +193,61 @@ public sealed class GitHubIssueLinkStoreTests
         Assert.Single(reservations, acquired => acquired);
         await store.MarkCommentPostedAsync(link.Id, GitHubCommentKinds.WorkStarted);
         Assert.False(await store.TryReserveCommentAsync(link.Id, GitHubCommentKinds.WorkStarted));
+    }
+
+    [Fact]
+    public async Task TryClaimCommentOperation_DoesNotClaimWhenConnectionIsDisabled()
+    {
+        var database = NewDatabase();
+        var store = NewStore(database);
+        var link = await store.CreateAsync("proj_1", "hello-world", 42, 7);
+        await using (var db = new MohistDbContext(database.Options))
+        {
+            db.GitHubConnections.Add(new GitHubConnectionRow
+            {
+                Id = "ghconn_1",
+                ProjectId = "proj_1",
+                Owner = "octocat",
+                Repo = "hello-world",
+                RepositoryName = "hello-world",
+                ApproversJson = "[]",
+                Status = GitHubConnectionStatus.Disabled,
+                NeedsAttention = false,
+                CreatedAt = Now,
+                UpdatedAt = Now,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        Assert.True(await store.TryReserveCommentAsync(
+            link.Id,
+            "retained-comment",
+            GitHubCommentOperationKind.Comment,
+            "retained while disabled",
+            stateReason: null));
+        var operationId = await LoadOperationIdAsync(database, link.Id, "retained-comment");
+        await store.ReleaseCommentOperationLeaseAsync(operationId);
+
+        Assert.Null(await store.TryClaimCommentOperationAsync(
+            operationId,
+            TimeSpan.FromMinutes(2)));
+
+        await using var verify = new MohistDbContext(database.Options);
+        var operation = await verify.GitHubIssueCommentOperations.SingleAsync(row => row.Id == operationId);
+        Assert.Equal(GitHubCommentOperationStatus.Reserved, operation.Status);
+        Assert.Null(operation.LeaseUntil);
+    }
+
+    private static async Task<string> LoadOperationIdAsync(
+        TestDatabase database,
+        string linkId,
+        string commentKey)
+    {
+        await using var db = new MohistDbContext(database.Options);
+        return await db.GitHubIssueCommentOperations
+            .Where(row => row.LinkId == linkId && row.CommentKey == commentKey)
+            .Select(row => row.Id)
+            .SingleAsync();
     }
 
     [Fact]

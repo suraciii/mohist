@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Ports;
 using Mohist.Server.Infrastructure;
@@ -55,9 +56,10 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
         foreach (var operation in pending)
         {
             ct.ThrowIfCancellationRequested();
-            if (await IsConnectionDisabledAsync(operation.LinkId, ct))
-                continue;
-
+            // The store claim includes the Active connection predicate. Do not
+            // split this boundary into a status read followed by an
+            // unconditional lease update: Disable may win between those two
+            // operations.
             var claimed = await _links.TryClaimCommentOperationAsync(operation.Id, LeaseDuration, ct);
             if (claimed is null)
                 continue;
@@ -77,17 +79,6 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
             }
         }
         return processed;
-    }
-
-    private async Task<bool> IsConnectionDisabledAsync(
-        string linkId,
-        CancellationToken ct)
-    {
-        var link = await _links.GetByIdAsync(linkId, ct);
-        if (link is null)
-            return false;
-        var connection = await _connections.GetByRepositoryAsync(link.ProjectId, link.RepositoryName, ct);
-        return connection?.Status == GitHubConnectionStatus.Disabled;
     }
 
     private async Task RecoverAsync(
@@ -325,18 +316,26 @@ public sealed class GitHubIssueCommentOperationRecoveryService : IScopedService
 /// scans durable rows after startup and between bounded wake intervals; the
 /// row lease prevents it from racing an in-flight request.
 /// </summary>
+public sealed class GitHubIssueCommentOperationRecoveryOptions
+{
+    public bool HostedWorkerEnabled { get; set; } = true;
+}
+
 public sealed class GitHubIssueCommentOperationRecoveryWorker : BackgroundService
 {
     private static readonly TimeSpan SafetyPollInterval = TimeSpan.FromMinutes(1);
 
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IOptions<GitHubIssueCommentOperationRecoveryOptions> _options;
     private readonly ILogger<GitHubIssueCommentOperationRecoveryWorker> _log;
 
     public GitHubIssueCommentOperationRecoveryWorker(
         IServiceScopeFactory scopeFactory,
+        IOptions<GitHubIssueCommentOperationRecoveryOptions> options,
         ILogger<GitHubIssueCommentOperationRecoveryWorker> log)
     {
         _scopeFactory = scopeFactory;
+        _options = options;
         _log = log;
     }
 
@@ -362,6 +361,9 @@ public sealed class GitHubIssueCommentOperationRecoveryWorker : BackgroundServic
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!_options.Value.HostedWorkerEnabled)
+            return;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             await ProcessPendingAsync(stoppingToken);
