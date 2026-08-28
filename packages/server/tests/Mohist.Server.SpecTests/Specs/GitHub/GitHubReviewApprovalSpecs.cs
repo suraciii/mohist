@@ -6,6 +6,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.GitHub.Infrastructure;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -14,9 +15,13 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.SpecTests.Specs.GitHub;
+using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Workflow.Definition;
 using Xunit;
@@ -27,6 +32,7 @@ namespace Mohist.Server.SpecTests.Specs.GitHub;
 public sealed class GitHubReviewApprovalSpecs
 {
     private const string RepoName = "hello-world";
+    private const int PullRequestNumber = 7;
     private const string GitHubReviewHandlerIdentity = "Mohist.Server.GitHub.Subscriptions.GitHubPullRequestReviewHandler";
 
     private readonly GitHubCommandFixture _fixture;
@@ -44,7 +50,7 @@ public sealed class GitHubReviewApprovalSpecs
     {
         var (projectId, connectionId, secret, issueNumber) = await SetupAtCheckGateAsync(["alice"]);
 
-        await DeliverAsync(connectionId, secret, "review-approve-1", ReviewPayload("approved", "alice", issueNumber));
+        await DeliverAsync(connectionId, secret, "review-approve-1", ReviewPayload("approved", "alice", PullRequestNumber));
         await PumpAsync();
 
         var status = await LoadWorkflowStatusAsync(projectId, issueNumber);
@@ -60,7 +66,7 @@ public sealed class GitHubReviewApprovalSpecs
     {
         var (projectId, connectionId, secret, issueNumber) = await SetupAtCheckGateAsync(["alice"]);
 
-        await DeliverAsync(connectionId, secret, "review-changes-1", ReviewPayload("changes_requested", "alice", issueNumber, "Fix the naming"));
+        await DeliverAsync(connectionId, secret, "review-changes-1", ReviewPayload("changes_requested", "alice", PullRequestNumber, "Fix the naming"));
         await PumpAsync();
 
         var status = await LoadWorkflowStatusAsync(projectId, issueNumber);
@@ -79,7 +85,7 @@ public sealed class GitHubReviewApprovalSpecs
             await SetupAtCheckGateAsync(["alice"], includeFeedbackTasks: false);
 
         await DeliverAsync(connectionId, secret, "review-changes-no-feedback-1", ReviewPayload(
-            "changes_requested", "alice", issueNumber, "Fix the naming"));
+            "changes_requested", "alice", PullRequestNumber, "Fix the naming"));
         await PumpAsync();
 
         var status = await LoadWorkflowStatusAsync(projectId, issueNumber);
@@ -96,7 +102,7 @@ public sealed class GitHubReviewApprovalSpecs
     {
         var (projectId, connectionId, secret, issueNumber) = await SetupAtCheckGateAsync(["alice"]);
 
-        await DeliverAsync(connectionId, secret, "review-comment-1", ReviewPayload("commented", "alice", issueNumber, "Nice work"));
+        await DeliverAsync(connectionId, secret, "review-comment-1", ReviewPayload("commented", "alice", PullRequestNumber, "Nice work"));
         await PumpAsync();
 
         var status = await LoadWorkflowStatusAsync(projectId, issueNumber);
@@ -113,7 +119,7 @@ public sealed class GitHubReviewApprovalSpecs
     {
         var (projectId, connectionId, secret, issueNumber) = await SetupAtCheckGateAsync(["alice"]);
 
-        await DeliverAsync(connectionId, secret, "review-outsider-1", ReviewPayload("approved", "mallory", issueNumber));
+        await DeliverAsync(connectionId, secret, "review-outsider-1", ReviewPayload("approved", "mallory", PullRequestNumber));
         await PumpAsync();
 
         var status = await LoadWorkflowStatusAsync(projectId, issueNumber);
@@ -128,7 +134,7 @@ public sealed class GitHubReviewApprovalSpecs
     {
         var (projectId, connectionId, secret, issueNumber) = await SetupAtCheckGateAsync([]);
 
-        await DeliverAsync(connectionId, secret, "review-empty-list-1", ReviewPayload("approved", "alice", issueNumber));
+        await DeliverAsync(connectionId, secret, "review-empty-list-1", ReviewPayload("approved", "alice", PullRequestNumber));
         await PumpAsync();
 
         var status = await LoadWorkflowStatusAsync(projectId, issueNumber);
@@ -143,9 +149,9 @@ public sealed class GitHubReviewApprovalSpecs
     {
         var (projectId, connectionId, secret, issueNumber) = await SetupAtCheckGateAsync(["alice"]);
 
-        await DeliverAsync(connectionId, secret, "review-gate-1", ReviewPayload("approved", "alice", issueNumber));
+        await DeliverAsync(connectionId, secret, "review-gate-1", ReviewPayload("approved", "alice", PullRequestNumber));
         await PumpAsync();
-        await DeliverAsync(connectionId, secret, "review-gate-2", ReviewPayload("approved", "alice", issueNumber));
+        await DeliverAsync(connectionId, secret, "review-gate-2", ReviewPayload("approved", "alice", PullRequestNumber));
         await PumpAsync();
 
         var status = await LoadWorkflowStatusAsync(projectId, issueNumber);
@@ -156,17 +162,17 @@ public sealed class GitHubReviewApprovalSpecs
     }
 
     [Fact]
-    public async Task Review_UnparseableBranch_NoAction()
+    public async Task Review_ArbitraryHeadBranch_StillCorrelates()
     {
         var (projectId, connectionId, secret, issueNumber) = await SetupAtCheckGateAsync(["alice"]);
 
-        await DeliverAsync(connectionId, secret, "review-branch-1", ReviewPayload("approved", "alice", issueNumber, branch: "feature/foo"));
+        await DeliverAsync(connectionId, secret, "review-branch-1", ReviewPayload("approved", "alice", PullRequestNumber, branch: "feature/foo"));
         await PumpAsync();
 
         var status = await LoadWorkflowStatusAsync(projectId, issueNumber);
         var check = status!.Workflow!.Stages.Single(s => s.Stage == "check");
-        Assert.Equal("awaiting-approval", check.Status);
-        Assert.Null(check.ApprovalStatus!.Result);
+        Assert.Equal("approved", check.ApprovalStatus!.Result);
+        Assert.Equal("integrate", status.Workflow.CurrentStage);
         await AssertReviewSettledAsync(projectId, connectionId, "review-branch-1");
     }
 
@@ -185,7 +191,7 @@ public sealed class GitHubReviewApprovalSpecs
     public async Task DuplicateDelivery_ApprovesOnce()
     {
         var (projectId, connectionId, secret, issueNumber) = await SetupAtCheckGateAsync(["alice"]);
-        var payload = ReviewPayload("approved", "alice", issueNumber);
+        var payload = ReviewPayload("approved", "alice", PullRequestNumber);
 
         await DeliverAsync(connectionId, secret, "review-dup-a", payload);
         await DeliverAsync(connectionId, secret, "review-dup-b", payload);
@@ -197,6 +203,110 @@ public sealed class GitHubReviewApprovalSpecs
         Assert.Equal("approved", check.ApprovalStatus!.Result);
         Assert.Equal("github:alice", check.ApprovalStatus.DecidedBy);
         Assert.Equal("integrate", status.Workflow.CurrentStage);
+    }
+
+    [Fact]
+    public async Task Review_SameLogicalRepositoryDifferentRemote_IsNoOp()
+    {
+        var (projectId, connectionId, secret, issueNumber) = await SetupAtCheckGateAsync(["alice"]);
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var project = await db.Projects.SingleAsync(row => row.Id == projectId);
+            var repositories = JSON.Deserialize<List<RepositoryInfo>>(project.RepositoriesJson)!;
+            repositories.Single(repository => repository.Name == RepoName).GitUrl =
+                $"https://github.com/other-owner/{RepoName}.git";
+            project.RepositoriesJson = JSON.Serialize(repositories);
+            await db.SaveChangesAsync();
+        }
+
+        await DeliverAsync(connectionId, secret, "review-remote-mismatch-1", ReviewPayload(
+            "approved", "alice", PullRequestNumber));
+        await PumpAsync();
+
+        var status = await LoadWorkflowStatusAsync(projectId, issueNumber);
+        var check = status!.Workflow!.Stages.Single(s => s.Stage == "check");
+        Assert.Equal("awaiting-approval", check.Status);
+        Assert.Null(check.ApprovalStatus!.Result);
+        await AssertReviewSettledAsync(projectId, connectionId, "review-remote-mismatch-1");
+    }
+
+    [Fact]
+    public async Task Review_InvalidRepositoryRemote_IsNoOp()
+    {
+        var (projectId, connectionId, secret, issueNumber) = await SetupAtCheckGateAsync(["alice"]);
+        const string malformedRemote = "not-a-valid-git-remote";
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var project = await db.Projects.SingleAsync(row => row.Id == projectId);
+            var repositories = JSON.Deserialize<List<RepositoryInfo>>(project.RepositoriesJson)!;
+            repositories.Single(repository => repository.Name == RepoName).GitUrl = malformedRemote;
+            project.RepositoriesJson = JSON.Serialize(repositories);
+
+            var runRow = await db.WorkflowRuns.SingleAsync(row => row.MetadataProjectId == projectId
+                && row.PullRequestNumber == PullRequestNumber);
+            var run = JSON.Deserialize<WorkflowRun>(runRow.State)!;
+            runRow.State = runRow.State.Replace(
+                run.Repository!.GitUrl,
+                malformedRemote,
+                StringComparison.Ordinal);
+            await db.SaveChangesAsync();
+        }
+
+        await DeliverAsync(connectionId, secret, "review-invalid-remote-1", ReviewPayload(
+            "approved", "alice", PullRequestNumber));
+        await PumpAsync();
+
+        var status = await LoadWorkflowStatusAsync(projectId, issueNumber);
+        var check = status!.Workflow!.Stages.Single(s => s.Stage == "check");
+        Assert.Equal("awaiting-approval", check.Status);
+        Assert.Null(check.ApprovalStatus!.Result);
+        await AssertReviewSettledAsync(projectId, connectionId, "review-invalid-remote-1");
+    }
+
+    [Fact]
+    public async Task DuplicateRuns_UsesOrderedCandidate_AndStopsOnRepositoryMismatch()
+    {
+        var (projectId, connectionId, secret, firstIssueNumber) = await SetupAtCheckGateAsync(["alice"]);
+        var secondIssueNumber = await AddCheckGateRunAsync(projectId);
+
+        string firstRunId;
+        string secondRunId;
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var runs = await db.WorkflowRuns
+                .Where(row => row.MetadataProjectId == projectId && row.PullRequestNumber == PullRequestNumber)
+                .OrderBy(row => row.WorkflowRunId)
+                .ToListAsync();
+            Assert.Equal(2, runs.Count);
+            firstRunId = runs[0].WorkflowRunId;
+            secondRunId = runs[1].WorkflowRunId;
+            var firstRun = JSON.Deserialize<WorkflowRun>(runs[0].State)!;
+            runs[0].State = runs[0].State.Replace(
+                firstRun.Repository!.GitUrl,
+                $"https://github.com/other-owner/{RepoName}.git",
+                StringComparison.Ordinal);
+            await db.SaveChangesAsync();
+        }
+
+        await DeliverAsync(connectionId, secret, "review-duplicate-runs-1", ReviewPayload(
+            "approved", "alice", PullRequestNumber));
+        await PumpAsync();
+
+        var firstStatus = await LoadWorkflowStatusAsync(projectId, firstIssueNumber);
+        var secondStatus = await LoadWorkflowStatusAsync(projectId, secondIssueNumber);
+        Assert.Contains(firstStatus!.WorkflowRunId, new[] { firstRunId, secondRunId });
+        Assert.Contains(secondStatus!.WorkflowRunId, new[] { firstRunId, secondRunId });
+        Assert.Equal("awaiting-approval", firstStatus.Workflow!.Stages.Single(s => s.Stage == "check").Status);
+        Assert.Equal("awaiting-approval", secondStatus.Workflow!.Stages.Single(s => s.Stage == "check").Status);
+        await AssertReviewSettledAsync(projectId, connectionId, "review-duplicate-runs-1");
     }
 
     /// <summary>
@@ -220,6 +330,27 @@ public sealed class GitHubReviewApprovalSpecs
         var deadLetters = scope.ServiceProvider.GetRequiredService<IDeadLetterStore>();
         var rows = await deadLetters.QueryAsync(GitHubReviewHandlerIdentity, 10);
         Assert.Empty(rows);
+    }
+
+    private async Task<int> AddCheckGateRunAsync(string projectId)
+    {
+        var issueNumber = await _fixture.Grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId)).NextAsync();
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+        await issueGrain.CreateAsync(projectId, issueNumber, "Implement the second feature", null, null, "p2", repositoryRef: RepoName, isDraft: false);
+        await issueGrain.StartWorkAsync();
+        var status = await LoadWorkflowStatusAsync(projectId, issueNumber);
+        Assert.Equal("awaiting-approval", status!.Workflow!.Status);
+        Assert.Equal("check", status.Workflow.CurrentStage);
+        await Client.PatchDataAsync<JsonElement>(
+            $"/api/workflow-runs/{status.WorkflowRunId}/variables",
+            new
+            {
+                vars = new
+                {
+                    github = new { pr = new { number = PullRequestNumber } },
+                },
+            });
+        return issueNumber;
     }
 
     private async Task<(string ProjectId, string ConnectionId, string Secret, int IssueNumber)> SetupAtCheckGateAsync(
@@ -246,6 +377,26 @@ public sealed class GitHubReviewApprovalSpecs
         var status = await LoadWorkflowStatusAsync(project.Id, issueNumber);
         Assert.Equal("awaiting-approval", status!.Workflow!.Status);
         Assert.Equal("check", status.Workflow.CurrentStage);
+
+        var variables = new
+        {
+            vars = new
+            {
+                github = new { pr = new { number = PullRequestNumber } },
+            },
+        };
+        await Client.PatchDataAsync<JsonElement>(
+            $"/api/workflow-runs/{status.WorkflowRunId}/variables", variables);
+
+        await using (var variableScope = _fixture.Services.CreateAsyncScope())
+        {
+            var dbFactory = variableScope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+            await using var verifyDb = await dbFactory.CreateDbContextAsync();
+            var runRow = await verifyDb.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == status.WorkflowRunId);
+            Assert.Equal(PullRequestNumber, runRow.PullRequestNumber);
+            Assert.Contains("pullRequestIdentity", runRow.State, StringComparison.Ordinal);
+        }
+
         return (project.Id, connectionId, secret, issueNumber);
     }
 
@@ -319,14 +470,15 @@ public sealed class GitHubReviewApprovalSpecs
         return await grain.GetWorkflowStatusAsync();
     }
 
-    private static string ReviewPayload(string state, string login, int issueNumber, string? body = null, string? branch = null)
+    private static string ReviewPayload(string state, string login, int pullRequestNumber, string? body = null, string? branch = null)
     {
         var bodyJson = body is null ? "null" : $"\"{body}\"";
+        var headJson = branch is null ? string.Empty : $", \"head\": {{ \"ref\": \"{branch}\" }}";
         return $$"""
             {
               "action": "submitted",
               "review": { "state": "{{state}}", "body": {{bodyJson}}, "user": { "login": "{{login}}" } },
-              "pull_request": { "number": 7, "head": { "ref": "{{branch ?? "mo/issue-" + issueNumber}}" } },
+              "pull_request": { "number": {{pullRequestNumber}}{{headJson}} },
               "repository": { "name": "hello-world", "full_name": "octocat/hello-world", "owner": { "login": "octocat" } }
             }
             """;

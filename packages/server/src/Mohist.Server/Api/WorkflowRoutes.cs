@@ -121,18 +121,27 @@ public static partial class WorkflowRoutes
             {
                 return ApiResults.BadRequest(ex.Message, "invalid_variables");
             }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_variables");
+            }
         });
 
         app.MapPatch("/api/workflow-runs/{workflowRunId}/variables", async (
             string workflowRunId,
             VariableBundle patch,
-            WorkflowRunVariablesStore runVariablesStore) =>
+            IGrainFactory grains) =>
         {
             try
             {
-                return ApiResults.Ok(await runVariablesStore.PatchVariablesAsync(workflowRunId, patch));
+                return ApiResults.Ok(await grains.GetGrain<IWorkflowGrain>(workflowRunId)
+                    .PatchVariablesAsync(patch));
             }
             catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_variables");
+            }
+            catch (InvalidOperationException ex)
             {
                 return ApiResults.BadRequest(ex.Message, "invalid_variables");
             }

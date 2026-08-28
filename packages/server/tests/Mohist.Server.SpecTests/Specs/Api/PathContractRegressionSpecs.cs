@@ -315,7 +315,27 @@ public class PathContractRegressionSpecs
     [Fact]
     public async Task WorkflowRunProfileVariables_AreReadWrittenAsVariableBundle()
     {
-        var workflowRunId = $"wr_api_{Guid.NewGuid():N}";
+        var project = await (await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name = $"workflow-vars-{Guid.NewGuid():N}",
+            repository = new { name = "primary", gitUrl = "git@example.com:workflow-vars.git", baseBranch = "main" },
+        }))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        var projectId = project.GetProperty("data").GetProperty("id").GetString()!;
+        var issue = await (await _client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues",
+            new { title = "Workflow variables", projectId, isDraft = false }))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        var issueNumber = issue.GetProperty("data").GetProperty("number").GetInt32();
+        using var startResponse = await _client.PostAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/start",
+            null);
+        Assert.Equal(System.Net.HttpStatusCode.OK, startResponse.StatusCode);
+        await DispatchEventsAsync();
+        var workflowStatus = await (await _client.GetAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/status"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        var workflowRunId = workflowStatus.GetProperty("data").GetProperty("workflowRunId").GetString()!;
 
         using var putResponse = await _client.PutAsJsonAsync(
             $"/api/workflow-runs/{workflowRunId}/variables",

@@ -1,9 +1,9 @@
 # Repository Execution
 
 A Repository is a named execution resource owned by a Project Space. An Issue
-stores only the target Repository resource name. A WorkflowRun does not copy
-the Repository, and a Runner Workspace does not become a second source of truth
-for Repository identity.
+stores the target Repository resource name. A WorkflowRun captures the bound
+Repository snapshot and may record one write-once Pull Request identity. A Runner
+Workspace does not become a second source of truth for Repository identity.
 
 ## Model
 
@@ -23,14 +23,17 @@ WorkflowRun
   Id
   ProjectId
   IssueNumber
+  Repository
+  PullRequestIdentity
 ```
 
 - Project Repository is the only write authority for `GitUrl` and
   `BaseBranch`.
 - An Issue's `RepositoryName` is a stable reference to a Project Repository.
   The Issue cannot be rebound after its first start.
-- A WorkflowRun stores only the scalars needed to locate its Issue. It stores
-  no Repository snapshot, Workspace path, or branch.
+- A WorkflowRun stores the bound Repository snapshot (name, Git URL, and base
+  branch) captured at start. It may also store one write-once Pull Request
+  identity for that Repository.
 - A Workspace is a first-class execution-environment resource under a Project,
   with its own identity, origin, and lifecycle. Its Repository references are
   access grants, not copies of Repository definitions. See
@@ -69,19 +72,16 @@ remote, the lock cannot split one physical repository into two locks.
 
 ### Dispatch
 
-Each task dispatch uses the WorkflowRun's Project and Issue references to read
-the Issue's Repository name, then resolves that name through the Project
-Repository collection.
+Each task dispatch uses the WorkflowRun's bound Repository snapshot. The
+snapshot is not a Run Variable and is not resolved again from the Project
+Repository collection. There is no fallback to the Project default, `main`, or
+legacy variables.
 
-The resolved value belongs only to that dispatch. It is not a Run Variable and
-is not written back to WorkflowRun. There is no fallback to the Project
-default, `main`, or legacy variables. If the target resource is missing, the
-task fails with an actionable Repository error; it may be retried after the
-Project Repository is repaired.
-
-An unfinished Issue locks the Repository's execution properties, so every
-dispatch in one WorkflowRun sees stable `GitUrl` and `BaseBranch` values without
-a snapshot.
+An unfinished Issue locks the Repository's execution properties before the run
+starts, so every dispatch in that WorkflowRun uses stable `GitUrl` and
+`BaseBranch` values. The first `github.pr.number` carrier through the Workflow
+grain records the run's write-once Pull Request identity; a conflicting number
+is rejected.
 
 ### Workspace
 
@@ -91,14 +91,13 @@ make a WorkflowRun, checkout, or Runner directory a second authority for both
 resources.
 
 An Issue therefore holds both stable references: `RepositoryName` selects the
-Project Repository and `WorkspaceName` selects the Project Workspace. Dispatch
-resolves the Repository live through the chain above and passes the Workspace
-name independently. Workspace identity, Origin, materialization, affinity, and
-loss behavior are defined only in
-[`workspaces.md`](workspaces.md).
+Project Repository and `WorkspaceName` selects the Project Workspace. WorkflowRun
+carries the bound Repository snapshot, while dispatch passes the Workspace name
+independently. Workspace identity, Origin, materialization, affinity, and loss
+behavior are defined only in [`workspaces.md`](workspaces.md).
 
 Repository preparation still protects one local invariant: the materialized
-checkout must belong to the resolved `GitUrl`. If the Runner cannot confirm the
+checkout must belong to the bound `GitUrl`. If the Runner cannot confirm the
 remote, it fails preparation before fetch, push, or rebase. This validation does
 not make the remote URL, checkout path, or branch part of Workspace identity.
 
@@ -118,10 +117,10 @@ fence rules are authoritative in
 
 - Changing the Git URL or base branch while an unfinished Issue uses the
   Repository is rejected and identifies the blocking Issue.
-- When dispatch cannot resolve the Issue's Repository, the task fails and may
-  retry after the Project is repaired.
+- When a run lacks the required bound Repository context, the task fails with
+  an actionable Repository error.
 - When preparation cannot confirm that the materialized checkout belongs to the
-  resolved Repository, it fails before fetch, push, or rebase.
+  bound Repository, it fails before fetch, push, or rebase.
 
 ## Status
 

@@ -32,6 +32,36 @@ internal static class VariableJsonMerge
         return JSON.DeserializeElement(ClonePatchObject(patch).ToJsonString());
     }
 
+    public static void SetPath(JsonObject target, string path, JsonElement value)
+    {
+        var segments = path.Split('.');
+        var current = target;
+        for (var index = 0; index < segments.Length - 1; index++)
+        {
+            var segment = segments[index];
+            if (current[segment] is not JsonObject child)
+            {
+                child = new JsonObject();
+                current[segment] = child;
+            }
+            current = child;
+        }
+
+        // An explicit null in the patch document is the deletion
+        // instruction consumed by ApplyObjectPatch; the indexer's null
+        // assignment would drop the key instead, so the null goes through
+        // Add. Nested nulls survive the raw-text clone below.
+        if (value.ValueKind == JsonValueKind.Null)
+        {
+            current.Remove(segments[^1]);
+            current.Add(segments[^1], null);
+        }
+        else
+        {
+            current[segments[^1]] = JsonNode.Parse(value.GetRawText());
+        }
+    }
+
     private static JsonObject ClonePatchObject(JsonElement patch)
     {
         var node = new JsonObject();

@@ -3,21 +3,22 @@ using Microsoft.Extensions.Logging;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Events;
-using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Infrastructure.Orleans;
-using Mohist.Server.Issue.Grains;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Services;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.GitHub.Subscriptions;
 
 /// <summary>
 /// Approval translator: a submitted PR review by an approver resolves the
-/// Check gate of the issue whose branch the PR head carries. The branch
-/// names the Mohist issue (<c>mo/issue-N</c>); a branch that does not parse
-/// is ignored, as are reviewers outside the connection's approver list
-/// (an empty list disables the capability entirely). Only a review arriving
-/// while the issue's active run is actually awaiting approval at the Check
+/// Check gate of the WorkflowRun bound to the Pull Request identity. Reviews
+/// whose number has no matching run, or whose run is bound to another
+/// repository, are ignored. Reviewers outside the connection's approver list
+/// (an empty list disables the capability entirely) are also ignored. Only a
+/// review arriving while the run is actually awaiting approval at the Check
 /// stage counts — the decision is taken from the event as delivered, never
 /// re-derived from later dismissals or stale reviews.
 /// <para>
@@ -70,43 +71,38 @@ public sealed class GitHubPullRequestReviewHandler : ICloudEventHandler
         await using var scope = _scopes.CreateAsyncScope();
         var sp = scope.ServiceProvider;
         var connection = await sp.GetRequiredService<GitHubConnectionStore>().GetByIdAsync(connectionId, ct);
-        if (connection is null || connection.Status != GitHubConnectionStatus.Active)
+        if (connection is null
+            || connection.Status != GitHubConnectionStatus.Active
+            || !string.Equals(connection.ProjectId, projectId, StringComparison.Ordinal))
             return;
         if (connection.Approvers.Count == 0
             || !connection.Approvers.Contains(payload.ReviewerLogin, StringComparer.OrdinalIgnoreCase))
         {
             return;
         }
-        if (!GitHubPullRequestReviewTranslation.TryParseIssueNumber(payload.HeadBranch, out var issueNumber))
-        {
-            _log.LogDebug(
-                "GitHub review skipped: branch '{Branch}' of PR #{PrNumber} does not name a Mohist issue",
-                payload.HeadBranch, payload.PullRequestNumber);
-            return;
-        }
-
-        // An issue that does not exist (stale branch, wrong project) is a
-        // no-op, never a handler failure: the dispatcher must settle the
-        // event instead of retrying or dead-lettering it.
-        var issueStore = sp.GetRequiredService<IIssueStore>();
-        if (await issueStore.LoadAsync(GrainKey.Issue(new IssueKey(projectId, issueNumber))) is null)
+        var project = await sp.GetRequiredService<ProjectQuerier>().GetByIdAsync(projectId);
+        var connectionRepository = project?.Repositories.FirstOrDefault(repository =>
+            string.Equals(repository.Name, connection.RepositoryName, StringComparison.OrdinalIgnoreCase));
+        if (connectionRepository is null)
             return;
 
-        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
-        string? workflowRunId;
-        try
-        {
-            var status = await issueGrain.GetWorkflowStatusAsync();
-            if (status?.Workflow is not { Status: "awaiting-approval", CurrentStage: "check" })
-                return;
-            workflowRunId = status.WorkflowRunId;
-        }
-        catch (InvalidOperationException)
-        {
+        var workflowRuns = sp.GetRequiredService<WorkflowRunQuerier>();
+        var workflowRunId = (await workflowRuns.FindByPullRequestAsync(
+            projectId, payload.PullRequestNumber, ct)).FirstOrDefault();
+        if (workflowRunId is null)
             return;
-        }
 
-        var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId!);
+        var run = await workflowRuns.LoadAsync(workflowRunId, ct);
+        if (run?.Repository is not { } repository
+            || run.PullRequestIdentity is not { Number: var identityNumber }
+            || identityNumber != payload.PullRequestNumber
+            || !GitUrlsEqual(repository.GitUrl, connectionRepository.GitUrl)
+            || run.Status != WorkflowRunStatus.AwaitingApproval
+            || !string.Equals(run.CurrentStageId, "check", StringComparison.Ordinal)
+            || !run.CurrentStage().IsAwaitingApproval)
+            return;
+
+        var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
         var decidedBy = GitHubPullRequestReviewTranslation.DecidedBy(payload.ReviewerLogin);
         try
         {
@@ -126,8 +122,17 @@ public sealed class GitHubPullRequestReviewHandler : ICloudEventHandler
         catch (InvalidOperationException ex)
         {
             _log.LogDebug(
-                "GitHub review no-op: Check gate of issue #{IssueNumber} is no longer awaiting approval ({Message})",
-                issueNumber, ex.Message);
+                "GitHub review no-op: Check gate of run {WorkflowRunId} is no longer awaiting approval ({Message})",
+                workflowRunId, ex.Message);
         }
+    }
+
+    private static bool GitUrlsEqual(string left, string right)
+    {
+        if (!GitRemoteUrlNormalizer.TryNormalize(left, out var normalizedLeft)
+            || !GitRemoteUrlNormalizer.TryNormalize(right, out var normalizedRight))
+            return false;
+
+        return string.Equals(normalizedLeft, normalizedRight, StringComparison.OrdinalIgnoreCase);
     }
 }

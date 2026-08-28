@@ -173,8 +173,9 @@ in WorkflowRun state, task input, Variables, or Prompts, and it creates no
 template namespace. The current child-Issue body remains authoritative for
 delivery scope.
 
-Repository does not enter a WorkflowRun snapshot or Run Variables. Issue stores only the resource
-name of its target repository. Dispatch uses that reference to read the Project Repository
-resource. An incomplete Issue prevents changes to the target Repository's Git URL or base branch,
-so every dispatch in one WorkflowRun reads stable execution properties without requiring the run
-to copy them. See [`../repositories.md`](../repositories.md) for the complete rules.
+WorkflowRun stores its bound Repository snapshot and its write-once Pull Request identity;
+neither is a Run Variable. The Issue's Repository binding supplies the snapshot at start, and
+dispatch uses that stable Repository context. The first `github.pr.number` carrier through the
+Workflow grain records the Pull Request identity; the same number is accepted again and a
+conflicting number is rejected. See [`../repositories.md`](../repositories.md) for the complete
+rules.

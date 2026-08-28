@@ -78,6 +78,146 @@ public partial class WorkflowRunStoreSpecs
     }
 
     [Fact]
+    public async Task SaveAsync_PersistsPullRequestIdentityProjection()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
+        var store = CreateStore(factory, new EventStore(factory, NullLogger<EventStore>.Instance));
+        var run = CreateRun("wr_pull_request_projection", epicNumber: null);
+        var repository = new WorkflowRepositoryContext(
+            "web",
+            "https://github.com/octocat/hello-world.git",
+            "master");
+        run.AssignRepositoryContext(repository);
+        run.AssignPullRequestIdentity(repository, 42);
+
+        await store.SaveAsync(run);
+
+        await using var db = factory.CreateDbContext();
+        var row = await db.WorkflowRuns.SingleAsync(value => value.WorkflowRunId == run.Id);
+        Assert.Equal(42, row.PullRequestNumber);
+        Assert.Contains("pullRequestIdentity", row.State, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunVariables_PatchPersistsPullRequestIdentity()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
+        var store = CreateStore(factory, new EventStore(factory, NullLogger<EventStore>.Instance));
+        var run = CreateRun("wr_pull_request_record", epicNumber: null);
+        var repository = new WorkflowRepositoryContext(
+            "web",
+            "https://github.com/octocat/hello-world.git",
+            "master");
+        run.AssignRepositoryContext(repository);
+        await store.SaveAsync(run);
+
+        var variables = new WorkflowRunVariablesStore(factory);
+        var patch = new VariableBundle(Vars: JsonSerializer.SerializeToElement(new
+        {
+            github = new { pr = new { number = 42 } },
+        }));
+        await variables.PatchVariablesAsync(run.Id, patch);
+
+        await using var db = factory.CreateDbContext();
+        var row = await db.WorkflowRuns.SingleAsync(value => value.WorkflowRunId == run.Id);
+        Assert.Equal(42, row.PullRequestNumber);
+        var persisted = await store.LoadAsync(run.Id);
+        Assert.Equal(42, persisted!.PullRequestIdentity!.Number);
+        Assert.Equal(repository, persisted.PullRequestIdentity.Repository);
+    }
+
+    [Fact]
+    public async Task RunVariables_SetCarrierDoesNotEstablishPullRequestIdentity()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
+        var store = CreateStore(factory, new EventStore(factory, NullLogger<EventStore>.Instance));
+        var run = CreateRun("wr_pull_request_carrier", epicNumber: null);
+        var repository = new WorkflowRepositoryContext(
+            "web",
+            "https://github.com/octocat/hello-world.git",
+            "master");
+        run.AssignRepositoryContext(repository);
+        await store.SaveAsync(run);
+
+        var variables = new WorkflowRunVariablesStore(factory);
+        var patch = new VariableBundle(Vars: JsonSerializer.SerializeToElement(new
+        {
+            github = new { pr = new { number = 42 } },
+        }));
+        await variables.SetVariablesAsync(run.Id, patch);
+
+        await using var db = factory.CreateDbContext();
+        var row = await db.WorkflowRuns.SingleAsync(value => value.WorkflowRunId == run.Id);
+        Assert.Null(row.PullRequestNumber);
+        Assert.DoesNotContain("pullRequestIdentity", row.State, StringComparison.Ordinal);
+        var written = await variables.GetVariablesAsync(run.Id);
+        Assert.Equal(42, written.Vars!.Value.GetProperty("github").GetProperty("pr").GetProperty("number").GetInt32());
+    }
+
+    [Fact]
+    public async Task RunVariables_ConflictingPullRequestNumber_IsRejectedWithoutStateChange()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
+        var store = CreateStore(factory, new EventStore(factory, NullLogger<EventStore>.Instance));
+        var run = CreateRun("wr_pull_request_conflict", epicNumber: null);
+        var repository = new WorkflowRepositoryContext(
+            "web",
+            "https://github.com/octocat/hello-world.git",
+            "master");
+        run.AssignRepositoryContext(repository);
+        run.AssignPullRequestIdentity(repository, 42);
+        await store.SaveAsync(run);
+
+        var variables = new WorkflowRunVariablesStore(factory);
+        var patch = new VariableBundle(Vars: JsonSerializer.SerializeToElement(new
+        {
+            github = new { pr = new { number = 43 } },
+        }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            variables.PatchVariablesAsync(run.Id, patch));
+
+        await using var db = factory.CreateDbContext();
+        var row = await db.WorkflowRuns.SingleAsync(value => value.WorkflowRunId == run.Id);
+        Assert.Equal(42, row.PullRequestNumber);
+        Assert.DoesNotContain("43", row.State, StringComparison.Ordinal);
+        Assert.False(await db.WorkflowRunProfiles.AnyAsync(value => value.WorkflowRunId == run.Id));
+    }
+
+    [Fact]
+    public async Task RunVariables_SetConflictingPullRequestNumber_IsRejectedWithoutStateChange()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
+        var store = CreateStore(factory, new EventStore(factory, NullLogger<EventStore>.Instance));
+        var run = CreateRun("wr_pull_request_set_conflict", epicNumber: null);
+        var repository = new WorkflowRepositoryContext(
+            "web",
+            "https://github.com/octocat/hello-world.git",
+            "master");
+        run.AssignRepositoryContext(repository);
+        run.AssignPullRequestIdentity(repository, 42);
+        await store.SaveAsync(run);
+
+        var variables = new WorkflowRunVariablesStore(factory);
+        var replacement = new VariableBundle(Vars: JsonSerializer.SerializeToElement(new
+        {
+            github = new { pr = new { number = 43 } },
+        }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            variables.SetVariablesAsync(run.Id, replacement));
+
+        await using var db = factory.CreateDbContext();
+        var row = await db.WorkflowRuns.SingleAsync(value => value.WorkflowRunId == run.Id);
+        Assert.Equal(42, row.PullRequestNumber);
+        Assert.DoesNotContain("43", row.State, StringComparison.Ordinal);
+        Assert.False(await db.WorkflowRunProfiles.AnyAsync(value => value.WorkflowRunId == run.Id));
+    }
+
+    [Fact]
     public async Task SaveAsync_NewTerminalRun_DoesNotPersistProfileBackingKey()
     {
         using var database = TestSqliteDatabase.CreateMigrated();

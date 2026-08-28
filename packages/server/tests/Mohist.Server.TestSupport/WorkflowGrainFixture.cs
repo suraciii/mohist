@@ -25,6 +25,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public string ConnectionString => _keeper.ConnectionString;
     public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     public AgentSessionPersistenceTestProbe Persistence { get; }
+    public ReportPersistenceFailureProbe ReportPersistenceFailures { get; } = new();
     public ControllableDispatchPollObserver DispatchPollObserver { get; } = new();
 
     private readonly RecordingEventStore _sharedEventStore = new();
@@ -61,6 +62,9 @@ public class WorkflowGrainFixture : IAsyncLifetime
                 _sharedEventStore,
                 TimeProvider,
                 Persistence);
+            siloBuilder.Services.AddSingleton(ReportPersistenceFailures);
+            siloBuilder.Services.AddSingleton<Mohist.Server.Workflow.Grains.IWorkflowReportPersistenceFailureInjector>(
+                services => services.GetRequiredService<ReportPersistenceFailureProbe>());
             siloBuilder.Services.AddSingleton<IDispatchPollObserver>(DispatchPollObserver);
             // IssueGrain + ProjectGrain dependencies: the workflow-only
             // tests above never activate issue/project grains, but the
@@ -173,11 +177,16 @@ public sealed class ControllableDispatchPollObserver : IDispatchPollObserver
     private TaskCompletionSource _runnerInfoObserved = NewSignal();
     private TaskCompletionSource? _afterRunnerInfoBlock;
 
+    public Func<string, Task>? BeforeWorkflowClaim { get; set; }
+
     public Task AfterRunnerInfoAsync(string runnerId)
     {
         _runnerInfoObserved.TrySetResult();
         return _afterRunnerInfoBlock?.Task ?? Task.CompletedTask;
     }
+
+    public Task BeforeWorkflowClaimAsync(string workflowRunId) =>
+        BeforeWorkflowClaim?.Invoke(workflowRunId) ?? Task.CompletedTask;
 
     public Task WaitForRunnerInfoAsync() => _runnerInfoObserved.Task;
 
@@ -189,6 +198,7 @@ public sealed class ControllableDispatchPollObserver : IDispatchPollObserver
     {
         _afterRunnerInfoBlock?.TrySetResult();
         _afterRunnerInfoBlock = null;
+        BeforeWorkflowClaim = null;
         _runnerInfoObserved = NewSignal();
     }
 

@@ -61,6 +61,67 @@ public class AuxiliaryDeclarationsTests
     }
 
     [Fact]
+    public void Parse_SetVarsSourceWithEmptySegment_Rejected()
+    {
+        var result = WorkflowDefinitionParser.Parse("""
+            stages:
+              - stage: build
+                tasks:
+                  - id: t1
+                    uses: mohist/opencode
+                    setVars:
+                      value: output.result..id
+                checks: []
+            """);
+
+        Assert.False(result.IsValid);
+        var error = result.Errors.Single(e => e.Path == "stages[0].tasks[0].setVars.value");
+        Assert.Equal(
+            "setVars source path 'output.result..id' contains an empty segment",
+            error.Message);
+    }
+
+    [Fact]
+    public void Parse_SetVarsBareOutputPrefix_Rejected()
+    {
+        var result = WorkflowDefinitionParser.Parse("""
+            stages:
+              - stage: build
+                tasks:
+                  - id: t1
+                    uses: mohist/opencode
+                    setVars:
+                      value: output.
+                checks: []
+            """);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e =>
+            e.Path == "stages[0].tasks[0].setVars.value" &&
+            e.Message == "setVars source path 'output.' contains an empty segment");
+    }
+
+    [Fact]
+    public void Parse_SetVarsKeyWithEmptySegment_Rejected()
+    {
+        var result = WorkflowDefinitionParser.Parse("""
+            stages:
+              - stage: build
+                tasks:
+                  - id: t1
+                    uses: mohist/opencode
+                    setVars:
+                      result..id: output.result.id
+                checks: []
+            """);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e =>
+            e.Path == "stages[0].tasks[0].setVars.result..id" &&
+            e.Message == "setVars key 'result..id' contains an empty segment");
+    }
+
+    [Fact]
     public void Parse_ExpectMarkerFailIfNotMemberOfOneOf_Rejected()
     {
         var result = WorkflowDefinitionParser.Parse("""

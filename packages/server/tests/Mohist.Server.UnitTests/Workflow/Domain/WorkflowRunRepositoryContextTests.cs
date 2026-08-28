@@ -207,6 +207,52 @@ public class WorkflowRunRepositoryContextTests
     }
 
     [Fact]
+    public void AssignPullRequestIdentity_SameRepositoryAndNumber_IsIdempotent()
+    {
+        var run = NewRun();
+        var repository = SampleRepository();
+        run.EnsureStarted(repository, SampleWorkspace(run.Id), FixedNow);
+
+        run.AssignPullRequestIdentity(repository, 42);
+        run.AssignPullRequestIdentity(repository, 42);
+
+        Assert.NotNull(run.PullRequestIdentity);
+        Assert.Equal(42, run.PullRequestIdentity!.Number);
+        Assert.Equal(repository, run.PullRequestIdentity.Repository);
+    }
+
+    [Fact]
+    public void AssignPullRequestIdentity_ConflictingNumber_RefusesWithoutChangingIdentity()
+    {
+        var run = NewRun();
+        var repository = SampleRepository();
+        run.EnsureStarted(repository, SampleWorkspace(run.Id), FixedNow);
+        run.AssignPullRequestIdentity(repository, 42);
+        var before = JsonSerializer.Serialize(run, JSON.Options);
+
+        Assert.Throws<InvalidOperationException>(() => run.AssignPullRequestIdentity(repository, 43));
+
+        Assert.Equal(before, JsonSerializer.Serialize(run, JSON.Options));
+        Assert.Equal(42, run.PullRequestIdentity!.Number);
+    }
+
+    [Fact]
+    public void PullRequestIdentity_StateRoundTrip_PreservesRepositoryAndNumber()
+    {
+        var run = NewRun();
+        var repository = SampleRepository();
+        run.EnsureStarted(repository, SampleWorkspace(run.Id), FixedNow);
+        run.AssignPullRequestIdentity(repository, 42);
+
+        var json = JsonSerializer.Serialize(run, JSON.Options);
+        var reloaded = JsonSerializer.Deserialize<WorkflowRun>(json, JSON.Options);
+
+        Assert.NotNull(reloaded?.PullRequestIdentity);
+        Assert.Equal(42, reloaded!.PullRequestIdentity!.Number);
+        Assert.Equal(repository, reloaded.PullRequestIdentity.Repository);
+    }
+
+    [Fact]
     public void Start_AfterEnsureStarted_DoesNotOverwriteRepositoryContext()
     {
         // Contract: once the run has been ensured-started, the

@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Project.Domain;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
@@ -413,20 +414,34 @@ public sealed class DispatchService : IScopedService
 
         try
         {
-            if (activeWork.IsTask)
+            var storedJson = await _dispatchSnapshots.LoadJsonAsync(workflowRunId, workId, ct);
+            if (storedJson is not null)
             {
-                var storedJson = await _dispatchSnapshots.LoadJsonAsync(workflowRunId, workId, ct);
-                if (storedJson is not null)
-                    return (workKey, JSON.Deserialize<WorkDispatch>(storedJson)!, ReserveSlot: true);
+                var stored = JSON.Deserialize<WorkDispatch>(storedJson)!;
+                await ValidateWorkflowDispatchAsync(workflowRunId, stored);
+                return (workKey, stored, ReserveSlot: true);
             }
 
             var dispatch = await _translator.TranslateToDispatchAsync(activeWork.Item, workflowRunId, run, runnerId);
             var concrete = WithIssueFromRun(dispatch, run);
+            await ValidateWorkflowDispatchAsync(workflowRunId, concrete);
             if (activeWork.IsChecks)
                 return (workKey, concrete, ReserveSlot: true);
 
             var saved = await StoreDispatchAsync(workflowRunId, runnerId, workId, concrete);
             return (workKey, saved, ReserveSlot: true);
+        }
+        catch (WorkflowDispatchRejectedException ex) when (IsPullRequestIdentityConflict(ex))
+        {
+            _log.LogWarning(ex,
+                "refused dispatch with conflicting Pull Request identity for run {run} work {work}",
+                workflowRunId,
+                workId);
+            if (activeWork.IsChecks
+                && await FailWorkflowChecksDispatchAsync(
+                    workflowRunId, runnerId, workId, processGeneration, ex.Error, ct))
+                return (null, null, ReserveSlot: false);
+            return (workKey, null, ReserveSlot: true);
         }
         catch (WorkflowDispatchRejectedException ex)
         {
@@ -457,8 +472,28 @@ public sealed class DispatchService : IScopedService
         string processGeneration,
         CancellationToken ct)
     {
-        WorkItem? item;
         ct.ThrowIfCancellationRequested();
+        var pendingRun = await _workflowRuns.LoadAsync(workflowRunId, ct);
+        var pendingItem = pendingRun is null ? null : BuildWorkflowWorkItem(pendingRun);
+        if (pendingRun is null || pendingItem is null)
+            return null;
+
+        try
+        {
+            var preview = await _translator.TranslateToDispatchPreviewAsync(
+                pendingItem, workflowRunId, pendingRun);
+            await ValidateWorkflowDispatchAsync(workflowRunId, preview);
+            await _pollObserver.BeforeWorkflowClaimAsync(workflowRunId).WaitAsync(ct);
+        }
+        catch (WorkflowDispatchRejectedException ex) when (IsPullRequestIdentityConflict(ex))
+        {
+            _log.LogWarning(ex,
+                "refused dispatch with conflicting Pull Request identity before claiming run {run}",
+                workflowRunId);
+            return null;
+        }
+
+        WorkItem? item;
         try
         {
             item = await runner.TryClaimWorkflowAsync(workflowRunId, projectId, assignWorker, processGeneration);
@@ -487,10 +522,22 @@ public sealed class DispatchService : IScopedService
         {
             var dispatch = await _translator.TranslateToDispatchAsync(item, workflowRunId, run, runnerId);
             var concrete = WithIssueFromRun(dispatch, run);
+            await ValidateWorkflowDispatchAsync(workflowRunId, concrete);
             if (item.IsChecks)
                 return concrete;
 
             return await StoreDispatchAsync(workflowRunId, runnerId, item.Id!, concrete);
+        }
+        catch (WorkflowDispatchRejectedException ex) when (IsPullRequestIdentityConflict(ex))
+        {
+            _log.LogWarning(ex,
+                "refused dispatch with conflicting Pull Request identity after claiming run {run} work {work}",
+                workflowRunId,
+                item.Id);
+            if (item.IsChecks)
+                await FailWorkflowChecksDispatchAsync(
+                    workflowRunId, runnerId, item.Id!, processGeneration, ex.Error, ct);
+            return null;
         }
         catch (WorkflowDispatchRejectedException ex)
         {
@@ -594,6 +641,12 @@ public sealed class DispatchService : IScopedService
         await _grains.GetGrain<IWorkflowGrain>(workflowRunId)
             .StoreActiveWorkDispatchAsync(runnerId, workId, dispatch);
 
+    private async Task ValidateWorkflowDispatchAsync(
+        string workflowRunId,
+        WorkDispatch dispatch) =>
+        await _grains.GetGrain<IWorkflowGrain>(workflowRunId)
+            .ValidateDispatchAsync(dispatch);
+
     private async Task RejectWorkflowDispatchAsync(
         string workflowRunId,
         string runnerId,
@@ -609,6 +662,62 @@ public sealed class DispatchService : IScopedService
         await _grains.GetGrain<IWorkflowGrain>(workflowRunId)
             .RejectActiveWorkDispatchAsync(runnerId, workId, exception.Error);
     }
+
+    private async Task<bool> FailWorkflowChecksDispatchAsync(
+        string workflowRunId,
+        string runnerId,
+        string workId,
+        string processGeneration,
+        ExecutionError error,
+        CancellationToken ct)
+    {
+        var reason = $"{error.Code}: {error.Message}";
+        try
+        {
+            var verdict = await _grains.GetGrain<IWorkflowGrain>(workflowRunId)
+                .FailActiveWorkAsync(runnerId, workId, processGeneration, reason);
+            return verdict == WorkReportVerdict.Accepted;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            ct.ThrowIfCancellationRequested();
+            _log.LogWarning(ex,
+                "failed to settle conflicting checks dispatch for run {run} work {work}",
+                workflowRunId,
+                workId);
+            return false;
+        }
+    }
+
+    private static WorkItem? BuildWorkflowWorkItem(WorkflowRun run)
+    {
+        return run.NextWork() switch
+        {
+            WorkflowTaskWork task => WorkItem.Task(
+                task.Stage,
+                task.Id,
+                task.Title,
+                task.Uses,
+                task.With,
+                task.Artifacts,
+                task.SetVars,
+                task.Recovery,
+                task.RecoveryRemaining,
+                task.Expect),
+            WorkflowChecksWork checks => WorkItem.Checks(
+                checks.Stage,
+                WorkflowRunExtensions.ChecksWorkIdFor(checks.Stage),
+                checks.Items),
+            _ => null,
+        };
+    }
+
+    private static bool IsPullRequestIdentityConflict(WorkflowDispatchRejectedException exception) =>
+        string.Equals(exception.Error.Code, "pull_request_identity_conflict", StringComparison.Ordinal);
 
     private static string WorkflowWorkKey(string workflowRunId, string workId) =>
         $"{WorkDispatchOwnerKinds.Workflow}:{workflowRunId}:{workId}";

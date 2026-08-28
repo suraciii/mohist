@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Runner.Grains;
 using Mohist.Workflow.Definition;
+using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Workflow.Grains;
@@ -27,6 +28,8 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<bool> HasIncompleteTaskByIdAsync(string id);
     Task<WorkflowAssignmentResult> AssignWorkerAsync(string workerId);
     Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration);
+    Task<VariableBundle> PatchVariablesAsync(VariableBundle patch);
+    Task ValidateDispatchAsync(WorkDispatch dispatch);
     Task<WorkDispatch?> StoreActiveWorkDispatchAsync(string workerId, string workId, WorkDispatch dispatch);
     Task<WorkReportVerdict> FailActiveWorkAsync(string workerId, string workId, string processGeneration, string message);
     Task<WorkReportVerdict> AbandonActiveWorkAsync(string workerId, string workId, string reason);

@@ -3,6 +3,7 @@ namespace Mohist.Server.Runner.Services;
 public interface IDispatchPollObserver
 {
     Task AfterRunnerInfoAsync(string runnerId);
+    Task BeforeWorkflowClaimAsync(string workflowRunId);
 }
 
 public sealed class NoopDispatchPollObserver : IDispatchPollObserver
@@ -14,4 +15,6 @@ public sealed class NoopDispatchPollObserver : IDispatchPollObserver
     }
 
     public Task AfterRunnerInfoAsync(string runnerId) => Task.CompletedTask;
+
+    public Task BeforeWorkflowClaimAsync(string workflowRunId) => Task.CompletedTask;
 }

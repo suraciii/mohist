@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 namespace Mohist.Server.Workflow.Domain.Run;
 
@@ -43,6 +44,21 @@ public static class WorkflowRunBranch
 
 public static partial class WorkflowRunExtensions
 {
+    public static int? ReadPullRequestNumber(JsonElement? vars)
+    {
+        if (vars is not { ValueKind: JsonValueKind.Object }
+            || !vars.Value.TryGetProperty("github", out var github)
+            || github.ValueKind != JsonValueKind.Object
+            || !github.TryGetProperty("pr", out var pullRequest)
+            || pullRequest.ValueKind != JsonValueKind.Object
+            || !pullRequest.TryGetProperty("number", out var number))
+            return null;
+
+        if (!number.TryGetInt32(out var value) || value <= 0)
+            throw new InvalidOperationException("vars.github.pr.number must be a positive integer");
+        return value;
+    }
+
     extension(WorkflowRun run)
     {
         public bool IsTerminal() => run.Status.IsTerminal();

@@ -238,6 +238,7 @@ public class WorkflowRunStore : IWorkflowRunStore
                 WorkflowRunId = run.Id,
                 State = JSON.Serialize(run),
                 EpicNumber = epicNumber,
+                PullRequestNumber = run.PullRequestIdentity?.Number,
                 ActiveWorkId = projection.ActiveWorkId,
                 ActiveWorkerId = projection.ActiveWorkerId,
                 AttentionStatus = null,
@@ -253,6 +254,7 @@ public class WorkflowRunStore : IWorkflowRunStore
         }
 
         entity.EpicNumber = epicNumber;
+        entity.PullRequestNumber = run.PullRequestIdentity?.Number;
         entity.State = JSON.Serialize(run);
         entity.ActiveWorkId = projection.ActiveWorkId;
         entity.ActiveWorkerId = projection.ActiveWorkerId;

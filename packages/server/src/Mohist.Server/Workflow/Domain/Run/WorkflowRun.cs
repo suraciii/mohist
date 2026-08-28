@@ -61,6 +61,11 @@ public sealed record WorkflowRepositoryContext(
     [property: Id(1)] string GitUrl,
     [property: Id(2)] string BaseBranch);
 
+[GenerateSerializer]
+public sealed record WorkflowPullRequestIdentity(
+    [property: Id(0)] WorkflowRepositoryContext Repository,
+    [property: Id(1)] int Number);
+
 public sealed class WorkflowRun
 {
     public required string Id { get; init; }
@@ -112,8 +117,57 @@ public sealed class WorkflowRun
     [JsonInclude]
     public WorkflowRepositoryContext? Repository { get; private set; }
 
+    [JsonInclude]
+    public WorkflowPullRequestIdentity? PullRequestIdentity { get; private set; }
+
     internal void AssignRepositoryContext(WorkflowRepositoryContext? repository) =>
         Repository = repository;
+
+    internal void AssignPullRequestIdentity(int number) =>
+        AssignPullRequestIdentity(Repository
+            ?? throw new InvalidOperationException(
+                $"WorkflowRun '{Id}' cannot record a Pull Request without a bound repository"), number);
+
+    internal void AssignPullRequestIdentity(WorkflowRepositoryContext repository, int number)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        if (number <= 0)
+            throw new InvalidOperationException("Pull Request number must be positive");
+        if (Repository is null || !RepositoryContextEquals(Repository, repository))
+            throw new InvalidOperationException(
+                $"WorkflowRun '{Id}' cannot record a Pull Request for a conflicting repository");
+
+        var candidate = new WorkflowPullRequestIdentity(repository, number);
+        if (PullRequestIdentity is null)
+        {
+            PullRequestIdentity = candidate;
+            return;
+        }
+
+        if (PullRequestIdentity.Number != number
+            || !RepositoryContextEquals(PullRequestIdentity.Repository, repository))
+        {
+            throw new InvalidOperationException(
+                $"WorkflowRun '{Id}' already has Pull Request #{PullRequestIdentity.Number} for a conflicting identity");
+        }
+    }
+
+    internal void ValidatePullRequestNumber(int number)
+    {
+        if (number <= 0)
+            throw new InvalidOperationException("Pull Request number must be positive");
+        if (PullRequestIdentity is not null && PullRequestIdentity.Number != number)
+            throw new InvalidOperationException(
+                $"WorkflowRun '{Id}' is bound to Pull Request #{PullRequestIdentity.Number}, not #{number}");
+    }
+
+    private static bool RepositoryContextEquals(
+        WorkflowRepositoryContext left,
+        WorkflowRepositoryContext right) =>
+        string.Equals(left.Name, right.Name, StringComparison.Ordinal)
+        && string.Equals(left.GitUrl, right.GitUrl, StringComparison.Ordinal)
+        && string.Equals(left.BaseBranch, right.BaseBranch, StringComparison.Ordinal);
+
     public List<ApprovalFeedback> Feedback { get; set; } = new();
 
     public bool IsAssigned => Assignment is not null;
