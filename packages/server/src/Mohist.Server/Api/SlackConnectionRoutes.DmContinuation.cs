@@ -135,7 +135,7 @@ public static partial class SlackConnectionRoutes
             req.ProjectId,
             route.SessionId,
             failedTurn.Id,
-            "slack-continuation:auto",
+            $"slack-continuation:auto:{failedTurn.Id}",
             ct);
         if (retry.Outcome == AgentSessionRetryOutcome.AcceptedPending
             && !string.IsNullOrWhiteSpace(retry.OperationId))

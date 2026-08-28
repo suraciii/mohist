@@ -512,6 +512,11 @@ resolved replacement Session, and accepts the triggering message there exactly
 once. This recovers a definitely failed launch; it is not permission to replay
 an active or unknown effect.
 
+Pre-execution Skill resolution is part of that retry-safe boundary. A missing
+Skill fails before a Runtime Session or model turn starts, so a later ordinary
+DM may resume through the durable replacement path after the Skill becomes
+available. It never requires the user to start a new task.
+
 Queued Follow-up now enters the same physical Runtime missing-binding recovery
 boundary before its input is submitted. Generic AgentJob launch does not yet
 enter that boundary. Reconnect reconciliation can also replace a binding for

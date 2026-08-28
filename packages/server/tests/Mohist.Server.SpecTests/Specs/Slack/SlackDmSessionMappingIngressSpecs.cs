@@ -69,8 +69,10 @@ public sealed class SlackDmSessionMappingIngressSpecs
         Assert.False(string.IsNullOrEmpty(sessionId));
     }
 
-    [Fact]
-    public async Task Retry_safe_failed_initial_launch_recovers_and_accepts_followup_once()
+    [Theory]
+    [InlineData(AgentJobFailureReasons.RunnerUnavailable)]
+    [InlineData("skill-not-found")]
+    public async Task Retry_safe_failed_initial_launch_recovers_and_accepts_followup_once(string failureCategory)
     {
         var connection = await CreateConnectionAsync();
         const string conversationId = "D-DM-MISSING-RUNTIME";
@@ -104,8 +106,8 @@ public sealed class SlackDmSessionMappingIngressSpecs
             failedInitial!.Turn!.JobId!,
             AgentTurnStatus.Failed,
             new AgentTurnResult(
-                FailureReason: "runner unavailable",
-                FailureCategory: AgentJobFailureReasons.RunnerUnavailable));
+                FailureReason: "failed before execution started",
+                FailureCategory: failureCategory));
 
         async Task<JsonElement> PostFollowupAsync(string messageTs, string text)
         {
