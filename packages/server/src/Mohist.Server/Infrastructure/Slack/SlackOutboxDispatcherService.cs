@@ -108,14 +108,26 @@ public sealed class SlackOutboxDispatcherService : IDisposable
         foreach (var row in rows)
         {
             ct.ThrowIfCancellationRequested();
-            var updated = await _store.MarkDeadLetteredAsync(row.ProjectId, row.Id, "retry budget exhausted", ct).ConfigureAwait(false);
-            if (updated == 0)
-                continue;
+            await ProcessRowAsync(row, "retry-exhausted", async () =>
+            {
+                var updated = await _store.MarkDeadLetteredAsync(
+                    row.ProjectId,
+                    row.Id,
+                    "retry budget exhausted",
+                    expectedState: SlackOutboxStates.Pending,
+                    expectedUpdatedAt: row.UpdatedAt,
+                    ct: ct).ConfigureAwait(false);
+                if (updated == 0)
+                {
+                    LogSkippedStateChange(row, "retry-exhausted", SlackOutboxStates.Pending);
+                    return;
+                }
 
-            await _deadLetters.WriteAsync(BuildDeadLetter(row, "retry budget exhausted"), ct).ConfigureAwait(false);
-            _log.LogInformation(
-                "Slack outbox row {RowId} (ConnectionId={ConnectionId}, Kind={Kind}, AttemptCount={AttemptCount}) dead-lettered: retry budget exhausted",
-                row.Id, row.ConnectionId, row.Kind, row.AttemptCount);
+                await _deadLetters.WriteAsync(BuildDeadLetter(row, "retry budget exhausted"), ct).ConfigureAwait(false);
+                _log.LogInformation(
+                    "Slack outbox row {RowId} (ConnectionId={ConnectionId}, Kind={Kind}, AttemptCount={AttemptCount}) dead-lettered: retry budget exhausted",
+                    row.Id, row.ConnectionId, row.Kind, row.AttemptCount);
+            }, ct).ConfigureAwait(false);
         }
     }
 
@@ -125,10 +137,26 @@ public sealed class SlackOutboxDispatcherService : IDisposable
         foreach (var row in rows)
         {
             ct.ThrowIfCancellationRequested();
-            await _store.MarkDeliveryUncertainAsync(row.ProjectId, row.Id, "claim timeout", ct).ConfigureAwait(false);
-            _log.LogInformation(
-                "Slack outbox row {RowId} (ConnectionId={ConnectionId}, ClaimedAt={ClaimedAt}) flipped to DeliveryUncertain: claim timeout",
-                row.Id, row.ConnectionId, row.ClaimedAt);
+            await ProcessRowAsync(row, "claim-timeout", async () =>
+            {
+                var updated = await _store.MarkDeliveryUncertainAsync(
+                    row.ProjectId,
+                    row.Id,
+                    "claim timeout",
+                    adapterId: null,
+                    ct: ct,
+                    expectedState: SlackOutboxStates.Claimed,
+                    expectedUpdatedAt: row.UpdatedAt).ConfigureAwait(false);
+                if (updated == 0)
+                {
+                    LogSkippedStateChange(row, "claim-timeout", SlackOutboxStates.Claimed);
+                    return;
+                }
+
+                _log.LogInformation(
+                    "Slack outbox row {RowId} (ConnectionId={ConnectionId}, ClaimedAt={ClaimedAt}) flipped to DeliveryUncertain: claim timeout",
+                    row.Id, row.ConnectionId, row.ClaimedAt);
+            }, ct).ConfigureAwait(false);
         }
     }
 
@@ -138,16 +166,61 @@ public sealed class SlackOutboxDispatcherService : IDisposable
         foreach (var row in rows)
         {
             ct.ThrowIfCancellationRequested();
-            var updated = await _store.MarkDeadLetteredAsync(row.ProjectId, row.Id, "delivery uncertain timeout", ct).ConfigureAwait(false);
-            if (updated == 0)
-                continue;
+            await ProcessRowAsync(row, "uncertain-timeout", async () =>
+            {
+                var updated = await _store.MarkDeadLetteredAsync(
+                    row.ProjectId,
+                    row.Id,
+                    "delivery uncertain timeout",
+                    expectedState: SlackOutboxStates.DeliveryUncertain,
+                    expectedUpdatedAt: row.UpdatedAt,
+                    ct: ct).ConfigureAwait(false);
+                if (updated == 0)
+                {
+                    LogSkippedStateChange(row, "uncertain-timeout", SlackOutboxStates.DeliveryUncertain);
+                    return;
+                }
 
-            await _deadLetters.WriteAsync(BuildDeadLetter(row, "delivery uncertain timeout"), ct).ConfigureAwait(false);
-            _log.LogInformation(
-                "Slack outbox row {RowId} (ConnectionId={ConnectionId}, DeliveryUncertainAt={DeliveryUncertainAt}) dead-lettered: uncertain timeout",
-                row.Id, row.ConnectionId, row.DeliveryUncertainAt);
+                await _deadLetters.WriteAsync(BuildDeadLetter(row, "delivery uncertain timeout"), ct).ConfigureAwait(false);
+                _log.LogInformation(
+                    "Slack outbox row {RowId} (ConnectionId={ConnectionId}, DeliveryUncertainAt={DeliveryUncertainAt}) dead-lettered: uncertain timeout",
+                    row.Id, row.ConnectionId, row.DeliveryUncertainAt);
+            }, ct).ConfigureAwait(false);
         }
     }
+
+    private async Task ProcessRowAsync(
+        SlackOutboxRow row,
+        string sweep,
+        Func<Task> process,
+        CancellationToken ct)
+    {
+        try
+        {
+            await process().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(
+                ex,
+                "Slack outbox {Sweep} sweep skipped row {RowId} (ConnectionId={ConnectionId}) after a per-row failure",
+                sweep,
+                row.Id,
+                row.ConnectionId);
+        }
+    }
+
+    private void LogSkippedStateChange(SlackOutboxRow row, string sweep, string expectedState) =>
+        _log.LogDebug(
+            "Slack outbox {Sweep} sweep skipped row {RowId} (ConnectionId={ConnectionId}); expected state {ExpectedState} no longer matched",
+            sweep,
+            row.Id,
+            row.ConnectionId,
+            expectedState);
 
     private async Task RecoverBackpressureAsync(CancellationToken ct)
     {

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Domain;
@@ -228,6 +229,119 @@ public sealed class SlackProviderReliabilityStoreSpecs
             Assert.Single((await store.ListAsync("proj_a", "conn_1")).Entries).State);
     }
 
+    [Fact]
+    public async Task Outbox_dead_letter_skips_a_row_claimed_after_the_sweep_listing()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        await SeedEnabledConnectionAsync(database);
+        var store = NewOutbox(database, new RecordingHealthBackpressurer(), capacity: 3);
+        var queued = await store.EnqueueAsync(OutboxDraft(SlackOutboxKinds.TerminalResult, "done"));
+        Assert.NotNull(await store.ClaimAsync("proj_a", "conn_1", "adapter-a"));
+
+        var updated = await store.MarkDeadLetteredAsync(
+            "proj_a",
+            queued.Id,
+            "retry budget exhausted",
+            expectedState: SlackOutboxStates.Pending,
+            expectedUpdatedAt: Start);
+
+        Assert.Equal(0, updated);
+        Assert.Equal(
+            SlackOutboxStates.Claimed,
+            Assert.Single((await store.ListAsync("proj_a", "conn_1")).Entries).State);
+    }
+
+    [Fact]
+    public async Task Outbox_dead_letter_fence_preserves_a_retry_ack_after_the_sweep_listing()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        await SeedEnabledConnectionAsync(database);
+        var time = new FakeTimeProvider(Start);
+        var store = NewOutbox(database, new RecordingHealthBackpressurer(), capacity: 3, time, maxAttempts: 1);
+        var queued = await store.EnqueueAsync(OutboxDraft(SlackOutboxKinds.TerminalResult, "done"));
+
+        await using (var db = database.CreateContext())
+        {
+            var row = await db.SlackOutboxRows.SingleAsync(candidate => candidate.Id == queued.Id);
+            row.AttemptCount = 1;
+            await db.SaveChangesAsync();
+        }
+
+        var listedRows = await store.ListPendingReadyForRetryAsync(1);
+        var listed = Assert.Single(listedRows);
+        time.Advance(TimeSpan.FromSeconds(1));
+        Assert.NotNull(await store.ClaimAsync("proj_a", "conn_1", "adapter-a"));
+        time.Advance(TimeSpan.FromSeconds(1));
+        await store.ScheduleRetryAsync("proj_a", queued.Id, "transient", "adapter-a");
+
+        var updated = await store.MarkDeadLetteredAsync(
+            listed.ProjectId,
+            listed.Id,
+            "retry budget exhausted",
+            expectedState: SlackOutboxStates.Pending,
+            expectedUpdatedAt: listed.UpdatedAt);
+
+        var rowAfterSweep = Assert.Single((await store.ListAsync("proj_a", "conn_1")).Entries);
+        Assert.Equal(0, updated);
+        Assert.Equal(SlackOutboxStates.Pending, rowAfterSweep.State);
+        Assert.Equal(2, rowAfterSweep.AttemptCount);
+        Assert.Equal("transient", rowAfterSweep.LastError);
+        Assert.True(rowAfterSweep.UpdatedAt > listed.UpdatedAt);
+    }
+
+    [Fact]
+    public async Task Outbox_claim_timeout_skips_a_row_delivered_after_the_sweep_listing()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        await SeedEnabledConnectionAsync(database);
+        var store = NewOutbox(database, new RecordingHealthBackpressurer(), capacity: 3);
+        var queued = await store.EnqueueAsync(OutboxDraft(SlackOutboxKinds.TerminalResult, "done"));
+        Assert.NotNull(await store.ClaimAsync("proj_a", "conn_1", "adapter-a"));
+        await store.MarkDeliveredAsync("proj_a", queued.Id, null, "adapter-a");
+
+        var updated = await store.MarkDeliveryUncertainAsync(
+            "proj_a",
+            queued.Id,
+            "claim timeout",
+            adapterId: null,
+            expectedState: SlackOutboxStates.Claimed,
+            expectedUpdatedAt: Start);
+
+        Assert.Equal(0, updated);
+        Assert.Equal(
+            SlackOutboxStates.Delivered,
+            Assert.Single((await store.ListAsync("proj_a", "conn_1")).Entries).State);
+    }
+
+    [Fact]
+    public async Task Outbox_claim_timeout_skips_a_row_reclaimed_after_the_sweep_listing()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        await SeedEnabledConnectionAsync(database);
+        var time = new FakeTimeProvider(Start);
+        var store = NewOutbox(database, new RecordingHealthBackpressurer(), capacity: 3, time);
+        var queued = await store.EnqueueAsync(OutboxDraft(SlackOutboxKinds.TerminalResult, "done"));
+        var listed = (await store.ClaimAsync("proj_a", "conn_1", "adapter-a"))!;
+        time.Advance(TimeSpan.FromSeconds(1));
+        await store.ScheduleRetryAsync("proj_a", queued.Id, "transient", "adapter-a");
+        time.Advance(TimeSpan.FromSeconds(1));
+        Assert.NotNull(await store.ClaimAsync("proj_a", "conn_1", "adapter-b"));
+
+        var updated = await store.MarkDeliveryUncertainAsync(
+            "proj_a",
+            queued.Id,
+            "claim timeout",
+            adapterId: null,
+            expectedState: SlackOutboxStates.Claimed,
+            expectedUpdatedAt: listed.UpdatedAt);
+
+        var row = Assert.Single((await store.ListAsync("proj_a", "conn_1")).Entries);
+        Assert.Equal(0, updated);
+        Assert.Equal(SlackOutboxStates.Claimed, row.State);
+        Assert.Equal("adapter-b", row.ClaimedByAdapterId);
+        Assert.Equal("transient", row.LastError);
+    }
+
     private static SlackProviderInboxDraft Draft(string messageTs) => new(
         "proj_a", "conn_1", new SlackMessageIdentity("team-1", "D1", messageTs), "U1");
 
@@ -241,11 +355,16 @@ public sealed class SlackProviderReliabilityStoreSpecs
         TestSqliteDatabase database,
         RecordingHealthBackpressurer health,
         int capacity,
-        FakeTimeProvider? time = null) => new(
+        FakeTimeProvider? time = null,
+        int maxAttempts = 5) => new(
             new TestDbContextFactory(database.Options),
             health,
             time ?? new FakeTimeProvider(Start),
-            Options.Create(new SlackProviderOptions { OutboxCapacityPerConnection = capacity }));
+            Options.Create(new SlackProviderOptions
+            {
+                OutboxCapacityPerConnection = capacity,
+                OutboxMaxAttempts = maxAttempts,
+            }));
 
     private static async Task SeedEnabledConnectionAsync(TestSqliteDatabase database)
     {
