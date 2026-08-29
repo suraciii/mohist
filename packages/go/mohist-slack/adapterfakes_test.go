@@ -198,16 +198,17 @@ type fakeWeb struct {
 	historyInputs []HistoryInput
 	uploads       []FileUploadInput
 
-	postTS       string
-	postErr      error
-	updateTS     string
-	updateErr    error
-	reactionErr  error
-	historyFn    func(HistoryInput) ([]HistoryMessage, error)
-	reactionList []string
-	getErr       error
-	uploadResult FileUploadResult
-	uploadErr    error
+	postTS        string
+	postErr       error
+	updateTS      string
+	updateErr     error
+	reactionErr   error
+	historyFn     func(HistoryInput) ([]HistoryMessage, error)
+	historyPageFn func(HistoryInput) (HistoryPage, error)
+	reactionList  []string
+	getErr        error
+	uploadResult  FileUploadResult
+	uploadErr     error
 }
 
 func (w *fakeWeb) PostMessage(_ context.Context, input PostMessageInput) (string, error) {
@@ -256,15 +257,19 @@ func (w *fakeWeb) GetReactions(_ context.Context, channel, timestamp string) ([]
 	return names, getErr
 }
 
-func (w *fakeWeb) GetConversationHistory(_ context.Context, input HistoryInput) ([]HistoryMessage, error) {
+func (w *fakeWeb) GetConversationHistory(_ context.Context, input HistoryInput) (HistoryPage, error) {
 	w.mu.Lock()
 	w.historyInputs = append(w.historyInputs, input)
-	fn := w.historyFn
+	pageFn, fn := w.historyPageFn, w.historyFn
 	w.mu.Unlock()
-	if fn != nil {
-		return fn(input)
+	if pageFn != nil {
+		return pageFn(input)
 	}
-	return nil, nil
+	if fn != nil {
+		messages, err := fn(input)
+		return HistoryPage{Messages: messages}, err
+	}
+	return HistoryPage{}, nil
 }
 
 func (w *fakeWeb) UploadFileV2(_ context.Context, input FileUploadInput) (FileUploadResult, error) {
