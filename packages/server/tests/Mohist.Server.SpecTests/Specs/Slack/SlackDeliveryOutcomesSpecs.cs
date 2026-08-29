@@ -11,6 +11,9 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -21,6 +24,7 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 public sealed class SlackDeliveryOutcomesSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
+    private readonly Dictionary<string, ReplyAnchor> _replyAnchors = new(StringComparer.Ordinal);
 
     public SlackDeliveryOutcomesSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
 
@@ -556,27 +560,34 @@ public sealed class SlackDeliveryOutcomesSpecs
     }
 
     [Fact]
-    public async Task Agent_reply_route_requires_the_complete_anchor_only_for_anchored_dispatches()
+    public async Task Agent_reply_route_requires_the_complete_anchor_for_every_dispatch()
     {
         var connection = await CreateConnectionAsync();
         await CreateDmMappingAsync(connection, "D-route-anchor");
+        var anchor = _replyAnchors["D-route-anchor"];
 
         using var missingConnection = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
             new
             {
-                conversationId = "D-route-anchor",
-                triggeringMessageId = "1710000000.000040",
-                dispatchRef = "turn-1",
+                workspaceTeamId = anchor.WorkspaceTeamId,
+                conversationId = anchor.ConversationId,
+                threadTs = anchor.ThreadTs,
+                triggeringMessageId = anchor.TriggeringMessageId,
+                sessionId = anchor.SessionId,
+                dispatchRef = anchor.DispatchRef,
                 text = "answer",
             });
         using var missingTrigger = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
             new
             {
-                conversationId = "D-route-anchor",
-                connectionId = connection.Id,
-                dispatchRef = "turn-1",
+                workspaceTeamId = anchor.WorkspaceTeamId,
+                conversationId = anchor.ConversationId,
+                threadTs = anchor.ThreadTs,
+                connectionId = anchor.ConnectionId,
+                sessionId = anchor.SessionId,
+                dispatchRef = anchor.DispatchRef,
                 text = "answer",
             });
         using var legacy = await _fixture.Client.PostAsJsonAsync(
@@ -584,19 +595,12 @@ public sealed class SlackDeliveryOutcomesSpecs
             new { conversationId = "D-route-anchor", text = "legacy answer" });
         using var anchored = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
-            new
-            {
-                conversationId = "D-route-anchor",
-                connectionId = connection.Id,
-                triggeringMessageId = "1710000000.000040",
-                dispatchRef = "turn-1",
-                text = "anchored answer",
-            });
+            ReplyBody("D-route-anchor", "anchored answer"));
 
         Assert.Equal(HttpStatusCode.BadRequest, missingConnection.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, missingTrigger.StatusCode);
-        Assert.True(legacy.IsSuccessStatusCode, await legacy.Content.ReadAsStringAsync());
-        Assert.Equal(HttpStatusCode.BadRequest, anchored.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, legacy.StatusCode);
+        Assert.True(anchored.IsSuccessStatusCode, await anchored.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -659,7 +663,7 @@ public sealed class SlackDeliveryOutcomesSpecs
         var body = "**重要** 已完成\n\n- 第一步\n- 第二步\n\n```\ncode block\n```\n\n> 引用";
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
-            new { conversationId = "D-render-md", text = body });
+            ReplyBody("D-render-md", body));
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
 
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -684,7 +688,7 @@ public sealed class SlackDeliveryOutcomesSpecs
         var body = "# 标题\n\n| A | B |\n|---|---|\n| 1 | 2 |";
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
-            new { conversationId = "D-render-table", text = body });
+            ReplyBody("D-render-table", body));
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
 
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -706,7 +710,7 @@ public sealed class SlackDeliveryOutcomesSpecs
 
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
-            new { conversationId = "D-render-image", text = "看图", imageUrl = "https://example.com/chart.png" });
+            ReplyBody("D-render-image", "看图", imageUrl: "https://example.com/chart.png"));
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
 
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -734,7 +738,7 @@ public sealed class SlackDeliveryOutcomesSpecs
 
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
-            new { conversationId = "D-render-image-only", imageUrl = "https://example.com/p.png" });
+            ReplyBody("D-render-image-only", imageUrl: "https://example.com/p.png"));
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
 
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -757,7 +761,7 @@ public sealed class SlackDeliveryOutcomesSpecs
         var fileContentBase64 = Convert.ToBase64String("png-bytes"u8);
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
-            new { conversationId = "D-render-file", fileName = "shot.png", fileContentBase64 });
+            ReplyBody("D-render-file", fileName: "shot.png", fileContentBase64: fileContentBase64));
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
 
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -777,7 +781,7 @@ public sealed class SlackDeliveryOutcomesSpecs
         // dispatch reference and never collides with the file upload row.
         using var textReply = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
-            new { conversationId = "D-render-file", text = "screenshot attached" });
+            ReplyBody("D-render-file", "screenshot attached"));
         Assert.True(textReply.IsSuccessStatusCode, await textReply.Content.ReadAsStringAsync());
         var both = await db.SlackOutboxRows.AsNoTracking()
             .Where(r => r.ProjectId == connection.ProjectId && r.ConversationId == "D-render-file")
@@ -794,7 +798,7 @@ public sealed class SlackDeliveryOutcomesSpecs
 
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
-            new { conversationId = "D-render-invalid", fileName = "x.png", fileContentBase64 = "not-base64!!" });
+            ReplyBody("D-render-invalid", fileName: "x.png", fileContentBase64: "not-base64!!"));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -807,6 +811,22 @@ public sealed class SlackDeliveryOutcomesSpecs
     private async Task CreateDmMappingAsync(AgentConnection connection, string dmConversationId)
     {
         var now = _fixture.TimeProvider.GetUtcNow();
+        var sessionId = $"reply-route-session_{Guid.NewGuid():N}";
+        var inputId = $"reply-route-input_{Guid.NewGuid():N}";
+        var turnId = $"reply-route-turn_{Guid.NewGuid():N}";
+        var threadTs = "1710000000.000001";
+        var metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AgentSessionQueryMetadataKeys.ProjectId] = connection.ProjectId,
+            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-connection",
+            [GenericAgentSessionMetadata.AgentId] = connection.AgentId,
+            [AgentSessionQueryMetadataKeys.ConnectionId] = connection.Id,
+            [AgentSessionQueryMetadataKeys.SlackWorkspaceTeamId] = connection.WorkspaceTeamId,
+            [AgentSessionQueryMetadataKeys.SlackConversationId] = dmConversationId,
+        });
+        var provenance = new AgentSessionInputProvenance(
+            "slack", connection.WorkspaceTeamId, dmConversationId, null,
+            "U_OWNER", threadTs, connection.Id, BoundThreadRootMessageId: null);
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         db.SlackDmSessionMappings.Add(new SlackDmSessionMappingRow
@@ -817,11 +837,52 @@ public sealed class SlackDeliveryOutcomesSpecs
             WorkspaceTeamId = connection.WorkspaceTeamId,
             SlackUserId = "U_OWNER",
             DmConversationId = dmConversationId,
-            CurrentSessionId = $"session_{Guid.NewGuid():N}",
+            CurrentSessionId = sessionId,
             UpdatedAt = now,
         });
         await db.SaveChangesAsync();
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).EnsureInitialLaunchAsync(
+            new EnsureInitialLaunchCommand(
+                inputId, turnId, "seed reply anchor", "agent-connection",
+                $"reply-route-job_{Guid.NewGuid():N}", metadata,
+                Runtime: "opencode", Provenance: provenance));
+        _replyAnchors[dmConversationId] = new ReplyAnchor(
+            connection.WorkspaceTeamId, dmConversationId, threadTs, threadTs,
+            connection.Id, sessionId, $"slack:{sessionId}:{inputId}");
     }
+
+    private object ReplyBody(
+        string conversationId,
+        string? text = null,
+        string? imageUrl = null,
+        string? fileName = null,
+        string? fileContentBase64 = null)
+    {
+        var anchor = _replyAnchors[conversationId];
+        return new
+        {
+            workspaceTeamId = anchor.WorkspaceTeamId,
+            conversationId = anchor.ConversationId,
+            threadTs = anchor.ThreadTs,
+            connectionId = anchor.ConnectionId,
+            triggeringMessageId = anchor.TriggeringMessageId,
+            sessionId = anchor.SessionId,
+            dispatchRef = anchor.DispatchRef,
+            text,
+            imageUrl,
+            fileName,
+            fileContentBase64,
+        };
+    }
+
+    private sealed record ReplyAnchor(
+        string WorkspaceTeamId,
+        string ConversationId,
+        string ThreadTs,
+        string TriggeringMessageId,
+        string ConnectionId,
+        string SessionId,
+        string DispatchRef);
 
     private async Task CreateThreadMappingAsync(
         AgentConnection connection,
@@ -891,6 +952,7 @@ public sealed class SlackDeliveryOutcomesSpecs
         {
             Id = id,
             ProjectId = projectId,
+            AgentId = agentId,
             WorkspaceTeamId = "T123",
         };
     }

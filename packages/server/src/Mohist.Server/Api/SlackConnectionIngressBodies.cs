@@ -4,6 +4,7 @@ namespace Mohist.Server.Api;
 
 public sealed class SlackIngressBody
 {
+    public string ApiAppId { get; init; } = string.Empty;
     public string EventType { get; init; } = "message";
     public bool IsDirectMessage { get; init; } = true;
     public string TeamId { get; init; } = string.Empty;

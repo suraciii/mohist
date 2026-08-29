@@ -66,6 +66,12 @@ public static class SlackInteractionRoutes
             var connection = await connections.GetAsync(projectId, connectionId, ct);
             if (connection is null)
                 return ApiResults.NotFound("Slack Connection was not found.");
+            if (string.IsNullOrWhiteSpace(request.ApiAppId))
+                return ApiResults.BadRequest("apiAppId is required.", "slack_app_identity_mismatch");
+            if (!string.Equals(connection.AppId, request.ApiAppId, StringComparison.Ordinal))
+                return ApiResults.BadRequest(
+                    "The Slack app does not match this Connection.",
+                    "slack_app_identity_mismatch");
             if (connection.DesiredState == Agent.Domain.DesiredStateKind.Disabled)
                 return ApiResults.Conflict("This Slack Connection is disabled.", "connection_disabled");
 
@@ -114,6 +120,7 @@ public static class SlackInteractionRoutes
 
 public sealed class SlackInteractionRequest
 {
+    public string ApiAppId { get; init; } = string.Empty;
     public string EventType { get; init; } = "block_actions";
     public string InteractionId { get; init; } = string.Empty;
     public string TeamId { get; init; } = string.Empty;
