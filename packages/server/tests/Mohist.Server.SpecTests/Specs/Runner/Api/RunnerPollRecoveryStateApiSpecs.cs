@@ -17,11 +17,12 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Api;
 
+[Collection("RunnerPollRecoveryStateApi")]
 public sealed class RunnerPollRecoveryStateApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public RunnerPollRecoveryStateApiSpecs(MohistIntegrationFixture fixture)
+    public RunnerPollRecoveryStateApiSpecs(IsolatedMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }
@@ -189,8 +190,10 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                 PinnedRunnerId: runnerId));
             var dispatch = await PollAsync(runnerId);
             var workId = dispatch.GetProperty("workId").GetString()!;
-            Assert.True(await job.RecordRuntimeSessionBindingAsync(
-                runnerId, workId, agentSessionId, runtimeSessionId));
+            var bindingRecorded = await job.RecordRuntimeSessionBindingAsync(
+                runnerId, workId, agentSessionId, runtimeSessionId);
+            Assert.True(bindingRecorded);
+            Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
             var payload = new
             {
                 ownerKind = WorkDispatchOwnerKinds.AgentJob,

@@ -30,9 +30,15 @@ public sealed partial class GitHubSyncSpecs
         // delay; advance the injected clock instead of waiting.
         _fixture.TimeProvider.Advance(GitHubIssueLinkStore.RetryBaseDelay);
 
+        // The barrier must belong to the operation under test: leftover
+        // rows from earlier specs in this collection are claimable after the
+        // clock advance and would otherwise satisfy (or block on) the race
+        // synchronization before the gated row reaches it.
+        var marker = GitHubCommentOperationMarker.For(link.Id, commentKey);
         var findEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseFind = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _fixture.Comments.FindEntered = findEntered;
+        _fixture.Comments.FindEnteredFilter = m => string.Equals(m, marker, StringComparison.Ordinal);
         _fixture.Comments.ReleaseFind = releaseFind;
 
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -55,16 +61,18 @@ public sealed partial class GitHubSyncSpecs
         await findEntered.Task.WaitAsync(TestContext.Current.CancellationToken);
         releaseFind.SetResult();
         releaseHolder.SetResult();
-        var processed = await recovery.WaitAsync(TestContext.Current.CancellationToken);
+        await recovery.WaitAsync(TestContext.Current.CancellationToken);
         await holder;
 
-        Assert.Equal(0, processed);
-        var marker = GitHubCommentOperationMarker.For(link.Id, commentKey);
         Assert.DoesNotContain(_fixture.Comments.Comments, comment =>
             comment.Body.Contains(marker, StringComparison.Ordinal));
         Assert.Equal(
             GitHubCommentOperationStatus.Reserved,
             await LoadOperationStatusAsync(link.Id, commentKey));
+        var deferred = await LoadLinkAsync(projectId, issueNumber);
+        Assert.NotNull(deferred);
+        Assert.Equal(0, deferred!.PostedComments.Count(key =>
+            string.Equals(key, commentKey, StringComparison.Ordinal)));
         var disabled = await connections.GetAsync(projectId, connectionId);
         Assert.Equal(GitHubConnectionStatus.Disabled, disabled!.Status);
 
@@ -72,9 +80,11 @@ public sealed partial class GitHubSyncSpecs
             $"/api/projects/{projectId}/github-connections/{connectionId}/enable", JsonContent.Create(new { })))
             enabled.EnsureSuccessStatusCode();
 
-        Assert.True(await worker.ProcessPendingAsync() >= 1);
+        await worker.ProcessPendingAsync();
         var recovered = await LoadLinkAsync(projectId, issueNumber);
-        Assert.True(recovered!.HasPostedComment(commentKey));
+        Assert.NotNull(recovered);
+        Assert.Equal(1, recovered!.PostedComments.Count(key =>
+            string.Equals(key, commentKey, StringComparison.Ordinal)));
         Assert.Equal(1, _fixture.Comments.Comments.Count(comment =>
             comment.Body.Contains(marker, StringComparison.Ordinal)));
         Assert.Equal(

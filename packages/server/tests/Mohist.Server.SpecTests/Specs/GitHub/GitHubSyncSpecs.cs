@@ -43,6 +43,7 @@ public sealed partial class GitHubSyncSpecs
         fixture.Comments.PostEntered = null;
         fixture.Comments.ReleasePost = null;
         fixture.Comments.FindEntered = null;
+        fixture.Comments.FindEnteredFilter = null;
         fixture.Comments.ReleaseFind = null;
         fixture.Comments.UpdateFailure = null;
         fixture.Comments.UpdateFailures.Clear();

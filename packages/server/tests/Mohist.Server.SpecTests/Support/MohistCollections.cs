@@ -51,6 +51,13 @@ public class RunnerMutationIntegrationCollection : ICollectionFixture<MohistInte
 [CollectionDefinition("RunnerMutationIntegrationB")]
 public class RunnerMutationIntegrationBCollection : ICollectionFixture<MohistIntegrationFixture>;
 
+// Runner report arbitration advances durable AgentJob state while a shared
+// assembly fixture can advance the same fake clock from unrelated specs.
+// Keep this contract on its own host so another collection cannot time out or
+// mutate the job between its explicit report steps.
+[CollectionDefinition("RunnerPollRecoveryStateApi")]
+public class RunnerPollRecoveryStateApiCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
+
 [CollectionDefinition("AgentPathAmplificationIntegration")]
 public class AgentPathAmplificationIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
