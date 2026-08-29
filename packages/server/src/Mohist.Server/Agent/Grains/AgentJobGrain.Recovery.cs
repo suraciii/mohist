@@ -3,6 +3,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Agent.Grains;
@@ -127,7 +128,7 @@ public sealed partial class AgentJobGrain
 
         _log.LogWarning(
             "AgentJob {Id} report timeout after {Timeout}; transitioning to unknown with reason {Reason}",
-            Key, effectiveTimeout, reason);
+            Key, effectiveTimeout, SlackSecretRedactor.Redact(reason));
         await EnterUnknownStateAsync(reason, recoveryDeadlineAt, failureCategory);
         if (IsManagerInput())
         {
@@ -211,7 +212,7 @@ public sealed partial class AgentJobGrain
 
         _log.LogInformation(
             "AgentJob {Id} unknown: previous={Previous}, reason={Reason}, recoveryDeadlineAt={RecoveryDeadlineAt}",
-            Key, previousStatus, reason, recoveryDeadlineAt);
+            Key, previousStatus, SlackSecretRedactor.Redact(reason), recoveryDeadlineAt);
     }
 
     private async Task<bool> FailRecoveringJobIfDueAsync()

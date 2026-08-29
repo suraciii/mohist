@@ -99,20 +99,6 @@ public static partial class SlackConnectionRoutes
                 : rows.Where(row => row.AgentId == agentId).ToList());
         });
 
-        app.MapGet("/api/slack-connections/adapter", async (
-            HttpContext http,
-            AgentConnectionStore connections,
-            CancellationToken ct) =>
-        {
-            var targets = await connections.ListForAdapterAsync(ct);
-            return ApiResults.Ok(targets.Select(target => new
-            {
-                ownerKind = SlackDeliveryOwnerKinds.Connection,
-                projectId = target.ProjectId,
-                connectionId = target.ConnectionId,
-            }).ToArray());
-        });
-
         MapSlackManagerAdapterRoutes(app);
 
         management.MapGet("/{connectionId}", async (

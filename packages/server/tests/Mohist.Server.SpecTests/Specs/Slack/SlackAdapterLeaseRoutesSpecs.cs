@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Mohist.Server.Infrastructure.Security.Secrets;
@@ -44,6 +45,33 @@ public sealed class SlackAdapterLeaseRoutesSpecs
         using var tokenOnlyResponse = await SendAsync(tokenOnly, path, body);
         Assert.Equal(HttpStatusCode.Forbidden, tokenOnlyResponse.StatusCode);
         Assert.Equal("operator_credential_required", await CodeAsync(tokenOnlyResponse));
+    }
+
+    [Fact]
+    public async Task ReadonlyPatWithOperatorIdentity_CannotDiscoverLeaseTargets()
+    {
+        using var issuer = _fixture.CreateOperatorClient(OperatorId);
+        using var created = await issuer.PostAsJsonAsync("/api/auth/tokens", new
+        {
+            name = $"readonly-lease-discovery-{Guid.NewGuid():N}",
+            scope = "readonly",
+            ttlHours = 720,
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var token = (await created.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data")
+            .GetProperty("token")
+            .GetString();
+        Assert.False(string.IsNullOrWhiteSpace(token));
+
+        using var readonlyClient = _fixture.Factory.CreateClient();
+        readonlyClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        readonlyClient.DefaultRequestHeaders.Add(
+            SlackAdapterOperatorAuthenticator.OperatorIdHeaderName,
+            OperatorId);
+        using var response = await readonlyClient.GetAsync(TargetsPath);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]

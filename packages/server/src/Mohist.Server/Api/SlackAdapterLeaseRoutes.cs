@@ -1,3 +1,5 @@
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
 
@@ -14,7 +16,8 @@ public static class SlackAdapterLeaseRoutes
 {
     public static WebApplication MapSlackAdapterLeaseRoutes(this WebApplication app)
     {
-        var leases = app.MapGroup("/api/slack-adapter/leases");
+        var leases = app.MapGroup("/api/slack-adapter/leases")
+            .RequireScopes(Scope.Operator);
 
         leases.MapGet("/targets", async (
             HttpContext http,

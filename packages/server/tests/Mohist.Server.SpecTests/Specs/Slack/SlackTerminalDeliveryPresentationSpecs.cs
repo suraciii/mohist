@@ -62,7 +62,7 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
             ConversationId: failed.ConversationId,
             Status: "failed",
             Message: "failed",
-            FailureReason: "runner unavailable",
+            FailureReason: "runner unavailable: xoxb-bot-secret xapp-app-secret xoxe-config-secret xoxr-refresh-secret",
             FailureCategory: failureCategory,
             ArtifactCount: 0,
             ExitCode: 1,
@@ -83,7 +83,13 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
 
         var payload = SlackDeliveryPayload.Parse(failure.PayloadJson);
         Assert.Equal(SlackDeliveryOperations.PostMessage, payload.Operation);
-        Assert.Equal("The Agent run failed: runner unavailable", payload.Text);
+        Assert.Equal(
+            "The Agent run failed: runner unavailable: [REDACTED] [REDACTED] [REDACTED] [REDACTED]",
+            payload.Text);
+        Assert.DoesNotContain("xoxb-bot-secret", failure.PayloadJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("xapp-app-secret", failure.PayloadJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("xoxe-config-secret", failure.PayloadJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("xoxr-refresh-secret", failure.PayloadJson, StringComparison.Ordinal);
         var blocks = Assert.NotNull(payload.Blocks);
         var button = Assert.Single(
             blocks.EnumerateArray()
