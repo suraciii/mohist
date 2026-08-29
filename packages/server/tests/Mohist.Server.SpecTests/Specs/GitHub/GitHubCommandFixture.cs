@@ -41,6 +41,10 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     public TaskCompletionSource? PostEntered { get; set; }
     public TaskCompletionSource? ReleasePost { get; set; }
     public TaskCompletionSource? FindEntered { get; set; }
+    // When set, FindEntered/ReleaseFind engage only for a find whose marker
+    // passes the filter; foreign leftover rows must not satisfy a test's
+    // race barrier or block on its release.
+    public Func<string, bool>? FindEnteredFilter { get; set; }
     public TaskCompletionSource? ReleaseFind { get; set; }
     public Exception? UpdateFailure { get; set; }
     public Queue<Exception> UpdateFailures { get; } = new();
@@ -153,9 +157,12 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         string marker,
         CancellationToken ct = default)
     {
-        FindEntered?.TrySetResult();
-        if (ReleaseFind is not null)
-            await ReleaseFind.Task.WaitAsync(ct);
+        if (FindEnteredFilter?.Invoke(marker) != false)
+        {
+            FindEntered?.TrySetResult();
+            if (ReleaseFind is not null)
+                await ReleaseFind.Task.WaitAsync(ct);
+        }
         return Comments
             .Select((comment, index) => (comment, index))
             .Where(item => item.comment.ConnectionId == connection.Id
