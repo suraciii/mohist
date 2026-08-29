@@ -9,6 +9,9 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -19,6 +22,7 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 public sealed class SlackReplySegmentationSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
+    private readonly Dictionary<string, ReplyAnchor> _replyAnchors = new(StringComparer.Ordinal);
 
     public SlackReplySegmentationSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
 
@@ -34,7 +38,7 @@ public sealed class SlackReplySegmentationSpecs
 
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
-            new { conversationId = "D-segment-long", text = body });
+            ReplyBody("D-segment-long", body));
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
 
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -63,7 +67,7 @@ public sealed class SlackReplySegmentationSpecs
 
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
-            new { conversationId = "D-segment-short", text = "Done. The task is complete." });
+            ReplyBody("D-segment-short", "Done. The task is complete."));
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
 
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -86,11 +90,11 @@ public sealed class SlackReplySegmentationSpecs
 
         var first = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
-            new { conversationId = "D-segment-merge", text = part });
+            ReplyBody("D-segment-merge", part));
         Assert.True(first.IsSuccessStatusCode, await first.Content.ReadAsStringAsync());
         var second = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
-            new { conversationId = "D-segment-merge", text = part });
+            ReplyBody("D-segment-merge", part));
         Assert.True(second.IsSuccessStatusCode, await second.Content.ReadAsStringAsync());
 
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -103,10 +107,10 @@ public sealed class SlackReplySegmentationSpecs
         Assert.All(payload.Segments!, segment =>
             Assert.InRange(segment.EnumerateRunes().Count(), 1, SlackFinalReplyRenderer.DefaultReplySegmentLength));
         var rejoined = string.Join('\n', payload.Segments);
-        // Both sends survive the in-place merge and re-segmentation.
+        // The second anchored send is an idempotent retry of the same turn.
         var markerOccurrences = payload.Segments!
             .Sum(segment => segment.Split("Merge 00000:", StringSplitOptions.None).Length - 1);
-        Assert.Equal(2, markerOccurrences);
+        Assert.Equal(1, markerOccurrences);
     }
 
     [Fact]
@@ -150,6 +154,21 @@ public sealed class SlackReplySegmentationSpecs
     private async Task CreateDmMappingAsync(AgentConnection connection, string dmConversationId)
     {
         var now = _fixture.TimeProvider.GetUtcNow();
+        var sessionId = $"reply-route-session_{Guid.NewGuid():N}";
+        var inputId = $"reply-route-input_{Guid.NewGuid():N}";
+        var threadTs = "1710000000.000001";
+        var metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AgentSessionQueryMetadataKeys.ProjectId] = connection.ProjectId,
+            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-connection",
+            [GenericAgentSessionMetadata.AgentId] = connection.AgentId,
+            [AgentSessionQueryMetadataKeys.ConnectionId] = connection.Id,
+            [AgentSessionQueryMetadataKeys.SlackWorkspaceTeamId] = connection.WorkspaceTeamId,
+            [AgentSessionQueryMetadataKeys.SlackConversationId] = dmConversationId,
+        });
+        var provenance = new AgentSessionInputProvenance(
+            "slack", connection.WorkspaceTeamId, dmConversationId, null,
+            "U_OWNER", threadTs, connection.Id, BoundThreadRootMessageId: null);
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         db.SlackDmSessionMappings.Add(new SlackDmSessionMappingRow
@@ -160,11 +179,44 @@ public sealed class SlackReplySegmentationSpecs
             WorkspaceTeamId = connection.WorkspaceTeamId,
             SlackUserId = "U_OWNER",
             DmConversationId = dmConversationId,
-            CurrentSessionId = $"session_{Guid.NewGuid():N}",
+            CurrentSessionId = sessionId,
             UpdatedAt = now,
         });
         await db.SaveChangesAsync();
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).EnsureInitialLaunchAsync(
+            new EnsureInitialLaunchCommand(
+                inputId, $"reply-route-turn_{Guid.NewGuid():N}", "seed reply anchor",
+                "agent-connection", $"reply-route-job_{Guid.NewGuid():N}", metadata,
+                Runtime: "opencode", Provenance: provenance));
+        _replyAnchors[dmConversationId] = new ReplyAnchor(
+            connection.WorkspaceTeamId, dmConversationId, threadTs, threadTs,
+            connection.Id, sessionId, $"slack:{sessionId}:{inputId}");
     }
+
+    private object ReplyBody(string conversationId, string? text = null)
+    {
+        var anchor = _replyAnchors[conversationId];
+        return new
+        {
+            workspaceTeamId = anchor.WorkspaceTeamId,
+            conversationId = anchor.ConversationId,
+            threadTs = anchor.ThreadTs,
+            connectionId = anchor.ConnectionId,
+            triggeringMessageId = anchor.TriggeringMessageId,
+            sessionId = anchor.SessionId,
+            dispatchRef = anchor.DispatchRef,
+            text,
+        };
+    }
+
+    private sealed record ReplyAnchor(
+        string WorkspaceTeamId,
+        string ConversationId,
+        string ThreadTs,
+        string TriggeringMessageId,
+        string ConnectionId,
+        string SessionId,
+        string DispatchRef);
 
     private async Task<AgentConnection> CreateConnectionAsync()
     {
@@ -204,6 +256,7 @@ public sealed class SlackReplySegmentationSpecs
         {
             Id = id,
             ProjectId = projectId,
+            AgentId = "agent-1",
             WorkspaceTeamId = "T123",
         };
     }

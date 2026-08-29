@@ -57,6 +57,7 @@ public sealed partial class SlackMultiAgentIngressSpecs : IAsyncLifetime
 
         var body = new
         {
+            apiAppId = connectionA.AppId,
             isDirectMessage = false,
             teamId = connectionA.WorkspaceTeamId,
             conversationId = "C-multi-bot",
@@ -125,6 +126,7 @@ public sealed partial class SlackMultiAgentIngressSpecs : IAsyncLifetime
     {
         var body = new
         {
+            apiAppId = connection.AppId,
             isDirectMessage = false,
             teamId = connection.WorkspaceTeamId,
             conversationId,

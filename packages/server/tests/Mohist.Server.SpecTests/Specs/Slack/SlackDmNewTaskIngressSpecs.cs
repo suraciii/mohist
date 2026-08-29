@@ -431,6 +431,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
     {
         using var response = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
         {
+            apiAppId = "A123",
             isDirectMessage = true,
             teamId = connection.WorkspaceTeamId,
             conversationId,

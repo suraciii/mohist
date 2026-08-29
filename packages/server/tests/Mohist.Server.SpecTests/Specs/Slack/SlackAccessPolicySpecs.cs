@@ -157,6 +157,7 @@ public sealed partial class SlackAccessPolicySpecs : IAsyncLifetime
     {
         var body = new
         {
+            apiAppId = "A123",
             isDirectMessage = false,
             teamId = connection.WorkspaceTeamId,
             conversationId,

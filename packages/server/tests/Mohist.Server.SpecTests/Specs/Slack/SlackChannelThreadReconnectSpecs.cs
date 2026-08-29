@@ -54,6 +54,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
         {
             using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), new
             {
+                apiAppId = "A123",
                 isDirectMessage = true,
                 teamId = connection.WorkspaceTeamId,
                 conversationId = "D-gap-clear",

@@ -49,6 +49,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
 
         using var response = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
         {
+            apiAppId = "A123",
             isDirectMessage = true,
             teamId = connection.WorkspaceTeamId,
             conversationId = "D-DM-MAP",
@@ -80,6 +81,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
 
         using (var first = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
         {
+            apiAppId = "A123",
             isDirectMessage = true,
             teamId = connection.WorkspaceTeamId,
             conversationId,
@@ -113,6 +115,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
         {
             using var response = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
             {
+                apiAppId = "A123",
                 isDirectMessage = true,
                 teamId = connection.WorkspaceTeamId,
                 conversationId,
@@ -173,6 +176,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
 
         using var first = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
         {
+            apiAppId = "A123",
             isDirectMessage = true,
             teamId = connection.WorkspaceTeamId,
             conversationId = "D-DM-REPLAY",
@@ -197,6 +201,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
 
         using var replay = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
         {
+            apiAppId = "A123",
             isDirectMessage = true,
             teamId = connection.WorkspaceTeamId,
             conversationId = "D-DM-REPLAY",
@@ -298,6 +303,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
 
             using var followup = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
             {
+                apiAppId = "A123",
                 isDirectMessage = true,
                 teamId = connection.WorkspaceTeamId,
                 conversationId = "D-DM-FOLLOWUP",
@@ -341,6 +347,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
 
             var switched = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
             {
+                apiAppId = "A123",
                 isDirectMessage = true,
                 teamId = connection.WorkspaceTeamId,
                 conversationId = "D-DM-FOLLOWUP",
@@ -365,6 +372,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
 
             using var replay = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
             {
+                apiAppId = "A123",
                 isDirectMessage = true,
                 teamId = connection.WorkspaceTeamId,
                 conversationId = "D-DM-FOLLOWUP",

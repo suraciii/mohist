@@ -12,18 +12,20 @@ public static partial class SlackConnectionRoutes
             HttpContext context,
             SlackReplyBody body,
             SlackOutboxStore outbox,
-            SlackProviderInboxStore inboxStore,
             IGrainFactory grains,
             CancellationToken ct) =>
         {
             if (body is null || string.IsNullOrWhiteSpace(body.ConversationId))
                 return ApiResults.BadRequest("conversationId is required.");
-            if (!string.IsNullOrWhiteSpace(body.DispatchRef)
-                && (string.IsNullOrWhiteSpace(body.ConnectionId)
-                    || string.IsNullOrWhiteSpace(body.ThreadTs)
-                    || string.IsNullOrWhiteSpace(body.TriggeringMessageId)))
+            if (string.IsNullOrWhiteSpace(body.WorkspaceTeamId)
+                || string.IsNullOrWhiteSpace(body.ConnectionId)
+                || string.IsNullOrWhiteSpace(body.ThreadTs)
+                || string.IsNullOrWhiteSpace(body.TriggeringMessageId)
+                || string.IsNullOrWhiteSpace(body.SessionId)
+                || string.IsNullOrWhiteSpace(body.DispatchRef))
                 return ApiResults.BadRequest(
-                    "connectionId, threadTs, and triggeringMessageId are required when dispatchRef is supplied.");
+                    "workspaceTeamId, connectionId, threadTs, triggeringMessageId, sessionId, and dispatchRef are required.",
+                    "slack_reply_anchor_required");
 
             var hasAttachment = !string.IsNullOrWhiteSpace(body.ImageUrl)
                 || !string.IsNullOrWhiteSpace(body.FileContentBase64);
@@ -45,60 +47,25 @@ public static partial class SlackConnectionRoutes
             }
 
             var projectId = context.GetResolvedProject().Id;
-            var idempotentRetryOnly = false;
-            if (!string.IsNullOrWhiteSpace(body.DispatchRef))
+            var anchor = new SlackReplyAnchorValidationRequest(
+                projectId,
+                body.WorkspaceTeamId.Trim(),
+                body.ConversationId.Trim(),
+                body.ThreadTs.Trim(),
+                body.TriggeringMessageId.Trim(),
+                body.ConnectionId.Trim(),
+                body.SessionId.Trim(),
+                body.DispatchRef.Trim());
+            var validation = await grains.GetGrain<IAgentSessionGrain>(anchor.SessionId)
+                .ValidateSlackReplyAnchorAsync(anchor);
+            if (!validation.Valid)
             {
-                var workspaceId = body.WorkspaceTeamId?.Trim();
-                var sessionId = body.SessionId?.Trim();
-                if (string.IsNullOrWhiteSpace(workspaceId) || string.IsNullOrWhiteSpace(sessionId))
-                {
-                    var triggeringMessageId = body.TriggeringMessageId!.Trim();
-                    var inbox = await inboxStore.FindReplyAnchorAsync(
-                        projectId,
-                        body.ConnectionId!.Trim(),
-                        body.ConversationId.Trim(),
-                        triggeringMessageId,
-                        ct);
-                    if (inbox is null)
-                    {
-                        return ApiResults.Fail(
-                            "The Slack reply anchor could not be restored from its accepted message.",
-                            409,
-                            "slack_reply_anchor_mismatch");
-                    }
-                    if ((!string.IsNullOrWhiteSpace(workspaceId)
-                            && !string.Equals(workspaceId, inbox.WorkspaceTeamId, StringComparison.Ordinal))
-                        || (!string.IsNullOrWhiteSpace(sessionId)
-                            && !string.Equals(sessionId, inbox.SessionId, StringComparison.Ordinal)))
-                    {
-                        return ApiResults.Fail(
-                            "The Slack reply anchor does not match its accepted message.",
-                            409,
-                            "slack_reply_anchor_mismatch");
-                    }
-                    workspaceId = inbox.WorkspaceTeamId;
-                    sessionId = inbox.SessionId;
-                }
-                var anchor = new SlackReplyAnchorValidationRequest(
-                    projectId,
-                    workspaceId!,
-                    body.ConversationId.Trim(),
-                    body.ThreadTs!.Trim(),
-                    body.TriggeringMessageId!.Trim(),
-                    body.ConnectionId!.Trim(),
-                    sessionId!,
-                    body.DispatchRef.Trim());
-                var validation = await grains.GetGrain<IAgentSessionGrain>(anchor.SessionId)
-                    .ValidateSlackReplyAnchorAsync(anchor);
-                if (!validation.Valid)
-                {
-                    return ApiResults.Fail(
-                        "The Slack reply anchor does not match the active Session turn.",
-                        409,
-                        "slack_reply_anchor_mismatch");
-                }
-                idempotentRetryOnly = !validation.TurnActive;
+                return ApiResults.Fail(
+                    "The Slack reply anchor does not match the active Session turn.",
+                    409,
+                    "slack_reply_anchor_mismatch");
             }
+            var idempotentRetryOnly = !validation.TurnActive;
             var text = SlackMarkdownRenderer.ToMrkdwn(SlackFinalReplyRenderer.RedactReplyText(body.Text));
             if (string.IsNullOrWhiteSpace(text) && !hasAttachment)
                 return ApiResults.BadRequest("text must not be empty.");

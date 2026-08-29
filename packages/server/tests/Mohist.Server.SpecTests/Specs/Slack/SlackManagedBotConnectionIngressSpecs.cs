@@ -74,6 +74,38 @@ public sealed class SlackManagedBotConnectionIngressSpecs
     }
 
     [Fact]
+    public async Task Connection_ingress_requires_the_enrolled_api_app_id_before_admission()
+    {
+        var team = $"T_CONNECTION_APP_ID_{Guid.NewGuid():N}";
+        var enrollmentId = await SetupManagerAsync(
+            team, "A_APP_ID_MANAGER", "U_APP_ID_MANAGER");
+        var connection = await SeedConnectionAsync(
+            team, enrollmentId, "A_APP_ID_CONNECTION", "U_APP_ID_CONNECTION", DesiredStateKind.Enabled);
+        var before = await SnapshotConnectionRowsAsync(connection);
+
+        using var wrong = await PostBotAsync(
+            connection, connection.AppId, connection.BotUserId,
+            "1710000000.000010", isDirectMessage: true, apiAppId: "A_WRONG");
+        using var missing = await PostBotAsync(
+            connection, connection.AppId, connection.BotUserId,
+            "1710000000.000011", isDirectMessage: true, apiAppId: string.Empty);
+
+        Assert.Equal(HttpStatusCode.BadRequest, wrong.StatusCode);
+        Assert.Equal("slack_app_identity_mismatch", await ReadCodeAsync(wrong));
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+        Assert.Equal("slack_app_identity_mismatch", await ReadCodeAsync(missing));
+        var after = await SnapshotConnectionRowsAsync(connection);
+        Assert.Equal(before.Inbox, after.Inbox);
+        Assert.Equal(before.Outbox, after.Outbox);
+
+        using var correct = await PostBotAsync(
+            connection, connection.AppId, connection.BotUserId,
+            "1710000000.000012", isDirectMessage: true);
+        Assert.Equal(HttpStatusCode.OK, correct.StatusCode);
+        Assert.Equal("ignored", (await ReadDataAsync(correct)).GetProperty("kind").GetString());
+    }
+
+    [Fact]
     public async Task Connection_ignores_transition_author_received_by_live_connection()
     {
         var team = $"T_CONNECTION_TRANSITION_{Guid.NewGuid():N}";
@@ -171,6 +203,7 @@ public sealed class SlackManagedBotConnectionIngressSpecs
         using var human = await _fixture.Client.PostAsJsonAsync(
             IngressPath(connection), new
             {
+                apiAppId = connection.AppId,
                 isDirectMessage = false,
                 teamId = connection.Team,
                 conversationId = "C_CONNECTION_COMPAT",
@@ -208,6 +241,7 @@ public sealed class SlackManagedBotConnectionIngressSpecs
         using (var wrongWorkspace = await _fixture.Client.PostAsJsonAsync(
                    IngressPath(connection), new
                    {
+                       apiAppId = connection.AppId,
                        isDirectMessage = true,
                        teamId = "T_WRONG_CONNECTION_WORKSPACE",
                        conversationId = "D_CONNECTION_VALIDATION",
@@ -352,9 +386,11 @@ public sealed class SlackManagedBotConnectionIngressSpecs
         string messageTs,
         bool isDirectMessage,
         string? threadTs = null,
-        IReadOnlyList<string>? mentionedUserIds = null) =>
+        IReadOnlyList<string>? mentionedUserIds = null,
+        string? apiAppId = null) =>
         await _fixture.Client.PostAsJsonAsync(IngressPath(target), new
         {
+            apiAppId = apiAppId ?? target.AppId,
             isDirectMessage,
             teamId = target.Team,
             conversationId = isDirectMessage ? "D_CONNECTION_MANAGED" : "C_CONNECTION_MANAGED",
@@ -391,6 +427,62 @@ public sealed class SlackManagedBotConnectionIngressSpecs
                 && ids.Contains(row.ConnectionId)),
             await db.AgentSessions.CountAsync(row =>
                 row.LabelConnectionId != null && ids.Contains(row.LabelConnectionId)));
+    }
+
+    private async Task<(string[] Inbox, string[] Outbox)> SnapshotConnectionRowsAsync(SeededConnection connection)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var inboxRows = await db.SlackProviderInboxRows.AsNoTracking()
+            .Where(row => row.ConnectionId == connection.Id)
+            .OrderBy(row => row.Id)
+            .ToListAsync();
+        var outboxRows = await db.SlackOutboxRows.AsNoTracking()
+            .Where(row => row.ConnectionId == connection.Id)
+            .OrderBy(row => row.Id)
+            .ToListAsync();
+        return (
+            inboxRows.Select(row => JsonSerializer.Serialize(new
+            {
+                row.Id,
+                row.ProjectId,
+                row.ConnectionId,
+                row.SlackMessageIdentity,
+                row.WorkspaceTeamId,
+                row.ConversationId,
+                row.ThreadTs,
+                row.SlackUserId,
+                row.RouteKind,
+                row.RouteSessionId,
+                row.RouteTurnId,
+                row.AcceptedAt,
+                row.DispatchedAt,
+                row.CreatedAt,
+            })).ToArray(),
+            outboxRows.Select(row => JsonSerializer.Serialize(new
+            {
+                row.Id,
+                row.ProjectId,
+                row.ConnectionId,
+                row.OwnerKind,
+                row.WorkspaceTeamId,
+                row.ConversationId,
+                row.ThreadTs,
+                row.Kind,
+                row.State,
+                row.DispatchRef,
+                row.PayloadJson,
+                row.AttemptCount,
+                row.NextAttemptAt,
+                row.ClaimedAt,
+                row.ClaimedByAdapterId,
+                row.DeliveredAt,
+                row.DeliveryUncertainAt,
+                row.DeadLetteredAt,
+                row.LastError,
+                row.CreatedAt,
+                row.UpdatedAt,
+            })).ToArray());
     }
 
     private static async Task<JsonElement> ReadDataAsync(HttpResponseMessage response)

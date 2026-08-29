@@ -38,21 +38,26 @@ public sealed partial class CliSlackCommandSpecs
     }
 
     [Fact]
-    public async Task MessageSend_keeps_connection_and_dispatch_ref_optional_for_general_sends()
+    public async Task MessageSend_rejects_anchorless_agent_reply_before_http()
     {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
-            Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { accepted = true } })));
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(http,
             ["slack", "message", "send", "--conversation", "C1", "--text", "hello"],
             output, error, fs, executor);
 
-        Assert.Equal(0, exit);
-        var body = JsonNode.Parse(handler.Requests.Single().Body!)!;
-        Assert.Null(body["connectionId"]);
-        Assert.Null(body["triggeringMessageId"]);
-        Assert.Null(body["dispatchRef"]);
-        Assert.Null(body["workspaceTeamId"]);
-        Assert.Null(body["sessionId"]);
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("anchored-reply contract", error.ToString(), StringComparison.Ordinal);
     }
+
+    private static string[] ReplyAnchorArgs() =>
+    [
+        "--workspace", "T1",
+        "--reply-to", "1710000000.000100",
+        "--connection", "connection_1",
+        "--session", "session-1",
+        "--triggering-message", "1710000000.000200",
+        "--dispatch-ref", "agent-session-followup:session-1:turn-2",
+    ];
 }
