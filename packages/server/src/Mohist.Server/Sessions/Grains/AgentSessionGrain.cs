@@ -1805,7 +1805,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             ["deliveryId"] = command.DeliveryId,
             ["status"] = command.Status,
             ["exitCode"] = command.ExitCode,
-            ["failureReason"] = command.FailureReason,
+            ["failureReason"] = RedactFailureReason(command.FailureReason),
             ["failureCategory"] = command.FailureCategory,
             ["agentJobId"] = AgentSessionJsonHelper.GetStringProp(sourcePayload, "agentJobId"),
         });

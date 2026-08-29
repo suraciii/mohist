@@ -281,6 +281,36 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         Assert.DoesNotContain(rows, row => row.PayloadJson.Contains("<@U123>", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("xoxb-lineage-secret")]
+    [InlineData("xapp-lineage-secret")]
+    [InlineData("xoxe-lineage-secret")]
+    [InlineData("xoxr-lineage-secret")]
+    public void BuildTerminalDeliveryEnvelope_RedactsSlackTokenFamiliesFromLineageText(string token)
+    {
+        var pending = new PendingTerminalDeliveryEvent(
+            EventId: "delivery-redaction",
+            Origin: new ConnectionLaunchOrigin("conn-1", "team-1", "U_OWNER", "C1", "1710000000.000001", "1710000000.000000"),
+            Status: AgentJobStatus.Failed,
+            Message: $"failure message with {token}",
+            FailureReason: $"failure reason with {token}",
+            FailureCategory: "runtime-failed",
+            ArtifactCount: 0,
+            ExitCode: 1,
+            RecordedAt: new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero),
+            Output: $"{{\"kind\":\"opencode\",\"text\":\"assistant text with {token}\"}}");
+
+        var envelope = AgentJobLineage.BuildTerminalDeliveryEnvelope(
+            "job-redaction",
+            pending,
+            new Dictionary<string, string> { [EventCatalog.Lineage.ProjectId] = "proj-1" },
+            $"task label with {token}");
+
+        var data = envelope.Data!.Value.GetRawText();
+        Assert.DoesNotContain(token, data, StringComparison.Ordinal);
+        Assert.Contains("***", data, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void BuildTerminalDeliveryEnvelope_CarriesTheFirstSessionInputAsAnEightyCharacterLabel()
     {
