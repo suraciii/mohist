@@ -48,6 +48,7 @@ type fakeSocket struct {
 	cancel            context.CancelFunc
 	handlers          sync.WaitGroup
 	disconnectEntered chan struct{}
+	disconnectGate    <-chan struct{}
 	order             *orderedLog
 }
 
@@ -85,10 +86,20 @@ func (s *fakeSocket) OnState(handler func(string, error)) {
 	s.mu.Unlock()
 }
 
-func (s *fakeSocket) Disconnect(context.Context) error {
+func (s *fakeSocket) Disconnect(ctx context.Context) error {
 	select {
 	case s.disconnectEntered <- struct{}{}:
 	default:
+	}
+	s.mu.Lock()
+	gate := s.disconnectGate
+	s.mu.Unlock()
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	s.cancel()
 	s.handlers.Wait()
@@ -278,22 +289,26 @@ func (w *fakeWeb) updateCount() int {
 
 // fakeTransport records Server calls and replays scripted responses.
 type fakeTransport struct {
-	mu               sync.Mutex
-	order            *orderedLog
-	targets          []Target
-	validationLeases []ValidationLease
-	runtimeLeases    []RuntimeLease
-	acquireKinds     []LeaseKind
-	renewQueue       []*LeaseRenewal
-	renewErr         error
-	claimCalls       int
-	claimEntered     chan struct{}
-	claimErr         error
-	ingressResults   []IngressResult
-	ingressErr       error
-	interactionState []string
-	claimQueue       []*Delivery
-	uncertainQueue   []*Delivery
+	mu                            sync.Mutex
+	order                         *orderedLog
+	targets                       []Target
+	validationLeases              []ValidationLease
+	runtimeLeases                 []RuntimeLease
+	acquireKinds                  []LeaseKind
+	renewQueue                    []*LeaseRenewal
+	renewErr                      error
+	claimCalls                    int
+	claimEntered                  chan struct{}
+	claimErr                      error
+	ingressResults                []IngressResult
+	ingressErr                    error
+	interactionState              []string
+	helloOutcomes                 []HelloOutcome
+	interactionGate               chan struct{}
+	interactionEntered            chan struct{}
+	interactionIgnoreCancellation bool
+	claimQueue                    []*Delivery
+	uncertainQueue                []*Delivery
 
 	discoverGate               chan struct{}
 	discoverEntered            chan struct{}
@@ -379,7 +394,12 @@ func (t *fakeTransport) ReportHello(_ context.Context, _ Target, _, appID string
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.helloApps = append(t.helloApps, appID)
-	return HelloVerified, nil
+	if len(t.helloOutcomes) == 0 {
+		return HelloVerified, nil
+	}
+	outcome := t.helloOutcomes[0]
+	t.helloOutcomes = t.helloOutcomes[1:]
+	return outcome, nil
 }
 
 func (t *fakeTransport) Ingress(ctx context.Context, _ Target, envelope Envelope, _, _ string) (IngressResult, error) {
@@ -427,7 +447,29 @@ func (t *fakeTransport) Ingress(ctx context.Context, _ Target, envelope Envelope
 	return result, t.ingressErr
 }
 
-func (t *fakeTransport) Interaction(_ context.Context, _ Target, envelope InteractionEnvelope, _, _ string) (InteractionResult, error) {
+func (t *fakeTransport) Interaction(ctx context.Context, _ Target, envelope InteractionEnvelope, _, _ string) (InteractionResult, error) {
+	t.mu.Lock()
+	gate := t.interactionGate
+	entered := t.interactionEntered
+	ignoreCancellation := t.interactionIgnoreCancellation
+	t.mu.Unlock()
+	if entered != nil {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+	}
+	if gate != nil {
+		if ignoreCancellation {
+			<-gate
+		} else {
+			select {
+			case <-gate:
+			case <-ctx.Done():
+				return InteractionResult{}, ctx.Err()
+			}
+		}
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.interactns = append(t.interactns, envelope)

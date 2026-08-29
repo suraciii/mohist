@@ -15,7 +15,7 @@ const adapterDisconnectTimeout = 15 * time.Second
 // runtime per target key, generation fencing across await boundaries,
 // eviction that never deletes a successor, drain single-flight with
 // uncertain recovery first, backpressure notices before acknowledgement,
-// and interaction-first / message-last event acknowledgements.
+// and message acknowledgements only after successful server ingress.
 //
 // Fencing maps the Node identity checks onto Go snapshots: a snapshot holds
 // the lease id plus socket and web identities captured under the runtime
@@ -223,13 +223,21 @@ func (a *Adapter) Stop() {
 	}
 	a.mu.Unlock()
 	defer close(a.stopDone)
-	close(a.stopCh)
-	for _, rt := range pending {
-		a.disconnectRuntime(rt)
-	}
 	if cancelBase != nil {
 		cancelBase()
 	}
+	close(a.stopCh)
+
+	// Disconnect in parallel so per-socket bounds do not add up across targets.
+	var disconnectWG sync.WaitGroup
+	disconnectWG.Add(len(pending))
+	for _, rt := range pending {
+		go func(rt *runtime) {
+			defer disconnectWG.Done()
+			a.disconnectRuntime(rt)
+		}(rt)
+	}
+	disconnectWG.Wait()
 	if a.opts.Dispose != nil {
 		a.disposeOnce.Do(a.opts.Dispose)
 	}
@@ -377,8 +385,18 @@ func (a *Adapter) validateTarget(ctx context.Context, ref Target, lease Validati
 	if err != nil {
 		return err
 	}
-	_, err = a.opts.Transport.ReportHello(ctx, ref, lease.LeaseID, appID)
-	return err
+	outcome, err := a.opts.Transport.ReportHello(ctx, ref, lease.LeaseID, appID)
+	if err != nil {
+		return err
+	}
+	// A stale probe can belong to a successor, so never let it acquire a
+	// runtime lease and supersede the currently valid connection.
+	switch outcome {
+	case HelloLeaseStale, HelloAppIDMismatch:
+		return errors.New("Slack hello validation rejected: " + string(outcome))
+	default:
+		return nil
+	}
 }
 
 func (a *Adapter) startRuntime(rt *runtime) error {
@@ -455,7 +473,7 @@ func (a *Adapter) onSocketEvent(rt *runtime, socket SocketClient, event SocketEv
 	if err := a.handleEvent(ctx, rt, event.Body, event.Ack); err != nil {
 		message := "event handling failed before acknowledgement"
 		if interaction {
-			message = "interaction processing failed after acknowledgement"
+			message = "interaction processing failed before acknowledgement"
 		}
 		a.log.Error(message, "target", rt.key, "event", eventType, "reason", SafeErrorMessage(err))
 	}
@@ -603,8 +621,8 @@ func (a *Adapter) removeRuntimeAfterSocketFailure(rt *runtime, socket SocketClie
 	}
 }
 
-// handleEvent forwards one inbound body: interactions acknowledge before
-// forwarding, messages forward before acknowledging; both trigger a drain.
+// handleEvent forwards one inbound body: interactions forward before
+// acknowledging, messages forward before acknowledging; both trigger a drain.
 // Fencing panics unwind into the deferred recovery and are swallowed.
 func (a *Adapter) handleEvent(ctx context.Context, rt *runtime, body any, ack func()) (err error) {
 	snapshot := a.snapshot(rt)
@@ -628,11 +646,6 @@ func (a *Adapter) handleEvent(ctx context.Context, rt *runtime, body any, ack fu
 		}
 	}()
 
-	if interaction {
-		a.assertCurrent(rt, snapshot)
-		ack()
-		a.assertCurrent(rt, snapshot)
-	}
 	select {
 	case a.sem <- struct{}{}:
 	case <-ctx.Done():
@@ -647,6 +660,12 @@ func (a *Adapter) handleEvent(ctx context.Context, rt *runtime, body any, ack fu
 		if normalizeErr != nil {
 			return normalizeErr
 		}
+		// Keep the Slack acknowledgement last: cancellation while waiting for
+		// the shared permit must leave the envelope retryable, and an accepted
+		// acknowledgement must always follow a forwarded action.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		a.assertCurrent(rt, snapshot)
 		if _, err := a.opts.Transport.Interaction(ctx, rt.target, envelope, snapshot.leaseID, a.opts.AdapterID); err != nil {
 			if IsLeaseStale(err) {
@@ -656,7 +675,12 @@ func (a *Adapter) handleEvent(ctx context.Context, rt *runtime, body any, ack fu
 			return err
 		}
 		a.assertCurrent(rt, snapshot)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		a.assertCurrent(rt, snapshot)
 		a.log.Info("interaction forwarded", "target", rt.key, "event", SlackEventType(body))
+		ack()
 		_ = a.drainWithContext(ctx, rt)
 		return nil
 	}
