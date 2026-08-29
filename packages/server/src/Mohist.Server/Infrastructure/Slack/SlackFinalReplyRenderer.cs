@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Infrastructure.Slack;
 
@@ -44,9 +45,6 @@ public static class SlackFinalReplyRenderer
     private const int MaximumKeyResults = 3;
     private static readonly Regex SecretAssignment = new(
         "(?i)(?:\\\"(?:token|secret|api[_-]?key|password)[^\\\"]*\\\"\\s*:\\s*\\\"|(?:token|secret|api[_-]?key|password)\\s*[:=]\\s*)(?:[^\\\"\\s,}]+|[^\\\"]*\\\")",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
-    private static readonly Regex SlackToken = new(
-        "xox[baprs]-[A-Za-z0-9._-]+",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex SlackControlSyntax = new(
         @"<(?:(?:!|@|#)[^>\r\n]*|(?:https?|mailto|tel):[^>\r\n]*)>",
@@ -132,7 +130,7 @@ public static class SlackFinalReplyRenderer
             return string.Empty;
 
         clean = SecretAssignment.Replace(clean, "[REDACTED]");
-        clean = SlackToken.Replace(clean, "[REDACTED]");
+        clean = SlackSecretRedactor.Redact(clean);
         return NeutralizeSlackControlSyntax(clean);
     }
 
@@ -242,7 +240,7 @@ public static class SlackFinalReplyRenderer
             return null;
 
         clean = SecretAssignment.Replace(clean, "[REDACTED]");
-        return SlackToken.Replace(clean, "[REDACTED]");
+        return SlackSecretRedactor.Redact(clean);
     }
 
     private static string? CleanStableReference(string? value) =>
@@ -357,7 +355,7 @@ public static class SlackFinalReplyRenderer
             return "[redacted]";
 
         clean = SecretAssignment.Replace(clean, "[REDACTED]");
-        clean = SlackToken.Replace(clean, "[REDACTED]");
+        clean = SlackSecretRedactor.Redact(clean);
         return MachineUrl.Replace(clean, "[URL omitted]");
     }
 

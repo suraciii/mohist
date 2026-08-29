@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Sessions.Grains;
 
@@ -84,6 +85,9 @@ public sealed partial class AgentSessionGrain
             TurnActive: followupTurn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing);
     }
 
+    private static string? RedactFailureReason(string? value) =>
+        value is null ? null : SlackSecretRedactor.Redact(value);
+
     private static SlackReplyAnchorValidationResult InvalidSlackReplyAnchor() => new(false, false);
 
     private static string? DurableBoundRoot(AgentSessionInputProvenance? provenance) =>
@@ -135,6 +139,7 @@ public sealed partial class AgentSessionGrain
             AgentTurnStatus.Cancelled => "failed",
             _ => turn.Status.ToString().ToLowerInvariant(),
         };
+        var failureReason = RedactFailureReason(turn.Result?.FailureReason);
 
         var delivery = new
         {
@@ -150,7 +155,7 @@ public sealed partial class AgentSessionGrain
             messageTs,
             status,
             message = turn.Result?.Message,
-            failureReason = turn.Result?.FailureReason,
+            failureReason,
             failureCategory = turn.Result?.FailureCategory,
             artifactCount = 0,
             exitCode = (int?)null,

@@ -18,6 +18,7 @@ public sealed class SlackLegacyRouteRetirementSpecs
         "/api/projects/{projectRef}/slack-manager/connections/{connectionId}/authorize",
         "/api/projects/{projectRef}/slack-connections/{connectionId}/rotate-credentials",
         "/api/projects/{projectRef}/slack-connections/{connectionId}/adapter-session",
+        "/api/slack-connections/adapter",
     ];
 
     private static readonly string[] KeptControlPlaneRoutes =
@@ -32,7 +33,6 @@ public sealed class SlackLegacyRouteRetirementSpecs
         "/api/slack-manager/adapter/{enrollmentId}/deliveries/claim",
         "/api/slack-manager/adapter/{enrollmentId}/deliveries/claim-uncertain",
         "/api/slack-manager/adapter/{enrollmentId}/deliveries/ack",
-        "/api/slack-connections/adapter",
         "/api/projects/{projectRef}/slack-connections/{connectionId}/deliveries/claim",
         "/api/projects/{projectRef}/slack-connections/{connectionId}/deliveries/claim-uncertain",
         "/api/projects/{projectRef}/slack-connections/{connectionId}/deliveries/ack",
@@ -73,6 +73,7 @@ public sealed class SlackLegacyRouteRetirementSpecs
     [InlineData("POST", "/api/projects/proj-retired/slack-manager/connections/conn-retired/authorize")]
     [InlineData("POST", "/api/projects/proj-retired/slack-connections/conn-retired/rotate-credentials")]
     [InlineData("POST", "/api/projects/proj-retired/slack-connections/conn-retired/adapter-session")]
+    [InlineData("GET", "/api/slack-connections/adapter")]
     public async Task Retired_routes_answer_404_not_found(string method, string path)
     {
         using var request = new HttpRequestMessage(new HttpMethod(method), path)

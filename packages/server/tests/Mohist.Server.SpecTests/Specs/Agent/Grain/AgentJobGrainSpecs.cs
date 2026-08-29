@@ -289,6 +289,36 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         Assert.Equal("boom", terminal.FailureReason);
     }
 
+    [Fact]
+    public async Task ReportResultAsync_FailedMessageWithSlackToken_IsRedactedInDurableResult()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-fail-token-runner-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-fail-token-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+
+        await job.SubmitAsync(MakeInput("do a failing thing", projectId, "/tmp/agent-job-fail-token"));
+
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var snapshot = await job.GetRuntimeSnapshotAsync();
+        var workId = snapshot.CurrentWorkId!;
+
+        var report = await job.ReportResultAsync(
+            runnerId,
+            workId,
+            new WorkResult("failed", "auth rejected for xapp-1-ABCdef123", Output: null, ExitCode: 1));
+        Assert.True(report.Accepted);
+
+        await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
+
+        // The ledger result, session turn, and downstream events all inherit
+        // the same redacted diagnostic; no copy may retain the bare token.
+        var terminal = await job.GetTerminalResultAsync();
+        Assert.Equal(AgentJobStatus.Failed, terminal.Status);
+        Assert.DoesNotContain("xapp-1-ABCdef123", terminal.Message);
+        Assert.DoesNotContain("xapp-1-ABCdef123", terminal.FailureReason);
+        Assert.Contains("auth rejected for", terminal.Message);
+    }
+
       [Fact]
     public async Task ReportResultAsync_AfterTerminalCompletion_IsRejected_AndPriorResultPreserved()
     {

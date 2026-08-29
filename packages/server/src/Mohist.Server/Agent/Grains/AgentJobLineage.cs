@@ -4,6 +4,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Agent.Grains;
 
@@ -35,7 +36,6 @@ public static class AgentJobLineage
     private static readonly Regex SecretAssignment = new(
         "(?i)(?:\\\"(?:token|secret|api[_-]?key|password)[^\\\"]*\\\"\\s*:\\s*\\\"|(?:token|secret|api[_-]?key|password)\\s*[:=]\\s*)(?:[^\\\"\\s,}]+|[^\\\"]*\\\")",
         RegexOptions.Compiled);
-    private static readonly Regex SlackToken = new("xox[baprs]-[A-Za-z0-9-]+", RegexOptions.Compiled);
 
     public sealed record FailurePayload(
         string JobKey,
@@ -85,7 +85,9 @@ public static class AgentJobLineage
         {
             jobKey = payload.JobKey,
             status = payload.Status.ToString().ToLowerInvariant(),
-            failureReason = payload.FailureReason,
+            failureReason = payload.FailureReason is { } reason
+                ? SlackSecretRedactor.Redact(reason)
+                : null,
             failureCategory = payload.FailureCategory,
             projectId = payload.ProjectId,
             agentId = payload.AgentId,
@@ -227,7 +229,9 @@ public static class AgentJobLineage
                 return null;
             }
 
-            var redacted = SlackToken.Replace(SecretAssignment.Replace(text.GetString()!, "***"), "***");
+            var redacted = SlackSecretRedactor.Redact(
+                SecretAssignment.Replace(text.GetString()!, "***"),
+                "***");
             return redacted.Length <= AssistantTextMaxLength
                 ? redacted
                 : redacted[..AssistantTextMaxLength];
@@ -256,7 +260,7 @@ public static class AgentJobLineage
 
         var normalized = string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         normalized = SecretAssignment.Replace(normalized, "***");
-        normalized = SlackToken.Replace(normalized, "***");
+        normalized = SlackSecretRedactor.Redact(normalized, "***");
         return normalized.Length <= SummaryFactMaxLength ? normalized : normalized[..SummaryFactMaxLength];
     }
 }

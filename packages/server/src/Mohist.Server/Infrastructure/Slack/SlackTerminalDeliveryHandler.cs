@@ -137,7 +137,7 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
     private static string FailureNoticeText(SlackTerminalDelivery delivery) =>
         string.IsNullOrWhiteSpace(delivery.FailureReason)
             ? "The Agent run failed."
-            : $"The Agent run failed: {delivery.FailureReason}";
+            : $"The Agent run failed: {SlackSecretRedactor.Redact(delivery.FailureReason)}";
 
 }
 

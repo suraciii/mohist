@@ -648,6 +648,9 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
 
     internal async Task EnterUnknownStateAsync(string reason)
     {
+        // Unknown-state reasons surface in durable state and recovery logs;
+        // redact at entry so every copy inherits a safe diagnostic.
+        reason = SlackSecretRedactor.Redact(reason);
         if (IsTerminal)
             return;
 
@@ -677,7 +680,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
 
         _log.LogInformation(
             "AgentJob {Id} unknown: previous={Previous}, reason={Reason}",
-            Key, previousStatus, reason);
+            Key, previousStatus, SlackSecretRedactor.Redact(reason));
     }
 
     private bool EnsureUnknownInitialTurnDelivery(string reason)
@@ -960,130 +963,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             && _timeProvider.GetUtcNow() >= State.RunningSince.Value + EffectiveJobTimeout();
     }
 
-    internal async Task EnterTerminalStateAsync(
-        AgentJobStatus terminalStatus,
-        int? exitCode,
-        string? failureReason,
-        string? failureCategory,
-        string? pendingReason,
-        string? message,
-        string? output,
-        string[]? artifactUploadIds,
-        int? terminalExitCode,
-        string? addTasksJson = null)
-    {
-        var pending = BuildPendingSessionClose(terminalStatus, exitCode, failureReason, failureCategory, pendingReason);
-
-        if (IsTerminal)
-        {
-            State.PendingSessionClose ??= pending;
-            if (State.PendingSessionClose is not null
-                || State.PendingFailureEvent is not null
-                || State.PendingTerminalDeliveryEvent is not null
-                || State.PendingWorkflowTerminalEvent is not null
-                || State.PendingSubagentTerminalEvent is not null)
-                await EnsureRecoveryReminderAsync();
-            await PersistAsync();
-            await TryReleaseConcurrencyPermitAsync();
-            if (State.PendingSessionClose is not null)
-                await DeliverTerminalToSessionAsync(State.PendingSessionClose);
-            if (State.PendingFailureEvent is not null)
-                await EmitFailureEventAsync(State.PendingFailureEvent);
-            if (State.PendingTerminalDeliveryEvent is not null)
-                await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
-            if (State.PendingWorkflowTerminalEvent is not null)
-                await EmitWorkflowTerminalEventAsync(State.PendingWorkflowTerminalEvent);
-            if (State.PendingSubagentTerminalEvent is not null)
-                await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
-            return;
-        }
-
-        if (State.TerminalLogOwnership is null
-            && !string.IsNullOrWhiteSpace(State.RunnerId)
-            && !string.IsNullOrWhiteSpace(State.WorkId))
-        {
-            State.TerminalLogOwnership = new AgentJobTerminalLogOwnership(
-                TerminalLogOwnerKinds.AgentJob,
-                Key,
-                State.WorkId,
-                State.RunnerId);
-        }
-
-        State.Status = terminalStatus;
-        State.FailureReason = failureReason;
-        State.RecoveryDeadlineAt = null;
-        State.RunningSince = null;
-        State.TerminalAt = _timeProvider.GetUtcNow();
-        State.TerminalResult = new AgentJobTerminalResult(
-            terminalStatus,
-            message,
-            output,
-            artifactUploadIds,
-            failureReason,
-            terminalExitCode ?? exitCode,
-            Model: State.Input?.Model ?? State.RoutedPlan?.Model,
-            Variant: State.Input?.Variant ?? State.RoutedPlan?.Variant,
-            ReasoningEffort: State.Input?.ReasoningEffort ?? State.RoutedPlan?.ReasoningEffort);
-        State.PendingSessionClose = pending;
-        StageTerminalDeliveryEvent(
-            terminalStatus,
-            message,
-            output,
-            failureReason,
-            failureCategory,
-            artifactUploadIds,
-            terminalExitCode ?? exitCode);
-        StageWorkflowTerminalEvent(
-            terminalStatus,
-            message,
-            output,
-            failureReason,
-            failureCategory,
-            artifactUploadIds,
-            terminalExitCode ?? exitCode,
-            addTasksJson);
-        StageSubagentTerminalEvent(terminalStatus);
-
-        if (terminalStatus == AgentJobStatus.Failed)
-        {
-            State.PendingFailureEvent = new PendingFailureEvent(
-                EventId: AgentJobSessionDeliveryIds.FailureEventId(Key),
-                FailureReason: failureReason ?? pendingReason,
-                FailureCategory: failureCategory,
-                RecordedAt: _timeProvider.GetUtcNow());
-        }
-
-        DisposeJobTimeoutTimer();
-
-        State.ConcurrencyGateStatus = terminalStatus == AgentJobStatus.Cancelled
-            ? AgentConcurrencyPermitStatus.Cancelled
-            : AgentConcurrencyPermitStatus.Terminal;
-        State.ConcurrencyReleasePending = State.ConcurrencyPermitId is not null
-            || State.ConcurrencyPermitHeld
-            || State.ConcurrencyWaiterId is not null;
-        await EnsureRecoveryReminderAsync();
-        await PersistAsync();
-        await TryReleaseConcurrencyPermitAsync();
-        _terminalCompletion.TrySetResult(State.TerminalResult);
-
-        _log.LogInformation(
-            "AgentJob {Id} terminal: {Status} ({Reason}, category={Category}, deliveryId={DeliveryId})",
-            Key, State.Status, State.FailureReason ?? "ok",
-            State.PendingSessionClose?.FailureCategory ?? "-",
-            State.PendingSessionClose?.DeliveryId ?? "-");
-
-        await DeliverTerminalToSessionAsync(pending);
-        await MarkInitialTurnTerminalAsync(terminalStatus, message, output, failureReason, failureCategory, terminalExitCode ?? exitCode);
-        if (State.PendingFailureEvent is not null)
-            await EmitFailureEventAsync(State.PendingFailureEvent);
-        if (State.PendingTerminalDeliveryEvent is not null)
-            await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
-        if (State.PendingWorkflowTerminalEvent is not null)
-            await EmitWorkflowTerminalEventAsync(State.PendingWorkflowTerminalEvent);
-        if (State.PendingSubagentTerminalEvent is not null)
-            await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
-    }
-
     private async Task MarkInitialTurnExecutingAsync()
     {
         var sessionId = State.Input?.AgentSessionId;
@@ -1143,7 +1022,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             Key,
             EventCatalog.ReverseDns.AgentJobFailed,
             obligation.EventId,
-            obligation.FailureReason ?? "-",
+            SlackSecretRedactor.Redact(obligation.FailureReason ?? "-"),
             obligation.FailureCategory ?? "-");
     }
 

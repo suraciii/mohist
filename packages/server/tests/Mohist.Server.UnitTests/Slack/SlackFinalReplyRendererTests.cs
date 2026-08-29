@@ -1,5 +1,6 @@
 using System.Text;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Slack.Services;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Slack;
@@ -57,6 +58,59 @@ public sealed class SlackFinalReplyRendererTests
         Assert.DoesNotContain("<!channel>", redacted, StringComparison.Ordinal);
         Assert.DoesNotContain("<@U123>", redacted, StringComparison.Ordinal);
         Assert.Contains("&lt;!channel&gt;", redacted, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("xoxb-bot-secret")]
+    [InlineData("xapp-app-secret")]
+    [InlineData("xoxe-config-secret")]
+    [InlineData("xoxr-refresh-secret")]
+    public void RedactReplyText_StripsEverySlackTokenFamily(string token)
+    {
+        var redacted = SlackFinalReplyRenderer.RedactReplyText(
+            $"The diagnostic reason remains useful: token={token}.");
+
+        Assert.Contains("The diagnostic reason remains useful:", redacted, StringComparison.Ordinal);
+        Assert.DoesNotContain(token, redacted, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", redacted, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("xoxb-project-secret")]
+    [InlineData("xapp-project-secret")]
+    [InlineData("xoxe-project-secret")]
+    [InlineData("xoxr-project-secret")]
+    public void Project_RedactsEverySlackTokenFamilyFromFailureReason(string token)
+    {
+        var projection = SlackFinalReplyRenderer.Project(new SlackConfirmedAgentResult(
+            "inspect the failure",
+            SlackFinalReplyStatus.Failed,
+            FailureReason: $"diagnostic context: {token}"));
+        var text = string.Join('\n', projection.Segments);
+
+        Assert.Contains("Failure reason: diagnostic context: [REDACTED]", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(token, text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("xApP-app-secret")]
+    [InlineData("xOxE-config-secret")]
+    [InlineData("XoXr-refresh-secret")]
+    [InlineData("xOxB-bot-secret")]
+    [InlineData("XoXa-user-secret")]
+    [InlineData("xOxP-user-secret")]
+    [InlineData("XoXs-session-secret")]
+    public void Redactor_MatchesEachSlackTokenFamilyRegardlessOfCase(string token)
+    {
+        Assert.Equal("[REDACTED]", SlackSecretRedactor.Redact(token));
+    }
+
+    [Fact]
+    public void Redactor_RequiresTokenBoundaryAndPreservesTrailingPunctuation()
+    {
+        Assert.Equal("prefixxoxb-secret", SlackSecretRedactor.Redact("prefixxoxb-secret"));
+        Assert.Equal("[REDACTED].", SlackSecretRedactor.Redact("xoxb-secret."));
+        Assert.Equal("[REDACTED],", SlackSecretRedactor.Redact("xoxb-secret,"));
     }
 
     [Fact]
