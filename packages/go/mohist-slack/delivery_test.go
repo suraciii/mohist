@@ -217,16 +217,26 @@ func TestUploadFileIdentityFromSharesThenHistoryScan(t *testing.T) {
 	}
 }
 
-func TestSegmentsPostSequentiallyAndOnlyFirstCarriesClientMsgID(t *testing.T) {
+func TestSegmentsPostSequentiallyWithDeterministicClientMsgIDs(t *testing.T) {
 	successWeb := &fakeWeb{}
-	segmentPayload := `{"segments":["one","two"],"clientMessageId":"cmid-seg","threadTs":"1700.0"}`
+	segmentPayload := `{"segments":["one","two","three"],"clientMessageId":"cmid-seg","threadTs":"1700.0"}`
 	delivery := &Delivery{ID: "d-17", ConversationID: testConversation, ThreadTs: strPtr("1700.0"), PayloadJSON: segmentPayload}
 	ack := mutate(t, successWeb, delivery)
-	if ack.Outcome != OutcomeDelivered || len(successWeb.posts) != 2 {
+	if ack.Outcome != OutcomeDelivered || len(successWeb.posts) != 3 {
 		t.Fatalf("segment ack = %+v posts = %d", ack, len(successWeb.posts))
 	}
-	if successWeb.posts[0].ClientMsgID != "cmid-seg" || successWeb.posts[1].ClientMsgID != "" {
-		t.Fatalf("client msg id placement wrong: %+v / %+v", successWeb.posts[0], successWeb.posts[1])
+	payload, err := ParseDeliveryPayload(segmentPayload)
+	if err != nil {
+		t.Fatalf("parse segment payload: %v", err)
+	}
+	refs, err := segmentDispatchRefs(payload)
+	if err != nil {
+		t.Fatalf("derive segment refs: %v", err)
+	}
+	for index, post := range successWeb.posts {
+		if post.ClientMsgID != refs[index] {
+			t.Fatalf("segment %d client msg id = %q, want %q", index, post.ClientMsgID, refs[index])
+		}
 	}
 	if successWeb.posts[0].ThreadTs != "1700.0" {
 		t.Fatalf("segment thread ts lost: %+v", successWeb.posts[0])
@@ -236,6 +246,175 @@ func TestSegmentsPostSequentiallyAndOnlyFirstCarriesClientMsgID(t *testing.T) {
 	ack = mutate(t, failing, delivery)
 	if ack.Outcome != OutcomeRetry || !strings.Contains(ack.Reason, "msg_too_long") {
 		t.Fatalf("failed segment ack = %+v", ack)
+	}
+}
+
+func TestSegmentDispatchReferenceRejectsSeparatorCollisionBeforePosting(t *testing.T) {
+	derived, err := segmentDispatchRef("x", 1)
+	if err != nil {
+		t.Fatalf("derive segment reference: %v", err)
+	}
+	if derived != "x"+segmentDispatchSeparator+"1" {
+		t.Fatalf("derived reference = %q", derived)
+	}
+	if _, err := segmentDispatchRef("x"+segmentDispatchSeparator+"1", 0); err == nil {
+		t.Fatal("a producer base containing the separator must be rejected")
+	}
+
+	web := &fakeWeb{}
+	payload := `{"segments":["one","two"],"clientMessageId":"x\u001f1"}`
+	if _, err := MutateDelivery(context.Background(), web, testDelivery("d-17a", payload), func() {}); err == nil {
+		t.Fatal("invalid segment base was accepted")
+	}
+	if web.postCount() != 0 {
+		t.Fatalf("invalid segment base posted %d messages", web.postCount())
+	}
+}
+
+func TestReconcileSegmentsRequiresEverySegmentReference(t *testing.T) {
+	payload := `{"operation":"post_message","segments":["one","two","three"],"clientMessageId":"cmid-seg-reconcile"}`
+	missing := &fakeWeb{historyFn: func(HistoryInput) ([]HistoryMessage, error) {
+		return []HistoryMessage{{TS: "1702.2", ClientMsgID: "cmid-seg-reconcile"}}, nil
+	}}
+	ack := reconcileNow(t, missing, testDelivery("d-17b", payload))
+	if ack.Outcome != OutcomeRetry || ack.Reason != providerMutationAbsent {
+		t.Fatalf("partial segment history ack = %+v", ack)
+	}
+
+	complete := &fakeWeb{historyFn: func(HistoryInput) ([]HistoryMessage, error) {
+		return []HistoryMessage{
+			{TS: "1702.3", ClientMsgID: "cmid-seg-reconcile"},
+			{TS: "1702.4", ClientMsgID: "cmid-seg-reconcile" + segmentDispatchSeparator + "1"},
+			{TS: "1702.5", ClientMsgID: "cmid-seg-reconcile" + segmentDispatchSeparator + "2"},
+		}, nil
+	}}
+	ack = reconcileNow(t, complete, testDelivery("d-17c", payload))
+	if ack.Outcome != OutcomeDelivered || ack.ProviderMessageIdentity == nil || ack.ProviderMessageIdentity.MessageTs != "1702.3" {
+		t.Fatalf("complete segment history ack = %+v", ack)
+	}
+}
+
+func TestFallbackLookupPaginatesBeforePosting(t *testing.T) {
+	web := &fakeWeb{reactionErr: &SlackError{Code: "cant_react"}, postTS: "1702.7"}
+	web.historyPageFn = func(input HistoryInput) (HistoryPage, error) {
+		switch input.Cursor {
+		case "":
+			newer := make([]HistoryMessage, 200)
+			for index := range newer {
+				newer[index] = HistoryMessage{TS: "1702.8", ClientMsgID: "newer"}
+			}
+			return HistoryPage{
+				Messages:   newer,
+				HasMore:    true,
+				NextCursor: "page-2",
+			}, nil
+		case "page-2":
+			return HistoryPage{Messages: []HistoryMessage{{TS: "1702.9", ClientMsgID: "fb-deep"}}}, nil
+		default:
+			return HistoryPage{}, errors.New("unexpected history cursor")
+		}
+	}
+	payload := `{"operation":"reaction_add","reaction":"eyes","targetMessageIdentity":{"conversationId":"D1","messageTs":"1700.1"},"fallbackText":"fallback","fallbackDispatchRef":"fb-deep"}`
+	ack := mutate(t, web, testDelivery("d-17lookup", payload))
+	if ack.Outcome != OutcomeDelivered || ack.ProviderMessageIdentity == nil || ack.ProviderMessageIdentity.MessageTs != "1702.9" {
+		t.Fatalf("paginated fallback ack = %+v", ack)
+	}
+	if web.postCount() != 0 || len(web.historyInputs) != 2 || web.historyInputs[1].Cursor != "page-2" {
+		t.Fatalf("paginated fallback calls = %+v posts = %d", web.historyInputs, web.postCount())
+	}
+}
+
+func TestFallbackLookupIncompleteSettlesUncertainWithoutPosting(t *testing.T) {
+	web := &fakeWeb{reactionErr: &SlackError{Code: "cant_react"}, postTS: "1703.0"}
+	web.historyPageFn = func(input HistoryInput) (HistoryPage, error) {
+		if input.Cursor == "" {
+			return HistoryPage{HasMore: true, NextCursor: "page-2"}, nil
+		}
+		return HistoryPage{HasMore: true}, nil
+	}
+	payload := `{"operation":"reaction_add","reaction":"eyes","targetMessageIdentity":{"conversationId":"D1","messageTs":"1700.1"},"fallbackText":"fallback","fallbackDispatchRef":"fb-missing"}`
+	ack := mutate(t, web, testDelivery("d-17incomplete", payload))
+	if ack.Outcome != OutcomeUncertain || ack.Reason != providerHistoryIncomplete {
+		t.Fatalf("incomplete fallback ack = %+v", ack)
+	}
+	if web.postCount() != 0 {
+		t.Fatalf("incomplete fallback posted %d messages", web.postCount())
+	}
+}
+
+func TestSegmentReconciliationPaginatesAndRequiresCompleteHistory(t *testing.T) {
+	payload := `{"operation":"post_message","segments":["one","two","three"],"clientMessageId":"cmid-page"}`
+	web := &fakeWeb{}
+	web.historyPageFn = func(input HistoryInput) (HistoryPage, error) {
+		switch input.Cursor {
+		case "":
+			return HistoryPage{
+				Messages:   []HistoryMessage{{TS: "1703.1", ClientMsgID: "cmid-page"}},
+				HasMore:    true,
+				NextCursor: "page-2",
+			}, nil
+		case "page-2":
+			return HistoryPage{Messages: []HistoryMessage{
+				{TS: "1703.2", ClientMsgID: "cmid-page" + segmentDispatchSeparator + "1"},
+				{TS: "1703.3", ClientMsgID: "cmid-page" + segmentDispatchSeparator + "2"},
+			}}, nil
+		default:
+			return HistoryPage{}, errors.New("unexpected history cursor")
+		}
+	}
+	ack := reconcileNow(t, web, testDelivery("d-17page", payload))
+	if ack.Outcome != OutcomeDelivered || ack.ProviderMessageIdentity == nil || ack.ProviderMessageIdentity.MessageTs != "1703.1" {
+		t.Fatalf("paginated segment ack = %+v", ack)
+	}
+	if len(web.historyInputs) != 2 || web.historyInputs[1].Cursor != "page-2" {
+		t.Fatalf("segment history inputs = %+v", web.historyInputs)
+	}
+
+	incomplete := &fakeWeb{}
+	incomplete.historyPageFn = func(input HistoryInput) (HistoryPage, error) {
+		if input.Cursor == "" {
+			return HistoryPage{Messages: []HistoryMessage{{TS: "1703.4", ClientMsgID: "cmid-page"}}, HasMore: true, NextCursor: "page-2"}, nil
+		}
+		return HistoryPage{HasMore: true}, nil
+	}
+	ack = reconcileNow(t, incomplete, testDelivery("d-17page-incomplete", payload))
+	if ack.Outcome != OutcomeUncertain || ack.Reason != providerHistoryIncomplete {
+		t.Fatalf("incomplete segment ack = %+v", ack)
+	}
+}
+
+func TestFallbackReconciliationFindsLostPostBeforePostingAgain(t *testing.T) {
+	web := &fakeWeb{
+		reactionErr: &SlackError{Code: "cant_react"},
+		getErr:      &SlackError{Code: "cant_react"},
+		postErr:     errors.New("response lost"),
+	}
+	web.historyFn = func(HistoryInput) ([]HistoryMessage, error) {
+		if web.postCount() == 0 {
+			return nil, nil
+		}
+		return []HistoryMessage{{TS: "1702.6", ClientMsgID: "fb-lost"}}, nil
+	}
+	payload := `{"operation":"reaction_add","reaction":"eyes","targetMessageIdentity":{"conversationId":"D1","messageTs":"1700.1"},"fallbackText":"fallback","fallbackDispatchRef":"fb-lost"}`
+	delivery := testDelivery("d-17d", payload)
+	if _, err := MutateDelivery(context.Background(), web, delivery, func() {}); err == nil {
+		t.Fatal("lost fallback response should leave the first delivery uncertain")
+	}
+	ack := reconcileNow(t, web, delivery)
+	if ack.Outcome != OutcomeDelivered || ack.ProviderMessageIdentity == nil || ack.ProviderMessageIdentity.MessageTs != "1702.6" {
+		t.Fatalf("reconciled fallback ack = %+v", ack)
+	}
+	if web.postCount() != 1 {
+		t.Fatalf("fallback was posted more than once: %d", web.postCount())
+	}
+}
+
+func TestFallbackDispatchReferenceDerivesFromPrimaryReference(t *testing.T) {
+	web := &fakeWeb{reactionErr: &SlackError{Code: "missing_scope"}}
+	payload := `{"operation":"reaction_add","reaction":"eyes","targetMessageIdentity":{"conversationId":"D1","messageTs":"1700.1"},"clientMessageId":"cmid-fallback","fallbackText":"fallback"}`
+	ack := mutate(t, web, testDelivery("d-17e", payload))
+	if ack.Outcome != OutcomeDelivered || web.postCount() != 1 || web.posts[0].ClientMsgID != "cmid-fallback:fallback" {
+		t.Fatalf("derived fallback ack = %+v post = %+v", ack, web.posts)
 	}
 }
 
