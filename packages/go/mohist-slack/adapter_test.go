@@ -3,6 +3,7 @@ package mohistslack
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"testing/synctest"
 )
@@ -31,6 +32,59 @@ func TestValidationProbeReportsHelloOnceAndCreatesNoRuntime(t *testing.T) {
 	h.adapter.mu.Unlock()
 	if runtimes != 0 {
 		t.Fatalf("validation probe created %d runtime(s), want 0", runtimes)
+	}
+}
+
+func TestValidationRejectsTerminalHelloBeforeRuntimeLease(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		outcome HelloOutcome
+	}{
+		{name: "stale", outcome: HelloLeaseStale},
+		{name: "app mismatch", outcome: HelloAppIDMismatch},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			h := newTestHarness()
+			target := connectionTarget("p1", "c1")
+			h.transport.helloOutcomes = []HelloOutcome{testCase.outcome, HelloVerified}
+			if _, err := h.connectWithLeases(target,
+				ValidationLease{LeaseID: "v-1", AppToken: "xapp-v", ExpectedAppID: "A1", ExpiresAt: "soon"},
+				RuntimeLease{LeaseID: "lease-1", AppToken: "xapp-t", BotToken: "xoxb-t", ExpiresAt: "soon"},
+			); err == nil {
+				t.Fatal("terminal hello outcome was accepted")
+			}
+			if got, want := h.transport.acquireKinds, []LeaseKind{LeaseValidation}; !slices.Equal(got, want) {
+				t.Fatalf("acquire kinds after terminal hello = %v, want %v", got, want)
+			}
+			if got := len(h.sockets); got != 1 {
+				t.Fatalf("terminal probe sockets = %d, want one probe", got)
+			}
+			if got := h.sockets[0].startCount(); got != 1 {
+				t.Fatalf("terminal probe starts = %d, want 1", got)
+			}
+			if !h.sockets[0].wasDisconnected() {
+				t.Fatal("terminal probe socket was not disconnected")
+			}
+
+			if _, err := h.connectWithLeases(target,
+				ValidationLease{LeaseID: "v-2", AppToken: "xapp-v", ExpectedAppID: "A1", ExpiresAt: "later"},
+				RuntimeLease{LeaseID: "lease-2", AppToken: "xapp-t", BotToken: "xoxb-t", ExpiresAt: "later"},
+			); err != nil {
+				t.Fatalf("subsequent verified connect failed: %v", err)
+			}
+			h.adapter.mu.Lock()
+			rt := h.adapter.runtimes[target.Key()]
+			h.adapter.mu.Unlock()
+			if rt == nil {
+				t.Fatal("subsequent verified connect did not create a runtime")
+			}
+			if got := len(h.sockets); got != 3 {
+				t.Fatalf("subsequent verified connect sockets = %d, want 3", got)
+			}
+			if got := h.sockets[2].startCount(); got != 1 {
+				t.Fatalf("subsequent runtime starts = %d, want 1", got)
+			}
+		})
 	}
 }
 
@@ -334,7 +388,7 @@ func TestConcurrentStopWaitsForInProgressCleanup(t *testing.T) {
 	})
 }
 
-func TestStopWaitsForStartDiscoveryToFinish(t *testing.T) {
+func TestStopCancelsBlockedStartDiscovery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		h := newTestHarness()
 		discoverEntered := make(chan struct{}, 1)
@@ -342,7 +396,6 @@ func TestStopWaitsForStartDiscoveryToFinish(t *testing.T) {
 		h.transport.mu.Lock()
 		h.transport.discoverEntered = discoverEntered
 		h.transport.discoverGate = discoverGate
-		h.transport.discoverIgnoreCancellation = true
 		h.transport.mu.Unlock()
 
 		startResult := make(chan error, 1)
@@ -356,16 +409,12 @@ func TestStopWaitsForStartDiscoveryToFinish(t *testing.T) {
 		synctest.Wait()
 		select {
 		case <-stopped:
-			t.Fatal("Stop returned before Start discovery completed")
 		default:
+			t.Fatal("Stop did not cancel blocked discovery")
 		}
-
-		close(discoverGate)
-		synctest.Wait()
-		if err := <-startResult; err != nil {
-			t.Fatalf("Start error = %v", err)
+		if err := <-startResult; !errors.Is(err, context.Canceled) {
+			t.Fatalf("Start error = %v, want context cancellation", err)
 		}
-		<-stopped
 	})
 }
 
@@ -490,7 +539,7 @@ func TestBackpressureNoticePostsBeforeAcknowledgement(t *testing.T) {
 	}
 }
 
-func TestInteractionAcksBeforeForwarding(t *testing.T) {
+func TestInteractionForwardsBeforeAcknowledgement(t *testing.T) {
 	target := connectionTarget("p1", "c1")
 	h := newTestHarness()
 	if _, err := h.connect(target); err != nil {
@@ -513,11 +562,79 @@ func TestInteractionAcksBeforeForwarding(t *testing.T) {
 		t.Fatal("interaction was not acknowledged")
 	}
 	entries := h.order.snapshot()
-	if len(entries) < 2 || entries[0] != "ack" || entries[1] != "interaction" {
-		t.Fatalf("interaction order = %v, want ack then interaction", entries)
+	if len(entries) < 2 || entries[0] != "interaction" || entries[1] != "ack" {
+		t.Fatalf("interaction order = %v, want interaction then ack", entries)
 	}
 	if got := h.transport.interactns[0].ActionValue; got != "yes" {
 		t.Fatalf("forwarded action value = %q", got)
+	}
+}
+
+func TestInteractionWaitsForPermitBeforeAcknowledgement(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		target := connectionTarget("p1", "c1")
+		h := newTestHarness()
+		defer h.adapter.Stop()
+		if _, err := h.connect(target); err != nil {
+			t.Fatalf("connect() error = %v", err)
+		}
+		h.adapter.sem = make(chan struct{}, 1)
+		ingressEntered := make(chan struct{}, 1)
+		ingressGate := make(chan struct{})
+		h.transport.mu.Lock()
+		h.transport.ingressEntered = ingressEntered
+		h.transport.ingressGate = ingressGate
+		h.transport.mu.Unlock()
+
+		messageAck := h.sockets[0].emitAsync(messageBody("D1", "1701.0", "busy"))
+		<-ingressEntered
+		interactionAck := h.sockets[0].emitAsync(interactionBody())
+		synctest.Wait()
+		select {
+		case acked := <-interactionAck:
+			if acked {
+				t.Fatal("interaction was acknowledged while the message permit was held")
+			}
+		default:
+		}
+		close(ingressGate)
+		if !<-messageAck {
+			t.Fatal("saturated message was not acknowledged")
+		}
+		if !<-interactionAck {
+			t.Fatal("interaction was not forwarded and acknowledged after permit release")
+		}
+		if got := len(h.transport.interactns); got != 1 {
+			t.Fatalf("forwarded interactions = %d, want 1", got)
+		}
+	})
+}
+
+func TestCancelledInteractionAfterForwardingIsNotAcknowledged(t *testing.T) {
+	target := connectionTarget("p1", "c1")
+	h := newTestHarness()
+	if _, err := h.connect(target); err != nil {
+		t.Fatalf("connect() error = %v", err)
+	}
+	interactionEntered := make(chan struct{}, 1)
+	interactionGate := make(chan struct{})
+	h.transport.mu.Lock()
+	h.transport.interactionEntered = interactionEntered
+	h.transport.interactionGate = interactionGate
+	h.transport.interactionIgnoreCancellation = true
+	h.transport.mu.Unlock()
+
+	ack := h.sockets[0].emitAsync(interactionBody())
+	<-interactionEntered
+	// The action is allowed to complete after cancellation; the final context
+	// check must prevent an acknowledgement from claiming a dropped action.
+	h.sockets[0].cancel()
+	close(interactionGate)
+	if <-ack {
+		t.Fatal("cancelled interaction was acknowledged")
+	}
+	if got := len(h.transport.interactns); got != 1 {
+		t.Fatalf("forwarded interactions = %d, want 1", got)
 	}
 }
 
@@ -573,4 +690,44 @@ func TestStopDisconnectsAllRuntimes(t *testing.T) {
 	if count != 0 {
 		t.Fatalf("Stop left %d runtime(s)", count)
 	}
+}
+
+func TestStopDisconnectsMultipleStuckSocketsConcurrently(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newTestHarness(connectionTarget("p1", "c1"), connectionTarget("p2", "c2"))
+		for _, target := range h.transport.targets {
+			if _, err := h.connect(target); err != nil {
+				t.Fatalf("connect() error = %v", err)
+			}
+		}
+		release := make(chan struct{})
+		h.sockets[0].disconnectGate = release
+		h.sockets[1].disconnectGate = release
+		stopped := make(chan struct{})
+		go func() {
+			h.adapter.Stop()
+			close(stopped)
+		}()
+		synctest.Wait()
+		select {
+		case <-h.sockets[0].disconnectEntered:
+		default:
+			t.Fatal("first socket was not disconnected")
+		}
+		select {
+		case <-h.sockets[1].disconnectEntered:
+		default:
+			t.Fatal("second socket was not disconnected while first was stuck")
+		}
+		close(release)
+		synctest.Wait()
+		select {
+		case <-stopped:
+		default:
+			t.Fatal("Stop did not return after stuck sockets were released")
+		}
+		if !h.sockets[0].wasDisconnected() || !h.sockets[1].wasDisconnected() {
+			t.Fatal("Stop left a runtime socket connected")
+		}
+	})
 }

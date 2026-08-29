@@ -6,8 +6,8 @@ import (
 )
 
 // SocketEvent is one inbound Socket Mode payload. Ack acknowledges the event
-// to Slack; the adapter controls when, mirroring the Node contract (messages
-// acknowledge after forwarding, interactions before).
+// to Slack; the adapter controls when (messages and interactions acknowledge
+// after their server action is accepted).
 type SocketEvent struct {
 	Context context.Context
 	Body    any
