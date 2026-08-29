@@ -87,6 +87,7 @@ public sealed class SlackOwnerClaimOnboardingSpecs
         await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/{connection.Id}/ingress", new
             {
+                apiAppId = "A123",
                 isDirectMessage = true,
                 teamId = connection.WorkspaceTeamId,
                 conversationId,

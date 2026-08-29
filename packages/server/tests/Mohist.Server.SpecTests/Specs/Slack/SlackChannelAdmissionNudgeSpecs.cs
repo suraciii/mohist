@@ -145,6 +145,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
     {
         var body = new
         {
+            apiAppId = "A123",
             isDirectMessage = false,
             teamId = connection.WorkspaceTeamId,
             conversationId,

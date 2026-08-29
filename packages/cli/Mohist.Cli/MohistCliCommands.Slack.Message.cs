@@ -21,27 +21,27 @@ internal static partial class SlackCommands
         };
         var replyTo = new Option<string?>("--reply-to")
         {
-            Description = "Durable reply root from the injected Slack anchor. Required by the Server when --dispatch-ref is supplied; optional for general sends.",
+            Description = "Durable reply root from the injected Slack reply anchor (required for Agent replies).",
         };
         var dispatchRef = new Option<string?>("--dispatch-ref")
         {
-            Description = "Logical reply identity from the injected Slack reply anchor. Agent retries reuse it; separate turns use different values.",
+            Description = "Logical reply identity from the injected Slack reply anchor (required for Agent replies). Agent retries reuse it; separate turns use different values.",
         };
         var connection = new Option<string?>("--connection")
         {
-            Description = "Owning Connection id from the injected Slack reply anchor. Required by the Server when --dispatch-ref is supplied.",
+            Description = "Owning Connection id from the injected Slack reply anchor (required for Agent replies).",
         };
         var triggeringMessage = new Option<string?>("--triggering-message")
         {
-            Description = "Triggering Slack message id from the injected reply anchor. Required by the Server when --dispatch-ref is supplied.",
+            Description = "Triggering Slack message id from the injected Slack reply anchor (required for Agent replies).",
         };
         var workspace = new Option<string?>("--workspace")
         {
-            Description = "Slack workspace id from the injected reply anchor. Required by the Server when --dispatch-ref is supplied.",
+            Description = "Slack workspace id from the injected Slack reply anchor (required for Agent replies).",
         };
         var session = new Option<string?>("--session")
         {
-            Description = "Owning Session id from the injected reply anchor. Required by the Server when --dispatch-ref is supplied.",
+            Description = "Owning Session id from the injected Slack reply anchor (required for Agent replies).",
         };
         var text = new Option<string?>("--text")
         {
@@ -69,6 +69,33 @@ internal static partial class SlackCommands
         command.Options.Add(project);
         command.SetAction(async ctx =>
         {
+            var anchorValues = new[]
+            {
+                (Name: "--workspace", Value: ctx.GetValue(workspace)),
+                (Name: "--reply-to", Value: ctx.GetValue(replyTo)),
+                (Name: "--connection", Value: ctx.GetValue(connection)),
+                (Name: "--session", Value: ctx.GetValue(session)),
+                (Name: "--triggering-message", Value: ctx.GetValue(triggeringMessage)),
+                (Name: "--dispatch-ref", Value: ctx.GetValue(dispatchRef)),
+            };
+            if (!ManagerCliMode.Active)
+            {
+                if (anchorValues.All(anchor => anchor.Value is null))
+                {
+                    api.Error.WriteLine("Slack Agent replies require the complete anchored-reply contract: supply all six anchor options.");
+                    return CliExitCode.For(CliExitOutcome.OperationFailure);
+                }
+                var missing = anchorValues
+                    .Where(anchor => string.IsNullOrWhiteSpace(anchor.Value))
+                    .Select(anchor => anchor.Name)
+                    .ToArray();
+                if (missing.Length > 0)
+                {
+                    api.Error.WriteLine($"The Slack reply anchor is incomplete; missing: {string.Join(", ", missing)}. Supply all six anchor options.");
+                    return CliExitCode.For(CliExitOutcome.OperationFailure);
+                }
+            }
+
             string? projectId = null;
             if (!ManagerCliMode.Active)
             {

@@ -507,6 +507,7 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
     {
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), new
         {
+            apiAppId = "A123",
             isDirectMessage = true,
             teamId = connection.WorkspaceTeamId,
             conversationId,
@@ -531,6 +532,7 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
     {
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), new
         {
+            apiAppId = "A123",
             isDirectMessage = false,
             teamId = connection.WorkspaceTeamId,
             conversationId,
@@ -638,9 +640,11 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
             new
             {
+                workspaceTeamId = anchor.WorkspaceId,
                 conversationId = anchor.ConversationId,
                 threadTs = anchor.ThreadRootMessageId,
                 connectionId = anchor.ConnectionId,
+                sessionId = anchor.SessionId,
                 triggeringMessageId = anchor.TriggeringMessageId,
                 dispatchRef = anchor.DispatchRef,
                 text,

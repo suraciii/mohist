@@ -443,6 +443,8 @@ public static partial class SlackConnectionRoutes
                 if (disabledConnection?.DesiredState == DesiredStateKind.Disabled
                     && body is not null)
                 {
+                    if (ValidateIngressAppIdentity(disabledConnection, body) is { } disabledAppIdentityError)
+                        return disabledAppIdentityError;
                     var disabledIdentity = new SlackMessageIdentity(
                         body.TeamId, body.ConversationId, body.MessageTs);
                     var disabledIdentityError = disabledIdentity.Validate();
@@ -450,7 +452,6 @@ public static partial class SlackConnectionRoutes
                         return ApiResults.BadRequest(disabledIdentityError, "invalid_slack_identity");
                     if (!string.Equals(body.TeamId, disabledConnection.WorkspaceTeamId, StringComparison.Ordinal))
                         return ApiResults.BadRequest("The Slack workspace does not match this Connection.", "workspace_mismatch");
-
                     var disabledAdmission = await managedBotAdmission.EvaluateAsync(
                         disabledIdentity.WorkspaceTeamId,
                         body.SenderKind,
@@ -465,10 +466,9 @@ public static partial class SlackConnectionRoutes
             var connection = await connections.GetAsync(projectId, connectionId, ct);
             if (connection is null)
                 return ApiResults.NotFound("Slack Connection was not found.");
-            if (body is null)
-                return ApiResults.Ok(new { kind = "ignored" });
-
-            var identity = new SlackMessageIdentity(body.TeamId, body.ConversationId, body.MessageTs);
+            if (ValidateIngressAppIdentity(connection, body!) is { } appIdentityError)
+                return appIdentityError;
+            var identity = new SlackMessageIdentity(body!.TeamId, body.ConversationId, body.MessageTs);
             var identityError = identity.Validate();
             if (identityError.Length != 0)
                 return ApiResults.BadRequest(identityError, "invalid_slack_identity");

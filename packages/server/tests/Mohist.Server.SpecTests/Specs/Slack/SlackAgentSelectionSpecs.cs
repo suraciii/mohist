@@ -719,6 +719,7 @@ public sealed partial class SlackMultiAgentIngressSpecs
             $"/api/projects/{promptOwner.ProjectId}/slack-connections/{promptOwner.Id}/interactions",
             new
             {
+                apiAppId = promptOwner.AppId,
                 eventType = "block_actions",
                 interactionId = $"selection-{Guid.NewGuid():N}",
                 teamId = choice.WorkspaceTeamId,

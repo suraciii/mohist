@@ -67,6 +67,7 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
 
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection, "/ingress"), new
         {
+            apiAppId = "A123",
             isDirectMessage = true,
             teamId = connection.WorkspaceTeamId,
             conversationId = "D-steer",
@@ -89,6 +90,69 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
         Assert.False(string.IsNullOrWhiteSpace(result.GetProperty("inputId").GetString()));
         Assert.Equal(AgentTurnControlClassification.Queued,
             (await session.ResolveTurnControlAsync(result.GetProperty("turnId").GetString()!))?.Classification);
+    }
+
+    [Fact]
+    public async Task Interaction_requires_the_enrolled_api_app_id_before_control_side_effects()
+    {
+        var connection = await CreateConnectionAsync();
+        var seeded = await SeedExecutingSessionAsync(connection, "U_OWNER", "C-app-id");
+        var action = await CreateStopActionAsync(connection, seeded, "U_OWNER", "C-app-id");
+        var hub = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
+        hub.Clear();
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(seeded.SessionId);
+        var beforeRows = await SnapshotConnectionRowsAsync(connection);
+        var beforeTurns = JsonSerializer.Serialize(await session.ListTurnsAsync());
+        var beforeInputs = JsonSerializer.Serialize(await session.ListInputsAsync());
+
+        using var wrong = await _fixture.Client.PostAsJsonAsync(
+            IngressPath(connection, "/interactions"),
+            new
+            {
+                apiAppId = "A_WRONG",
+                eventType = "block_actions",
+                interactionId = "interaction-app-id-wrong",
+                teamId = connection.WorkspaceTeamId,
+                conversationId = "C-app-id",
+                messageTs = "1710000000.000900",
+                threadTs = "1710000000.000001",
+                actorSlackUserId = "U_OWNER",
+                actionId = action.ActionId,
+                actionValue = action.ActionValue,
+                leaseId = _connectionLeases[connection.Id],
+                adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
+            });
+        using var missing = await _fixture.Client.PostAsJsonAsync(
+            IngressPath(connection, "/interactions"),
+            new
+            {
+                eventType = "block_actions",
+                interactionId = "interaction-app-id-missing",
+                teamId = connection.WorkspaceTeamId,
+                conversationId = "C-app-id",
+                messageTs = "1710000000.000901",
+                threadTs = "1710000000.000001",
+                actorSlackUserId = "U_OWNER",
+                actionId = action.ActionId,
+                actionValue = action.ActionValue,
+                leaseId = _connectionLeases[connection.Id],
+                adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
+            });
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, wrong.StatusCode);
+        Assert.Equal("slack_app_identity_mismatch", await ReadCodeAsync(wrong));
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, missing.StatusCode);
+        Assert.Equal("slack_app_identity_mismatch", await ReadCodeAsync(missing));
+        Assert.Empty(hub.Invocations);
+        var afterRows = await SnapshotConnectionRowsAsync(connection);
+        Assert.Equal(beforeRows.Inbox, afterRows.Inbox);
+        Assert.Equal(beforeRows.Outbox, afterRows.Outbox);
+        Assert.Equal(beforeTurns, JsonSerializer.Serialize(await session.ListTurnsAsync()));
+        Assert.Equal(beforeInputs, JsonSerializer.Serialize(await session.ListInputsAsync()));
+
+        hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
+        var correct = await PostInteractionAsync(connection, action, "U_OWNER", "C-app-id");
+        Assert.Equal("stopped", correct.GetProperty("state").GetString());
     }
 
     [Fact]
@@ -255,6 +319,7 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
     {
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection, "/interactions"), new
         {
+            apiAppId = "A123",
             eventType = "block_actions",
             interactionId = $"interaction-{Guid.NewGuid():N}",
             teamId = connection.WorkspaceTeamId,
@@ -270,6 +335,68 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
         response.EnsureSuccessStatusCode();
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return document.RootElement.GetProperty("data").Clone();
+    }
+
+    private static async Task<string?> ReadCodeAsync(HttpResponseMessage response)
+    {
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.GetProperty("code").GetString();
+    }
+
+    private async Task<(string[] Inbox, string[] Outbox)> SnapshotConnectionRowsAsync(AgentConnection connection)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var inboxRows = await db.SlackProviderInboxRows.AsNoTracking()
+            .Where(row => row.ConnectionId == connection.Id)
+            .OrderBy(row => row.Id)
+            .ToListAsync();
+        var outboxRows = await db.SlackOutboxRows.AsNoTracking()
+            .Where(row => row.ConnectionId == connection.Id)
+            .OrderBy(row => row.Id)
+            .ToListAsync();
+        return (
+            inboxRows.Select(row => JsonSerializer.Serialize(new
+            {
+                row.Id,
+                row.ProjectId,
+                row.ConnectionId,
+                row.SlackMessageIdentity,
+                row.WorkspaceTeamId,
+                row.ConversationId,
+                row.ThreadTs,
+                row.SlackUserId,
+                row.RouteKind,
+                row.RouteSessionId,
+                row.RouteTurnId,
+                row.AcceptedAt,
+                row.DispatchedAt,
+                row.CreatedAt,
+            })).ToArray(),
+            outboxRows.Select(row => JsonSerializer.Serialize(new
+            {
+                row.Id,
+                row.ProjectId,
+                row.ConnectionId,
+                row.OwnerKind,
+                row.WorkspaceTeamId,
+                row.ConversationId,
+                row.ThreadTs,
+                row.Kind,
+                row.State,
+                row.DispatchRef,
+                row.PayloadJson,
+                row.AttemptCount,
+                row.NextAttemptAt,
+                row.ClaimedAt,
+                row.ClaimedByAdapterId,
+                row.DeliveredAt,
+                row.DeliveryUncertainAt,
+                row.DeadLetteredAt,
+                row.LastError,
+                row.CreatedAt,
+                row.UpdatedAt,
+            })).ToArray());
     }
 
     private async Task AssertControlDeliveryAsync(

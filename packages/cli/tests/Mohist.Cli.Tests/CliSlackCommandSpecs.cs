@@ -1103,7 +1103,7 @@ public sealed partial class CliSlackCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { accepted = true, connectionId = "connection_1", deliveryId = "slkout_2", dispatchRef = "d", merged = false } })));
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["slack", "message", "send", "--conversation", "D1", "--text", "-"],
+            ["slack", "message", "send", "--conversation", "D1", ..ReplyAnchorArgs(), "--text", "-"],
             output, error, fs, executor,
             standardInput: new StringReader("line one\nline two\n"));
 
@@ -1111,8 +1111,7 @@ public sealed partial class CliSlackCommandSpecs
         var body = JsonNode.Parse(handler.Requests.Single().Body!)!;
         Assert.Equal("line one\nline two\n", body["text"]!.GetValue<string>());
         Assert.Equal("D1", body["conversationId"]!.GetValue<string>());
-        // --reply-to is optional (omitted for a DM).
-        Assert.Null(body["threadTs"]?.GetValue<string?>());
+        Assert.Equal("1710000000.000100", body["threadTs"]!.GetValue<string>());
     }
 
     [Fact]
@@ -1121,7 +1120,7 @@ public sealed partial class CliSlackCommandSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["slack", "message", "send", "--conversation", "C1", "--text", "   "],
+            ["slack", "message", "send", "--conversation", "C1", ..ReplyAnchorArgs(), "--text", "   "],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exit);
@@ -1141,7 +1140,7 @@ public sealed partial class CliSlackCommandSpecs
         fs.AddFile("/mohist-tests/shot.png", "fake-png");
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["slack", "message", "send", "--conversation", "D1", "--file", "/mohist-tests/shot.png"],
+            ["slack", "message", "send", "--conversation", "D1", ..ReplyAnchorArgs(), "--file", "/mohist-tests/shot.png"],
             output, error, fs, executor);
 
         Assert.Equal(0, exit);
@@ -1164,7 +1163,7 @@ public sealed partial class CliSlackCommandSpecs
         fs.AddFile("/mohist-tests/shot.png", "fake-png");
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["slack", "message", "send", "--conversation", "D1", "--file", "/mohist-tests/shot.png", "--text", "see shot"],
+            ["slack", "message", "send", "--conversation", "D1", ..ReplyAnchorArgs(), "--file", "/mohist-tests/shot.png", "--text", "see shot"],
             output, error, fs, executor);
 
         Assert.Equal(0, exit);
@@ -1184,7 +1183,7 @@ public sealed partial class CliSlackCommandSpecs
             })));
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["slack", "message", "send", "--conversation", "C1", "--image", "https://example.com/chart.png"],
+            ["slack", "message", "send", "--conversation", "C1", ..ReplyAnchorArgs(), "--image", "https://example.com/chart.png"],
             output, error, fs, executor);
 
         Assert.Equal(0, exit);
@@ -1199,7 +1198,7 @@ public sealed partial class CliSlackCommandSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["slack", "message", "send", "--conversation", "C1", "--file", "/mohist-tests/nope.png"],
+            ["slack", "message", "send", "--conversation", "C1", ..ReplyAnchorArgs(), "--file", "/mohist-tests/nope.png"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exit);
@@ -1214,7 +1213,7 @@ public sealed partial class CliSlackCommandSpecs
         fs.AddFile("/mohist-tests/shot.png", "fake-png");
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["slack", "message", "send", "--conversation", "C1", "--file", "/mohist-tests/shot.png", "--image", "https://example.com/p.png"],
+            ["slack", "message", "send", "--conversation", "C1", ..ReplyAnchorArgs(), "--file", "/mohist-tests/shot.png", "--image", "https://example.com/p.png"],
             output, error, fs, executor);
 
         Assert.Equal(2, exit);
@@ -1228,7 +1227,7 @@ public sealed partial class CliSlackCommandSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["slack", "message", "send", "--conversation", "C1", "--image", "ftp://example.com/p.png"],
+            ["slack", "message", "send", "--conversation", "C1", ..ReplyAnchorArgs(), "--image", "ftp://example.com/p.png"],
             output, error, fs, executor);
 
         Assert.Equal(2, exit);

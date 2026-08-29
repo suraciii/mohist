@@ -39,6 +39,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
         var connection = await CreateConnectionAsync();
         var body = new
         {
+            apiAppId = "A123",
             isDirectMessage = false,
             teamId = connection.WorkspaceTeamId,
             conversationId = "C-channel-A",
@@ -347,10 +348,22 @@ public sealed partial class SlackChannelThreadIngressSpecs
         // The Agent sends its reply via the reply action API (mo slack message send).
         // The reply lands in the outbox — preferring an in-place update of the
         // liveness progress message — and is the only reply body Slack sees.
+        var followupTurn = (await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId!)
+            .ListTurnsAsync()).Single(turn => turn.Id == followup.GetProperty("turnId").GetString());
         const string agentReply = "Done — the follow-up is resolved. token=xoxb-leak-attempt";
         using var reply = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{connection.ProjectId}/slack-connections/reply",
-            new { conversationId, threadTs = rootTs, text = agentReply });
+            new
+            {
+                workspaceTeamId = connection.WorkspaceTeamId,
+                conversationId,
+                threadTs = rootTs,
+                connectionId = connection.Id,
+                sessionId,
+                triggeringMessageId = followupTs,
+                dispatchRef = followupTurn.OperationId,
+                text = agentReply,
+            });
         if (!reply.IsSuccessStatusCode)
         {
             var body = await reply.Content.ReadAsStringAsync();
@@ -395,6 +408,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
 
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), new
         {
+            apiAppId = "A123",
             isDirectMessage = false,
             teamId = connection.WorkspaceTeamId,
             conversationId = "C-channel-backpressured",
@@ -473,6 +487,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
     {
         var body = new
         {
+            apiAppId = "A123",
             isDirectMessage = false,
             teamId = connection.WorkspaceTeamId,
             conversationId,

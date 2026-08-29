@@ -182,6 +182,7 @@ public sealed class SlackRuntimeLeaseGateSpecs
 
         var body = new
         {
+            apiAppId = connection.AppId,
             eventType = "block_actions",
             interactionId = "trigger-stop",
             teamId = TeamId,
@@ -206,6 +207,7 @@ public sealed class SlackRuntimeLeaseGateSpecs
         // invalid signature is then rejected by turn control, not by the gate).
         using var current = await PostAsync(IngressPath(connection, "/interactions"), new
         {
+            apiAppId = connection.AppId,
             eventType = "block_actions",
             interactionId = "trigger-stop",
             teamId = TeamId,
@@ -354,7 +356,7 @@ public sealed class SlackRuntimeLeaseGateSpecs
         await secrets.StoreAsync(
             SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken),
             Encoding.UTF8.GetBytes("xoxb-gate"));
-        return new SeededConnection(projectId, connectionId);
+        return new SeededConnection(projectId, connectionId, appId);
     }
 
     private async Task<string> SeedEnrollmentAsync()
@@ -449,6 +451,7 @@ public sealed class SlackRuntimeLeaseGateSpecs
     private async Task<HttpResponseMessage> PostIngressAsync(SeededConnection connection, string leaseId) =>
         await PostAsync(IngressPath(connection, "/ingress"), new
         {
+            apiAppId = connection.AppId,
             isDirectMessage = false,
             teamId = TeamId,
             conversationId = "C_GATE",
@@ -496,5 +499,5 @@ public sealed class SlackRuntimeLeaseGateSpecs
         return document.RootElement.GetProperty("code").GetString();
     }
 
-    private sealed record SeededConnection(string ProjectId, string ConnectionId);
+    private sealed record SeededConnection(string ProjectId, string ConnectionId, string AppId);
 }

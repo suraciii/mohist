@@ -241,6 +241,7 @@ public sealed class SlackRetryInteractionSpecs : IAsyncLifetime
         string conversationId) =>
         _fixture.Client.PostAsJsonAsync(IngressPath(connection), new
         {
+            apiAppId = "A123",
             eventType = "block_actions",
             interactionId = $"interaction-{Guid.NewGuid():N}",
             teamId = connection.WorkspaceTeamId,

@@ -468,10 +468,10 @@ closed: renew is rejected, hello returns stale, and a hello from an old token
 must not reject or delete the new candidate. A failed acquisition leaves no
 inert active lease and does not displace the existing holder.
 
-Every Socket envelope validates `api_app_id + team_id` before resolving
-Enrollment or Connection. An unknown App/team is acknowledged and rejected,
-never routed by Bot name. The acknowledgement still means only Server durable
-acceptance and never waits for Agent execution.
+Every Socket envelope validates `api_app_id + team_id` against its target
+Enrollment or Connection before admission. An unknown App/team is
+acknowledged and rejected, never routed by Bot name. The acknowledgement
+still means only Server durable acceptance and never waits for Agent execution.
 
 ## Session Boundary
 
@@ -618,31 +618,32 @@ reply nor treats silence as failure.
 
 ### Reply Action CLI: `mo slack message send`
 
-The reply action command surface is `mo slack message send`, a general CLI for
-people and Agents rather than an Agent-only black box. Its explicit destination
-matches Buzz `buzz messages send`:
+The reply action command surface is `mo slack message send`. A Connection Agent
+reply is anchored-only: the CLI requires the complete reply anchor before it
+contacts the Server. Its explicit destination matches Buzz `buzz messages send`:
 
 ```text literal
-mo slack message send --conversation <id> --text "<body>"
-mo slack message send --workspace <workspace-id> --conversation <id> --reply-to <ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <ref> --text "<body>"        # anchored Agent reply
-printf 'long body\n\nmultiple paragraphs\n' | mo slack message send --conversation <id> --text -
-mo slack message send --conversation <id> --text "see this screenshot" --file ./screenshot.png
-mo slack message send --conversation <id> --text "architecture diagram" --image https://example.com/diagram.png
+mo slack message send --workspace <workspace-id> --conversation <id> --reply-to <ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <ref> --text "<body>"
+printf 'long body\n\nmultiple paragraphs\n' | mo slack message send --workspace <workspace-id> --conversation <id> --reply-to <ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <ref> --text -
+mo slack message send --workspace <workspace-id> --conversation <id> --reply-to <ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <ref> --text "see this screenshot" --file ./screenshot.png
+mo slack message send --workspace <workspace-id> --conversation <id> --reply-to <ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <ref> --text "architecture diagram" --image https://example.com/diagram.png
 ```
 
-- **Explicit destination.** `--conversation` is required; `--reply-to` is the
-  durable root assertion for anchored replies and optional for general sends. The Agent reads both from the injected reply anchor
-  instead of choosing from memory. Sending elsewhere states that intent
-  explicitly.
-- **Explicit ownership and dispatch identity.** An Agent also passes the
-  injected `--workspace`, `--connection`, `--session`, `--reply-to`,
-  `--triggering-message`, and `--dispatch-ref`. Server validates the complete
+- **Explicit destination.** `--conversation`, `--workspace`, `--reply-to`,
+  `--connection`, `--session`, `--triggering-message`, and `--dispatch-ref`
+  are required for a Connection Agent reply. An anchor-less send is refused by
+  the CLI with no HTTP request; supplying only some anchor fields is also
+  refused with the missing fields listed. The Agent reads these values from the
+  injected reply anchor instead of choosing a destination from memory.
+- **Explicit ownership and dispatch identity.** Server validates the complete
   anchor against durable Session provenance and its Turn before it scopes terminal
   reply selection and coalescing to that logical Turn. Distinct sends are accepted
   only while the Turn is active; an identical retry after terminal completion still
   returns the committed delivery intent. Another Connection or pending Turn in the
-  same DM or thread cannot receive or merge the answer. Human-authored sends without
-  an execution anchor retain conversation-scoped behavior.
+  same DM or thread cannot receive or merge the answer.
+- **Manager separation.** Manager-mode `mo slack message send` uses the dedicated
+  Manager reply route and its Manager credential/origin contract; it is separate
+  from this Connection Agent anchor requirement.
 - **Body through `--text`.** A string, or `-` for stdin so shell escaping does
   not consume newlines. The Agent writes standard Markdown; the renderer
   converts it to Slack mrkdwn and degrades unsupported tables and headings to
