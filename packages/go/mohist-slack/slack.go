@@ -602,16 +602,17 @@ func (w *SlackWeb) GetReactions(ctx context.Context, channel, timestamp string) 
 	return names, nil
 }
 
-func (w *SlackWeb) GetConversationHistory(ctx context.Context, input HistoryInput) ([]HistoryMessage, error) {
+func (w *SlackWeb) GetConversationHistory(ctx context.Context, input HistoryInput) (HistoryPage, error) {
 	resp, err := w.api.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
 		ChannelID: input.Channel,
+		Cursor:    input.Cursor,
 		Latest:    input.Latest,
 		Oldest:    input.Oldest,
 		Inclusive: input.Latest != "" || input.Oldest != "",
 		Limit:     input.Limit,
 	})
 	if err != nil {
-		return nil, err
+		return HistoryPage{}, err
 	}
 	messages := make([]HistoryMessage, 0, len(resp.Messages))
 	for _, message := range resp.Messages {
@@ -625,7 +626,11 @@ func (w *SlackWeb) GetConversationHistory(ctx context.Context, input HistoryInpu
 		}
 		messages = append(messages, historyMessage)
 	}
-	return messages, nil
+	return HistoryPage{
+		Messages:   messages,
+		HasMore:    resp.HasMore,
+		NextCursor: resp.ResponseMetaData.NextCursor,
+	}, nil
 }
 
 func (w *SlackWeb) UploadFileV2(ctx context.Context, input FileUploadInput) (FileUploadResult, error) {

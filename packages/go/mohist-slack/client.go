@@ -51,9 +51,17 @@ type UpdateMessageInput struct {
 // HistoryInput scopes one conversations.history call.
 type HistoryInput struct {
 	Channel string
+	Cursor  string
 	Latest  string
 	Oldest  string
 	Limit   int
+}
+
+// HistoryPage preserves pagination metadata so callers can distinguish absence from an incomplete search.
+type HistoryPage struct {
+	Messages   []HistoryMessage
+	HasMore    bool
+	NextCursor string
 }
 
 // HistoryMessage is one message from conversations.history.
@@ -93,7 +101,7 @@ type WebClient interface {
 	AddReaction(ctx context.Context, channel, name, timestamp string) error
 	RemoveReaction(ctx context.Context, channel, name, timestamp string) error
 	GetReactions(ctx context.Context, channel, timestamp string) (names []string, err error)
-	GetConversationHistory(ctx context.Context, input HistoryInput) ([]HistoryMessage, error)
+	GetConversationHistory(ctx context.Context, input HistoryInput) (HistoryPage, error)
 	UploadFileV2(ctx context.Context, input FileUploadInput) (FileUploadResult, error)
 }
 

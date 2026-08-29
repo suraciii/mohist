@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Delivery settlement ports packages/mohist-slack/src/adapter-delivery.ts.
@@ -23,7 +24,17 @@ const (
 	OpUploadFile     = "upload_file"
 )
 
-const providerMutationAbsent = "provider_mutation_absent"
+const (
+	providerMutationAbsent    = "provider_mutation_absent"
+	providerHistoryIncomplete = "provider_history_incomplete"
+	// Keep provider lookups bounded so a busy conversation cannot monopolize an adapter worker.
+	historyPageBudget = 8
+
+	// Reserve a delimiter outside normal producer ids to keep base and segment namespaces disjoint.
+	segmentDispatchSeparator = "\x1f"
+)
+
+var errHistorySearchIncomplete = errors.New("conversation history search incomplete")
 
 // DeliveryPayload is one claimed delivery's decoded payload. Unknown fields
 // are ignored; required-field validation happens where the Node
@@ -166,32 +177,54 @@ func FindStatusMessage(ctx context.Context, web WebClient, conversationID, clien
 	if web == nil {
 		return nil, nil
 	}
-	messages, err := GetConversationHistory(ctx, web, HistoryInput{Channel: conversationID, Limit: 200}, ensureCurrent)
+	history, complete, err := readConversationHistory(ctx, web, HistoryInput{Channel: conversationID, Limit: 200}, ensureCurrent)
 	if err != nil {
 		return nil, err
 	}
-	for _, candidate := range messages {
+	for _, candidate := range history {
 		if candidate.ClientMsgID == clientMessageID && candidate.TS != "" {
 			return &MessageIdentity{ConversationID: conversationID, MessageTs: candidate.TS}, nil
 		}
 	}
+	if !complete {
+		return nil, errHistorySearchIncomplete
+	}
 	return nil, nil
+}
+
+func readConversationHistory(ctx context.Context, web WebClient, input HistoryInput, ensureCurrent func()) ([]HistoryMessage, bool, error) {
+	history := make([]HistoryMessage, 0, input.Limit)
+	for pageNumber := 0; pageNumber < historyPageBudget; pageNumber++ {
+		page, err := GetConversationHistory(ctx, web, input, ensureCurrent)
+		if err != nil {
+			return nil, false, err
+		}
+		history = append(history, page.Messages...)
+		if !page.HasMore {
+			return history, true, nil
+		}
+		if page.NextCursor == "" || page.NextCursor == input.Cursor {
+			return history, false, nil
+		}
+		input.Cursor = page.NextCursor
+	}
+	return history, false, nil
 }
 
 // GetConversationHistory invokes conversations.history through the seam,
 // converting typed rejections into coded results the caller can inspect via
 // SlackErrorCode on the returned error.
-func GetConversationHistory(ctx context.Context, web WebClient, input HistoryInput, ensureCurrent func()) ([]HistoryMessage, error) {
+func GetConversationHistory(ctx context.Context, web WebClient, input HistoryInput, ensureCurrent func()) (HistoryPage, error) {
 	ensureCurrent()
-	messages, err := web.GetConversationHistory(ctx, input)
+	page, err := web.GetConversationHistory(ctx, input)
 	ensureCurrent()
 	if err != nil {
 		if code := SlackErrorCode(err); code != "" {
 			err = &SlackError{Code: code}
 		}
-		return nil, err
+		return HistoryPage{}, err
 	}
-	return messages, nil
+	return page, nil
 }
 
 // MutateDelivery performs one delivery's primary path or degradation ladder.
@@ -259,13 +292,16 @@ func MutateDelivery(ctx context.Context, web WebClient, delivery *Delivery, ensu
 			return retryAck(delivery, code), nil
 		}
 		if code == "missing_scope" {
-			if payload.FallbackText == "" || payload.FallbackDispatchRef == "" {
+			if payload.FallbackText == "" || fallbackDispatchRef(payload) == "" {
 				return DeliveredAck(delivery, nil), nil
 			}
 			return postFallback(ctx, web, delivery, payload, code, ensureCurrent)
 		}
 		statusTarget, err := findStatusTarget(ctx, web, delivery, payload, ensureCurrent)
 		if err != nil {
+			if errors.Is(err, errHistorySearchIncomplete) {
+				return uncertainAck(delivery, providerHistoryIncomplete), nil
+			}
 			return DeliveryAck{}, err
 		}
 		if statusTarget != nil && statusTarget.MessageTs != target.MessageTs {
@@ -284,7 +320,7 @@ func MutateDelivery(ctx context.Context, web WebClient, delivery *Delivery, ensu
 		if operation == OpReactionRemove {
 			return DeliveredAck(delivery, nil), nil
 		}
-		if payload.FallbackText != "" && payload.FallbackDispatchRef != "" {
+		if payload.FallbackText != "" && fallbackDispatchRef(payload) != "" {
 			return postFallback(ctx, web, delivery, payload, code, ensureCurrent)
 		}
 		return DeliveredAck(delivery, nil), nil
@@ -309,6 +345,9 @@ func MutateDelivery(ctx context.Context, web WebClient, delivery *Delivery, ensu
 	}
 	existingStatus, err := findStatusTarget(ctx, web, delivery, payload, ensureCurrent)
 	if err != nil {
+		if errors.Is(err, errHistorySearchIncomplete) {
+			return uncertainAck(delivery, providerHistoryIncomplete), nil
+		}
 		return DeliveryAck{}, err
 	}
 	if existingStatus != nil {
@@ -355,16 +394,21 @@ func MutateDelivery(ctx context.Context, web WebClient, delivery *Delivery, ensu
 }
 
 func deliverSegments(ctx context.Context, web WebClient, delivery *Delivery, payload DeliveryPayload, ensureCurrent func()) (DeliveryAck, error) {
+	refs, err := segmentDispatchRefs(payload)
+	if err != nil {
+		return DeliveryAck{}, err
+	}
+	if len(refs) != len(payload.Segments) {
+		return DeliveryAck{}, errors.New("segmented delivery is missing a client message id")
+	}
 	threadTs := derefString(delivery.ThreadTs)
 	var firstIdentity *MessageIdentity
 	for index, segment := range payload.Segments {
 		input := PostMessageInput{
-			Channel:  delivery.ConversationID,
-			Text:     segment,
-			ThreadTs: threadTs,
-		}
-		if index == 0 {
-			input.ClientMsgID = payload.ClientMessageID
+			Channel:     delivery.ConversationID,
+			Text:        segment,
+			ThreadTs:    threadTs,
+			ClientMsgID: refs[index],
 		}
 		ensureCurrent()
 		ts, err := web.PostMessage(ctx, input)
@@ -407,9 +451,9 @@ func uploadFile(ctx context.Context, web WebClient, delivery *Delivery, payload 
 	}
 	identity := fileShareIdentity(delivery, result)
 	if identity == nil && result.FileID != "" {
-		messages, histErr := GetConversationHistory(ctx, web, HistoryInput{Channel: delivery.ConversationID, Limit: 200}, ensureCurrent)
+		page, histErr := GetConversationHistory(ctx, web, HistoryInput{Channel: delivery.ConversationID, Limit: 200}, ensureCurrent)
 		if histErr == nil {
-			for _, candidate := range messages {
+			for _, candidate := range page.Messages {
 				if candidate.TS == "" {
 					continue
 				}
@@ -442,7 +486,7 @@ func fileShareIdentity(delivery *Delivery, result FileUploadResult) *MessageIden
 }
 
 func fallbackAfterUpdateFailure(ctx context.Context, web WebClient, delivery *Delivery, payload DeliveryPayload, reason string, ensureCurrent func()) (DeliveryAck, error) {
-	if payload.FallbackText == "" || payload.FallbackDispatchRef == "" {
+	if payload.FallbackText == "" || fallbackDispatchRef(payload) == "" {
 		return retryAck(delivery, reason), nil
 	}
 	return postFallback(ctx, web, delivery, payload, reason, ensureCurrent)
@@ -453,12 +497,23 @@ func postFallback(ctx context.Context, web WebClient, delivery *Delivery, payloa
 	if fallbackText == "" {
 		fallbackText = payload.Text
 	}
+	fallbackRef := fallbackDispatchRef(payload)
+	existing, err := FindStatusMessage(ctx, web, delivery.ConversationID, fallbackRef, ensureCurrent)
+	if err != nil {
+		if errors.Is(err, errHistorySearchIncomplete) {
+			return uncertainAck(delivery, providerHistoryIncomplete), nil
+		}
+		return DeliveryAck{}, err
+	}
+	if existing != nil {
+		return DeliveredAck(delivery, existing), nil
+	}
 	ensureCurrent()
 	ts, err := web.PostMessage(ctx, PostMessageInput{
 		Channel:     delivery.ConversationID,
 		Text:        fallbackText,
 		ThreadTs:    derefString(delivery.ThreadTs),
-		ClientMsgID: payload.FallbackDispatchRef,
+		ClientMsgID: fallbackRef,
 		Blocks:      payload.Blocks,
 	})
 	ensureCurrent()
@@ -473,6 +528,41 @@ func postFallback(ctx context.Context, web WebClient, delivery *Delivery, payloa
 		identity = &MessageIdentity{ConversationID: delivery.ConversationID, MessageTs: ts}
 	}
 	return DeliveredAck(delivery, identity), nil
+}
+
+func segmentDispatchRef(base string, index int) (string, error) {
+	if strings.Contains(base, segmentDispatchSeparator) {
+		return "", fmt.Errorf("client message id contains the reserved segment separator")
+	}
+	if index == 0 {
+		return base, nil
+	}
+	return fmt.Sprintf("%s%s%d", base, segmentDispatchSeparator, index), nil
+}
+
+func segmentDispatchRefs(payload DeliveryPayload) ([]string, error) {
+	if len(payload.Segments) <= 1 || payload.ClientMessageID == "" {
+		return nil, nil
+	}
+	refs := make([]string, len(payload.Segments))
+	for index := range payload.Segments {
+		ref, err := segmentDispatchRef(payload.ClientMessageID, index)
+		if err != nil {
+			return nil, err
+		}
+		refs[index] = ref
+	}
+	return refs, nil
+}
+
+func fallbackDispatchRef(payload DeliveryPayload) string {
+	if payload.FallbackDispatchRef != "" {
+		return payload.FallbackDispatchRef
+	}
+	if payload.ClientMessageID == "" {
+		return ""
+	}
+	return payload.ClientMessageID + ":fallback"
 }
 
 func findStatusTarget(ctx context.Context, web WebClient, delivery *Delivery, payload DeliveryPayload, ensureCurrent func()) (*MessageIdentity, error) {
@@ -509,7 +599,7 @@ func Reconcile(ctx context.Context, web WebClient, delivery *Delivery, ensureCur
 			if !IsUnsupportedReactionError(code) {
 				return uncertainAck(delivery, code), nil
 			}
-			if payload.FallbackText == "" || payload.FallbackDispatchRef == "" {
+			if payload.FallbackText == "" || fallbackDispatchRef(payload) == "" {
 				return DeliveredAck(delivery, target), nil
 			}
 			return postFallback(ctx, web, delivery, payload, code, ensureCurrent)
@@ -534,12 +624,27 @@ func Reconcile(ctx context.Context, web WebClient, delivery *Delivery, ensureCur
 	if web == nil {
 		return uncertainAck(delivery, "Slack client cannot reconcile messages"), nil
 	}
-	history, err := GetConversationHistory(ctx, web, HistoryInput{
+	segmented := len(payload.Segments) > 1
+	segmentRefs, err := segmentDispatchRefs(payload)
+	if err != nil {
+		return DeliveryAck{}, err
+	}
+	if segmented && len(segmentRefs) == 0 {
+		return retryAck(delivery, providerMutationAbsent), nil
+	}
+	historyInput := HistoryInput{
 		Channel: delivery.ConversationID,
 		Latest:  derefIdentityTS(target),
 		Oldest:  derefIdentityTS(target),
 		Limit:   200,
-	}, ensureCurrent)
+	}
+	if segmented {
+		// A segmented post has identities for every message, so it must search
+		// the conversation rather than only the original update target.
+		historyInput.Latest = ""
+		historyInput.Oldest = ""
+	}
+	history, complete, err := readConversationHistory(ctx, web, historyInput, ensureCurrent)
 	if err != nil {
 		if code := SlackErrorCode(err); code != "" {
 			return uncertainAck(delivery, code), nil
@@ -547,17 +652,41 @@ func Reconcile(ctx context.Context, web WebClient, delivery *Delivery, ensureCur
 		return DeliveryAck{}, err
 	}
 	var match *HistoryMessage
-	for i := range history {
-		candidate := history[i]
-		if (target != nil && candidate.TS == target.MessageTs) ||
-			(payload.ClientMessageID != "" && candidate.ClientMsgID == payload.ClientMessageID) ||
-			(payload.FallbackDispatchRef != "" && candidate.ClientMsgID == payload.FallbackDispatchRef) {
-			match = &candidate
-			break
+	if segmented {
+		found := make(map[string]HistoryMessage, len(segmentRefs))
+		for _, candidate := range history {
+			if candidate.TS == "" {
+				continue
+			}
+			for _, ref := range segmentRefs {
+				if candidate.ClientMsgID == ref {
+					found[ref] = candidate
+					break
+				}
+			}
+		}
+		if len(found) != len(segmentRefs) {
+			if !complete {
+				return uncertainAck(delivery, providerHistoryIncomplete), nil
+			}
+			return retryAck(delivery, providerMutationAbsent), nil
+		}
+		first := found[segmentRefs[0]]
+		match = &first
+	} else {
+		fallbackRef := fallbackDispatchRef(payload)
+		for i := range history {
+			candidate := history[i]
+			if (target != nil && candidate.TS == target.MessageTs) ||
+				(payload.ClientMessageID != "" && candidate.ClientMsgID == payload.ClientMessageID) ||
+				(fallbackRef != "" && candidate.ClientMsgID == fallbackRef) {
+				match = &candidate
+				break
+			}
 		}
 	}
 	if match != nil && match.TS != "" {
-		if payload.Operation == OpChatUpdate && payload.Text != "" && match.Text != payload.Text {
+		if !segmented && payload.Operation == OpChatUpdate && payload.Text != "" && match.Text != payload.Text {
 			return retryAck(delivery, providerMutationAbsent), nil
 		}
 		if IsKnownDeliveryOperation(orDefault(payload.Operation, OpPostMessage)) {
@@ -565,7 +694,10 @@ func Reconcile(ctx context.Context, web WebClient, delivery *Delivery, ensureCur
 		}
 		return DeliveredAck(delivery, nil), nil
 	}
-	if payload.Operation == OpChatUpdate && payload.FallbackText != "" && payload.FallbackDispatchRef != "" {
+	if !complete {
+		return uncertainAck(delivery, providerHistoryIncomplete), nil
+	}
+	if payload.Operation == OpChatUpdate && payload.FallbackText != "" && fallbackDispatchRef(payload) != "" {
 		if web == nil {
 			return uncertainAck(delivery, "Slack client cannot post fallback"), nil
 		}
