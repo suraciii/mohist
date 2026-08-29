@@ -184,6 +184,32 @@ public sealed class SlackOutboxBackpressureRecoverySpecs
     }
 
     [Fact]
+    public async Task Dispatcher_continues_after_a_poisoned_dead_letter_payload()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var health = new SlackConnectionHealthBackpressurer(new TestDbContextFactory(database.Options), new FakeTimeProvider(Start));
+        await SeedBackpressuredConnectionAsync(database, SlackProviderBackpressureReasons.OutboxOverflow);
+        var (_, outbox, dispatcher) = await BuildDispatcherAsync(database, health, inboxCapacity: 4, outboxCapacity: 4);
+
+        var poisoned = await outbox.EnqueueAsync(OutboxDraft(SlackOutboxKinds.TerminalResult, "poisoned", dispatchRef: "agent:poisoned"));
+        var remaining = await outbox.EnqueueAsync(OutboxDraft(SlackOutboxKinds.TerminalResult, "remaining", dispatchRef: "agent:remaining"));
+        await using (var db = database.CreateContext())
+        {
+            var rows = await db.SlackOutboxRows.ToListAsync();
+            foreach (var row in rows)
+                row.AttemptCount = 5;
+            rows.Single(row => row.Id == poisoned.Id).PayloadJson = "{";
+            await db.SaveChangesAsync();
+        }
+
+        await dispatcher.DispatchAsync(CancellationToken.None);
+
+        var outboxRows = (await outbox.ListAsync("proj_a", "conn_1")).Entries;
+        Assert.Equal(SlackOutboxStates.DeadLettered, outboxRows.Single(row => row.Id == poisoned.Id).State);
+        Assert.Equal(SlackOutboxStates.DeadLettered, outboxRows.Single(row => row.Id == remaining.Id).State);
+    }
+
+    [Fact]
     public void Backpressured_diagnostic_uses_distinct_state_with_inbox_or_outbox_reason()
     {
         var inbox = new AgentConnection
