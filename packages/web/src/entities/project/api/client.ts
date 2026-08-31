@@ -6,12 +6,23 @@ export function getProjects() {
 }
 
 export function createProject(
-  data: { name: string; repository: { name: string; gitUrl: string; baseBranch?: string } },
+  data: {
+    name: string
+    verificationCommand: string
+    repository: { name: string; gitUrl: string; baseBranch?: string }
+  },
   requester: typeof request = request,
 ) {
   return requester<Project>('/projects', {
     method: 'POST',
     body: JSON.stringify(data),
+  })
+}
+
+export function setVerificationCommand(projectId: string, command: string) {
+  return request<Project>(`/projects/${encodeURIComponent(projectId)}/verification-command`, {
+    method: 'PUT',
+    body: JSON.stringify({ command }),
   })
 }
 
@@ -25,11 +36,7 @@ export function getRepositories(projectId: string) {
   return request<Repository[]>(`/projects/${encodeURIComponent(projectId)}/repositories`)
 }
 
-export function addRepository(
-  projectId: string,
-  data: AddRepositoryInput,
-  requester: typeof request = request,
-) {
+export function addRepository(projectId: string, data: AddRepositoryInput, requester: typeof request = request) {
   return requester<Project>(`/projects/${encodeURIComponent(projectId)}/repositories`, {
     method: 'POST',
     body: JSON.stringify(data),

@@ -38,6 +38,14 @@ public static class ProjectRoutes
             if (req.Repository is null)
                 return ApiResults.BadRequest("repository is required", "repository_required");
 
+            var verificationError = ProjectVerificationCommand.Validate(req.VerificationCommand);
+            if (verificationError is not null)
+                return ApiResults.BadRequest(
+                    $"{verificationError}; configure it with the verificationCommand field or `mo project workflow verification set`.",
+                    string.IsNullOrWhiteSpace(req.VerificationCommand)
+                        ? "project-verification-config-missing"
+                        : "invalid_project_verification_command");
+
             if (TryGetForbiddenLocalRepositoryField(
                     req.Repository.Path,
                     req.Repository.Remote,
@@ -79,7 +87,7 @@ public static class ProjectRoutes
 
             try
             {
-                var project = await projectGrain.CreateAsync(projectName, initial);
+                var project = await projectGrain.CreateAsync(projectName, initial, req.VerificationCommand);
                 return Results.Json(new { success = true, data = project }, statusCode: 201);
             }
             catch (InvalidOperationException ex)
@@ -544,6 +552,30 @@ public static class ProjectRoutes
                 await grains.GetGrain<IProjectGrain>(context.GetResolvedProject().Id).GetAsync());
         });
 
+        byRef.MapPut("/verification-command", async (
+            HttpContext context,
+            ProjectVerificationCommandBody? body,
+            IGrainFactory grains) =>
+        {
+            if (body is null)
+                return ApiResults.BadRequest("request body is required", "body_required");
+            if (body.UndeclaredFields.Count > 0)
+                return ApiResults.BadRequest(
+                    $"unsupported top-level field(s): {string.Join(", ", body.UndeclaredFields)}; verification command accepts only command.",
+                    "unsupported_field",
+                    new { fields = body.UndeclaredFields.ToArray() });
+            try
+            {
+                var updated = await grains.GetGrain<IProjectGrain>(context.GetResolvedProject().Id)
+                    .SetVerificationCommandAsync(body.Command!);
+                return updated is null ? ApiResults.NotFound("Project not found") : ApiResults.Ok(updated);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_project_verification_command");
+            }
+        });
+
         byRef.MapGet("/variables", async (HttpContext context, ProjectVariableStore variableStore) =>
         {
             var project = context.GetResolvedProject();
@@ -763,7 +795,7 @@ public sealed record ProjectPromptOverrideRequest(
 
 public sealed record PromptPreviewRequest(JsonElement? Variables);
 
-public record CreateProjectRequest(string Name, CreateProjectRepositoryRequest? Repository);
+public record CreateProjectRequest(string Name, CreateProjectRepositoryRequest? Repository, string? VerificationCommand = null);
 public record CreateProjectRepositoryRequest(
     string? Name,
     string? GitUrl,
@@ -797,13 +829,47 @@ public sealed record ToggleWorkflowProfileRequest(string ProfileId);
 
 /// <summary>
 /// Raw-JSON presence-bound body for
-/// <c>PUT/PATCH /api/projects/{projectRef}/default-execution-config</c>.
+/// <c>PUT /api/projects/{projectRef}/verification-command</c>.
 /// Records every top-level JSON property name so the route can reject
-/// undeclared fields before any state changes. The closed set is
-/// <c>runtime</c>, <c>model</c>, and optional <c>variant</c>; value rules
-/// (runtime ∈ {opencode, pi}, model in <c>provider/model</c> form) are owned
-/// by <c>IProjectGrain.SetDefaultExecutionConfigAsync</c>.
+/// undeclared fields before any state changes. The closed set contains only
+/// the required <c>command</c> string.
 /// </summary>
+public sealed record ProjectVerificationCommandBody(
+    string? Command,
+    IReadOnlyList<string> UndeclaredFields)
+{
+    internal static readonly IReadOnlySet<string> AllowedFields = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "command",
+    };
+
+    public static async ValueTask<ProjectVerificationCommandBody?> BindAsync(HttpContext context)
+    {
+        try
+        {
+            var raw = await JsonSerializer.DeserializeAsync<JsonElement>(context.Request.Body, JSON.Options);
+            if (raw.ValueKind != JsonValueKind.Object)
+                throw new JsonException("verification command must be a JSON object");
+            var undeclared = raw.EnumerateObject()
+                .Where(property => !AllowedFields.Contains(property.Name))
+                .Select(property => property.Name)
+                .ToList();
+            string? command = null;
+            if (raw.TryGetProperty("command", out var value))
+            {
+                if (value.ValueKind != JsonValueKind.String)
+                    throw new JsonException("command must be a string");
+                command = value.GetString();
+            }
+            return new ProjectVerificationCommandBody(command, undeclared);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+}
+
 public sealed record ProjectDefaultExecutionConfigBody(
     string? Runtime,
     string? Model,

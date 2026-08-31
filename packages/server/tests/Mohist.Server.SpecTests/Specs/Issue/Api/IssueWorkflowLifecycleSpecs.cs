@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
@@ -13,6 +14,7 @@ using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
@@ -75,6 +77,79 @@ public class IssueWorkflowLifecycleSpecs
         var final = await GetIssueInfoAsync(projectId, issueNumber);
         Assert.NotNull(final);
         Assert.Equal("backlog", final!.Status);
+    }
+
+    [Fact]
+    public async Task StartWorkAsync_MissingVerificationCommand_DoesNotMutateIssue()
+    {
+        var projectId = $"proj_{Guid.NewGuid():N}";
+        var projectName = $"missing-command-{Guid.NewGuid():N}";
+        await using (var scope = _services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            db.Projects.Add(new ProjectRow
+            {
+                Id = projectId,
+                Name = projectName,
+                RepositoriesJson = JSON.Serialize(new[]
+                {
+                    new RepositoryInfo
+                    {
+                        Name = "main",
+                        GitUrl = "git@example.com:main.git",
+                        BaseBranch = "main",
+                        IsDefault = true,
+                    },
+                }),
+                RepositoryRevision = 1,
+                CreatedAt = new DateTimeOffset(2026, 8, 14, 0, 0, 0, TimeSpan.Zero),
+                UpdatedAt = new DateTimeOffset(2026, 8, 14, 0, 0, 0, TimeSpan.Zero),
+                VerificationCommand = null,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var (issueKey, issueNumber) = await CreateIssueInBacklogAsync(projectId);
+        var issue = _grains.GetGrain<IIssueGrain>(issueKey);
+
+        var ex = await Assert.ThrowsAsync<ProjectVerificationConfigurationMissingException>(
+            () => issue.StartWorkAsync());
+        Assert.Contains(projectId, ex.Message);
+
+        var current = await GetIssueInfoAsync(projectId, issueNumber);
+        Assert.NotNull(current);
+        Assert.Equal("backlog", current!.Status);
+        Assert.Null(current.WorkflowRunId);
+
+        await using var verifyScope = _services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Empty(await verifyDb.WorkflowRuns
+            .Where(row => row.MetadataProjectId == projectId)
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task StartWorkAsync_ProjectCommandEditAfterBinding_ReplayKeepsOriginalCapturedCommand()
+    {
+        var (projectId, _) = await SeedProjectAsync();
+        var (issueKey, issueNumber) = await CreateIssueInBacklogAsync(projectId);
+        var issue = _grains.GetGrain<IIssueGrain>(issueKey);
+        var workflowRunId = await issue.StartWorkAsync();
+        var original = await LoadWorkflowRunAsync(workflowRunId);
+        Assert.NotNull(original);
+        Assert.Equal("git diff --check", original!.VerificationCommand);
+
+        await _grains.GetGrain<IProjectGrain>(projectId)
+            .SetVerificationCommandAsync("dotnet test");
+        var editedProject = await _grains.GetGrain<IProjectGrain>(projectId).GetAsync();
+        Assert.Equal("dotnet test", editedProject!.VerificationCommand);
+
+        await MarkIssueWorkStartedUndeliveredAsync(projectId, issueNumber);
+        await DispatchEventsAsync();
+
+        var replayed = await LoadWorkflowRunAsync(workflowRunId);
+        Assert.NotNull(replayed);
+        Assert.Equal("git diff --check", replayed!.VerificationCommand);
     }
 
     [Fact]
@@ -222,7 +297,7 @@ public class IssueWorkflowLifecycleSpecs
             GitUrl = "git@example.com:mohist-local.git",
             BaseBranch = "main",
             IsDefault = true,
-        });
+        }, "git diff --check");
         return (id, name);
     }
 

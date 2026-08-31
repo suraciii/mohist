@@ -147,7 +147,8 @@ public abstract class WorkflowGrainSpecs
             Name: null,
             CreatedAt: TestTime.UtcNow,
             ProjectId: projectId,
-            IssueNumber: issueNumber));
+            IssueNumber: issueNumber),
+            VerificationCommand: "true");
     }
 
     protected static string TestProjectId(string workflowId) => $"test-project-{workflowId}";

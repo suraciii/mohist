@@ -146,7 +146,7 @@ public class IssueCompositeChildProjectionApiSpecs
                 GitUrl = "git@example.com:repo.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         return id;
     }
 

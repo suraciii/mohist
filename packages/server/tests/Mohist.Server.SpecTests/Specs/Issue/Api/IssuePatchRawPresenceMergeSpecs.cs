@@ -100,6 +100,7 @@ public class IssuePatchRawPresenceMergeSpecs
             new
             {
                 name = $"p-{prefix}-{Guid.NewGuid():N}",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "main",

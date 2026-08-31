@@ -191,6 +191,9 @@ public partial class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingT
     public async Task<string> StartWorkAsync(WorkflowProjectContext? project = null)
     {
         EnsureIssue();
+        if (_issue!.Status is Domain.IssueStatus.Done or Domain.IssueStatus.Cancelled)
+            throw new InvalidOperationException($"Issue #{_issue.Number} is {_issue.Status}");
+
         var reusedRunId = await TryReuseActiveWorkflowAsync();
         if (reusedRunId is not null)
             return reusedRunId;
@@ -199,6 +202,7 @@ public partial class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingT
         ThrowIfStartBlocked(undeliveredPrerequisites);
         if (hasChildren)
         {
+            await EnsureVerificationConfiguredBeforeWorkAsync(_issue!.ProjectId);
             await StartCompositeAsync();
             return string.Empty;
         }
@@ -227,123 +231,53 @@ public partial class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingT
         bool hasChildren)
     {
         var workspaceName = $"issue-{_issue!.Number}";
-        var wsGrain = GrainFactory.GetGrain<IWorkspaceGrain>(
-            Infrastructure.Orleans.GrainKey.Workspace(_issue.ProjectId, workspaceName));
-        await wsGrain.EnsureIssueWorkspaceAsync(_issue.Number, repo.Name, _timeProvider.GetUtcNow());
+        var preparation = await PrepareWorkflowStartContextAsync(project, wrId, repo);
+        if (_issue.WorkflowRunId is not null)
+            _issue.ClearStoppedWorkflow(_issue.WorkflowRunId);
 
-        var (repositoryContext, workspace, issueContext) = await PrepareWorkflowStartContextAsync(project, wrId, repo);
-
-        var snapshot = new WorkflowStartSnapshot(repositoryContext, workspace);
-        var startContext = new WorkflowIssueContext(
-            issueContext.ProjectId,
-            issueContext.IssueNumber,
-            null,
-            _issue.WorkflowProfileId);
-
-        _issue!.Start(
+        _issue.Start(
             wrId,
             undeliveredPrerequisites,
             repository: new IssueWorkStartedRepository(
-                repositoryContext.Name,
-                repositoryContext.GitUrl,
-                repositoryContext.BaseBranch),
+                preparation.Repository.Name,
+                preparation.Repository.GitUrl,
+                preparation.Repository.BaseBranch),
             workspace: new IssueWorkStartedWorkspace(
-                workspace.Path,
-                workspace.Branch,
-                workspace.ChangeDir),
-            context: issueContext,
+                preparation.Workspace.Path,
+                preparation.Workspace.Branch,
+                preparation.Workspace.ChangeDir),
+            context: preparation.Context,
             workspaceName: workspaceName,
             hasChildren: hasChildren);
         await SaveIssueAsync();
 
         // IssueWorkStarted is the durable start intent. Only after that intent
-        // commits may the run become executable. The subscription replays this
-        // same idempotent call if the process exits before or during delivery.
+        // commits may workspace/variable preparation and WorkflowRun creation
+        // occur. The subscription repeats both operations after an interrupted
+        // handoff.
+        await EnsureWorkflowStartResourcesAsync(
+            wrId,
+            workspaceName,
+            repo,
+            preparation.Project,
+            preparation.Workspace);
+
+        var snapshot = new WorkflowStartSnapshot(
+            preparation.Repository,
+            preparation.Workspace,
+            preparation.Context.VerificationCommand);
+        var startContext = new WorkflowIssueContext(
+            preparation.Context.ProjectId,
+            preparation.Context.IssueNumber,
+            _issue.EpicNumber,
+            _issue.WorkflowProfileId);
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         await wfGrain.EnsureStartedAsync(startContext, snapshot);
+
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
     }
 
-    private async Task<(Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext Repository, WorkspaceIdentity Workspace, IssueWorkStartedContext Context)> PrepareWorkflowStartContextAsync(
-        WorkflowProjectContext? project,
-        string wrId,
-        RepositoryInfo repo)
-    {
-        var issue = _issue!;
-
-        var projectGrain = GrainFactory.GetGrain<IProjectGrain>(issue.ProjectId);
-        var projectInfo = await projectGrain.GetAsync();
-        var projectContext = BuildWorkflowProjectContext(issue, project, projectInfo, repo);
-        var workspace = BuildWorkspaceIdentity(issue, projectContext, wrId);
-
-        var repositoryContext = new Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext(
-            Name: repo.Name,
-            GitUrl: repo.GitUrl,
-            BaseBranch: repo.BaseBranch);
-        if (string.IsNullOrWhiteSpace(repositoryContext.BaseBranch))
-            throw new InvalidOperationException(
-                $"Cannot start workflow: target repository '{repo.Name}' has no configured base branch");
-
-        // The startup template resolution honors the issue's effective
-        // workflow profile (issue selection → project default → system
-        // default) and only the explicit advanced overrides (issue custom
-        // YAML, project template reference) take precedence. Auto-seeding the
-        // project default here would shadow an explicit issue-level profile
-        // selection (e.g. mohist/github-pr would lose to a freshly auto-seeded
-        // mohist/local), so the resolver's own fallback handles projects
-        // without a configured default.
-
-        var resolvedTemplate = await _workflowDefinitionResolver.LoadTemplateAsync(wrId, projectContext.Id, issue.Number);
-        var definition = resolvedTemplate.Structure
-            ?? throw new InvalidOperationException(WorkflowDefinitionResolver.NoEnabledWorkflowProfileMessage);
-
-        // Resolve the effective profile (issue selection → project default →
-        // system default) so prompts are merged from the same profile that
-        // drives the workflow definition. Previously this hardcoded the
-        // mohist/local profile, which meant a mohist/github-pr issue would
-        // inherit default prompts even though the run used the GitHub PR
-        // definition.
-        var availablePrompts = await _workflowPromptResolver.LoadPromptsAsync(
-            wrId,
-            projectId: issue.ProjectId);
-        EnsurePromptsReferencesResolve(
-            definition,
-            availablePrompts.Select(prompt => prompt.Key).ToHashSet(StringComparer.Ordinal));
-
-        // T1: persist the issue's built-in calling context on the issue
-        // profile. Global (config.jsonc) and project Variables are NOT baked
-        // in here — they are merged live at resolution time (dispatch + display)
-        // so that edits to project/global Variables propagate to already-created
-        // issues. Explicit issue overrides (e.g. model + reasoning variant set
-        // via POST/PATCH /api/issues) are preserved by PATCH-merging the
-        // context bundle on top of any existing variables, so an issue whose
-        // agent config was set during creation survives the T1 merge.
-        //
-        // the context bundle seeds `vars.agent = {}` when
-        // the issue's existing variables do not already define the key, so
-        // built-in workflows can still template-bind
-        // `options: ${{ vars.agent }}` without the issue page having to set
-        // it explicitly. Explicit issue values (including a user-chosen
-        // agent block) are preserved by passing the existing bundle into
-        // the builder — the seed only fires when the issue would otherwise
-        // expose `vars.agent` as undefined.
-        var existingVariables = await _issueVariableStore.GetVariablesAsync(issue.ProjectId, issue.Number);
-        var issueBundle = IssueVariableBuilder.BuildContextBundle(
-            wrId,
-            issue,
-            projectContext,
-            workspace,
-            existingVariables);
-        var mergedVariables = VariableBundle.Patch(existingVariables, issueBundle);
-        await _issueVariableStore.SetVariablesAsync(issue.ProjectId, issue.Number, mergedVariables);
-
-        return (repositoryContext, workspace, new IssueWorkStartedContext(
-            issue.ProjectId,
-            issue.Number,
-            issue.Title,
-            issue.Priority));
-    }
 
     private async Task<string?> TryReuseActiveWorkflowAsync()
     {
@@ -362,8 +296,9 @@ public partial class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingT
             }
             if (await workflow.IsStoppedOrTerminalAsync())
             {
-                issue.ClearStoppedWorkflow(workflowRunId);
-                await SaveIssueAsync();
+                // Keep the stale reference until the new-start preflight has
+                // passed. Clearing it before configuration validation could
+                // erase the Issue's existing run when start is rejected.
                 return null;
             }
 
@@ -376,8 +311,8 @@ public partial class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingT
                 "Issue {IssueKey} workflow run {WorkflowRunId} cannot be loaded while starting; clearing workflow run reference",
                 GrainKey,
                 workflowRunId);
-            issue.ClearStoppedWorkflow(workflowRunId);
-            await SaveIssueAsync();
+            // Keep the stale reference until the new-start preflight has
+            // passed; StartWorkflowAsync will replace it with the new run id.
             return null;
         }
     }

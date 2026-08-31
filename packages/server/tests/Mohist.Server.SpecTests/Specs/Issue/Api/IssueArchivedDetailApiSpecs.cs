@@ -39,6 +39,7 @@ public class IssueArchivedDetailApiSpecs
         using (var projectResponse = await _client.PostAsJsonAsync("/api/projects", new
         {
             name = $"arch-unknown-{Guid.NewGuid():N}",
+            verificationCommand = "true",
             repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
         }))
         {
@@ -60,6 +61,7 @@ public class IssueArchivedDetailApiSpecs
         using (var projectResponse = await _client.PostAsJsonAsync("/api/projects", new
         {
             name = $"arch-control-{Guid.NewGuid():N}",
+            verificationCommand = "true",
             repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
         }))
         {

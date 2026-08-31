@@ -12,28 +12,32 @@ const profileFiles = {
   'mohist/github-pr': '/virtual/profiles/mohist-github-pr.workflow.yaml',
 } as const
 
-/**
- * The six verification lanes mandated by the built-in CI contract, in
- * catalog order. The profile YAML is the authoritative source; these tests
- * bind these fixtures to the same contract the Server catalog recognizes.
- */
-const laneContract = [
-  { id: 'verify-install', run: 'npm ci', timeout: 900_000 },
-  {
-    id: 'verify-dotnet',
-    run: 'export DOTNET_ROOT=/home/szf/.dotnet\ndotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false',
-    timeout: 1_200_000,
-  },
-  { id: 'verify-web-typecheck', run: 'npm run typecheck -w packages/web', timeout: 600_000 },
-  { id: 'verify-web-tests', run: 'npm run test:run -w packages/web', timeout: 900_000 },
-  { id: 'verify-runner-typecheck', run: 'npm run typecheck -w packages/runner', timeout: 600_000 },
-  { id: 'verify-runner-tests', run: 'npm run test:run -w packages/runner -- --no-file-parallelism', timeout: 900_000 },
+/** The built-in Profiles expose one Project-owned verification boundary. */
+const verificationTaskContract = [
+  { id: 'verify', run: '${{ workflow.verification.command }}', timeout: 900_000 },
 ] as const
 
 const fixCiRecoveryLocal = `        recovery:
           budget: 2
           handlers:
-            - tasks:
+            - when: error.code=script-failed
+              tasks:
+                - id: recover:fix-ci
+                  title: Fix CI verification
+                  uses: mohist/agent
+                  with:
+                    name: mohist/builder
+                    session: build
+                    prompt: \${{ prompts.fix-ci }}
+                  expect:
+                    markers:
+                      - path: _output
+                        oneOf:
+                          - <promise>done</promise>
+                          - <promise>unfinished</promise>
+              retrySelf: true
+            - when: error.code=timeout
+              tasks:
                 - id: recover:fix-ci
                   title: Fix CI verification
                   uses: mohist/agent
@@ -52,7 +56,18 @@ const fixCiRecoveryLocal = `        recovery:
 const fixCiRecoveryGithubPr = `        recovery:
           budget: 2
           handlers:
-            - tasks:
+            - when: error.code=script-failed
+              tasks:
+                - id: recover:fix-ci
+                  title: Fix CI verification
+                  uses: mohist/agent
+                  with:
+                    name: mohist/builder
+                    session: build
+                    prompt: \${{ prompts.fix-ci }}
+              retrySelf: true
+            - when: error.code=timeout
+              tasks:
                 - id: recover:fix-ci
                   title: Fix CI verification
                   uses: mohist/agent
@@ -62,14 +77,15 @@ const fixCiRecoveryGithubPr = `        recovery:
                     prompt: \${{ prompts.fix-ci }}
               retrySelf: true`
 
-function laneTasks(recovery: string): string {
-  return laneContract
+function verificationTaskYaml(recovery: string): string {
+  return verificationTaskContract
     .map(
-      (lane) => `      - id: ${lane.id}
+      (task) => `      - id: ${task.id}
         uses: core/script
         with:
-          run: ${lane.run.includes('\n') ? `|\n            ${lane.run.split('\n').join('\n            ')}` : lane.run}
-          timeout: ${lane.timeout}
+          run: ${task.run.includes('\n') ? `|\n            ${task.run.split('\n').join('\n            ')}` : task.run}
+          timeout: ${task.timeout}
+          working-directory: REPOS/\${{ repository.name }}
 ${recovery}`,
     )
     .join('\n')
@@ -108,7 +124,7 @@ stages:
         with:
           run: git diff --check
           timeout: 300000
-      ${laneTasks(fixCiRecoveryLocal)}
+      ${verificationTaskYaml(fixCiRecoveryLocal)}
     checks: []
   - stage: check
     tasks:
@@ -167,7 +183,7 @@ stages:
       - id: load-tasks
         with:
           path: openspec/changes/issue-\${{ issue.number }}/tasks.json
-      ${laneTasks(fixCiRecoveryGithubPr)}
+      ${verificationTaskYaml(fixCiRecoveryGithubPr)}
       - id: push
         uses: mohist/push
         with:
@@ -271,15 +287,15 @@ function collectRecoverySections(yaml: string): string[] {
   return sections
 }
 
-/** Splits the build-stage task list into per-lane blocks by lane id. */
-function laneBlocks(buildBody: string): Map<string, string> {
+/** Splits the build-stage task list into blocks by task id. */
+function taskBlocks(buildBody: string): Map<string, string> {
   const tasksList = sliceStageTasksList(buildBody)
   const blocks = new Map<string, string>()
-  const laneIdRe = /(?:^|\n)\s*-\s+id:\s*(verify-[a-z-]+)/g
+  const taskIdRe = /(?:^|\n)(?: {6}| {12})-\s+id:\s*([a-z][a-z0-9:-]*)/g
   let match: RegExpExecArray | null
   let prevKey: string | null = null
   let prevStart = -1
-  while ((match = laneIdRe.exec(tasksList)) !== null) {
+  while ((match = taskIdRe.exec(tasksList)) !== null) {
     if (prevKey !== null) blocks.set(prevKey, tasksList.slice(prevStart, match.index))
     prevKey = match[1]
     prevStart = match.index
@@ -290,7 +306,7 @@ function laneBlocks(buildBody: string): Map<string, string> {
   return blocks
 }
 
-function laneRunValue(block: string): string {
+function taskRunValue(block: string): string {
   const lines = block.split('\n')
   const runIdx = lines.findIndex((line) => /^\s*run:\s*\|/.test(line))
   if (runIdx < 0) {
@@ -309,7 +325,7 @@ function laneRunValue(block: string): string {
   return content.join('\n')
 }
 
-function laneTimeout(block: string): number {
+function taskTimeout(block: string): number {
   const m = block.match(/timeout:\s*(\d+)/)
   return m ? Number(m[1]) : NaN
 }
@@ -348,90 +364,51 @@ for (const [profileId, path] of Object.entries(profileFiles)) {
       }
     })
 
-    it('build stage defines the six verification lanes in order after orchestration tasks', async () => {
+    it('build stage defines one Project verification task after orchestration tasks', async () => {
       const yaml = await readProfile(path)
       const build = sliceStage(yaml, 'build')
-
-      const taskIdPositions = laneContract.map((lane) => ({
-        ...lane,
-        index: build.indexOf(`- id: ${lane.id}`),
-      }))
-      for (const lane of taskIdPositions) {
-        expect(lane.index).toBeGreaterThanOrEqual(0)
-      }
-      for (let i = 1; i < taskIdPositions.length; i++) {
-        expect(taskIdPositions[i - 1].index).toBeLessThan(taskIdPositions[i].index)
-      }
-      expect(build.indexOf('- id: workspace-prepare')).toBeLessThan(taskIdPositions[0].index)
-      expect(build.indexOf('- id: load-tasks')).toBeLessThan(taskIdPositions[0].index)
-
-      // No aggregate verify task or aggregate CI variable remains.
-      expect(build).not.toMatch(/(?:^|\n)\s*-\s+id:\s*verify\s*$/m)
+      const verifyIndex = build.indexOf('- id: verify')
+      expect(verifyIndex).toBeGreaterThanOrEqual(0)
+      expect(build.indexOf('- id: workspace-prepare')).toBeLessThan(verifyIndex)
+      expect(build.indexOf('- id: load-tasks')).toBeLessThan(verifyIndex)
+      expect(build).toContain('run: ${{ workflow.verification.command }}')
+      expect(build).toContain('working-directory: REPOS/${{ repository.name }}')
       expect(build).not.toContain('vars.ci.verify')
     })
 
-    it('build stage lanes carry the exact command lines with the .NET runtime prelude', async () => {
+    it('build stage carries the Project verification template and repository root', async () => {
       const yaml = await readProfile(path)
       const build = sliceStage(yaml, 'build')
-      const blocks = laneBlocks(build)
-
-      expect(blocks.size).toBe(6)
-      for (const lane of laneContract) {
-        const block = blocks.get(lane.id)
-        expect(block, `lane ${lane.id} must have a definition block`).toBeDefined()
-        expect(laneRunValue(block!), `lane ${lane.id} run value`).toBe(lane.run)
-      }
-
-      const dotnet = blocks.get('verify-dotnet')!
-      expect(dotnet).toContain('uses: core/script')
-      expect(dotnet.indexOf('export DOTNET_ROOT=/home/szf/.dotnet')).toBeGreaterThanOrEqual(0)
-      expect(dotnet.indexOf('export DOTNET_ROOT=/home/szf/.dotnet')).toBeLessThan(
-        dotnet.indexOf('dotnet test Mohist.sln'),
-      )
-
-      // The dotnet lane body is only the prelude plus the unchanged command.
-      expect(laneRunValue(dotnet)).toBe(
-        'export DOTNET_ROOT=/home/szf/.dotnet\ndotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false',
-      )
+      const blocks = taskBlocks(build)
+      const verify = blocks.get('verify')!
+      expect(blocks.size).toBeGreaterThan(0)
+      expect(taskRunValue(verify)).toBe('${{ workflow.verification.command }}')
+      expect(verify).toContain('working-directory: REPOS/${{ repository.name }}')
     })
 
-    it('every lane declares its own positive finite timeout and no lane reuses the aggregate 300000 budget', async () => {
+    it('the verification task declares the bounded fifteen-minute timeout', async () => {
       const yaml = await readProfile(path)
       const build = sliceStage(yaml, 'build')
-      const blocks = laneBlocks(build)
-
-      for (const lane of laneContract) {
-        const block = blocks.get(lane.id)!
-        const timeout = laneTimeout(block)
-        expect(Number.isFinite(timeout), `lane ${lane.id} must have a literal positive finite timeout`).toBe(true)
-        expect(timeout).toBeGreaterThan(0)
-        expect(timeout, `lane ${lane.id} must not reuse the old aggregate budget`).not.toBe(300000)
-        expect(timeout, `lane ${lane.id} timeout must match the lane contract`).toBe(lane.timeout)
-      }
+      const block = taskBlocks(build).get('verify')!
+      expect(taskTimeout(block)).toBe(900_000)
     })
 
-    it('no single timeout encloses all six lanes', async () => {
+    it('the verification task carries exactly one timeout', async () => {
       const yaml = await readProfile(path)
       const build = sliceStage(yaml, 'build')
-      const blocks = laneBlocks(build)
-
-      for (const lane of laneContract) {
-        const block = blocks.get(lane.id)!
-        // Each lane carries exactly one timeout and it belongs to the lane,
-        // not to an enclosing wrapper around the whole sequence.
-        expect(countOccurrences(block, 'timeout:')).toBe(1)
-      }
+      const block = taskBlocks(build).get('verify')!
+      expect(countOccurrences(block, 'timeout:')).toBe(1)
     })
 
-    it('every lane carries the same profile-specific fix-ci recovery contract', async () => {
+    it('the verification task carries the profile-specific fix-ci recovery contract', async () => {
       const yaml = await readProfile(path)
       const build = sliceStage(yaml, 'build')
-      const blocks = laneBlocks(build)
+      const blocks = taskBlocks(build)
 
       const recovery = profileId === 'mohist/local' ? fixCiRecoveryLocal : fixCiRecoveryGithubPr
-      for (const lane of laneContract) {
-        const block = blocks.get(lane.id)!
-        expect(block, `lane ${lane.id} must keep the fix-ci recovery declaration`).toContain('budget: 2')
+      for (const task of verificationTaskContract) {
+        const block = blocks.get(task.id)!
+        expect(block, `task ${task.id} must keep the fix-ci recovery declaration`).toContain('budget: 2')
         expect(block).toContain('retrySelf: true')
         expect(block).toContain('id: recover:fix-ci')
         expect(block).toContain('session: build')
@@ -452,27 +429,27 @@ for (const [profileId, path] of Object.entries(profileFiles)) {
   })
 }
 
-describe('clean-run lane shells', () => {
-  it.each(laneContract)('$id executes in its own fresh shell with its own finite budget', async (lane) => {
+describe('clean-run verification task shells', () => {
+  it.each(verificationTaskContract)('$id executes in its own fresh shell with its own finite budget', async (task) => {
     const invocations: Array<{ command: string; args: string[]; timeoutMs: number | undefined; script: string }> = []
     await withTestRunnerResources(
       async () => {
-        const result = await scriptAction({ run: lane.run, timeout: lane.timeout }, makeHost())
+        const result = await scriptAction({ run: task.run, timeout: task.timeout }, makeHost())
         expect(result.error?.code ?? result.output).toBeTruthy()
 
         expect(invocations).toHaveLength(1)
         const invocation = invocations[0]
         expect(invocation.command).toBe(process.platform === 'win32' ? 'pwsh' : 'bash')
         expect(invocation.args).toHaveLength(1)
-        expect(invocation.timeoutMs).toBe(lane.timeout)
+        expect(invocation.timeoutMs).toBe(task.timeout)
 
         const scriptPath = invocation.args[0]
         expect(scriptPath).toMatch(/mohist-script-\w+\.sh$/)
-        // The lane body is the whole script for one shell invocation; no
-        // other lane's commands are mixed into this shell. scriptAction
+        // The task body is the whole script for one shell invocation; no
+        // other task's commands are mixed into this shell. scriptAction
         // deletes the file after the run, so the content is captured while
         // the shell is about to execute it.
-        expect(invocation.script).toBe(lane.run)
+        expect(invocation.script).toBe(task.run)
       },
       {
         commandRunner: {
@@ -490,60 +467,22 @@ describe('clean-run lane shells', () => {
     )
   })
 
-  it('the .NET lane shell sees DOTNET_ROOT before dotnet invokes', async () => {
-    const dotnet = laneContract.find((lane) => lane.id === 'verify-dotnet')!
-    const scripts: string[] = []
-    await withTestRunnerResources(
-      async () => {
-        const result = await scriptAction({ run: dotnet.run, timeout: dotnet.timeout }, makeHost())
-        expect(result.error?.code ?? result.output).toBeTruthy()
-
-        expect(scripts).toHaveLength(1)
-        const script = scripts[0]
-        const lines = script.split('\n')
-        expect(lines[0]).toBe('export DOTNET_ROOT=/home/szf/.dotnet')
-        expect(lines[1]).toBe('dotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false')
-        // The export is in the same script/shell, so the dotnet apphost can
-        // resolve the runtime without relying on any earlier lane's shell.
-        expect(script.indexOf('export DOTNET_ROOT=/home/szf/.dotnet')).toBeLessThan(script.indexOf('dotnet test'))
-      },
-      {
-        commandRunner: {
-          run: async (_command, args) => {
-            scripts.push(args[0] ? await currentFileSystemRead(args[0]) : '')
-            return { exitCode: 0, stdout: '', stderr: '' }
-          },
-        },
-      },
-    )
-  })
-
-  it('a representative clean run completes all six lanes for both built-in profiles', async () => {
+  it('a representative clean run executes one verification task for both built-in profiles', async () => {
     for (const profileId of Object.keys(profileFiles) as Array<keyof typeof profileFiles>) {
       const yaml = await readProfile(profileFiles[profileId])
       const build = sliceStage(yaml, 'build')
-      const blocks = laneBlocks(build)
-      expect(blocks.size).toBe(6)
-
-      let completed = 0
-      for (const lane of laneContract) {
-        const block = blocks.get(lane.id)!
-        const run = laneRunValue(block)
-        const timeout = laneTimeout(block)
-        const result = await withTestRunnerResources(async () => await scriptAction({ run, timeout }, makeHost()), {
+      const blocks = taskBlocks(build)
+      expect(blocks.size).toBeGreaterThan(0)
+      const verify = blocks.get('verify')!
+      const result = await withTestRunnerResources(
+        async () => await scriptAction({ run: taskRunValue(verify), timeout: taskTimeout(verify) }, makeHost()),
+        {
           commandRunner: {
-            run: async (_command, _args, _cwd, _signal, _env, options) => ({
-              exitCode: 0,
-              stdout: '',
-              stderr: '',
-              timeoutMs: (options as { timeoutMs?: number } | undefined)?.timeoutMs,
-            }),
+            run: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
           },
-        })
-        expect(result.error?.code ?? result.output, `${profileId} lane ${lane.id}`).toBeTruthy()
-        completed++
-      }
-      expect(completed).toBe(6)
+        },
+      )
+      expect(result.error?.code ?? result.output, `${profileId} verification`).toBeTruthy()
     }
   })
 })

@@ -60,23 +60,7 @@ public static partial class WorkflowRunExtensions
             var pendingTask = NextUnclaimedTask(current);
             if (pendingTask is not null)
             {
-                // A blocked lane is an ordered-stage barrier. Do not fall
-                // through to checks or any other later work while recovery is
-                // still waiting on the first non-passing lane.
-                if (!VerificationLaneGate.IsClaimableLaneTask(run, pendingTask))
-                    return null;
-
                 return new WorkflowTaskWork(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput, pendingTask.ExpectInput, pendingTask.Artifacts, pendingTask.SetVars, pendingTask.Recovery, pendingTask.RecoveryRemaining);
-            }
-
-            // A lane-enabled stage with no claimable task may still have a
-            // failed, timed-out, or missing lane and pending checks. Checks
-            // must not bypass the all-lanes-pass gate.
-            if (string.Equals(current.Id, "build", StringComparison.Ordinal)
-                && VerificationLaneGate.IsLaneEnabledRun(run)
-                && !VerificationLaneGate.CanAdvanceBuildStage(run))
-            {
-                return null;
             }
 
             var pendingChecks = current.Checks
@@ -256,18 +240,7 @@ public static partial class WorkflowRunExtensions
             if (current is null) return null;
             var task = current.Tasks.FirstOrDefault(t => t.Status is not (WorkflowActionAttemptStatus.Completed or WorkflowActionAttemptStatus.Failed or WorkflowActionAttemptStatus.Cancelled));
             if (task is not null)
-            {
-                if (!VerificationLaneGate.IsClaimableLaneTask(run, task))
-                    return null;
                 return new WorkflowPendingWork(task.WorkId ?? task.Id, WorkItemTypes.Task, current.Id, task.Title);
-            }
-
-            if (string.Equals(current.Id, "build", StringComparison.Ordinal)
-                && VerificationLaneGate.IsLaneEnabledRun(run)
-                && !VerificationLaneGate.CanAdvanceBuildStage(run))
-            {
-                return null;
-            }
 
             if (current.Checks.Count > 0 && current.Checks.Any(c => c.Status != StageCheckStatus.Passed))
                 return new WorkflowPendingWork("checks", WorkItemTypes.Checks, current.Id, "Checks");
@@ -367,36 +340,24 @@ public static partial class WorkflowRunExtensions
                 : firstIncompleteIndex >= 0
                     ? firstIncompleteIndex
                     : current.Tasks.Count;
-            var sourceLaneRetryAdded = false;
+            var sourceRetryAdded = false;
 
             foreach (var task in tasks)
             {
-                if (sourceTask?.Lane is { } sourceLaneForEnvelope
-                    && VerificationLaneCatalog.IsKnownLane(task.Definition.Id))
-                {
-                    // A recovery envelope for one lane may contain helpers,
-                    // but it must not introduce another catalog lane or a
-                    // second retry for the source identity. Otherwise a
-                    // replayed or malformed envelope could run a later lane
-                    // twice after the target retry passes.
-                    if (!string.Equals(task.Definition.Id, sourceLaneForEnvelope.LaneId, StringComparison.Ordinal)
-                        || sourceLaneRetryAdded)
-                    {
-                        continue;
-                    }
-                    sourceLaneRetryAdded = true;
-                }
-
-                // The Runner normally echoes the source lane definition. The
-                // source remains authoritative for a recovery retry's lane
-                // budget and recovery contract if a replayed envelope is
-                // incomplete or was rendered by an older Runner.
-                var definition = sourceTask?.Lane is not null
+                var isSourceContinuation = sourceTask is not null
                     && string.Equals(task.Definition.Id, sourceTask.DefinitionId, StringComparison.Ordinal)
-                    // The persisted source attempt owns the lane contract.
-                    // Runner follow-ups carry a scheduling hint, not a new
-                    // command, action, title, or recovery declaration.
-                    ? sourceTask.ToDefinition()
+                    && task.RecoveryRemaining is not null;
+                if (isSourceContinuation && sourceRetryAdded)
+                    continue;
+                if (isSourceContinuation)
+                    sourceRetryAdded = true;
+
+                // Runner follow-ups carry a scheduling hint, not a new
+                // command, action, title, or recovery declaration. Rebuild a
+                // self-retry from the persisted source task so mutable or
+                // malformed report data cannot redefine Workflow behavior.
+                var definition = isSourceContinuation
+                    ? sourceTask!.ToDefinition()
                     : task.Definition;
                 var newTask = task.RecoveryRemaining is { } remaining
                     ? WorkflowActionAttempt.MakeContinuationTask(
@@ -412,18 +373,6 @@ public static partial class WorkflowRunExtensions
                         current.Attempt,
                         run.Stages.SelectMany(candidate => candidate.Tasks),
                         causedByFailedTaskId: sourceTask?.Id);
-
-                if (sourceTask?.Lane is { } sourceLane
-                    && newTask.Lane is { } retryLane
-                    && string.Equals(newTask.DefinitionId, sourceTask.DefinitionId, StringComparison.Ordinal))
-                {
-                    newTask.Lane = retryLane with
-                    {
-                        LaneId = sourceLane.LaneId,
-                        Order = sourceLane.Order,
-                        ConfiguredBudgetMs = sourceLane.ConfiguredBudgetMs,
-                    };
-                }
 
                 current.Tasks.Insert(insertIndex, newTask);
                 insertIndex++;

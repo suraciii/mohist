@@ -8,7 +8,7 @@ namespace Mohist.Server.Project.Grains;
 public interface IProjectGrain : IGrainWithStringKey
 {
     Task<ProjectInfo?> GetAsync();
-    Task<ProjectInfo> CreateAsync(string name, RepositoryInfo initialRepository);
+    Task<ProjectInfo> CreateAsync(string name, RepositoryInfo initialRepository, string? verificationCommand = null);
     Task<ProjectInfo?> UpdateAsync();
     Task DeleteAsync();
     Task<List<RepositoryInfo>> ListRepositoriesAsync();
@@ -33,6 +33,9 @@ public interface IProjectGrain : IGrainWithStringKey
     /// (one default per Project) and returns the updated Project.
     /// </summary>
     Task<ProjectInfo?> SetDefaultExecutionConfigAsync(ExecutionConfigHint config);
+
+    /// <summary>Replace the Project verification command; clearing is not supported.</summary>
+    Task<ProjectInfo?> SetVerificationCommandAsync(string command);
 }
 
 public enum ProjectRepositoryRemovalOutcome

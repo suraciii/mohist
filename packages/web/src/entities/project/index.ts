@@ -6,6 +6,7 @@ export {
   useAddRepository,
   useRemoveRepository,
   useSetDefaultRepository,
+  useSetVerificationCommand,
   useProjectEvents,
 } from './api/queries'
 export type { ProjectCreator } from './api/queries'

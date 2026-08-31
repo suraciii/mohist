@@ -130,6 +130,7 @@ public sealed class AgentSessionSpawnRouteSpecs
             new
             {
                 name = $"spawn-route-{Guid.NewGuid():N}",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "primary",

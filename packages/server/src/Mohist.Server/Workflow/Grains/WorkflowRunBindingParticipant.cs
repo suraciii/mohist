@@ -1,6 +1,9 @@
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Project.Domain;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Services;
 using Mohist.Workflow.Definition;
 
 namespace Mohist.Server.Workflow.Grains;
@@ -53,6 +56,12 @@ public sealed class WorkflowRunBindingParticipant : Grain, IWorkflowRunBindingPa
             return new WorkflowRunBindingResult(WorkflowRunBindingOutcome.AlreadyApplied, binding);
         }
 
+        _ = ParseAndValidateDefinition(payload);
+        if (payload.VerificationCommand is not null)
+            ProjectVerificationCommand.Require(payload.VerificationCommand);
+        if (WorkflowProfileCatalog.IsSystemProfile(payload.ProfileId))
+            ProjectVerificationCommand.Require(payload.VerificationCommand);
+
         var structure = new WorkflowStructure(
             payload.ProfileId,
             payload.Stages.Select(stage => new StageStructure(stage.Stage, stage.RequiresApproval)).ToList());
@@ -60,11 +69,40 @@ public sealed class WorkflowRunBindingParticipant : Grain, IWorkflowRunBindingPa
         run.ExplicitWorkflowProfileId = payload.ExplicitProfileId;
         run.Workspace = payload.Workspace;
         run.BoundWorkflowDefinitionJson = payload.DefinitionJson;
+        run.VerificationCommand = payload.VerificationCommand;
         await _runs.SaveAsync(run);
         return new WorkflowRunBindingResult(WorkflowRunBindingOutcome.Applied, ToBinding(run) with
         {
             ExplicitProfileId = payload.ExplicitProfileId,
         });
+    }
+
+    private static WorkflowDefinition ParseAndValidateDefinition(BoundWorkflowStart payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload.DefinitionJson))
+            throw new ArgumentException("A bound workflow definition snapshot is required", nameof(payload));
+
+        WorkflowDefinition definition;
+        try
+        {
+            definition = WorkflowYamlSerializer.FromJson(payload.DefinitionJson);
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException("The bound workflow definition snapshot is invalid", nameof(payload), ex);
+        }
+
+        var stages = payload.Stages ?? throw new ArgumentException("Bound workflow stages are required", nameof(payload));
+        if (definition.Stages.Count != stages.Count
+            || definition.Stages.Select(stage => new BoundStageStructure(stage.Stage, stage.RequiresApproval))
+                .SequenceEqual(stages) is false)
+        {
+            throw new ArgumentException(
+                "Bound workflow definition stages do not match the startup stage list",
+                nameof(payload));
+        }
+
+        return definition;
     }
 
     private static bool StartupRequestMatches(
@@ -76,6 +114,7 @@ public sealed class WorkflowRunBindingParticipant : Grain, IWorkflowRunBindingPa
         && string.Equals(run.ExplicitWorkflowProfileId, request.ExplicitProfileId, StringComparison.Ordinal)
         && MetadataMatches(run.Metadata, request.Metadata)
         && Equals(run.Workspace, request.Workspace)
+        && string.Equals(run.VerificationCommand, request.VerificationCommand, StringComparison.Ordinal)
         && (request.Bound is null || BindingMatches(ToBinding(run), request.Bound));
 
     private static bool BindingMatches(BoundWorkflowStart existing, BoundWorkflowStart requested) =>
@@ -87,7 +126,8 @@ public sealed class WorkflowRunBindingParticipant : Grain, IWorkflowRunBindingPa
         && existing.Stages.SequenceEqual(requested.Stages)
         && MetadataMatches(existing.Metadata, requested.Metadata)
         && Equals(existing.Workspace, requested.Workspace)
-        && string.Equals(existing.DefinitionJson, requested.DefinitionJson, StringComparison.Ordinal);
+        && string.Equals(existing.DefinitionJson, requested.DefinitionJson, StringComparison.Ordinal)
+        && string.Equals(existing.VerificationCommand, requested.VerificationCommand, StringComparison.Ordinal);
 
     private static bool MetadataMatches(WorkflowRunMetadata existing, WorkflowRunMetadata requested) =>
         string.Equals(existing.Name, requested.Name, StringComparison.Ordinal)
@@ -117,5 +157,6 @@ public sealed class WorkflowRunBindingParticipant : Grain, IWorkflowRunBindingPa
         run.Stages.Select(stage => new BoundStageStructure(stage.Id, stage.RequiresApproval)).ToList(),
         run.Metadata,
         run.Workspace,
-        DefinitionJson: run.BoundWorkflowDefinitionJson);
+        DefinitionJson: run.BoundWorkflowDefinitionJson,
+        VerificationCommand: run.VerificationCommand);
 }

@@ -21,8 +21,7 @@ public sealed record WorkflowStatusView(
     FailureStatusView? Failure,
     List<AvailableActionView> AvailableActions,
     string? AssignedTo = null,
-    MetadataView? Metadata = null,
-    VerificationLanesView? VerificationLanes = null);
+    MetadataView? Metadata = null);
 
 [GenerateSerializer]
 public sealed record StageStatusView(
@@ -108,7 +107,6 @@ public sealed record TaskStatusView(
     long? DurationMs = null,
     JsonElement? Output = null,
     ExecutionError? Error = null,
-    TaskLaneView? Lane = null,
     string? AgentJobId = null,
     string? AgentSessionId = null);
 
@@ -128,55 +126,6 @@ public sealed record PendingWorkView(
     string? Stage,
     string? Title,
     string? Uses);
-
-/// <summary>
-/// Per-task verification-lane view derived from the additive
-/// <c>WorkflowActionAttempt.Lane</c> metadata. Populated only for tasks whose
-/// <c>DefinitionId</c> is a recognized built-in lane id; non-lane tasks
-/// (including the <c>recover:fix-ci</c> helper) project a null
-/// <c>Lane</c> on the task view.
-/// </summary>
-[GenerateSerializer]
-public sealed record TaskLaneView(
-    string LaneId,
-    int Order,
-    int ConfiguredBudgetMs,
-    string Outcome,
-    string ActionAttemptId,
-    string? WorkId = null,
-    string? Detail = null,
-    ExecutionError? Error = null,
-    DateTimeOffset? FinishedAt = null);
-
-/// <summary>
-/// Build-stage verification-lane projection for a lane-enabled run.
-/// Always contains all six catalog lanes, including pending or missing
-/// lanes; the projection is null on legacy runs without lane fields so
-/// they remain readable and are not asked to wait for synthesized state.
-/// </summary>
-[GenerateSerializer]
-public sealed record VerificationLanesView(
-    bool AllPassing,
-    string? FirstNonPassingLane,
-    IReadOnlyList<VerificationLaneView> Lanes);
-
-/// <summary>
-/// Single-lane view entry inside the build-stage verification projection.
-/// <c>Outcome</c> uses the wire values <c>pending</c>, <c>pass</c>,
-/// <c>fail</c>, or <c>timeout</c>; the same enum is shared with
-/// <c>TaskLaneView</c> so the two projections stay consistent.
-/// </summary>
-[GenerateSerializer]
-public sealed record VerificationLaneView(
-    string LaneId,
-    int Order,
-    int ConfiguredBudgetMs,
-    string Outcome,
-    string ActionAttemptId,
-    string? WorkId = null,
-    string? Detail = null,
-    ExecutionError? Error = null,
-    DateTimeOffset? FinishedAt = null);
 
 [GenerateSerializer]
 public sealed record ApprovalStatusView(

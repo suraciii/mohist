@@ -130,7 +130,10 @@ public partial class WorkflowGrain
                     TaskReportStatus.Failed,
                     Output: null,
                     Artifacts: null,
-                    Detail: $"Recovery follow-up rejected: {ex.Message}");
+                    Detail: $"Recovery follow-up rejected: {ex.Message}",
+                    Error: report.Error,
+                    ActionAttemptId: report.ActionAttemptId,
+                    TerminalResultFingerprint: report.TerminalResultFingerprint);
             }
         }
 

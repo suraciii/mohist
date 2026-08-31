@@ -68,7 +68,7 @@ public class RepositoryDeletionProtectionSpecs
                 GitUrl = defaultUrl,
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         if (secondaryName is not null && secondaryUrl is not null)
             await grain.AddRepositoryAsync(secondaryName, secondaryUrl, "main");
         return (grain.GetPrimaryKeyString(), project);

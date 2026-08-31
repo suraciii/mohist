@@ -1,16 +1,14 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-} from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { useState } from 'react'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
 import { CreateProjectDialog } from '..'
 import { useProject, type ProjectCreator } from '../../../entities/project'
 
-const createRequests: { name: string; repository: { name: string; gitUrl: string; baseBranch?: string } }[] = []
+const createRequests: {
+  name: string
+  verificationCommand: string
+  repository: { name: string; gitUrl: string; baseBranch?: string }
+}[] = []
 
 const createProject: ProjectCreator = async (request) => {
   createRequests.push(request)
@@ -43,11 +41,7 @@ function HostDialog() {
   return (
     <>
       <ActiveProjectProbe />
-      <CreateProjectDialog
-        open={open}
-        onClose={() => setOpen(false)}
-        projectCreator={createProject}
-      />
+      <CreateProjectDialog open={open} onClose={() => setOpen(false)} projectCreator={createProject} />
     </>
   )
 }
@@ -85,6 +79,9 @@ function fillCreateProjectForm(
   fireEvent.change(within(dialog).getByTestId('create-project-repository-base-branch'), {
     target: { value: repository.baseBranch },
   })
+  fireEvent.change(within(dialog).getByTestId('create-project-verification-command'), {
+    target: { value: 'true' },
+  })
 }
 
 describe('CreateProjectDialog', () => {
@@ -102,6 +99,7 @@ describe('CreateProjectDialog', () => {
 
     await waitFor(() => expect(createRequests).toHaveLength(1))
     expect(createRequests[0].name).toBe('my-project')
+    expect(createRequests[0].verificationCommand).toBe('true')
     expect(createRequests[0].repository).toEqual({
       name: 'server',
       gitUrl: 'git@github.com:example/server.git',
@@ -131,6 +129,25 @@ describe('CreateProjectDialog', () => {
     expect(within(dialog).queryByText(/path is required/i)).not.toBeInTheDocument()
   })
 
+  it('keeps submit disabled until a verification command is entered', async () => {
+    openDialog()
+    const dialog = await screen.findByTestId('create-project-dialog')
+    fireEvent.change(within(dialog).getByTestId('create-project-name'), {
+      target: { value: 'project-without-command' },
+    })
+    fireEvent.change(within(dialog).getByTestId('create-project-repository-name'), {
+      target: { value: 'server' },
+    })
+    fireEvent.change(within(dialog).getByTestId('create-project-repository-git-url'), {
+      target: { value: 'https://github.com/example/server.git' },
+    })
+
+    const submit = within(dialog).getByTestId('create-project-submit') as HTMLButtonElement
+    expect(submit).toBeDisabled()
+    fireEvent.click(submit)
+    expect(createRequests).toHaveLength(0)
+  })
+
   it('enables submit when the project and required repository fields are entered', async () => {
     openDialog()
     const dialog = await screen.findByTestId('create-project-dialog')
@@ -148,9 +165,7 @@ describe('CreateProjectDialog', () => {
     fireEvent.click(within(dialog).getByTestId('create-project-submit'))
 
     await waitFor(() => {
-      expect(within(dialog).getByTestId('create-project-conflict')).toHaveTextContent(
-        'Project name already exists',
-      )
+      expect(within(dialog).getByTestId('create-project-conflict')).toHaveTextContent('Project name already exists')
     })
     expect(screen.getByTestId('create-project-dialog')).toBeInTheDocument()
     expect(createRequests).toHaveLength(1)
@@ -180,6 +195,21 @@ describe('CreateProjectDialog', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('create-project-dialog')).not.toBeInTheDocument()
     })
+  })
+
+  it('preserves the verification command exactly before submission', async () => {
+    openDialog()
+    const dialog = await screen.findByTestId('create-project-dialog')
+
+    fillCreateProjectForm(dialog, 'exact-command')
+    const command = '  dotnet test\n'
+    fireEvent.change(within(dialog).getByTestId('create-project-verification-command'), {
+      target: { value: command },
+    })
+    fireEvent.click(within(dialog).getByTestId('create-project-submit'))
+
+    await waitFor(() => expect(createRequests).toHaveLength(1))
+    expect(createRequests[0].verificationCommand).toBe(command)
   })
 
   it('trims the name before submission', async () => {

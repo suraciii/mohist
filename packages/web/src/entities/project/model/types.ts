@@ -25,4 +25,5 @@ export interface Project {
   updatedAt: string
   repositories: Repository[]
   defaultExecutionConfig?: ProjectDefaultExecutionConfig | null
+  verificationCommand?: string | null
 }

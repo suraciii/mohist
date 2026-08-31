@@ -121,6 +121,7 @@ public class IssueLabelsApiSpecs
             new
             {
                 name = $"labels-{prefix}-{Guid.NewGuid():N}",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "main",

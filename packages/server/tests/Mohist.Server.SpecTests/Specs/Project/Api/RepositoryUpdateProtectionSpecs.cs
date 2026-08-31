@@ -25,6 +25,7 @@ public class RepositoryUpdateProtectionSpecs
             new
             {
                 name = $"repo-update-blocked-{Guid.NewGuid():N}",
+                verificationCommand = "true",
                 repository = new { name = "server", gitUrl = "git@example.com:server.git", baseBranch = "main" },
             });
         await _client.PostAsJsonAsync(

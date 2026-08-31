@@ -158,7 +158,8 @@ A symmetric command without an independent scenario and semantics does not
 enter the language.
 
 - `project`: `list`, `view`, `create`, `use`, `delete`;
-  `workflow set-default`; `workflow prompt get/set/clear/preview`;
+  `workflow set-default`; `workflow verification set/view`;
+  `workflow prompt get/set/clear/preview`;
   `repo set-default`; `variable list/get/set/unset`.
 - `repo`: `list`, `create`, `edit`, `delete`.
 - `workspace`: `list`, `view`, `create`, `close`; `repo add/remove`.
@@ -644,6 +645,18 @@ Project-scoped commands use one resolution sequence:
 
 The command surface has only `--project`, not a parallel `--project-id`. The
 same argument resolves a Project name or ID.
+
+Project creation requires `--verification-command <script>` or
+`--verification-command-file <path|->`. The command is visible Project configuration and is executed by
+built-in verification from the repository root. It can be replaced with:
+
+```text literal
+mo project workflow verification set --command "npm run verify"
+mo project workflow verification set --command-file ./verify.sh
+```
+
+The command is frozen into each new WorkflowRun and is not a Project Variable. A Project without one
+cannot start new work; the error identifies this command and the Project Settings > Workflows editor.
 
 ## Input and Interaction
 
