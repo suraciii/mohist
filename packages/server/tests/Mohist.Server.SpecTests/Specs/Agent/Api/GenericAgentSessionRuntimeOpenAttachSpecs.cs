@@ -178,6 +178,60 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
     }
 
     [Fact]
+    public async Task AgentJobOpenAndAttach_WorkflowSource_BindsSession()
+    {
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"workflow-agent-open-{Guid.NewGuid():N}");
+        var sessionId = $"agent-session-workflow-{Guid.NewGuid():N}";
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: $"input-{Guid.NewGuid():N}",
+            TurnId: $"turn-{Guid.NewGuid():N}",
+            Prompt: "open a Workflow AgentJob session",
+            Source: "workflow",
+            JobId: $"job-{Guid.NewGuid():N}",
+            Metadata: WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext(
+                project.Id,
+                $"workflow-{Guid.NewGuid():N}",
+                "plan")),
+            Runtime: "opencode"));
+
+        var runnerId = $"workflow-agent-open-runner-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
+            capabilities = new[] { "spec/*" },
+            hostname = $"{runnerId}-host",
+            projectId = project.Id,
+        });
+
+        try
+        {
+            using var open = await _fixture.Client.PostAsJsonAsync(
+                $"/api/runner/{runnerId}/agent-sessions/{project.Id}/{sessionId}/open",
+                new { workId = $"work-{Guid.NewGuid():N}" });
+            open.EnsureSuccessStatusCode();
+
+            using var attach = await _fixture.Client.PostAsJsonAsync(
+                $"/api/runner/{runnerId}/agent-sessions/{project.Id}/{sessionId}/attach",
+                new
+                {
+                    runtimeSessionId = $"runtime-{Guid.NewGuid():N}",
+                    workDir = "/tmp/workflow-agent-open",
+                    processPid = 4321,
+                });
+            attach.EnsureSuccessStatusCode();
+            var attachPayload = await attach.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("opencode", attachPayload.GetProperty("runtime").GetString());
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", content: null);
+        }
+    }
+
+    [Fact]
     public async Task GenericOpen_DefaultRuntime_OpensSessionWithOpenCode()
     {
         // Sanity: the default (no AgentConfig.runtime, no request
