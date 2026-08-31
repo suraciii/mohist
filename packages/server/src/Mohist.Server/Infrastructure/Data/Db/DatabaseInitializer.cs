@@ -19,6 +19,7 @@ public static class DatabaseInitializer
             .GetService<ILoggerFactory>()?
             .CreateLogger(nameof(WorkflowRunStateDataUpgrader));
         await SquashedMigrationHistory.RemapAsync(db, cancellationToken);
+        await WorkflowArtifactActionAttemptMigrationCompatibility.NormalizeAsync(db, cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);
         await ProjectRepositoryDataUpgrader.UpgradeAsync(db, cancellationToken);
         await WorkflowRunStateDataUpgrader.UpgradeAsync(db, cancellationToken, logger: logger);

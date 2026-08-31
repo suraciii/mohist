@@ -1138,7 +1138,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     UploadId = table.Column<string>(type: "TEXT", maxLength: 64, nullable: false),
                     WorkflowRunId = table.Column<string>(type: "TEXT", maxLength: 50, nullable: false),
                     WorkId = table.Column<string>(type: "TEXT", maxLength: 128, nullable: false),
-                    ActionAttemptId = table.Column<string>(type: "TEXT", maxLength: 128, nullable: false),
+                    TaskRunId = table.Column<string>(type: "TEXT", maxLength: 128, nullable: false),
                     Path = table.Column<string>(type: "TEXT", maxLength: 1024, nullable: false),
                     Kind = table.Column<string>(type: "TEXT", maxLength: 16, nullable: false, defaultValue: "file"),
                     FileCount = table.Column<int>(type: "INTEGER", nullable: true),
@@ -1160,7 +1160,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 {
                     ArtifactId = table.Column<string>(type: "TEXT", maxLength: 64, nullable: false),
                     WorkflowRunId = table.Column<string>(type: "TEXT", maxLength: 50, nullable: false),
-                    ActionAttemptId = table.Column<string>(type: "TEXT", maxLength: 128, nullable: false),
+                    TaskRunId = table.Column<string>(type: "TEXT", maxLength: 128, nullable: false),
                     SourceUploadId = table.Column<string>(type: "TEXT", maxLength: 64, nullable: true),
                     Path = table.Column<string>(type: "TEXT", maxLength: 1024, nullable: false),
                     RecordedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
@@ -2375,7 +2375,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
             migrationBuilder.CreateIndex(
                 name: "UX_WorkflowArtifactPendingUploads_IdempotencyKey",
                 table: "WorkflowArtifactPendingUploads",
-                columns: new[] { "WorkflowRunId", "WorkId", "ActionAttemptId", "Path" },
+                columns: new[] { "WorkflowRunId", "WorkId", "TaskRunId", "Path" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -2389,9 +2389,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 columns: new[] { "WorkflowRunId", "Path", "RecordedAt" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_WorkflowArtifacts_WorkflowRunId_ActionAttemptId_RecordedAt",
+                name: "IX_WorkflowArtifacts_WorkflowRunId_TaskRunId_RecordedAt",
                 table: "WorkflowArtifacts",
-                columns: new[] { "WorkflowRunId", "ActionAttemptId", "RecordedAt" });
+                columns: new[] { "WorkflowRunId", "TaskRunId", "RecordedAt" });
 
             migrationBuilder.CreateIndex(
                 name: "UX_WorkflowArtifacts_SourceUploadId",

@@ -42,6 +42,9 @@ never silently breaks an existing database.
   attributes; a hand-written single-file migration must carry them itself.
 - Migration ids are zero-padded timestamps (`yyyyMMddHHmmss`); ordering is lexicographic.
 - Migrations are immutable once merged. Edit a migration only before it ships.
+- A persisted table or column rename after the baseline ships requires a new retained-tail
+  migration. Changing the baseline or model snapshot alone only fixes fresh databases; the
+  incremental migration must preserve existing rows and recreate every affected index.
 
 ### Squash procedure
 
