@@ -22,6 +22,17 @@ next squash replaces this snapshot.
 procedure is durable while the list is replaced at every squash; mixing them
 forces the durable contract to carry expiring content.
 
+## Corrective upgrade bridge
+
+The Workflow AgentJob migration briefly changed the already-published baseline from
+`TaskRunId` to `ActionAttemptId`. Existing databases therefore may record the same baseline
+id with either physical column shape. The retained-tail rename migration restores one
+upgrade chain: the baseline creates `TaskRunId`, then the tail migration renames both
+workflow artifact columns and their indexes. Before EF migration, startup recognizes only
+the complete `ActionAttemptId` shape produced by the brief baseline revision and records the
+rename migration as already satisfied. Missing tables, mixed columns, or incorrect index
+shape fail startup instead of being guessed or rewritten.
+
 ## Accepted deltas at the current baseline
 
 Schema equivalence was verified at squash time with these documented
