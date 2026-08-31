@@ -168,6 +168,24 @@ func TestReactionAddMissingScopeFallsBackWhenMaterialExists(t *testing.T) {
 func TestReactionOutcomesByErrorCode(t *testing.T) {
 	target := `"targetMessageIdentity":{"conversationId":"D1","messageTs":"1700.1"},"reaction":"eyes"`
 
+	for _, tc := range []struct {
+		name      string
+		operation string
+		code      string
+	}{
+		{name: "add already present", operation: OpReactionAdd, code: "already_reacted"},
+		{name: "remove already absent", operation: OpReactionRemove, code: "no_reaction"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			web := &fakeWeb{reactionErr: &SlackError{Code: tc.code}}
+			ack := mutate(t, web,
+				testDelivery("d-idempotent", `{"operation":"`+tc.operation+`",`+target+`}`))
+			if ack.Outcome != OutcomeDelivered {
+				t.Fatalf("idempotent reaction ack = %+v", ack)
+			}
+		})
+	}
+
 	transient := &fakeWeb{reactionErr: &SlackError{Code: "internal_error"}}
 	ack := mutate(t, transient,
 		testDelivery("d-11", `{"operation":"reaction_add",`+target+`}`))
