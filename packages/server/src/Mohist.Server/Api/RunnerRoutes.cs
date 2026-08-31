@@ -278,10 +278,8 @@ public static partial class RunnerRoutes
             return Results.Ok(events);
         });
 
-        // Generic (non-workflow) AgentSession routes — used by the runner
-        // when it executes an agent-job dispatch whose launch minted an
-        // AgentSession id. Identifies a session by
-        // (projectId, sessionId) without a workflowRunId/sessionName pair.
+        // AgentJob AgentSession routes identify the persisted Session by
+        // (projectId, sessionId) regardless of launch origin.
         group.MapGet("/agent-sessions/{projectId}/{sessionId}", async (
             string projectId, string sessionId,
             AgentSessionResolver sessions,
@@ -290,7 +288,7 @@ public static partial class RunnerRoutes
         {
             var session = await sessions.GetGrain(sessionId).GetAsync();
             if (session is null) return ApiResults.NotFound($"Agent session {sessionId} not found");
-            if (!await IsGenericAgentSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
+            if (!await IsAgentJobSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
                 return ApiResults.NotFound($"Agent session {sessionId} not found");
 
             return Results.Ok(ToRunnerGenericAgentSession(session));
@@ -306,12 +304,11 @@ public static partial class RunnerRoutes
             var grain = sessions.GetGrain(sessionId);
             var existing = await grain.GetAsync();
             if (existing is null) return ApiResults.NotFound($"Agent session {sessionId} not found");
-            if (!await IsGenericAgentSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
+            if (!await IsAgentJobSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
                 return ApiResults.NotFound($"Agent session {sessionId} not found");
-            // The generic AgentSession was pre-created by an Agent launch or
-            // Agent Connection, carrying project/agent/source labels. The
-            // runner's open call only contributes annotations
-            // (workId/workType/stage/title/issueNumber) for traceability
+            // The AgentSession was pre-created by its launch origin, carrying
+            // project and source labels. The runner's open call only contributes
+            // annotations (workId/workType/stage/title/issueNumber) for traceability
             // — labels are intentionally left untouched so the pre-created
             // identity (projectId, agentId, agentName, source-kind) is
             // preserved by AgentSessionMetadata.Merge.
@@ -337,7 +334,7 @@ public static partial class RunnerRoutes
             var grain = sessions.GetGrain(sessionId);
             var existing = await grain.GetAsync();
             if (existing is null) return ApiResults.NotFound($"Agent session {sessionId} not found");
-            if (!await IsGenericAgentSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
+            if (!await IsAgentJobSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
                 return ApiResults.NotFound($"Agent session {sessionId} not found");
 
             try
@@ -373,7 +370,7 @@ public static partial class RunnerRoutes
             CancellationToken ct) =>
         {
             var grain = sessions.GetGrain(sessionId);
-            if (await grain.GetAsync() is null || !await IsGenericAgentSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
+            if (await grain.GetAsync() is null || !await IsAgentJobSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
                 return ApiResults.NotFound($"Agent session {sessionId} not found");
             try
             {
@@ -406,7 +403,7 @@ public static partial class RunnerRoutes
             var grain = sessions.GetGrain(sessionId);
             var existing = await grain.GetAsync();
             if (existing is null) return ApiResults.NotFound($"Agent session {sessionId} not found");
-            if (!await IsGenericAgentSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
+            if (!await IsAgentJobSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
                 return ApiResults.NotFound($"Agent session {sessionId} not found");
             if (string.IsNullOrWhiteSpace(req.RuntimeSessionId))
                 return ApiResults.BadRequest("runtimeSessionId is required", "runtime_session_id_required");
@@ -494,7 +491,7 @@ public static partial class RunnerRoutes
             session.ResolvedModel,
             session.Runtime);
 
-    private static async Task<bool> IsGenericAgentSessionInProjectAsync(
+    private static async Task<bool> IsAgentJobSessionInProjectAsync(
         AgentSessionQuery sessionQuery,
         string projectId,
         string sessionId,
@@ -503,9 +500,11 @@ public static partial class RunnerRoutes
         var records = await sessionQuery.ListByIdsAsync([sessionId], ct);
         var record = records.FirstOrDefault();
         if (record is null) return false;
-        return string.Equals(record.Label(AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal)
-            && (string.Equals(record.Label(AgentSessionQueryMetadataKeys.SourceKind), "agent-launch", StringComparison.Ordinal)
-                || string.Equals(record.Label(AgentSessionQueryMetadataKeys.SourceKind), "agent-connection", StringComparison.Ordinal));
+        if (!string.Equals(record.Label(AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal))
+            return false;
+
+        return record.Label(AgentSessionQueryMetadataKeys.SourceKind) is
+            "agent-launch" or "agent-connection" or "workflow";
     }
 
     /// <summary>

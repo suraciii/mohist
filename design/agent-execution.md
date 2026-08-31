@@ -89,6 +89,11 @@ Workflow consumes the AgentJob result and decides whether its stage advances, re
 launching new work, or stops. A Session event cannot advance a Workflow or make an AgentJob
 terminal. A work failure may appear in Transcript, but AgentSession does not arbitrate that result.
 
+Runner opens and attaches the AgentSession through one AgentJob execution route regardless of
+launch origin. That route verifies the persisted Project identity and accepts the canonical
+AgentJob Session source kinds `agent-launch`, `agent-connection`, and `workflow`. It does not treat
+Workflow as a separate Runtime path or reject it as non-generic.
+
 A Follow-up is a Session command, not a new work dispatch. It appends a SessionInput to an existing
 AgentSession and either joins the current Turn through steer or creates a later Turn. It does not create an AgentJob. Compact, Reset, recovery, rebind, handoff, and force-reset also change
 only the Session.
