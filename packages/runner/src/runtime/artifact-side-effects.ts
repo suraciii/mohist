@@ -1,5 +1,5 @@
-import { renderTemplate, unresolvedReferences } from "../core/template.js"
-import type { ActionResult, JsonObject, DispatchWorkItem, WorkItemResult } from "../core/types.js"
+import { renderTemplate, unresolvedReferences } from '../core/template.js'
+import type { ActionResult, JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import {
   actionProducedArtifacts,
   captureArtifacts,
@@ -9,19 +9,19 @@ import {
   type ArtifactUploader,
   type CapturedArtifact,
   type UploadCapturedArtifactsResult,
-} from "./artifact-capture.js"
+} from './artifact-capture.js'
 
 export type RenderedArtifactDeclarations =
-  | { kind: "ok"; artifacts: JsonObject | null }
-  | { kind: "failure"; status: WorkItemResult["status"]; message: string }
+  | { kind: 'ok'; artifacts: JsonObject | null }
+  | { kind: 'failure'; status: WorkItemResult['status']; message: string }
 
 export type UploadedCaptures =
-  | { kind: "ok"; uploadIds: string[]; failures: ArtifactCaptureFailure[] }
-  | { kind: "failure"; status: WorkItemResult["status"]; message: string }
+  | { kind: 'ok'; uploadIds: string[]; failures: ArtifactCaptureFailure[] }
+  | { kind: 'failure'; status: WorkItemResult['status']; message: string }
 
 export type ArtifactCaptureBatch =
-  | { kind: "ok"; captures: CapturedArtifact[]; failures: ArtifactCaptureFailure[] }
-  | { kind: "failure"; message: string }
+  | { kind: 'ok'; captures: CapturedArtifact[]; failures: ArtifactCaptureFailure[] }
+  | { kind: 'failure'; message: string }
 
 const MAX_MESSAGE_LEN = 4000
 
@@ -29,23 +29,24 @@ export function renderArtifactDeclarations(
   work: DispatchWorkItem,
   variables: JsonObject,
 ): RenderedArtifactDeclarations {
-  if (!work.artifacts) return { kind: "ok", artifacts: null }
+  if (!work.artifacts) return { kind: 'ok', artifacts: null }
   try {
     const unresolved = unresolvedReferences(work.artifacts, variables)
     if (unresolved.length > 0) {
-      const refs = unresolved.map((p) => "'${{ " + p + " }}'").join(", ")
+      const refs = unresolved.map((p) => "'${{ " + p + " }}'").join(', ')
       return {
-        kind: "failure",
-        status: "failed",
-        message: `artifact declaration references undefined variable(s): ${refs}. ` +
+        kind: 'failure',
+        status: 'failed',
+        message:
+          `artifact declaration references undefined variable(s): ${refs}. ` +
           `Add the variable to workflow.variables or a parent stage.`,
       }
     }
-    return { kind: "ok", artifacts: renderTemplate(work.artifacts, variables) as JsonObject | null }
+    return { kind: 'ok', artifacts: renderTemplate(work.artifacts, variables) as JsonObject | null }
   } catch (error) {
     return {
-      kind: "failure",
-      status: "failed",
+      kind: 'failure',
+      status: 'failed',
       message: `artifact template render failed: ${error instanceof Error ? error.message : String(error)}`,
     }
   }
@@ -62,17 +63,17 @@ export async function captureAndUploadArtifactsForWork(
   signal: AbortSignal,
 ): Promise<WorkItemResult> {
   const rendered = renderArtifactDeclarations(work, variables)
-  if (rendered.kind === "failure") return withArtifactFailure(result, rendered.status, rendered.message)
+  if (rendered.kind === 'failure') return withArtifactFailure(result, rendered.status, rendered.message)
 
   const captured = await captureArtifactsForWork(work, workspaceRoot, workDir, rendered.artifacts, actionResult)
-  if (captured.kind === "failure") return withArtifactFailure(result, "failed", captured.message)
+  if (captured.kind === 'failure') return withArtifactFailure(result, 'failed', captured.message)
   if (captured.captures.length === 0) {
-    return appendArtifactWarning(result, captured.failures, "artifact capture warnings")
+    return appendArtifactWarning(result, captured.failures, 'artifact capture warnings')
   }
   const uploads = await uploadCapturesForWork(connection, work, captured.captures, signal)
-  if (uploads.kind === "failure") return withArtifactFailure(result, uploads.status, uploads.message)
+  if (uploads.kind === 'failure') return withArtifactFailure(result, uploads.status, uploads.message)
   const allFailures = [...captured.failures, ...uploads.failures]
-  return { ...appendArtifactWarning(result, allFailures, "artifact warnings"), artifactUploadIds: uploads.uploadIds }
+  return { ...appendArtifactWarning(result, allFailures, 'artifact warnings'), artifactUploadIds: uploads.uploadIds }
 }
 
 export async function captureArtifactsForWork(
@@ -85,16 +86,20 @@ export async function captureArtifactsForWork(
   try {
     const declaredOutcome = await captureArtifacts({ work, workDir: workspaceRoot, renderedArtifacts })
     const dynamicInputs = actionProducedArtifacts(actionResult)
-    const dynamicOutcome = dynamicInputs.length === 0
-      ? { captures: [], failures: [] }
-      : await captureArtifacts({ work: { ...work, artifacts: null }, workDir, dynamicArtifacts: dynamicInputs })
+    const dynamicOutcome =
+      dynamicInputs.length === 0
+        ? { captures: [], failures: [] }
+        : await captureArtifacts({ work: { ...work, artifacts: null }, workDir, dynamicArtifacts: dynamicInputs })
     return {
-      kind: "ok",
+      kind: 'ok',
       captures: [...declaredOutcome.captures, ...dynamicOutcome.captures],
       failures: [...declaredOutcome.failures, ...dynamicOutcome.failures],
     }
   } catch (error) {
-    return { kind: "failure", message: `artifact capture failed: ${error instanceof Error ? error.message : String(error)}` }
+    return {
+      kind: 'failure',
+      message: `artifact capture failed: ${error instanceof Error ? error.message : String(error)}`,
+    }
   }
 }
 
@@ -104,24 +109,27 @@ export async function uploadCapturesForWork(
   captures: ReadonlyArray<CapturedArtifact>,
   signal: AbortSignal,
 ): Promise<UploadedCaptures> {
-  const ownerKind = work.ownerKind === "agent-job" ? "agent-job" : "workflow"
-  const ownerId = ownerKind === "agent-job" ? work.agentJobId : work.workflowRunId
+  const isWorkflowAgentJob =
+    work.ownerKind === 'agent-job' && Boolean(work.workflowRunId) && Boolean(work.actionAttemptId)
+  const ownerKind = work.ownerKind === 'agent-job' && !isWorkflowAgentJob ? 'agent-job' : 'workflow'
+  const ownerId = ownerKind === 'agent-job' ? work.agentJobId : work.workflowRunId
+  const uploadWorkId = isWorkflowAgentJob ? work.actionAttemptId! : work.workId
   if (!ownerId) {
-    const ownerLabel = ownerKind === "agent-job" ? "agentJobId" : "workflowRunId"
-    return { kind: "failure", status: "failed", message: `artifact upload failed: missing ${ownerLabel}` }
+    const ownerLabel = ownerKind === 'agent-job' ? 'agentJobId' : 'workflowRunId'
+    return { kind: 'failure', status: 'failed', message: `artifact upload failed: missing ${ownerLabel}` }
   }
   let outcome: UploadCapturedArtifactsResult
   try {
-    outcome = await uploadCapturedArtifacts(connection, ownerId, work.workId, captures, signal, ownerKind)
+    outcome = await uploadCapturedArtifacts(connection, ownerId, uploadWorkId, captures, signal, ownerKind)
   } catch (error) {
     return {
-      kind: "failure",
-      status: "failed",
+      kind: 'failure',
+      status: 'failed',
       message: `artifact upload failed: ${error instanceof Error ? error.message : String(error)}`,
     }
   }
   return {
-    kind: "ok",
+    kind: 'ok',
     uploadIds: outcome.uploads.map((upload) => upload.uploadId),
     failures: outcome.failures,
   }
@@ -138,13 +146,13 @@ export function appendArtifactWarning(
 
 export function withArtifactFailure(
   result: WorkItemResult,
-  status: WorkItemResult["status"],
+  status: WorkItemResult['status'],
   message: string,
 ): WorkItemResult {
   return appendMessage({ ...result, status }, message)
 }
 
 function appendMessage(result: WorkItemResult, addition: string): WorkItemResult {
-  const prefix = result.message ? result.message + "; " : ""
+  const prefix = result.message ? result.message + '; ' : ''
   return { ...result, message: (prefix + addition).slice(0, MAX_MESSAGE_LEN) }
 }

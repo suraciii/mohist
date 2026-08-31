@@ -528,6 +528,41 @@ describe('WorkExecutor artifact capture', () => {
     expect(result.artifactUploadIds).toBeUndefined()
   })
 
+  it('uploads Workflow-origin AgentJob artifacts with the frozen Workflow attempt identity', async (workDir) => {
+    await writeFile(join(workDir, 'review.md'), 'workflow artifact', 'utf8')
+    const connection = new FakeServerConnection()
+    const fakeRuntime = makeFakeRuntimeReturningCompleted(workDir)
+    const executor = new WorkExecutor(
+      makeRegistry(async () => ({ output: { reached: false } })),
+      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      connection as never,
+      workDir,
+      undefined,
+      fakeRuntime as never,
+      new AgentJobExecutor(connection as never, { openCode: fakeRuntime as never, pi: null }),
+    )
+
+    const work = buildWork(workDir, { files: [{ path: 'review.md' }] })
+    work.workId = 'agent-work-1'
+    work.actionAttemptId = 'plan.1'
+    work.ownerKind = 'agent-job'
+    work.agentJobId = 'agent-job-1'
+    work.with = { prompt: 'review this' }
+
+    const result = await executor.execute(work, new AbortController().signal)
+
+    expect(result.status).toBe('completed')
+    expect(result.artifactUploadIds).toEqual(['artup_1'])
+    expect(connection.uploads).toEqual([
+      expect.objectContaining({
+        ownerId: 'wf-1',
+        ownerKind: 'workflow',
+        workId: 'plan.1',
+        path: 'review.md',
+      }),
+    ])
+  })
+
   it('AgentJob dispatches drive the AgentJobExecutor and never reach the action registry', async (workDir) => {
     // After #410 T-001, an AgentJob dispatch is routed to the
     // AgentJobExecutor (which drives `OpenCodeRuntime.runTurn`
