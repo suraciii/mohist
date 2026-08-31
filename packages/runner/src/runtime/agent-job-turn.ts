@@ -595,6 +595,7 @@ export function createAgentSessionEventSink(
   let pending: Promise<void> = Promise.resolve()
   const deliverySignal = () => AbortSignal.any([signal, AbortSignal.timeout(AGENT_EVENT_DELIVERY_TIMEOUT_MS)])
   const projectId = work.projectId
+  const agentTurnId = work.initialTurnId ?? null
   if (!agentSessionId || !projectId) {
     const noop = async () => undefined
     return {
@@ -641,6 +642,7 @@ export function createAgentSessionEventSink(
             workType: work.workType,
             stage: work.stage,
             runtimeSessionId,
+            agentTurnId,
             runtimeEvents: [
               {
                 type: 'session.input',
@@ -650,6 +652,7 @@ export function createAgentSessionEventSink(
                   source: 'agent-job',
                   role: 'user',
                   runtimeSessionId,
+                  ...(agentTurnId ? { turnId: agentTurnId } : {}),
                 },
               },
             ],
@@ -678,7 +681,13 @@ export function createAgentSessionEventSink(
                 workType: work.workType,
                 stage: work.stage,
                 runtimeSessionId: event.runtimeSessionId,
-                runtimeEvents: [{ type: event.type, payload: event.payload }],
+                agentTurnId,
+                runtimeEvents: [
+                  {
+                    type: event.type,
+                    payload: agentTurnId ? { ...event.payload, turnId: agentTurnId } : event.payload,
+                  },
+                ],
               },
               deliverySignal(),
             )
@@ -705,7 +714,13 @@ export function createAgentSessionEventSink(
                 workType: work.workType,
                 stage: work.stage,
                 runtimeSessionId: event.runtimeSessionId,
-                runtimeEvents: [{ type: event.type, payload: event.payload }],
+                agentTurnId,
+                runtimeEvents: [
+                  {
+                    type: event.type,
+                    payload: agentTurnId ? { ...event.payload, turnId: agentTurnId } : event.payload,
+                  },
+                ],
               },
               deliverySignal(),
             )
