@@ -522,7 +522,7 @@ describe('AgentJobExecutor reports the runtime session binding', () => {
       },
     ])
 
-    await executor.execute(buildAgentJobWork(), new AbortController().signal)
+    await executor.execute(buildAgentJobWork({ initialTurnId: 'turn-real' }), new AbortController().signal)
 
     expect(connection.attachCalls).toHaveLength(1)
     expect(connection.eventCalls).toHaveLength(2)
@@ -538,7 +538,8 @@ describe('AgentJobExecutor reports the runtime session binding', () => {
         workType: 'task',
         stage: undefined,
         runtimeSessionId: 'ses_default',
-        runtimeEvents: [{ type: 'message.delta', payload: { text: 'working' } }],
+        agentTurnId: 'turn-real',
+        runtimeEvents: [{ type: 'message.delta', payload: { text: 'working', turnId: 'turn-real' } }],
       },
     })
   })

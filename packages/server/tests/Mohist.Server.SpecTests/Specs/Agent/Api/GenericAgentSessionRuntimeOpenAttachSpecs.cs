@@ -184,16 +184,18 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
             "/api/projects",
             $"workflow-agent-open-{Guid.NewGuid():N}");
         var sessionId = $"agent-session-workflow-{Guid.NewGuid():N}";
+        var workflowRunId = $"workflow-{Guid.NewGuid():N}";
+        var turnId = $"turn-{Guid.NewGuid():N}";
         var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
             InputId: $"input-{Guid.NewGuid():N}",
-            TurnId: $"turn-{Guid.NewGuid():N}",
+            TurnId: turnId,
             Prompt: "open a Workflow AgentJob session",
             Source: "workflow",
             JobId: $"job-{Guid.NewGuid():N}",
             Metadata: WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext(
                 project.Id,
-                $"workflow-{Guid.NewGuid():N}",
+                workflowRunId,
                 "plan")),
             Runtime: "opencode"));
 
@@ -213,17 +215,38 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
                 new { workId = $"work-{Guid.NewGuid():N}" });
             open.EnsureSuccessStatusCode();
 
+            var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
             using var attach = await _fixture.Client.PostAsJsonAsync(
                 $"/api/runner/{runnerId}/agent-sessions/{project.Id}/{sessionId}/attach",
                 new
                 {
-                    runtimeSessionId = $"runtime-{Guid.NewGuid():N}",
+                    runtimeSessionId,
                     workDir = "/tmp/workflow-agent-open",
                     processPid = 4321,
                 });
             attach.EnsureSuccessStatusCode();
             var attachPayload = await attach.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal("opencode", attachPayload.GetProperty("runtime").GetString());
+
+            using var runtimeEvent = await _fixture.Client.PostAsJsonAsync(
+                $"/api/runner/{runnerId}/agent-sessions/{project.Id}/{sessionId}/runtime-events",
+                new
+                {
+                    workId = "plan.1",
+                    workType = "task",
+                    stage = "plan",
+                    runtimeSessionId,
+                    agentTurnId = turnId,
+                    runtimeEvents = new[]
+                    {
+                        new
+                        {
+                            type = "message.delta",
+                            payload = new { text = "working", turnId },
+                        },
+                    },
+                });
+            runtimeEvent.EnsureSuccessStatusCode();
         }
         finally
         {

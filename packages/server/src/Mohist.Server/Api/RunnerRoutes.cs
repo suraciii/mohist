@@ -411,7 +411,10 @@ public static partial class RunnerRoutes
             var runtimeEvents = req.RuntimeEvents.Select(e => new AgentSessionRuntimeEventInput(
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
-            var events = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId));
+            var events = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+                runtimeEvents,
+                req.RuntimeSessionId,
+                SessionTurnId: req.AgentTurnId));
             if (string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal))
             {
                 RevokeCompletedManagerFollowupLeases(sessionId, req.RuntimeEvents, managerCredentials);
