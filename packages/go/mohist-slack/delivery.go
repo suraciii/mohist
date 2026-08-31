@@ -135,8 +135,9 @@ func rejectionReason(err error, fallback string) string {
 	return fallback
 }
 
-// mutateReaction performs reactions.add/remove and normalizes coded Slack
-// rejections into (code, false); uncoded failures return as transport errors.
+// mutateReaction performs reactions.add/remove and treats an already-reached
+// provider state as success. Other coded rejections become (code, false);
+// uncoded failures return as transport errors.
 func mutateReaction(ctx context.Context, web WebClient, operation string, target MessageIdentity, reaction string, ensureCurrent func()) (string, bool, error) {
 	ensureCurrent()
 	var err error
@@ -150,6 +151,10 @@ func mutateReaction(ctx context.Context, web WebClient, operation string, target
 		return "", true, nil
 	}
 	if code := SlackErrorCode(err); code != "" {
+		if (operation == OpReactionAdd && code == "already_reacted") ||
+			(operation == OpReactionRemove && code == "no_reaction") {
+			return "", true, nil
+		}
 		return code, false, nil
 	}
 	return "", false, err
