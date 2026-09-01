@@ -24,7 +24,7 @@ WorkflowRun { workflowProfileId, definition }
   -- selected and bound at start --> WorkflowProfile
 
 WorkflowProfile: Project-scoped; does not own Variables or Prompts.
-WorkflowRun: Profile ID and complete Definition bind at start.
+WorkflowRun: Profile ID, complete Definition, and verification command bind at start.
 ```
 
 WorkflowProfile is Project-scoped and does not own Variables or Prompts. The minimal model is:
@@ -44,6 +44,12 @@ cannot be modified or deleted. The Project manages Profiles with other IDs.
 A Profile can reference external values through `${{ vars.* }}` and `${{ prompts.* }}`, but it does not
 declare or store those values. An Action Input that is fixed and belongs only to one task must be written
 directly in `definition`.
+
+Built-in Profiles also reference the Project's single deterministic verification command as
+`${{ workflow.verification.command }}`. This is not a Variable: the command is read while a WorkflowRun
+binds and is copied into the Run startup facts. Project edits therefore affect only future Runs. Built-in
+local and GitHub PR Profiles execute it as one `core/script` Task from `REPOS/${{ repository.name }}`;
+Projects needing multiple verification boundaries own that topology in a custom WorkflowProfile.
 
 ## Agent Task Binding
 

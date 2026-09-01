@@ -149,7 +149,7 @@ model, configure it on the Agent or in Project Agent settings. See
 Create a Project with the CLI:
 
 ```bash
-mo project create my-app --path /path/to/your/repo
+mo project create my-app --path /path/to/your/repo --verification-command "npm run verify"
 mo project use my-app
 ```
 
@@ -190,6 +190,7 @@ manual fallback path, use the Web UI:
 3. Enter a resource name for the initial repository, such as `server`, and its
    Git URL.
 4. Confirm the base branch. The default is `main`.
+5. Enter the verification command that this Project should run, such as `npm run verify`.
 
 ## 8. Create Your First Issue
 

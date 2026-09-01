@@ -157,6 +157,12 @@ with the Profile that is effective for that new start.
 A Profile can read Variables through expressions such as
 `${{ vars.github.pr.number }}`. It does not declare their values.
 
+Built-in Profiles use the separate Project-owned `${{ workflow.verification.command }}`
+value for their single verification Task. The command is captured when the WorkflowRun binds and
+runs from `REPOS/${{ repository.name }}` with the built-in timeout and recovery contract. It is not
+`vars.ci.verify`, and Project Variable edits cannot alter an in-flight Run. Projects needing multiple
+verification Tasks should create a custom WorkflowProfile.
+
 Mohist merges Variables in this order: Project -> Issue -> Run. A later scope
 overrides an earlier scope with the same key. Project and Issue Variables can
 define Workflow-wide or per-Stage values. A Task's `setVars` writes

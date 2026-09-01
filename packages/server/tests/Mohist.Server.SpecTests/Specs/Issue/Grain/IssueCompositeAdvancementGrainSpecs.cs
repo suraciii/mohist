@@ -159,7 +159,7 @@ public class IssueCompositeAdvancementGrainSpecs
             GitUrl = "git@example.com:mohist-local.git",
             BaseBranch = "main",
             IsDefault = true,
-        });
+        }, "git diff --check");
         return id;
     }
 

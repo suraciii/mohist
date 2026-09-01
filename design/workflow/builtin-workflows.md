@@ -87,6 +87,12 @@ Repository health checks remain explicit Tasks. Their recovery is limited to
 the formatting or patch problem they detect and cannot become a general repair
 hook.
 
+The built-in verification boundary is one ordinary `core/script` Task. It executes the Project's
+`verificationCommand` from `REPOS/${{ repository.name }}` with a 900000 ms timeout. The command is
+frozen into each WorkflowRun at binding, so editing Project configuration cannot change a retry or a
+later Task in an existing Run. Script failure and timeout use the explicit Builder recovery declared by
+the Profile. Projects requiring several independent checks own that topology in a custom WorkflowProfile.
+
 ## `mohist/github-pr`
 
 This Profile opens a draft Pull Request after Plan, marks it ready after an
@@ -95,8 +101,9 @@ Integrate. The Runner host must have an authenticated `gh` CLI for the target
 Repository, and the Repository must allow auto-merge.
 
 Every Agent Task in this Profile uses `mohist/agent` with a named built-in
-Agent; the Agent definition selects the execution backend and model. Agent-backed
-Plan, Build, Check, Feedback, and recovery Tasks use the same binding. Mechanical
+Agent; the Agent definition selects the execution backend and model. The built-in verification boundary
+uses the same Project command and `core/script` contract as `mohist/local`, while GitHub required checks
+remain a separate remote gate. Agent-backed Plan, Build, Check, Feedback, and recovery Tasks use the same binding. Mechanical
 Tasks such as publication remain ordinary explicit Tasks. The complete bound
 Definition fixes the Stage graph for each WorkflowRun.
 

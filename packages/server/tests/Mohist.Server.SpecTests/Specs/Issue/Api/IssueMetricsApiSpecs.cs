@@ -93,6 +93,7 @@ public class IssueMetricsApiSpecs
             new
             {
                 name,
+                verificationCommand = "true",
                 repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "trunk" },
             },
             JsonOptions);

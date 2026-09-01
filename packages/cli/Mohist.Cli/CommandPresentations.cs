@@ -286,7 +286,11 @@ internal static class CommandPresentations
             ("set-default", "Set a Repository as the Project default"));
         AttachGroup(root, ["project", "workflow"], CommandCapability.Work, "Manage Project Workflow references and Prompts",
             ("set-default", "Set the Project default Workflow Profile"),
+            ("verification", "Manage the Project verification command"),
             ("prompt", "Manage Project Workflow Prompts"));
+        AttachGroup(root, ["project", "workflow", "verification"], CommandCapability.Work, "Manage the Project verification command",
+            ("set", "Replace the Project verification command"),
+            ("view", "View the Project verification command"));
         AttachGroup(root, ["project", "workflow", "prompt"], CommandCapability.Work, "Manage Project Workflow Prompts",
             ("get", "Read a Project Workflow Prompt"),
             ("set", "Set a Project Workflow Prompt"),

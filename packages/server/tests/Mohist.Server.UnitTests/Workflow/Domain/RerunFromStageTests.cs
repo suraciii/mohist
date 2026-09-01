@@ -411,4 +411,34 @@ public class RerunFromStageTests
         Assert.Equal("compile.s2.1", rerunTask.Id);
         Assert.NotEqual(originalTaskId, rerunTask.Id);
     }
+
+    [Fact]
+    public void RecoverySelfRetry_PreservesStageScopedSourceAttemptIdentity()
+    {
+        var recovery = new RecoveryDefinition(
+            1,
+            [new RecoveryHandlerDefinition(null, [], RetrySelf: true)]);
+        var run = BuildCompletedRun();
+        run.Status = WorkflowRunStatus.Failed;
+        run.Failure = new FailureDetails(FailureReason.TaskFailed, "integrate", "merge.1");
+        run.RerunFromStage("build", DateTimeOffset.UnixEpoch);
+        run.InitializeStage(
+            [new("compile", "Compile", "spec/task", Recovery: recovery)],
+            [],
+            DateTimeOffset.UnixEpoch,
+            advance: false);
+
+        var source = Assert.Single(run.CurrentStage().Tasks);
+        Assert.Equal("compile.s2.1", source.Id);
+        source.Status = WorkflowActionAttemptStatus.Failed;
+
+        run.AddRuntimeTaskAttempts(
+            [(new TaskDefinition("compile", "Compile", "spec/task", Recovery: recovery), 0)],
+            DateTimeOffset.UnixEpoch,
+            source.Id);
+
+        var retry = Assert.Single(run.CurrentStage().Tasks.Skip(1));
+        Assert.Equal("compile.s2.2", retry.Id);
+        Assert.Equal(source.Id, retry.CausedByFailedTaskId);
+    }
 }

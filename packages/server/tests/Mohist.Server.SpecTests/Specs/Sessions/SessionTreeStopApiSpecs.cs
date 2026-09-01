@@ -114,6 +114,7 @@ public sealed class SessionTreeStopApiSpecs
         using var response = await _fixture.Client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
         });
         response.EnsureSuccessStatusCode();

@@ -124,63 +124,37 @@ public class MohistWorkflowDefinitionTests
     }
 
     [Fact]
-    public void DefaultWorkflowDefinition_BuildStage_LanesCarryExactCommandsAndRuntimePrelude()
+    public void DefaultWorkflowDefinition_BuildStageUsesOneProjectVerificationTask()
     {
         var build = WorkflowProfileCatalog.Definition.Stages.Single(s => s.Stage == "build");
+        var verify = build.Tasks.Single(t => t.Id == "verify");
 
-        Assert.Equal(VerificationLaneCatalog.LaneIds, build.Tasks.Where(t => VerificationLaneCatalog.IsKnownLane(t.Id)).Select(t => t.Id).ToArray());
-        Assert.Equal("npm ci", ReadString(build, VerificationLaneCatalog.VerifyInstall));
-
-        // The .NET lane run body has only the required runtime prelude before
-        // the unchanged dotnet command; the export is setup in the same lane
-        // shell because every core/script task runs in a fresh shell. The
-        // literal block scalar retains a trailing newline that the runner
-        // shell ignores.
-        Assert.Equal(
-            "export DOTNET_ROOT=/home/szf/.dotnet\ndotnet test Mohist.sln --nologo -m:1 -p:UseSharedCompilation=false",
-            ReadString(build, VerificationLaneCatalog.VerifyDotnet)?.TrimEnd('\n'));
-
-        Assert.Equal("npm run typecheck -w packages/web", ReadString(build, VerificationLaneCatalog.VerifyWebTypecheck));
-        Assert.Equal("npm run test:run -w packages/web", ReadString(build, VerificationLaneCatalog.VerifyWebTests));
-        Assert.Equal("npm run typecheck -w packages/runner", ReadString(build, VerificationLaneCatalog.VerifyRunnerTypecheck));
-        Assert.Equal("npm run test:run -w packages/runner -- --no-file-parallelism", ReadString(build, VerificationLaneCatalog.VerifyRunnerTests));
+        Assert.Equal("core/script", verify.Uses);
+        Assert.Equal("${{ workflow.verification.command }}", ReadString(build, "verify"));
+        Assert.Equal("REPOS/${{ repository.name }}", verify.With!["working-directory"]!.Value.GetString());
+        Assert.Equal("900000", verify.With!["timeout"]!.Value.GetRawText());
+        AssertFixCiRecovery(verify);
+        Assert.Equal(2, verify.Recovery!.Handlers.Count);
+        Assert.Equal("error.code=script-failed", verify.Recovery.Handlers[0].When);
+        Assert.Equal("error.code=timeout", verify.Recovery.Handlers[1].When);
     }
 
     [Fact]
-    public void DefaultWorkflowDefinition_EveryBuildLaneCarriesTheSameFixCiRecovery()
-    {
-        var build = WorkflowProfileCatalog.Definition.Stages.Single(s => s.Stage == "build");
-
-        foreach (var lane in VerificationLaneCatalog.LaneIds)
-        {
-            var laneTask = build.Tasks.Single(t => t.Id == lane);
-            AssertFixCiRecovery(laneTask);
-        }
-    }
-
-    [Fact]
-    public void DefaultWorkflowDefinition_GithubPrBuildLaneRecoveryUsesAgentActionWithoutExpect()
+    public void GithubPrWorkflowDefinition_UsesOneProjectVerificationTask()
     {
         var build = WorkflowProfileCatalog.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "build");
-
-        foreach (var lane in VerificationLaneCatalog.LaneIds)
+        var verify = build.Tasks.Single(t => t.Id == "verify");
+        Assert.Equal("${{ workflow.verification.command }}", ReadString(build, "verify"));
+        Assert.Equal(2, verify.Recovery!.Handlers.Count);
+        Assert.All(verify.Recovery.Handlers, handler =>
         {
-            var laneTask = build.Tasks.Single(t => t.Id == lane);
-            var recovery = laneTask.Recovery;
-            Assert.NotNull(recovery);
-            Assert.Equal(2, recovery!.Budget);
-            var handler = Assert.Single(recovery.Handlers);
-            Assert.Null(handler.When);
             Assert.True(handler.RetrySelf);
             var fixCi = Assert.Single(handler.Tasks);
             Assert.Equal("recover:fix-ci", fixCi.Id);
             Assert.Equal("mohist/agent", fixCi.Uses);
-        Assert.Equal("mohist/builder", fixCi.With!["name"]!.Value.GetString());
-            Assert.Equal("${{ prompts.fix-ci }}", fixCi.With!["prompt"]!.Value.GetString());
-            Assert.False(fixCi.With!.ContainsKey("options"));
-            Assert.Equal("build", fixCi.With!["session"]!.Value.GetString());
+            Assert.Equal("mohist/builder", fixCi.With!["name"]!.Value.GetString());
             Assert.Null(fixCi.Expect);
-        }
+        });
     }
 
     private static string? ReadString(StageDefinition stage, string taskId)
@@ -196,8 +170,7 @@ public class MohistWorkflowDefinitionTests
         var recovery = lane.Recovery;
         Assert.NotNull(recovery);
         Assert.Equal(2, recovery!.Budget);
-        var handler = Assert.Single(recovery.Handlers);
-        Assert.Null(handler.When);
+        var handler = recovery.Handlers.Single(handler => handler.When == "error.code=script-failed");
         Assert.True(handler.RetrySelf);
         var fixCi = Assert.Single(handler.Tasks);
         Assert.Equal("recover:fix-ci", fixCi.Id);

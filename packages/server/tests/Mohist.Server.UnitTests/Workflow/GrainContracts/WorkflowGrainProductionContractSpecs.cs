@@ -36,26 +36,15 @@ public sealed class WorkflowGrainProductionContractSpecs
     }
 
     [Fact]
-    public async Task CommitAsync_DifferentResolutionExceptionMessages_ProduceIdenticalControlFlow()
+    public async Task EnsureStarted_NoSnapshotRun_FailsClosedBeforeExecution()
     {
-        const string projectId = "proj-resolution-typing";
-        await SeedSingleStageTemplateAsync(projectId);
-
-        var firstOutcome = await DriveOnceAsync(
-            projectId,
+        var outcome = await DriveOnceAsync(
+            "proj-resolution-typing",
             workflowRunId: "wr-resolution-first",
-            exceptionMessage: "Workflow 'first' has no definition for stage 'missing'");
+            exceptionMessage: "unused");
 
-        var secondOutcome = await DriveOnceAsync(
-            projectId,
-            workflowRunId: "wr-resolution-second",
-            exceptionMessage: "totally rewritten wording with different punctuation!!!");
-
-        Assert.Equal(firstOutcome.ExceptionType, secondOutcome.ExceptionType);
-        Assert.Equal(typeof(WorkflowDefinitionResolutionException), firstOutcome.ExceptionType);
-        Assert.Equal(firstOutcome.InputMessage, firstOutcome.ExceptionMessage);
-        Assert.Equal(secondOutcome.InputMessage, secondOutcome.ExceptionMessage);
-        Assert.NotEqual(firstOutcome.ExceptionMessage, secondOutcome.ExceptionMessage);
+        Assert.Equal(typeof(WorkflowDefinitionResolutionException), outcome.ExceptionType);
+        Assert.Contains("no bound workflow definition", outcome.ExceptionMessage, StringComparison.Ordinal);
     }
 
     [Fact]

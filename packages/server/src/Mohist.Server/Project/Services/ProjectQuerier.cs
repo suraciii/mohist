@@ -145,5 +145,6 @@ public class ProjectQuerier : ISingletonService
         CreatedAt = e.CreatedAt.ToString("o"),
         UpdatedAt = e.UpdatedAt.ToString("o"),
         DefaultExecutionConfig = ExecutionConfigJson.Deserialize(e.DefaultExecutionConfigJson),
+        VerificationCommand = e.VerificationCommand,
     };
 }

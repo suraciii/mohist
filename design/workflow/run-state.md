@@ -85,7 +85,11 @@ discriminator would create permanent branching for a one-way startup upgrade,
 so multiple formats must not coexist on the read path.
 
 A State format change is a database upgrade completed before the new Server
-accepts requests:
+accepts requests. The verification-command cutover does not rewrite
+persisted task-attempt properties or a bound Workflow Definition. Unknown
+historical properties are ignored by the current model. Existing active Runs
+without a bound Definition are drained or stopped operationally before
+deployment, while terminal historical rows remain readable.
 
 - Database initialization is the sole upgrade entry point. EF migration owns
   schema changes and unambiguous transformations expressible with SQLite JSON.

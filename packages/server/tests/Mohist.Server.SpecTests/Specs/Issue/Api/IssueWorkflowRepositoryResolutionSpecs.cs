@@ -40,7 +40,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true });
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true }, "git diff --check");
         await projectGrain.AddRepositoryAsync(
             "secondary",
             "git@secondary.example:repo.git",
@@ -64,7 +64,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true });
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true }, "git diff --check");
         await projectGrain.AddRepositoryAsync(
             "secondary",
             "git@secondary.example:repo-old.git",
@@ -105,11 +105,11 @@ public class IssueWorkflowRepositoryResolutionSpecs
     }
 
     [Fact]
-    public async Task StartWorkAsync_ReferencedRepositoryRemovedAfterIssueCreation_ThrowsRepositoryConfigurationProblem()
+    public async Task StartWorkAsync_TerminalIssueRejectsBeforeRepositoryResolution()
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true });
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true }, "git diff --check");
         await projectGrain.AddRepositoryAsync(
             "secondary",
             "git@secondary.example:repo.git",
@@ -131,9 +131,8 @@ public class IssueWorkflowRepositoryResolutionSpecs
         await issueGrain.CancelAsync();
         await projectGrain.RemoveRepositoryAsync("secondary");
 
-        var ex = await Assert.ThrowsAsync<IssueStartRepositoryUnavailableException>(() => issueGrain.StartWorkAsync());
-        Assert.Contains("secondary", ex.Message);
-        Assert.Contains("RepositoryNotFound", ex.Message);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());
+        Assert.Equal("Issue #1 is Cancelled", ex.Message);
 
         using var scope = _services.CreateScope();
         var issueQuery = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -151,7 +150,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
-        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true });
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true }, "git diff --check");
         await projectGrain.AddRepositoryAsync("main", "git@main.example:repo.git", "main");
 
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
@@ -181,7 +180,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
                 GitUrl = "git@example.com:server.git",
                 BaseBranch = "release",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
         await issueGrain.CreateAsync(projectId, number, "Existing issue", body: null, labels: null, priority: null, repositoryRef: null);
@@ -222,7 +221,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
                 GitUrl = "git@example.com:server.git",
                 BaseBranch = "release",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
         await issueGrain.CreateAsync(projectId, number, "In-flight issue", body: null, labels: null, priority: null, repositoryRef: null);

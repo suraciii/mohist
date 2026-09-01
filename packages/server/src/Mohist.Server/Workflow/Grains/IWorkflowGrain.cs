@@ -81,7 +81,8 @@ public sealed record WorkflowStartInput(
     [property: Id(1)] Dictionary<string, string>? Labels = null,
     [property: Id(2)] Dictionary<string, string>? Annotations = null,
     [property: Id(3)] WorkflowRunMetadata? Metadata = null,
-    [property: Id(4)] WorkspaceIdentity? Workspace = null);
+    [property: Id(4)] WorkspaceIdentity? Workspace = null,
+    [property: Id(5)] string? VerificationCommand = null);
 
 [GenerateSerializer]
 public sealed record WorkflowIssueContext(
@@ -102,7 +103,8 @@ public sealed record WorkflowIssueContext(
 [GenerateSerializer]
 public sealed record WorkflowStartSnapshot(
     [property: Id(0)] WorkflowRepositoryContext? Repository,
-    [property: Id(1)] WorkspaceIdentity? Workspace);
+    [property: Id(1)] WorkspaceIdentity? Workspace,
+    [property: Id(2)] string? VerificationCommand = null);
 
 [GenerateSerializer]
 public sealed record RuntimeTaskAddedResult(

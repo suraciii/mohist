@@ -1,7 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useProject } from '../model/ProjectContext'
-import { createProject, deleteProject, getProjects, getRepositories, addRepository, removeRepository, setDefaultRepository } from './client'
+import {
+  createProject,
+  deleteProject,
+  getProjects,
+  getRepositories,
+  addRepository,
+  removeRepository,
+  setDefaultRepository,
+  setVerificationCommand,
+} from './client'
 import type { AddRepositoryInput } from '../model/types'
 import { getProjectEvents, type ProjectEventDto, type ProjectEventTypeFilter } from './projectEvents'
 
@@ -73,11 +82,29 @@ export function useSetDefaultRepository() {
 export function useCreateProject(projectCreator: ProjectCreator = createProject) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: { name: string; repository: { name: string; gitUrl: string; baseBranch?: string } }) =>
-      projectCreator(data),
+    mutationFn: (data: {
+      name: string
+      verificationCommand: string
+      repository: { name: string; gitUrl: string; baseBranch?: string }
+    }) => projectCreator(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       toast.success('Project created')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useSetVerificationCommand() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ projectId, command }: { projectId: string; command: string }) =>
+      setVerificationCommand(projectId, command),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      toast.success('Verification command updated')
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')

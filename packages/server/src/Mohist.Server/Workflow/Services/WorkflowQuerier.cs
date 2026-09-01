@@ -58,7 +58,19 @@ public class WorkflowQuerier : IScopedService, IWorkflowStatusReader
             : await LoadAndCacheAsync(db, workflowRunId, etag.Value);
         if (run is null) return null;
 
-        var definition = (await _definitionResolver.LoadTemplateAsync(workflowRunId)).Structure;
+        WorkflowDefinition? definition;
+        try
+        {
+            definition = (await _definitionResolver.LoadTemplateAsync(workflowRunId)).Structure;
+        }
+        catch (WorkflowDefinitionResolutionException ex)
+            when (ex.Reason == WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition)
+        {
+            // Historical runs without a durable definition snapshot remain
+            // readable, but their status must not be reconstructed from a
+            // mutable live profile.
+            definition = null;
+        }
 
         var view = WorkflowStatusMapper.BuildStatusView(run, definition);
         if (view is null) return null;
@@ -137,7 +149,8 @@ public class WorkflowQuerier : IScopedService, IWorkflowStatusReader
                     DurationMs: task.DurationMs,
                     Output: task.Output,
                     Error: task.Error,
-                    Lane: task.Lane);
+                    AgentJobId: task.AgentJobId,
+                    AgentSessionId: task.AgentSessionId);
             }
         }
     }

@@ -81,6 +81,7 @@ public sealed class WebConversationWorkspaceSpecs
         using var create = await _fixture.Client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new { name = "server", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
         });
         create.EnsureSuccessStatusCode();

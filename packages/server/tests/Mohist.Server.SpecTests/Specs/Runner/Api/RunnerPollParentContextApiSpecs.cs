@@ -152,6 +152,7 @@ public sealed class RunnerPollParentContextApiSpecs
             Name: null,
             CreatedAt: DateTimeOffset.UnixEpoch,
              ProjectId: projectId,
-             IssueNumber: 2)));
+             IssueNumber: 2),
+            VerificationCommand: "true"));
     }
 }

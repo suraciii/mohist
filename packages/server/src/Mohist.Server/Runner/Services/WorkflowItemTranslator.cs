@@ -480,7 +480,13 @@ public sealed class WorkflowItemTranslator : IScopedService
         var effectiveVarsJson = resolved.Vars ?? JSON.DeserializeElement("{}");
 
         payload["vars"] = effectiveVarsJson;
-        payload["workflow"] = JSON.SerializeToElement(new { runId = workflowRunId });
+        payload["workflow"] = JSON.SerializeToElement(new
+        {
+            runId = workflowRunId,
+            verification = run.VerificationCommand is { } command
+                ? new { command }
+                : null,
+        });
         payload["stage"] = JSON.SerializeToElement(new { name = stage });
         var work = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
@@ -571,8 +577,7 @@ public sealed class WorkflowItemTranslator : IScopedService
             if (task is not null
                 && (task.Output.HasValue
                     || task.Error is not null
-                    || task.Status == WorkflowActionAttemptStatus.Failed
-                    || task.Lane?.Outcome is VerificationLaneOutcome.Fail or VerificationLaneOutcome.Timeout))
+                    || task.Status == WorkflowActionAttemptStatus.Failed))
             {
                 return task;
             }

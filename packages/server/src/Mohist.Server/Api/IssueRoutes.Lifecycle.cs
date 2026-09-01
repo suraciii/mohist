@@ -8,6 +8,7 @@ using Mohist.Server.Issue.Grains.Coordinator;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Workflow.Domain;
 
 namespace Mohist.Server.Api;
 
@@ -53,6 +54,10 @@ public static partial class IssueRoutes
             catch (MissingPromptsException ex)
             {
                 return ApiResults.Fail(ex.Message, 400, "missing_prompts", new { missingKeys = ex.MissingKeys });
+            }
+            catch (ProjectVerificationConfigurationMissingException ex)
+            {
+                return ApiResults.Fail(ex.Message, 400, "project-verification-config-missing");
             }
             catch (InvalidOperationException ex)
             {

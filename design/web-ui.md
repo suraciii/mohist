@@ -32,7 +32,10 @@ the AgentJob result through the Agent API, and Agent Connection binding and
 policy through the API.
 
 Web UI never interprets Workflow rules. It renders Server state and submits
-user intent.
+user intent. Project Settings > Workflows includes the fallback editor for the
+Project's single verification command. It calls the same dedicated Server API as
+the CLI; the command is visible configuration and is frozen into future
+WorkflowRuns rather than stored in Web Variables.
 
 ## Events
 

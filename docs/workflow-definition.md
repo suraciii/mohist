@@ -173,6 +173,7 @@ Fields under `with` and `expect` can use `${{ }}` expressions. The available
 namespaces are listed below. A root reference not listed here is invalid.
 
 - `workflow.runId`: the current Run identifier.
+- `workflow.verification.command`: the Project-owned verification command frozen into the Run at binding; built-in Profiles use it as the `core/script` `run` input.
 - `stage.name`: the current Stage name.
 - `work.*`: current work information, such as `work.id`, `work.type`,
   `work.title`, and `work.attempt`.

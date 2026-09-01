@@ -133,7 +133,8 @@ public sealed class OrleansL0WorkflowGrainFixture : WorkflowGrainFixture
             Name: null,
             CreatedAt: DateTimeOffset.UnixEpoch,
             ProjectId: projectId,
-            IssueNumber: 1)));
+            IssueNumber: 1),
+            VerificationCommand: "true"));
         var assignment = await workflow.AssignWorkerAsync(runnerId);
         if (assignment.Status != WorkflowAssignmentStatus.Assigned)
             throw new InvalidOperationException($"Recovery workflow assignment failed: {assignment.Reason}");

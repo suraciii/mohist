@@ -8,6 +8,15 @@ public interface IIssueGrain : IGrainWithStringKey
 {
     Task<int> CreateAsync(string projectId, int number, string title, string? body, IReadOnlyDictionary<string, string>? labels, string? priority, string? repositoryRef = null, string? risk = null, bool isDraft = false, string[]? attachmentIds = null, string? workflowProfileId = null, int[]? prerequisiteNumbers = null, int? parentIssueNumber = null);
     Task<string> StartWorkAsync(WorkflowProjectContext? project = null);
+    Task EnsureWorkflowStartPreparedAsync(
+        string workflowRunId,
+        string workspaceName,
+        string repositoryName,
+        string repositoryGitUrl,
+        string repositoryBaseBranch,
+        string workspacePath,
+        string? workspaceBranch,
+        string? workspaceChangeDir) => throw new NotSupportedException();
     Task CompleteWorkAsync(string workflowRunId);
     Task MarkDoneAsync();
     Task CancelAsync();

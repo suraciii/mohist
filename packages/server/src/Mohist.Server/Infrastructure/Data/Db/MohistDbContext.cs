@@ -208,9 +208,6 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
         modelBuilder.Entity<ProjectRow>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasMaxLength(256);
-            entity.Property(e => e.Name).HasMaxLength(ProjectName.MaxLength).IsRequired();
-            entity.Property(e => e.RepositoriesJson).IsRequired();
             entity.HasIndex(e => e.Name).IsUnique();
         });
 
@@ -1356,6 +1353,7 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
         });
 
         ConfigureProjectWorkflowProfile(modelBuilder);
+        ConfigureProjectVerificationCommand(modelBuilder);
         ConfigureDispatching(modelBuilder);
 
         modelBuilder.Entity<ProjectWorkflowTemplateRow>(entity =>

@@ -13,6 +13,20 @@ namespace Mohist.Server.UnitTests.Workflow.Querier;
 public class WorkflowTemplateSelectionSpecs : WorkflowDefinitionResolverTestFactory
 {
     [Fact]
+    public async Task LoadTemplate_ExistingRunWithoutSnapshot_RejectsLiveProfileResolution()
+    {
+        const string runId = "wr_no_snapshot";
+        await SeedRunOnlyAsync("proj-no-snapshot", 1, runId);
+
+        var ex = await Assert.ThrowsAsync<WorkflowDefinitionResolutionException>(
+            () => DefinitionResolver.LoadTemplateAsync(runId));
+
+        Assert.Equal(
+            WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
+            ex.Reason);
+    }
+
+    [Fact]
     public async Task LoadTemplate_FallsBackToSystemDefault_WhenRunContextMissing()
     {
         var result = await DefinitionResolver.LoadTemplateAsync("unknown-run-id");

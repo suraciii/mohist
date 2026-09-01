@@ -130,7 +130,7 @@ public class IssueFeedbackApiSpecs
     {
         var id = $"proj_{Guid.NewGuid():N}";
         var projectGrain = _grains.GetGrain<IProjectGrain>(id);
-        return await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true });
+        return await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", new Mohist.Server.Project.Domain.RepositoryInfo { Name = "placeholder", GitUrl = "git@example.com:placeholder.git", BaseBranch = "main", IsDefault = true }, "git diff --check");
     }
 
     private async Task<(string IssueKey, int Number)> CreateIssueAsync(string projectId, string title)

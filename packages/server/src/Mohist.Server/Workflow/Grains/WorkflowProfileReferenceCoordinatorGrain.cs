@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Project.Domain;
 using Mohist.Server.Workflow.Grains.Coordinator;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
@@ -142,8 +144,21 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
             _ = await ReplayPendingAsync(existingFence);
         }
 
+        // Resolve the current startup facts before checking replay state. A
+        // normal bind request must compare its current Project command and
+        // definition snapshot against an existing binding; an unbound replay
+        // request cannot skip that conflict check.
+        var bound = await ResolveWorkflowStartAsync(payload);
+        if (bound is null)
+            return new WorkflowProfileReferenceResult(
+                WorkflowProfileReferenceResultCode.ProfileUnknown,
+                payload.ExplicitProfileId ?? string.Empty,
+                expectedRevision ?? 0L,
+                "No enabled Workflow Profile is available for this Project");
+
+        var boundPayload = payload with { Bound = bound };
         var participant = _grains.GetGrain<IWorkflowRunBindingParticipant>(payload.WorkflowRunId);
-        var receipt = await participant.GetBindingAsync(payload);
+        var receipt = await participant.GetBindingAsync(boundPayload);
         if (receipt.Outcome == WorkflowRunBindingOutcome.Conflict)
             return new WorkflowProfileReferenceResult(
                 WorkflowProfileReferenceResultCode.ConflictingRequest,
@@ -158,15 +173,7 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
                 expectedRevision ?? 0L,
                 Binding: receipt.Binding);
 
-        var bound = await ResolveWorkflowStartAsync(payload);
-        if (bound is null)
-            return new WorkflowProfileReferenceResult(
-                WorkflowProfileReferenceResultCode.ProfileUnknown,
-                payload.ExplicitProfileId ?? string.Empty,
-                expectedRevision ?? 0L,
-                "No enabled Workflow Profile is available for this Project");
 
-        var boundPayload = payload with { Bound = bound };
         var pending = await AcquireFenceAsync(
             WorkflowProfileCommandPayloadKinds.BindWorkflowRun,
             bound.ProfileId,
@@ -482,6 +489,7 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
     private async Task<BoundWorkflowStart?> ResolveWorkflowStartAsync(
         WorkflowProfileCommandPayload.BindWorkflowRun request)
     {
+        var verificationCommand = request.VerificationCommand;
         var disabled = await _provider.GetDisabledProfileIdsAsync(request.ProjectId);
         var projectDefault = await _provider.GetDefaultProfileIdAsync(request.ProjectId);
         var selected = await ResolveEffectiveProfileIdAsync(
@@ -491,6 +499,21 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
             disabled);
         if (selected is null)
             return null;
+
+        if (WorkflowProfileCatalog.IsSystemProfile(selected))
+        {
+            var verificationError = ProjectVerificationCommand.Validate(verificationCommand);
+            if (verificationError is not null)
+            {
+                if (string.IsNullOrWhiteSpace(verificationCommand))
+                    throw new ProjectVerificationConfigurationMissingException(request.ProjectId);
+                throw new ArgumentException(verificationError, nameof(request.VerificationCommand));
+            }
+        }
+        else if (verificationCommand is not null)
+        {
+            ProjectVerificationCommand.Require(verificationCommand);
+        }
 
         var entry = await _provider.GetAsync(request.ProjectId, selected);
         if (entry is null) return null;
@@ -513,7 +536,8 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
             definition.Stages.Select(stage => new BoundStageStructure(stage.Stage, stage.RequiresApproval)).ToList(),
             metadata,
             request.Workspace,
-            DefinitionJson: WorkflowYamlSerializer.ToJson(definition));
+            DefinitionJson: WorkflowYamlSerializer.ToJson(definition),
+            VerificationCommand: verificationCommand);
     }
 
     private async Task<string?> ResolveEffectiveProfileIdAsync(
@@ -573,6 +597,7 @@ public sealed class WorkflowProfileReferenceCoordinatorGrain : Grain, IWorkflowP
         && left.IssueNumber == right.IssueNumber
         && left.EpicNumber == right.EpicNumber
         && string.Equals(left.ExplicitProfileId, right.ExplicitProfileId, StringComparison.Ordinal)
+        && string.Equals(left.VerificationCommand, right.VerificationCommand, StringComparison.Ordinal)
         && SameMetadataIdentity(left.Metadata, right.Metadata)
         && Equals(left.Workspace, right.Workspace);
 

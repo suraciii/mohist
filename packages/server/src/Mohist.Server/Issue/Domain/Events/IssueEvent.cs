@@ -93,7 +93,8 @@ public sealed record IssueWorkStartedContext(
     string ProjectId,
     int IssueNumber,
     string? Title,
-    string? Priority);
+    string? Priority,
+    string? VerificationCommand = null);
 
 public sealed record IssueCompleted(
     string? WorkflowRunId,

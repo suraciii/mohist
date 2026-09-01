@@ -8,6 +8,7 @@ internal static class ProjectWorkflowCommands
     {
         var workflow = new Command("workflow", "Project Workflow references and Prompts");
         workflow.Subcommands.Add(BuildSetDefault(api));
+        workflow.Subcommands.Add(BuildVerification(api));
         workflow.Subcommands.Add(BuildPrompt(api));
         return workflow;
     }
@@ -28,6 +29,64 @@ internal static class ProjectWorkflowCommands
             return await api.PrintPutWithOutputAsync($"/api/projects/{MohistCliCommands.Escape(resolved)}/workflow-profile/default", new { profileId = ctx.GetValue(profile) }, mode, nameof(MohistCliApi.TableShape.ProjectWorkflowProfile));
         });
         return cmd;
+    }
+
+    private static Command BuildVerification(MohistCliApi api)
+    {
+        var verification = new Command("verification", "Manage the Project verification command");
+        var set = new Command("set", "Replace the Project verification command");
+        var body = new Option<string?>("--command") { Description = "Verification shell command (mutually exclusive with --command-file)" };
+        var bodyFile = new Option<string?>("--command-file") { Description = "Read the verification command from a UTF-8 file path, or - for stdin" };
+        var project = MohistCliCommands.ProjectRefOption();
+        var output = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.Project)));
+        set.Options.Add(body); set.Options.Add(bodyFile); set.Options.Add(project); set.Options.Add(output);
+        set.SetAction(async ctx =>
+        {
+            var resolvedBody = await BodyInputResolver.ResolveAsync(
+                ctx.GetValue(body),
+                ctx.GetValue(bodyFile),
+                new BodyInputResolver.SourceFlags("--command", "--command-file", "verification command"),
+                api.FileSystem,
+                api.StandardInput,
+                TextWriter.Null);
+            if (resolvedBody is BodyInputResolver.Result.Failure failure)
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, failure.Message);
+            var (resolved, resolveExit) = await api.ResolveProject(ctx.GetValue(project));
+            if (resolveExit != 0) return resolveExit;
+            var (mode, modeExit) = api.ResolveOutputMode(ctx.GetValue(output));
+            if (modeExit != 0) return modeExit;
+            var command = ((BodyInputResolver.Result.Success)resolvedBody).Body;
+            return await api.PrintPutWithOutputAsync(
+                $"/api/projects/{MohistCliCommands.Escape(resolved)}/verification-command",
+                new { command },
+                mode,
+                nameof(MohistCliApi.TableShape.Project));
+        });
+        verification.Subcommands.Add(set);
+        verification.Subcommands.Add(BuildVerificationView(api));
+        return verification;
+    }
+
+    private static Command BuildVerificationView(MohistCliApi api)
+    {
+        var view = new Command("view", "View the Project verification command");
+        var project = MohistCliCommands.ProjectRefOption();
+        var output = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.Project)));
+        view.Options.Add(project);
+        view.Options.Add(output);
+        view.SetAction(async ctx =>
+        {
+            var (resolved, resolveExit) = await api.ResolveProject(ctx.GetValue(project));
+            if (resolveExit != 0) return resolveExit;
+            var (mode, modeExit) = api.ResolveOutputMode(ctx.GetValue(output));
+            return modeExit != 0
+                ? modeExit
+                : await api.PrintWithOutputAsync(
+                    $"/api/projects/{MohistCliCommands.Escape(resolved)}",
+                    mode,
+                    nameof(MohistCliApi.TableShape.Project));
+        });
+        return view;
     }
 
     private static Command BuildPrompt(MohistCliApi api)
