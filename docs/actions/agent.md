@@ -1,11 +1,11 @@
 # `mohist/agent` Action
 
 `mohist/agent` launches a predefined Mohist Agent from the Project for one
-Workflow task. It enters the canonical AgentJob launch boundary: the task
+Workflow task. The task enters the canonical AgentJob launch boundary and
 creates a real AgentJob and AgentSession. AgentJob owns execution, retry,
 recovery, and result. AgentSession owns conversation continuity. Neither owns
 Workflow or Approval Point state. A missing, archived, or not-ready Agent fails
-launch explicitly. It supports tasks only, not Workflow checks.
+launch explicitly. This Action supports tasks only, not Workflow checks.
 
 This is the only Agent task binding in a Workflow Profile. Runtime Actions such
 as `mohist/opencode` and `mohist/pi` are internal Agent-to-Runner contracts
@@ -29,13 +29,13 @@ relationship between Agent, AgentJob, and AgentSession.
     prompt: ${{ prompts.review }}
 ```
 
-The Agent selected by `name` provides identity instructions, execution backend
-(OpenCode or Pi), model, optional Reasoning Effort, true model variant, and
-Skills. `prompt` is the input for this task. Use this Action when the same role
-must be reused by multiple tasks or Profiles, or when routing rules and `@`
-mentions must use the same Agent identity. Runtime-specific Actions
-(`mohist/opencode`, `mohist/pi`) are no longer selectable from a Profile; the
-Agent definition owns the backend choice.
+The Agent selected by `name` provides identity instructions, execution
+backend (OpenCode or Pi), model, optional Reasoning Effort, true model variant,
+and Skills. `prompt` is the input for this task. Use this Action when multiple
+Tasks or Profiles reuse the same role, or when routing rules and `@` mentions
+must use the same Agent identity. Runtime-specific Actions (`mohist/opencode`,
+`mohist/pi`) are no longer selectable from a Profile. The Agent definition
+owns the backend choice.
 
 ## Action Inputs
 

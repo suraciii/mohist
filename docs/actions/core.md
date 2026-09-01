@@ -1,9 +1,9 @@
 # Core Actions
 
 Core Actions are deterministic local primitives. They run processes, scripts,
-and file checks directly on the Runner without an execution backend or a
-model, so a Workflow can express setup and verification steps whose outputs
-and error codes recovery rules match exactly.
+and file checks directly on the Runner. They do not use an execution backend or
+model. Workflows use their declared outputs and error codes for setup and
+verification recovery.
 
 ## `core/process`
 
@@ -63,9 +63,9 @@ Business error codes:
 - `script-failed`: the script exited with a nonzero status.
 
 A script-failure diagnostic includes the shell exit code and bounded tails of
-nonempty standard output and standard error. Recovery therefore receives an
-actionable failure reason even when a tool writes warnings to standard error
-and the actual failure to standard output.
+nonempty standard output and standard error. Recovery receives an actionable
+failure reason even when a tool writes warnings to standard error and the actual
+failure to standard output.
 
 ## `core/artifact-exists`
 

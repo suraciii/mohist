@@ -1,15 +1,15 @@
 # GitHub PR Actions
 
-GitHub PR Action repositories, branches, and Pull Request identities are
-determined by explicit `with` inputs. An Action does not read implicit fallback
-values from Variables and always uses the workspace supplied by the host.
+GitHub PR Action repositories, branches, and Pull Request identities come from
+explicit `with` inputs. An Action does not read implicit fallback values from
+Variables. It always uses the workspace supplied by the host.
 
 In these examples, `${{ repository.gitUrl }}`,
 `${{ repository.baseBranch }}`, and `${{ workspace.branch }}` come from the
 repository and workspace for the current run. `${{ vars.github.pr.number }}`
 is a Run Variable populated from the `prNumber` output of an earlier
-`mohist/create-github-pr` Action. See
-[Workflow Definition Reference](../workflow-definition.md#template-expressions)
+`mohist/create-github-pr` Action.
+See [Workflow Definition Reference](../workflow-definition.md#template-expressions)
 for the complete expression and Variable rules.
 
 ## `mohist/create-github-pr`
@@ -111,15 +111,16 @@ Business error codes:
 
 Enables auto-merge on the specified GitHub Pull Request, then waits until
 GitHub performs the merge. GitHub arbitrates merge timing and merge-time
-prerequisites, so the Workflow has no merge-moment races to recover from. The
-Action is idempotent when auto-merge is already enabled: it proceeds directly
-to the wait. Pair it with `mohist/github-pr-status` using `expect: merged` as
-post-hoc verification.
+prerequisites. The Workflow has no merge-moment races to recover from.
+The Action is idempotent when auto-merge is already enabled. It proceeds
+straight to the wait. Pair it with `mohist/github-pr-status` using
+`expect: merged` for post-hoc verification.
 
 Each attempt has one fixed 30-minute absolute deadline. CLI prechecks, Pull
-Request reads, squash-subject selection, registration, ambiguous-registration
-reconciliation, transient-read delays, and merge polling all consume the same
-remaining budget. The deadline never resets inside an attempt.
+Request reads, squash-subject selection, registration,
+ambiguous-registration reconciliation, transient-read delays, and merge
+polling all consume the same remaining budget. The deadline never resets
+inside an attempt.
 
 ```yaml
 - id: enable-auto-merge

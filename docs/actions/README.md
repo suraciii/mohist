@@ -75,18 +75,15 @@ markers.
 
 - [`mohist/task-list`](task-list.md#mohisttask-list)
 
-Pi is an independent peer backend, not an input extension of
-`mohist/opencode`.
-
 ### Model Selection
 
 A Workflow task that runs an Agent does not carry model options. The named
 Agent definition owns the backend (OpenCode or Pi), model, optional Reasoning
-Effort, and true model variant; the AgentJob fixes them at launch. The Workflow
-supplies only `name`, `prompt`, `session`, and `timeout` through `mohist/agent`.
+Effort, and true model variant. The AgentJob fixes these values at launch. The Workflow supplies
+only `name`, `prompt`, `session`, and `timeout` through `mohist/agent`.
 
-Project and Issue model selectors configure the Agent, not the Workflow: the
-available catalogs come from the runtime the Agent selects, and a configured
+Project and Issue model selectors configure the Agent, not the Workflow. The
+available catalogs come from the runtime selected by the Agent. A configured
 model that is no longer discovered stays visible until it is changed or
 cleared. Mohist never substitutes a model from another backend.
 

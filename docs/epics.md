@@ -1,8 +1,19 @@
 # Planning with Epics
 
-An Epic organizes separate Issues around one product goal and continuously
-feeds ready work into the production line. It defines which Issues belong to
-the goal and which Issue can enter a Workflow next.
+An Epic organizes Issues around one product goal and feeds ready work into the
+production line. It records the goal and current membership; each Issue keeps
+its own Workflow and state.
+
+## Product Commitments
+
+- An Epic uses its Project-scoped number as its permanent identity.
+- A new Epic is `idle` and does not advance work until a user starts it.
+- A running Epic starts one ready linked Issue at a time.
+- Pause stops future advancement without interrupting the current Issue.
+- Epic progress and the next candidate derive from current Issue membership and state.
+- A child Issue cannot belong to an Epic. A parent Issue can be an Epic member.
+- A cancelled Issue satisfies Epic completion but does not count as delivered.
+- Repeating a lifecycle operation in its target state is safe and has no side effects.
 
 ## When to Use an Epic
 
@@ -10,14 +21,11 @@ Use an Epic when:
 
 - A product goal needs at least three Issues, such as a complete authentication
   system.
-- You want to plan a roadmap and identify the goals for a future period.
-- You need progress for the complete goal instead of only individual Issues.
+- You need a roadmap view or progress for the complete goal.
 - Ready Issues under one goal should advance automatically in sequence.
 
-Do not use an Epic for:
-
-- A small, independent change.
-- A goal that is not understood yet. Keep those ideas in the backlog first.
+Do not use an Epic for a small independent change or a goal that is not
+understood yet. Keep an unclear idea in the backlog first.
 
 ## Create an Epic
 
@@ -39,14 +47,13 @@ On the Epics page in the top navigation, select **New Epic**.
 
 ### Epic Properties
 
-An Epic has a short title and a long description that holds the Goal,
-Background, Non-goals, and member Issues. Its priority runs from `p0` through
-`p4`. Its status is `idle`, `running`, `paused`, `done`, or `closed`,
-controlled by the lifecycle.
+An Epic has a short title, a long description, a priority from `p0` through
+`p4`, and Project-scoped membership. The description can contain Goal,
+Background, Non-goals, and scope.
 
 Both Epics and Issues use their Project-scoped number as their permanent
-identity. Commands, pages, and events use that same number. Users do not need
-to understand another ID system.
+identity. Commands, pages, and events use that number. Users do not need a
+second ID system.
 
 The following is an effective Epic description:
 
@@ -80,19 +87,18 @@ mo epic add <epic-number> <issue-number>
 mo epic remove <epic-number> <issue-number>
 ```
 
-Adding a link changes the Issue's current Epic to the selected Epic. If the
-Issue belonged to another Epic, this operation moves it directly. Removing the
-link has an effect only when the Issue currently belongs to the selected Epic.
-Repeating the same operation is safe.
+Adding a link changes the Issue's current Epic to the selected Epic. If it
+belonged to another Epic, the operation moves it directly. Removing a link has
+an effect only when the Issue currently belongs to the selected Epic. Repeating
+either operation is safe.
 
 ### Web UI
 
 On the Issue details page, select **Edit** and choose an Epic. You can also add
 or remove an Issue in the Linked Issues section of the Epic details page.
 
-An Issue must not belong to more than one Epic at a time. This membership is part of
-the Issue. The Epic derives its members, progress, and next candidate from the
-current membership of its Issues.
+An Issue belongs to at most one Epic. The Issue owns this membership. The Epic
+derives its members, progress, and next candidate from current Issue state.
 
 A `closed` Epic rejects new links and must be reopened first. Linking an open
 Issue to a `done` Epic changes the Epic to `running`. Linking a terminal Issue
@@ -102,10 +108,10 @@ does not wake the Epic.
 
 ### Web UI
 
-- The **Epics list page** groups all Epics by status and shows the current
-  status and next candidate for each Epic.
-- The **Epic details page** shows the Epic, linked Issues, delivered and total
-  progress, current status, and next action.
+- The **Epics list page** groups Epics by status and shows current status and
+  next candidate.
+- The **Epic details page** shows linked Issues, delivered and total progress,
+  current status, and next action.
 
 ### CLI
 
@@ -117,45 +123,65 @@ mo epic list --project <project>
 mo epic view <epic-number> --project <project>
 ```
 
-The details view in the Web UI or `mo epic view` shows how many Issues are
-delivered, total, blocked, and in progress. It also identifies the next Issue,
-explains why no Issue is advancing, and reports whether the Epic can be marked
-Done.
+The details view shows delivered, total, blocked, and in-progress Issue counts.
+It identifies the next Issue, explains why no Issue is advancing, and reports
+whether the Epic can be marked Done.
 
 ## Epic Lifecycle
 
-An Epic has five lifecycle states. User operations and automatic advancement
-both drive this state.
+An Epic has five lifecycle states: `idle`, `running`, `paused`, `done`, and
+`closed`.
 
-A new Epic is `idle`: created, but not advancing automatically. Start from
-`idle` enters `running`, where the Epic advances linked Issues automatically.
-Pause from `running` enters `paused`: future advancement is paused, but the
-current in-progress Issue continues. The Epic is `done` when it is currently
-complete, with no open linked Issues: mark it Done while it is not `paused` or
-`closed` and all linked Issues are terminal, or let automatic progress
-recalculation find the same condition. Close from `idle`, `running`, or
-`paused` enters `closed`: the Epic is closed and will not continue.
+```text diagram
+         +---+
+         | * |
+         +-+-+
+           |
+           v
+       +------+
+       | idle +<------++
+       +--+---+       ||
+          |           ||
+          v           ||
+     +---------+      ||
+     | running +<-----++++
+     +----+----+      ||||
+     +----+------+    ||||
+     v           v    ||||
++--------+   +------+ ||||
+| paused +---| done +<+++|
++----+---+   +------+ || |
+     +-+              || |
+       v              || |
+  +--------+          || |
+  | closed +<---------++-+
+  +--------+
+```
 
-- A new Epic starts in `idle` and does not advance automatically. You must
-  explicitly Start it to enter `running`.
-- `done` and `closed` are completion states. Reopen explicitly restores either
-  state to `idle`. In addition, linking a new open Issue to a `done` Epic
-  automatically restores it to `running`. A `closed` Epic does not accept new
-  links.
+A new Epic is `idle`. Start changes it to `running` and tries to start the
+first startable linked Issue. Pause changes `running` to `paused`; future
+advancement stops, but the current in-progress Issue continues. Resume changes
+`paused` to `running` and evaluates readiness again.
+
+The Epic is `done` when it is not `paused` or `closed` and all linked Issues are
+terminal. A user can mark it Done, or automatic progress recalculation can find
+the same condition. Close from `idle`, `running`, or `paused` changes the Epic
+to `closed` and stops future work. Reopen changes `done` or `closed` to `idle`.
+Linking a new open Issue to a `done` Epic changes it to `running`; a `closed`
+Epic accepts no new links.
 
 ### Start, Pause, and Resume
 
 Start (`mo epic start <number>`, or **Start Epic** in the Web UI) changes
 `idle` to `running` and tries to start the first startable linked Issue. Pause
 (`mo epic pause <number>`, or **Pause**) changes `running` to `paused` and
-stops future advancement without interrupting the current in-progress Issue.
-Resume (`mo epic resume <number>`, or **Resume**) changes `paused` to
-`running`, evaluates readiness again, and advances.
+stops future advancement without interrupting the current Issue. Resume
+(`mo epic resume <number>`, or **Resume**) changes `paused` to `running`,
+evaluates readiness again, and advances.
 
 Repeating an operation when the Epic is already in its target state is safe and
-has no side effects. For example, Start succeeds for an Epic that is already
-`running`. Mohist rejects an operation from any other incompatible state and
-reports the current state.
+has no side effects. Mohist rejects an operation from another incompatible
+state and reports the current state.
 
 ```bash
 # Start: idle -> running, then try to start the first linked Issue.
@@ -171,30 +197,28 @@ mo epic resume 12
 ### Automatic Advancement and Running-but-Idle
 
 When the current in-progress linked Issue reaches `done` or `cancelled`, a
-`running` Epic automatically advances to the next startable Issue. An Epic in
-`idle` or `paused` does not advance automatically.
+`running` Epic starts the next startable Issue. An Epic in `idle` or `paused`
+does not advance automatically.
 
-This behavior does not start all Issues at once. The Epic sends one ready Issue
-at a time to its Workflow so that the owner does not have to advance each one
-manually.
+The Epic starts one ready Issue at a time. This differs from a Composite Issue,
+which advances its children in parallel. The normal concurrency limit still
+applies.
 
-A `running` Epic with open linked Issues but no next startable Issue is in the
-observable **running-but-idle** condition. Its state remains `running`; this is
-not a sixth state. The Epic details in the Web UI or `mo epic view` explain why
-nothing is advancing. For example, an in-progress Issue might still be running,
-or the next Issue might be blocked or have an unmet prerequisite.
+A `running` Epic with open linked Issues but no startable next Issue remains in
+the observable **running-but-idle** condition. This is not a sixth state. The
+Epic details explain why nothing is advancing, such as an in-progress Issue,
+a blocked Issue, or an unmet prerequisite.
 
 When there are no linked Issues, the details identify an empty Epic. When all
 linked Issues are terminal, the details indicate that the Epic can be marked
-Done, and the system can change it to `done` automatically.
+Done and automatic recalculation may change it to `done`.
 
-#### Conditions That Prevent Advancement
+Advancement does not occur when:
 
 - The Epic is not `running`.
 - The Epic has no linked Issues.
 - All linked Issues are terminal.
-- The next Issue is not startable because it is blocked or has an unmet
-  prerequisite.
+- The next Issue is blocked or has an unmet prerequisite.
 
 ### Mark Done, Close, and Reopen
 
@@ -211,13 +235,8 @@ mo epic reopen <epic-number>
 
 The Epic details page provides **Mark Done**, **Close Epic**, and **Reopen**.
 
-In addition to manual Mark Done, the system changes an eligible Epic that is
-not `paused` or `closed` to `done` when recalculation finds that all linked
-Issues are terminal. The observed completion does not require another user
-operation.
-
-Delivered progress counts only Issues in `done`. A `cancelled` Issue is terminal
-and satisfies the completion condition, but it does not count as delivered.
+Delivered progress counts only Issues in `done`. A `cancelled` Issue is
+terminal and satisfies completion, but it does not count as delivered.
 
 ## Recommended Workflow
 
@@ -230,41 +249,38 @@ and satisfies the completion condition, but it does not count as delivered.
 
 ## Relationship to Workflows
 
-An Epic affects when linked Issues advance. It does not change the execution
+An Epic controls when linked Issues advance. It does not change the execution
 rules of an individual Issue's Workflow.
 
-Each linked Issue still uses its own Workflow, such as the default
-`mohist/local` or a per-Issue selection. The Epic decides when to send the next
-Issue to a Workflow. It does not define the Steps inside that Workflow.
+Each linked Issue uses its own Workflow, such as `mohist/local` or a per-Issue
+selection. The Epic sends the next Issue to that Workflow but does not define
+its stages or tasks.
 
 ## Relationship to Child Issues
 
-Epics and composite Issues are independent organization axes. See
-[Composite Issues and Child Issues](composite-issues.md). An Epic organizes multiple
-deliverables under a product goal. A composite Issue divides the internal work
-for one deliverable. The boundary rules are:
+Epics and Composite Issues are independent organization axes. An Epic organizes
+multiple deliverables under a product goal. A Composite Issue divides the work
+for one requirement.
 
 - A child Issue must not link to an Epic. Epic advancement never operates on a
   child Issue.
 - A parent Issue is a normal Epic member. When selected, the Epic starts the
   parent, which advances its children. When the parent reaches Done, it counts
-  toward Epic progress. The Epic does not inspect the composite structure, and
-  these rules do not otherwise change Epic behavior.
+  toward Epic progress.
+- The Epic does not inspect the Composite Issue structure.
+
+## Boundary
+
+Epics are not nested. They have no dependency graph, roadmap timeline view, or
+single command that starts every backlog Issue as a batch. Use Issue
+prerequisites and the normal one-at-a-time advancement for ordering.
 
 ## Implementation Gaps
 
-Epic commands use the Project-scoped Epic number, including `reopen`. Each
-Issue owns its current Epic membership, while Epic reads derive progress and
-the next startable Issue from current Issue state. This keeps membership under
-one authority and avoids a second list that can drift.
-
-## Current Limitations
-
-- There is no roadmap timeline view, only a list.
-- Epics cannot be nested.
-- There is no dependency graph between Epics.
-- Mohist cannot start every backlog Issue in an Epic as one batch.
+The Web UI provides a list rather than a roadmap timeline. Mohist cannot start
+every backlog Issue in an Epic as one batch.
 
 ---
 
-Implementation source: `packages/server/src/Mohist.Server/Epic/` and `Api/EpicRoutes.cs`.
+Implementation source: `packages/server/src/Mohist.Server/Epic/` and
+`Api/EpicRoutes.cs`.
