@@ -19,6 +19,7 @@ changing a document in `design/`.
 - [conventions.md](conventions.md) — Naming, layering, variable conventions, certainty vocabulary (facts, claims, settlement).
 - [cli.md](cli.md) — Command language for humans and agents: domain ownership, progressive help / Skill context, field-selection output, error and reliability contract.
 - [observability.md](observability.md) — Observability signal split, resource budget, degradation rules, high-frequency path cost constraints.
+- [diagnostics.md](diagnostics.md) — Run failure diagnosis and deployment doctor: server-assembled read models, dispatch snapshot retention, logical path display contract.
 - [eventbus.md](eventbus.md) — Event bus: CloudEvent subscription contract + single dispatcher reliable at-least-once notification.
 - [event-protocol.md](event-protocol.md) — Event protocol: three-axis envelope model, business lineage stamping matrix, match expressions (CEL subset), conformance.
 

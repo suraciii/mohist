@@ -35,7 +35,10 @@ from presentation.
 
 - `docs/cli-reference.md` owns target product semantics and user-facing command
   behavior.
-- The C# command tree is the executable syntax authority after implementation.
+- The command tree is the executable syntax authority after implementation.
+  Its implementation language migrates from C# to Go under
+  [`decisions/cli-go.md`](decisions/cli-go.md); the reference contract is
+  preserved across the migration.
 - The Server read model is the field authority. `ResourceOutputCatalog` is only
   its CLI projection.
 - Help is local and side-effect free. Remote operations begin only after local
