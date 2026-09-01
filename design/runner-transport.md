@@ -1,37 +1,29 @@
 # Runner Control Transport
 
-Mohist uses HTTP for Runner registration, work dispatch, result reporting, and
-volatile evidence delivery. The native WebSocket carries Server-to-Runner
-control. This document describes the current contract; the migration notes
-below are historical context only. It does not redesign work dispatch,
-Workspace identity, or the domain event bus.
+Mohist uses HTTP for Runner registration, heartbeat, work dispatch, result
+reporting, volatile evidence delivery, and reconciliation reads. The native
+WebSocket carries Server-to-Runner control. This document defines the transport
+boundary and wire contract. It does not redesign work dispatch, Workspace
+identity, or the domain event bus.
 
-## Migration Scope
+## System Boundary
 
-The current boundary has two channels:
-
-- HTTP handles Runner registration, heartbeat, work poll, work result report,
-  Runtime event delivery, and reconciliation reads.
-- SignalR handles five Workspace reads, four local mutations, and one
-  loss-tolerant Workflow status notification.
-
-The migration keeps the HTTP channel and every business owner unchanged. It
-replaces SignalR with one authenticated, outbound WebSocket connection:
-
-```mermaid
-flowchart LR
-    subgraph Before
-        R1["Runner"] -->|"HTTP poll/report"| S1["Server"]
-        R1 -->|"SignalR client results"| S1
-    end
-    subgraph After
-        R2["Runner"] -->|"HTTP poll/report"| S2["Server"]
-        R2 -->|"native WebSocket control"| S2
-    end
+```text diagram
++--------+ HTTP               +--------+
+| Runner +------------------->| Server |
++--------+                    +----+---+
+     ^              status notice  |
+     +-----------------------------+
 ```
 
-The target removes the SignalR Hub, SignalR Runner client, and SignalR-specific
-dispatch code. It does not keep SignalR as a fallback after cutover.
+- HTTP carries registration, heartbeat, work poll, work reports, Runtime event
+  delivery, task-log delivery, and reconciliation reads.
+- WebSocket carries Workspace reads, Session commands, and the loss-tolerant
+  Workflow status notification.
+- WorkflowRun and AgentJob remain the work owners. The WebSocket does not carry
+  work, replace HTTP poll/report, or become a second event bus.
+- The control connection is authenticated, outbound from Runner, and singular
+  per Runner. Mixed old and new control clients are unsupported.
 
 ## Preserved Boundaries
 
@@ -45,8 +37,8 @@ dispatch code. It does not keep SignalR as a fallback after cutover.
   controls. Server-owned operation admission and settlement decide whether a
   retry may apply an effect; Runner does not retain operation effect memory
   across restart.
-- Workspace queries keep their current domain inputs and results. Named
-  Workspace and Repository cleanup is a separate design change.
+- Workspace queries keep their domain inputs and results. This transport does
+  not change Workspace or Repository cleanup.
 - Workflow terminal status remains a best-effort notification. Runner's HTTP
   status reconciliation remains the correctness backstop.
 - Runtime events, logs, progress, readiness, and snapshots remain on their
@@ -96,12 +88,11 @@ Runner reconnects with bounded backoff and jitter. WebSocket Ping and Pong
 detect a dead connection. They do not replace HTTP presence, heartbeat, or
 Runtime readiness.
 
-Runner uses `ws` 8.18.x rather than Node's global WHATWG `WebSocket`. The
-control connection requires a Bearer header, the custom
-`X-Runner-Connection-Id` upgrade header, and client Ping frames; the WHATWG
-surface does not provide those capabilities. Each attempt uses a fresh
-canonical lowercase UUID. The production socket disables compression, limits
-received messages to 4 MiB, and gives the HTTP upgrade 15 seconds.
+The Runner WebSocket client must support a Bearer header, the custom
+`X-Runner-Connection-Id` upgrade header, and client Ping frames. Each attempt
+uses a fresh canonical lowercase UUID. The production socket disables
+compression, limits received messages to 4 MiB, and gives the HTTP upgrade 15
+seconds.
 
 Runner retries immediately, then after 2, 5, 10, and 30 seconds, repeating 30
 seconds thereafter. Every non-zero delay receives independent plus-or-minus
@@ -134,21 +125,14 @@ and closes it with `1013`. The `ws.send` callback is the response completion
 boundary. One output owner serializes data, Ping, and close so those operations
 cannot race.
 
-### Preserved Hub lifecycle
+### Connection lifecycle
 
-The WebSocket endpoint and connection registry replace transport code, but they
-must preserve the current non-transport behavior of `RunnerHub`:
-
-- attach the current physical connection through `RunnerConnectionTracker` and
-  retain the connection generation used by HTTP poll admission;
-- refresh the Runner's build and Runtime identity through the existing Runner
-  lifecycle path; and
-- on disconnect, unregister only the matching connection and notify every
-  tracked AgentSession that its Runner disconnected.
-
-A replacement connection supersedes the old tracker entry before it accepts
-requests. A late close from the old connection must not unregister the new one.
-This migration does not introduce a second connection or presence model.
+The endpoint and connection registry attach the current physical connection,
+refresh Runner build and Runtime identity, and notify tracked AgentSessions
+when the matching connection disconnects. A replacement supersedes the old
+connection before it accepts requests. A late close from the old connection
+must not unregister the replacement. This transport has one connection and one
+presence model.
 
 ## Wire Protocol
 
@@ -293,15 +277,8 @@ The nested wire values are:
   optional. Stop requires non-empty `sessionId`, `turnId`, and `operationId`.
 
 The JSON-RPC dispatcher rejects a mutating request missing these identities as
-Invalid Params before invoking its handler. Current Server dispatchers already
-supply them; the migration removes the Runner's legacy unjournaled fallback.
-
-Step 1 promotes anonymous SignalR payloads to these named DTOs and freezes exact
-JSON names, nullability, and enum spellings in shared fixtures. The carrier
-wrappers above are new; nested domain values and result semantics do not change.
-C# and TypeScript contract tests decode the same checked-in request, success, and error
-fixtures for every method. No schema generator or generic map-based handler is
-added.
+Invalid Params before invoking its handler. The transport has no fallback for
+missing operation identities.
 
 ## Delivery Semantics
 
@@ -312,9 +289,9 @@ applies a timeout. A disconnect or lost response returns unavailable. Server
 does not replay a read automatically; a caller may issue a new read.
 
 Read handlers retain their existing path, Git argument, and process timeout
-rules. The control connection applies one response-size limit and returns
-a JSON-RPC server error when a result exceeds it. This migration does not
-otherwise change what a Workspace read means.
+rules. The control connection applies one response-size limit and returns a
+JSON-RPC server error when a result exceeds it. The transport does not change
+what a Workspace read means.
 
 ### Mutating requests
 
@@ -355,8 +332,8 @@ Server adapters map transport failures at their existing domain boundaries:
 
 `workspace.remove` remains an idempotent, checkable local operation. Repeating
 the same Workspace removal may report already absent. It must still use the
-existing Runtime removal fence before deleting a directory. This migration does
-not add a Workspace removal aggregate or another Runner journal.
+existing Runtime removal fence before deleting a directory. The transport adds
+no Workspace removal aggregate or Runner journal.
 
 ### Notification
 
@@ -366,29 +343,9 @@ or duplicating the notification changes latency, not the cleanup decision.
 It never marks a Workspace eligible directly; final host wiring maps the
 notification callback to one status-convergence pass.
 
-## Implementation Order
-
-1. Introduce the named `params` DTOs and freeze shared JSON contract fixtures.
-2. Implement the Server WebSocket endpoint, connection registry, correlation,
-   timeout, bounded queues, connection-ID upgrade header, and preserved Hub
-   lifecycle hooks. Keep the endpoint dormant and heartbeat behavior unchanged.
-3. Implement the Runner WebSocket client and bind the typed methods to the
-   existing handlers. (Historical migration step.)
-4. In one release candidate, switch every Server control caller to the
-   WebSocket registry and delete `RunnerHub`, the Runner SignalR client,
-   recording SignalR test fakes, and unused SignalR package dependencies. In
-   the same change, replace heartbeat registration with current-lease matching.
-5. Cut over with a coordinated stop, deploy, and start of Server and Runner.
-   Start Server before Runner. Mixed old and new control clients are unsupported.
-
-Steps 1 through 3 do not change the production carrier. Each step must leave
-HTTP work poll and report behavior unchanged. Production moves directly from
-SignalR to WebSocket at steps 4 and 5 and never supports both protocols as a
-runtime compatibility mode.
-
 ## Non-Goals
 
-This migration does not add:
+This transport does not add:
 
 - a durable WebSocket event log, sequence, cursor, replay, or snapshot protocol;
 - a generic Runner command ledger or operation poll;
@@ -396,21 +353,16 @@ This migration does not add:
 - a custom RPC envelope or additional `Sec-WebSocket-Protocol` negotiation;
 - a second HTTP API for each WebSocket method;
 - Workspace `homeEpoch`, checkout registration, or a new removal state machine;
-- compatibility with old Runner control clients after cutover.
-
-These features solve problems outside the SignalR-to-WebSocket migration. Add
-one only when an independent product requirement needs it.
+- compatibility with old Runner control clients.
 
 ## Status
 
-The final cutover is active. Server control callers use the native WebSocket
-registry for all nine request methods and the Workflow status notification.
-RunnerHost opens the matching native client after HTTP registration and binds
-the transport-neutral handler catalog. Runner-specific SignalR endpoints,
-clients, handlers, test fakes, and dependencies are removed; `/hubs/events`
-has since been replaced by the project-scoped native event WebSocket. Existing HTTP registration,
-heartbeat, work poll and report, Runtime event and task-log queues, and
-Workflow status reconciliation remain unchanged. The current Runner keeps no
-operation journals; Server identity and admission state survive Runner
-restart, while Runner effect memory does not. Mixed old and new Runner control
-clients are unsupported.
+Native WebSocket control is active for all nine request methods and the
+Workflow status notification. Runner opens the client after HTTP registration
+and uses the transport-neutral handler catalog. SignalR control endpoints,
+clients, handlers, test fakes, and dependencies are removed. The project-scoped
+native event WebSocket replaces `/hubs/events`. HTTP registration, heartbeat,
+work poll and report, Runtime event and task-log queues, and Workflow status
+reconciliation remain unchanged. Runner keeps no operation journals; Server
+identity and admission state survive Runner restart, while Runner effect memory
+does not.
