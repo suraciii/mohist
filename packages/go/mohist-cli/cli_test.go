@@ -56,6 +56,41 @@ func TestRunSendsAuthenticatedRequestAndProjectsJSON(t *testing.T) {
 	if out.String() != `{"status":"Failed","workflowRunId":"wr-1"}`+"\n" { t.Fatalf("output=%q", out.String()) }
 }
 
+func TestRunWhyRendersLiveDiagnosisAndSeparatesStreams(t *testing.T) {
+	body := `{"success":true,"data":{"workflowRunId":"wr-live","status":"Running","failure":null,"tasks":[{"taskId":"build","attempt":1,"uses":"shell","workspace":{"path":"workspace/demo","binding":"named","branch":"main"},"recovery":{"remaining":2}}],"dispatch":{"status":"present"},"events":[{"id":7,"eventId":"evt-7","type":"TaskStarted","source":"server","time":"2026-09-02T00:00:00Z"}]}}`
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) { return response(200, body), nil }), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"run", "why", "wr-live"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	for _, expected := range []string{"run: wr-live", "status: Running", "tasks:", "build (attempt 1)", "workspace:", "dispatch:", "events:", "TaskStarted"} {
+		if !strings.Contains(out.String(), expected) {
+			t.Errorf("output missing %q: %s", expected, out.String())
+		}
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("unexpected stderr=%q", errOut.String())
+	}
+}
+
+func TestRunWhyRendersFailureChainWithoutProcessPaths(t *testing.T) {
+	body := `{"success":true,"data":{"workflowRunId":"wr-failed","status":"Failed","failure":{"reason":"TaskFailed","stage":"verify","taskId":"check","message":"command failed","error":{"code":"exit_code","message":"exit 1"}},"tasks":[{"taskId":"check","attempt":2,"uses":"verify","workspace":{"path":"/proc/41/fd/5","binding":"named","branch":"mohist/run-wr-failed"},"exitCode":1,"error":{"code":"exit_code","message":"exit 1"},"recovery":{"budget":3,"remaining":1,"handlers":[{"when":"TaskFailed","retrySelf":true,"taskIds":["check"]}]}}],"dispatch":{"status":"present","snapshot":{"command":"run verification","path":"/proc/41/fd/6"}},"events":[{"id":9,"eventId":"evt-9","type":"TaskFailed","source":"runner","time":"2026-09-02T00:00:00Z","data":{"path":"/proc/41/fd/7"}}]}}`
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) { return response(200, body), nil }), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"run", "why", "wr-failed"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	for _, expected := range []string{"failure:", "TaskFailed", "command failed", "error:", "recovery:", "remaining", "TaskFailed"} {
+		if !strings.Contains(out.String(), expected) {
+			t.Errorf("output missing %q: %s", expected, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "/proc/") || strings.Contains(out.String(), "/fd/") {
+		t.Fatalf("process path leaked: %s", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("unexpected stderr=%q", errOut.String())
+	}
+}
+
 func TestRunMapsTransportAndCancellation(t *testing.T) {
 	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("network secret") }), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
 	if code := Run(context.Background(), []string{"doctor"}, deps); code != ExitOperation || strings.Contains(errOut.String(), "network secret") { t.Fatalf("transport code=%d stderr=%q", code, errOut.String()) }
@@ -72,5 +107,42 @@ func TestClientRejectsMalformedAndFailedResponses(t *testing.T) {
 	for _, body := range []string{"not-json", `{"success":false,"error":"nope","code":"forbidden"}`} {
 		deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) { return response(500, body), nil }), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
 		if code := Run(context.Background(), []string{"doctor"}, deps); code != ExitOperation || errOut.Len() == 0 { t.Fatalf("body=%q code=%d stderr=%q", body, code, errOut.String()) }
+	}
+}
+
+func TestRunWhyRejectsUnknownFieldBeforeHTTP(t *testing.T) {
+	calls := 0
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) { calls++; return nil, errors.New("must not call") }), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"run", "why", "wr-1", "--json", "unknown"}, deps); code != ExitUsage {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if calls != 0 || out.Len() != 0 || !strings.Contains(errOut.String(), "run why <run-ref> --json") {
+		t.Fatalf("calls=%d stdout=%q stderr=%q", calls, out.String(), errOut.String())
+	}
+}
+
+func TestRunWhyMapsNotFoundAndMalformedPayloads(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+		code int
+		want string
+	}{
+		{name: "not found", body: `{"success":false,"error":"Workflow run 'missing' not found","code":"not_found"}`, code: ExitOperation, want: "not_found"},
+		{name: "malformed diagnosis", body: `{"success":true,"data":[]}`, code: ExitOperation, want: "invalid_response"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			status := 404
+			if test.name == "malformed diagnosis" {
+				status = 200
+			}
+			deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) { return response(status, test.body), nil }), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+			if code := Run(context.Background(), []string{"run", "why", "wr-1"}, deps); code != test.code {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+			if out.Len() != 0 || !strings.Contains(errOut.String(), test.want) {
+				t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
+			}
+		})
 	}
 }
