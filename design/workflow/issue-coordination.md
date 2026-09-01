@@ -1,175 +1,173 @@
 # Aggregate Coordination
 
-Participants are `Issue` and `Epic` from the Issue context, `WorkflowRun` from the Workflow
-context, and `AgentJob`, `Runner` and `Session`.
+Issue and Epic belong to the Issue context. WorkflowRun belongs to the Workflow context. AgentJob, Runner, and
+Session belong to Agent execution. This document defines their cross-context coordination without creating a
+second owner for any business fact.
 
-In the diagrams, `->` denotes a synchronous command and `[Event]` denotes an asynchronous reaction
-triggered by a durable handler after commit. Each solid command enters exactly one target aggregate
-transaction; it does not mean that caller and target share a transaction.
+In the diagrams, `->` is a synchronous command and `[Event]` is an asynchronous reaction started by a
+durable handler after commit. Each solid command enters exactly one target aggregate transaction. A command
+caller and target do not share a transaction.
+
+## System Boundary
+
+Cross-aggregate workflows use a synchronous command to commit one fact and a durable event to close the
+business loop. A query may be stale, but the target aggregate revalidates its current state before committing.
+A synchronous call stack must never cycle back into an aggregate that is already calling.
 
 ## Write Authorities
 
 Each business fact has one sole write authority:
 
-- Which Epic currently contains an Issue: Issue.`EpicNumber?`. Epic queries Issue; WorkflowRun
-  stores minimal run context.
-- Epic lifecycle and advancement policy: Epic. Issue carries only `EpicNumber?` and does not copy
-  Epic state.
-- Issue lifecycle and current WorkflowRun: Issue. Epic queries it; WorkflowRun results return
-  through events.
-- Workflow execution state: WorkflowRun. Issue stores only the current `WorkflowRunId`.
-- Runner presence and capacity: Runner. Workflow scheduling consumes only its public facts.
-- Session lifecycle: Session. WorkflowRun and Agent store only associated identities.
+- Issue.`EpicNumber?` says which Epic contains an Issue. Epic queries Issue, and WorkflowRun stores only minimal
+  run context.
+- Epic owns its lifecycle and advancement policy. Issue stores only `EpicNumber?` and does not copy Epic state.
+- Issue owns its lifecycle and current WorkflowRun. Epic queries it, and WorkflowRun results return through
+  events.
+- WorkflowRun owns Workflow execution state. Issue stores only `WorkflowRunId`.
+- Runner owns presence and capacity. Workflow scheduling consumes only its public facts.
+- Session owns Session lifecycle. WorkflowRun and Agent store only associated identities.
 
-There is no independent membership aggregate, generic `OwnerRef`, or controller aggregate. Member
-lists, progress, and the next candidate Issue are queries over current Issue state, not a second set
-of facts that Epic can modify independently.
+There is no independent membership aggregate, generic `OwnerRef`, or controller aggregate. Member lists,
+progress, and the next candidate Issue are queries over current Issue state. Epic cannot modify those facts
+independently.
 
 ## Association and Migration
 
-```mermaid
-flowchart TD
-    U["User / API"] --> L["Epic.LinkIssue(issueNumber): reads current affiliation; verifies not closed for a new association"]
-    L --> A["Issue.AssignEpic(epicNumber)"]
-    A --> T["transaction: Issue state + IssueEpicChanged"]
-    E["IssueEpicChanged"] --> O["old Epic.Recompute"]
-    E --> N["new Epic.Recompute"]
-    E --> W["active WorkflowRun.UpdateIssueContext(current Issue context)"]
+```text diagram
+                                                    +-------+
+                                                +-->| Epics |
++------+    +------+    +-------+    +---------+|   +-------+
+| User +--->| Link +--->| Issue +--->| Changed ++
++------+    +------+    +-------+    +---------+|   +-----+
+                                                +-->| Run |
+                                                    +-----+
 ```
 
-`LinkIssue` first reads the Issue's current affiliation. If the Issue already belongs to this Epic,
-it returns success even if the Epic became `closed` after the original request committed. A retry
-cannot turn a successful result into failure. Only an unassociated Issue causes `LinkIssue` to
-check `closed` and send a write command.
+`LinkIssue` reads the Issue's current affiliation. If the Issue already belongs to this Epic, it returns success
+even when the Epic became `closed` after the original request committed. A retry cannot turn that success
+into failure. Only an unassociated Issue causes `LinkIssue` to check `closed` and send a write command.
 
-In one Issue transaction, `AssignEpic` changes `EpicNumber?` from the old value to the new one.
-Moving an Issue therefore needs no unlink-then-link sequence and has no intermediate state in which
-two Epics own it. Assigning the same number again is a no-op. Disassociation uses
-`Issue.RemoveEpic(expectedEpicNumber)`. If the Issue has already moved to another Epic, a late
-command from the old Epic cannot clear the new affiliation.
+`Issue.AssignEpic(epicNumber)` changes `EpicNumber?` from the old value to the new value in one Issue transaction. Moving an Issue
+needs no unlink-then-link sequence and creates no state where two Epics own it. Assigning the same number is a
+no-op. `Issue.RemoveEpic(expectedEpicNumber)` cannot clear a newer affiliation after a late command from the old Epic.
 
-Epic validation and the Issue affiliation commit are not one transaction. If the Issue commits but
-the call result is lost, retrying `LinkIssue` returns the same idempotent result. If the subsequent
-Epic state save fails, the durable `IssueEpicChanged` reaction still causes Epic to recompute. A
-`done` Epic reopens when an open Issue joins, and an old Epic updates progress when a member leaves;
-both converge through `Recompute`.
+Epic validation and the Issue affiliation commit are separate transactions. If the Issue commits but the
+response is lost, retrying `LinkIssue` returns the same idempotent result. If a later Epic save fails, `IssueEpicChanged`
+still causes Epic to recompute. A `done` Epic reopens when an open Issue joins. An old Epic updates
+progress when a member leaves.
 
-A handler does not treat an old event payload as current affiliation. It rereads current Issue
-state before sending a complete command to Epic or WorkflowRun. Out-of-order delivery and
-redelivery therefore cannot write an old Epic number back.
+A handler rereads current Issue state before sending a complete command to Epic or WorkflowRun. The active run
+update uses `WorkflowRun.UpdateIssueContext(current Issue context)`. Out-of-order and duplicate events cannot write an old Epic number back.
 
 ## Epic Advances Issues
 
-```mermaid
-flowchart TD
-    U["User"] --> S["Epic.Start"]
-    S --> T["transaction: Epic state + EpicStarted"]
-    ES["EpicStarted"] --> AD["Epic.Advance"]
-    AD --> Q["query current Issues"]
-    Q --> C["candidate Issue.TryStartFromEpic(epicNumber)"]
-    C --> T2["transaction: Issue state + IssueWorkStarted"]
-    IW["IssueWorkStarted"] --> ENS["WorkflowRun.EnsureStarted(workflowRunId, ProjectId + IssueNumber + EpicNumber?)"]
-    ENS --> T3["transaction: WorkflowRun state + WorkflowRun events"]
+```text diagram
++------+    +-------+    +------+    +---------+    +-------+    +-----+
+| User +--->| Start +--->| Epic +--->| Advance +--->| Issue +--->| Run |
++------+    +-------+    +------+    +---------+    +-------+    +-----+
 ```
 
-The candidate query performed by Epic may be stale. `TryStartFromEpic` must recheck the current
-`EpicNumber`, state, dependencies, and existing WorkflowRun inside Issue. If the candidate is no
-longer valid, Issue rejects the request or returns a no-op and Epic selects again later.
-Correctness does not depend on atomicity between the query and command.
+After `Epic.Start` commits `EpicStarted`, a durable handler invokes `Epic.Advance`. The candidate query performed by Epic
+may be stale. `Issue.TryStartFromEpic(epicNumber)` rechecks current `EpicNumber`, state, dependencies, and existing WorkflowRun inside
+Issue. It rejects or no-ops when the candidate is no longer valid. Epic selects again later. Correctness does
+not depend on atomicity between query and command.
 
-Issue allocates and stores `WorkflowRunId` in its start transaction without writing WorkflowRun.
-The durable `IssueWorkStarted` handler rereads Issue and calls `EnsureStarted` only if the event
-still refers to the current active run. WorkflowRun is created idempotently by `WorkflowRunId` and
-enters its normal lifecycle directly. It needs no `AwaitingBinding`, `WorkflowBindingPending`, or
-lineage revision. The same event redelivery recovers failures before creation, after creation but
-before the response, or before handler acknowledgement.
+Issue allocates and stores `WorkflowRunId` in its start transaction without writing WorkflowRun. The durable
+`IssueWorkStarted` handler rereads Issue and calls:
+
+`WorkflowRun.EnsureStarted(workflowRunId, ProjectId + IssueNumber + EpicNumber?)` only when the event still names the current active run. WorkflowRun creation is idempotent by
+`WorkflowRunId` and enters its normal lifecycle directly. It needs no `AwaitingBinding`, `WorkflowBindingPending`, or lineage revision.
+Event redelivery recovers failures before creation, after creation but before the response, or before handler
+acknowledgement.
 
 ## Workflow Results and Continued Advancement
 
-```mermaid
-flowchart TD
-    R["Runner"] --> RP["Report"] --> WR["WorkflowRun"]
-    WR --> T1["transaction: WorkflowRun state + WorkflowRunCompleted"]
-    WR --> T2["transaction: WorkflowRun state + WorkflowRunFailed"]
-    WC["WorkflowRunCompleted"] --> IC["Issue.Complete(expectedWorkflowRunId)"]
-    WF["WorkflowRunFailed"] --> IA["Issue.AbortWork(expectedWorkflowRunId)"]
-    U["User"] --> MD["Issue.MarkDone: require leaf Issue InProgress; require bound run Stopped or Completed"]
-    MD --> T3["transaction: Issue state + IssueCompleted(completionKind=manual)"]
-    EV["IssueCompleted / IssueCancelled"] --> PR["parent Issue.RecomputeComposite (child Issue only)"]
-    EV --> EA["current Epic.Advance (when affiliated)"]
+```text diagram
++--------+    +-----+       +-------+
+| Runner +--->| Run +------>| Event ++
++--------+    +-----+       +-------+|   +-------+    +---------------+
+                                     +-->| Issue +--->| Parent / Epic |
++------+      +--------+    +------+     +-------+    +---------------+
+| User +----->| Manual +--->| Done |                          ^
++------+      +--------+    +---+--+                          |
+                                |                             |
+                                +-----------------------------+
 ```
 
-Issue uses `expectedWorkflowRunId` to reject a late result from an old run. The next Epic advance is
-triggered only by the terminal event committed by Issue; WorkflowRun never modifies Epic directly.
+WorkflowRun commits either `WorkflowRunCompleted` or `WorkflowRunFailed`. Durable handlers call `Issue.Complete(expectedWorkflowRunId)` or `Issue.AbortWork(expectedWorkflowRunId)`. Issue uses
+`expectedWorkflowRunId` to reject a late result from an old run. The next Epic advance starts only from the terminal event
+committed by Issue. WorkflowRun never modifies Epic directly.
 
-Manual completion is an explicit Issue lifecycle command. It neither fabricates
-`WorkflowRunCompleted` nor modifies WorkflowRun. Before commit, IssueGrain reads the state of the
-currently bound run. Only `Stopped` and `Completed`, which cannot be scheduled again, are accepted.
-A `Failed` run can still be retried, so the user must stop it explicitly first. Because the allowed
-values are terminal, the read cannot race with resume or retry. The Issue aggregate rechecks that
-it is still `InProgress` and still bound to the same run, then writes the sole `IssueCompleted`
-fact. The event's `completionKind` distinguishes `workflow` from `manual`; parent Issues, Epic,
-Inbox, and metrics continue to consume the same completion event.
+Manual completion is an explicit Issue lifecycle command. It does not fabricate `WorkflowRunCompleted` or modify
+WorkflowRun. Before commit, IssueGrain reads the currently bound run. Only `Stopped` and `Completed` are
+accepted because they cannot be scheduled again. A `Failed` run can still be retried, so the user must stop
+it first. The terminal read cannot race with resume or retry. Issue then rechecks that it remains `InProgress`
+and bound to the same run before writing `IssueCompleted`.
 
-A duplicate command against `Done` is a no-op, so redelivery after a lost response cannot produce a
-second completion event. A parent Issue with child Issues cannot be completed manually; only a fresh
-snapshot of its child Issues determines its terminal state.
+The event's `completionKind` distinguishes `workflow` from `manual`. Parent Issues, Epic, Inbox, and metrics consume
+the same completion event. A duplicate command against `Done` is a no-op, so a lost response cannot create
+a second completion event. A parent Issue with children cannot be completed manually. Its terminal state comes
+from a fresh child snapshot.
 
 ## Synchronous Direction and Asynchronous Closure
 
-Aggregates in the same context may depend on each other in both directions, but a synchronous call
-stack must never form a cycle:
+Aggregates may depend on each other in both directions, but each call stack has one direction:
 
-- Association command: Epic -> Issue. Issue does not synchronously call Epic back from that call.
-- Advancement command: Epic -> Issue. Issue starts Workflow and notifies Epic through events.
-- Execution result: WorkflowRun emits an event, then an Issue handler sends a command. WorkflowRun
-  does not synchronously call Issue.
-- Affiliation refresh: Issue emits an event, then the handler updates Epic and WorkflowRun. Neither
-  target aggregate calls Issue back from the command.
+- Association is Epic -> Issue. Issue does not call Epic synchronously from that command.
+- Advancement is Epic -> Issue. Issue starts Workflow and notifies Epic through events.
+- Execution result is WorkflowRun -> event -> Issue command. WorkflowRun does not call Issue synchronously.
+- Affiliation refresh is Issue -> event -> Epic and WorkflowRun. Neither target calls Issue back from the
+  command.
 
-These paths form a business loop, but each call stack has one direction and each commit still
-contains exactly one aggregate.
+These paths form a business loop, but each commit contains exactly one aggregate.
 
 ## Session Ends Bound Workflow Work
 
-```mermaid
-flowchart TD
-    S["Session settles an active Turn with a non-success terminal outcome"] --> A["WorkflowRun.AbandonActiveWork(runnerId, workId, reason)"]
-    A --> T["transaction: WorkflowRun state"]
+```text diagram
++---------+    +---------+    +-----+
+| Session +--->| Abandon +--->| Run |
++---------+    +---------+    +-----+
 ```
 
-A Workflow-origin Session is bound to one WorkflowRun work item by `(runnerId, workId)`. When the
-Session's active Turn settles with a non-success terminal outcome — an intended stop recorded
-`Cancelled`, or a Runtime-reported failure — Session synchronously abandons that bound active work
-with the settlement reason. The command enters exactly one WorkflowRun transaction and carries the
-frozen identities recorded at settlement, so a late or replayed command cannot abandon work that
-appeared later.
+A Workflow-origin Session binds one WorkflowRun work item by `(runnerId, workId)`. When its active Turn settles with a
+non-success terminal outcome, Session synchronously calls `WorkflowRun.AbandonActiveWork(runnerId, workId, reason)`. The settlement reason is either an
+intended `Cancelled` stop or a Runtime-reported failure.
 
-WorkflowRun never calls Session back synchronously from this command; each call stack keeps one
-direction under
-[Synchronous Direction and Asynchronous Closure](#synchronous-direction-and-asynchronous-closure).
-If the command result is lost after the Session settlement committed, replaying the same settlement
-operation re-issues the same abandon; the WorkflowRun command is idempotent on its frozen
-`(runnerId, workId)`.
+The command carries the frozen identities recorded at settlement and enters one WorkflowRun transaction. A
+late or replayed command cannot abandon later work. WorkflowRun never calls Session back synchronously.
+Replaying a settlement operation reissues the same idempotent abandon for `(runnerId, workId)`.
 
 ## Session and AgentJob Propagate One Way per Call Stack
 
-```mermaid
-flowchart LR
-    S["Session"] -->|"MarkUnknown: stop of the launch Turn unconfirmed"| J["AgentJob"]
-    J -.->|"job state fact: initial Turn settles asynchronously"| S
+```text diagram
++---------+    +-------------+    +----------+    +---------------+
+| Session +--->| Job unknown +--->| Job fact +--->| Session async |
++---------+    +-------------+    +----------+    +---------------+
 ```
 
-When the Session's stop recovery cannot confirm the stop of a launch Turn, Session synchronously
-marks the owning AgentJob unknown — one direction. AgentJob never calls Session back synchronously
-from that command: its initial-Turn propagation reaches Session through a durable job-state fact
-plus the existing asynchronous channel (an event handler or Session's own recovery pass), replayed
-under the same identity until acknowledged. No call stack holds a grain while that grain is called
-back; a propagation that would close a synchronous cycle always takes the asynchronous leg.
+When Session stop recovery cannot confirm the stop of a launch Turn, Session synchronously marks the owning
+AgentJob unknown. AgentJob never calls Session back synchronously from that command. Its initial-Turn
+propagation reaches Session through a durable job-state fact and the existing asynchronous channel, such as an
+event handler or Session recovery pass. The fact is replayed under the same identity until acknowledged.
+
+No call stack holds one aggregate while calling it back. Any propagation that would form a synchronous cycle
+uses the asynchronous leg.
 
 ## Other Interactions
 
-Two more one-way interactions exist beyond the sections above:
+Two additional one-way interactions exist:
 
 - Issue -> Cancel -> WorkflowRun.
-- Runner --[RunnerDisconnected]--> Session, which fails the affected Sessions.
+- Runner -> `[RunnerDisconnected]` -> Session, which fails affected Sessions.
+
+## Non-Goals
+
+- Coordination does not create an independent membership, owner, or controller aggregate.
+- Coordination does not make cross-aggregate validation and commit one transaction.
+- Coordination does not trust a stale query or event payload without target-side revalidation.
+- WorkflowRun does not own Session lifecycle or call Issue synchronously for results.
+
+## Status
+
+The active coordination contract uses one write authority per business fact, one aggregate transaction per
+command, and durable asynchronous closure for cross-aggregate effects.

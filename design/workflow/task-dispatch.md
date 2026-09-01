@@ -1,49 +1,65 @@
 # Task Dispatch
 
-> Mechanical Actions dispatch as Workflow-owned work. `mohist/agent` tasks enter the durable
-> AgentJob launch boundary described in [`../agent-execution.md`](../agent-execution.md).
+Task dispatch is Workflow-owned work. `mohist/agent` tasks enter the durable AgentJob launch boundary described in
+[`../agent-execution.md`](../agent-execution.md).
 
-This document is the sole authority for when task input templates are evaluated. `tasks[*].with`
-and task-level `expect` are part of the Workflow declaration. Server sends them in their original
-form with the dispatch and does not expand templates in advance. Runner expands them uniformly at
-the execution entry point before invoking an Action. The Prompt body, Effective Stage Variables,
-runtime context, and failure context are part of the immutable snapshot for an attempt.
+This document is the sole authority for evaluating task input templates. `tasks[*].with` and task-level `expect`
+remain Workflow declarations. Server dispatches them unchanged. Runner evaluates them once at the execution
+entry point against an immutable attempt snapshot. Runner never receives a Profile template expression:
+`uses` is a literal Action name before dispatch.
 
-Runner never receives a Profile template expression: `uses` is a literal concrete Action name
-before dispatch.
+## Design Drivers
 
-## Rendering Boundary
+- Server must preserve the authored Workflow declaration. It must not freeze rendered values into a TaskRun or
+  dispatch payload.
+- One Runner entry point must apply the same rendering and validation rules to ordinary, redelivered, retried,
+  recovery, and rerun attempts.
+- An attempt must use one immutable snapshot. Later Variable or Prompt changes affect only work that has not
+  been dispatched.
+- Actions receive one rendered, validated input channel. They do not receive raw declarations, resources, or
+  the complete dispatch context.
 
-Template evaluation happens only at the Runner execution entry point before an Action call, and
-does **not** happen during Server dispatch:
+## Model
 
-- Server persists the original `with` and `expect` declarations with the task; it does not expand
-  templates.
-- Every wire dispatch carries the original `with` and `expect` plus an immutable context snapshot
-  for that attempt:
-  - Effective Stage Variables, resolved at dispatch and frozen under
-    [`variables.md`](variables.md);
-  - Project Prompt bodies, loaded by key at dispatch;
-  - runtime context: `workflow.runId`, `workflow.verification.command`, `stage.name`, `work.*`,
-    `issue.*`, `repository.*`, `tasks.<id>.outputs.*`, and `workspace.*`;
-  - failure context, `failure.*`, for a recovery task when applicable.
-- Before manifest validation and the Action call, Runner renders local inputs for this execution
-  from the original `with` and `expect` against the attempt snapshot. Rendering creates a new
-  structure. It does **not** modify the original `with` or `expect` in the dispatch, a persisted
-  task definition, an Action `addTasks` definition, or a retry source.
-- After rendering, Runner performs manifest validation, resolves `working-directory`, and invokes
-  the Action. The Action receives one rendered and validated input channel. It does **not** receive
-  raw input, a Variables resource, or the complete dispatch context.
+A dispatch contains the original `with` and `expect` declarations plus a context snapshot for that
+attempt. The snapshot contains Effective Stage Variables, Prompt bodies loaded by key, fixed Workflow and
+runtime facts, and recovery failure facts when applicable.
 
-Once dispatched, an attempt's context snapshot remains unchanged throughout that attempt. Later
-changes to Variables or Prompts affect only Tasks not yet dispatched and later attempts, including
-retry, recovery continuation, and rerun-from-stage. A Profile edit affects only future
-WorkflowRuns because the current Run uses its complete bound Definition.
+The Prompt body, Effective Stage Variables, runtime context, and failure context are immutable for the
+attempt. Runner creates a new rendered structure before manifest validation and the Action call. It never
+mutates the original declaration, persisted task definition, `addTasks` definition, or retry source.
 
-## Template Expression Rules
+### Rendering Boundary
 
-Runner applies the following evaluation rules to every attempt during rendering; dispatch does not
-participate in evaluation:
+Server persists original `with` and `expect` declarations with the task. It does not expand templates.
+Every wire dispatch carries those declarations and an immutable snapshot containing:
+
+- Effective Stage Variables, resolved at dispatch and frozen under [`variables.md`](variables.md).
+- Project Prompt bodies, loaded by key at dispatch.
+- Runtime facts: `workflow.runId`, `workflow.verification.command`, `stage.name`, `work.*`, `issue.*`, `repository.*`, `tasks.<id>.outputs.*`, and `workspace.*`.
+- `failure.*` facts for a recovery task.
+
+Before manifest validation and the Action call, Runner renders local inputs from the original `with` and
+`expect` against that snapshot. Runner then validates the manifest, resolves `working-directory`, and invokes the
+Action. The Action receives only rendered and validated input. No input channel exposes raw `with`, raw
+`expect`, a Variables resource, or the complete dispatch context. `expect` remains a Workflow-owned
+completion contract and does not enter the Action input channel.
+
+```text diagram
++-----------------+    +---------------+    +-------------------+    +--------+
+| Server dispatch +--->| Runner render +--->| Manifest validate +--->| Action |
++-----------------+    +---------------+    +-------------------+    +--------+
+```
+
+Once dispatched, the snapshot does not change. Later Variable or Prompt changes affect only Tasks not yet
+dispatched and later attempts, including retry, recovery continuation, and `rerun-from-stage`. A Profile edit affects
+only future WorkflowRuns because the current Run uses its complete bound Definition.
+
+## Semantics
+
+### Template Expression Rules
+
+Runner applies these rules to every attempt during rendering. Server dispatch does not evaluate expressions:
 
 ```text literal
 ${{ path }} occupies the whole value  -> replace it and preserve the JSON type
@@ -56,126 +72,100 @@ any unresolved whole expression       -> task fails
 ordinary value                         -> preserve it unchanged
 ```
 
-The [Template Expressions](../../docs/workflow-definition.md#template-expressions) product
-reference is authoritative for author-visible interpolation and `\${{` escaping syntax.
+The [Template Expressions](../../docs/workflow-definition.md#template-expressions) product reference is
+authoritative for author-visible interpolation and `\${{` escaping.
 
-After rendering, `expect` remains a Workflow-owned completion contract and does not enter the
-Action input channel.
+### Deferred Rendering
 
-## Deferred Rendering
+`render: deferred` is declared on an input field in an Action manifest. Runner preserves a deferred field unchanged,
+including internal runtime `${{ ... }}`, through manifest validation and the Action call. Fields without that
+declaration are recursively expanded, including nested objects and arrays. An Action can read retained
+internal templates only from a deferred field.
 
-`render: deferred` is declared on an input field in an Action manifest. Runner preserves a
-deferred field unchanged, including internal runtime `${{ ... }}`, through manifest validation and
-the Action call. Fields not declared deferred are
-recursively expanded under the rules above, including nested objects and arrays. An Action can
-read retained internal templates only from a deferred field. No input channel exposes raw `with`,
-raw `expect`, a Variables resource, or the complete dispatch context.
+Runner resolves the Workspace exactly once for each WorkItem and provides it as `ActionContext.workDir`. An Action must not
+select another directory from `variables.workspace.path`. That value is dispatch context, not a second execution entry point.
 
-Runner resolves the workspace exactly once for each WorkItem and provides it as
-`ActionContext.workDir`. An Action must not select a working directory again from
-`variables.workspace.path`; that value is a visible dispatch-context fact, not a second execution
-entry point.
+If a persisted WorkItem violates the selected Action's static `uses` or `with` contract, or if the
+attempt snapshot cannot resolve a template, Runner returns deterministic `invalid-input`. The claimed TaskRun
+reports that failure with the exact `workerId` and `workId`. Poll redelivery must not retry the same
+deterministically invalid input.
 
-If a persisted WorkItem's `uses` or `with` violates the selected Action's static input contract, or
-if the attempt context cannot resolve a template, Runner must return the deterministic
-`invalid-input` failure. A claimed TaskRun must report that failure using the exact
-`workerId + workId`; poll redelivery must not retry the same deterministically invalid input.
+### Prompt Body Evaluation
 
-## Prompt Body Evaluation
+A Prompt body is not persisted task input. At dispatch, Server loads the body identified by `prompts.<key>` into the
+snapshot. Runner evaluates `${{ ... }}` inside that body during rendering with the same syntax and failure rules
+as `with` and `expect`.
 
-A Prompt body is not persisted task input. At dispatch, Server loads the body identified by
-`prompts.<key>` into the attempt snapshot. During rendering, Runner evaluates `${{ ... }}` inside
-the snapshotted body using the same syntax and failure semantics as `with` and `expect`. Redelivery,
-retry, and rerun each reread and render from their own snapshot, so the Prompt body used by one
-attempt is bound to that attempt's dispatch time.
+Redelivery, retry, and rerun each use their own dispatch snapshot. The Prompt body for an attempt is therefore
+bound to its dispatch time.
 
-## Effective Variables Resolution
+### Effective Variables Resolution
 
-See [`variables.md`](variables.md) for Variables resources, cross-scope merging, and dynamic
-effect semantics. At dispatch, Server resolves Effective Stage Variables for the current Stage and
-freezes them in the attempt snapshot. Runner does not read a Variables resource or fetch newer
-values after dispatch. `vars.*` appears exactly once during an attempt: in that attempt's snapshot.
+[`variables.md`](variables.md) defines Variables resources, cross-scope merging, and dynamic effects. Server
+resolves Effective Stage Variables at dispatch and freezes them in the snapshot. Runner does not read a
+Variables resource or fetch newer values after dispatch. `vars.*` appears exactly once during an attempt, in
+that snapshot.
 
-Runner expands `${{ failure.* }}` in place while constructing a recovery task because only Runner
-holds the triggering task's output; see [`recovery.md`](recovery.md). Other expressions, including
-unbound `vars.*` in a recovery task, remain in the original declaration and are expanded uniformly
-during that attempt's rendering stage.
+Runner expands `${{ failure.* }}` while constructing a recovery task because it holds the triggering task's output.
+Other expressions, including unbound `vars.*` in that task, remain in the original declaration and are
+expanded during the new attempt's rendering. See [`recovery.md`](recovery.md).
 
-## Dispatch Context
+### Dispatch Context
 
-The [Template Expressions](../../docs/workflow-definition.md#template-expressions)
-product reference is authoritative for author-visible namespaces. Dispatch
-fixes `workflow.runId`, `stage.name`, `work.*`, `issue.*`, `repository.*`, and
-previous `tasks.<id>.outputs.*` facts. Tasks produced by ApprovalFeedback also
-receive fixed `work.approvalFeedback.*` facts.
+The [Template Expressions](../../docs/workflow-definition.md#template-expressions) product reference defines
+author-visible namespaces. Dispatch fixes `workflow.runId`, `stage.name`, `work.*`, `issue.*`, `repository.*`, and prior
+`tasks.<id>.outputs.*` facts. Tasks produced by Approval Feedback also receive `work.approvalFeedback.*` facts.
 
-Effective Stage Variables under `vars.*` and Project Prompt bodies under
-`prompts.<key>` are loaded into the attempt snapshot at dispatch. Runner
-evaluates the Prompt during rendering. Runner resolves `workspace.*` at the
-execution entry point. Recovery tasks alone receive `failure.output`,
-`failure.error.code`, and `failure.error.message` from the triggering task.
+Effective Stage Variables under `vars.*` and Project Prompt bodies under `prompts.<key>` enter the snapshot at
+dispatch. Runner evaluates Prompt bodies during rendering and resolves `workspace.*` at the execution entry point.
+Only recovery tasks receive `failure.output`, `failure.error.code`, and `failure.error.message`.
 
-Runtime context, Workflow Variables, and Project Prompts are independent namespaces. Their sources
-and evaluation timing remain distinct in the attempt snapshot. See
-[`../runner.md`](../runner.md) for the complete dispatch and report flow.
+Runtime context, Workflow Variables, and Project Prompts are independent namespaces with distinct sources and
+timing. Effective Variables appear only under `vars`; keys are not copied to bare top-level names. Runtime
+context is not written to or merged into Variables. `work.approvalFeedback` exists only on a task produced by that feedback
+and is absent from ordinary tasks. Plan-artifact paths are not runtime context. A Profile and Prompt express
+them directly, for example `PLANS/PLAN.md`. See [`../runner.md`](../runner.md) for the complete dispatch and report flow.
 
-Effective Variables appear only under `vars`; variable keys are not copied to bare top-level names.
-Runtime context is neither written back to nor merged into Variables. `work.approvalFeedback` exists
-only on a task produced by that feedback and is absent from ordinary tasks. Plan-artifact paths
-are not runtime context. A Profile and Prompt express them directly, for example
-`PLANS/PLAN.md`.
+### Dispatch Snapshot Persistence
 
-## Dispatch Snapshot Persistence
+An attempt snapshot is the contract actually dispatched. Its lifecycle is:
 
-An attempt snapshot is the contract actually dispatched. Its content semantics are defined above;
-this section defines its **storage lifecycle**:
+- The first write wins. Poll redelivery returns the exact original snapshot without rendering it again.
+- The snapshot exists only while the attempt is Running, after dispatch and before a terminal report. It
+  expires when the attempt becomes Completed, Failed, or Cancelled, or when a later attempt supersedes it.
+- The snapshot is separate from WorkflowRun State. State contains arbitration facts and does not copy dispatch
+  payloads. Historical attempt snapshots do not exist.
+- A check dispatch does not persist a snapshot. Redelivery reconstructs it through the ordinary translation
+  boundary.
+- Content deduplication inside a snapshot, such as Prompt keys or on-demand task-output pruning, may reduce
+  rendering content without changing this lifecycle. See [`variables.md`](variables.md).
 
-- The snapshot never changes after first dispatch; the first write wins. Poll redelivery must
-  return the exact original snapshot without rendering it again.
-- The snapshot needs to be available only while the attempt is Running, after dispatch and before
-  a terminal report. It expires immediately when the attempt becomes Completed, Failed, or
-  Cancelled, or when a later attempt supersedes it.
-- The snapshot is **not** stored as part of the complete WorkflowRun State. It is stored separately
-  from run State and loaded separately when redelivery needs it. Run State contains only the facts
-  required for arbitration and does not copy dispatch payloads. Historical attempt snapshots do
-  not exist.
-- A check dispatch does not persist a snapshot; redelivery reconstructs the
-  dispatch through the ordinary translation boundary.
-- Content deduplication within a snapshot, such as referencing Prompts by key or pruning `tasks`
-  output on demand, is a rendering-content optimization and does not alter these lifecycle rules.
-  See [`variables.md`](variables.md).
+### Validation Timing
+
+Catalog validation during Profile save or update checks constant inputs against the Action contract: unknown
+`uses`, unknown input keys, missing required inputs, and constant type mismatches. For a template
+expression, it checks only the key name. Server dispatch does not expand templates.
+
+Runner renders expressions and then applies manifest value, type, and required-field validation. A failure
+returns `invalid-input` and does not call the Action.
+
+If a persisted WorkItem names a retired Action, Runner rejects it during dispatch. Manifest validation finds
+the tombstone and returns its guidance as a non-retryable error.
+
+### Parent Context for a Child-Issue Plan
+
+A child-Issue Plan `mohist/agent` task may receive the current parent Issue title and body as optional read-only
+context. Other Stages, Actions, AgentJobs, and ordinary Issues do not receive it. Parent context is not
+persisted in WorkflowRun State, task input, Variables, or Prompts, and it creates no template namespace. The
+current child-Issue body remains authoritative for delivery scope.
+
+WorkflowRun stores its bound Repository snapshot and write-once Pull Request identity. Neither is a Run
+Variable. The Issue's Repository binding supplies the snapshot at start, and dispatch uses that stable
+Repository context. The first `github.pr.number` carrier through the Workflow grain records Pull Request identity. The
+same number is accepted again. A conflicting number is rejected. See [`../repositories.md`](../repositories.md).
 
 ## Status
 
 Active attempt snapshots are stored outside WorkflowRun State. The first dispatch fixes the snapshot,
-redelivery reuses it, and terminal or superseding transitions remove it. Startup removes orphaned
-snapshots. Arbitration therefore depends on current execution facts instead of payload history.
-
-## Validation Timing
-
-Catalog validation during Profile save or update checks only constant inputs against the Action
-contract: unknown `uses`, unknown input keys, missing `required` inputs, and constant type
-mismatches. For an input containing a template expression, it checks only the key name. Dispatch no
-longer expands templates on Server. Runner renders expressions and then applies manifest value,
-type, and required-field validation. A failure makes the attempt fail with `invalid-input`, and the
-Action is not called.
-
-If dispatch of a persisted WorkItem finds that its `uses` names a retired Action, Runner still
-rejects it during dispatch. Manifest validation finds the tombstone and fails with its guidance as
-a non-retryable error.
-
-### Parent Context for a Child-Issue Plan
-
-A child-Issue Plan Mohist Agent Task may receive the current parent Issue title
-and body as optional read-only context. Other Stages, Actions,
-AgentJobs, and ordinary Issues do not receive it. Parent context is not persisted
-in WorkflowRun state, task input, Variables, or Prompts, and it creates no
-template namespace. The current child-Issue body remains authoritative for
-delivery scope.
-
-WorkflowRun stores its bound Repository snapshot and its write-once Pull Request identity;
-neither is a Run Variable. The Issue's Repository binding supplies the snapshot at start, and
-dispatch uses that stable Repository context. The first `github.pr.number` carrier through the
-Workflow grain records the Pull Request identity; the same number is accepted again and a
-conflicting number is rejected. See [`../repositories.md`](../repositories.md) for the complete
-rules.
+redelivery reuses it, and terminal or superseding transitions remove it. Startup removes orphaned snapshots.
+Arbitration therefore depends on current execution facts instead of payload history.

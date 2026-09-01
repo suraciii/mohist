@@ -1,23 +1,59 @@
 # Action Design
 
-> Mechanical Actions are Workflow-owned orchestration. The concrete `mohist/agent` Action launches
-> an AgentJob; see [`../decisions/workflow-agent-binding.md`](../decisions/workflow-agent-binding.md).
+An Action is the pluggable execution unit of a Workflow task. `uses` selects
+an Action, `with` supplies its inputs, and the Action returns structured output
+or an error. An Action is a trusted module registered in the Runner process,
+not a separate process or an identifiable Mohist Agent.
 
-An Action is the pluggable execution unit of a Workflow task. `uses` selects the Action, `with`
-provides all inputs, and the Action returns structured output or an error. For a developer,
-authoring an Action means writing a declarative contract, or manifest, plus a pure-function
-implementation. The experience follows GitHub Actions.
+Workflow owns the completion contract in `expect`. Action capabilities and
+results do not replace that contract. See
+[`../decisions/workflow-agent-binding.md`](../decisions/workflow-agent-binding.md)
+for the `mohist/agent` binding and [`runner.md`](../runner.md#report) for the
+report boundary.
 
-An Action does not own the Workflow completion decision in `expect`, does not represent an
-identifiable Mohist Agent, and is not a separate process. It is a trusted module registered in the
-Runner process.
+## Core Decisions
 
-## Model
+- The manifest is the only Action contract. It declares inputs, outputs,
+  business errors, and capabilities beside the implementation.
+- Runner renders and validates `with` before calling `run(inputs, host)`.
+  Actions never read raw `with`, Run Variables, Server state, or dispatch
+  metadata.
+- Action results stay structured from Runner through `TaskRun.Output`,
+  `setVars`, output references, and recovery matching.
+- Capabilities are explicit. The engine injects only capabilities declared by
+  the manifest.
+- The registry reports a manifest catalog and tombstones to Server. Profile
+  validation uses that catalog without inferring behavior from an Action name.
+
+## System Boundary
+
+```text diagram
++----------------+   uses, with, expect   +------------------+
+| Workflow task  |------------------------>| Runner executor  |
+| Workflow-owned |                         +--------+---------+
++----------------+                                  |
+                                      render, validate |
+                                                      v
+                                             +----------------+
+                                             | Action.run     |
+                                             | inputs, host   |
+                                             +--------+-------+
+                                                      |
+                                                      v
+                                             +----------------+
+                                             | output or error|
+                                             +----------------+
+```
+
+An Action receives only the rendered `with` value and the declared host. It
+cannot own Workflow completion, access a Server connection, choose recovery,
+or inspect a Runtime handle. A Profile passes required context through `with`.
 
 ### Manifest
 
-Each Action declares its contract in a manifest. The manifest is pure data that can be serialized
-as JSON. It is defined beside the implementation and gains type inference through `defineAction`:
+Each Action declares a pure-data manifest that can be serialized as JSON. The
+manifest sits beside the implementation and gains type inference through
+`defineAction`:
 
 ```ts
 export const rebaseAction = defineAction({
@@ -43,28 +79,30 @@ export const rebaseAction = defineAction({
 })
 ```
 
-- `name` is the case-insensitive `uses` match key. It is lowercase, has the form
-  `<namespace>/<action>`, and has no version segment.
-- Every `inputs` entry declares `type` (`string | number | boolean | object | array`), either
-  `required` or `default` but not both, and `description`.
-- `outputs` declares successful output fields. It is both documentation and a projection contract,
-  providing the available paths for `setVars` and `tasks.<id>.outputs.*`.
-- `errors` declares every business error code for the Action in kebab-case and its meaning. Recovery
-  can match these with `when: error.code=...`, and documentation can be generated from them.
+Manifest rules:
 
-The platform reserves two categories that do not appear in the manifest: the reserved input
-`working-directory`, which the engine consumes to select `host.workDir` and which an Action cannot
-declare, and the platform error codes `invalid-input`, `unexpected-error`, and `timeout`, which the
-engine produces and an Action cannot invent.
+- `name` is the case-insensitive `uses` key. It must be lowercase, use the
+  `<namespace>/<action>` form, and have no version segment.
+- Each input declares a type from `string | number | boolean | object | array`,
+  exactly one of `required` or `default`, and a description.
+- `outputs` declares successful fields. It documents the output and provides
+  the paths available to `setVars` and `tasks.<id>.outputs.*`.
+- `errors` declares every business error code in lowercase kebab-case and its
+  meaning. Recovery may match a declared code with `when: error.code=...`.
 
-`host.workDir` is only the Action execution directory. For a Workflow Workspace,
+The engine reserves `working-directory` as an input. It consumes that value to
+select `host.workDir`, so an Action cannot declare it. The engine also owns the
+platform errors `invalid-input`, `unexpected-error`, and `timeout`.
+
+`host.workDir` is the Action execution directory. For a Workflow Workspace,
 Runner separately derives the target Repository guard directory from Workspace
-and Repository facts. Branch stability and clean-worktree enforcement use that
-guard directory even when `host.workDir` is the Workspace root.
+and Repository facts. Branch stability and clean-worktree checks use that guard
+directory even when `host.workDir` is the Workspace root.
 
-### Implementation Interface and Host
+### Implementation Surface
 
-`run(inputs, host)` is the entire Action implementation surface. The default host contains only:
+`run(inputs, host)` is the complete Action implementation surface. The default
+host is:
 
 ```ts
 interface ActionHost {
@@ -75,82 +113,98 @@ interface ActionHost {
 }
 ```
 
-An Action cannot access Run Variables, the Server connection, Runtime handles, recovery
-declarations, or dispatch metadata. A Profile must explicitly pass required context through a
-`with` template.
-
 ### Capabilities
 
-Capabilities beyond the default host must be declared in the manifest. The engine injects only
-declared capabilities:
+Capabilities beyond the default host must be declared in the manifest. The
+engine injects only declared capabilities:
 
-- `agent-turn` injects `host.agent.execute({ prompt, session?, options? })`. It executes one Agent
-  input. The capability layer owns Session open/attach and the Runtime lifecycle; the Action only
-  expresses intent.
-- `add-tasks` allows a result to carry `addTasks`, appending later tasks. The engine reports them
-  uniformly; the Action does not connect directly to Server.
-- `write-vars` injects `host.writeVars(vars)`. It persists `vars.*` immediately during execution,
-  unlike the post-completion `setVars` projection. Writes are not rolled back on failure and are
-  visible to retries.
+- `agent-turn` injects `host.agent.execute({ prompt, session?, options? })`.
+  The capability layer opens or attaches the Session and owns the Runtime
+  lifecycle. The Action expresses intent for one Agent input.
+- `add-tasks` allows a successful result to carry `addTasks`. The engine reports
+  the tasks uniformly; the Action does not connect to Server.
+- `write-vars` injects `host.writeVars(vars)`. It persists `vars.*` during
+  execution, unlike post-completion `setVars`. These writes are not rolled back
+  on failure and are visible to retries.
 
-Declaring `agent-turn` also means the Action produces a Runner-private execution fact: the
-final assistant text. The capability layer records it so the `_output` marker in `expect` can match
-it. The Action result itself does not carry this fact.
+An `agent-turn` Action also produces a Runner-private final assistant-text
+fact. The capability layer records that fact so `expect` can match `_output`.
+The fact is not part of Action output.
 
 ### Registry and Catalog
 
-Built-in Runner Actions are registered in one list. The registry is built from manifests and
-matches `uses` against `name` case-insensitively. All manifests are collected into a pure-JSON
-catalog and reported to Server when Runner registers, together with tombstones for retired Actions.
-The catalog preserves manifest capabilities so Server can validate Profile `uses` declarations
-without inferring semantics from an Action name. Each tombstone contains a name and guidance.
+Built-in Runner Actions are registered in one list. The registry matches
+`uses` against manifest `name` case-insensitively. Runner reports all manifests
+as a pure-JSON catalog when it registers with Server, together with tombstones
+for retired Actions. The catalog includes capabilities so Server can validate
+Profile `uses` declarations without inferring semantics from a name. Each
+tombstone contains a name and guidance.
 
-Loading external plugins, version segments in `uses` such as `@v1`, and composite Actions that
-orchestrate YAML steps are out of scope. The registry retains an extension point that accepts
-additional `defineAction` collections.
+The registry has an extension point for additional `defineAction` collections.
+External plugins, versioned `uses` such as `@v1`, and composite Actions that
+orchestrate YAML steps are not supported.
 
-## Semantics
+## Execution Semantics
 
 ### Inputs
 
-Actions have one input channel: all inputs come from the rendered and validated `with` value. The
-Runner renders and validates against the manifest before calling the Action. The Action cannot see
-raw `with`, a Variables resource, or dispatch context. [`task-dispatch.md`](task-dispatch.md) is
-authoritative for rendering timing and attempt snapshot semantics.
+Actions have one input channel: the rendered and validated `with` value. The
+Runner renders and validates it against the manifest before calling the Action.
+[`task-dispatch.md`](task-dispatch.md) owns rendering timing and attempt
+snapshot semantics.
 
-```yaml
-- id: integrate:rebase
-  uses: mohist/rebase
-  with:
-    baseBranch: ${{ repository.baseBranch }}
-    remote: origin
+```text diagram
++------------------+
+| Attempt snapshot |
++--------+---------+
+         |
+         v
++------------------+       +----------------+
+| Render with      |------>| Render expect  |
++--------+---------+       +--------+-------+
+         |                          |
+         v                          v
++------------------+       +----------------+
+| Validate inputs  |       | Workflow check |
++--------+---------+       +----------------+
+         |
+         v
++------------------+
+| Apply defaults   |
++--------+---------+
+         |
+         v
++------------------+
+| Action.run       |
++------------------+
 ```
 
-The Runner execution entry point applies this order. Failure at any step prevents the Action call:
+Failure at any input step prevents the Action call:
 
-1. Clone the original `with` from the attempt snapshot. Preserve fields declared
-   `render: deferred` by the manifest and recursively expand `${{ ... }}` in every other field. An
-   unresolved reference fails under the dispatch contract; see
-   [`task-dispatch.md`](task-dispatch.md).
-2. Render `expect` from the same attempt snapshot. The result remains a Workflow-owned completion
-   contract and does not enter the Action input channel.
-3. Validate rendered inputs against the manifest. An unknown input key fails with `invalid-input`
-   instead of being silently ignored.
-4. A missing `required` input fails with `invalid-input`.
+1. Clone `with` from the attempt snapshot. Preserve fields declared
+   `render: deferred` by the manifest and recursively expand `${{ ... }}` in
+   every other field. An unresolved reference fails under the dispatch
+   contract; see [`task-dispatch.md`](task-dispatch.md).
+2. Render `expect` from the same attempt snapshot. It remains a Workflow-owned
+   completion contract and never enters the Action input channel.
+3. Validate rendered inputs against the manifest. An unknown input key fails
+   with `invalid-input` instead of being ignored.
+4. A missing required input fails with `invalid-input`.
 5. A type mismatch fails with `invalid-input`.
-6. Apply each `default`; `run` receives complete, strongly typed inputs.
+6. Apply each default. `run` receives complete, strongly typed inputs.
 
-A field declared `render: deferred` is excluded from recursive expansion in step 1 and passes
-unchanged through steps 3-6. Internal `${{ ... }}` expressions remain available for an Action that
-must propagate them into later tasks. Other object and array fields use the normal recursive rules.
+A field declared `render: deferred` is excluded from recursive expansion in
+step 1 and passes unchanged through steps 3 to 6. Internal `${{ ... }}`
+expressions remain available for an Action that propagates them to later tasks.
+Other object and array fields use normal recursive rules.
 
-Consistency constraints between inputs, such as merge preconditions, belong to the Action's
-semantics and are checked at the beginning of `run`. A failure returns an error code declared by
-the manifest or `invalid-input`.
+Consistency constraints such as merge preconditions belong to Action semantics
+and are checked at the beginning of `run`. The Action returns a manifest error
+code or `invalid-input`.
 
 ### Results
 
-An Action has exactly one of two public result shapes:
+An Action has exactly one of these public result shapes:
 
 ```json
 { "output": { "prNumber": 42, "prUrl": "https://github.com/example/repo/pull/42" } }
@@ -160,64 +214,64 @@ An Action has exactly one of two public result shapes:
 { "error": { "code": "pr-checks-failed", "message": "PR #42 checks failed. Fix the failures and retry." } }
 ```
 
-- `output` is a JSON object or `null` and stays structured end to end. Runner internals, the report
-  wire format, `TaskRun.Output` storage, `setVars` projection, `tasks.<id>.outputs.*` reads, and
-  recovery matching through `when: output.*` all operate on the same object. No layer stringifies
-  and reparses it.
-- `error.code` must be a code declared in the manifest's `errors` or a platform code.
-- `error.message` is the only user-visible error text. An error has no additional details; raw
-  command output and diagnostics belong in the task log.
-- Native exceptions are not part of the protocol. The engine normalizes them to `unexpected-error`
-  at the Action boundary.
-- An Action with the `add-tasks` capability may include `addTasks` in a successful result, which the
-  engine reports.
-- The engine does not validate successful output against a schema at runtime. If a field declared
-  in `outputs` is missing, `setVars` projection exposes an explicit error.
+- `output` is a JSON object or `null` and stays structured end to end. Runner
+  internals, the report wire format, `TaskRun.Output`, `setVars`,
+  `tasks.<id>.outputs.*`, and recovery matching through `when: output.*` use
+  the same object. No layer stringifies and reparses it.
+- `error.code` must be declared by the manifest or be a platform code.
+- `error.message` is the only user-visible error text. Raw command output and
+  diagnostics belong in the task log.
+- Native exceptions normalize to `unexpected-error` at the Action boundary.
+- An Action with `add-tasks` may include `addTasks` in a successful result.
+- The engine does not validate successful output against an output schema. A
+  missing field is reported as an explicit `setVars` projection error.
 
-The engine maps a successful task Action to the canonical work status
-`completed` and an Action error to `failed`; timeout and uncertain execution use
-the platform statuses `timeout` and `unknown`. It never emits `success`, `ok`,
-or `succeeded`. A checks batch uses `pass` or `fail` instead. The report boundary
-and binding rules are authoritative in [`../runner.md`](../runner.md#report).
+The engine maps a successful task Action to `completed` and an Action error to
+`failed`. Timeout and uncertain execution use `timeout` and `unknown`. It does
+not emit `success`, `ok`, or `succeeded`. A checks batch uses `pass` or `fail`.
+The report boundary and binding rules are authoritative in
+[`../runner.md`](../runner.md#report).
 
-`TaskRun.Output` stores only successful Action output. If `expect`, a workspace constraint, or
-another Runner postcondition fails after an Action succeeds, TaskRun can store both the original
-output and the Runner-produced error. Task status, exit code, and Runner-private execution facts
-belong to the task execution protocol, not the public Action result.
+`TaskRun.Output` stores only successful Action output. If `expect`, a Workspace
+constraint, or another Runner postcondition fails after an Action succeeds,
+TaskRun may store both the original output and the Runner error. Task status,
+exit code, and Runner-private execution facts belong to the task protocol, not
+the public Action result.
 
-Generic result handling in the engine does not interpret any Action's business semantics. The only
-capability-based branch is for an Action that declares `agent-turn`: the task executor projects
-its output from `expect` as `null | { promise }`, as described below. Every other Action preserves
-its output unchanged. There is no special-case list based on `uses`.
+Generic result handling does not interpret Action business semantics. The only
+capability-based branch is `agent-turn`: the executor projects its `expect`
+result as `null | { promise }`, as described below. Every other Action
+preserves its output unchanged. There is no `uses`-based special-case list.
 
 ### Validation Timing and Catalog Consumption
 
-- **Profile save or update:** Server performs full validation against the most recently reported
-  catalog. Unknown `uses`, unknown input keys, missing `required` inputs, and constant input type
-  mismatches are actionable errors. Inputs containing template expressions are checked only for
-  key names; type validation waits for the Runner execution entry point. If no catalog has been
-  reported, this layer is skipped and recorded without blocking a Profile that uses only literal
-  Actions.
-- **Runner execution entry point, authoritative and fail-closed:** Runner renders the original
-  `with` from the attempt snapshot, enforces its local manifest, and fails the task with
-  `invalid-input` instead of invoking `run` with unvalidated input. Server no longer expands
+- **Profile save or update:** Server validates against the most recently
+  reported catalog. Unknown `uses`, unknown input keys, missing required inputs,
+  and constant input type mismatches are actionable errors. Template values are
+  checked for key names only; type validation waits for Runner execution. If no
+  catalog exists, catalog validation is skipped and recorded. A Profile that
+  uses only literal Actions is not blocked by that absence.
+- **Runner execution:** Runner is authoritative and fail-closed. It renders the
+  original `with` from the attempt snapshot, enforces the local manifest, and
+  fails with `invalid-input` before invoking `run`. Server no longer expands
   templates before dispatch.
-- **Retired Action:** a tombstone encountered during Runner rendering fails with its guidance; a
-  tombstone encountered during Profile save rejects the save.
+- **Retired Action:** A tombstone fails Runner rendering with its guidance and
+  rejects Profile save.
 
-Profile save uses the Workflow Definition validator to produce a semantic model and the catalog to
-evaluate concrete `uses` and `with`. Agent tasks use the server-side `mohist/agent` boundary and are
-validated as a virtual manifest; runtime Actions such as `mohist/opencode` and `mohist/pi` are
-rejected in Profile `uses` and are invoked only by the AgentJob launcher.
-The Definition validator only recursively checks runtime template expressions in `with` values. The
-catalog does not repeat Profile, Definition field, or template namespace validation. All
-diagnostic sources are combined into one validation exception, use the same YAML path convention,
-and carry source labels. A successful save response explicitly contains
-`actionValidation: { performed, reason? }`, telling the caller whether Action-contract validation
-ran. If the catalog is unavailable, the response explains the skipped validation. Built-in Profile
-loading, runtime loading, and `mo workflow validate --file` only perform Definition validation and
-do not depend on the catalog. Legacy `with.agent`, `with.kind`, `with.type`, and `with.expect`
-receive no special treatment and are rejected as unknown input keys.
+Profile save uses the Definition validator for the semantic model and the
+catalog for concrete `uses` and `with`. Agent tasks use the server-side
+`mohist/agent` boundary and are validated as a virtual manifest. Runtime
+Actions such as `mohist/opencode` and `mohist/pi` are rejected in Profile
+`uses` and are invoked only by the AgentJob launcher.
+
+The Definition validator recursively checks template expressions in `with`
+values. The catalog does not repeat Profile, Definition-field, or template
+namespace validation. Diagnostic sources are combined into one validation
+exception, use one YAML path convention, and carry source labels. A successful
+save response contains `actionValidation: { performed, reason? }`. Built-in
+Profile loading, runtime loading, and `mo workflow validate --file` perform
+Definition validation without the catalog. Legacy `with.agent`, `with.kind`,
+`with.type`, and `with.expect` are rejected as unknown input keys.
 
 ### `setVars`
 
@@ -229,18 +283,20 @@ setVars:
   change.url: output.changeUrl
 ```
 
-- The left side is a path under `vars`; the right side is a JSON path in Action output.
-- Runner applies `setVars` before reporting task completion. A projection failure, including a
-  missing path, fails the task instead of being silently skipped.
-- Only `vars.*` can change. `workflow`, `stage`, `work`, `issue`, and `workspace` cannot.
-- A recovery task can overwrite the same `vars.*` path.
-- Runner uses the same Run Variables PATCH API as other callers, but its generated body contains
-  only `vars`, not `stages`. See [`variables.md`](variables.md) for complete semantics.
+- The left side is a path under `vars`; the right side is a JSON path in Action
+  output.
+- Runner applies `setVars` before reporting task completion. A projection
+  failure, including a missing path, fails the task.
+- Only `vars.*` can change. `workflow`, `stage`, `work`, `issue`, and
+  `workspace` cannot change.
+- A recovery task may overwrite the same `vars.*` path.
+- Runner uses the Run Variables PATCH API with a body containing only `vars`.
+  See [`variables.md`](variables.md) for complete semantics.
 
 ### `artifacts`
 
-`artifacts` declares output to collect. Collection is best-effort: a missing file is skipped and
-does not fail the task.
+`artifacts` declares output to collect. Collection is best-effort. A missing
+file is skipped and does not fail the task.
 
 ```yaml
 artifacts:
@@ -250,29 +306,30 @@ artifacts:
 
 ### `expect`
 
-`expect` is a Workflow-owned task completion contract separate from Action input. See the
-[product reference](../../docs/workflow-definition.md#expect-completion-requirements) for
-author-visible failure rules and its relationship with `artifacts`. The Runner task executor
-renders `expect` against the attempt snapshot and applies completion checks only after the Action
-succeeds. If the Action fails, is cancelled, or times out, the original failure is preserved and no
-file or marker is read. Neither the Action nor its capability implementation interprets `expect`,
-and rendered `expect` does not enter the Action input channel.
+`expect` is a Workflow-owned task completion contract separate from Action
+input. See the
+[product reference](../../docs/workflow-definition.md#expect-completion-requirements)
+for author-visible failure rules and its relationship with `artifacts`. The
+Runner renders `expect` from the attempt snapshot and applies completion checks
+only after the Action succeeds. If the Action fails, is cancelled, or times
+out, the original failure is preserved and no file or marker is read. Neither
+the Action nor its capabilities interprets `expect`.
 
-A marker `path` may use the special value `_output`, which matches the final assistant text of this
-execution instead of file content. The task executor obtains that text from the execution fact
-recorded by the `agent-turn` capability. It does not enter Action output and requires no extra
-Action declaration.
+A marker `path` may be `_output`, which matches the final assistant text of an
+execution instead of file content. The executor obtains that text from the
+`agent-turn` fact. It does not enter Action output and requires no extra
+manifest declaration.
 
-`_output` recognizes only the promise-tag form `<promise>VALUE</promise>`. If multiple accepted
-values appear, the last occurrence in the text wins, unlike file markers where declaration order
-wins. To match a literal substring of final assistant text, encode the literal as the `VALUE`
-inside a promise tag in `oneOf`. `_output` does not read the file system, and evidence collection
-does not treat it as a file path.
+`_output` recognizes only `<promise>VALUE</promise>`. If multiple accepted
+values appear, the last occurrence wins. File markers use declaration order.
+To match a literal substring of final assistant text, encode the literal as the
+`VALUE` inside a promise tag in `oneOf`. `_output` does not read the file system,
+and evidence collection does not treat it as a file path.
 
 ### Errors and Recovery
 
-Runner constructs an `{ output, error }` context for recovery. An explicit `when` uses a path in
-that context:
+Runner constructs an `{ output, error }` context for recovery. An explicit
+`when` uses a path in that context:
 
 ```yaml
 handlers:
@@ -280,35 +337,32 @@ handlers:
   - when: output.promise=FAIL
 ```
 
-The final handler without `when` is a fallback only when an error exists. It can handle a failure
-that the executor finds after Action completion, such as a dirty workspace. `error.message` is not
-a machine protocol and must not be used in `when`.
+The final handler without `when` is a fallback only when an error exists. It
+can handle a post-Action failure such as a dirty Workspace. `error.message` is
+not a machine protocol and must not be used in `when`.
 
-There is no global Action error enum, and the engine does not understand error-specific meaning.
-Each Action manifest is the authoritative catalog of its error codes. A Runtime or resolver may
-use a different diagnostic vocabulary, but the Action boundary must map that vocabulary to a
-declared lowercase kebab-case Action code before normalization. An undeclared non-platform code
-always becomes `unexpected-error`; the validator and normalizer have no per-Action exceptions. See
+There is no global Action error enum. Each manifest is authoritative for its
+codes. A Runtime or resolver may use another diagnostic vocabulary, but the
+Action boundary maps it to a declared lowercase kebab-case code. An undeclared
+non-platform code becomes `unexpected-error`. See
 [`recovery.md`](recovery.md) for recovery design.
 
 ### Checks
 
-A Stage check uses the same `uses` and `with` values to reuse the same Action contract. The check
-host maps success or failure to pass or fail. An Action does not know whether it is running as a
-task or a check.
+A Stage check uses the same `uses` and `with` values and the same Action
+contract. The check host maps success or failure to `pass` or `fail`. An Action
+does not know whether it runs as a task or a check.
 
 ## Built-In Actions
 
-### `mohist/opencode`
+### `mohist/opencode` and `mohist/pi`
 
-This Runtime-specific Action declares `agent-turn`. It is an internal
-Agent-to-Runner contract: the AgentJob launcher invokes it for an Agent whose
-definition selects OpenCode, and a Workflow Profile `uses` cannot reference it
-directly. See [`../agent-execution.md`](../agent-execution.md) for the
-ownership relationship with Agent and Session. Because the launcher already
-knows the Runtime, inputs need no `kind` or `type` discriminator.
+These Runtime-specific Actions declare `agent-turn`. They are internal
+Agent-to-Runner contracts. The AgentJob launcher invokes the Action for an
+Agent whose definition selects the Runtime. A Workflow Profile cannot bind
+these names directly and must use `mohist/agent`.
 
-Input contract:
+The launcher supplies this input shape:
 
 ```ts
 type OpenCodeActionInput = {
@@ -321,91 +375,98 @@ type OpenCodeActionInput = {
 }
 ```
 
-The AgentJob launcher supplies `options` from the Agent definition. See
-[`task-dispatch.md`](task-dispatch.md) for template evaluation timing. Keys other than `model` and
-`variant` in `options` are ignored and recorded in diagnostics without failing execution. Workflow
-provides `expect` separately as the task completion contract. Legacy `with.expect` and `with.agent`
-are rejected with actionable errors when the Profile loads.
+The launcher supplies `options` from the Agent definition. Keys other than
+`model` and `variant` are ignored and recorded in diagnostics. Workflow
+provides `expect` separately. Because the launcher knows the Runtime, these
+inputs have no `kind` or `type` discriminator.
 
-Output contract:
+The executor synthesizes this output from `expect`:
 
 ```ts
 type OpenCodeActionOutput = null | { promise: string }
 ```
 
-The task executor synthesizes this `{ promise }` output for an `agent-turn` Action based on
-`expect`; neither the Action nor the capability layer produces it. Runtime Session identity, model,
-usage, transcript, diagnostics, and expectation details stay in the models that own them and are
-not copied into Action output. See [`../runtimes/opencode.md`](../runtimes/opencode.md) for the
-OpenCode implementation.
+The Action and capability layer do not produce that output. Runtime Session
+identity, model, usage, transcript, diagnostics, and expectation details stay
+in their owning models. See [`../runtimes/opencode.md`](../runtimes/opencode.md)
+for the OpenCode implementation. `mohist/pi` has the same launcher-facing
+shape and capability.
 
-`mohist/pi` is a peer internal runtime contract with the same launcher-facing input shape and
-`agent-turn` capability. There is no generic Agent-turn Action in the registry; Workflow Profiles
-bind Agent work through `mohist/agent` only.
+There is no generic Agent-turn Action in the registry. Workflow Profiles bind
+Agent work through `mohist/agent` only.
 
 ### `mohist/task-list`
 
-`mohist/task-list` appends planned Build tasks through its `add-tasks` capability. Its
-`task.uses` input is a required literal Action default for every appended task, typically
-`mohist/agent` with a fixed Agent `name`.
+`mohist/task-list` appends planned Build tasks through `add-tasks`. Its
+`task.uses` input is a required literal Action default for every appended task,
+typically `mohist/agent` with a fixed Agent `name`.
 
-The source task list may describe task identity, title, goal, acceptance criteria, and plan
-references, but it cannot provide `uses`. Allowing a source task to replace `task.uses` would
-bypass Profile validation and could mix execution identities inside a Run. The Action rejects such
-input with `invalid-input`.
+The source task list may describe task identity, title, goal, acceptance
+criteria, and plan references, but it cannot provide `uses`. Replacing
+`task.uses` would bypass Profile validation and mix execution identities inside
+a Run. The Action rejects that input with `invalid-input`.
 
-The task list is a Workspace-local file. A rebuilt Workspace directory loses it, and the
-recovery is rerunning from the plan Stage, which regenerates it. See
-[`plan-artifacts.md`](plan-artifacts.md) for the artifact and persistence boundary.
+The task list is a Workspace-local file. Rebuilding a Workspace loses it, and
+recovery reruns the plan Stage to regenerate it. See
+[`plan-artifacts.md`](plan-artifacts.md) for the persistence boundary.
 
 ### Git and GitHub PR Actions
 
-`mohist/push`, `create-github-pr`, `mark-github-pr-ready`, `enable-github-pr-auto-merge`, and
-`mohist/rebase` are ordinary Workflow Actions with one input channel. A Profile explicitly passes
-the base branch, workflow branch, remote, and other context through `${{ repository.* }}` and
-`${{ workspace.* }}`. An Action does not look up Run Variables itself.
+`mohist/push`, `create-github-pr`, `mark-github-pr-ready`,
+`enable-github-pr-auto-merge`, and `mohist/rebase` are ordinary Workflow
+Actions with one input channel. A Profile passes repository and Workspace
+context through `${{ repository.* }}` and `${{ workspace.* }}`. An Action does
+not read Run Variables itself.
 
-- `push` is solely responsible for publishing the current workspace's committed HEAD to the remote
-  workflow branch. One WorkflowRun exclusively owns the workflow branch, so the Profile uses a
-  force update and does not depend on a remote-tracking ref.
-- `create-github-pr` only creates or updates a draft PR and outputs a stable PR identity. It performs
-  no Git operation and does not decide which commit should be published.
-- `mark-github-pr-ready` marks a draft PR ready and is idempotent if it is already ready.
-- `enable-github-pr-auto-merge` registers the merge method on a PR, then waits until
-  GitHub performs the merge, reusing the same bounded polling and classification as
-  `mohist/github-pr-checks`. It is idempotent when auto-merge is already enabled.
-  One attempt has one fixed 30-minute deadline; every external command, retry
+- `push` publishes the current committed HEAD to the remote Workflow branch.
+  One WorkflowRun exclusively owns that branch, so the Profile uses a force
+  update and does not depend on a remote-tracking ref.
+- `create-github-pr` creates or updates a draft PR and outputs a stable PR
+  identity. It performs no Git operation and does not choose the commit.
+- `mark-github-pr-ready` marks a draft PR ready and is idempotent when it is
+  already ready.
+- `enable-github-pr-auto-merge` registers the merge method, then waits for
+  GitHub to merge the PR. It uses the same bounded polling and classification as
+  `mohist/github-pr-checks` and is idempotent when auto-merge is enabled.
+  One attempt has one fixed 30-minute deadline. Every external command, retry
   delay, registration reconciliation, and poll consumes the remaining budget.
-  An explicit squash subject takes precedence. When it is absent, the Action
-  uses the PR title from the bounded PR read and performs no separate Issue-field
-  lookup. Failed checks return `error.code: pr-checks-failed` and merge conflicts
-  return `conflict`; the Profile declares recovery explicitly.
+  An explicit squash subject takes precedence. Without one, the Action uses
+  the PR title from its bounded PR read and does not read a separate Issue
+  field. Failed checks return `error.code: pr-checks-failed`; merge conflicts
+  return `conflict`. The Profile declares recovery explicitly.
 
-`retry-safe` is a failure classification, not retry authority. It means that a
-new explicit attempt may repeat the operation after the current Task fails. A
-Profile does not automatically retry it unless it declares that policy, and the
-built-in Profiles deliberately do not. Host cancellation remains a platform
-cancellation and must not be normalized to `retry-safe`.
+`retry-safe` is a failure classification, not retry authority. A new explicit
+attempt may repeat the operation after the current task fails, but a Profile
+does not automatically retry it. Host cancellation remains platform
+cancellation and must not become `retry-safe`.
 
-Publishing, PR metadata, and merge registration are three independent tasks with independent failure
-boundaries. A push failure retries only push; a PR operation failure retries only that PR operation.
+Publishing, PR metadata, and merge registration are independent tasks with
+independent failure boundaries. A push failure retries only push. A PR
+operation failure retries only that PR operation.
 
-The `mohist/github-pr-status` Stage Check with `expect: merged` is one-shot post-hoc
-verification: by the time it runs, the registration Action has already completed the wait.
+The `mohist/github-pr-status` Stage Check with `expect: merged` is one-shot
+post-hoc verification. The registration Action has already completed its wait.
+The `mohist/github-pr-checks` Stage Check exposes polling and classification as
+an explicit task. A typical Profile places it after `mark-pr-ready` in the
+check Stage. Failed checks return `error.code: pr-checks-failed`, and the
+Profile declares `recover:fix-pr-checks` with `recover:push` and `retrySelf`.
+The check is read-only: it does not modify the PR, push, or perform implicit
+repair. See [`builtin-workflows.md`](builtin-workflows.md) for the complete
+task graph.
 
-`mohist/github-pr-checks` exposes check polling and classification as an explicit task in
-the Stage graph. A typical Profile places this delivery CI check after `mark-pr-ready` in the check
-Stage. Failed checks return `error.code: pr-checks-failed`, and the Profile declares the
-`recover:fix-pr-checks` + `recover:push` + `retrySelf` recovery explicitly. It is read-only: it
-does not modify the PR, push, or perform implicit repair.
+## Non-Goals
 
-See [`builtin-workflows.md`](builtin-workflows.md) for the complete task graph.
+- External plugins, versioned Action names, and composite Actions are not
+  supported.
+- A Workflow Profile cannot invoke Runtime-specific Actions directly.
+- An Action does not own Workflow state, recovery state, or Agent execution
+  lifecycle.
 
 ## Status
 
-Implemented: manifests and `defineAction`; registry and catalog reporting, including tombstones,
-when Runner registers with Server; catalog validation during Profile save with an
-`actionValidation` response marker; declarative capability injection for `agent-turn`,
-`add-tasks`, and `write-vars`; structured output end to end; `setVars` projection; capability
-projection in the Server catalog; and the required non-overridable `task.uses` contract for
-`mohist/task-list`.
+Implemented: manifests and `defineAction`; registry and catalog reporting,
+including tombstones; catalog validation during Profile save with an
+`actionValidation` response marker; declarative `agent-turn`, `add-tasks`, and
+`write-vars` capabilities; structured output; `setVars` projection; catalog
+capability projection in Server; and the non-overridable `task.uses` contract
+for `mohist/task-list`.

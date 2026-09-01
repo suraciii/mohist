@@ -1,148 +1,128 @@
 # Task Recovery
 
-> Workflow recovery policy decides which follow-up Action to schedule. AgentJob owns physical Agent
-> execution recovery; a recovery `mohist/agent` Action creates a new AgentJob.
+Workflow recovery chooses which follow-up Action to schedule. AgentJob owns physical Agent execution recovery.
+A recovery `mohist/agent` Action creates a new AgentJob.
 
-After task execution, the Runner executor matches `when` expressions against the
-`{ output, error }` result context, builds recovery tasks, and returns them through `addTasks` for
-mechanical insertion by the engine. Recovery is part of how a task completes, not remediation only
-after failure. Explicit matching is independent of task success or failure: successful output that
-matches `when: output.promise=FAIL` also triggers recovery. The default handler, which omits `when`,
-handles only results that contain an error, including final failures produced by the executor after
-the Action completes.
+The Runner executor matches `when` expressions against the `{ output, error }` result context, builds recovery tasks,
+and returns them through `addTasks` for mechanical insertion by the engine. Recovery is part of task
+completion, not only failure remediation. Explicit matching is independent of task success or failure:
+successful output that matches `when: output.promise=FAIL` also triggers recovery. The default handler, which omits `when`,
+handles only results with an error, including final failures produced after the Action completes.
 
-See the product reference for author-visible syntax and semantics, including budget, first match,
-`retrySelf`, and manual retry opening a new round:
-[`recovery`](../../docs/workflow-definition.md#recovery-failure-recovery). This document defines the
-execution mechanism.
+Author-visible syntax and semantics, including budget, first match, `retrySelf`, and manual retry, are defined
+in [`recovery`](../../docs/workflow-definition.md#recovery-failure-recovery). This document defines execution.
 
-## Responsibilities
+## Design Drivers
 
-- The engine remains generic. It understands only Stage, task, check, completed, and failed; it
-  never understands recovery. To the engine, `recovery` is an opaque task attribute.
-- Recovery configuration remains read-only from YAML through Runner. Remaining budget is
-  per-attempt execution state outside configuration, stored in `recoveryRemaining`, not a modified
-  copy of the configuration.
-- Matching happens in the Runner executor. An explicit `when` matches any path in result context;
-  the final handler without `when` matches only when an error exists. An Action has no recovery
-  awareness.
-- Recovery tasks are real Workflow tasks and appear in the graph, timeline, and state.
-- The task that triggers recovery ends as completed because it produced later work.
-- When Runner constructs a handler task, it expands only `${{ failure.* }}` references bound to the
-  triggering attempt. Other expressions remain in the new task declaration; see
-  [`task-dispatch.md`](task-dispatch.md).
-- `retrySelf` must copy the triggering attempt's original dispatch declaration, not this Action
-  execution's rendered input. It deep-copies `with`, task-level `expect`, artifacts, `setVars`,
-  recovery configuration, and task identity. Only `recoveryRemaining` is decremented as separate
-  state. A later dispatch can therefore expand `${{ vars.* }}` against its own Variable snapshot,
-  rather than freezing values resolved by the triggering attempt into the retry.
-- A new attempt expands its declaration against its own context snapshot.
+- The engine remains generic. It understands Stage, task, check, completion, and failure. It treats `recovery`
+  as an opaque task attribute.
+- Workflow YAML remains read-only during execution. Remaining budget is per-attempt state in `recoveryRemaining`, not a
+  modified configuration copy.
+- Recovery tasks are real Workflow tasks. They appear in the graph, timeline, and state.
+- A task that triggers recovery is completed because it produced later work.
+- Runner owns matching and task construction. Actions do not interpret recovery.
 
-The responsibility split is:
+## Model
 
-- Workflow YAML declares `budget` and `handlers`, with optional `when`, `tasks`, and `retrySelf`.
-- The Action returns output or an error and has no recovery awareness.
-- The Runner executor matches explicit `when` first, then the default handler when an error exists;
-  maps explicit `null` to the full `budget`, clamps a numeric value to the declared range, and
-  builds `addTasks` from the original declaration.
-- The engine mechanically inserts `addTasks`, passes `recoveryRemaining` as opaque per-attempt
-  state, and reconstructs a manual retry only from definitional fields.
+Workflow YAML declares `budget` and `handlers`, with optional `when`, `tasks`, and `retrySelf`. The Action
+returns output or an error and has no recovery awareness. The engine inserts returned `addTasks` mechanically
+and passes `recoveryRemaining` as opaque per-attempt state.
 
-## Remaining Budget (`recoveryRemaining`)
+Runner matches explicit `when` handlers first and then the default handler when an error exists. It maps
+explicit `null` to the full `budget`, clamps numeric values to the declared range, and builds `addTasks`
+from the original declaration. A handler task receives its own full `recoveryRemaining`. A `retrySelf` copy receives the
+remaining budget minus one.
 
-The `recovery` configuration remains read-only. The number of recoveries left in the current round
-is execution state outside configuration and flows with the task in `recoveryRemaining`:
+Runner expands only `${{ failure.* }}` references while constructing a recovery task. Other expressions remain in the
+new task declaration and are evaluated at that attempt's dispatch entry point. See
+[`task-dispatch.md`](task-dispatch.md).
 
-```mermaid
-flowchart LR
-    Y["YAML budget: 2"] --> TR["TaskRun: Recovery (read-only), RecoveryRemaining"]
-    TR --> WI["WorkItem / dispatch"]
-    WI --> RT["Runner tryRecovery"]
-    RT -->|"null: budget unchanged"| TR
-    RT -->|"match and remaining > 0"| AT["addTasks"]
-    AT --> RTI["RuntimeTaskInput: retrySelf = original declaration, recoveryRemaining = remaining - 1"]
-    RTI --> TR
+A `retrySelf` task copies the triggering attempt's original dispatch declaration, not this Action execution's
+rendered input. The copy includes `with`, task-level `expect`, artifacts, `setVars`, recovery
+configuration, and task identity. Only `recoveryRemaining` changes as separate state. A later dispatch can therefore
+evaluate `${{ vars.* }}` against its own Variable snapshot instead of freezing values from the triggering attempt.
+Every new attempt expands its declaration against its own context snapshot.
+
+## Semantics
+
+### Remaining Budget (`recoveryRemaining`)
+
+A recovery budget bounds one continuous automatic-recovery round. `recoveryRemaining` travels with the task as execution
+state:
+
+```text diagram
++------+    +------+    +------+    +--------+    +-----+
+| YAML +--->| Task +--->| Work +--->| Runner +--->| Add |
++------+    +------+    +------+    +----+---+    +--+--+
+                ^                        |           |
+                +------------------------+-----------+
 ```
 
-- Runner `tryRecovery` is the sole read/write authority. The engine only passes this field through
-  and never reads its value.
-- Explicit `null` starts a new round and receives the full `budget`. An absent field is malformed
-  transport and receives ordinary-result handling; it must not reopen the budget.
-- On the engine side, `recoveryRemaining` is not part of a task definition. During addTask intake,
-  it passes to `TaskRun` as side-channel state, following the `causedByFeedbackId` precedent, and
-  never enters `TaskDefinition`.
+Runner `tryRecovery` is the sole read and write authority for `recoveryRemaining`. The engine passes the field through and
+never reads its value. On the engine side, the field is side-channel state during task intake, following the
+`causedByFeedbackId` precedent. It never enters `TaskDefinition`.
 
-## Manual Retry Opens a New Round
+An explicit `null` starts a new round with the full `budget`. An absent field is malformed transport and
+receives ordinary-result handling. It must not reopen the budget. A matched handler consumes one unit of
+budget. An unmatched result consumes none. The declaration is never modified.
 
-Invariant: **a budget bounds one continuous round of automatic recovery; a manual retry opens a
-new round with the full budget.**
+### Manual Retry Opens a New Round
 
-A manual retry reconstructs the Task from its original declaration rather than from the previous
-attempt's resolved input. This boundary lets corrected Variables and Prompts take effect without
-turning execution output into future configuration. `with` and `expect` therefore remain Workflow
-expressions, while execution state such as `recoveryRemaining` cannot enter the new declaration.
-The new attempt starts with `recoveryRemaining = null`, so Runner opens a fresh round from the
-declared `budget`. The failed attempt and its consumed budget remain unchanged for audit.
+A manual retry reconstructs the Task from its original declaration and definitional fields. It starts with
+`recoveryRemaining = null`, so Runner opens a new round from the declared `budget`. Corrected Variables and Prompts can
+therefore take effect without turning execution output into future configuration. The failed attempt and its
+consumed budget remain unchanged for audit.
 
-## A Stage Rerun Does Not Reuse TaskRun Identity
+### A Stage Rerun Does Not Reuse TaskRun Identity
 
-A `TaskRun` execution identity consists of Definition ID, Stage attempt, and task attempt. The first
-Stage attempt retains the existing `{definitionId}.{taskAttempt}` format. Starting with the second,
-it uses `{definitionId}.s{stageAttempt}.{taskAttempt}`. For example, the first build task is
-`T-001.1`, a manual retry in the same Stage is `T-001.2`, and the first task after rerunning build is
-`T-001.s2.1`. Definition IDs remain scoped to a Stage, so another Stage may use the same ID. If its
-candidate TaskRun ID already exists in the WorkflowRun, the allocator appends the first available
-`.runN` suffix. This preserves established IDs when there is no collision while keeping every
-persisted TaskRun ID and Work ID unique within the run.
+A `TaskRun` identity consists of Definition ID, Stage attempt, and task attempt. The first Stage attempt
+retains `{definitionId}.{taskAttempt}`. Later attempts use `{definitionId}.s{stageAttempt}.{taskAttempt}`. For example, the first build task is `T-001.1`, a manual
+retry in the same Stage is `T-001.2`, and the first task after rerunning build is `T-001.s2.1`.
 
-`rerun-from-stage` discards visible task history from the old Stage, but it cannot decrease the
-Stage attempt or let a new TaskRun reuse an old identity. A Workflow AgentSession whose default
-name is the Work ID is therefore always a new logical Session and cannot inherit the invalidated
-attempt's physical binding or working directory. An explicit `session` name continues to define
-its own reuse semantics through the Workflow Definition.
+Definition IDs are scoped to a Stage. If a candidate TaskRun ID already exists in the WorkflowRun, the
+allocator appends the first available `.runN` suffix. This preserves established IDs without collisions and
+keeps every persisted TaskRun ID and Work ID unique within the run.
 
-## Runtime Binding Repair Is Not Workflow Recovery
+`rerun-from-stage` discards visible task history from the old Stage, but it cannot decrease the Stage attempt or reuse
+an old identity. A Workflow AgentSession whose default name is the Work ID is always a new logical Session. It
+cannot inherit the invalidated attempt's physical binding or working directory. An explicit `session` name
+retains its own reuse semantics through the Workflow Definition.
 
-Before submitting new independent input, AgentSession can determine that its current Runtime
-Session is confirmed missing and repair the physical binding under
-[`agent-execution.md`](../agent-execution.md#runtime-session-missing-recovery). This happens before
-the Action produces either a successful or failed result. When repair succeeds, the original
-TaskRun attempt continues without creating a recovery task, decrementing `recoveryRemaining`, or
-requiring manual Retry. Only if repair fails does the Action pass a normalized error to the recovery
-and manual retry semantics in this document.
+### Runtime Binding Repair Is Not Workflow Recovery
 
-WorkflowRun must neither decide nor implement Runtime binding repair. Runner reports Runtime facts,
-Session arbitrates and persists the binding, and Workflow interprets only the final Action result.
+Before submitting independent input, AgentSession may find that its Runtime Session is confirmed missing and
+repair the physical binding under [`agent-execution.md`](../agent-execution.md#runtime-session-missing-recovery). Repair
+occurs before the Action produces a result. A successful repair continues the original TaskRun attempt without
+a recovery task, budget decrement, or manual Retry. A failed repair passes a normalized error into the
+recovery and manual-retry rules here.
 
-## Runner Executor Flow
+WorkflowRun neither decides nor implements Runtime binding repair. Runner reports Runtime facts, Session
+arbitrates and persists the binding, and Workflow interprets only the final Action result.
+
+### Runner Executor Flow
 
 The Runner executor applies these rules in order:
 
-1. Build the result context `{ output, error }` from the Action result.
-2. An absent `recoveryRemaining` returns the ordinary result.
-3. Otherwise compute the remaining budget: explicit `null` receives the full declared `budget`,
-   and a numeric value clamps to the declared range.
-4. Match the first explicit `when` handler against the context; when none matches and an error
-   exists, match the default handler without `when`.
-5. When a handler matches and budget remains, bind `${{ failure.* }}` references in its tasks,
-   copy the original declaration for `retrySelf`, and return completed with `addTasks`. Handler
-   tasks receive their own full `recoveryRemaining`; the retry copy receives the remaining budget
-   minus one.
-6. Without a matched handler, the result stands: completed when no error exists, failed otherwise.
+1. Build `{ output, error }` from the Action result.
+2. Return the ordinary result when `recoveryRemaining` is absent.
+3. Give explicit `null` the full declared `budget`. Clamp numeric values to the declared range.
+4. Match the first explicit `when` handler. If none matches and an error exists, match the default handler
+   without `when`.
+5. If a handler matches and budget remains, bind `${{ failure.* }}` in its tasks, copy the original declaration for
+   `retrySelf`, and return completed with `addTasks`. Handler tasks receive full budget. The retry copy receives
+   the remaining budget minus one.
+6. Without a matching handler, return completed when there is no error and failed otherwise.
 
-At most one default handler exists and it must be last, so it cannot shadow an explicit match. It
-matches after the executor has formed the final failed result, which lets the same recovery path
-handle failures found after an Action, such as a dirty workspace or invalid branch. A negative
-value clamps to 0 and a value above the declared limit clamps to that limit. A matched handler
-consumes one unit of budget; an unmatched result consumes none. The declaration is never modified.
+At most one default handler exists and it is last, so it cannot shadow an explicit match. It matches after the
+executor forms the final failed result, including failures such as a dirty workspace or invalid branch.
+Negative `recoveryRemaining` clamps to 0. Values above the declared limit clamp to that limit.
 
-A recovery handler template can read `${{ failure.output.* }}`, `${{ failure.error.code }}`, and
-`${{ failure.error.message }}`. The message exists only to carry an actionable error into a
-recovery task. A handler must not branch on the message.
+A recovery handler may read `${{ failure.output.* }}`, `${{ failure.error.code }}`, and `${{ failure.error.message }}`. The message carries an actionable error into
+a recovery task. A handler must not branch on the message.
 
-## WorkResult
+### WorkResult
 
-```json
+```text literal
 {
   "status": "completed",
   "addTasks": [
@@ -152,35 +132,25 @@ recovery task. A handler must not branch on the message.
 }
 ```
 
-- `completed` with `addTasks`: the engine inserts the tasks into the current Stage.
-- `completed` without `addTasks`: normal completion.
-- `failed`: Workflow fails.
+`completed` with `addTasks` makes the engine insert tasks into the current Stage. `completed` without `addTasks` is
+normal completion. `failed` fails the Workflow.
 
-## Status
+### One-Off Task Injection Uses the Profile Mechanism
 
-Implemented: both `retrySelf` and manual retry reconstruct the original declaration.
-`with` and `expect` retain Workflow expressions, a new attempt expands them against its own context
-snapshot, and `recoveryRemaining` is separate execution state that cannot enter reconstruction by
-construction.
+An API-triggered rebase task carries a `RecoveryDefinition` and uses the same budget, handler matching, `when`,
+`retrySelf`, and remaining-budget semantics as inline `task.recovery`. Only the trigger differs: the API route selects
+the recovery and the Runner executor applies it. Runner still matches and decrements the budget, and `addTasks`
+still follows the engine insertion path.
 
-## One-Off Task Injection Uses the Same Recovery Mechanism as a Profile
+One-off injection does not have a second representation or different namespaces. Recovery content remains a
+`RecoveryDefinition`, so application code selects a name rather than copying `uses`, Prompt references, budget, or
+handler order.
 
-An API-triggered rebase task carries a `RecoveryDefinition` and submits it to the engine under the
-semantics in this document: budget, handlers, `when` matching, `retrySelf`, and the remaining-budget
-behavior of manual retry. It has no behavioral or semantic difference from inline `task.recovery`
-in a Profile; only the trigger differs, API route versus Runner executor. One mechanism is enough.
-API-injected recovery remains a `RecoveryDefinition`, Runner still performs matching and decrements
-remaining budget, and `addTasks` still follows the engine insertion path.
+### Top-Level `recoveries`: Named Recovery Templates
 
-This rules out a separate representation for one-off injection with different budget semantics,
-handler matching, or namespaces. Such a representation would duplicate every field defined here
-without adding a requirement.
-
-## Top-Level `recoveries`: Named Recovery Templates
-
-One-off injection references a named recovery Definition from the Profile, rather than hard-coding
-recovery content in an API route. The top-level `recoveries` key in Workflow YAML owns named
-recovery templates:
+The top-level `recoveries` key owns named recovery templates. A one-off trigger selects a template from the
+complete Workflow Definition bound to the WorkflowRun. It does not read the current Profile or build a second
+definition in application code.
 
 ```yaml
 recoveries:
@@ -199,14 +169,16 @@ recoveries:
         retrySelf: false
 ```
 
-- The `recoveries` map is part of WorkflowDefinition and round-trips with the rest of the Profile.
-- A recovery trigger selects a named template from the complete Definition bound to the WorkflowRun.
-  It does not read the current Profile or build a second recovery definition in application code.
-- Workflow content is the single author of recovery `uses`, Prompt references, budget, and handler
-  order. Keeping application code limited to name selection lets a Profile edit change behavior for
-  future WorkflowRuns in one place and prevents a copied recovery path from drifting to the wrong
-  Prompt.
-- Naming convention: template names are lowercase and hyphen-separated, such as
-  `rebase-conflicts` and `plan-conflicts`. Each built-in YAML file declares the templates it needs.
-  Extract cross-Profile sharing into a separate file only after a third Profile or a second shared
-  template appears.
+The `recoveries` map is part of WorkflowDefinition and round-trips with the Profile. Workflow content remains the
+single author of recovery `uses`, Prompt references, budget, and handler order. A Profile edit therefore
+changes future WorkflowRuns in one place.
+
+Template names are lowercase and hyphen-separated, such as `rebase-conflicts` and `plan-conflicts`. Each built-in YAML file
+declares the templates it needs. Extract cross-Profile sharing only after a third Profile or a second shared
+template appears.
+
+## Status
+
+Implemented: `retrySelf` and manual retry reconstruct the original declaration. `with` and `expect` retain
+Workflow expressions, new attempts evaluate them against their own context snapshot, and `recoveryRemaining` remains
+separate execution state.
