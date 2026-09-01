@@ -318,6 +318,9 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if strings.HasPrefix(command.kind, "project-") || strings.HasPrefix(command.kind, "repo-") || strings.HasPrefix(command.kind, "workspace-") {
 		return runProjectSpace(ctx, deps, client, command)
 	}
+	if strings.HasPrefix(command.kind, "issue-") || strings.HasPrefix(command.kind, "epic-") || strings.HasPrefix(command.kind, "label-") {
+		return runOrganization(ctx, deps, client, command)
+	}
 	data, err := client.get(ctx, command.path)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
@@ -375,6 +378,9 @@ func parse(args []string) (command, error) {
 	}
 	if args[0] == "project" || args[0] == "repo" || args[0] == "workspace" {
 		return parseProjectSpace(args[0], args[1:])
+	}
+	if args[0] == "issue" || args[0] == "epic" || args[0] == "label" {
+		return parseOrganization(args[0], args[1:])
 	}
 	if args[0] == "run" && len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
 		return command{help: true, helpText: runGroupHelp()}, nil
