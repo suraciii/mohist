@@ -12,8 +12,8 @@ function config() {
   return parseSuiteConfig(`{
     "suiteDeadlineMs": 300000,
     "tracks": [
-      {"id":"server-unit","kind":"report-only","trackType":"behavior","application":"server","specKinds":["Design"],"level":"L0","resources":[],"report":"reports/server.json","reportFormat":"vitest","deadlineMs":1000,"enforce":true,"rules":[{"id":"unit","percentile":95,"percentileMs":50}]},
-      {"id":"server-spec","kind":"report-only","trackType":"behavior","application":"server","specKinds":["Product"],"level":"L1","resources":[],"report":"reports/spec.json","reportFormat":"vitest","deadlineMs":1000,"enforce":true,"rules":[{"id":"spec","percentile":95,"percentileMs":500}]},
+      {"id":"server-l0","kind":"report-only","trackType":"behavior","application":"server","specKinds":["Design"],"level":"L0","resources":[],"report":"reports/server.json","reportFormat":"vitest","deadlineMs":1000,"enforce":true,"rules":[{"id":"unit","percentile":95,"percentileMs":50}]},
+      {"id":"server-l1","kind":"report-only","trackType":"behavior","application":"server","specKinds":["Product"],"level":"L1","resources":[],"report":"reports/spec.json","reportFormat":"vitest","deadlineMs":1000,"enforce":true,"rules":[{"id":"spec","percentile":95,"percentileMs":500}]},
       {"id":"repository-arch","kind":"report-only","trackType":"architecture","architectureScope":"repository","specKinds":["Design"],"resources":[],"report":"reports/arch.json","reportFormat":"vitest","deadlineMs":1000,"enforce":true,"rules":[{"id":"arch"}]}
     ],
     "plan": {
