@@ -48,6 +48,7 @@ public sealed class SlackStatusProjection : IScopedService
         string? threadTs,
         string? progressDispatchRef = null,
         JsonElement? blocks = null,
+        string? sessionId = null,
         CancellationToken ct = default)
     {
         // Queue the receipt removal first. The adapter claims rows in their
@@ -81,6 +82,7 @@ public sealed class SlackStatusProjection : IScopedService
                 ct);
         }
 
+        var sessionCardText = BuildSessionCardText(sessionId);
         var result = await _outbox.UpsertReplaceableProgressAsync(new SlackOutboxDraft(
             projectId,
             connectionId,
@@ -90,7 +92,7 @@ public sealed class SlackStatusProjection : IScopedService
             progressDispatchRef ?? DispatchRef(source, "progress"),
             JsonSerializer.Serialize(new SlackDeliveryPayload(
                 SlackDeliveryOperations.PostMessage,
-                "Working...",
+                sessionCardText,
                 ClientMessageId: DispatchRef(source, "status"),
                 FallbackDispatchRef: DispatchRef(source, "status"),
                 StatusDispatchRef: DispatchRef(source, "status"),
@@ -106,7 +108,7 @@ public sealed class SlackStatusProjection : IScopedService
             "working-add",
             SlackDeliveryOperations.ReactionAdd,
             WorkingReaction,
-            "Working...",
+            sessionCardText,
             ct);
         return result;
     }
@@ -167,8 +169,8 @@ public sealed class SlackStatusProjection : IScopedService
             JsonSerializer.Serialize(payload),
             threadTs,
             OwnerKindFor(projectId));
-        var promoted = await _outbox.PromotePendingProgressAsync(draft, dispatchRef, ct);
-        var result = promoted ?? await _outbox.EnqueueRequiredAsync(draft, ct);
+        var terminalProjection = await _outbox.PromotePendingProgressAsync(draft, dispatchRef, ct);
+        var result = terminalProjection ?? await _outbox.EnqueueRequiredAsync(draft, ct);
         if (hadProgress)
         {
             await EnqueueReactionAsync(
@@ -202,9 +204,9 @@ public sealed class SlackStatusProjection : IScopedService
     /// (Completed/Failed). The reply body itself comes from the Agent's
     /// reply action (<c>mo slack message send</c>); silence is a
     /// legitimate outcome, so this never injects text. Safe to call
-    /// after a reply action already promoted the progress message in
-    /// place — it looks for either a replaceable progress row or the
-    /// promoted terminal row for the same dispatch reference.
+    /// after a reply action already created an independent terminal row — it
+    /// looks for either a replaceable progress row or the terminal row for
+    /// the same dispatch reference.
     /// </summary>
     public async Task FinalizeLivenessAsync(
         string projectId,
@@ -278,6 +280,11 @@ public sealed class SlackStatusProjection : IScopedService
 
     public static string DispatchRef(SlackMessageIdentity source, string phase) =>
         $"slack-status:{source.AsKey()}:{phase}";
+
+    private static string BuildSessionCardText(string? sessionId) =>
+        string.IsNullOrWhiteSpace(sessionId)
+            ? "Agent session."
+            : SlackFinalReplyRenderer.AppendStableReference("Agent session.", sessionId, sessionId);
 
     public static string ReactionFor(string status) => status switch
     {

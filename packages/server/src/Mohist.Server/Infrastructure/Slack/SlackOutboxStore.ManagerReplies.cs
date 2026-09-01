@@ -12,10 +12,10 @@ public sealed partial class SlackOutboxStore
     /// Enqueues the reply action for one Manager execution. Manager rows are
     /// selected by the complete immutable origin and the stable liveness
     /// dispatch reference; a conversation lookup is deliberately not used.
-    /// A pending progress row is promoted in place and retains its dispatch
-    /// identity so terminal convergence can still find it. Repeated sends
-    /// return the existing row without appending text or creating another
-    /// lifecycle.
+    /// A pending Manager liveness row may be converted in place and retains
+    /// its dispatch identity so terminal convergence can still find it.
+    /// Repeated sends return the existing row without appending text or
+    /// creating another lifecycle.
     /// </summary>
     public async Task<SlackAgentReplyResult> EnqueueManagerAgentReplyAsync(
         SlackManagerReplyAnchor anchor,

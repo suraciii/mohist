@@ -347,7 +347,8 @@ internal sealed class SlackChannelLaunchService : IScopedService
             threadTs,
             SlackStatusProjection.DispatchRef(source, "progress"),
             blocks,
-            ct);
+            sessionId: launch.SessionId,
+            ct: ct);
     }
 
     internal static (string SessionId, string InputId, string TurnId) PreMintSlackLaunchIds(

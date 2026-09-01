@@ -52,9 +52,11 @@ public sealed class SlackStatusProjectionTests
         var projection = new SlackStatusProjection(store);
         var source = new SlackMessageIdentity("T1", "C1", "100.001");
 
-        var progress = await projection.EnqueueWorkingAsync("p1", "c1", source, null);
+        var progress = await projection.EnqueueWorkingAsync(
+            "p1", "c1", source, null, sessionId: "agent-session-1");
         await store.MarkDeliveredAsync("p1", progress.Id, new SlackProviderMessageIdentity("C1", "100.002"));
-        await projection.EnqueueWorkingAsync("p1", "c1", source, null);
+        await projection.EnqueueWorkingAsync(
+            "p1", "c1", source, null, sessionId: "agent-session-1");
 
         var current = Assert.Single(
             (await store.ListAsync("p1", "c1")).Entries,
@@ -62,6 +64,45 @@ public sealed class SlackStatusProjectionTests
         Assert.Equal(
             new SlackProviderMessageIdentity("C1", "100.002"),
             SlackDeliveryPayload.Parse(current.PayloadJson).ProviderMessageIdentity);
+        var payload = SlackDeliveryPayload.Parse(current.PayloadJson);
+        Assert.Equal("Agent session.\nSession: agent-session-1", payload.Text);
+        Assert.DoesNotContain("Working", payload.Text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(SlackOutboxStates.Claimed)]
+    [InlineData(SlackOutboxStates.Delivered)]
+    [InlineData(SlackOutboxStates.DeliveryUncertain)]
+    public async Task Replayed_session_card_does_not_revive_a_non_pending_delivery(string state)
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
+        await SeedConnectionAsync(database, time);
+        var store = CreateStore(database, time);
+        var projection = new SlackStatusProjection(store);
+        var source = new SlackMessageIdentity("T1", "C1", "100.001");
+
+        var card = await projection.EnqueueWorkingAsync(
+            "p1", "c1", source, null, sessionId: "agent-session-1");
+        await using (var db = database.CreateContext())
+        {
+            var row = await db.SlackOutboxRows.SingleAsync(candidate => candidate.Id == card.Id);
+            row.State = state;
+            await db.SaveChangesAsync();
+        }
+
+        var replay = await projection.EnqueueWorkingAsync(
+            "p1", "c1", source, null, sessionId: "agent-session-2");
+
+        Assert.True(replay.MergedIntoExisting);
+        Assert.Equal(card.Id, replay.Id);
+        var persisted = Assert.Single(
+            (await store.ListAsync("p1", "c1")).Entries,
+            entry => entry.Id == card.Id);
+        Assert.Equal(state, persisted.State);
+        Assert.Equal(
+            "Agent session.\nSession: agent-session-1",
+            SlackDeliveryPayload.Parse(persisted.PayloadJson).Text);
     }
 
     [Fact]

@@ -254,6 +254,12 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         var now = _timeProvider.GetUtcNow();
         if (existing is not null)
         {
+            // A Session card is immutable once an adapter has started delivery.
+            // Replayed ingress must not revive a claimed, delivered, or uncertain
+            // row and race the provider reconciliation path.
+            if (existing.State != SlackOutboxStates.Pending)
+                return new SlackOutboxEnqueueResult(existing.Id, MergedIntoExisting: true);
+
             var previousPayload = SlackDeliveryPayload.Parse(existing.PayloadJson);
             var nextPayload = SlackDeliveryPayload.Parse(draft.PayloadJson);
             existing.PayloadJson = System.Text.Json.JsonSerializer.Serialize(
@@ -263,14 +269,7 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
                         ?? previousPayload.ProviderMessageIdentity,
                 });
             existing.ThreadTs = draft.ThreadTs;
-            existing.State = SlackOutboxStates.Pending;
             existing.NextAttemptAt = now;
-            existing.ClaimedAt = null;
-            existing.ClaimedByAdapterId = null;
-            existing.DeliveredAt = null;
-            existing.DeliveryUncertainAt = null;
-            existing.DeadLetteredAt = null;
-            existing.LastError = null;
             existing.UpdatedAt = now;
             await db.SaveChangesAsync(ct);
             return new SlackOutboxEnqueueResult(existing.Id, MergedIntoExisting: true);
@@ -283,14 +282,14 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
     /// Enqueues an Agent-authored reply (<c>mo slack message send</c>) into
     /// the same outbox as liveness projections. The reply is the Agent's
     /// voice — the caller passes already-redacted, mrkdwn-rendered text.
-    /// Text landing prefers an in-place update of the replaceable progress
-    /// message for this input (one input = one final answer); a repeated
-    /// send for the same input merges its text into the existing terminal
-    /// row. When the injected reply dispatch reference is supplied, terminal
+    /// The Agent reply is independent from the Server-authored Session card;
+    /// a repeated send for the same input merges its text into the existing
+    /// terminal row. When the injected reply dispatch reference is supplied, terminal
     /// selection and retry identity are scoped to that input rather than the
     /// surrounding conversation.
-    /// When no progress row exists the reply resolves the owning Connection
-    /// from the conversation mapping and posts a fresh terminal answer.
+    /// The reply resolves the owning Connection from the conversation mapping
+    /// and posts one terminal answer regardless of the Session card's delivery
+    /// state.
     /// Attachments (<paramref name="imageUrl"/>/<paramref name="fileName"/>
     /// + <paramref name="fileContentBase64"/>) always land as their own
     /// fresh message: an image cannot replace a progress message in place
@@ -304,7 +303,6 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
         string? threadTs,
         string redactedText,
         string? connectionId = null,
-        string? triggeringMessageId = null,
         string? replyDispatchRef = null,
         string? imageUrl = null,
         string? fileName = null,
@@ -321,10 +319,6 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
             ? null
             : ReplyDispatchRef(replyDispatchRef.Trim());
         connectionId = string.IsNullOrWhiteSpace(connectionId) ? null : connectionId.Trim();
-        triggeringMessageId = string.IsNullOrWhiteSpace(triggeringMessageId)
-            ? null
-            : triggeringMessageId.Trim();
-
         if (imageUrl is not null || fileName is not null || fileContentBase64 is not null)
         {
             var attachment = await EnqueueAttachmentReplyAsync(
@@ -332,23 +326,6 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
                 connectionId, terminalDispatchRef, imageUrl, fileName, fileContentBase64,
                 idempotentRetryOnly, ct);
             return attachment;
-        }
-
-        var progress = idempotentRetryOnly
-            ? null
-            : await FindReplyProgressRowAsync(
-                db, projectId, conversationId, threadTs, connectionId, triggeringMessageId, ct);
-        if (progress is not null && await IsLiveOwnerRowAsync(db, progress, ct))
-        {
-            var promoted = await PromoteReplyProgressAsync(
-                db, progress, redactedText, threadTs, terminalDispatchRef, ct);
-            await transaction.CommitAsync(ct);
-            return new SlackAgentReplyResult(
-                Accepted: true,
-                progress.ConnectionId,
-                promoted.Id,
-                progress.DispatchRef ?? promoted.Id,
-                MergedIntoExisting: true);
         }
 
         var terminal = await FindReplyTerminalRowAsync(
@@ -478,37 +455,6 @@ public sealed partial class SlackOutboxStore : IScopedService, IAgentConnectionP
                 : ConflictingAgentReply(resolvedConnectionId, canonical.Id, dispatchRef);
         }
         return new SlackAgentReplyResult(true, resolvedConnectionId, row.Id, dispatchRef, MergedIntoExisting: false);
-    }
-
-    private async Task<SlackOutboxRow> PromoteReplyProgressAsync(
-        MohistDbContext db,
-        SlackOutboxRow progress,
-        string redactedText,
-        string? threadTs,
-        string? terminalDispatchRef,
-        CancellationToken ct)
-    {
-        var previous = SlackDeliveryPayload.Parse(progress.PayloadJson);
-        var progressDispatchRef = progress.DispatchRef;
-        var dispatchRef = terminalDispatchRef ?? progressDispatchRef ?? progress.Id;
-        // Carry the liveness StatusDispatchRef forward so the in-place update is
-        // a faithful replacement of the progress message: the post-reply
-        // liveness finalization derives the reaction target (projectionSource)
-        // from this authoritative field, exactly as the prior terminal path did.
-        var payload = BuildReplyPayload(
-            redactedText,
-            dispatchRef,
-            previous.ProviderMessageIdentity,
-            previous.StatusDispatchRef,
-            progressDispatchRef);
-        progress.Kind = SlackOutboxKinds.TerminalResult;
-        progress.DispatchRef = dispatchRef;
-        progress.PayloadJson = JsonSerializer.Serialize(payload);
-        if (!string.IsNullOrWhiteSpace(threadTs))
-            progress.ThreadTs = threadTs;
-        progress.UpdatedAt = _timeProvider.GetUtcNow();
-        await db.SaveChangesAsync(ct);
-        return progress;
     }
 
     private static SlackDeliveryPayload BuildReplyPayload(

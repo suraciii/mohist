@@ -351,9 +351,13 @@ Runtime permissions.
 Slack carries two signals with different owners:
 
 - **Liveness** is owned by Mohist. Reactions are 👀 Received, ⏳ Working, ✅
-  Completed, and ⚠️ exception. Mohist also maintains one replaceable status
-  message. Every accepted input reaches a terminal liveness form on completion,
-  failure, cancellation, Agent crash, or service restart.
+  Completed, and ⚠️ exception. Every accepted input reaches a terminal
+  reaction on completion, failure, cancellation, Agent crash, or service
+  restart.
+- **The Session card** is owned by Mohist. It carries the stable Session
+  reference, **Open in Mohist** when available, and state-bound controls such as
+  Stop. It is an observation and control surface, not a progress sentence or an
+  Agent reply, so it never remains as a misleading `Working...` message.
 - **The reply** is owned by the Agent. The Agent sends content through the send
   action and the injected reply anchor. Reasoning, tool calls, and intermediate
   output never become Slack messages.
@@ -365,12 +369,12 @@ IDs. Mohist never sends a localhost address to Slack.
 
 ### One Input, One Answer
 
-For each accepted input, Mohist may add 👀, ⏳, and one status message. The Agent
-reply replaces the status message when possible. One input has at most one
-status message and one final answer. Fast work may skip the status message.
-Retries and duplicate delivery never create a second answer. If a status update
-fails, Mohist appends the final answer once in the same thread and records a
-diagnosable delivery problem.
+For each accepted input, Mohist may add 👀, ⏳, and one Session card. The
+Agent reply is a separate Agent-authored message; it never mutates the
+Server-authored Session card. One input has at most one Session card and one
+final answer. Fast work may skip the Session card. Retries and duplicate
+delivery never create a second answer. Delivery uncertainty for the Session
+card never delays, redirects, or duplicates the Agent reply.
 
 The Connection ID, triggering message ID, and dispatch reference identify the
 answer. Repeated sends converge only within the owning Connection and Turn. A

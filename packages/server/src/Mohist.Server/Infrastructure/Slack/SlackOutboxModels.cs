@@ -94,9 +94,9 @@ public sealed record SlackOutboxList(IReadOnlyList<SlackOutboxEntry> Entries);
 /// <summary>
 /// Outcome of an Agent-authored reply action
 /// (<c>mo slack message send</c>). The reply lands in the same outbox as
-/// liveness projections; when a replaceable progress message exists it is
-/// promoted in place (one input = one final answer). Repeated identical sends
-/// reuse that intent, while a different payload is rejected as an idempotency
+/// liveness projections but remains independent from the Server-authored
+/// Session card (one input = one final answer). Repeated identical sends reuse
+/// that intent, while a different payload is rejected as an idempotency
 /// conflict. <see cref="Accepted"/> is false when no live Connection owns the
 /// conversation or when a different payload conflicts with an immutable retry.
 /// </summary>
@@ -111,7 +111,7 @@ public sealed record SlackAgentReplyResult(
     string? Message = null);
 
 /// <summary>
-/// The non-secret origin facts required to promote a Manager reply. The
+/// The non-secret origin facts required to route a Manager reply. The
 /// route constructs this only after validating the lease and the durable
 /// inbox/session mapping, so the outbox never resolves a Manager reply by
 /// conversation alone.

@@ -807,8 +807,7 @@ public static partial class SlackConnectionRoutes
             source,
             threadTs,
             SlackStatusProjection.DispatchRef(source, "progress"),
-            blocks,
-            ct);
+            blocks, launch.SessionId, ct);
     }
 
     private static async Task<SlackThreadHistoryReadResult> ReadThreadHistoryIfAnyAsync(
@@ -1343,8 +1342,7 @@ public static partial class SlackConnectionRoutes
                 req.Identity,
                 body.ThreadTs,
                 $"agent-session-followup:{followupResult.SessionId}:{followupResult.TurnId}:progress",
-                blocks,
-                ct);
+                blocks, followupResult.SessionId, ct);
         }
         var responseOwner = SlackIngressResponseOwners.None;
         if (followupResult.Status == "rejected")
@@ -1473,8 +1471,7 @@ public static partial class SlackConnectionRoutes
                 req.Identity,
                 body.ThreadTs,
                 $"agent-session-followup:{followupResult.SessionId}:{followupResult.TurnId}:progress",
-                blocks,
-                ct);
+                blocks, followupResult.SessionId, ct);
         }
         var responseOwner = SlackIngressResponseOwners.None;
         if (followupResult.Status == "rejected")

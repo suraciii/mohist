@@ -54,17 +54,40 @@ public sealed class SlackStatusProjectionSpecs
         var store = CreateStore(database, time);
         var projection = new SlackStatusProjection(store);
         var source = new SlackMessageIdentity("T1", "C1", "100.001");
+        const string sessionId = "agent-session-1";
+        var blocks = JsonSerializer.SerializeToElement(new[]
+        {
+            new
+            {
+                type = "actions",
+                elements = new[]
+                {
+                    new
+                    {
+                        type = "button",
+                        text = new { type = "plain_text", text = "Open in Mohist" },
+                        url = "https://mohist.example/p1/sessions/agent-session-1",
+                    },
+                },
+            },
+        });
 
-        var progress = await projection.EnqueueWorkingAsync("p1", "c1", source, null);
+        var progress = await projection.EnqueueWorkingAsync(
+            "p1", "c1", source, null, blocks: blocks, sessionId: sessionId);
         await store.MarkDeliveredAsync("p1", progress.Id, new SlackProviderMessageIdentity("C1", "100.002"));
-        await projection.EnqueueWorkingAsync("p1", "c1", source, null);
+        await projection.EnqueueWorkingAsync(
+            "p1", "c1", source, null, blocks: blocks, sessionId: sessionId);
 
         var current = Assert.Single(
             (await store.ListAsync("p1", "c1")).Entries,
             entry => entry.Kind == SlackOutboxKinds.ReplaceableProgress);
-        Assert.Equal(
-            new SlackProviderMessageIdentity("C1", "100.002"),
-            SlackDeliveryPayload.Parse(current.PayloadJson).ProviderMessageIdentity);
+        var payload = SlackDeliveryPayload.Parse(current.PayloadJson);
+        Assert.Equal(new SlackProviderMessageIdentity("C1", "100.002"), payload.ProviderMessageIdentity);
+        Assert.Equal("Agent session.\nSession: agent-session-1", payload.Text);
+        Assert.Contains(sessionId, payload.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Working", payload.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Open in Mohist", payload.Blocks?.GetRawText(), StringComparison.Ordinal);
+        Assert.Contains($"/sessions/{sessionId}", payload.Blocks?.GetRawText(), StringComparison.Ordinal);
     }
 
     [Fact]

@@ -46,39 +46,6 @@ public sealed partial class SlackOutboxStore
         string.Equals(combined, text, StringComparison.Ordinal)
         || combined?.EndsWith("\n\n" + text, StringComparison.Ordinal) == true;
 
-    private static async Task<SlackOutboxRow?> FindReplyProgressRowAsync(
-        MohistDbContext db,
-        string projectId,
-        string conversationId,
-        string? threadTs,
-        string? connectionId,
-        string? triggeringMessageId,
-        CancellationToken ct)
-    {
-        var query = db.SlackOutboxRows.Where(row =>
-            row.ProjectId == projectId
-            && row.ConversationId == conversationId
-            && row.Kind == SlackOutboxKinds.ReplaceableProgress
-            && row.State == SlackOutboxStates.Pending);
-        if (string.IsNullOrWhiteSpace(triggeringMessageId)
-            && !string.IsNullOrWhiteSpace(threadTs))
-            query = query.Where(row => row.ThreadTs == threadTs);
-        if (!string.IsNullOrWhiteSpace(connectionId))
-            query = query.Where(row => row.ConnectionId == connectionId);
-        var ordered = query.OrderBy(row => row.Id);
-        if (string.IsNullOrWhiteSpace(triggeringMessageId))
-            return await ordered.FirstOrDefaultAsync(ct);
-        var candidates = await ordered.ToListAsync(ct);
-        return candidates.FirstOrDefault(row =>
-            SlackDeliveryPayload.Parse(row.PayloadJson).StatusDispatchRef
-                == SlackStatusProjection.DispatchRef(
-                    new SlackMessageIdentity(
-                        row.WorkspaceTeamId,
-                        conversationId,
-                        triggeringMessageId),
-                    "status"));
-    }
-
     private static async Task<SlackOutboxRow?> FindReplyTerminalRowAsync(
         MohistDbContext db,
         string projectId,
