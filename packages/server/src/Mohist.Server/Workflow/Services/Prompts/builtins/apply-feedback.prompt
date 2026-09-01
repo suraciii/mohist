@@ -33,7 +33,10 @@ mo run feedback view --issue ${{ issue.number }} --feedback ${{ work.approvalFee
 4. Apply only the changes needed to satisfy the feedback. Do not make unrelated edits.
 5. Add or update focused tests for the fixed behavior.
 6. Run the smallest relevant verification commands (build, lint, focused tests).
-7. Write a concise feedback resolution summary as your final output. The summary should describe what changed and how it was verified.
+7. Commit the applied repository change on the workflow branch under
+   `REPOS/${{ repository.name }}`. Workspace preparation discards uncommitted
+   work, so an uncommitted fix is a lost fix.
+8. Write a concise feedback resolution summary as your final output. The summary should describe what changed and how it was verified.
 
 ## Rules
 
