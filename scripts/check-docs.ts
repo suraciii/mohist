@@ -29,6 +29,7 @@ const forbiddenDiagramLanguages = new Set([
   'graphviz',
   'gv',
   'kroki',
+  'mermaid',
   'nomnoml',
   'nwdiag',
   'packetdiag',
