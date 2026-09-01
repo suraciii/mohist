@@ -58,29 +58,6 @@ stages:
       - path: PLANS/PLAN.md
       - path: PLANS/DESIGN.md
       - path: PLANS/tasks.json
-  - id: push
-    title: Push
-    uses: mohist/push
-    with:
-      source: HEAD
-      target: ${{ workspace.branch }}
-      remote: origin
-      force: true
-      working-directory: REPOS/${{ repository.name }}
-  - id: open-draft-pr
-    title: Open draft GitHub PR
-    uses: mohist/create-github-pr
-    with:
-      repositoryUrl: ${{ repository.gitUrl }}
-      source: ${{ workspace.branch }}
-      target: ${{ repository.baseBranch }}
-      draft: true
-      titleFrom: issue.title
-      bodyFrom: issue.body
-      working-directory: REPOS/${{ repository.name }}
-    setVars:
-      github.pr.number: output.prNumber
-      github.pr.url: output.prUrl
   checks: []
 - stage: build
   tasks:
@@ -138,6 +115,20 @@ stages:
       remote: origin
       force: true
       working-directory: REPOS/${{ repository.name }}
+  - id: open-draft-pr
+    title: Open draft GitHub PR
+    uses: mohist/create-github-pr
+    with:
+      repositoryUrl: ${{ repository.gitUrl }}
+      source: ${{ workspace.branch }}
+      target: ${{ repository.baseBranch }}
+      draft: true
+      titleFrom: issue.title
+      bodyFrom: issue.body
+      working-directory: REPOS/${{ repository.name }}
+    setVars:
+      github.pr.number: output.prNumber
+      github.pr.url: output.prUrl
   checks: []
 - stage: check
   requiresApproval: true
