@@ -1,22 +1,27 @@
 # Workflow Definition Reference
 
-A Workflow Profile Definition is a YAML document. It declares the Stages that
-an Issue follows, the initial Tasks, Checks, Approval Points, and the rules that
-produce follow-up Tasks. This document is the complete syntax reference for a
-Definition. See [Workflow Profile](workflow-profiles.md) for Profile selection
+A Workflow Definition is the YAML content of a Workflow Profile. It declares
+ordered Stages, Tasks, Checks, Approval Points, and recovery rules for a
+WorkflowRun. See [Workflow Profile](workflow-profiles.md) for Profile selection
 and management.
 
-During a run, retry, recovery, Approval Feedback, and control commands such as
-`mo issue rebase` can produce additional Tasks. These Tasks belong to the
-current WorkflowRun and do not rewrite the Definition.
+A Profile source may also contain `id`, `name`, and `description`. Those fields
+belong to the Profile resource. Mohist removes them before it parses the
+Definition, whose top level contains only `approval`, `stages`, and
+`recoveries`.
 
-A complete Profile source may also contain `id`, `name`, and `description`
-metadata. Those fields belong to the Profile and are removed
-before Mohist parses the Definition described here.
+During a run, retry, recovery, Approval Feedback, and control commands such as
+`mo issue rebase` may create Tasks. These Tasks belong to the current
+WorkflowRun and do not rewrite its Definition.
+
+## Product Commitments
+
+A Definition is explicit and ordered. A WorkflowRun snapshots it at start.
+Validation returns all structural and template errors together.
 
 ## Top-Level Structure
 
-A Definition has only three top-level sections:
+A Definition has only these three top-level sections:
 
 ```yaml
 approval:      # Optional. Configures Approval Feedback work.
@@ -33,11 +38,10 @@ recoveries:    # Optional. Named recovery declarations reused by Tasks.
 
 `approval.feedback.tasks` declares the ordered Feedback Tasks for Approval
 Feedback. A non-empty list enables Request Changes for WorkflowRuns that bind
-this Definition. Each Task must explicitly declare all work that it needs,
-including any Agent, prompt, named Session, timeout, or publication step.
-Mohist does not add omitted work. See
-[Core Concepts: Approval Point](concepts.md#approval-point) for the execution
-order and decision rules.
+this Definition. Each Task must declare the work it needs, including its Agent,
+prompt, named Session, timeout, or publication step. Mohist does not add omitted
+work. See [Core Concepts: Approval Point](concepts.md#approval-point) for the
+execution order and decision rules.
 
 ## Stage
 
@@ -53,8 +57,14 @@ order and decision rules.
     - <Check>
 ```
 
-See [Core Concepts: Approval Point](concepts.md#approval-point) for the
-available decisions and who can submit them.
+Stage names must be non-empty and unique. `tasks` must be non-empty and
+ordered. `requiresApproval` defaults to `false` and waits at an Approval Point
+when `true`. `lockBehavior` accepts `sequential` only and requires non-empty
+`resources`; `resources` cannot appear alone. A Stage completes after all its
+Checks pass.
+
+See [Core Concepts: Approval Point](concepts.md#approval-point) for available
+decisions and who can submit them.
 
 ## Task
 
@@ -74,23 +84,22 @@ available decisions and who can submit them.
   recovery: <Recovery>           # Optional. Failure recovery declaration.
 ```
 
-See [Action Contracts](actions/README.md) for the available Actions and their
-inputs and outputs. Each Action declares its input names, required fields,
-default values, output fields, and error codes. Mohist validates `with` against
-that declaration. It rejects unknown fields, missing required fields, and
-invalid types instead of ignoring them.
+`id` must be non-empty and unique within its task list. `uses` is required and
+must contain a literal concrete Action name. It cannot contain a template.
 
-One `with` key is engine-reserved and valid for every Task:
-`working-directory` sets the Workspace-relative directory the Action runs in
-and is resolved before manifest validation. Repository-only Tasks in a Workflow
-Workspace use `working-directory: REPOS/${{ repository.name }}` to address the
-checkout; see [Workspace](workspaces.md#layout). Runner derives that same
-Repository independently for branch stability and clean-worktree enforcement,
-including when an Agent executes from the Workspace root. A path that escapes
-the Workspace fails the Task.
+The selected Action contract validates `with`. Each Action declares its input
+names, required fields, defaults, outputs, and error codes. Mohist rejects
+unknown fields, missing required fields, and invalid types. It does not ignore
+invalid input. See [Action Contracts](actions/README.md) for Action inputs and
+outputs.
 
-`uses` always contains a literal concrete Action name; there is no dynamic or
-template-driven `uses` value.
+`working-directory` is the one engine-reserved `with` key. It sets the
+Workspace-relative directory before Action validation. Repository-only Tasks
+use `working-directory: REPOS/${{ repository.name }}` to address the checkout;
+see [Workspace](workspaces.md#layout). Runner derives the same Repository
+independently for branch stability and clean-worktree enforcement, including
+when an Agent runs from the Workspace root. A path that escapes the Workspace
+fails the Task.
 
 ### `expect`: Completion Requirements
 
@@ -106,18 +115,18 @@ expect:
       failIf: <promise>FAIL</promise>   # Optional. This text makes the Task fail.
 ```
 
-`expect` defines the Workflow's completion requirements for a Task. It is not
-Action Input. An Action failure makes the Task fail. After the Action succeeds,
-an unmet `expect` also makes the Task fail.
+`expect` defines completion requirements. It is not Action Input. An Action
+failure fails the Task. After the Action succeeds, unmet `expect` requirements
+also fail the Task.
 
 List a required output file in both `expect.files` and `artifacts.files`. List
 an optional output file only in `artifacts`.
 
 ### `artifacts`: Artifact Collection
 
-Collection is best effort. Mohist skips a file that does not exist and does not
-fail the Task. Collected artifacts are stored permanently and are available in
-the Task details.
+Artifact collection is best effort. Mohist skips a file that does not exist
+and does not fail the Task. Collected artifacts are stored permanently and are
+available in Task details.
 
 ### `setVars`: Write Output to Variables
 
@@ -139,19 +148,16 @@ recovery:
       retrySelf: true       # Optional. Default: false. Retry the original Task afterward.
 ```
 
-- A handler must declare at least one of `tasks` or `retrySelf`.
-- A handler with `when` matches the result context in declaration order. This
-  match does not depend on Task success or failure. For example, a successful
-  Task with `output.promise=FAIL` triggers
-  `when: output.promise=FAIL`. A failed Task can use
-  `when: error.code=...`.
-- A handler without `when` is the default handler. A recovery declaration can
-  have at most one default handler, and it must be last. It runs only when the
+- A handler must declare `tasks`, `retrySelf`, or both.
+- A handler with `when` matches the result context in declaration order, regardless
+  of Task success or failure. A successful Task with `output.promise=FAIL` can
+  match `when: output.promise=FAIL`. A failed Task can match `when: error.code=...`.
+- A handler without `when` is the default handler. A recovery declaration has at
+  most one default handler, and that handler must be last. It runs only when the
   Task fails and no earlier explicit handler matches.
-- Recovery Tasks are real Workflow Tasks. They appear in progress and timeline
-  views.
-- After the budget is exhausted, automatic recovery stops. The Task fails and
-  exposes the cause. A manual retry starts a new cycle with the full budget.
+- Recovery Tasks are real Workflow Tasks and appear in progress and timeline views.
+- After the budget is exhausted, automatic recovery stops and the Task fails with
+  its cause. A manual retry starts a new cycle with the full budget.
 
 ## Check
 
@@ -164,65 +170,90 @@ recovery:
     prNumber: ${{ vars.github.pr.number }}
 ```
 
-A Stage completes only after all its Checks pass. If a Check fails, the
-Workflow does not enter the next Stage.
+A Check `id` must be non-empty and unique within its Stage. `uses` is required.
 
 ## Template Expressions
 
-Fields under `with` and `expect` can use `${{ }}` expressions. The available
-namespaces are listed below. A root reference not listed here is invalid.
+Mohist supports `${{ }}` expressions in fields under `with` and `expect`.
+These root namespaces are valid:
 
 - `workflow.runId`: the current Run identifier.
-- `workflow.verification.command`: the Project-owned verification command frozen into the Run at binding; built-in Profiles use it as the `core/script` `run` input.
+- `workflow.verification.command`: the Project-owned verification command frozen into
+  the Run at binding. Built-in Profiles use it as the `core/script` `run` input.
 - `stage.name`: the current Stage name.
-- `work.*`: current work information, such as `work.id`, `work.type`,
-  `work.title`, and `work.attempt`.
-- `work.approvalFeedback.*`: available only to Feedback Tasks.
-  Information that triggered this work, such as `id`, `stage`, `createdAt`,
-  and `summary`.
+- `work.*`: current work information, such as `work.id`, `work.type`, `work.title`,
+  and `work.attempt`.
+- `work.approvalFeedback.*`: information that triggered Feedback work, including
+  `id`, `stage`, `createdAt`, and `summary`. It is available only to Feedback Tasks.
 - `issue.*`: Issue information, such as `issue.projectId`, `issue.number`,
   `issue.title`, and `issue.body`.
-- `repository.*`: target repository information, such as
-  `repository.baseBranch`.
+- `repository.*`: target repository information, such as `repository.baseBranch`.
 - `workspace.*`: Workspace information, such as `workspace.branch`.
-- `vars.*`: merged Variables. See
-  [Variable References](workflow-profiles.md#variable-references).
+- `vars.*`: merged Variables. See [Variable References](workflow-profiles.md#variable-references).
 - `tasks.<id>.outputs.*`: output from a previous Task.
 - `prompts.<key>`: a Project Prompt whose body is read when the Task executes.
-- `failure.output`: available only to recovery Tasks. Output from the Task
-  that triggered recovery.
-- `failure.error.code`: available only to recovery Tasks. The triggering
-  error code.
-- `failure.error.message`: available only to recovery Tasks. The triggering
-  error message.
+- `failure.output`: output from the Task that triggered recovery. It is available
+  only to recovery Tasks.
+- `failure.error.code`: the triggering error code. It is available only to recovery
+  Tasks.
+- `failure.error.message`: the triggering error message. It is available only to
+  recovery Tasks.
 
-- Mohist expands templates before a Task starts. Input for a started Task stays
-  fixed when Variables change later.
-- `${{ prompts.<key> }}` is an exception: Mohist reads the Prompt body when the
-  Task executes. Expressions in the Prompt body use the same namespaces,
-  missing-value behavior, and interpolation rules.
-- A Task fails when any expression cannot resolve a value. This includes a
-  missing `${{ tasks.<id>.outputs.* }}` path.
-- When an expression occupies the complete value, the replacement retains its
-  original type, including object, array, or number.
-- An expression can be embedded in a string, for example
-  `PLANS/tasks.json`. Mohist converts the value to
-  text. The Task fails when the expression cannot resolve or its value is an
-  object or array.
-- Write `\${{` when the literal text `${{` is required.
-- Effective Variables are exposed only through `${{ vars.* }}`. A Variable key
-  does not also become a top-level name. Mohist also does not copy `workflow`,
-  `stage`, `work`, `issue`, `repository`, `workspace`, `tasks`, `prompts`, or
-  `failure` into `vars`.
-- `workspace` describes only Workspace facts, such as `workspace.path` and
-  `workspace.branch`. It does not provide plan-artifact path conventions. A
-  Profile or Prompt must write a path such as
-  `PLANS/PLAN.md` explicitly.
+Evaluation follows this boundary:
+
+```text diagram
+     +--------------+
+     | Profile YAML |
+     +-------+------+
+             |
+             v
+  +--------------------+
+  | parse and validate |
+  +----------+---------+
+             |
+             v
+  +--------------------+
+  | Run binds complete |
+  |     Definition     |
+  +----------+---------+
+             |
+             v
++------------------------+
+| task dispatch resolves |
+|         inputs         |
++------------+-----------+
+             |
+             v
+  +---------------------+
+  | attempt input stays |
+  |        fixed        |
+  +---------------------+
+```
+
+- Mohist expands templates before a Task starts. Input for a started Task stays fixed
+  when Variables change later.
+- `${{ prompts.<key> }}` is an exception. Mohist reads the Prompt body when the Task
+  executes. Expressions in that body use the same namespaces, missing-value behavior,
+  and interpolation rules.
+- A Task fails when any expression cannot resolve a value. This includes a missing
+  `${{ tasks.<id>.outputs.* }}` path.
+- When an expression occupies a complete value, replacement retains its original
+  type, including object, array, or number.
+- An expression embedded in a string, such as `PLANS/tasks.json`, is converted to
+  text. The Task fails when the expression cannot resolve or its value is an object
+  or array.
+- Write `\${{` when literal text `${{` is required.
+- Effective Variables are exposed only through `${{ vars.* }}`. A Variable key is not
+  a top-level name. Mohist also does not copy `workflow`, `stage`, `work`, `issue`,
+  `repository`, `workspace`, `tasks`, `prompts`, or `failure` into `vars`.
+- `workspace` describes Workspace facts, such as `workspace.path` and
+  `workspace.branch`. It does not provide plan-artifact path conventions. A Profile
+  or Prompt must write a path such as `PLANS/PLAN.md` explicitly.
 
 ## Validate a Definition
 
-When you save a Profile, Mohist validates the Definition structure, field
-types, template expressions, and concrete Action contracts. It returns all problems
+When a Profile is saved, Mohist validates Definition structure, field types,
+template expressions, and concrete Action contracts. It returns all problems
 in one response. You can validate Profile composition and Definition syntax
 locally without a running Server:
 
@@ -340,9 +371,3 @@ stages:
           prNumber: ${{ vars.github.pr.number }}
           expect: merged
 ```
-
-## Validation Boundary
-
-The ownership boundary between the Profile compiler and the Definition
-validator is defined in
-[Workflow Definition design](../design/workflow/definition.md).
