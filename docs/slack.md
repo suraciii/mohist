@@ -299,8 +299,11 @@ is never discarded.
 Runtime failure does not end the Slack conversation. A DM input waiting for its
 first Runtime binding is queued. A retry-safe infrastructure failure retries the
 recorded work with its original snapshot, moves the DM route to the replacement
-Session, and then accepts the current message there. Slack redelivery resolves
-to the same retry and SessionInput.
+Session, and then accepts the current message there. The current input's message
+and thread become the replacement execution's reply anchor; the failed input
+remains retry history and never redirects a new reply into an unrelated old
+thread. Slack redelivery resolves to the same retry, reply anchor, and
+SessionInput.
 
 An idle Session whose physical Runtime Session is confirmed missing is recovered
 on the same Runner and logical AgentSession. Mohist never automatically replays

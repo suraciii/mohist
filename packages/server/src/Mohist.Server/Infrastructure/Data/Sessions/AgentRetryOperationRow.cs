@@ -17,6 +17,7 @@ public sealed class AgentRetryOperationRow
     public string PreAllocatedSessionId { get; set; } = string.Empty;
     public string PreAllocatedInputId { get; set; } = string.Empty;
     public string PreAllocatedTurnId { get; set; } = string.Empty;
+    public string? ReplyProvenanceJson { get; set; }
     public string State { get; set; } = "pending";
     public string? ResultState { get; set; }
     public string? ResultText { get; set; }
