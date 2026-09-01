@@ -173,8 +173,8 @@ enter the language.
 - `workflow`: `list`, `view`, `create`, `edit`, `delete`, `validate`;
   `view --yaml` reads the raw Workflow Definition.
 - `run`: `list`, `view`, `watch`, `approve`, `request-changes`, `retry`,
-  `rerun`, `pause`, `resume`, `stop`; `view --yaml` reads the complete Definition
-  bound to the Run; `feedback list/view`;
+  `rerun`, `pause`, `resume`, `stop`; `view --yaml` reads the complete
+  Definition bound to the Run; `feedback list/view`;
   `variable list/get/set/unset`, where `list/get --effective` reads merged
   values.
 - `agent`: `list`, `view`, `start`, `create`, `edit`, `archive`, `restore`,
@@ -233,9 +233,9 @@ mo agent subscription delete <agent> <subscription-id> [--project <project>]
 Create and edit return one subscription resource; its stable fields include
 `id`, `name`, `match`, `responsePrompt`, `continue`, and `status`.
 Subscription status is `active` or `archived`. Delete confirmation uses
-`status: deleted`. A list also returns the collection `state` — one of
-`configured`, `empty`, `unconfigured`, `unavailable`, or `no_connection` —
-plus the Agent's `agentStatus`, `readiness`, and `connection`. Leaf help lists
+`status: deleted`. A list also returns the collection `state`, which is one of
+`configured`, `empty`, `unconfigured`, `unavailable`, or `no_connection`.
+It also returns the Agent's `agentStatus`, `readiness`, and `connection`. Leaf help lists
 the complete selectable field catalog.
 
 An empty list is a successful result and does not mean the Agent is missing. A

@@ -1,27 +1,34 @@
 # Repositories
 
-A Project is the scope and execution boundary for one product in Mohist. Its
-code can span multiple codebases, such as separate server and web codebases. A
-Project references them by declaring **Repositories**. A Repository is an
-execution resource declared by a Project, and each Issue binds to one target
-Repository.
+A Project is the scope and execution boundary for one product. Its code may
+span several codebases. The Project declares those codebases as Repositories,
+and each Issue binds to one target Repository.
+
+## Product Commitments
+
+- A Repository is a Project resource with a stable name, Git URL, and base
+  branch.
+- Each Project has exactly one default Repository.
+- Repository declarations remain isolated between Projects.
+- Each Issue records one target Repository. The binding locks after the Issue
+  first starts.
+- Changing a Project default never changes an existing Issue binding.
+- Runner must be able to access every Repository declared by the Project.
+- A Project with one Repository keeps the simple single-codebase workflow.
 
 ## Mental Model
 
-- **Project = product; Repository = resource.** A Project is not the same as
-  one codebase. It declares one or more Repositories as a pipeline declares its
-  resources.
-- Each Repository has a resource name that is unique within the Project, such
-  as `server` or `web`, plus a Git URL and base branch. The resource name is its
-  stable management reference.
-- Each Project has exactly one **default Repository**. When there is only one,
-  it is naturally the default.
-- Data remains isolated between Projects. Repository declarations are not
-  shared across Projects.
+- **Project means product. Repository means resource.** A Project is not the
+  same as one codebase.
+- A Repository name is unique within its Project. Use names such as `server` or
+  `web` as stable management references.
+- A Project with one Repository uses that Repository as its default. A Project
+  with several Repositories still has only one default.
+- Repository declarations are not shared across Projects.
 
 ## Managing Repositories
 
-Repositories are members of the Project's collection:
+Repositories are members of the Project collection:
 
 ```bash
 mo repo list
@@ -32,51 +39,62 @@ mo repo edit web --base-branch develop
 mo repo delete web
 ```
 
-- A codebase supplied with `--path` when a Project is created is registered as
-  that Project's default Repository. A single-Repository Project still starts
-  with one command.
-- The default Repository cannot be deleted. Select another default first.
-- A non-default Repository can be deleted only when no unfinished Issue is
-  bound to it. Backlog and in-progress Issues prevent deletion. Done and
-  cancelled Issues retain the historical target Repository name but do not
-  prevent deletion.
-- The Git URL or base branch cannot change while a backlog or in-progress Issue
-  uses the Repository. Changing the default does not affect existing Issue
-  bindings.
+A codebase supplied with `--path` when a Project is created becomes that
+Project's default Repository. A single-Repository Project therefore needs no
+extra selection.
+
+The default Repository cannot be deleted. Select another default first. A
+non-default Repository can be deleted only when no unfinished Issue is bound to
+it. Backlog and In Progress Issues prevent deletion. Done and Cancelled Issues
+retain the historical target Repository name but do not prevent deletion.
+
+The Git URL or base branch cannot change while a Backlog or In Progress Issue
+uses the Repository. Changing the default affects only future Issue bindings.
 
 ## Issues and Repositories
 
-Each Issue binds to a target Repository when it is created. Use
-`mo issue create "Web change" --repo web` to select one explicitly. Without
-`--repo`, the Issue binds to the current default Repository. Later default
-changes do not rewrite existing Issues. Before its first start, an Issue can be
-reassigned with `mo issue edit <number> --repo <resource-name>`. The binding is
-permanently locked after the first start. `mo issue list --repo <resource-name>`
-filters by the stored binding, and `mo issue view` displays the target
-Repository.
+Create an Issue with an explicit target:
 
-The Workflow workspace, branch, diff, rebase, local integration, and GitHub
+```text literal
+mo issue create "Web change" --repo web
+```
+
+Without `--repo`, the Issue uses the current default Repository. Before its
+first start, an Issue can be reassigned:
+
+```text literal
+mo issue edit <number> --repo <resource-name>
+```
+
+The binding becomes permanent after the first start. `mo issue list --repo
+<resource-name>` filters by the stored binding, and `mo issue view` displays the
+target Repository.
+
+The Workflow Workspace, branch, diff, rebase, local integration, and GitHub
 Pull Request all use the Issue's target Repository. Its Git URL and base branch
-remain unchanged while the Issue runs. Runner must be able to access every
-Repository declared by the Project.
+remain unchanged while the Issue runs.
 
 ## Runner Constraint
 
-Runner must be able to access **every** Repository declared by a Project.
-Before adding a Repository, confirm that its Git URL is available on the Runner
-host. A local path or `file://` URL must be visible from that host.
+Runner must access every Repository declared by the Project. Before adding a
+Repository, confirm that its Git URL is available on the Runner host. A local
+path or `file://` URL must be visible from that host.
 
 ## Single-Repository Promise
 
 A Project with one Repository behaves like the original single-codebase model.
-Every Issue uses that Repository automatically, and the user does not need to
-understand the concepts in this document. The additional complexity appears
-only when a second Repository is added.
+Every Issue uses that Repository automatically. The additional Repository
+concepts matter only after a second Repository is added.
 
 ## Non-goals
 
-- **Release coordination:** Mohist does not coordinate simultaneous deployment
-  of changes from several Repositories.
-- **Several Repositories checked out for one Issue:** Integration work that
-  needs two codebases at once is not supported. Evaluate it separately when a
-  real requirement appears.
+- Mohist does not coordinate simultaneous deployment of changes from several
+  Repositories.
+- One Issue cannot check out several Repositories at once. Evaluate a
+  multi-codebase requirement separately when it becomes real.
+
+## Implementation Gaps
+
+The repository model, default binding, pre-start reassignment, and deletion
+safeguards are implemented. No other implementation gap is currently recorded
+for this document.

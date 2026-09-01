@@ -1,6 +1,19 @@
 # Troubleshooting and Recovery
 
-Use this guide when an Issue stops advancing.
+Use this guide when an Issue stops advancing. It maps each symptom to a cause
+and an operator action while preserving the Issue history.
+
+## Product Commitments
+
+- An operator can inspect health, status, and the blocking reason before taking
+  recovery action.
+- Retry, rerun, pause, resume, stop, and close keep the Issue history and
+  explain their different effects.
+- A recovery command never silently creates a second execution path or discards
+  recorded evidence.
+- Each common failure identifies what to inspect and which action is safe.
+- Unknown failures provide one complete diagnostic path for creating a useful
+  follow-up Issue.
 
 ## Inspect State First
 
@@ -56,20 +69,20 @@ not automatic recovery and has no Request Changes limit.
 
 **Symptom:** Plan is blocked and `PLANS/PLAN.md` does not exist.
 
-Possible causes:
+**Cause:**
 
 - OpenCode is missing or its path is wrong.
 - Model API configuration or rate limiting prevents execution.
 - The Issue body is too ambiguous for a stable plan.
 
-Inspect:
+**Action:** Check:
 
 ```bash
 mo issue logs <n>              # Read the specific error
 mo session list --issue <n>   # Inspect the Agent execution
 ```
 
-Resolve:
+**Action:**
 
 - Confirm that `opencode --help` works.
 - Inspect model configuration under Settings > OpenCode in the Web UI.
@@ -79,19 +92,19 @@ Resolve:
 
 **Symptom:** A Build task fails repeatedly.
 
-Possible causes:
+Cause:
 
 - The Repository is too large for the Agent context.
 - The test suite itself fails or is unstable.
 - Task definitions conflict.
 
-Inspect:
+**Action:** Check:
 
 ```bash
 mo session list --issue <n>
 ```
 
-Resolve:
+**Action:**
 
 - Edit the task list in `PLANS/tasks.json` and remove a blocked task.
 - Request Changes at the Plan Approval Point so its Feedback Tasks revise the
@@ -102,11 +115,11 @@ Resolve:
 
 **Symptom:** The Check review evidence reports must-fix findings.
 
-**Meaning:** A separate Agent session found a problem while reviewing the
-diff. The review is evidence, not a verdict: the Workflow does not repair
+**Cause:** A separate Agent session found a problem while reviewing the
+diff. The review is evidence, not a verdict. The Workflow does not repair
 findings on its own.
 
-Choose one action:
+**Action:** Choose one:
 
 - Request Changes so the configured Feedback Tasks repair the findings and the
   Stage Checks run again.
@@ -119,7 +132,7 @@ Choose one action:
 **Cause:** The base branch advanced while the Issue was running, because
 another Issue merged or a user pushed manually.
 
-First try automatic rebase:
+**Action:** First try automatic rebase:
 
 ```bash
 mo issue rebase <n>
@@ -141,7 +154,7 @@ with `runner-lost`.
 **Cause:** Runner is stopped or disconnected. Executing work fails explicitly
 with `runner-lost`; it is not replayed automatically.
 
-Verify Runner state:
+**Action:** Verify Runner state:
 
 ```bash
 mo runner status
@@ -155,14 +168,16 @@ Workflow, retry after Runner recovers. Completed stages and history remain.
 **Symptom:** The Issue shows running but produces no output for more than ten
 minutes.
 
-Inspect:
+**Cause:** Agent execution or the Runner response is stalled.
+
+**Action:** Check:
 
 ```bash
 mo session list --issue <n>   # Inspect the latest AgentSession entry
 mo server logs                # Inspect the Server application log tail
 ```
 
-Resolve:
+Fix:
 
 ```bash
 mo run pause --issue <n>     # Pause
@@ -175,10 +190,10 @@ mo run retry --issue <n>     # Retry the failure point
 
 **Symptom:** Issue details show a "Base Drift Detected" panel.
 
-**Meaning:** The base branch advanced while the Issue was running. Execution has
+**Cause:** The base branch advanced while the Issue was running. Execution has
 not failed, but Integrate can fail later.
 
-The panel shows one of four decisions:
+**Action:** The panel shows one of four decisions:
 
 - `needs-attention`: drift must be handled; rebase now.
 - `defer`: Mohist can handle it automatically later; wait.
@@ -195,35 +210,37 @@ Some drift resolves automatically and can be left alone.
 
 ## Failure Signals
 
-Constant monitoring is not required. Mohist signals a problem through:
+**Symptom:** You do not know where a failure is visible.
 
-- The **Needs attention** banner above the Web UI board.
-- A red blocked indicator on the Issue card.
-- The red error panel on Issue details.
-- A Hermes notification for an Approval point, failure, or completion. See
-  [Hermes Notifications](hermes-notifications.md).
+**Cause:** Mohist reports failures through several operator surfaces.
 
-## Prevention
+**Action:** Check the **Needs attention** banner above the Web UI board, the
+blocked indicator on the Issue card, the error panel on Issue details, or a
+Hermes notification for an Approval Point, failure, or completion. See
+[Hermes Notifications](hermes-notifications.md).
 
-- **Write a specific Issue body.** Ambiguous bodies cause many poor Plans. See
-  [Write an Effective Issue Body](issues.md#write-an-effective-issue-body).
-- **Keep an Issue small.** One Issue should do one thing. Small Issues recover
-  easily, plan better, and execute concurrently.
-- **Avoid changing the base branch during Agent work.** A change can cause drift
-  or conflict.
-- **Monitor capacity.** `mo runner status` shows use. Work above capacity waits
-  instead of failing.
-- **Preserve important Workspace work remotely.** Runner materialization is
-  rebuildable; commit and push changes that must survive Runner loss or cleanup.
-- **Investigate repeated failure patterns.** When several Issues block on the
-  same work, do not retry each one indefinitely. Common causes include an
-  ambiguous input template, slow or unstable tests, unclear module boundaries,
-  or a Workflow Profile that does not fit the work. Repair the common cause
-  before increasing concurrency.
+## Repeated Failure Pattern
 
-## Complete Diagnostics
+**Symptom:** Several Issues fail at the same stage or on the same type of work.
 
-When the cause remains unclear, collect:
+**Cause:** The shared cause may be an ambiguous Issue body or input template,
+a slow or unstable test, an unclear module boundary, or an unsuitable Workflow
+Profile. Repeated retries do not repair a shared cause.
+
+**Action:** Write a specific Issue body. Keep one change in each Issue. Avoid
+changing the base branch during Agent work. Check capacity with `mo runner
+status`; work above capacity waits instead of failing. Commit and push important
+Workspace changes so they survive Runner loss or cleanup. Repair the shared
+cause before increasing concurrency. See [Write an Effective Issue Body](issues.md#write-an-effective-issue-body).
+
+## Unknown Failure
+
+**Symptom:** The documented entries do not explain why an Issue stopped.
+
+**Cause:** The available state, event, session, and Server logs do not identify
+a known failure mode.
+
+**Action:** Collect:
 
 ```bash
 mo issue logs <n>
@@ -234,10 +251,14 @@ mo server logs
 # Then inspect error-level entries on the Web UI Logs page.
 ```
 
-For a Mohist defect, create an Issue with the Issue number, `health`, `status`,
+Create a Mohist defect Issue with the Issue number, `health`, `status`,
 `blockedReason`, relevant log excerpts, and reproduction steps.
-
----
 
 Implementation source: recovery spans the Issue and Workflow domains, including
 health and blocked-state handling.
+
+## Implementation Gaps
+
+Provider-specific runtime errors may not match a named entry in this guide. Use
+[Unknown Failure](#unknown-failure) when the symptom, cause, or recovery action
+is not yet documented.
