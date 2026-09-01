@@ -22,6 +22,7 @@ public partial class MohistDbContext
             entity.Property(row => row.PreAllocatedSessionId).HasMaxLength(512).IsRequired();
             entity.Property(row => row.PreAllocatedInputId).HasMaxLength(128).IsRequired();
             entity.Property(row => row.PreAllocatedTurnId).HasMaxLength(128).IsRequired();
+            entity.Property(row => row.ReplyProvenanceJson).HasMaxLength(4096);
             entity.Property(row => row.State).HasMaxLength(16).IsRequired();
             entity.Property(row => row.ResultState).HasMaxLength(64);
             entity.Property(row => row.ResultText).HasMaxLength(2048);

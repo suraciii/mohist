@@ -257,6 +257,15 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
             "U-worker-recovery",
             "C-worker-recovery",
             "1710000000.000001");
+        var replyProvenance = new AgentSessionInputProvenance(
+            "slack",
+            origin.WorkspaceTeamId,
+            origin.ConversationId,
+            "1710000000.000002",
+            origin.SlackUserId,
+            "1710000000.000003",
+            origin.ConnectionId,
+            "1710000000.000002");
 
         AgentLaunchResult failedLaunch;
         await using (var scope = _fixture.Services.CreateAsyncScope())
@@ -284,7 +293,8 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
                     AgentRetryOperationKind.Root,
                     "worker-preallocated-session",
                     "worker-preallocated-input",
-                    "worker-preallocated-turn")).Operation;
+                    "worker-preallocated-turn",
+                    replyProvenance)).Operation;
         }
 
         var worker = new AgentRetryObligationWorker(
@@ -302,6 +312,7 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
             Assert.Equal(operation.PreAllocatedSessionId, finished.ResultSessionId);
             Assert.Equal(operation.PreAllocatedInputId, finished.ResultInputId);
             Assert.Equal(operation.PreAllocatedTurnId, finished.ResultTurnId);
+            Assert.Equal(replyProvenance, finished.ReplyProvenance);
         }
 
         var recovered = _fixture.Grains.GetGrain<IAgentSessionGrain>(operation.PreAllocatedSessionId);
@@ -310,7 +321,8 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
         Assert.Equal(operation.PreAllocatedInputId, recoveredInitial.Input!.Id);
         Assert.Equal(operation.PreAllocatedTurnId, recoveredInitial.Turn!.Id);
         Assert.Equal(origin.ConversationId, recoveredInitial.Input.Provenance!.ConversationId);
-        Assert.Equal(origin.MessageTs, recoveredInitial.Input.Provenance.MessageId);
+        Assert.Equal(replyProvenance.MessageId, recoveredInitial.Input.Provenance.MessageId);
+        Assert.Equal(replyProvenance.BoundThreadRootMessageId, recoveredInitial.Input.Provenance.BoundThreadRootMessageId);
 
         // A second pass is the adapter-failover/redelivery case. The durable
         // receipt and launch idempotency key make it a no-op.

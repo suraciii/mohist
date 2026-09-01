@@ -78,6 +78,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
         var connection = await CreateConnectionAsync();
         const string conversationId = "D-DM-MISSING-RUNTIME";
         const string followupTs = "1710000000.000150";
+        const string followupThreadTs = "1710000000.000125";
 
         using (var first = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
         {
@@ -120,6 +121,7 @@ public sealed class SlackDmSessionMappingIngressSpecs
                 teamId = connection.WorkspaceTeamId,
                 conversationId,
                 messageTs,
+                threadTs = followupThreadTs,
                 senderSlackUserId = "U_OWNER",
                 text,
                 leaseId = _connectionLeases[connection.Id],
@@ -145,6 +147,14 @@ public sealed class SlackDmSessionMappingIngressSpecs
             Assert.Equal("accepted", followup.GetProperty("kind").GetString());
             Assert.Equal(replacementSessionId, followup.GetProperty("sessionId").GetString());
         });
+
+        var replacementInitial = await _fixture.Grains
+            .GetGrain<IAgentSessionGrain>(replacementSessionId!)
+            .GetInitialLaunchAsync();
+        var replacementProvenance = Assert.IsType<AgentSessionInputProvenance>(replacementInitial?.Input?.Provenance);
+        Assert.Contains(replacementProvenance.MessageId, new[] { followupTs, "1710000000.000151" });
+        Assert.Equal(followupThreadTs, replacementProvenance.BoundThreadRootMessageId);
+        Assert.NotEqual("1710000000.000100", replacementProvenance.MessageId);
 
         var replay = await PostFollowupAsync(followupTs, "more details");
         Assert.Equal("already_accepted", replay.GetProperty("kind").GetString());
