@@ -71,7 +71,10 @@ Do not let agents guess rules. Do not let the current code decide for the target
 
 ### Use the minimal structure
 
-Start from the structure below. Delete sections that have no content. Do not add empty sections for symmetry.
+Two kinds of design specs exist. Start from the matching structure below.
+Delete sections that have no content. Do not add empty sections for symmetry.
+
+A **concept spec** defines one concept: one resource, mechanism, or contract.
 
 ```text literal
 # Name
@@ -88,13 +91,40 @@ Resources, ownership, references, and the minimal data shape.
 Selection, merging, state changes, timing, errors, and interfaces.
 
 ## Examples
-A small number of inputs and expected outputs.
+A small number of inputs and expected outputs. Optional.
 
 ## Status
 Open questions and current implementation gaps.
 ```
 
 Put API, Writes, Merge, and similar topics in `Semantics` subsections. Split them into standalone sections only when they are complex enough.
+
+A **subsystem spec** defines one subsystem's boundaries and the decisions
+that must remain true.
+
+```text literal
+# Name
+
+The subsystem's boundary and what this document records.
+
+## Core Decisions
+The load-bearing choices, one line each; the rules live in the sections
+below. Include this register only when the subsystem carries many decisions.
+
+## System Boundary
+Components, the boundary diagram, and what each component owns and does not
+own.
+
+## <Concern>
+One section per design concern, named by the question it answers: the model,
+the rules, and the failure behavior.
+
+## Non-Goals
+Scope exclusions.
+
+## Status
+Current implementation state and gaps.
+```
 
 ### Before committing
 

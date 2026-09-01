@@ -35,3 +35,35 @@ Shared writing rules (language, diagrams, fences, tables, examples) live in
 - WIP product ideas use future-state language and record their current state
   in an Implementation Gaps section. After the requirements and spec are
   final, move the document to its product area.
+
+## Minimal structure
+
+A product spec states what the product must satisfy; the implementation
+aligns to it. Start from the structure below. Delete sections that have no
+content. Do not add empty sections for symmetry.
+
+```text literal
+# Name
+
+Opening paragraph: what this is and why the product behavior exists, in two
+to four sentences. It lets the reader decide whether this is the document
+they need.
+
+## Product Commitments
+What a user or Agent can rely on, stated as promises.
+
+## <Concept>
+One section per user-visible concept: what it is and is not, when it is
+created and ends, who owns it.
+
+## <Capability>
+One section per user-facing capability: how to use it and the rules that
+hold. Exact CLI, DSL, and API syntax lives here.
+
+## Boundary
+What the product deliberately does not do. Optional.
+
+## Implementation Gaps
+Where the implementation does not yet match this document, stated as plain
+product facts.
+```
