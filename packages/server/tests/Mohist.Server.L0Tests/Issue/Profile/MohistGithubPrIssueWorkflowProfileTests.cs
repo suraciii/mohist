@@ -157,8 +157,11 @@ public class MohistGithubPrIssueWorkflowProfileTests
     {
         var definition = GithubPrDefinition;
         Assert.Equal(["plan", "build", "check", "integrate"], definition.Stages.Select(s => s.Stage).ToArray());
-        Assert.Equal(["workspace-prepare", "plan", "push", "open-draft-pr"], definition.Stages[0].Tasks.Select(t => t.Id).ToArray());
+        Assert.Equal(["workspace-prepare", "plan"], definition.Stages[0].Tasks.Select(t => t.Id).ToArray());
         Assert.Equal("mohist/task-list", definition.Stages[1].Tasks.Single(t => t.Id == "load-tasks").Uses);
+        Assert.Equal(
+            ["workspace-prepare", "load-tasks", "verify", "push", "open-draft-pr"],
+            definition.Stages[1].Tasks.Select(t => t.Id).ToArray());
         Assert.Null(definition.Stages[2].Tasks.Single(t => t.Id == "ai-review").Recovery);
         var integrate = definition.Stages[3];
         Assert.Equal(["workspace-prepare", "push", "enable-auto-merge"], integrate.Tasks.Select(t => t.Id).ToArray());
