@@ -132,10 +132,20 @@ public static partial class SlackConnectionRoutes
 
         var retryService = req.Services.GetRequiredService<AgentSessionRetryService>();
         var retry = await retryService.RetryAsync(
-            req.ProjectId,
-            route.SessionId,
-            failedTurn.Id,
-            $"slack-continuation:auto:{failedTurn.Id}",
+            new AgentSessionRetryCommand(
+                req.ProjectId,
+                route.SessionId,
+                failedTurn.Id,
+                $"slack-continuation:auto:{failedTurn.Id}",
+                new AgentSessionInputProvenance(
+                    "slack",
+                    req.Body.TeamId,
+                    req.Body.ConversationId,
+                    req.Body.ThreadTs ?? req.Body.MessageTs,
+                    req.SenderSlackUserId,
+                    req.Body.MessageTs,
+                    req.Connection.Id,
+                    req.Body.ThreadTs ?? req.Body.MessageTs)),
             ct);
         if (retry.Outcome == AgentSessionRetryOutcome.AcceptedPending
             && !string.IsNullOrWhiteSpace(retry.OperationId))

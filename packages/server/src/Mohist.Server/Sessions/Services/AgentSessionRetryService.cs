@@ -34,7 +34,8 @@ public sealed record AgentSessionRetryCommand(
     string ProjectId,
     string SessionId,
     string TurnId,
-    string IdempotencyKey);
+    string IdempotencyKey,
+    AgentSessionInputProvenance? ReplyProvenance = null);
 
 /// <summary>
 /// Provider-independent retry application service. It validates the current
@@ -119,6 +120,7 @@ public sealed class AgentSessionRetryService : IScopedService
             preAllocatedSessionId: NewExecutionId("agent-session"),
             preAllocatedInputId: NewExecutionId("input"),
             preAllocatedTurnId: NewExecutionId("turn"),
+            replyProvenance: command.ReplyProvenance,
             ct: ct);
 
         if (claim.AlreadyExists)
@@ -240,8 +242,6 @@ public sealed class AgentSessionRetryService : IScopedService
             throw new InvalidOperationException("Retry target has no durable Agent identity.");
         var agent = await _agents.GetByIdAsync(target.ProjectId, agentId, ct)
             ?? throw new InvalidOperationException($"Agent '{agentId}' was not found.");
-        var connectionId = provenance.ConnectionId
-            ?? throw new InvalidOperationException("Retry target has no durable Connection identity.");
         var definition = target.Session.Settings.Definition
             ?? throw new InvalidOperationException("Retry target has no durable execution definition.");
         var startup = target.Session.Settings.AgentSessionStartup is { } recordedStartup
@@ -255,14 +255,16 @@ public sealed class AgentSessionRetryService : IScopedService
             }
             : null;
 
+        var replyProvenance = operation.ReplyProvenance ?? provenance;
         var origin = new ConnectionLaunchOrigin(
-            connectionId,
-            provenance.WorkspaceId,
-            provenance.MemberId,
-            provenance.ConversationId,
-            provenance.MessageId,
-            provenance.ThreadId,
-            provenance.OriginMarker);
+            replyProvenance.ConnectionId
+                ?? throw new InvalidOperationException("Retry target has no durable Connection identity."),
+            replyProvenance.WorkspaceId,
+            replyProvenance.MemberId,
+            replyProvenance.ConversationId,
+            replyProvenance.MessageId,
+            replyProvenance.BoundThreadRootMessageId ?? replyProvenance.ThreadId,
+            replyProvenance.OriginMarker);
         var launch = await _launcher.LaunchConnectionAsync(
             agent,
             input.Text,
