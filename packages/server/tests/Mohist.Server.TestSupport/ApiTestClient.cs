@@ -110,6 +110,7 @@ public static class ApiTestClient
         var body = new
         {
             name = projectName,
+            verificationCommand = "true",
             repository = new
             {
                 name = repoName ?? "test-repo",

@@ -1,6 +1,8 @@
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services;
+using Mohist.Workflow.Definition;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Workflow.Grains;
@@ -47,7 +49,12 @@ public sealed class WorkflowRunBindingParticipantTests
             CreatedAt,
             ProjectId: "project-1",
             IssueNumber: 42),
-        Workspace: new WorkspaceIdentity("/worktrees/issue-42", "issue/42"));
+        Workspace: new WorkspaceIdentity("/worktrees/issue-42", "issue/42"),
+        DefinitionJson: WorkflowYamlSerializer.ToJson(new WorkflowDefinition(new[]
+        {
+            new StageDefinition("build", new[] { new TaskDefinition("verify", "Verify", "core/script") }, Array.Empty<CheckDefinition>()),
+        })),
+        VerificationCommand: "npm run verify");
 
     private sealed class FakeWorkflowRunStore : IWorkflowRunStore
     {

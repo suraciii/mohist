@@ -108,6 +108,7 @@ public sealed class RunnerWorkspaceReclaimableApiSpecs
         using var createProject = await _fixture.Client.PostAsJsonAsync("/api/projects", new
         {
             name = projectName,
+            verificationCommand = "true",
             repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
         });
         createProject.EnsureSuccessStatusCode();

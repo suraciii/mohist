@@ -21,6 +21,7 @@ public class RuntimeSettingsSpecs
         await _client.PostOkAsync("/api/projects", new
         {
             name = projectName,
+            verificationCommand = "true",
             repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
         });
         var projectId = (await _client.GetDataAsync<List<ProjectResponse>>("/api/projects")).Single(p => p.Name == projectName).Id;

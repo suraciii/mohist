@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Project.Domain;
 
@@ -6,6 +7,19 @@ namespace Mohist.Server.Infrastructure.Data.Db;
 
 public partial class MohistDbContext
 {
+    // Project-owned verification command lives with the Project table
+    // configuration rather than the ratchet-limited main model file.
+    private static void ConfigureProjectVerificationCommand(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ProjectRow>(entity =>
+        {
+            entity.Property(e => e.Id).HasMaxLength(256);
+            entity.Property(e => e.Name).HasMaxLength(ProjectName.MaxLength).IsRequired();
+            entity.Property(e => e.RepositoriesJson).IsRequired();
+            entity.Property(e => e.VerificationCommand).HasMaxLength(4096);
+        });
+    }
+
     private static void ConfigureProjectWorkflowProfile(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<ProjectWorkflowProfile>(entity =>

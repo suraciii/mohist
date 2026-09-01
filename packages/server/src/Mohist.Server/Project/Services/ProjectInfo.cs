@@ -25,6 +25,15 @@ public class ProjectInfo
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public ExecutionConfigHint? DefaultExecutionConfig { get; set; }
 
+    /// <summary>
+    /// The Project-owned deterministic verification command. This is a
+    /// startup fact for new WorkflowRuns and is intentionally separate from
+    /// mutable Project Variables.
+    /// </summary>
+    [Id(7)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? VerificationCommand { get; set; }
+
     public RepositoryInfo? DefaultRepository =>
         Repositories.FirstOrDefault(r => r.IsDefault);
 

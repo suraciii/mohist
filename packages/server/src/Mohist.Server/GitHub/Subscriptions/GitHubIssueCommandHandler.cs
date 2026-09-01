@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Workflow.Domain;
 
 namespace Mohist.Server.GitHub.Subscriptions;
 
@@ -226,6 +227,19 @@ public sealed class GitHubIssueCommandHandler : ICloudEventHandler
                 ct);
         }
         catch (IssueStartRepositoryUnavailableException ex)
+        {
+            await ReplyAsync(
+                replies,
+                delivery,
+                projectId,
+                connection,
+                payload.IssueNumber,
+                payload.CommentId,
+                GitHubCommentKinds.CommandReplyStartFailed,
+                GitHubIssueCommandComments.StartFailed(ex.Message),
+                ct);
+        }
+        catch (ProjectVerificationConfigurationMissingException ex)
         {
             await ReplyAsync(
                 replies,

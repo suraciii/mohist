@@ -143,17 +143,6 @@ public static partial class WorkflowRunExtensions
             }
             if (stage.HasNoPendingTasksAndPassedChecks())
             {
-                // Build-stage gate: for a lane-enabled run the stage must not
-                // advance until every required lane has a durable pass. The
-                // gate is scoped to the run's persisted bound definition, so
-                // a profile or deployment change cannot flip the mode; legacy
-                // aggregate runs are never held by it.
-                if (string.Equals(stage.Id, "build", StringComparison.Ordinal)
-                    && !VerificationLaneGate.CanAdvanceBuildStage(run))
-                {
-                    stage.Status = StageRunStatus.Running;
-                    return;
-                }
                 if (stage.RequiresApproval && stage.ApprovalStatus is not { Result: "approved" })
                 {
                     stage.Status = StageRunStatus.Running;
@@ -178,7 +167,7 @@ public static partial class WorkflowRunExtensions
                 // Retry keeps the failed attempt for history; preserve its feedback owner so completion can resolve the request.
                 causedByFeedbackId: failedTask.CausedByFeedbackId,
                 // Feedback retries also need a lineage edge so resolution can ignore the superseded failed attempt.
-                causedByFailedTaskId: failedTask.CausedByFeedbackId is not null || failedTask.Lane is not null ? failedTask.Id : null);
+                causedByFailedTaskId: failedTask.CausedByFeedbackId is not null ? failedTask.Id : null);
             var failedTaskIndex = stage.Tasks.IndexOf(failedTask);
             stage.Tasks.Insert(failedTaskIndex + 1, newTask);
             stage.Failure = null;

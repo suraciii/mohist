@@ -45,7 +45,7 @@ public class ProjectGrain : Grain, IProjectGrain
 
     public Task<ProjectInfo?> GetAsync() => Task.FromResult(_project);
 
-    public async Task<ProjectInfo> CreateAsync(string name, RepositoryInfo initialRepository)
+    public async Task<ProjectInfo> CreateAsync(string name, RepositoryInfo initialRepository, string? verificationCommand = null)
     {
         if (_project is not null)
             throw new InvalidOperationException($"Project '{GrainKey}' already exists");
@@ -54,6 +54,8 @@ public class ProjectGrain : Grain, IProjectGrain
 
         if (initialRepository is null)
             throw new ArgumentNullException(nameof(initialRepository));
+
+        ProjectVerificationCommand.Require(verificationCommand);
 
         if (string.IsNullOrWhiteSpace(initialRepository.Name))
             throw new ArgumentException("Repository name is required.", nameof(initialRepository));
@@ -90,6 +92,7 @@ public class ProjectGrain : Grain, IProjectGrain
             RepositoryRevision = 1,
             CreatedAt = now,
             UpdatedAt = now,
+            VerificationCommand = verificationCommand,
         };
 
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -118,6 +121,7 @@ public class ProjectGrain : Grain, IProjectGrain
                 },
             ],
             Variables = ProjectVariablesBag.Empty,
+            VerificationCommand = verificationCommand,
         };
 
         _log.LogInformation("Project {Name} created", entry.Name);
@@ -552,6 +556,26 @@ public class ProjectGrain : Grain, IProjectGrain
             GrainKey,
             normalized.Runtime,
             normalized.Model);
+        return _project;
+    }
+
+    public async Task<ProjectInfo?> SetVerificationCommandAsync(string command)
+    {
+        if (_project is null) return null;
+        ProjectVerificationCommand.Require(command);
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var entry = await db.Projects.FindAsync(GrainKey);
+        if (entry is null) return null;
+
+        var now = Now();
+        entry.VerificationCommand = command;
+        entry.UpdatedAt = now;
+        await db.SaveChangesAsync();
+
+        _project.VerificationCommand = command;
+        _project.UpdatedAt = now.UtcDateTime.ToString("o");
+        _log.LogInformation("Project {ProjectId} verification command updated", GrainKey);
         return _project;
     }
 

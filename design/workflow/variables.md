@@ -150,7 +150,9 @@ Variables resource again.
 
 Runtime context such as `workflow.*`, `stage.*`, `issue.*`, and `repository.*`, plus
 `tasks.<id>.outputs.*` and `prompts.*`, are separate namespaces. They do not participate in the Variables
-merge.
+merge. In particular, `workflow.verification.command` is a Project-owned startup fact,
+not a Variable: built-in verification reads the value frozen on WorkflowRun binding. A `ci.verify`
+Variable must never override or configure that command.
 
 Invalid Variables, an impossible `setVars`, and other semantic errors must be rejected at the write
 boundary. The operation must return a domain error and keep the original value unchanged. It must not

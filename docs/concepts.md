@@ -27,7 +27,7 @@ boundary in Mohist. It is not the user's chat or collaboration workspace.
 - Data is fully isolated between Projects.
 
 ```bash
-mo project create my-app --path /path/to/repo   # Register this as the default repository.
+mo project create my-app --path /path/to/repo --verification-command "npm run verify"   # Register the repository and its verification command.
 mo project use my-app
 mo runner status   # Show Runners and shared execution capacity.
 ```

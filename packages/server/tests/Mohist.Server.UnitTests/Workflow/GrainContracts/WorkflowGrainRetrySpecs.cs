@@ -217,6 +217,54 @@ public sealed class WorkflowGrainRetrySpecs
     }
 
     [Fact]
+    public async Task MalformedRecoveryFollowUp_PreservesTerminalResultFingerprintForReplay()
+    {
+        var recovery = new RecoveryDefinition(
+            2,
+            [new RecoveryHandlerDefinition("error.code=base-moved", [], RetrySelf: true)]);
+        var arrangement = await ArrangeAsync(
+            "wr-retry-malformed-followup-fingerprint",
+            SingleStage(
+                tasks: [new TaskDefinition("merge-pr", "Merge PR", "spec/task", Recovery: recovery)],
+                checks: []));
+
+        var task = (await arrangement.AssignAndClaimAsync())!;
+        var actionAttemptId = await arrangement.RunningActionAttemptIdAsync();
+        const string fingerprint = "terminal-fingerprint";
+        var malformed = new TaskReport(
+            task.Id!,
+            TaskReportStatus.Succeeded,
+            Output: JsonSerializer.SerializeToElement(new { }),
+            Artifacts: null,
+            AddTasks: [new RuntimeTaskInput("recover", "Recover", "spec/task", Recovery: recovery)],
+            ActionAttemptId: actionAttemptId,
+            TerminalResultFingerprint: fingerprint);
+
+        var first = await arrangement.Grain.ReceiveTaskReportAsync(
+            arrangement.WorkerId,
+            task.Id!,
+            malformed);
+        Assert.Equal(WorkReportVerdict.Accepted, first);
+
+        var persisted = await RequireRunAsync(arrangement);
+        var failed = Assert.Single(persisted.CurrentStage().Tasks);
+        Assert.Equal(WorkflowActionAttemptStatus.Failed, failed.Status);
+        Assert.Equal(fingerprint, failed.TerminalResultFingerprint);
+
+        var replay = await arrangement.Grain.ReceiveTaskReportAsync(
+            arrangement.WorkerId,
+            task.Id!,
+            malformed);
+        Assert.Equal(WorkReportVerdict.Accepted, replay);
+
+        var conflict = await arrangement.Grain.ReceiveTaskReportAsync(
+            arrangement.WorkerId,
+            task.Id!,
+            malformed with { TerminalResultFingerprint = "different" });
+        Assert.Equal(WorkReportVerdict.Refused, conflict);
+    }
+
+    [Fact]
     public async Task RecoveryFollowUpBatch_AcceptsOutOfRangeContinuationAlongsideValidFollowUp()
     {
         var recovery = new RecoveryDefinition(

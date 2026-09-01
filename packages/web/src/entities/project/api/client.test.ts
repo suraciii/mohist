@@ -24,6 +24,7 @@ describe('createProject', () => {
     await createProject(
       {
         name: 'my-project',
+        verificationCommand: 'npm run verify',
         repository: {
           name: 'main',
           gitUrl: 'git@example.com:main.git',
@@ -37,6 +38,7 @@ describe('createProject', () => {
       method: 'POST',
       body: JSON.stringify({
         name: 'my-project',
+        verificationCommand: 'npm run verify',
         repository: {
           name: 'main',
           gitUrl: 'git@example.com:main.git',

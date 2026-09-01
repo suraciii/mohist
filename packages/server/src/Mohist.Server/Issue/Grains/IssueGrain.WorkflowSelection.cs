@@ -7,6 +7,8 @@ public partial class IssueGrain
         if (!_issue!.NoWorkflow)
             return false;
 
+        if (_issue.WorkflowRunId is not null)
+            _issue.ClearStoppedWorkflow(_issue.WorkflowRunId);
         _issue.StartWithoutWorkflow(undeliveredPrerequisites, _timeProvider.GetUtcNow().UtcDateTime);
         await SaveIssueAsync();
         return true;

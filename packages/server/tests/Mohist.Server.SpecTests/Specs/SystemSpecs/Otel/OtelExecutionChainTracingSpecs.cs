@@ -251,7 +251,7 @@ public class OtelExecutionChainTracingSpecs
             GitUrl = "git@example.com:placeholder.git",
             BaseBranch = "main",
             IsDefault = true,
-        });
+        }, "git diff --check");
         await projectGrain.AddRepositoryAsync("main", $"file://{Guid.NewGuid():N}", "main");
         return projectId;
     }

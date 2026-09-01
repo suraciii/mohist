@@ -1,13 +1,9 @@
 import { useState } from 'react'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/shared/ui/components/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Label } from '@/shared/ui/components/label'
+import { Textarea } from '@/shared/ui/components/textarea'
 import { useCreateProject, useProject } from '../../../entities/project'
 import type { ProjectCreator } from '../../../entities/project'
 
@@ -22,19 +18,19 @@ export function CreateProjectDialog({ open, onClose, projectCreator }: Props) {
   const [repositoryName, setRepositoryName] = useState('')
   const [repositoryGitUrl, setRepositoryGitUrl] = useState('')
   const [repositoryBaseBranch, setRepositoryBaseBranch] = useState('main')
+  const [verificationCommand, setVerificationCommand] = useState('')
   const { setProjectId } = useProject()
 
   const createProject = useCreateProject(projectCreator)
 
-  const isConflict =
-    createProject.isError &&
-    (createProject.error as Error).message.includes('already exists')
+  const isConflict = createProject.isError && (createProject.error as Error).message.includes('already exists')
 
   function resetAndClose() {
     setName('')
     setRepositoryName('')
     setRepositoryGitUrl('')
     setRepositoryBaseBranch('main')
+    setVerificationCommand('')
     createProject.reset()
     onClose()
   }
@@ -43,6 +39,7 @@ export function CreateProjectDialog({ open, onClose, projectCreator }: Props) {
     createProject.mutate(
       {
         name: name.trim(),
+        verificationCommand,
         repository: {
           name: repositoryName.trim(),
           gitUrl: repositoryGitUrl.trim(),
@@ -66,7 +63,9 @@ export function CreateProjectDialog({ open, onClose, projectCreator }: Props) {
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label htmlFor="project-name" className="text-xs">Name *</Label>
+            <Label htmlFor="project-name" className="text-xs">
+              Name *
+            </Label>
             <Input
               id="project-name"
               type="text"
@@ -78,7 +77,9 @@ export function CreateProjectDialog({ open, onClose, projectCreator }: Props) {
             />
           </div>
           <div>
-            <Label htmlFor="project-repository-name" className="text-xs">Repository name *</Label>
+            <Label htmlFor="project-repository-name" className="text-xs">
+              Repository name *
+            </Label>
             <Input
               id="project-repository-name"
               type="text"
@@ -89,7 +90,9 @@ export function CreateProjectDialog({ open, onClose, projectCreator }: Props) {
             />
           </div>
           <div>
-            <Label htmlFor="project-repository-git-url" className="text-xs">Git URL *</Label>
+            <Label htmlFor="project-repository-git-url" className="text-xs">
+              Git URL *
+            </Label>
             <Input
               id="project-repository-git-url"
               type="url"
@@ -100,7 +103,9 @@ export function CreateProjectDialog({ open, onClose, projectCreator }: Props) {
             />
           </div>
           <div>
-            <Label htmlFor="project-repository-base-branch" className="text-xs">Base branch</Label>
+            <Label htmlFor="project-repository-base-branch" className="text-xs">
+              Base branch
+            </Label>
             <Input
               id="project-repository-base-branch"
               type="text"
@@ -110,30 +115,34 @@ export function CreateProjectDialog({ open, onClose, projectCreator }: Props) {
               data-testid="create-project-repository-base-branch"
             />
           </div>
+          <div>
+            <Label htmlFor="project-verification-command" className="text-xs">
+              Verification command *
+            </Label>
+            <Textarea
+              id="project-verification-command"
+              value={verificationCommand}
+              onChange={(e) => setVerificationCommand(e.target.value)}
+              placeholder="npm run verify"
+              data-testid="create-project-verification-command"
+              rows={3}
+            />
+          </div>
 
           {isConflict && (
-            <div
-              data-testid="create-project-conflict"
-              className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600"
-            >
+            <div data-testid="create-project-conflict" className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
               Project name already exists
             </div>
           )}
 
           {!isConflict && createProject.isError && (
-            <div
-              data-testid="create-project-error"
-              className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600"
-            >
+            <div data-testid="create-project-error" className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
               {createProject.error.message}
             </div>
           )}
 
           <div className="flex justify-end gap-2 pt-1">
-            <Button
-              variant="outline"
-              onClick={resetAndClose}
-            >
+            <Button variant="outline" onClick={resetAndClose}>
               Cancel
             </Button>
             <Button
@@ -142,6 +151,7 @@ export function CreateProjectDialog({ open, onClose, projectCreator }: Props) {
                 !name.trim() ||
                 !repositoryName.trim() ||
                 !repositoryGitUrl.trim() ||
+                !verificationCommand.trim() ||
                 createProject.isPending
               }
               data-testid="create-project-submit"

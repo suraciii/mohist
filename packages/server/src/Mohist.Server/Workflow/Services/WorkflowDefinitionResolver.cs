@@ -52,17 +52,13 @@ public class WorkflowDefinitionResolver : IScopedService
             issueNumber ?? resolvedContext.IssueNumber,
             resolvedContext.RunExists);
 
-        var boundProfileId = await LoadBoundProfileIdAsync(db, runId);
-        if (!string.IsNullOrWhiteSpace(boundProfileId)
-            && !string.IsNullOrWhiteSpace(context.ProjectId))
-        {
-            var boundProfile = await LoadProfileAsync(context.ProjectId!, boundProfileId!);
-            if (boundProfile is null)
-                throw new WorkflowDefinitionResolutionException(
-                    WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
-                    $"Workflow '{runId}' has no current definition for bound Profile '{boundProfileId}'");
-            return boundProfile;
-        }
+        var boundRun = await TryLoadRunAsync(runId);
+        if (HasBoundSnapshot(boundRun))
+            return ResolvedTemplate.FromProfile(ParseBoundTemplate(boundRun!));
+        if (boundRun is not null)
+            throw new WorkflowDefinitionResolutionException(
+                WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
+                $"Workflow '{runId}' has no bound workflow definition and is not executable");
 
         if (string.IsNullOrWhiteSpace(context.ProjectId))
             return ResolvedTemplate.FromProfile(WorkflowProfileCatalog.Profile);
@@ -93,16 +89,9 @@ public class WorkflowDefinitionResolver : IScopedService
     // =======================================================================
 
     /// <summary>
-    /// Returns the per-stage spec (tasks + checks + lock behavior) for a
-    /// single stage. Snapshot-backed runs read from
-    /// <c>WorkflowRun.BoundWorkflowDefinitionJson</c> and never from the live
-    /// profile provider, so a profile edit after binding cannot change a
-    /// run's task definitions, commands, or per-lane timeouts. Pre-snapshot
-    /// runs (no <c>BoundWorkflowDefinitionJson</c>) fall back to the live
-    /// cascade for backward compatibility; the affected built-in profiles
-    /// keep their pre-change aggregate path through
-    /// <c>RetainedLegacyAggregate</c>. Throws if neither the snapshot nor
-    /// the resolved template contains <paramref name="stageId"/>.
+    /// Returns the per-stage spec (tasks + checks + lock behavior) from the
+    /// immutable bound snapshot. A run without a snapshot is historical data
+    /// and cannot be executed after the verification-command cutover.
     /// </summary>
     public async Task<StageDefinition> LoadStageSpecsAsync(
         string runId,
@@ -114,6 +103,10 @@ public class WorkflowDefinitionResolver : IScopedService
         var inMemory = await TryLoadRunAsync(runId);
         if (HasBoundSnapshot(inMemory))
             return ResolveBoundSnapshotStage(inMemory!, stageId);
+        if (inMemory is not null)
+            throw new WorkflowDefinitionResolutionException(
+                WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
+                $"Workflow '{runId}' has no bound workflow definition and is not executable");
 
         var template = string.IsNullOrWhiteSpace(boundProfileId)
             ? await LoadTemplateAsync(runId, projectId, issueNumber)
@@ -121,11 +114,10 @@ public class WorkflowDefinitionResolver : IScopedService
         var definition = template.Structure
             ?? throw new InvalidOperationException(
                 $"Workflow '{runId}' has no effective workflow template");
-        var resolved = definition.Stages.FirstOrDefault(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal))
+        return definition.Stages.FirstOrDefault(s => string.Equals(s.Stage, stageId, StringComparison.Ordinal))
             ?? throw new WorkflowDefinitionResolutionException(
                 WorkflowDefinitionResolutionException.ResolutionReason.NoStageDefinition,
                 $"Workflow '{runId}' has no definition for stage '{stageId}'");
-        return resolved;
     }
 
     private static bool HasBoundSnapshot(WorkflowRun? run) =>
@@ -154,11 +146,8 @@ public class WorkflowDefinitionResolver : IScopedService
     /// <summary>
     /// Snapshot-only stage resolver used by the Workflow grain's stage
     /// initializer and stage-lock coordinator. Reads the bound definition
-    /// from the in-memory run first, falling back to a database load, and
-    /// never calls the live profile provider for snapshot-backed runs. A run
-    /// without a snapshot resolves its stage from the retained pre-change
-    /// aggregate definition for the affected built-in profiles; legacy
-    /// aggregate state must not be made to wait for synthesized lane state.
+    /// from the in-memory run first, falling back to a database load. Runs
+    /// without a snapshot are historical and are not executable.
     /// </summary>
     public async Task<StageDefinition> ResolveStageFromBoundSnapshotAsync(
         string runId,
@@ -167,16 +156,6 @@ public class WorkflowDefinitionResolver : IScopedService
     {
         if (HasBoundSnapshot(inMemoryRun))
             return ResolveBoundSnapshotStage(inMemoryRun!, stageId);
-
-        if (inMemoryRun is not null
-            && !string.IsNullOrWhiteSpace(inMemoryRun.WorkflowProfileId)
-            && string.IsNullOrWhiteSpace(inMemoryRun.BoundWorkflowDefinitionJson))
-        {
-            var legacy = RetainedLegacyAggregate.TryGetLegacyDefinition(
-                inMemoryRun.WorkflowProfileId,
-                stageId);
-            if (legacy is not null) return legacy;
-        }
 
         return await LoadStageSpecsAsync(runId, stageId);
     }
@@ -258,6 +237,23 @@ public class WorkflowDefinitionResolver : IScopedService
         return null;
     }
 
+    private static string? ReadWorkflowProfileId(string? stateJson)
+    {
+        if (string.IsNullOrWhiteSpace(stateJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(stateJson);
+            return doc.RootElement.TryGetProperty("workflowProfileId", out var value)
+                && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static IEnumerable<string> CandidateProfileIds(
         string? issueSelection,
         string? projectDefault,
@@ -308,45 +304,6 @@ public class WorkflowDefinitionResolver : IScopedService
         return new RunContext(projectId, issueNumber, workflowRun is not null);
     }
 
-    private static async Task<string?> LoadBoundProfileIdAsync(MohistDbContext db, string runId)
-    {
-        var state = await db.WorkflowRuns.AsNoTracking()
-            .Where(x => x.WorkflowRunId == runId)
-            .Select(x => x.State)
-            .FirstOrDefaultAsync();
-        return ReadWorkflowProfileId(state);
-    }
-
-    private async Task<ResolvedTemplate> LoadBoundTemplateAsync(string runId, string profileId, string? projectId)
-    {
-        if (string.IsNullOrWhiteSpace(projectId))
-            return await LoadTemplateAsync(runId, projectId);
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var profile = await LoadProfileAsync(projectId!, profileId);
-        if (profile is null)
-            throw new WorkflowDefinitionResolutionException(
-                WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
-                $"Workflow '{runId}' has no current definition for bound Profile '{profileId}'");
-        return profile;
-    }
-
-    private static string? ReadWorkflowProfileId(string? stateJson)
-    {
-        if (string.IsNullOrWhiteSpace(stateJson)) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(stateJson);
-            return doc.RootElement.TryGetProperty("workflowProfileId", out var value)
-                && value.ValueKind == JsonValueKind.String
-                ? value.GetString()
-                : null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     private static async Task<IssueRunRef?> FindIssueForRunAsync(MohistDbContext db, string runId)
     {
         var rows = await db.Issues.AsNoTracking()
@@ -386,6 +343,38 @@ public class WorkflowDefinitionResolver : IScopedService
         catch
         {
             return null;
+        }
+    }
+
+    private async Task<ResolvedTemplate> LoadBoundTemplateAsync(string runId, string profileId, string? projectId)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+            return await LoadTemplateAsync(runId, projectId);
+
+        var profile = await LoadProfileAsync(projectId!, profileId);
+        if (profile is null)
+            throw new WorkflowDefinitionResolutionException(
+                WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
+                $"Workflow '{runId}' has no current definition for bound Profile '{profileId}'");
+        return profile;
+    }
+
+    private static WorkflowProfile ParseBoundTemplate(WorkflowRun run)
+    {
+        try
+        {
+            var definition = WorkflowYamlSerializer.FromJson(run.BoundWorkflowDefinitionJson!);
+            return new WorkflowProfile(
+                run.WorkflowProfileId ?? "bound",
+                run.WorkflowProfileId ?? "Bound workflow",
+                "Bound workflow snapshot",
+                definition);
+        }
+        catch (Exception ex)
+        {
+            throw new WorkflowDefinitionResolutionException(
+                WorkflowDefinitionResolutionException.ResolutionReason.NoCurrentDefinition,
+                $"Workflow '{run.Id}' has an unreadable BoundWorkflowDefinitionJson: {ex.Message}");
         }
     }
 

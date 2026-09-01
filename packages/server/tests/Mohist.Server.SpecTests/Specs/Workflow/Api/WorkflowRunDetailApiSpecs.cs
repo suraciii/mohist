@@ -196,7 +196,7 @@ public class WorkflowRunDetailApiSpecs
             GitUrl = "git@example.com:test.git",
             BaseBranch = "main",
             IsDefault = true,
-        });
+        }, "git diff --check");
         return (id, name);
     }
 

@@ -85,7 +85,8 @@ public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
             await workflow.StartAsync(new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: TestTime.UtcNow,
-                 ProjectId: projectId)));
+                 ProjectId: projectId),
+                VerificationCommand: "true"));
             return workflowId;
         }
 

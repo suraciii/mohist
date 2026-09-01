@@ -36,6 +36,7 @@ public class PathContractRegressionSpecs
         var project = await (await _client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new { name = "primary", gitUrl = "git@example.com:primary.git", baseBranch = "main" },
         }))
             .Content.ReadFromJsonAsync<JsonElement>();
@@ -76,6 +77,7 @@ public class PathContractRegressionSpecs
         var createResponse = await _client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" },
         });
         Assert.Equal(System.Net.HttpStatusCode.Created, createResponse.StatusCode);
@@ -98,6 +100,7 @@ public class PathContractRegressionSpecs
         var createResponse = await _client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" },
         });
         var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
@@ -118,6 +121,7 @@ public class PathContractRegressionSpecs
         using var response = await _client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" },
         });
 
@@ -163,6 +167,7 @@ public class PathContractRegressionSpecs
         var project = await (await _client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" },
         }))
             .Content.ReadFromJsonAsync<JsonElement>();
@@ -193,6 +198,7 @@ public class PathContractRegressionSpecs
         var project = await (await _client.PostAsJsonAsync("/api/projects", new
         {
             name = $"contract-local-add-{Guid.NewGuid():N}",
+            verificationCommand = "true",
             repository = new { name = "primary", gitUrl = "git@example.com:primary.git", baseBranch = "main" },
         }))
             .Content.ReadFromJsonAsync<JsonElement>();
@@ -224,6 +230,7 @@ public class PathContractRegressionSpecs
         var project = await (await _client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new { name = "primary", gitUrl = "git@example.com:primary.git", baseBranch = "main" },
         }))
             .Content.ReadFromJsonAsync<JsonElement>();
@@ -252,6 +259,7 @@ public class PathContractRegressionSpecs
         var project = await (await _client.PostAsJsonAsync("/api/projects", new
         {
             name = $"contract-local-update-{Guid.NewGuid():N}",
+            verificationCommand = "true",
             repository = new { name = "primary", gitUrl = "git@example.com:primary.git", baseBranch = "main" },
         }))
             .Content.ReadFromJsonAsync<JsonElement>();
@@ -280,6 +288,7 @@ public class PathContractRegressionSpecs
         var project = await (await _client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new { name = "primary", gitUrl = "git@example.com:dispatch.git", baseBranch = "main" },
         }))
             .Content.ReadFromJsonAsync<JsonElement>();
@@ -318,6 +327,7 @@ public class PathContractRegressionSpecs
         var project = await (await _client.PostAsJsonAsync("/api/projects", new
         {
             name = $"workflow-vars-{Guid.NewGuid():N}",
+            verificationCommand = "true",
             repository = new { name = "primary", gitUrl = "git@example.com:workflow-vars.git", baseBranch = "main" },
         }))
             .Content.ReadFromJsonAsync<JsonElement>();
@@ -372,6 +382,7 @@ public class PathContractRegressionSpecs
         var project = await (await _client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new { name = "primary", gitUrl = "git@example.com:keypath.git", baseBranch = "main" },
         }))
             .Content.ReadFromJsonAsync<JsonElement>();

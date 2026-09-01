@@ -456,6 +456,7 @@ public class RunnerConfigFixture : IAsyncLifetime
         using var projectResponse = await Client.PostAsJsonAsync("/api/projects", new
         {
             name = projectName,
+            verificationCommand = "true",
             repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
         });
         projectResponse.EnsureSuccessStatusCode();

@@ -465,7 +465,8 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             Name: null,
             CreatedAt: DateTimeOffset.UnixEpoch,
              ProjectId: projectId,
-             IssueNumber: 1)));
+             IssueNumber: 1),
+            VerificationCommand: "true"));
     }
 
     private async Task<JsonElement> PollAsync(string runnerId)

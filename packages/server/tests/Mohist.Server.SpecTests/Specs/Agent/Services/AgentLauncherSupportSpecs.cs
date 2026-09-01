@@ -84,6 +84,7 @@ public abstract class AgentLauncherSupportSpecs
         using var response = await Fixture.Client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
         });
         if (!response.IsSuccessStatusCode)

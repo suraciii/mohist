@@ -84,14 +84,20 @@ public sealed class WorkflowRun
     /// Write-once immutable snapshot of the complete effective
     /// <c>WorkflowDefinition</c> captured at <c>BindWorkflowRun</c> time.
     /// Subsequent stage initialization and stage-lock resolution read this
-    /// snapshot rather than the live profile provider, so a profile edit
-    /// after binding cannot retroactively change a run's lane mode, task
-    /// definitions, command text, or per-lane timeouts. Pre-existing runs
-    /// without this field remain readable as explicit legacy mode and use
-    /// the retained pre-change aggregate definition for the affected
-    /// built-in profiles; the lane gate does not apply to them.
+    /// snapshot rather than the live profile provider, so a profile or Project
+    /// edit after binding cannot retroactively change task definitions,
+    /// verification command text, or timeouts. Runs without this field are
+    /// historical no-snapshot records and are not a supported executable path
+    /// after the verification-command cutover.
     /// </summary>
     public string? BoundWorkflowDefinitionJson { get; set; }
+
+    /// <summary>
+    /// The Project verification command captured at initial binding. It is
+    /// immutable for the lifetime of the run and is exposed to dispatch as
+    /// <c>workflow.verification.command</c>.
+    /// </summary>
+    public string? VerificationCommand { get; set; }
     public string? CurrentStageId { get; set; }
     public required List<StageRun> Stages { get; init; }
     public DateTimeOffset? StartedAt { get; set; }

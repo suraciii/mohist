@@ -122,6 +122,7 @@ public class IssueWatchApiSpecs
         using var response = await _client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
         });
         response.EnsureSuccessStatusCode();

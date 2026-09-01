@@ -286,7 +286,7 @@ public sealed class IssueWorkflowLifecycleGrainSpecs
             GitUrl = "git@example.com:mohist-local.git",
             BaseBranch = "main",
             IsDefault = true,
-        });
+        }, "git diff --check");
         return (id, name);
     }
 

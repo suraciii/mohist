@@ -108,6 +108,22 @@ public class IssueEventSerializerTests
     }
 
     [Fact]
+    public void ToData_IssueWorkStarted_PreservesCapturedVerificationCommand()
+    {
+        var data = IssueEventSerializer.ToData(new IssueWorkStarted(
+            "wr_1",
+            Context: new IssueWorkStartedContext(
+                "project-1",
+                42,
+                "Verify issue",
+                "p1",
+                "npm run verify")));
+
+        Assert.Equal("project-1", data.GetProperty("context").GetProperty("projectId").GetString());
+        Assert.Equal("npm run verify", data.GetProperty("context").GetProperty("verificationCommand").GetString());
+    }
+
+    [Fact]
     public void ToData_IssueCompleted_PreservesCompletionKind()
     {
         var data = IssueEventSerializer.ToData(

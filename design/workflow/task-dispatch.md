@@ -24,8 +24,8 @@ does **not** happen during Server dispatch:
   - Effective Stage Variables, resolved at dispatch and frozen under
     [`variables.md`](variables.md);
   - Project Prompt bodies, loaded by key at dispatch;
-  - runtime context: `workflow.runId`, `stage.name`, `work.*`, `issue.*`, `repository.*`,
-    `tasks.<id>.outputs.*`, and `workspace.*`;
+  - runtime context: `workflow.runId`, `workflow.verification.command`, `stage.name`, `work.*`,
+    `issue.*`, `repository.*`, `tasks.<id>.outputs.*`, and `workspace.*`;
   - failure context, `failure.*`, for a recovery task when applicable.
 - Before manifest validation and the Action call, Runner renders local inputs for this execution
   from the original `with` and `expect` against the attempt snapshot. Rendering creates a new

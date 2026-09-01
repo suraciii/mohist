@@ -199,6 +199,7 @@ public sealed class IntegrationTokenSpecs(MohistIntegrationFixture fixture)
         using var response = await fixture.Client.PostAsJsonAsync("/api/projects", new
         {
             name = $"{name}-{Guid.NewGuid():N}",
+            verificationCommand = "true",
             repository = new { name = "primary", gitUrl = "git@example.com:primary.git", baseBranch = "main" },
         });
         response.EnsureSuccessStatusCode();

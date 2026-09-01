@@ -109,6 +109,7 @@ public class IssueStartReadinessApiSpecs
             new
             {
                 name = $"readiness-{Guid.NewGuid():N}",
+                verificationCommand = "true",
                 repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
             },
             JsonOptions);

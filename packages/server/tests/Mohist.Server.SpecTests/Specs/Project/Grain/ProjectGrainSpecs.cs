@@ -36,7 +36,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:r.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            }));
+            }, "git diff --check"));
     }
 
     [Fact]
@@ -50,7 +50,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = string.Empty,
                 BaseBranch = "main",
                 IsDefault = true,
-            }));
+            }, "git diff --check"));
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:main.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
 
         Assert.Single(project.Repositories);
         var repo = project.Repositories[0];
@@ -87,7 +87,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:main.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             grain.CreateAsync(
@@ -98,7 +98,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                     GitUrl = "git@example.com:main.git",
                     BaseBranch = "main",
                     IsDefault = true,
-                }));
+                }, "git diff --check"));
     }
 
     [Fact]
@@ -113,7 +113,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:main.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         var project = await grain.GetAsync();
 
         Assert.NotNull(project);
@@ -140,7 +140,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:main.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         var before = created.UpdatedAt;
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
 
@@ -170,7 +170,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:main.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         await grain.DeleteAsync();
 
         Assert.Null(await grain.GetAsync());
@@ -188,7 +188,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:server.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         await grain.AddRepositoryAsync("frontend", "git@example.com:frontend.git", "main");
         await grain.AddRepositoryAsync("backend", "git@example.com:backend.git", "main");
 
@@ -214,7 +214,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:server.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         await grain.AddRepositoryAsync("frontend", "git@example.com:frontend.git", "main", setDefault: true);
 
         var project = await grain.GetAsync();
@@ -237,7 +237,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:server.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
             grain.AddRepositoryAsync("SERVER", "git@example.com:server-other.git", "main"));
@@ -255,7 +255,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:main.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
             grain.AddRepositoryAsync("server", "", "main"));
@@ -273,7 +273,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:main.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
             grain.AddRepositoryAsync("", "git@example.com:r.git", "main"));
@@ -291,7 +291,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:main.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         var updated = await grain.AddRepositoryAsync("web", "git@example.com:web.git", null);
 
         Assert.NotNull(updated);
@@ -312,7 +312,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:server.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
 
         var triggerName = $"fail_project_update_{Guid.NewGuid():N}";
         await using var connection = new SqliteConnection(_fixture.ConnectionString);
@@ -364,7 +364,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:server.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
 
         await using (var connection = new SqliteConnection(_fixture.ConnectionString))
         {
@@ -396,7 +396,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:frontend.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         await grain.AddRepositoryAsync("backend", "git@example.com:backend.git", "main");
         await grain.SetDefaultRepositoryAsync("backend");
 
@@ -421,7 +421,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:server.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         var before = await grain.GetAsync();
         await grain.SetDefaultRepositoryAsync("server");
 
@@ -456,7 +456,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:server.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
 
         var result = await grain.SetDefaultRepositoryAsync("ghost");
         Assert.Null(result);
@@ -474,7 +474,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:server.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         await grain.AddRepositoryAsync("web", "git@example.com:web.git", "main");
 
         var updated = await grain.RemoveRepositoryAsync("web");
@@ -496,7 +496,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:server.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             grain.RemoveRepositoryAsync("server"));
@@ -519,7 +519,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:server.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
 
         var result = await grain.RemoveRepositoryAsync("ghost");
         Assert.Null(result);
@@ -537,7 +537,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:backend.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
 
         var updated = await grain.UpdateRepositoryAsync("backend", gitUrl: "git@example.com:backend-v2.git", baseBranch: "develop");
 
@@ -559,7 +559,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:backend.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
             grain.UpdateRepositoryAsync("backend", gitUrl: null, baseBranch: null));
@@ -577,7 +577,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:backend.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
 
         var result = await grain.UpdateRepositoryAsync("ghost", gitUrl: "git@example.com:other.git");
         Assert.Null(result);
@@ -595,7 +595,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
                 GitUrl = "git@example.com:first.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         await grain.AddRepositoryAsync("default-one", "git@example.com:d.git", "main", setDefault: true);
 
         var project = await grain.GetAsync();

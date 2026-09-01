@@ -116,7 +116,7 @@ public class IssueCompositeLifecycleGrainSpecs
             GitUrl = "git@example.com:mohist-local.git",
             BaseBranch = "main",
             IsDefault = true,
-        });
+        }, "git diff --check");
         return id;
     }
 

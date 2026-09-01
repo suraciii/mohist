@@ -46,12 +46,25 @@ internal static class ProjectCommands
         var cmd = new Command("create", "Create a new project from a local Git working tree");
         var nameArg = new Argument<string>("name") { Description = "Project name" };
         var pathOpt = new Option<string>("--path") { Description = "Path to the local Git repository that becomes the project's default repository" };
+        var commandOpt = new Option<string?>("--verification-command") { Description = "Verification shell command (mutually exclusive with --verification-command-file)" };
+        var commandFileOpt = new Option<string?>("--verification-command-file") { Description = "Read the verification command from a UTF-8 file path, or - for stdin" };
         cmd.Arguments.Add(nameArg);
         cmd.Options.Add(pathOpt);
+        cmd.Options.Add(commandOpt);
+        cmd.Options.Add(commandFileOpt);
         cmd.SetAction(async ctx =>
         {
             var name = ctx.GetValue(nameArg);
             var path = ctx.GetValue(pathOpt);
+            var resolvedCommand = await BodyInputResolver.ResolveAsync(
+                ctx.GetValue(commandOpt),
+                ctx.GetValue(commandFileOpt),
+                new BodyInputResolver.SourceFlags("--verification-command", "--verification-command-file", "verification command"),
+                api.FileSystem,
+                api.StandardInput,
+                TextWriter.Null);
+            if (resolvedCommand is BodyInputResolver.Result.Failure commandFailure)
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, commandFailure.Message);
 
             var bootstrap = await ProjectRepositoryBootstrap.TryResolveAsync(
                 path ?? string.Empty,
@@ -65,11 +78,13 @@ internal static class ProjectCommands
             }
 
             var resolved = ((ProjectRepositoryBootstrap.Outcome.Success)bootstrap).Result;
+            var verificationCommand = ((BodyInputResolver.Result.Success)resolvedCommand).Body;
             return await api.PrintPostAsync(
                 "/api/projects",
                 new
                 {
                     name,
+                    verificationCommand,
                     repository = new
                     {
                         name = resolved.RepositoryName,

@@ -42,6 +42,7 @@ public class WorkflowArtifactQueryRouteSpecs
             new
             {
                 name = projectName,
+                verificationCommand = "true",
                 repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
             });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();

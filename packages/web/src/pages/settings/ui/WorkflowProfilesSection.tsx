@@ -1,6 +1,6 @@
-import { useCallback, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
 import { ArrowLeftIcon } from 'lucide-react'
-import { useProject } from '../../../entities/project'
+import { useProject, useSetVerificationCommand } from '../../../entities/project'
 import {
   useDisableWorkflowProfile,
   useEnableWorkflowProfile,
@@ -16,6 +16,8 @@ import type {
 import { includesWorkflowProfileId } from '../../../entities/settings'
 import { CardSection } from '../../../shared/ui/components/card-section'
 import { Switch } from '../../../shared/ui/components/switch'
+import { Textarea } from '../../../shared/ui/components/textarea'
+import { Button } from '../../../shared/ui/components/button'
 import type { SettingsSearchEntry } from '../model/settings-search'
 import { getSectionMeta } from '../lib/sections'
 import { NoProjectCard } from './NoProjectCard'
@@ -36,7 +38,54 @@ export const WORKFLOW_DESCRIPTORS: SettingsSearchEntry[] = [
     description: 'Set the default workflow profile for new issues in this project.',
     focusTargetId: 'project-default-workflow',
   },
+  {
+    tab: 'workflows',
+    label: 'Project Verification Command',
+    description: 'Set the command used by the built-in verification task.',
+    focusTargetId: 'project-verification-command',
+  },
 ]
+
+function ProjectVerificationCommandControl() {
+  const { currentProject } = useProject()
+  const mutation = useSetVerificationCommand()
+  const [command, setCommand] = useState(currentProject?.verificationCommand ?? '')
+
+  useEffect(() => {
+    setCommand(currentProject?.verificationCommand ?? '')
+  }, [currentProject?.id, currentProject?.verificationCommand])
+
+  if (!currentProject) return null
+
+  return (
+    <CardSection title="Project verification command" titleAs="h3" tone="blue">
+      <div id="project-verification-command" tabIndex={-1} className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          The command runs from the repository root for each new WorkflowRun. It is frozen when work starts and is not a
+          secret.
+        </p>
+        <Textarea
+          value={command}
+          onChange={(event) => setCommand(event.target.value)}
+          placeholder="npm run verify"
+          aria-label="Project verification command"
+          data-testid="project-verification-command-input"
+          rows={4}
+        />
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={() => mutation.mutate({ projectId: currentProject.id, command })}
+            disabled={!command.trim() || mutation.isPending}
+            data-testid="project-verification-command-save"
+          >
+            {mutation.isPending ? 'Saving...' : 'Save command'}
+          </Button>
+          {mutation.isError && <span className="text-sm text-red-700">{mutation.error.message}</span>}
+        </div>
+      </div>
+    </CardSection>
+  )
+}
 
 function YamlViewer({ yaml }: { yaml: string }) {
   return (
@@ -382,6 +431,7 @@ export function WorkflowProfilesSection({
     <div id="workflow-profiles-section" tabIndex={-1}>
       <SettingsSection title={sectionLabel} description={sectionDescription}>
         <div className="space-y-4">
+          <ProjectVerificationCommandControl />
           <div id="project-default-workflow" tabIndex={-1}>
             <DefaultWorkflowControl />
           </div>

@@ -82,7 +82,13 @@ public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
     protected async Task SeedProjectTemplateAsync(string projectId, string runId, string templateId, string templateJson)
     {
         await using var db = new MohistDbContext(Database.Options);
-        SeedRunContext(db, projectId, 1, runId);
+        SeedRunContext(
+            db,
+            projectId,
+            1,
+            runId,
+            templateId,
+            WorkflowYamlSerializer.ToJson(WorkflowProfilePersistence.Deserialize(templateJson).Definition));
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
@@ -116,7 +122,13 @@ public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
     {
         await using var db = new MohistDbContext(Database.Options);
         var issueProfileId = WorkflowProfilePersistence.Deserialize(issueTemplateJson).Id;
-        SeedRunContext(db, projectId, issueNumber, runId, issueProfileId);
+        SeedRunContext(
+            db,
+            projectId,
+            issueNumber,
+            runId,
+            issueProfileId,
+            WorkflowYamlSerializer.ToJson(WorkflowProfilePersistence.Deserialize(issueTemplateJson).Definition));
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
@@ -143,7 +155,21 @@ public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
         await using var db = new MohistDbContext(Database.Options);
         var resolvedIssueProfileId = issueWorkflowProfileId
             ?? (issueTemplateJson is null ? issueSourceTemplateId : WorkflowProfilePersistence.Deserialize(issueTemplateJson).Id);
-        SeedRunContext(db, projectId, issueNumber, runId, resolvedIssueProfileId);
+        var boundProfileId = resolvedIssueProfileId ?? projectDefaultTemplateId ?? "mohist/local";
+        var boundDefinition = issueTemplateJson is not null && resolvedIssueProfileId is not null
+            ? WorkflowProfilePersistence.Deserialize(issueTemplateJson).Definition
+            : projectTemplateJson is not null
+                && (projectDefaultTemplateId is not null || issueSourceTemplateId is not null)
+                ? WorkflowProfilePersistence.Deserialize(projectTemplateJson).Definition
+                : WorkflowProfileCatalog.GetDefinition(boundProfileId)
+                    ?? throw new InvalidOperationException($"Unknown system profile '{boundProfileId}'");
+        SeedRunContext(
+            db,
+            projectId,
+            issueNumber,
+            runId,
+            boundProfileId,
+            WorkflowYamlSerializer.ToJson(boundDefinition));
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
@@ -218,6 +244,8 @@ public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
                 CreatedAt: DateTimeOffset.UnixEpoch,
                 ProjectId: projectId,
                 IssueNumber: issueNumber));
+        run.WorkflowProfileId = systemProfileId;
+        run.BoundWorkflowDefinitionJson = WorkflowYamlSerializer.ToJson(definition);
         row.State = JSON.Serialize(run);
         await db.SaveChangesAsync();
     }
@@ -306,7 +334,8 @@ public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
         string projectId,
         int issueNumber,
         string runId,
-        string? issueWorkflowProfileId = null)
+        string? issueWorkflowProfileId = null,
+        string? boundDefinitionJson = null)
     {
         db.WorkflowRuns.Add(new WorkflowRunRow
         {
@@ -320,6 +349,8 @@ public abstract class WorkflowDefinitionResolverTestFactory : IDisposable
                     ProjectId = projectId,
                     IssueNumber = issueNumber,
                 },
+                WorkflowProfileId = issueWorkflowProfileId,
+                BoundWorkflowDefinitionJson = boundDefinitionJson,
                 Status = "Failed",
                 Stages = Array.Empty<object>(),
             }),

@@ -31,7 +31,7 @@ public class CliProjectCommandSpecs
         SeedGitRepo(fileSystem, executor, RepoRoot, gitUrl: "git@example.com:team/product-a.git", baseBranch: "main");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "create", "my-project", "--path", RepoRoot], output, error, fileSystem, executor);
+            http, ["project", "create", "my-project", "--path", RepoRoot, "--verification-command", "true"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
@@ -40,6 +40,7 @@ public class CliProjectCommandSpecs
 
         var body = JsonNode.Parse(request.Body!)!;
         Assert.Equal("my-project", body["name"]?.GetValue<string>());
+        Assert.Equal("true", body["verificationCommand"]?.GetValue<string>());
         var repo = body["repository"];
         Assert.NotNull(repo);
         Assert.Equal("product-a", repo!["name"]?.GetValue<string>());
@@ -73,7 +74,7 @@ public class CliProjectCommandSpecs
             createGitMarker: false);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "create", "my-project", "--path", nestedPath], output, error, fileSystem, executor);
+            http, ["project", "create", "my-project", "--path", nestedPath, "--verification-command", "true"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var body = JsonNode.Parse(handler.Requests.Single().Body!)!;
@@ -112,7 +113,7 @@ public class CliProjectCommandSpecs
         QueueGit(executor, RepoRoot, ["rev-parse", "--show-toplevel"], 128, "", "fatal: not a git repository");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "create", "my-project", "--path", RepoRoot], output, error, fileSystem, executor);
+            http, ["project", "create", "my-project", "--path", RepoRoot, "--verification-command", "true"], output, error, fileSystem, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(handler.Requests);
@@ -130,7 +131,7 @@ public class CliProjectCommandSpecs
         SeedGitRepo(fileSystem, executor, RepoRoot, includeOrigin: false, includeBranch: true, branch: "main");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "create", "my-project", "--path", RepoRoot], output, error, fileSystem, executor);
+            http, ["project", "create", "my-project", "--path", RepoRoot, "--verification-command", "true"], output, error, fileSystem, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(handler.Requests);
@@ -152,7 +153,7 @@ public class CliProjectCommandSpecs
         QueueGit(executor, RepoRoot, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], 0, "origin/main\n");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "create", "my-project", "--path", RepoRoot], output, error, fileSystem, executor);
+            http, ["project", "create", "my-project", "--path", RepoRoot, "--verification-command", "true"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var body = JsonNode.Parse(handler.Requests.Single().Body!)!;
@@ -170,7 +171,7 @@ public class CliProjectCommandSpecs
         SeedGitRepo(fileSystem, executor, RepoRoot, includeOrigin: true, includeOriginHead: false, includeBranch: false, gitUrl: "git@example.com:team/product-a.git");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "create", "my-project", "--path", RepoRoot], output, error, fileSystem, executor);
+            http, ["project", "create", "my-project", "--path", RepoRoot, "--verification-command", "true"], output, error, fileSystem, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(handler.Requests);
@@ -193,13 +194,44 @@ public class CliProjectCommandSpecs
         SeedGitRepo(fileSystem, executor, RepoRoot, gitUrl: "git@example.com:team/product-a.git", includeOrigin: true, includeOriginHead: false, includeBranch: true, branch: "develop");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["project", "create", "my-project", "--path", RepoRoot], output, error, fileSystem, executor);
+            http, ["project", "create", "my-project", "--path", RepoRoot, "--verification-command", "true"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
         var body = JsonNode.Parse(request.Body!)!;
         Assert.Equal("develop", body["repository"]!["baseBranch"]?.GetValue<string>());
         executor.AssertExpectedCommandsExecuted();
+    }
+
+    [Fact]
+    public async Task ProjectWorkflowVerificationView_ReadsProjectByResolvedRef()
+    {
+        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(
+            async (_, _) => RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    id = "proj_a",
+                    name = "alpha",
+                    verificationCommand = "npm run verify",
+                },
+            }),
+            activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["project", "workflow", "verification", "view", "--project", "proj_a"],
+            output,
+            error,
+            fileSystem,
+            executor);
+
+        Assert.Equal(0, exitCode);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal("/api/projects/proj_a", request.RequestUri?.PathAndQuery);
+        Assert.Contains("npm run verify", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

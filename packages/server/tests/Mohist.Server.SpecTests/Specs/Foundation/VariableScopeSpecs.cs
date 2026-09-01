@@ -52,10 +52,12 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
                 ["custom"] = JsonSerializer.SerializeToElement(new { answer = 42 }),
                 ["vars"] = JsonSerializer.SerializeToElement(new Dictionary<string, string>()),
             }))));
-        await workflow.StartAsync(new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
-            Name: null,
-            CreatedAt: TestTime.UtcNow,
-             ProjectId: projectId)));
+        await workflow.StartAsync(new WorkflowStartInput(
+            Metadata: new WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: TestTime.UtcNow,
+                ProjectId: projectId),
+            VerificationCommand: "true"));
 
         await EnqueueWorkflowForTestAsync(workflowId, projectId);
         var (work, _) = await PollWorkAnyAsync();
@@ -89,10 +91,12 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
                 [new("publish", "Publish", "spec/task")],
                 [])
         ]), projectId);
-        await workflow.StartAsync(new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
-            Name: null,
-            CreatedAt: TestTime.UtcNow,
-             ProjectId: projectId)));
+        await workflow.StartAsync(new WorkflowStartInput(
+            Metadata: new WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: TestTime.UtcNow,
+                ProjectId: projectId),
+            VerificationCommand: "true"));
 
         await EnqueueWorkflowForTestAsync(workflowId, projectId);
         var (work, _) = await PollWorkAnyAsync();

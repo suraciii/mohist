@@ -148,7 +148,8 @@ public abstract record WorkflowProfileCommandPayload
         string? ExplicitProfileId,
         WorkflowRunMetadata Metadata,
         WorkspaceIdentity? Workspace = null,
-        BoundWorkflowStart? Bound = null) : WorkflowProfileCommandPayload
+        BoundWorkflowStart? Bound = null,
+        [property: Id(8)] string? VerificationCommand = null) : WorkflowProfileCommandPayload
     {
         public override string Kind => WorkflowProfileCommandPayloadKinds.BindWorkflowRun;
         public string ProfileId => Bound?.ProfileId ?? ExplicitProfileId ?? string.Empty;
@@ -185,7 +186,8 @@ public sealed record BoundWorkflowStart(
     [property: Id(7)] List<BoundStageStructure> Stages,
     [property: Id(8)] WorkflowRunMetadata Metadata,
     [property: Id(9)] WorkspaceIdentity? Workspace,
-    [property: Id(10)] string? DefinitionJson = null);
+    [property: Id(10)] string? DefinitionJson = null,
+    [property: Id(11)] string? VerificationCommand = null);
 
 [GenerateSerializer]
 public sealed record BoundStageStructure(

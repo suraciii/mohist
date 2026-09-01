@@ -65,7 +65,7 @@ public class ProjectCliTests
 
         var exitCode = await MohistCliCommands.RunAsync(
             new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
-            ["project", "create", "alpha", "--path", workTreeRoot],
+            ["project", "create", "alpha", "--path", workTreeRoot, "--verification-command", "true"],
             output,
             error,
             files,

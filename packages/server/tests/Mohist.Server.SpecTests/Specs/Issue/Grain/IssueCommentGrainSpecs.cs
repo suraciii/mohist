@@ -112,7 +112,7 @@ public class IssueCommentGrainSpecs
                 GitUrl = "git@example.com:mohist-local.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         var issueNumber = await Grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var grain = Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
         await grain.CreateAsync(projectId, issueNumber, "Commented issue", null, null, null, isDraft: false);

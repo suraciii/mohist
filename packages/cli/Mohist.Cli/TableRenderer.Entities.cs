@@ -62,6 +62,7 @@ internal sealed partial class TableRenderer
         var baseBranch = StringOf(data, "baseBranch");
         var createdAt = StringOf(data, "createdAt");
         var updatedAt = StringOf(data, "updatedAt");
+        var verificationCommand = StringOf(data, "verificationCommand");
         var repos = data["repositories"] as JsonArray;
         var repoCount = repos?.Count.ToString() ?? "0";
 
@@ -69,6 +70,7 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"name:        {name}");
         _out.WriteLine($"base branch: {baseBranch}");
         _out.WriteLine($"repositories:{repoCount}");
+        _out.WriteLine($"verification: {Truncate(string.IsNullOrWhiteSpace(verificationCommand) ? "<not configured>" : verificationCommand, 80)}");
         _out.WriteLine($"created:     {Truncate(createdAt, TitleSoftCap)}");
         _out.WriteLine($"updated:     {Truncate(updatedAt, TitleSoftCap)}");
     }

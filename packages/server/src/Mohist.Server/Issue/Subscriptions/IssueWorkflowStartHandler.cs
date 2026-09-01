@@ -3,6 +3,7 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain.Events;
+using Mohist.Server.Issue.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 
@@ -43,12 +44,33 @@ public sealed class IssueWorkflowStartHandler : ICloudEventHandler<IssueWorkStar
             return;
         }
 
+        var issueGrain = _grains.GetGrain<IIssueGrain>(
+            GrainKey.Issue(new IssueKey(issue.ProjectId, issue.Number)));
         var workflow = _grains.GetGrain<IWorkflowGrain>(evt.Data.WorkflowRunId);
         var issueContext = new WorkflowIssueContext(
             issue.ProjectId,
             issue.Number,
             issue.EpicNumber,
             evt.Data.WorkflowProfileId);
+
+        // Workspace and issue variables are prepared after the Issue intent
+        // commits. Repeating the setup here closes a crash window between the
+        // Issue transaction and WorkflowRun startup.
+        if (evt.Data.Repository is { } preparedRepository
+            && evt.Data.Workspace is { } preparedWorkspace
+            && evt.Data.Context is not null
+            && evt.Data.WorkspaceName is { } workspaceName)
+        {
+            await issueGrain.EnsureWorkflowStartPreparedAsync(
+                evt.Data.WorkflowRunId,
+                workspaceName,
+                preparedRepository.Name,
+                preparedRepository.GitUrl,
+                preparedRepository.BaseBranch,
+                preparedWorkspace.Path,
+                preparedWorkspace.Branch,
+                preparedWorkspace.ChangeDir);
+        }
 
         // When the Issue transaction captured an
         // immutable repository/workspace snapshot, replay it verbatim into
@@ -65,7 +87,8 @@ public sealed class IssueWorkflowStartHandler : ICloudEventHandler<IssueWorkStar
                     repository.BaseBranch),
                 Workspace: evt.Data.Workspace is { } workspace
                     ? new WorkspaceIdentity(workspace.Path, workspace.Branch, workspace.ChangeDir)
-                    : null);
+                    : null,
+                VerificationCommand: evt.Data.Context?.VerificationCommand);
             await workflow.EnsureStartedAsync(issueContext, snapshot);
         }
         else

@@ -17,4 +17,11 @@ public class ProjectRow
     /// keep null and observe no behavior change.
     /// </summary>
     public string? DefaultExecutionConfigJson { get; set; }
+
+    /// <summary>
+    /// The Project-owned verification script. Nullable only for Projects
+    /// created before the verification command migration; such Projects are
+    /// rejected before new work starts until configured.
+    /// </summary>
+    public string? VerificationCommand { get; set; }
 }

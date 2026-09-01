@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
@@ -37,10 +38,12 @@ public static class WorkflowGrainTestHelpers
     public static WorkflowStartInput TestInput(IGrainFactory grains, string workflowId, string? projectId = null, string? issueId = null)
     {
         projectId ??= TestProjectId(workflowId);
-        return new WorkflowStartInput(Metadata: new WorkflowRunMetadata(
-            Name: null,
-            CreatedAt: TestTime.UtcNow,
-            ProjectId: projectId));
+        return new WorkflowStartInput(
+            Metadata: new WorkflowRunMetadata(
+                Name: null,
+                CreatedAt: TestTime.UtcNow,
+                ProjectId: projectId),
+            VerificationCommand: "true");
     }
 
     public static string TestIssueId(string workflowId) => $"test-issue-{workflowId}";
@@ -238,6 +241,21 @@ public static class WorkflowGrainTestHelpers
         {
             existingProfile.DefinitionSource = definitionSource;
             existingProfile.UpdatedAt = TestTime.UtcNow;
+        }
+
+        var project = await db.Projects.FindAsync(projectId);
+        if (project is null)
+        {
+            db.Projects.Add(new ProjectRow
+            {
+                Id = projectId,
+                Name = projectId,
+                RepositoriesJson = "[]",
+                RepositoryRevision = 0,
+                CreatedAt = TestTime.UtcNow,
+                UpdatedAt = TestTime.UtcNow,
+                VerificationCommand = "true",
+            });
         }
 
         var projectProfile = await db.ProjectWorkflowProfiles.FindAsync(projectId);

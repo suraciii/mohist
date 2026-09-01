@@ -151,6 +151,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     {
         RejectIfRunReloadRequired();
         await EnsureCreatedRunAsync(input);
+        RejectUnsupportedRun();
         var events = _run!.Start(Now());
 
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run!.CurrentStageId);
@@ -196,7 +197,18 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             return;
         }
         if (_run is null)
-            await EnsureCreatedRunAsync(context, snapshot.Workspace);
+            await EnsureCreatedRunAsync(context, snapshot.Workspace, snapshot.VerificationCommand);
+        else
+            await RefreshIssueContextAsync(context);
+
+        if (_run is not null && !string.Equals(
+            _run.VerificationCommand,
+            snapshot.VerificationCommand,
+            StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"WorkflowRun '{GrainKey}' already started with a conflicting verification command");
+        }
 
         var metadata = _run!.Metadata;
         var events = _run.EnsureStarted(snapshot.Repository, snapshot.Workspace, Now(), metadata);
@@ -206,10 +218,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
                 "Workflow {Id} ensured-started with repository snapshot, stage={Stage}",
                 GrainKey, _run.CurrentStageId);
             await CommitAsync(events);
-        }
-        else
-        {
-            await SaveRunAsync();
         }
     }
 
@@ -247,10 +255,14 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             metadata?.EpicNumber,
             explicitProfileId: null,
             metadata!,
-            input?.Workspace);
+            input?.Workspace,
+            input?.VerificationCommand);
     }
 
-    private async Task EnsureCreatedRunAsync(WorkflowIssueContext context, WorkspaceIdentity? workspace = null)
+    private async Task EnsureCreatedRunAsync(
+        WorkflowIssueContext context,
+        WorkspaceIdentity? workspace = null,
+        string? verificationCommand = null)
     {
         if (_run is not null) return;
         var metadata = WorkflowRunLineage.ForIssue(
@@ -265,7 +277,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             context.EpicNumber,
             context.WorkflowProfileId,
             metadata,
-            workspace);
+            workspace,
+            verificationCommand);
     }
 
     public async Task ResumeAsync()
@@ -482,6 +495,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task<WorkflowAssignmentResult> AssignWorkerAsync(string workerId)
     {
         RejectIfRunReloadRequired();
+        RejectUnsupportedRun();
         if (_run is null) return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "missing");
         if (_run.Status.IsTerminal() || _run.Status is WorkflowRunStatus.Created or WorkflowRunStatus.Paused or WorkflowRunStatus.AwaitingApproval)
             return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "not-runnable");
@@ -506,6 +520,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     public async Task<WorkItem?> ClaimNextAsync(string workerId, string processGeneration)
     {
         RejectIfRunReloadRequired();
+        RejectUnsupportedRun();
         if (string.IsNullOrWhiteSpace(processGeneration)
             || _run is null || _run.Status is not (WorkflowRunStatus.Ready or WorkflowRunStatus.Running))
             return null;
@@ -715,6 +730,17 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             throw new InvalidOperationException($"Workflow '{GrainKey}' must reload after a failed save");
     }
 
+    private void RejectUnsupportedRun()
+    {
+        if (_run is not null
+            && !_run.Status.IsTerminal()
+            && string.IsNullOrWhiteSpace(_run.BoundWorkflowDefinitionJson))
+        {
+            throw new InvalidOperationException(
+                $"Workflow '{GrainKey}' has no bound workflow definition and is not executable");
+        }
+    }
+
     private async Task CommitAsync(
         IReadOnlyList<WorkflowEvent> events,
         CancellationToken ct = default)
@@ -770,7 +796,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         int? epicNumber,
         string? explicitProfileId,
         WorkflowRunMetadata metadata,
-        WorkspaceIdentity? workspace)
+        WorkspaceIdentity? workspace,
+        string? verificationCommand = null)
     {
         var result = await GrainFactory
             .GetGrain<IWorkflowProfileReferenceCoordinatorGrain>(projectId)
@@ -782,7 +809,8 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
                     epicNumber,
                     explicitProfileId,
                     metadata,
-                    workspace),
+                    workspace,
+                    VerificationCommand: verificationCommand),
                 $"workflow-run:{GrainKey}:start",
                 expectedRevision: null);
         if (!result.IsApplied)

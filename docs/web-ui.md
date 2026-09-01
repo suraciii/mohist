@@ -314,8 +314,8 @@ Application sections:
 Project sections:
 
 - **Repositories:** Git Repositories associated with the Project.
-- **Workflows:** The Workflow new Issues inherit, plus the read-only system
-  catalog.
+- **Workflows:** The Workflow new Issues inherit, the Project verification command used by
+  built-in Profiles, plus the read-only system catalog.
 - **Templates:** Project Prompt templates, which can override system templates
   or add project-unique keys.
 - **Label catalog:** The labels the Project suggests for Issues. The catalog

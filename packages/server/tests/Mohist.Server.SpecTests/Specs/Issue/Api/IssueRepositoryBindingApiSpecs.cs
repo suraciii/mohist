@@ -118,7 +118,7 @@ public class IssueRepositoryBindingApiSpecs
                 GitUrl = "git@main.example:repo.git",
                 BaseBranch = "main",
                 IsDefault = true,
-            });
+            }, "git diff --check");
         await grain.AddRepositoryAsync("secondary", "git@secondary.example:repo.git", "develop");
         return (projectId, project);
     }

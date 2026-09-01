@@ -54,7 +54,7 @@ public class IssueCreationSpecs
             GitUrl = "git@example.com:main.git",
             BaseBranch = "main",
             IsDefault = true,
-        });
+        }, "git diff --check");
         return project;
     }
 

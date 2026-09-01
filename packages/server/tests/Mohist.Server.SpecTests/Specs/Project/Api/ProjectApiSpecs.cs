@@ -43,6 +43,7 @@ public class ProjectApiSpecs
         using var response = await _client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new { name = "main", gitUrl = "" },
         });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -60,6 +61,7 @@ public class ProjectApiSpecs
         using var response = await _client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new
             {
                 name = "server",
@@ -81,6 +83,7 @@ public class ProjectApiSpecs
         using var response = await _client.PostAsJsonAsync("/api/projects", new
         {
             name,
+            verificationCommand = "true",
             repository = new
             {
                 name = "main",
@@ -119,6 +122,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "repository-backed",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "main",
@@ -142,6 +146,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "list-test",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "main",
@@ -163,6 +168,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "use-delete-test",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "main",
@@ -191,6 +197,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "repo-add",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "server",
@@ -223,6 +230,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "repo-add-set-default",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "server",
@@ -250,6 +258,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "dup-repo-test",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "server",
@@ -278,6 +287,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "alias-repo-add",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "server",
@@ -307,6 +317,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "alias-repo-patch",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "server",
@@ -340,6 +351,7 @@ public class ProjectApiSpecs
             new
             {
                 name = $"alias-repo-blocked-{Guid.NewGuid():N}",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "server",
@@ -375,6 +387,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "repo-add-no-url",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "server",
@@ -444,6 +457,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "repo-update",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "backend",
@@ -472,6 +486,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "repo-update-empty",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "backend",
@@ -550,6 +565,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "repo-update-unknown",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "backend",
@@ -573,6 +589,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "repo-set-default",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "server",
@@ -617,6 +634,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "repo-delete",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "server",
@@ -646,6 +664,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "repo-delete-default",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "server",
@@ -673,6 +692,7 @@ public class ProjectApiSpecs
             new
             {
                 name = $"repo-delete-cli-{Guid.NewGuid():N}",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "server",
@@ -705,6 +725,7 @@ public class ProjectApiSpecs
             new
             {
                 name = "query-default",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "first-listed",
@@ -729,6 +750,7 @@ public class ProjectApiSpecs
             new
             {
                 name = $"repo-patch-{Guid.NewGuid():N}",
+                verificationCommand = "true",
                 repository = new
                 {
                     name = "backend",

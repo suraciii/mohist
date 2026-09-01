@@ -7,13 +7,6 @@ using Xunit;
 
 namespace Mohist.Server.UnitTests.Workflow.Grains;
 
-/// <summary>
-/// Verifies the <c>BoundWorkflowDefinitionJson</c> snapshot: capture at
-/// <c>BindAsync</c> time, durable persistence on the run, inclusion in
-/// idempotency replay/conflict checks, and the snapshot is independent of
-/// later profile edits (so mixed-version rollouts cannot change a run's lane
-/// mode or task definitions).
-/// </summary>
 public sealed class WorkflowRunBindingSnapshotTests
 {
     private static readonly DateTimeOffset CreatedAt = new(2026, 8, 14, 0, 0, 0, TimeSpan.Zero);
@@ -23,27 +16,41 @@ public sealed class WorkflowRunBindingSnapshotTests
     {
         var store = new FakeWorkflowRunStore();
         var participant = new WorkflowRunBindingParticipant(store);
-        var requested = CreateStart("{\"stages\":[]}");
+        var requested = CreateStart(BuildDefinitionJson());
 
         var applied = await participant.BindAsync(requested, "start-1", expectedRevision: null);
 
         Assert.Equal(WorkflowRunBindingOutcome.Applied, applied.Outcome);
         var stored = Assert.IsType<WorkflowRun>(await store.LoadAsync(requested.WorkflowRunId));
-        Assert.Equal("{\"stages\":[]}", stored.BoundWorkflowDefinitionJson);
+        Assert.Equal(requested.DefinitionJson, stored.BoundWorkflowDefinitionJson);
+        Assert.Equal("npm run verify", stored.VerificationCommand);
     }
 
     [Fact]
-    public async Task BindAsync_NullDefinitionJson_IsAllowedForLegacyRun()
+    public async Task BindAsync_NullDefinitionJson_IsRejectedForNewRun()
     {
         var store = new FakeWorkflowRunStore();
         var participant = new WorkflowRunBindingParticipant(store);
-        var requested = CreateStart(null);
 
-        var applied = await participant.BindAsync(requested, "start-1", expectedRevision: null);
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            participant.BindAsync(CreateStart(null), "start-1", expectedRevision: null));
+        Assert.Null(await store.LoadAsync("run-1"));
+    }
 
-        Assert.Equal(WorkflowRunBindingOutcome.Applied, applied.Outcome);
-        var stored = Assert.IsType<WorkflowRun>(await store.LoadAsync(requested.WorkflowRunId));
-        Assert.Null(stored.BoundWorkflowDefinitionJson);
+    [Fact]
+    public async Task BindAsync_InvalidSnapshot_IsRejectedWhenStagesDoNotMatch()
+    {
+        var store = new FakeWorkflowRunStore();
+        var participant = new WorkflowRunBindingParticipant(store);
+        var requested = CreateStart(
+            WorkflowYamlSerializer.ToJson(new WorkflowDefinition(new[]
+            {
+                new StageDefinition("other", Array.Empty<TaskDefinition>(), Array.Empty<CheckDefinition>()),
+            })));
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            participant.BindAsync(requested, "start-1", expectedRevision: null));
+        Assert.Null(await store.LoadAsync("run-1"));
     }
 
     [Fact]
@@ -51,7 +58,7 @@ public sealed class WorkflowRunBindingSnapshotTests
     {
         var store = new FakeWorkflowRunStore();
         var participant = new WorkflowRunBindingParticipant(store);
-        var requested = CreateStart("{\"stages\":[]}");
+        var requested = CreateStart(BuildDefinitionJson());
 
         var first = await participant.BindAsync(requested, "start-1", expectedRevision: null);
         var replay = await participant.BindAsync(requested, "start-1", expectedRevision: null);
@@ -66,8 +73,8 @@ public sealed class WorkflowRunBindingSnapshotTests
     {
         var store = new FakeWorkflowRunStore();
         var participant = new WorkflowRunBindingParticipant(store);
-        var original = CreateStart("{\"stages\":[]}");
-        var edited = CreateStart("{\"stages\":[\"build\"]}");
+        var original = CreateStart(BuildDefinitionJson());
+        var edited = CreateStart(BuildDefinitionJson("other"), "dotnet test");
 
         var first = await participant.BindAsync(original, "start-1", expectedRevision: null);
         var conflict = await participant.BindAsync(edited, "start-2", expectedRevision: null);
@@ -78,43 +85,21 @@ public sealed class WorkflowRunBindingSnapshotTests
     }
 
     [Fact]
-    public async Task BindAsync_ProfileEditedAfterBinding_DoesNotChangeRunSnapshot()
-    {
-        // Mixed-version rollout. The run is bound while the profile still
-        // contains the aggregate verify task; the snapshot captures that
-        // shape. A subsequent profile edit cannot retroactively change the
-        // run's bound definition, so the run materializes the aggregate
-        // task even after the profile moves to six lanes.
-        var store = new FakeWorkflowRunStore();
-        var participant = new WorkflowRunBindingParticipant(store);
-        var aggregateJson = BuildAggregateDefinitionJson();
-        var requested = CreateStart(aggregateJson);
-
-        await participant.BindAsync(requested, "start-1", expectedRevision: null);
-
-        var stored = Assert.IsType<WorkflowRun>(await store.LoadAsync(requested.WorkflowRunId));
-        var loaded = WorkflowYamlSerializer.FromJson(stored.BoundWorkflowDefinitionJson!);
-        var build = loaded.Stages.Single(s => s.Stage == "build");
-        Assert.Single(build.Tasks);
-        Assert.Equal("verify", build.Tasks[0].Id);
-        Assert.False(VerificationLaneGate.IsLaneEnabledRun(stored));
-    }
-
-    [Fact]
-    public async Task BindAsync_SixLaneSnapshot_RunIsLaneEnabled()
+    public async Task BindAsync_ConflictingVerificationCommand_ReturnsConflict()
     {
         var store = new FakeWorkflowRunStore();
         var participant = new WorkflowRunBindingParticipant(store);
-        var sixLaneJson = BuildSixLaneDefinitionJson();
-        var requested = CreateStart(sixLaneJson);
+        var original = CreateStart(BuildDefinitionJson());
+        var edited = CreateStart(BuildDefinitionJson(), "dotnet test");
 
-        await participant.BindAsync(requested, "start-1", expectedRevision: null);
+        var first = await participant.BindAsync(original, "start-1", expectedRevision: null);
+        var conflict = await participant.BindAsync(edited, "start-2", expectedRevision: null);
 
-        var stored = Assert.IsType<WorkflowRun>(await store.LoadAsync(requested.WorkflowRunId));
-        Assert.True(VerificationLaneGate.IsLaneEnabledRun(stored));
+        Assert.Equal(WorkflowRunBindingOutcome.Applied, first.Outcome);
+        Assert.Equal(WorkflowRunBindingOutcome.Conflict, conflict.Outcome);
     }
 
-    private static BoundWorkflowStart CreateStart(string? definitionJson) => new(
+    private static BoundWorkflowStart CreateStart(string? definitionJson, string? verificationCommand = "npm run verify") => new(
         WorkflowRunId: "run-1",
         ProjectId: "project-1",
         IssueNumber: 42,
@@ -128,28 +113,15 @@ public sealed class WorkflowRunBindingSnapshotTests
             ProjectId: "project-1",
             IssueNumber: 42),
         Workspace: new WorkspaceIdentity("/worktrees/issue-42", "issue/42"),
-        DefinitionJson: definitionJson);
+        DefinitionJson: definitionJson,
+        VerificationCommand: verificationCommand);
 
-    private static string BuildAggregateDefinitionJson() =>
+    private static string BuildDefinitionJson(string stage = "build") =>
         WorkflowYamlSerializer.ToJson(new WorkflowDefinition(new[]
         {
             new StageDefinition(
-                "build",
-                new[]
-                {
-                    new TaskDefinition("verify", "Verify", "core/script"),
-                },
-                Array.Empty<CheckDefinition>()),
-        }));
-
-    private static string BuildSixLaneDefinitionJson() =>
-        WorkflowYamlSerializer.ToJson(new WorkflowDefinition(new[]
-        {
-            new StageDefinition(
-                "build",
-                VerificationLaneCatalog.LaneIds
-                    .Select(id => new TaskDefinition(id, id, "core/script"))
-                    .ToList(),
+                stage,
+                new[] { new TaskDefinition("verify", "Verify", "core/script") },
                 Array.Empty<CheckDefinition>()),
         }));
 
