@@ -364,8 +364,8 @@ Slack carries two signals with different owners:
 
 Reactions are best-effort and never change work state. The Web Session timeline
 holds the complete execution record. **Open in Mohist** links there when an
-External Web URL is configured; otherwise Slack shows stable Job and Session
-IDs. Mohist never sends a localhost address to Slack.
+External Web URL is configured; otherwise the Session card keeps its stable
+Session ID. Mohist never sends a localhost address to Slack.
 
 ### One Input, One Answer
 
@@ -375,6 +375,11 @@ Server-authored Session card. One input has at most one Session card and one
 final answer. Fast work may skip the Session card. Retries and duplicate
 delivery never create a second answer. Delivery uncertainty for the Session
 card never delays, redirects, or duplicates the Agent reply.
+
+If the Agent crashes or never responds, Mohist may post a separately labelled
+system failure with a Retry action. That fallback never replaces the Session
+card, so its Session reference and **Open in Mohist** entry remain available
+for diagnosis.
 
 The Connection ID, triggering message ID, and dispatch reference identify the
 answer. Repeated sends converge only within the owning Connection and Turn. A

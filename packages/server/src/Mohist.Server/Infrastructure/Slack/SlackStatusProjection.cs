@@ -51,6 +51,9 @@ public sealed class SlackStatusProjection : IScopedService
         string? sessionId = null,
         CancellationToken ct = default)
     {
+        if (!string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal))
+            ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+
         // Queue the receipt removal first. The adapter claims rows in their
         // durable insertion order, so a working message cannot become
         // visible before the receipt transition has been requested.
@@ -82,7 +85,7 @@ public sealed class SlackStatusProjection : IScopedService
                 ct);
         }
 
-        var sessionCardText = BuildSessionCardText(sessionId);
+        var sessionCardText = BuildSessionCardText(sessionId!);
         var result = await _outbox.UpsertReplaceableProgressAsync(new SlackOutboxDraft(
             projectId,
             connectionId,
@@ -113,88 +116,44 @@ public sealed class SlackStatusProjection : IScopedService
         return result;
     }
 
-    public async Task<SlackOutboxEnqueueResult> EnqueueTerminalAsync(
+    public async Task<SlackOutboxEnqueueResult> EnqueueFailureAsync(
         string projectId,
         string connectionId,
         SlackMessageIdentity source,
         string? threadTs,
-        string status,
         string text,
-        string? terminalDispatchRef = null,
+        string? failureDispatchRef = null,
         string? progressDispatchRef = null,
         JsonElement? blocks = null,
         CancellationToken ct = default)
     {
-        var dispatchRef = progressDispatchRef ?? DispatchRef(source, "progress");
-        var entries = await _outbox.ListAsync(
-            projectId,
-            connectionId,
-            ct,
-            OwnerKindFor(projectId));
-        var progress = entries.Entries.FirstOrDefault(entry =>
-            entry.Kind == SlackOutboxKinds.ReplaceableProgress && entry.DispatchRef == dispatchRef);
-        var projectionSource = source;
-        var progressPayload = progress is null ? null : TryReadPayload(progress.PayloadJson);
-        if (progressPayload?.StatusDispatchRef is { } statusDispatchRef
-            && TryReadSource(statusDispatchRef, out var parsedSource))
-        {
-            projectionSource = parsedSource;
-        }
-        var received = entries.Entries.FirstOrDefault(entry =>
-            entry.Kind == SlackOutboxKinds.ReactionMutation
-            && entry.DispatchRef == DispatchRef(projectionSource, "received"));
-        var providerIdentity = progressPayload?.ProviderMessageIdentity;
-        providerIdentity ??= received is null ? null : ReadProviderIdentity(received.PayloadJson);
-        var hadProgress = progress is not null;
-        var operation = providerIdentity is null ? SlackDeliveryOperations.PostMessage : SlackDeliveryOperations.ChatUpdate;
+        var dispatchRef = failureDispatchRef ?? DispatchRef(source, "system-failure");
         var payload = new SlackDeliveryPayload(
-            operation,
+            SlackDeliveryOperations.PostMessage,
             text,
-            ClientMessageId: terminalDispatchRef ?? DispatchRef(source, "terminal"),
-            ProviderMessageIdentity: providerIdentity,
+            ClientMessageId: dispatchRef,
             FallbackText: text,
-            FallbackDispatchRef: $"{terminalDispatchRef ?? DispatchRef(source, "terminal")}:fallback",
-            StatusDispatchRef: DispatchRef(projectionSource, "status"),
+            FallbackDispatchRef: $"{dispatchRef}:fallback",
             Blocks: blocks);
-        var kind = string.Equals(status, "completed", StringComparison.Ordinal)
-            ? SlackOutboxKinds.TerminalResult
-            : SlackOutboxKinds.ExplicitFailure;
         var draft = new SlackOutboxDraft(
             projectId,
             connectionId,
             source.WorkspaceTeamId,
             source.ConversationId,
-            kind,
-            terminalDispatchRef ?? DispatchRef(source, "terminal"),
+            SlackOutboxKinds.ExplicitFailure,
+            dispatchRef,
             JsonSerializer.Serialize(payload),
             threadTs,
             OwnerKindFor(projectId));
-        var terminalProjection = await _outbox.PromotePendingProgressAsync(draft, dispatchRef, ct);
-        var result = terminalProjection ?? await _outbox.EnqueueRequiredAsync(draft, ct);
-        if (hadProgress)
-        {
-            await EnqueueReactionAsync(
-                projectId,
-                connectionId,
-                projectionSource,
-                threadTs,
-                "terminal-remove-working",
-                SlackDeliveryOperations.ReactionRemove,
-                WorkingReaction,
-                null,
-                ct);
-            await EnqueueReactionAsync(
-                projectId,
-                connectionId,
-                projectionSource,
-                threadTs,
-                "terminal-add",
-                SlackDeliveryOperations.ReactionAdd,
-                ReactionFor(status),
-                null,
-                ct,
-                terminalStatus: status);
-        }
+        var result = await _outbox.EnqueueRequiredAsync(draft, ct);
+        await FinalizeLivenessAsync(
+            projectId,
+            connectionId,
+            source,
+            threadTs,
+            "failed",
+            progressDispatchRef,
+            ct);
         return result;
     }
 
@@ -281,10 +240,8 @@ public sealed class SlackStatusProjection : IScopedService
     public static string DispatchRef(SlackMessageIdentity source, string phase) =>
         $"slack-status:{source.AsKey()}:{phase}";
 
-    private static string BuildSessionCardText(string? sessionId) =>
-        string.IsNullOrWhiteSpace(sessionId)
-            ? "Agent session."
-            : SlackFinalReplyRenderer.AppendStableReference("Agent session.", sessionId, sessionId);
+    private static string BuildSessionCardText(string sessionId) =>
+        SlackFinalReplyRenderer.AppendStableReference("Agent session.", sessionId, sessionId);
 
     public static string ReactionFor(string status) => status switch
     {

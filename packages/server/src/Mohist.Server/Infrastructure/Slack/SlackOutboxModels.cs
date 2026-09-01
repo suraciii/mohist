@@ -26,9 +26,9 @@ public sealed record SlackOutboxDraft(
 
 /// <summary>
 /// Result of <see cref="SlackOutboxStore.EnqueueAsync"/>. When
-/// <see cref="MergedIntoExisting"/> is true the draft's payload
-/// replaced the existing ReplaceableProgress row and no new row was
-/// created — the caller may continue as if a fresh insert succeeded.
+/// <see cref="MergedIntoExisting"/> is true an existing delivery was reused
+/// and no new row was created. Its payload may remain unchanged when delivery
+/// has already started.
 /// </summary>
 public sealed record SlackOutboxEnqueueResult(string Id, bool MergedIntoExisting, bool Suppressed = false);
 
@@ -131,13 +131,6 @@ public sealed record SlackManagerReplyAnchor(
     /// a different key.
     /// </summary>
     public string InputDispatchRef => $"manager-reply:{SessionId}:{Source.MessageTs}";
-
-    /// <summary>
-    /// Kept separate from <see cref="InputDispatchRef"/> because liveness
-    /// reactions use the source-message status namespace.
-    /// </summary>
-    public string ProgressDispatchRef => SlackStatusProjection.DispatchRef(Source, "progress");
-    public string StatusDispatchRef => SlackStatusProjection.DispatchRef(Source, "status");
 }
 
 public static class SlackDeliveryOwnerKinds

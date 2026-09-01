@@ -3,6 +3,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Tests.Support;
 using Xunit;
 
 namespace Mohist.Server.Tests.Slack;
@@ -21,7 +22,7 @@ public sealed partial class SlackDeliveryHandlerSpecs
         var source = new SlackMessageIdentity(
             connection.WorkspaceTeamId, "C-reply-delivered-card", "1710000000.000021");
         var card = await projection.EnqueueWorkingAsync(
-            connection.ProjectId, connection.Id, source, threadTs: null);
+            connection.ProjectId, connection.Id, source, threadTs: null, sessionId: "session-delivered-card");
         var providerIdentity = new SlackProviderMessageIdentity(
             source.ConversationId, "1710000000.000022");
         await outbox.MarkDeliveredAsync(connection.ProjectId, card.Id, providerIdentity);
@@ -29,8 +30,9 @@ public sealed partial class SlackDeliveryHandlerSpecs
         var reply = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             source.ConversationId,
-            null,
+            source.MessageTs,
             "delivered card answer",
+            connectionId: connection.Id,
             replyDispatchRef: "agent-session-delivered-card:turn-1");
 
         Assert.True(reply.Accepted);
@@ -62,8 +64,9 @@ public sealed partial class SlackDeliveryHandlerSpecs
         var reply = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "C-reply-claimed-card",
-            null,
+            "1710000000.000023",
             "claimed card answer",
+            connectionId: connection.Id,
             replyDispatchRef: "agent-session-claimed-card:turn-1");
 
         Assert.True(reply.Accepted);
@@ -95,8 +98,9 @@ public sealed partial class SlackDeliveryHandlerSpecs
         var reply = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "C-reply-uncertain-card",
-            null,
+            "1710000000.000024",
             "uncertain card answer",
+            connectionId: connection.Id,
             replyDispatchRef: "agent-session-uncertain-card:turn-1");
 
         Assert.True(reply.Accepted);

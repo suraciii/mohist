@@ -10,10 +10,8 @@ public sealed partial class SlackOutboxStore
 {
     /// <summary>
     /// Enqueues the reply action for one Manager execution. Manager rows are
-    /// selected by the complete immutable origin and the stable liveness
-    /// dispatch reference; a conversation lookup is deliberately not used.
-    /// A pending Manager liveness row may be converted in place and retains
-    /// its dispatch identity so terminal convergence can still find it.
+    /// selected by the complete immutable origin; a conversation lookup is
+    /// deliberately not used. The reply is independent from liveness rows.
     /// Repeated sends return the existing row without appending text or
     /// creating another lifecycle.
     /// </summary>
@@ -42,7 +40,6 @@ public sealed partial class SlackOutboxStore
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var projectId = SlackDeliveryOwnerIds.ManagerProjectId;
         var ownerKind = SlackDeliveryOwnerKinds.Manager;
-        var progressDispatchRef = anchor.ProgressDispatchRef;
         var inputDispatchRef = anchor.InputDispatchRef;
 
         var originAccepted = await db.SlackWorkspaceEnrollments.AnyAsync(enrollment =>
@@ -89,8 +86,6 @@ public sealed partial class SlackOutboxStore
                 redactedText,
                 inputDispatchRef,
                 existingPayload.ProviderMessageIdentity,
-                anchor.StatusDispatchRef,
-                progressDispatchRef,
                 imageUrl,
                 fileName,
                 fileContentBase64);
@@ -117,53 +112,13 @@ public sealed partial class SlackOutboxStore
                 MergedIntoExisting: true);
         }
 
-        var progress = await db.SlackOutboxRows.FirstOrDefaultAsync(row =>
-            row.ProjectId == projectId
-            && row.OwnerKind == ownerKind
-            && row.ConnectionId == anchor.EnrollmentId
-            && row.WorkspaceTeamId == anchor.Source.WorkspaceTeamId
-            && row.ConversationId == anchor.Source.ConversationId
-            && (row.ThreadTs ?? anchor.Source.MessageTs) == anchor.ThreadRootMessageId
-            && row.DispatchRef == progressDispatchRef
-            && row.Kind == SlackOutboxKinds.ReplaceableProgress, ct);
-        if (progress is not null && progress.State != SlackOutboxStates.Pending)
-        {
-            await transaction.CommitAsync(ct);
-            return new SlackAgentReplyResult(
-                Accepted: false,
-                ConnectionId: anchor.EnrollmentId,
-                DeliveryId: progress.Id,
-                DispatchRef: progress.DispatchRef,
-                MergedIntoExisting: true);
-        }
-
-        var previousPayload = progress is null ? null : SlackDeliveryPayload.Parse(progress.PayloadJson);
         var payload = BuildManagerReplyPayload(
             redactedText,
             inputDispatchRef,
-            previousPayload?.ProviderMessageIdentity,
-            anchor.StatusDispatchRef,
-            progress is null ? null : progressDispatchRef,
+            null,
             imageUrl,
             fileName,
             fileContentBase64);
-        if (progress is not null)
-        {
-            progress.Kind = SlackOutboxKinds.TerminalResult;
-            progress.DispatchRef = inputDispatchRef;
-            progress.PayloadJson = JsonSerializer.Serialize(payload);
-            progress.ThreadTs = anchor.ThreadRootMessageId;
-            progress.UpdatedAt = _timeProvider.GetUtcNow();
-            await db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
-            return new SlackAgentReplyResult(
-                Accepted: true,
-                ConnectionId: anchor.EnrollmentId,
-                DeliveryId: progress.Id,
-                DispatchRef: progress.DispatchRef,
-                MergedIntoExisting: true);
-        }
-
         var now = _timeProvider.GetUtcNow();
         var row = new SlackOutboxRow
         {
@@ -221,8 +176,6 @@ public sealed partial class SlackOutboxStore
         string text,
         string dispatchRef,
         SlackProviderMessageIdentity? providerIdentity,
-        string statusDispatchRef,
-        string? progressDispatchRef,
         string? imageUrl,
         string? fileName,
         string? fileContentBase64)
@@ -233,8 +186,6 @@ public sealed partial class SlackOutboxStore
                 SlackDeliveryOperations.UploadFile,
                 text,
                 ClientMessageId: dispatchRef,
-                StatusDispatchRef: statusDispatchRef,
-                ProgressDispatchRef: progressDispatchRef,
                 FileName: fileName,
                 FileContentBase64: fileContentBase64);
         }
@@ -246,12 +197,21 @@ public sealed partial class SlackOutboxStore
                 text,
                 ClientMessageId: dispatchRef,
                 ProviderMessageIdentity: providerIdentity,
-                StatusDispatchRef: statusDispatchRef,
-                ProgressDispatchRef: progressDispatchRef,
                 Blocks: BuildImageBlocks(text, imageUrl));
         }
 
-        return BuildReplyPayload(text, dispatchRef, providerIdentity, statusDispatchRef, progressDispatchRef);
+        var segments = SlackFinalReplyRenderer.SegmentReplyText(text);
+        return new SlackDeliveryPayload(
+            providerIdentity is null
+                ? SlackDeliveryOperations.PostMessage
+                : SlackDeliveryOperations.ChatUpdate,
+            text,
+            ClientMessageId: dispatchRef,
+            ProviderMessageIdentity: providerIdentity,
+            FallbackText: text,
+            FallbackDispatchRef: $"{dispatchRef}:fallback",
+            Segments: segments.Count > 1 ? segments : null,
+            ReplyParts: [text]);
     }
 
     private static bool SameReplyContent(SlackDeliveryPayload existing, SlackDeliveryPayload requested) =>
@@ -261,15 +221,6 @@ public sealed partial class SlackOutboxStore
         && string.Equals(existing.FileContentBase64, requested.FileContentBase64, StringComparison.Ordinal)
         && string.Equals(existing.Blocks?.GetRawText(), requested.Blocks?.GetRawText(), StringComparison.Ordinal);
 
-    private static string ReplyDispatchRef(string connectionId, string conversationId, string? threadTs) =>
-        $"slack-reply:{connectionId}:{conversationId}:{threadTs ?? "dm"}:terminal";
-
     private static string ReplyDispatchRef(string logicalDispatchRef) =>
         $"slack-reply:{logicalDispatchRef}:terminal";
-
-    private static string ReplyImageDispatchRef(string connectionId, string conversationId, string? threadTs) =>
-        $"slack-reply:{connectionId}:{conversationId}:{threadTs ?? "dm"}:image";
-
-    private static string ReplyFileDispatchRef(string connectionId, string conversationId, string? threadTs) =>
-        $"slack-reply:{connectionId}:{conversationId}:{threadTs ?? "dm"}:file";
 }

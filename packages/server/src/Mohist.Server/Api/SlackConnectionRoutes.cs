@@ -796,8 +796,7 @@ public static partial class SlackConnectionRoutes
             threadTs,
             ct);
 
-        var blocks = await BuildSessionStatusBlocksAsync(
-            services,
+        var blocks = await services.GetRequiredService<SlackSessionCardBlocksBuilder>().BuildAsync(
             projectId,
             launch.SessionId,
             stopAction?.Blocks);
@@ -840,39 +839,6 @@ public static partial class SlackConnectionRoutes
                 Truncated: marker is not null,
                 TruncationMarker: marker,
                 OmittedOldestMessageCount: omitted));
-    }
-
-    private static async Task<JsonElement?> BuildSessionStatusBlocksAsync(
-        IServiceProvider services,
-        string projectId,
-        string sessionId,
-        JsonElement? controlBlocks)
-    {
-        var links = services.GetRequiredService<SlackWebLinkBuilder>();
-        if (!links.HasUsableExternalWebUrl)
-            return controlBlocks;
-
-        var project = await services.GetRequiredService<ProjectQuerier>().GetByIdAsync(projectId);
-        var link = project is null
-            ? null
-            : links.BuildOpenSession(project.Name, sessionId);
-        return CombineBlocks(controlBlocks, link?.Blocks);
-    }
-
-    private static JsonElement? CombineBlocks(JsonElement? first, JsonElement? second)
-    {
-        var blocks = new List<JsonElement>();
-        AddBlockArray(blocks, first);
-        AddBlockArray(blocks, second);
-        return blocks.Count == 0 ? null : JsonSerializer.SerializeToElement(blocks);
-    }
-
-    private static void AddBlockArray(List<JsonElement> target, JsonElement? source)
-    {
-        if (source is not { ValueKind: JsonValueKind.Array })
-            return;
-
-        target.AddRange(source.Value.EnumerateArray().Select(block => block.Clone()));
     }
 
     private static async Task EnqueueReplyAsync(
@@ -1331,8 +1297,7 @@ public static partial class SlackConnectionRoutes
                 req.Identity,
                 body.ThreadTs,
                 ct);
-            var blocks = await BuildSessionStatusBlocksAsync(
-                req.Services,
+            var blocks = await req.Services.GetRequiredService<SlackSessionCardBlocksBuilder>().BuildAsync(
                 projectId,
                 followupResult.SessionId,
                 stopAction?.Blocks);
@@ -1460,8 +1425,7 @@ public static partial class SlackConnectionRoutes
                 req.Identity,
                 body.ThreadTs,
                 ct);
-            var blocks = await BuildSessionStatusBlocksAsync(
-                req.Services,
+            var blocks = await req.Services.GetRequiredService<SlackSessionCardBlocksBuilder>().BuildAsync(
                 projectId,
                 followupResult.SessionId,
                 stopAction?.Blocks);

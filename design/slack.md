@@ -559,7 +559,8 @@ successful reaction mutation never changes Server state.
 - **Server owns liveness and the Session card.** Reaction mutation is
   best-effort: a bounded, logged failure never blocks or fails a Turn. The
   Session card contains only a stable Session reference, navigation, and
-  state-bound controls; it is not a textual execution status.
+  state-bound controls; it is not a textual execution status. Once queued, it
+  is never promoted into or overwritten by a terminal reply or failure notice.
 - **The Agent owns the reply body.** During a Turn it sends what it wants to
   say through the **reply action**: an intent API to Server carrying body and
   reply anchor. The reply action enters the same outbox and reuses redaction,
@@ -573,6 +574,11 @@ session kind: every accepted input reaches Completed or attention on every
 outcome — completion, failure, cancellation, Agent crash, or Server restart.
 The outbox persists the closeout intent, while the neutral Session card remains
 a valid observation entry instead of a stale `Working...` claim.
+
+A system-authored fallback for Agent crash or complete non-response is a
+separate outbox message with its own stable dispatch reference. A retry action
+may be attached to that fallback, but the fallback never reuses the Session
+card's provider message identity and never replaces its navigation surface.
 
 - **Silence is valid.** A Turn that ends with no reply action closes liveness
   normally; Server invents no status summary.

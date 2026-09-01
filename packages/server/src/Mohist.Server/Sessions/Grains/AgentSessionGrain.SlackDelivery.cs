@@ -79,9 +79,6 @@ public sealed partial class AgentSessionGrain
             failureCategory = turn.Result?.FailureCategory,
             artifactCount = 0,
             exitCode = (int?)null,
-            assistantText = string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal)
-                ? null
-                : AgentJobLineage.ExtractAssistantText(turn.Result?.Output),
         };
         var data = JsonSerializer.SerializeToElement(delivery, CloudEvent.JsonOptions);
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal);

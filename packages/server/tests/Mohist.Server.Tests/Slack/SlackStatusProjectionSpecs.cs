@@ -19,7 +19,7 @@ namespace Mohist.Server.Tests.Slack;
 public sealed class SlackStatusProjectionSpecs
 {
     [Fact]
-    public async Task Accepted_status_projection_is_deduplicated_and_pending_progress_is_promoted_to_terminal()
+    public async Task Accepted_status_projection_keeps_the_session_card_separate_from_a_system_failure()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
@@ -30,19 +30,17 @@ public sealed class SlackStatusProjectionSpecs
 
         await projection.EnqueueReceivedAsync("p1", "c1", source, null);
         await projection.EnqueueReceivedAsync("p1", "c1", source, null);
-        await projection.EnqueueWorkingAsync("p1", "c1", source, null);
-        await projection.EnqueueWorkingAsync("p1", "c1", source, null);
-        await projection.EnqueueTerminalAsync("p1", "c1", source, null, "completed", "done");
+        await projection.EnqueueWorkingAsync("p1", "c1", source, null, sessionId: "session-1");
+        await projection.EnqueueWorkingAsync("p1", "c1", source, null, sessionId: "session-1");
+        await projection.EnqueueFailureAsync("p1", "c1", source, null, "failed");
 
         var rows = (await store.ListAsync("p1", "c1")).Entries;
-        Assert.Equal(6, rows.Count);
         var received = Assert.Single(rows, row => row.DispatchRef == SlackStatusProjection.DispatchRef(source, "received"));
         Assert.Equal(SlackOutboxKinds.UserAction, received.Kind);
         Assert.Equal("reaction_add", JsonDocument.Parse(received.PayloadJson).RootElement.GetProperty("operation").GetString());
-        Assert.Equal(SlackOutboxKinds.TerminalResult, Assert.Single(rows, row => row.DispatchRef == SlackStatusProjection.DispatchRef(source, "terminal")).Kind);
-        Assert.DoesNotContain(rows, row => row.Kind == SlackOutboxKinds.ReplaceableProgress);
-        Assert.Equal(4, rows.Count(row => row.Kind == SlackOutboxKinds.UserAction
-            && row.DispatchRef != SlackStatusProjection.DispatchRef(source, "received")));
+        Assert.Single(rows, row => row.Kind == SlackOutboxKinds.ReplaceableProgress);
+        var failure = Assert.Single(rows, row => row.Kind == SlackOutboxKinds.ExplicitFailure);
+        Assert.Equal(SlackDeliveryOperations.PostMessage, SlackDeliveryPayload.Parse(failure.PayloadJson).Operation);
     }
 
     [Fact]
@@ -101,7 +99,7 @@ public sealed class SlackStatusProjectionSpecs
         var source = new SlackMessageIdentity("T1", "C1", "100.001");
 
         await projection.EnqueueReceivedAsync("p1", "c1", source, null);
-        await projection.EnqueueWorkingAsync("p1", "c1", source, null);
+        await projection.EnqueueWorkingAsync("p1", "c1", source, null, sessionId: "session-pruning");
         var deleted = await store.PrunePendingStatusMutationsAsync("p1", "c1");
 
         Assert.Equal(3, deleted);
@@ -109,7 +107,7 @@ public sealed class SlackStatusProjectionSpecs
     }
 
     [Fact]
-    public async Task Terminal_projection_uses_the_confirmed_progress_provider_identity_for_chat_update()
+    public async Task System_failure_does_not_reuse_the_session_card_provider_identity()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
@@ -118,24 +116,30 @@ public sealed class SlackStatusProjectionSpecs
         var projection = new SlackStatusProjection(store);
         var source = new SlackMessageIdentity("T1", "C1", "100.001");
 
-        var progress = await projection.EnqueueWorkingAsync("p1", "c1", source, "100.000");
+        var progress = await projection.EnqueueWorkingAsync(
+            "p1", "c1", source, "100.000", sessionId: "session-failure");
         await store.MarkDeliveredAsync("p1", progress.Id, new SlackProviderMessageIdentity("C1", "100.002"));
         var blocks = JsonSerializer.SerializeToElement(new[]
         {
             new { type = "actions", elements = new[] { new { type = "button", url = "https://mohist.example/p1/sessions/s1" } }, },
         });
-        await projection.EnqueueTerminalAsync("p1", "c1", source, "100.000", "failed", "failed", blocks: blocks);
+        await projection.EnqueueFailureAsync("p1", "c1", source, "100.000", "failed", blocks: blocks);
 
-        var terminal = Assert.Single((await store.ListAsync("p1", "c1")).Entries, row => row.Kind == SlackOutboxKinds.ExplicitFailure);
+        var rows = (await store.ListAsync("p1", "c1")).Entries;
+        var card = Assert.Single(rows, row => row.Id == progress.Id);
+        Assert.Equal(SlackOutboxKinds.ReplaceableProgress, card.Kind);
+        Assert.Equal(SlackOutboxStates.Delivered, card.State);
+        var terminal = Assert.Single(rows, row => row.Kind == SlackOutboxKinds.ExplicitFailure);
         var payload = SlackDeliveryPayload.Parse(terminal.PayloadJson);
-        Assert.Equal(SlackDeliveryOperations.ChatUpdate, payload.Operation);
-        Assert.Equal(new SlackProviderMessageIdentity("C1", "100.002"), payload.ProviderMessageIdentity);
+        Assert.Equal(SlackDeliveryOperations.PostMessage, payload.Operation);
+        Assert.Null(payload.ProviderMessageIdentity);
+        Assert.Null(payload.StatusDispatchRef);
         Assert.True(payload.Blocks.HasValue);
         Assert.Equal(blocks.GetRawText(), payload.Blocks.Value.GetRawText());
     }
 
     [Fact]
-    public async Task Quick_terminal_does_not_update_the_original_message_from_a_reaction_ack()
+    public async Task System_failure_does_not_update_the_original_message_from_a_reaction_ack()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
@@ -150,11 +154,11 @@ public sealed class SlackStatusProjectionSpecs
             entry => entry.DispatchRef == SlackStatusProjection.DispatchRef(source, "received"));
         await store.MarkDeliveredAsync("p1", received.Id, new SlackProviderMessageIdentity("C1", "100.001"));
 
-        await projection.EnqueueTerminalAsync("p1", "c1", source, null, "completed", "done");
+        await projection.EnqueueFailureAsync("p1", "c1", source, null, "failed");
 
         var terminal = Assert.Single(
             (await store.ListAsync("p1", "c1")).Entries,
-            row => row.DispatchRef == SlackStatusProjection.DispatchRef(source, "terminal"));
+            row => row.Kind == SlackOutboxKinds.ExplicitFailure);
         var payload = SlackDeliveryPayload.Parse(terminal.PayloadJson);
         Assert.Equal(SlackDeliveryOperations.PostMessage, payload.Operation);
         Assert.Null(payload.ProviderMessageIdentity);
@@ -249,7 +253,7 @@ public sealed class SlackStatusProjectionSpecs
     }
 
     [Fact]
-    public async Task Manager_reply_promotes_only_matching_progress_and_conflicting_duplicate_is_rejected()
+    public async Task Manager_reply_is_independent_from_liveness_and_conflicting_duplicate_is_rejected()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
@@ -300,6 +304,8 @@ public sealed class SlackStatusProjectionSpecs
         var reply = Assert.Single(rows, row => row.Kind == SlackOutboxKinds.TerminalResult);
         var replyPayload = SlackDeliveryPayload.Parse(reply.PayloadJson);
         Assert.Equal("first answer", replyPayload.Text);
+        Assert.Null(replyPayload.StatusDispatchRef);
+        Assert.Null(replyPayload.ProgressDispatchRef);
         Assert.DoesNotContain(rows, row => row.Kind == SlackOutboxKinds.ReplaceableProgress);
         Assert.Single(rows, row => row.DispatchRef == SlackStatusProjection.DispatchRef(source, "terminal-add"));
         Assert.Equal("warning", SlackDeliveryPayload.Parse(
@@ -316,10 +322,14 @@ public sealed class SlackStatusProjectionSpecs
         var projection = new SlackStatusProjection(store);
         var source = new SlackMessageIdentity("T1", "C1", "100.001");
 
-        var result = await projection.EnqueueTerminalAsync("p1", "c1", source, null, "completed", "done");
+        var result = await projection.EnqueueFailureAsync("p1", "c1", source, null, "failed");
 
         Assert.False(result.Suppressed);
-        Assert.Single((await store.ListAsync("p1", "c1")).Entries, entry => entry.State == SlackOutboxStates.Pending);
+        Assert.Single(
+            (await store.ListAsync("p1", "c1")).Entries,
+            entry => entry.Id == result.Id
+                && entry.Kind == SlackOutboxKinds.ExplicitFailure
+                && entry.State == SlackOutboxStates.Pending);
         Assert.Null(await store.ClaimAsync("p1", "c1", "adapter-1"));
 
         await using (var db = database.CreateContext())
@@ -329,9 +339,10 @@ public sealed class SlackStatusProjectionSpecs
             await db.SaveChangesAsync();
         }
 
+        Assert.Equal(2, await store.PrunePendingStatusMutationsAsync("p1", "c1"));
         var claimed = await store.ClaimAsync("p1", "c1", "adapter-1");
-        Assert.NotNull(claimed);
-        Assert.Equal(SlackOutboxKinds.TerminalResult, claimed!.Kind);
+        Assert.Equal(result.Id, claimed?.Id);
+        Assert.Equal(SlackOutboxKinds.ExplicitFailure, claimed?.Kind);
     }
 
     [Fact]
@@ -349,8 +360,8 @@ public sealed class SlackStatusProjectionSpecs
 
         var store = CreateStore(database, time);
         var projection = new SlackStatusProjection(store);
-        var result = await projection.EnqueueTerminalAsync(
-            "p1", "c1", new SlackMessageIdentity("T1", "C1", "100.001"), null, "completed", "done");
+        var result = await projection.EnqueueFailureAsync(
+            "p1", "c1", new SlackMessageIdentity("T1", "C1", "100.001"), null, "failed");
 
         Assert.True(result.Suppressed);
         Assert.Empty((await store.ListAsync("p1", "c1")).Entries);
