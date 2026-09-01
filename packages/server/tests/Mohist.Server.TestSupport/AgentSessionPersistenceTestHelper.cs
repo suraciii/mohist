@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.TestSupport;
 
@@ -11,15 +12,20 @@ public static class AgentSessionPersistenceTestHelper
         int expectedCount,
         AgentSessionPersistenceCheckpoint persistence)
     {
-        var count = await CountTranscriptPartsAsync(dbFactory, sessionId);
-        if (count >= expectedCount)
-            return;
+        var checkpoint = persistence;
+        while (true)
+        {
+            var count = await CountTranscriptPartsAsync(dbFactory, sessionId);
+            if (count >= expectedCount)
+                return;
 
-        await persistence.WaitAsync();
-        count = await CountTranscriptPartsAsync(dbFactory, sessionId);
-        if (count < expectedCount)
-            throw new InvalidOperationException(
-                $"Expected at least {expectedCount} transcript part(s) for session {sessionId}, but found {count}");
+            var result = await checkpoint.WaitAsync();
+            if (result.Outcome != AgentSessionPersistenceOutcome.Succeeded)
+                throw new InvalidOperationException(
+                    $"Persistence cycle {result.CycleId} for session {sessionId} completed with {result.Outcome}");
+
+            checkpoint = checkpoint with { CycleId = result.CycleId };
+        }
     }
 
     private static async Task<int> CountTranscriptPartsAsync(IDbContextFactory<MohistDbContext> dbFactory, string sessionId)
