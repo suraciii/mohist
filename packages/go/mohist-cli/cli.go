@@ -321,6 +321,9 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if strings.HasPrefix(command.kind, "issue-") || strings.HasPrefix(command.kind, "epic-") || strings.HasPrefix(command.kind, "label-") {
 		return runOrganization(ctx, deps, client, command)
 	}
+	if strings.HasPrefix(command.kind, "workflow-") || strings.HasPrefix(command.kind, "run-") {
+		return runWorkflow(ctx, deps, client, command)
+	}
 	data, err := client.get(ctx, command.path)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
@@ -382,8 +385,8 @@ func parse(args []string) (command, error) {
 	if args[0] == "issue" || args[0] == "epic" || args[0] == "label" {
 		return parseOrganization(args[0], args[1:])
 	}
-	if args[0] == "run" && len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
-		return command{help: true, helpText: runGroupHelp()}, nil
+	if args[0] == "workflow" {
+		return parseWorkflow(args[1:])
 	}
 	if args[0] != "run" {
 		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") && contains(rootGroups(), args[0]) {
@@ -391,8 +394,14 @@ func parse(args []string) (command, error) {
 		}
 		return command{}, &usageError{message: "error: unknown command\n" + rootUsage()}
 	}
-	if len(args) < 2 || args[1] != "why" {
-		return command{}, &usageError{message: "error: incomplete command\nusage: mo run why <run-ref> [--json [fields]]"}
+	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+		return command{help: true, helpText: runGroupHelp()}, nil
+	}
+	if len(args) < 2 {
+		return command{}, usage("run action is required")
+	}
+	if args[1] != "why" {
+		return parseRun(args[1:])
 	}
 	c, err := parseLeaf("why", args[2:], "", diagnosisFields, "run why <run-ref>")
 	if c.help {
