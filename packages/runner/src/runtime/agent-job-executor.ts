@@ -7,6 +7,7 @@ import type {
   WorkItemResult,
 } from '../core/types.js'
 import { isObject } from '../core/json.js'
+import { stringAt } from '../core/json-path.js'
 import { parseModelIdentifier, type OpenCodeRuntime } from './opencode/index.js'
 import type { PiRuntime } from './pi/index.js'
 import type { RuntimeAccessor } from '../server/command-runtime.js'
@@ -180,7 +181,13 @@ export class AgentJobExecutor {
         skills,
         slackContext,
         work.agentSessionStartup,
-        workspaceBinding.kind === 'named' ? buildWorkspaceAnchor(workspaceBinding.workDir) : null,
+        workspaceBinding.kind === 'named'
+          ? buildWorkspaceAnchor(
+              workspaceBinding.workDir,
+              workspaceBinding.repositoryName,
+              workspaceBinding.workspaceName,
+            )
+          : null,
       ),
       attachmentDelivery,
     )
@@ -412,7 +419,7 @@ type WorkspaceBindingResolution =
   | { kind: 'default' }
   | { kind: 'invalid' }
   | { kind: 'path'; workDir: string }
-  | { kind: 'named'; workDir: string; projectId: string; workspaceName: string }
+  | { kind: 'named'; workDir: string; projectId: string; workspaceName: string; repositoryName?: string }
   | { kind: 'materialization-failed'; message: string }
 
 // Resolve the execution working directory from the dispatch's
@@ -437,16 +444,44 @@ async function resolveWorkspaceBinding(
   if (typeof name === 'string' && name.trim().length > 0) {
     if (!namedWorkspaceManager) return { kind: 'invalid' }
     try {
+      const projectId = work.projectId ?? ''
       const materialized = await namedWorkspaceManager.materialize(
-        work.projectId ?? '',
+        projectId,
         name,
         readWorkspaceRepositories(ws),
         signal,
       )
+      const repositoryName = stringAt(work.variables ?? {}, ['repository', 'name'])
+      const gitUrl = stringAt(work.variables ?? {}, ['repository', 'gitUrl'])
+      const baseBranch = stringAt(work.variables ?? {}, ['repository', 'baseBranch'])
+      if (work.workflowRunId) {
+        if (!repositoryName || !gitUrl || !baseBranch) {
+          return {
+            kind: 'materialization-failed',
+            message:
+              'Workflow-bound named workspace requires repository.name, repository.gitUrl, and repository.baseBranch',
+          }
+        }
+        const issueWorkspace = await namedWorkspaceManager.materializeForIssue(
+          projectId,
+          name,
+          repositoryName,
+          gitUrl,
+          baseBranch,
+          signal,
+        )
+        return {
+          kind: 'named',
+          workDir: issueWorkspace.path,
+          projectId,
+          workspaceName: name,
+          repositoryName,
+        }
+      }
       return {
         kind: 'named',
         workDir: materialized.path,
-        projectId: work.projectId ?? '',
+        projectId,
         workspaceName: name,
       }
     } catch (error) {
@@ -463,11 +498,12 @@ async function resolveWorkspaceBinding(
 }
 
 // The prompt anchor injected when the execution is bound to a named
-// workspace: the working directory is the workspace (all workspace
-// files live there, $HOME is off-limits), checkouts belong under
-// `repos/`, and work products belong at the workspace root. The layout
-// convention is prompt, not platform schema.
-function buildWorkspaceAnchor(workDir: string): string {
+// workspace. Workflow-bound jobs receive the canonical checkout and branch
+// so the AgentJob and mechanical actions address one physical repository.
+function buildWorkspaceAnchor(workDir: string, repositoryName?: string, workspaceName?: string): string {
+  if (repositoryName && workspaceName) {
+    return `Working directory: ${workDir}. All workspace files live here — do not search $HOME. The repository checkout is REPOS/${repositoryName} on branch mohist/ws-${workspaceName}; use that checkout for repository work. Plans, research, and other work products belong at the workspace root.`
+  }
   return `Working directory: ${workDir}. All workspace files live here — do not search $HOME. Repository checkouts belong under repos/ in this directory; plans, research, and other work products belong at the workspace root.`
 }
 
