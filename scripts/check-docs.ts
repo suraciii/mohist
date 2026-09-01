@@ -223,7 +223,7 @@ function diagramFenceViolations(filePath: string, tree: MarkdownNode): Documenta
           filePath,
           node,
           'ascii-diagram-only',
-          `fenced ${node.lang} diagram must be replaced with a fenced mermaid diagram`,
+          `fenced ${node.lang} diagram must be replaced with a grok-mermaid-rendered ASCII text diagram`,
         ),
       )
       return
