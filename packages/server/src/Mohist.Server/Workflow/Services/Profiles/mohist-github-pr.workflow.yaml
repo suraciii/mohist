@@ -76,6 +76,7 @@ stages:
         uses: mohist/agent
         with:
           name: mohist/builder
+          timeout: 1800000
   - id: verify
     title: Verify
     uses: core/script
