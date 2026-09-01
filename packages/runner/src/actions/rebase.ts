@@ -176,6 +176,27 @@ export async function rebaseAction(inputs: JsonObject, host: ActionHost): Promis
   if (result.success) {
     const after = await git(host.workDir, ['rev-parse', 'HEAD'], host.signal, opts)
     const afterSha = after.success ? after.stdout.trim() : null
+    // A branch that lands exactly on its base carries no committed change.
+    // Workspace preparation resets uncommitted work, so this state means an
+    // upstream agent never committed; failing here with a named cause beats
+    // the squash path's opaque "nothing to commit".
+    if (afterSha === baseSha) {
+      return rebaseOutput(
+        false,
+        baseBranch,
+        remote,
+        baseRef,
+        baseSha,
+        beforeSha,
+        afterSha,
+        null,
+        false,
+        [],
+        `The workflow branch has no committed change to integrate onto '${baseBranch}'. Workflow agents must commit their work before integration.`,
+        'nothing-to-integrate',
+        1,
+      )
+    }
     return await runSquashIfRequested({
       host,
       expectedBranch,
@@ -385,6 +406,7 @@ type RebaseFailureCode =
   | 'rebase-failed'
   | 'conflict'
   | 'squash-failed'
+  | 'nothing-to-integrate'
   | 'timeout'
   | null
 
