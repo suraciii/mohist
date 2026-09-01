@@ -1,91 +1,111 @@
 # Database Migrations
 
-The server persists to one SQLite database through EF Core migrations applied at startup.
-Migration files accumulate without bound during active development; squashing collapses them.
-This document defines the migration authoring contract and the squash procedure, so a squash
-never silently breaks an existing database.
+The Server persists to one SQLite database through EF Core migrations applied
+at startup. `DatabaseInitializer` applies migrations and then idempotent data
+upgraders for self-hosted and development databases. This spec defines
+migration authoring and squash rules so an existing database is never silently
+broken.
 
 ## Design Drivers
 
-- Startup applies `DatabaseInitializer`, which runs EF migrations and then idempotent data
-  upgraders. Self-hosted and development databases share this path; there is no separate
-  migration tool.
-- A squash deletes history. An existing database records old migration ids in
-  `__EFMigrationsHistory`; a regenerated baseline is unknown to it and would re-execute
-  `CREATE TABLE` against live tables. The upgrade path must therefore rewrite history
-  explicitly, and must refuse databases it cannot safely rewrite.
-- Hand-written migrations are common here (backfills, table rebuilds). EF Core discovers a
-  migration only through `[Migration("id")]` plus `[DbContext(typeof(MohistDbContext))]`; a
-  file missing either attribute is silently dead code. Two historical drop migrations
-  (`20260718090000_DropAgentSubscriptions`, `20260730000000_DropRunnerWorksTable`) never ran
-  for this reason. The authoring rule below exists so this cannot recur.
+- EF discovers a migration only through both required attributes. A missing
+  attribute makes hand-written migration code dead without an obvious failure.
+- A squash deletes migration history. A regenerated baseline is unknown to an
+  existing database and would re-run `CREATE TABLE` against live tables.
+- The upgrade path must rewrite `__EFMigrationsHistory` explicitly and must
+  refuse databases that it cannot safely rewrite.
+- Hand-written migrations carry backfills and table rebuilds. The authoring
+  contract must protect those operations.
 
 ## Model
 
-- **Baseline migration** — one migration that builds the complete schema of the squash floor
-  from an empty database. It replaces every migration at or below the floor.
-- **Squash floor** — the newest migration folded into the baseline
-  (`SquashedMigrationHistory.FloorId`). Databases at or past the floor upgrade seamlessly;
-  older databases do not.
-- **Retained tail** — migrations newer than the floor stay untouched and continue to apply
-  after the baseline.
-- **History remap** — `SquashedMigrationHistory.RemapAsync` runs inside
-  `DatabaseInitializer` before `MigrateAsync` and rewrites the history table of a pre-squash
-  database to reference the baseline.
+- **Baseline migration**: one migration that builds the complete schema at the
+  squash floor from an empty database. It replaces every migration at or below
+  the floor.
+- **Squash floor**: the newest migration folded into the baseline,
+  `SquashedMigrationHistory.FloorId`.
+- **Retained tail**: migrations newer than the floor. They remain unchanged and
+  apply after the baseline.
+- **History remap**: `SquashedMigrationHistory.RemapAsync` runs in
+  `DatabaseInitializer` before `MigrateAsync`. It rewrites pre-squash history
+  to reference the baseline.
 
 ## Semantics
 
 ### Authoring rules
 
 - A migration must carry both `[Migration("<id>_<Name>")]` and
-  `[DbContext(typeof(MohistDbContext))]`. When a `.Designer.cs` pair exists it carries the
-  attributes; a hand-written single-file migration must carry them itself.
-- Migration ids are zero-padded timestamps (`yyyyMMddHHmmss`); ordering is lexicographic.
-- Migrations are immutable once merged. Edit a migration only before it ships.
-- A persisted table or column rename after the baseline ships requires a new retained-tail
-  migration. Changing the baseline or model snapshot alone only fixes fresh databases; the
-  incremental migration must preserve existing rows and recreate every affected index.
+  `[DbContext(typeof(MohistDbContext))]`. A `.Designer.cs` pair carries the
+  attributes. A hand-written single-file migration carries them itself.
+- Migration IDs use zero-padded timestamps in `yyyyMMddHHmmss` format. Ordering
+  is lexicographic.
+- Migrations are immutable after merge. Edit one only before it ships.
+- A persisted table or column rename after the baseline ships requires a new
+  retained-tail migration. Editing only the baseline or model snapshot fixes
+  fresh databases but not existing rows. The incremental migration must
+  preserve rows and recreate every affected index.
 
 ### Squash procedure
 
 1. Pick the floor migration. Every supported database must be at or past it.
-2. In a worktree at the commit where the floor is the newest migration, delete all
-   migrations and the model snapshot, then scaffold one migration
-   (`dotnet ef migrations add SquashedBaseline`). Rename it to sort immediately before the
-   first retained migration.
-3. Patch the baseline for content the EF model cannot express:
-   - Non-model infrastructure owned by raw SQL (Orleans persistence/reminder tables and the
-     `OrleansQuery` seed rows) must be copied verbatim.
-   - Column `DEFAULT` constraints that historical `AddColumn` migrations needed (to add
-     `NOT NULL` columns to live tables) but the model never declared must be re-applied, so
-     a fresh database equals an upgraded one.
-4. Delete the squashed migrations, their `.Designer.cs` pairs, and any helper used only by
-   them. Delete the spec files that target deleted migrations.
-5. Verify semantic equivalence before merging: dump `sqlite_master` (normalized to
-   per-column/constraint fragments), `OrleansQuery` rows, and per-table row counts for the
-   old chain and for baseline-plus-tail, on empty databases. The dumps must differ only in
-   the documented deltas.
+2. In a worktree where the floor is newest, delete all migrations and the model
+   snapshot. Scaffold one migration with
+   `dotnet ef migrations add SquashedBaseline`. Rename it to sort immediately
+   before the first retained migration.
+3. Patch the baseline for content that the EF model cannot express:
+   - Copy non-model infrastructure owned by raw SQL verbatim, including
+     Orleans persistence and reminder tables and `OrleansQuery` seed rows.
+   - Reapply column `DEFAULT` constraints that historical `AddColumn`
+     migrations needed for `NOT NULL` columns on live tables but the model did
+     not declare. A fresh database must equal an upgraded database.
+4. Delete the squashed migrations, their `.Designer.cs` pairs, and helpers used
+   only by them. Delete spec files that target deleted migrations.
+5. Verify semantic equivalence before merging. On empty databases, dump
+   normalized `sqlite_master` fragments per column and constraint,
+   `OrleansQuery` rows, and per-table row counts for the old chain and for
+   baseline plus tail. Differences must be limited to documented deltas.
 
 ### History remap
 
 `RemapAsync` classifies the database before EF runs:
 
-- No history table, or an empty one: fresh database; nothing to rewrite.
-- History already contains the baseline: remapped before; nothing to do.
-- Newest applied migration below the floor: throw. The error names the database's newest
-  migration and the floor, and instructs to first run a build that still carries the
-  pre-squash chain.
-- Otherwise: insert the baseline row (copying the newest recorded `ProductVersion`), then
-  delete every row older than the first retained migration. The insert must precede the
-  delete so the version copy has a source row.
+```text diagram
+                               +---------------+
+                               | Open database |
+                               +-------+-------+
+                                       |
+                                       v
+                              +----------------+
+                              | History table? |
+                              +--------+-------+
+         +-----------------+-----------+--------+-------------------------+
+         vnone or empty    vbaseline present    vnewest below floor       vnewest at or above floor
++----------------+   +----------+    +---------------------+   +---------------------+
+| Fresh database |   | No remap |    | Throw with guidance |   | Insert baseline row |
++----------------+   +----------+    +---------------------+   +----------+----------+
+                                                                          |
+                                                                          v
+                                                             +-------------------------+
+                                                             | Delete old history rows |
+                                                             +-------------------------+
+```
+
+- No history table or an empty table means a fresh database. Nothing is
+  rewritten.
+- History that already contains the baseline was remapped. Nothing is done.
+- If the newest applied migration is below the floor, throw. The error names
+  the newest migration and floor and tells the operator to run a build that
+  still carries the pre-squash chain first.
+- Otherwise, insert the baseline row with the newest recorded
+  `ProductVersion`, then delete every row older than the first retained
+  migration. Insert first so the version copy has a source row.
 
 ### Current accepted deltas
 
-The point-in-time record of schema deltas accepted at the current squash baseline lives in
+The current squash baseline's accepted schema deltas are recorded in
 [`decisions/squashed-baseline.md`](decisions/squashed-baseline.md).
 
 ## Status
 
-- The remap floor is fixed at `20260906000000_AddWorkflowProfileAgentActionOverrides`. The
-  next squash must move the floor forward and replace the baseline; the procedure above
-  applies unchanged.
+`20260906000000_AddWorkflowProfileAgentActionOverrides` is the current remap
+floor. No later squash has replaced the baseline.

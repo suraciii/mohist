@@ -1,109 +1,200 @@
 # Web UI
 
-Mohist's fallback operations and visualization plane presents authoritative
-execution state, evidence, relationships, and safe actions when the owner needs
-a global view or manual takeover.
+The Web UI is Mohist's fallback operations and visualization plane. It presents
+authoritative state, evidence, relationships, and safe actions for global
+review or manual takeover. The primary conversation may remain in Slack, an
+IDE, or another external surface. Fallback means infrequent, not incomplete.
 
-## Product Boundary
+The Web UI is also a complete direct Mohist Agent client for configuration,
+launch, Follow-up, Job results, Session evidence, and recovery. Open
+`http://localhost:3456`. Every page answers what happened, why it happened,
+whether a person must act, and which actions are safe now.
 
-- The primary conversation normally remains in Slack, an IDE, or another
-  external surface. Web does not recreate those products. It does provide a
-  complete direct Mohist Agent client for configuration, launch, Follow-up, Job
-  result, Session evidence, and recovery.
-- Fallback means infrequent, not incomplete. Critical lifecycle, Approval,
-  recovery, and configuration actions remain available without an External
-  Agent.
-- Web emphasizes relationships and evidence that a short Agent summary cannot
-  show well: Project attention, Issue and Epic progress, Workflow state, diffs,
-  AgentSession transcript, and system health.
-- A new domain action cannot exist only in Web. Web submits the same
-  Server-owned intent available to other clients and never interprets Workflow
-  state separately.
-- Web, CLI, and Slack adapter consume the same Agent API. Web cannot add
-  launch-time Agent configuration overrides because it owns the editor.
+## Core Decisions
 
-## Ownership
+- Web owns rendering, view state, drafts, and user intent. The Server owns
+  state and domain rules.
+- Web, CLI, and the Slack adapter use the same Agent API. Web adds no launch
+  configuration override because the Agent editor owns configuration.
+- Push is observation. The UI reconciles authoritative queries after reconnect.
+- A Web action must use the same Server-owned intent as every other client.
+- The UI emphasizes Project attention, Issue and Epic progress, Workflow state,
+  diffs, Session evidence, and system health.
 
-Web UI owns render state and sends user actions to the API. The Server owns
-authoritative state; Workflow decisions belong to the Workflow context on the
-Server. The Runner owns Shell, Agent, and Git execution. Real-time push flows
-from the Server to the Web UI. The Agent context owns the Agent definition and
-the AgentJob result through the Agent API, and Agent Connection binding and
-policy through the API.
+## System Boundary
 
-Web UI never interprets Workflow rules. It renders Server state and submits
-user intent. Project Settings > Workflows includes the fallback editor for the
-Project's single verification command. It calls the same dedicated Server API as
-the CLI; the command is visible configuration and is frozen into future
-WorkflowRuns rather than stored in Web Variables.
+```text diagram
+                                                                       +--------------------+
+                                                                   +-->| Project event push |
++-------------+    +--------+    +------------+    +--------------+|   +----------+---------+
+| User action +--->| Web UI +--->| Domain API +--->| Server state ++              |
++-------------+    +--------+    +------------+    +--------------+|   +------------------+
+                        ^                                  ^       +-->| Runner execution |
+                        |                                  |           +---------+--------+
+                        |                                  |                     ||
+                        +----------------------------------+---------------------++
+                                                           +---------------------+
+```
 
-## Events
+- Web owns presentation. Query hooks own data retrieval and cache invalidation.
+  UI state stores view preferences, filters, and drafts,
+  never Workflow truth.
+- Web never interprets Workflow rules. The Server owns authoritative state.
+  Workflow decisions stay in the Workflow context on the Server.
+- The Runner owns Shell, Agent, and Git execution. Runner details stay behind
+  the API.
+- The Agent context owns Agent definitions and AgentJob results through the
+  Agent API. The API owns Connection binding and policy.
+- A committed Server decision, not a push event, is the source of truth.
+- Project Settings > Workflows edits the single Project verification command
+  through the dedicated Server API. The command is frozen into future
+  WorkflowRuns, not stored in Web Variables.
 
-Push is observation, not a driver: a Workflow decision commits on the Server,
-publishes over the project event WebSocket, and refreshes the affected queries.
-After reconnect, the UI reconciles its queries.
+## Navigation and Attention
 
-## Routes
+Project pages use `/<projectName>/`. Application Settings and device
+authorization use `/settings/<section>` and `/device`. Domain-identity paths
+identify Issues and Epics by Project and number:
 
-UI and API use domain-identity paths:
-`/projects/{projectId}/issues/{issueNumber}` and
-`/projects/{projectId}/epics/{epicNumber}`. Issue and Epic numbers no longer
-resolve to separate internal IDs. WorkflowRun continues to use `workflowRunId`.
+```text literal
+/projects/{projectId}/issues/{issueNumber}
+/projects/{projectId}/epics/{epicNumber}
+```
 
-## Rules
+WorkflowRun paths use `workflowRunId`; Issue and Epic numbers do not resolve to
+separate internal IDs. The page map is:
 
-- Query hooks own data retrieval and cache invalidation.
-- UI state stores view preferences, filters, and drafts, never Workflow truth.
-- Runner details remain behind the API. UI does not depend on process internals.
+- Board: `/<projectName>/`.
+- Issues: `/<projectName>/issues`.
+- Issue details and files:
+  `/<projectName>/issues/<number>` and
+  `/<projectName>/issues/<number>/files`.
+- Agents: `/<projectName>/agents` and
+  `/<projectName>/agents/<agentId>`.
+- New Session: `/<projectName>/agent-sessions/new`; existing Sessions use
+  `/<projectName>/sessions/<sessionId>`.
+- Epics: `/<projectName>/epics` and
+  `/<projectName>/epics/<number>`.
+- Inbox, Insights, Activity, Runners, Workspaces, and Logs use their matching
+  paths under `/<projectName>/`; details append the resource identity.
+- Project Settings use `/<projectName>/settings/<section>`.
+- Archived Issues use `/<projectName>/archived`.
+
+The Board is the global attention view. It groups Backlog, In Progress, Done,
+and Cancelled Issues. Cards show identity, priority, current Workflow stage,
+and health. Filters narrow the view, and their URL state is shareable. Blocked
+work and pending Approval Points need attention. Runner unavailability remains
+a separate system warning, not an inferred Issue state.
+
+Issue details support manual takeover with intent and ownership, execution
+position, change evidence, diagnosis, and state-valid collaboration actions.
+Layout may change across desktop and mobile, but meaning and available actions
+must not change. Buttons follow authoritative state: Backlog offers Start,
+running work offers Force Stop, an Approval Point offers Approve and offers
+Request Changes only when its Definition declares Feedback Tasks, blocked work
+offers Retry, Resume, Rerun, and Stop. Done offers Close and Archive.
 
 ## Agent Product Surface
 
-Agent list and detail form a management and test surface, not a decorative
-catalog. They expose definition, launch, separate Job and Session state, and
-Connections without requiring inference from raw transcript events.
+Agent list and detail are management and test surfaces. Before a Session starts,
+they expose avatar, name, description, active or archived state, `ready`,
+`needs-setup`, or `unknown` Readiness, Runtime, model, stored Reasoning Effort,
+true Variant, active and queued work, and Connection health. Runner
+availability is not Agent Readiness. An offline Runner must not appear as
+`needs-setup`.
 
-Identity, lifecycle, configuration Readiness, execution availability, and
-Connection health are separate signals. UI does not turn an offline Runner into
-an Agent configuration error or combine Slack health and Agent Readiness in one
-badge. Missing configuration links to the Agent edit location. `unknown`
-remains distinct from `ready` and `needs-setup`.
+The task-first composer at
+`/<projectName>/agent-sessions/new` accepts Prompt, attachments, and context
+references before Agent selection. Agent fields are edited before launch. New
+Agent for this task creates and launches one Agent. An existing Agent uses its
+stored definition. Runtime, Model, and Skills are not launch overrides. The
+request uses the same Agent API as CLI and Slack, with authenticated actor and
+source metadata.
 
-Direct launch uses the same Agent API request as CLI and Slack, except for
-authenticated actor and source metadata. Agent fields are edited before launch.
-The composer accepts only Prompt, context references, and attachments. Runtime,
-Model, and Skills overrides do not belong in the composer.
+A Project `defaultExecutionConfig` is the Recommended execution configuration
+and requires no extra question. Adjust submits catalog-backed values as hints.
+Without a Project default, a new Agent requires Runtime and Model inline.
+Models, Reasoning Efforts, and true Variants come from the selected Runtime
+catalog. Agent edits affect new Jobs;
+an in-flight Session keeps its launch snapshot.
 
-AgentSession renders two modes from the same Session model:
+A successful launch opens the returned AgentSession URL. Conflicts identify the
+earlier idempotency attempt. Pending launches instruct the user to retry with
+the same key. Unresolved configuration identifies both repairs: choose Runtime
+and Model or configure the Project default. The composer keeps the task and
+context after these rejections. An empty Agent list leads with Start with a
+Task; Configure an Agent remains the secondary definition-first path.
 
-- A Workflow origin emphasizes task ownership, evidence, and recovery.
-- An Agent launch origin also provides a complete Follow-up composer as the
-  fallback direct conversation client.
+Agent details provide these concerns:
 
-See [`session-timeline.md`](session-timeline.md) for timeline sentence form,
-domain-action recognition, collapse and salience rules, and raw view.
+- **Definition:** identity, Instructions, Runtime, Model, Reasoning Effort,
+  true Variant, Skills, concurrency, lifecycle, and Readiness. `needs-setup`
+  disables launch. A missing configuration links to the Agent edit location.
+  `unknown` accepts work and reports pending Runner validation. `ready` without
+  capacity queues work.
+- **Start session:** a real task and optional Issue, Epic, or Repository context
+  create AgentJob, AgentSession, first SessionInput, and first AgentTurn.
+- **Work:** AgentJob result is separate from AgentSession Activity. A failed Job
+  is not a failed Session.
+- **Slack:** Readiness, installation progress, Connection health, and identity
+  alignment remain separate. Setup is resumable and exposes one next action.
+  The panel supports owner transfer, credential rotation, revalidation, Enable,
+  Disable, and Delete without compressing them into one Connected or Failed
+  label.
 
-Route mode cannot change Session lifecycle or API. AgentJob result is separate
-from Session Activity and AgentTurn progress. Connection setup and health
-belong on Agent details because the user starts from the Agent to expose.
+After archival, Start session and Add Slack are unavailable. Historical Jobs,
+Sessions, and Connections remain readable. Readiness does not block Add Slack
+for an active Agent because Connection health and execution readiness are
+separate. A Connection panel exposes setup, access policy, identity alignment,
+and health. Allowlist display names and avatars are for human control only;
+authorization uses stable identity, and Web never reads Slack tokens.
 
-The Connection panel shows resumable setup, next action, access policy, identity
-alignment, and health. Allowlist editing uses member names and avatars for the
-human control. Display name is never authorization identity, and Web never
-reads Slack tokens.
+## AgentSession
+
+A Workflow-origin Session emphasizes evidence and diagnosis. An Agent-launch
+Session is also a fallback direct conversation client and accepts a complete
+Follow-up. The first viewport shows origin, current Activity, AgentTurn inputs,
+latest result, and required human action.
+
+The page exposes model, usage, compaction, Follow-up, Stop, Compact, and Reset
+under the same AgentSession. An uncertain Stop is Unknown. Compact uses the
+current Runtime capability. Reset uses empty Runtime context while retaining
+recorded conversation. Timeline derivation,
+domain-action recognition, collapse, salience, and raw view belong to
+[`session-timeline.md`](session-timeline.md). AgentJob result remains separate
+from Session Activity and AgentTurn progress.
 
 ## Frontend Module Boundary
 
-The Web application follows Feature-Sliced Design. The layering rules, slice
-export contract, and their enforcement are defined once in
-[`packages/web/AGENTS.md`](../packages/web/AGENTS.md); this document does not
-repeat them.
+The Web application follows Feature-Sliced Design. Layering, slice exports, and
+enforcement are defined once in
+[`packages/web/AGENTS.md`](../packages/web/AGENTS.md). This document does not
+repeat those rules.
 
 ## Presentation Preference
 
 Use dense, scannable screens. Do not use a landing page or chat-first
-application composition. A direct AgentSession can use a conversation layout
+application composition. A direct AgentSession may use a conversation layout
 because conversation is the task on that route, but it is not the application
 home.
 
-Order first screens by attention-first production overview, Issue execution
-details, Approval and recovery, execution evidence, and Runner state.
+Order primary screens by attention-first production overview, Issue execution
+details, Approval and recovery, execution evidence, and Runner state. Mobile
+adaptation is useful but is not a core scenario.
+
+## Non-Goals
+
+- Web does not replace Slack, an IDE, or another daily collaboration surface.
+- Web does not create a second state store, domain rule set, or Workflow
+  interpreter.
+- Web does not expose Runner internals or add a domain action unavailable
+  through the shared API.
+
+## Status
+
+The current UI provides Project board, Issue, Agent, Session, Epic, Activity,
+Runner, Workspace, Logs, Settings, and Archive surfaces. Session rendering is
+still a conversational message view without the TimelineItem derivation layer,
+salience policy, or raw event view. Agent avatar configuration, a separate
+AgentJob result view, and several Slack Connection management actions remain
+unavailable.

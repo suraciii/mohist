@@ -1,153 +1,200 @@
 # AgentSession Timeline
 
-This document defines the presentation model for the AgentSession page timeline: it derives
-scannable activity items from transcript facts. It defines presentation derivation only, not a
-second session record. The transcript contract and Session state authority remain unchanged
-(see [`agent-execution.md`](agent-execution.md)). See the AgentSession page section in
-[`../docs/web-ui.md`](../docs/web-ui.md) for product behavior.
+The AgentSession timeline is a local presentation derived from transcript facts.
+It is not a second Session record, event stream, or source of domain state. The
+transcript contract and Session state authority remain in
+[`agent-execution.md`](agent-execution.md). Product behavior is defined in the
+AgentSession page section of [`../docs/web-ui.md`](../docs/web-ui.md).
 
-The external Session event stream in [`agent-api.md`](agent-api.md) is a separate,
-Server-owned durable public projection. It has its own sequence, cursor,
-retention, and strict field allowlist. It cannot reuse local `TimelineItem`
-values, browser live subscriptions, or raw transcript facts as its event record,
-and the presentation rules in this document cannot define its ordering,
+The external Session event stream is a separate Server-owned projection. It has
+its own sequence, cursor, retention, and strict field allowlist. It must not
+reuse `TimelineItem`, browser subscriptions, or raw transcript facts as its
+event record. This presentation model does not define that stream's ordering,
 deduplication, or visibility.
 
-When the canonical `session.context_reset` fact occurs, the external stream
-appends only a public `session.context_reset` boundary event: stable
-Session/Project/Agent identities, public Session status, a safe reason code,
-timestamp, and sequence. It is not a raw `TimelineItem` payload and carries no
-runtime, path, prompt, memory, or raw transcript data.
+## Design Drivers
+
+- The client must derive a consistent, scannable view without persisting a
+  second timeline model.
+- Domain actions must be recognizable without hiding failures in shell output.
+- Routine reads may collapse, but errors, inputs, and important actions must
+  remain visible.
+- Session Activity and AgentTurn state come from Server facts. The client must
+  not infer them from heartbeats or item order.
+- Context reset must be visible locally while the public stream exposes only a
+  safe boundary event.
 
 ## Model
 
-**Timeline item (`TimelineItem`)**: a presentation unit derived from a span of transcript facts.
-It is derived locally by the client: it is not persisted, published to the event bus, or written
-back to the Server. Any client can implement the same rules independently.
+A `TimelineItem` is a presentation unit derived from a span of transcript
+facts. Any client may implement the same derivation rules.
 
 ```text literal
 TimelineItem
-  Id            # Determined by the source fact: toolCallId, InputId, fact sequence, and so on
+  Id            # Source identity: toolCallId, InputId, fact sequence, and so on
   RenderClass   # Presentation class
-  Summary       # Form: Verb + Object + Outcome?
-  Salience      # Salience
+  Summary       # Verb + Object + Outcome?
+  Salience      # Presentation salience
   GroupKey?     # Collapsible group key
-  Detail?       # Expanded content: arguments, full output, diff, raw payload
+  Detail?       # Expanded arguments, output, diff, or raw payload
 ```
 
-Presentation classes: `input`, `message`, `reasoning`, `file-read`,
-`file-edit`, `shell`, `domain-action`, `plan`, `tool`, `status`, `boundary`,
-`error`, and `suppressed`.
+Render classes are `input`, `message`, `reasoning`, `file-read`, `file-edit`,
+`shell`, `domain-action`, `plan`, `tool`, `status`, `boundary`, `error`, and
+`suppressed`.
 
-Items have no terminal lifecycle. In-progress items, such as an executing tool call, are updated
-in place as facts arrive.
+Items have no terminal lifecycle. An in-progress item, such as an executing
+tool call, is updated in place as facts arrive.
+
+When the canonical `session.context_reset` fact occurs, the external stream
+appends only a public `session.context_reset` boundary event. It contains
+stable Session, Project, and Agent identities, public Session status, a safe
+reason code, timestamp, and sequence. It contains no Runtime, path, prompt,
+memory, or raw transcript data.
 
 ## Semantics
 
-### Derivation and classification
+### Classification
 
-- Classification is a pure function: transcript fact sequence -> item sequence. Classification
-  is separate from rendering; presentation components consume only `TimelineItem` values.
-- Classification tries, in order, `domain-action` recognition -> tool type table -> `tool`
-  fallback. Failed recognition must degrade to the fallback and must not invent semantics.
-- Each fact belongs to exactly one class. Failure rewrites the result: when any item has a failed
-  outcome, its RenderClass is `error`; its original Summary is retained and the failure fact is
-  appended.
+Classification is a pure function from transcript fact sequence to item
+sequence. Classification and rendering are separate. Presentation components
+consume only `TimelineItem` values.
 
-### Domain operation recognition
+```text diagram
+               +-------+
+               | Facts |
+               +---+---+
+                   |
+                   v
+         +-------------------+
+         | Try domain action |
+         +---------+---------+
+         +---------+---------+
+         vrecognized         vnot recognized
+ +---------------+   +---------------+
+ | domain-action |   | Try tool type |
+ +---------------+   +-------+-------+
+                     +-------+-------+
+                     vrecognized     vnot recognized
+                 +------+   +----------------+
+                 | tool |   | shell fallback |
+                 +------+   +----------------+
+```
 
-Two paths converge on the same `domain-action` item:
+Classification tries these paths in order:
 
-1. **Shell path**: parse `mo` commands run by bash-like tools. Extract the command group and verb
-   (`issue comment create`, `run approve`, `issue start`, and so on), map them to Verb, and parse
-   arguments such as Issue number and WorkflowRun id into Object and page links.
-2. **Tool path**: map directly when a Runtime or MCP tool name matches the Mohist domain operation
-   table.
+1. Recognize a Mohist domain action.
+2. Map a known tool type.
+3. Use the source class as fallback, such as `shell`.
 
-The command exit result determines Outcome; a failure produces `error`. Both paths produce the
-same RenderClass and sentence form. Only the source marker may differ. A command that is not a
-known `mo` operation, or whose command group cannot be parsed, remains a normal `shell` item and
-is never promoted speculatively.
+Every fact belongs to exactly one class. A failed outcome changes the item's
+RenderClass to `error`, retains its original Summary, and appends the failure
+fact. Failed recognition must use the fallback and must not invent semantics.
 
-### Sentence form and reference resolution
+### Domain Operation Recognition
 
-- Construct Summary as `Verb + Object + Outcome?`; make Outcome immediately visible so success
-  or failure can be identified at a glance.
-- Resolve Object to a recognizable name or link: an Issue number links to the Issue page, an
-  Agent uses its name, and a run id links to the run. Do not show bare internal ids.
-- When a complete sentence cannot be constructed, retain an honest statement of the fact, such
-  as `Ran X`, without adding imagined content.
+Two sources produce the same `domain-action` item:
 
-### In-place updates
+- The Shell path parses a bash-like `mo` command, extracts its command group
+  and verb, and maps arguments such as Issue number and WorkflowRun ID to the
+  Object and page link.
+- The Tool path maps a Runtime or MCP tool name through the Mohist domain
+  operation list.
 
-- `tool_call.started / updated / completed` update one item by toolCallId. Terminal states
-  (`completed / failed`) are irreversible; late facts cannot move them backward.
-- Append streaming text / reasoning by message association. Seal the current stream before
-  inserting a non-text item; a later chunk starts a new item.
-- An item may first appear in a fallback class and be promoted when facts become complete, for
-  example from `shell` to `domain-action`; its Id does not change.
+The command exit result determines Outcome. A failed result is `error`. Both
+paths produce the same RenderClass and sentence form; only a source marker may
+differ. A command that is not a known `mo` operation, or whose group cannot be
+parsed, remains a `shell` item.
 
-### Collapsible groups
+### Sentence Form and References
 
-- Collapse a consecutive sequence of at least three low-salience items of one class
-  (`file-read`, successful `shell`, or `tool`) into a summary such as `Read 5 files`. The group
-  remains expandable, and items with the same GroupKey are grouped preferentially.
-- `error`, `domain-action`, `input`, `message`, `status`, `boundary`, and `suppressed` never enter
-  a group and break a consecutive sequence. Failures and important actions therefore always
-  remain visible outside collapsed groups.
+- Build `Summary` as `Verb + Object + Outcome?`. Put Outcome where the reader
+  sees success or failure immediately.
+- Resolve Object to a recognizable name or link. Issue numbers link to Issues,
+  Agent names identify Agents, and run IDs link to runs. Do not show bare
+  internal IDs.
+- If a complete sentence is not possible, state only the fact, such as
+  `Ran X`. Do not add imagined content.
 
-### Salience
+### In-Place Updates
 
-From highest to lowest: `error` -> write `domain-action` -> `input` / `message` -> `file-edit` /
-`shell` -> `file-read` / `tool` / `reasoning` -> `status` / `suppressed`.
+- `tool_call.started`, `updated`, and `completed` update one item by
+  `toolCallId`.
+- `completed` and `failed` are irreversible terminal states. Late facts cannot
+  move them backward.
+- Streaming text and reasoning append by message association. Seal the current
+  stream before inserting a non-text item. A later chunk starts a new item.
+- A fallback item may be promoted when facts become complete, for example from
+  `shell` to `domain-action`. Its Id does not change.
 
-Salience affects presentation only: prominence, grouping eligibility, and selection of the
-current activity summary. It is never written back to domain state and does not participate in
+### Collapsible Groups
+
+Collapse a consecutive sequence of at least three low-salience items of one
+class: `file-read`, successful `shell`, or `tool`. Keep the group expandable
+and prefer items with the same `GroupKey`.
+
+`error`, `domain-action`, `input`, `message`, `status`, `boundary`, and
+`suppressed` never enter a group and break a consecutive sequence. Failures and
+important actions therefore remain visible.
+
+### Salience and Status
+
+Salience order is:
+
+1. `error`
+2. write `domain-action`
+3. `input` and `message`
+4. `file-edit` and `shell`
+5. `file-read`, `tool`, and `reasoning`
+6. `status` and `suppressed`
+
+Salience affects prominence, grouping eligibility, and the current activity
+summary only. It is never written to domain state and never participates in
 Session state derivation.
 
-### Silence and status presentation
+The UI presents these Server facts without inference. Activity, AgentTurn
+state, and transcript status facts come from the Server. The client does not
+infer state from heartbeats or item order.
 
-- Turn `queued` -> the input item and status row show `Queued`.
-- Turn `executing` with no new item -> the current activity bar shows `Executing` and uses the
-  latest readable nonterminal item, skipping `status` / `suppressed`. When no item is in progress,
-  it shows the Turn state itself.
-- `idle` / `unknown` -> distinct idle / unknown presentations. `unknown` must not render as idle.
-- All of these states come from Server facts: activity, AgentTurn state, and transcript status
-  facts. The client does not infer state from heartbeats or from the item sequence, consistent
-  with the consumer rules in [`agent-execution.md`](agent-execution.md).
+- A queued Turn shows the input and `Queued`.
+- An executing Turn with no new item shows `Executing` and the latest readable
+  nonterminal item, skipping `status` and `suppressed`. With no active item,
+  it shows the Turn state.
+- `idle` and `unknown` have distinct presentations. `unknown` never renders
+  as idle.
 
-### Raw view
+### Raw View
 
-- A page-level toggle switches the same timeline data to raw fact order: one row per transcript
-  fact with an expandable payload.
-- The two views are two levels of the same data, not two feeds. Switching anchors the scroll
-  position by item Id.
+A page-level toggle shows the same timeline data in raw fact order: one row per
+transcript fact with an expandable payload. The two views are two levels of the
+same data, not two feeds. Switching views anchors the scroll position by item
+Id.
 
-This raw view remains a controlled Web diagnostic presentation. It is not an
-external API export and does not define any payload available to an external
-caller. Direct callers can use only the public projection defined by
-`agent-api.md`, which excludes prompts, memory, paths, runtime or connection
+The raw view is a controlled Web diagnostic presentation. It is not an external
+API export. Direct callers receive only the public projection from
+`agent-api.md`, which excludes prompts, memory, paths, Runtime or Connection
 identity, and raw payloads.
 
 ## Examples
 
-1. `tool_call.completed{bash, "mo issue comment create 42 --body ...", exit 0}` becomes the
-   `domain-action` item `Commented on #42`, which links to Issue #42.
-2. The same command with a nonzero exit becomes `error`: `Failed to comment on #42`. It is
-   prominent and never grouped.
-3. A consecutive read x3 plus grep x2 collapses to `Read 5 files`. If the third operation fails,
-   the first two collapse, the failure remains prominent, and the final two form a new group.
-4. `session.context_reset{reason: "reset"}` becomes the `boundary` item `Context reset`; later
-   items belong to the new Runtime context.
+1. `tool_call.completed{bash, "mo issue comment create 42 --body ...", exit 0}`
+   becomes the `domain-action` item `Commented on #42`, linked to Issue #42.
+2. The same command with a nonzero exit becomes `error`: `Failed to comment on
+   #42`. It remains prominent and is never grouped.
+3. Three reads and two greps collapse to `Read 5 files`. If the third operation
+   fails, the first two collapse, the failure stays visible, and the final two
+   form a new group.
+4. `session.context_reset{reason: "reset"}` becomes the `boundary` item
+   `Context reset`. Later items belong to the new Runtime context.
 
 ## Status
 
-The current Web implementation is a conversational message view: turns are grouped and tools
-use classified cards. It has no `TimelineItem` derivation layer or salience policy. Context-tool
-groups do not break on failure, `mo` domain operations are not recognized, and SessionInput
-acceptance and AgentTurn state appear in a separate evidence area rather than in the timeline.
-There is no raw event view.
+The current Web implementation provides a conversational message view with
+classified tool cards. It does not yet implement the `TimelineItem` derivation
+layer, salience policy, failure-breaking groups, Mohist domain-action
+recognition, or raw event view. SessionInput acceptance and AgentTurn state
+remain in a separate evidence area.
 
-Transcript facts, persistence, and real-time delivery are already implemented. This model needs
-no new transcript facts and does not change Server responsibilities; all derivation can happen
-locally in the Web client.
+Transcript facts, persistence, and real-time delivery are implemented. The
+presentation model requires no new transcript facts and does not change Server
+responsibilities.
