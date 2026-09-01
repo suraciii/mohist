@@ -465,6 +465,43 @@ describe('mohist/rebase', () => {
     expect(result.error?.message).toContain("non-empty commit 'message'")
   })
 
+  it('NoDeltaAfterRebase_ReportsNothingToIntegrate', async (resources) => {
+    const calls: string[] = []
+    useRebaseExistsChecker(resources, () => false)
+    installRebaseGitRunner(resources, async (_workDir, args) => {
+      calls.push(args.join(' '))
+      switch (args.join(' ')) {
+        case 'rev-parse --git-path rebase-merge':
+          return ok('/fake/worktree/.git/rebase-merge\n')
+        case 'rev-parse --git-path rebase-apply':
+          return ok('/fake/worktree/.git/rebase-apply\n')
+        case 'rev-parse master':
+          return ok('baseSha\n')
+        case 'status --porcelain':
+          return ok('')
+        case 'rev-parse HEAD':
+          // First probe: pre-rebase head. Second probe: post-rebase head equal
+          // to the base — the no-delta state the guard must name.
+          return ok(calls.filter((call) => call === 'rev-parse HEAD').length === 1 ? 'before\n' : 'baseSha\n')
+        case 'rebase master':
+          return ok('Successfully rebased')
+        default:
+          return fail(`unexpected git call: ${args.join(' ')}`)
+      }
+    })
+
+    const result = await callAction(
+      rebaseAction,
+      context({ baseBranch: 'master', squash: true, message: 'Deliver the change' }),
+    )
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatchObject({ code: 'nothing-to-integrate' })
+    expect(result.error?.message).toContain('no committed change to integrate')
+    expect(result.error?.message).toContain('must commit their work')
+    expect(calls).not.toContain('reset --soft')
+    expect(calls).not.toContain('commit -m')
+  })
+
   it('RemoteFetchFails_ReportsRetrySafe', async (resources) => {
     const calls: string[] = []
     useRebaseExistsChecker(resources, () => false)
