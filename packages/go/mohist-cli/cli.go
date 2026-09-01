@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
@@ -30,21 +32,34 @@ const (
 
 type EnvLookup func(string) (string, bool)
 type ReadFile func(string) (string, error)
+type WriteFile func(string, string, os.FileMode) error
+type Execute func(context.Context, string, []string) error
+type Wait func(context.Context, time.Duration) error
 
 // Dependencies makes process boundaries explicit and keeps command tests local.
 type Dependencies struct {
-	HTTPClient *http.Client
-	Stdout     io.Writer
-	Stderr     io.Writer
-	Lookup     EnvLookup
-	ReadFile   ReadFile
-	HomeDir    func() (string, error)
+	HTTPClient  *http.Client
+	Stdout      io.Writer
+	Stderr      io.Writer
+	Lookup      EnvLookup
+	ReadFile    ReadFile
+	WriteFile   WriteFile
+	HomeDir     func() (string, error)
+	Execute     Execute
+	OpenBrowser Execute
+	Input       io.Reader
+	Now         func() time.Time
+	Wait        Wait
+	Executable  func() string
 }
 
 type Config struct {
-	ServerURL     string
-	OperatorToken string
-	OperatorID    string
+	ServerURL        string
+	OperatorToken    string
+	OperatorID       string
+	CredentialSource string
+	RefreshToken     string
+	SessionServer    string
 }
 
 func defaultDependencies() Dependencies {
@@ -57,11 +72,42 @@ func defaultDependencies() Dependencies {
 			b, err := os.ReadFile(path)
 			return string(b), err
 		},
+		WriteFile: func(path, value string, mode os.FileMode) error {
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				return err
+			}
+			if err := os.WriteFile(path, []byte(value), mode); err != nil {
+				return err
+			}
+			return os.Chmod(path, mode)
+		},
 		HomeDir: os.UserHomeDir,
+		Execute: func(ctx context.Context, name string, args []string) error {
+			cmd := exec.CommandContext(ctx, name, args...)
+			return cmd.Run()
+		},
+		OpenBrowser: func(ctx context.Context, name string, args []string) error {
+			cmd := exec.CommandContext(ctx, name, args...)
+			return cmd.Run()
+		},
+		Input: os.Stdin,
+		Now:   time.Now,
+		Wait: func(ctx context.Context, d time.Duration) error {
+			timer := time.NewTimer(d)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				return nil
+			}
+		},
+		Executable: func() string { return os.Args[0] },
 	}
 }
 
 func ResolveConfig(deps Dependencies) (Config, error) {
+	defaults := defaultDependencies()
 	if deps.Lookup == nil {
 		deps.Lookup = os.LookupEnv
 	}
@@ -74,6 +120,27 @@ func ResolveConfig(deps Dependencies) (Config, error) {
 	if deps.HomeDir == nil {
 		deps.HomeDir = os.UserHomeDir
 	}
+	if deps.WriteFile == nil {
+		deps.WriteFile = defaults.WriteFile
+	}
+	if deps.Execute == nil {
+		deps.Execute = defaults.Execute
+	}
+	if deps.OpenBrowser == nil {
+		deps.OpenBrowser = defaults.OpenBrowser
+	}
+	if deps.Input == nil {
+		deps.Input = defaults.Input
+	}
+	if deps.Now == nil {
+		deps.Now = defaults.Now
+	}
+	if deps.Wait == nil {
+		deps.Wait = defaults.Wait
+	}
+	if deps.Executable == nil {
+		deps.Executable = defaults.Executable
+	}
 
 	cfg := Config{ServerURL: DefaultServerURL, OperatorID: DefaultOperatorID}
 	if value, ok := deps.Lookup("MOHIST_SERVER_URL"); ok && strings.TrimSpace(value) != "" {
@@ -82,26 +149,58 @@ func ResolveConfig(deps Dependencies) (Config, error) {
 	if value, ok := deps.Lookup("MOHIST_OPERATOR_ID"); ok && strings.TrimSpace(value) != "" {
 		cfg.OperatorID = strings.TrimSpace(value)
 	}
-	if value, ok := deps.Lookup("MOHIST_OPERATOR_TOKEN"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := deps.Lookup("MOHIST_TOKEN"); ok && strings.TrimSpace(value) != "" {
 		cfg.OperatorToken = strings.TrimSpace(value)
+		cfg.CredentialSource = "MOHIST_TOKEN"
 		return cfg, validateConfig(cfg)
 	}
 
-	path := strings.TrimSpace(lookup(deps.Lookup, "MOHIST_OPERATOR_TOKEN_PATH"))
+	// Keep the original bootstrap variable names for local installations while
+	// preferring the public authentication contract above.
+	if value, ok := deps.Lookup("MOHIST_OPERATOR_TOKEN"); ok && strings.TrimSpace(value) != "" {
+		cfg.OperatorToken = strings.TrimSpace(value)
+		cfg.CredentialSource = "MOHIST_OPERATOR_TOKEN"
+		return cfg, validateConfig(cfg)
+	}
+	if session, err := loadSession(deps, cfg.ServerURL); err == nil && session != nil {
+		cfg.OperatorToken, cfg.RefreshToken = session.AccessToken, session.RefreshToken
+		cfg.CredentialSource, cfg.SessionServer = "credentials.json", session.Server
+		return cfg, validateConfig(cfg)
+	}
+	if value, ok := deps.Lookup("MOHIST_ADMIN_TOKEN"); ok && strings.TrimSpace(value) != "" {
+		cfg.OperatorToken = strings.TrimSpace(value)
+		cfg.CredentialSource = "machine-local admin credential"
+		return cfg, validateConfig(cfg)
+	}
+
+	path := strings.TrimSpace(lookup(deps.Lookup, "MOHIST_ADMIN_TOKEN_PATH"))
+	if path == "" {
+		path = strings.TrimSpace(lookup(deps.Lookup, "MOHIST_OPERATOR_TOKEN_PATH"))
+	}
+	explicitPath := path != ""
 	if path == "" {
 		home, err := deps.HomeDir()
 		if err != nil {
 			return Config{}, errors.New("Mohist operator credential could not be resolved")
 		}
-		path = filepath.Join(home, ".mohist", "operator-token")
+		path = filepath.Join(home, ".mohist", "admin-token")
+		if _, err := deps.ReadFile(path); err != nil {
+			path = filepath.Join(home, ".mohist", "operator-token")
+		}
 	}
 	value, err := deps.ReadFile(path)
 	if err != nil {
-		return Config{}, errors.New("Mohist operator credential file could not be read")
+		if explicitPath {
+			return Config{}, errors.New("Mohist operator credential file could not be read")
+		}
+		return cfg, validateConfig(cfg)
 	}
 	cfg.OperatorToken = strings.TrimSpace(value)
-	if cfg.OperatorToken == "" {
+	if cfg.OperatorToken == "" && explicitPath {
 		return Config{}, errors.New("Mohist operator credential is blank")
+	}
+	if cfg.OperatorToken != "" {
+		cfg.CredentialSource = "machine-local admin credential"
 	}
 	return cfg, validateConfig(cfg)
 }
@@ -113,9 +212,6 @@ func validateConfig(cfg Config) error {
 	parsed, err := url.Parse(cfg.ServerURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return errors.New("Mohist server URL must be an absolute HTTP URL")
-	}
-	if strings.TrimSpace(cfg.OperatorToken) == "" {
-		return errors.New("Mohist operator credential is blank")
 	}
 	return nil
 }
@@ -157,6 +253,27 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if deps.HomeDir == nil {
 		deps.HomeDir = defaults.HomeDir
 	}
+	if deps.WriteFile == nil {
+		deps.WriteFile = defaults.WriteFile
+	}
+	if deps.Execute == nil {
+		deps.Execute = defaults.Execute
+	}
+	if deps.OpenBrowser == nil {
+		deps.OpenBrowser = defaults.OpenBrowser
+	}
+	if deps.Input == nil {
+		deps.Input = defaults.Input
+	}
+	if deps.Now == nil {
+		deps.Now = defaults.Now
+	}
+	if deps.Wait == nil {
+		deps.Wait = defaults.Wait
+	}
+	if deps.Executable == nil {
+		deps.Executable = defaults.Executable
+	}
 
 	if err := ctx.Err(); err != nil {
 		writeError(deps.Stderr, err)
@@ -168,12 +285,15 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 		return ExitUsage
 	}
 	if command.help {
-		fmt.Fprintln(deps.Stdout, rootUsage())
+		fmt.Fprintln(deps.Stdout, command.helpText)
 		return ExitOK
 	}
 	if command.fieldsOnly {
 		fmt.Fprintln(deps.Stdout, strings.Join(command.catalog, "\n"))
 		return ExitOK
+	}
+	if command.kind == "info" {
+		return runInfo(deps, command)
 	}
 
 	cfg, err := ResolveConfig(deps)
@@ -185,6 +305,10 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if err != nil {
 		writeError(deps.Stderr, err)
 		return ExitOperation
+	}
+	client.deps = deps
+	if strings.HasPrefix(command.kind, "auth-") {
+		return runAuth(ctx, deps, client, cfg, command)
 	}
 	data, err := client.get(ctx, command.path)
 	if err != nil {
@@ -209,6 +333,8 @@ type command struct {
 	kind, path       string
 	fields, catalog  []string
 	fieldsOnly, help bool
+	helpText         string
+	args             []string
 }
 
 var diagnosisFields = []string{"workflowRunId", "status", "failure", "tasks", "dispatch", "events"}
@@ -221,18 +347,41 @@ func parse(args []string) (command, error) {
 		return command{}, &usageError{message: rootUsage()}
 	}
 	if args[0] == "--help" || args[0] == "-h" {
-		return command{help: true}, nil
+		return command{help: true, helpText: rootUsage()}, nil
+	}
+	if args[0] == "help" {
+		return parseHelp(args[1:])
+	}
+	if args[0] == "info" {
+		return parseInfo(args[1:])
+	}
+	if args[0] == "auth" {
+		return parseAuth(args[1:])
 	}
 	if args[0] == "doctor" {
-		return parseLeaf("doctor", args[1:], "/api/doctor/checks", doctorFields, "mo doctor")
+		c, err := parseLeaf("doctor", args[1:], "/api/doctor/checks", doctorFields, "mo doctor")
+		if c.help {
+			c.helpText = doctorHelp()
+		}
+		return c, err
+	}
+	if args[0] == "run" && len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+		return command{help: true, helpText: runGroupHelp()}, nil
 	}
 	if args[0] != "run" {
+		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") && contains(rootGroups(), args[0]) {
+			return command{help: true, helpText: groupHelp(args[0])}, nil
+		}
 		return command{}, &usageError{message: "error: unknown command\n" + rootUsage()}
 	}
 	if len(args) < 2 || args[1] != "why" {
 		return command{}, &usageError{message: "error: incomplete command\nusage: mo run why <run-ref> [--json [fields]]"}
 	}
-	return parseLeaf("why", args[2:], "", diagnosisFields, "mo run why <run-ref>")
+	c, err := parseLeaf("why", args[2:], "", diagnosisFields, "mo run why <run-ref>")
+	if c.help {
+		c.helpText = "USAGE\n    mo run why <run-ref> [--json [fields]]\n\nRead the diagnostic chain for a WorkflowRun."
+	}
+	return c, err
 }
 
 func parseLeaf(kind string, args []string, path string, catalog []string, usage string) (command, error) {
@@ -241,7 +390,7 @@ func parseLeaf(kind string, args []string, path string, catalog []string, usage 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--help", "-h":
-			return command{help: true}, nil
+			return command{help: true, helpText: usage + "\n\nJSON FIELDS\n" + strings.Join(catalog, "\n")}, nil
 		case "--json":
 			c.fieldsOnly = true
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
@@ -287,13 +436,40 @@ func contains(values []string, wanted string) bool {
 	return false
 }
 
-func rootUsage() string { return "usage: mo run why <run-ref> [--json [fields]] | mo doctor" }
+func rootGroups() []string {
+	return []string{"project", "repo", "workspace", "issue", "epic", "label", "workflow", "run", "agent", "session", "activity", "routing", "webhook", "runner", "audit", "auth", "server", "service", "event", "github", "slack", "notification", "otel", "skill", "install", "update", "info", "help", "doctor"}
+}
+
+func rootUsage() string {
+	return "USAGE\n    mo <command> [subcommand] [flags]\n\nMohist CLI\n\nWork\n  project  Manage Projects\n  repo  Manage repositories\n  workspace  Manage workspaces\n  issue  Manage Issues\n  epic  Manage Epics\n  label  Manage labels\n\nAutomation\n  workflow  Manage Workflow Profiles\n  run  Manage WorkflowRuns\n  agent  Manage Agents\n  session  Manage AgentSessions\n  activity  Trace Project activity\n  routing  Manage routing rules\n  webhook  Manage webhook subscriptions\n\nOperations\n  runner  Manage runners\n  server  Manage the Server\n  service  Manage local services\n  event  Inspect event delivery\n  audit  Read audit records\n  auth  Manage credentials and sessions\n  github  Manage GitHub integration\n  slack  Manage Slack integration\n  notification  Configure notifications\n  otel  Inspect telemetry\n\nTools\n  help  Read shared CLI rules\n  skill  Manage Skills\n  install  Install components\n  update  Update components\n  info  Show local CLI information\n  doctor  Check Server readiness\n\nExamples:\n  mo project --help\n  mo run --help\n  mo help output"
+}
+
+func groupHelp(name string) string {
+	if name == "workflow" {
+		return "USAGE\n    mo workflow [<action>] [flags]\n\nProject-scoped Workflow Profiles.\n\nActions: list, view, create, edit, delete, validate\nSee also: mo run --help"
+	}
+	if name == "run" {
+		return runGroupHelp()
+	}
+	return "USAGE\n    mo " + name + " [<action>] [flags]\n\nManage " + name + " resources locally through the Mohist Server.\n\nUse a leaf command with --help for its complete arguments."
+}
+
+func runGroupHelp() string {
+	return "USAGE\n    mo run [<action>] [flags]\n\nWorkflowRuns and their controls.\n\nActions: list, view, watch, approve, request-changes, retry, rerun, pause, resume, stop\nCommon scope: --issue <number>\nSee also: mo run why <run-ref>"
+}
+
+func doctorHelp() string {
+	return "USAGE\n    mo doctor\n\nCheck Server readiness and show the next action for failed checks.\n\nJSON FIELDS\n" + strings.Join(doctorFields, "\n")
+}
 
 type client struct {
-	http       *http.Client
-	base       *url.URL
-	token      string
-	operatorID string
+	http         *http.Client
+	base         *url.URL
+	token        string
+	operatorID   string
+	machineLocal bool
+	refreshToken string
+	deps         Dependencies
 }
 
 func newClient(cfg Config, httpClient *http.Client) (*client, error) {
@@ -302,11 +478,11 @@ func newClient(cfg Config, httpClient *http.Client) (*client, error) {
 		return nil, errors.New("Mohist server URL is invalid")
 	}
 	base.RawPath = ""
-	return &client{http: httpClient, base: base, token: cfg.OperatorToken, operatorID: cfg.OperatorID}, nil
+	return &client{http: httpClient, base: base, token: cfg.OperatorToken, operatorID: cfg.OperatorID, machineLocal: cfg.CredentialSource == "machine-local admin credential", refreshToken: cfg.RefreshToken}, nil
 }
 
 type envelope struct {
-	Success bool            `json:"success"`
+	Success *bool           `json:"success"`
 	Data    json.RawMessage `json:"data"`
 	Error   string          `json:"error"`
 	Code    string          `json:"code"`
@@ -317,7 +493,9 @@ func (c *client) get(ctx context.Context, path string) (json.RawMessage, error) 
 	if err != nil {
 		return nil, &operationError{message: "error: request could not be created [request_error]"}
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	if c.token != "" && (!c.machineLocal || isLoopback(c.base)) {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	req.Header.Set(operatorIDHeader, c.operatorID)
 	req.Header.Set("Accept", "application/json")
 
@@ -330,12 +508,25 @@ func (c *client) get(ctx context.Context, path string) (json.RawMessage, error) 
 	if err != nil {
 		return nil, &operationError{message: "error: Mohist Server response could not be read [response_error]"}
 	}
+	if resp.StatusCode == http.StatusUnauthorized && c.refreshToken != "" {
+		if c.refresh() {
+			refresh := c.refreshToken
+			c.refreshToken = ""
+			data, retryErr := c.get(ctx, path)
+			c.refreshToken = refresh
+			return data, retryErr
+		}
+		if c.deps.Stderr != nil {
+			fmt.Fprintln(c.deps.Stderr, "Session expired. Run 'mo auth login' to sign in again.")
+		}
+	}
 
 	var result envelope
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, &operationError{message: responseStatusError(resp.StatusCode)}
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || !result.Success {
+	success := result.Success == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 || result.Success != nil && *result.Success
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || !success {
 		code := result.Code
 		if code == "" {
 			code = statusCodeName(resp.StatusCode)
@@ -350,6 +541,37 @@ func (c *client) get(ctx context.Context, path string) (json.RawMessage, error) 
 		return nil, &operationError{message: "error: Mohist Server returned no data [invalid_response]"}
 	}
 	return result.Data, nil
+}
+
+func (c *client) refresh() bool {
+	payload := strings.NewReader(`{"grant_type":"refresh_token","refresh_token":"` + c.refreshToken + `"}`)
+	req, err := http.NewRequest(http.MethodPost, c.base.String()+"/api/auth/token", payload)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var env envelope
+	if json.NewDecoder(resp.Body).Decode(&env) != nil || env.Data == nil {
+		return false
+	}
+	if env.Success != nil && !*env.Success {
+		return false
+	}
+	var next storedSession
+	if json.Unmarshal(env.Data, &next) != nil || next.AccessToken == "" || next.RefreshToken == "" {
+		return false
+	}
+	next.Server = normalizeOrigin(c.base.String())
+	c.token, c.refreshToken = next.AccessToken, next.RefreshToken
+	if c.deps.WriteFile != nil {
+		_ = saveSession(c.deps, next)
+	}
+	return true
 }
 
 func responseStatusError(status int) string {
