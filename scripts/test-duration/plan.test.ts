@@ -6,14 +6,14 @@ import type { SuiteConfig, TrackConfig } from './types.js'
 
 function track(overrides: Partial<TrackConfig> = {}): TrackConfig {
   return {
-    id: 'server-unit',
+    id: 'server-l0',
     kind: 'report-only',
     trackType: 'behavior',
     application: 'server',
     specKinds: ['Design'],
     level: 'L0',
     resources: [],
-    report: 'reports/server-unit.json',
+    report: 'reports/server-l0.json',
     reportFormat: 'vitest',
     deadlineMs: 1000,
     enforce: true,
@@ -49,7 +49,7 @@ test('selectApplicationTracks returns only the complete application behavior sco
   assert.equal(selection.scope, 'application')
   assert.deepEqual(
     selection.tracks.map((item) => item.id),
-    ['server-unit', 'server-arch'],
+    ['server-l0', 'server-arch'],
   )
 })
 

@@ -1,0 +1,125 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.L1Tests.Support;
+using Mohist.Server.TestSupport;
+using Xunit;
+
+namespace Mohist.Server.L1Tests.Specs.Agent.Api;
+
+/// <summary>
+/// Issue-479 T-003 specs for the launch identity surface: the launch 201
+/// surfaces BOTH the AgentJob identity and the AgentSession identity, the
+/// launched <c>jobId</c> is accepted verbatim by the AgentJob read surface
+/// (no id translation), and a launch still creates exactly one AgentJob,
+/// exactly one AgentSession, and issues exactly one dispatch. The three
+/// domain gates (whitespace prompt, unknown agent, archived agent) live in
+/// <see cref="AgentSessionLaunchValidationRoutesSpecs"/>; this file owns
+/// the identity + exactly-once invariants.
+/// </summary>
+[Collection("RunnerMutationIntegrationB")]
+public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSupport
+{
+    public AgentSessionLaunchJobIdentitySpecs(MohistIntegrationFixture fixture) : base(fixture)
+    {
+    }
+
+    [Fact]
+    public async Task Launch_ReturnedJobId_IsAcceptedVerbatimByAgentJobViewRoute()
+    {
+        var projectId = await CreateProjectAsync("launch-job-id-roundtrip");
+        var runnerId = $"launch-job-roundtrip-runner-{Guid.NewGuid():N}";
+        var agent = await CreateAgentAsync(projectId, "roundtrip-agent");
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        var workspaceName = await CreateRunnerHomeWorkspaceAsync(
+            projectId,
+            runnerId,
+            "launch-job-roundtrip");
+        ClaimResult? claim = null;
+
+        try
+        {
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(
+                projectId,
+                agent.Id,
+                new { prompt = "roundtrip the job id", context = new { workspace = workspaceName } });
+            Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
+            var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
+            var data = launchPayload.GetProperty("data");
+            var jobId = data.GetProperty("jobId").GetString()!;
+            var sessionId = data.GetProperty("sessionId").GetString()!;
+            Assert.False(string.IsNullOrWhiteSpace(jobId));
+            Assert.False(string.IsNullOrWhiteSpace(sessionId));
+            Assert.NotEqual(jobId, sessionId);
+
+            using var view = await _fixture.Client.GetAsync(
+                $"/api/projects/{projectId}/agent-jobs/{jobId}");
+            Assert.Equal(HttpStatusCode.OK, view.StatusCode);
+            var viewPayload = await view.Content.ReadFromJsonAsync<JsonElement>();
+            var viewData = viewPayload.GetProperty("data");
+            // The id returned at launch is accepted verbatim by the view
+            // route (no id translation). The status is current
+            // (pending/running while the runner has not yet reported);
+            // the launcher only submits — it does not assert a terminal
+            // result.
+            Assert.Equal(jobId, viewData.GetProperty("jobId").GetString());
+            var status = viewData.GetProperty("status").GetString();
+            Assert.Contains(status, new[] { "pending", "running" });
+            claim = await ClaimPreparedAgentJobAsync(jobId, runnerId, projectId, sessionId);
+        }
+        finally
+        {
+            if (claim is not null)
+                await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.WorkId);
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task Launch_CreatesExactlyOneAgentJobAndOneAgentSessionAndIssuesOneDispatch()
+    {
+        var projectId = await CreateProjectAsync("launch-exactly-once");
+        var runnerId = $"launch-exactly-once-runner-{Guid.NewGuid():N}";
+        var agent = await CreateAgentAsync(projectId, "exactly-once-agent");
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        var workspaceName = await CreateRunnerHomeWorkspaceAsync(
+            projectId,
+            runnerId,
+            "launch-exactly-once");
+        ClaimResult? claim = null;
+
+        try
+        {
+            var sessionsBefore = await CountAgentLaunchSessionsAsync(projectId);
+
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(
+                projectId,
+                agent.Id,
+                new { prompt = "exactly one of each", context = new { workspace = workspaceName } });
+            Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
+            var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
+            var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
+
+            // Exactly one AgentSession: the count grows by exactly one.
+            var sessionsAfter = await CountAgentLaunchSessionsAsync(projectId);
+            Assert.Equal(sessionsBefore + 1, sessionsAfter);
+
+            // Exactly one AgentJob: the runner claims the durable dispatch
+            // that carries the launched identities verbatim.
+            claim = await AcquirePreparedAgentJobAsync(jobId, runnerId, projectId);
+            AssertPreparedAgentJobClaim(claim, jobId, runnerId, sessionId);
+            Assert.Equal(jobId, claim.AgentJobId);
+            Assert.Equal(sessionId, claim.Dispatch.AgentSessionId);
+            Assert.Equal(WorkDispatchOwnerKinds.AgentJob, claim.Dispatch.OwnerKind);
+        }
+        finally
+        {
+            if (claim is not null)
+                await CompleteClaimedAgentJobAsync(runnerId, claim.AgentJobId, claim.Dispatch.WorkId);
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+}

@@ -12,7 +12,7 @@ function config() {
   return parseSuiteConfig(`{
     "suiteDeadlineMs": 300000,
     "tracks": [
-      {"id":"server-unit","kind":"report-only","trackType":"behavior","application":"server","specKinds":["Design"],"level":"L0","resources":[],"report":"reports/server.json","reportFormat":"vitest","deadlineMs":1000,"enforce":true,"rules":[{"id":"unit","percentile":95,"percentileMs":50}]},
+      {"id":"server-l0","kind":"report-only","trackType":"behavior","application":"server","specKinds":["Design"],"level":"L0","resources":[],"report":"reports/server.json","reportFormat":"vitest","deadlineMs":1000,"enforce":true,"rules":[{"id":"unit","percentile":95,"percentileMs":50}]},
       {"id":"web-unit","kind":"report-only","trackType":"behavior","application":"web","specKinds":["Design"],"level":"L0","resources":[],"report":"reports/web.json","reportFormat":"vitest","deadlineMs":1000,"enforce":true,"rules":[{"id":"unit","percentile":95,"percentileMs":50}]}
     ],
     "plan": {
@@ -55,7 +55,7 @@ test('verify runs every declared application and Repository scope under one dead
       events.push(`guard:${argv[argv.indexOf('--application') + 1]}`)
       const scope = argv[argv.indexOf('--application') + 1]
       const runRoot = argv[argv.indexOf('--run-root') + 1]
-      const trackId = scope === 'server' ? 'server-unit' : 'web-unit'
+      const trackId = scope === 'server' ? 'server-l0' : 'web-unit'
       writeFileSync(
         join(runRoot, 'summary.json'),
         JSON.stringify({

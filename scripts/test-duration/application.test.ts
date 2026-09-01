@@ -10,7 +10,7 @@ test('test:app parses one application or help', () => {
   assert.deepEqual(parseArgs(['server']), { application: 'server', help: false })
   assert.deepEqual(parseArgs(['--help']), { application: undefined, help: true })
   assert.throws(() => parseArgs(['server', 'web']), /exactly one application/)
-  assert.throws(() => parseArgs(['--track', 'server-unit']), /unknown test:app argument/)
+  assert.throws(() => parseArgs(['--track', 'server-l0']), /unknown test:app argument/)
 })
 
 test('test:app help derives the application list without building', async () => {

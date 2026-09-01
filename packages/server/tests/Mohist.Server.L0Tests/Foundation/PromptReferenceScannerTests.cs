@@ -1,0 +1,157 @@
+using System.Text.Json;
+using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Services;
+using Mohist.Workflow.Definition;
+using Xunit;
+
+namespace Mohist.Server.L0Tests.Foundation;
+
+public class PromptReferenceScannerTests
+{
+    private static WorkflowDefinition Parse(string yaml) => WorkflowYamlSerializer.FromYaml(yaml);
+
+    [Fact]
+    public void Scan_TaskWithPromptReference_ReturnsTopLevelKey()
+    {
+        var definition = Parse("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: write-proposal
+                title: Write proposal
+                uses: mohist/opencode
+                with:
+                  prompt: ${{ prompts.plan }}
+            checks: []
+        """);
+
+        var keys = PromptReferenceScanner.Scan(definition);
+
+        Assert.Equal(new[] { "plan" }, keys);
+    }
+
+    [Fact]
+    public void Scan_CheckWithPromptReference_ReturnsTopLevelKey()
+    {
+        var definition = Parse("""
+        stages:
+          - stage: build
+            tasks: []
+            checks:
+              - id: review
+                title: Review
+                uses: mohist/ai-review
+                with:
+                  prompt: ${{ prompts.review }}
+        """);
+
+        var keys = PromptReferenceScanner.Scan(definition);
+
+        Assert.Equal(new[] { "review" }, keys);
+    }
+
+    [Fact]
+    public void Scan_RecoveryTask_ReturnsItsPromptKey()
+    {
+        var definition = Parse("""
+        stages:
+          - stage: build
+            tasks:
+              - id: review
+                title: Review
+                uses: mohist/opencode
+                with:
+                  prompt: ${{ prompts.review }}
+                recovery:
+                  budget: 1
+                  handlers:
+                    - when: output.promise=FAIL
+                      tasks:
+                        - id: recover:fix
+                          title: Fix
+                          uses: mohist/opencode
+                          with:
+                            prompt: ${{ prompts.auto-fix }}
+                      retrySelf: true
+            checks: []
+        """);
+
+        var keys = PromptReferenceScanner.Scan(definition);
+
+        Assert.Contains("review", keys);
+        Assert.Contains("auto-fix", keys);
+    }
+
+    [Fact]
+    public void Scan_DuplicateReferences_ReturnUniqueSet()
+    {
+        var definition = Parse("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: t1
+                title: T1
+                uses: mohist/opencode
+                with:
+                  prompt: ${{ prompts.plan }}
+              - id: t2
+                title: T2
+                uses: mohist/opencode
+                with:
+                  prompt: ${{ prompts.plan }}
+            checks: []
+        """);
+
+        var keys = PromptReferenceScanner.Scan(definition);
+
+        Assert.Single(keys);
+        Assert.Contains("plan", keys);
+    }
+
+    [Fact]
+    public void Scan_KeyWithHyphensAndUnderscores_MatchesAllowedIdentifierCharacters()
+    {
+        var definition = Parse("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: t1
+                title: T1
+                uses: mohist/opencode
+                with:
+                  prompt: ${{ prompts.deploy_checklist }}
+              - id: t2
+                title: T2
+                uses: mohist/opencode
+                with:
+                  prompt: ${{ prompts.build-task }}
+            checks: []
+        """);
+
+        var keys = PromptReferenceScanner.Scan(definition);
+
+        Assert.Contains("deploy_checklist", keys);
+        Assert.Contains("build-task", keys);
+    }
+
+    [Fact]
+    public void Scan_NestedObjectValue_StillMatchesPromptReference()
+    {
+        var definition = Parse("""
+        stages:
+          - stage: plan
+            tasks:
+              - id: t1
+                title: T1
+                uses: mohist/opencode
+                with:
+                  options:
+                    prompt: ${{ prompts.plan }}
+            checks: []
+        """);
+
+        var keys = PromptReferenceScanner.Scan(definition);
+
+        Assert.Contains("plan", keys);
+    }
+}

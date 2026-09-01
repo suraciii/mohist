@@ -436,7 +436,7 @@ function laneResources(track: TrackConfig): string[] {
     'host',
     track.kind === 'vitest' ? 'node' : 'dotnet',
     ...(track.resources ?? []),
-    ...(track.id === 'server-spec' ? ['server-spec'] : []),
+    ...(track.id === 'server-l1' ? ['server-l1'] : []),
   ]
 }
 
@@ -684,7 +684,7 @@ function startLane(
         plan.lane.id,
         process.env,
         plan.sandboxOrdinal,
-        plan.lane.resources?.includes('server-spec'),
+        plan.lane.resources?.includes('server-l1'),
       )
       mkdirSync(sandbox.tempDir, { recursive: true })
       mkdirSync(sandbox.ipcDir, { recursive: true })
