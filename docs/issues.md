@@ -1,12 +1,20 @@
 # Issue Management
 
-An Issue is the main unit of work in the Mohist execution layer. This document
-covers every operation from creation through closure. Users usually ask an
-External Agent to perform these operations through the Mohist Skill and `mo`.
-You can also use the same CLI directly or work manually in the Web UI as a
-fallback surface. See [The Workflow](the-workflow.md) for the work and
-artifacts inside each Workflow Stage. See [Planning with Epics](epics.md) to organize
-multiple Issues into a milestone.
+An Issue is Mohist's main unit of work. This document explains how to create,
+prepare, start, inspect, advance, recover, and close an Issue. Use the same
+operations through an External Agent and the Mohist Skill, the `mo` CLI, or
+the Web UI fallback.
+
+## Product Commitments
+
+- Every Issue has one Project-scoped identity and one target Repository.
+- A Draft Issue does not consume execution capacity.
+- A ready Issue starts only when its prerequisites and Repository binding allow it.
+- A WorkflowRun uses the complete Definition that it bound when it started.
+- An Issue without a Workflow bypasses the production line and can be completed manually.
+- Approval decisions use authenticated ownership. A display name never changes attribution.
+- Pause preserves a recoverable Workflow. Stop is permanent. Close cancels the Issue and can be reopened.
+- Manual completion preserves Workflow history and cannot override a parent Issue's derived state.
 
 ## Create an Issue
 
@@ -20,22 +28,19 @@ mo issue create "Add search feature"
 mo issue create "Document search API" --body-file ./issue-body.md --ready
 ```
 
-The command also accepts a body inline, from a file, or from stdin, and
-selects priority, labels, a Workflow Profile, a model, a target repository,
-and a parent Issue. See [CLI Reference](cli-reference.md#issue) for the
-complete option surface.
+The command accepts a body inline, from a file, or from stdin. It can also set
+priority, labels, a Workflow Profile, a model, a target Repository, and a
+parent Issue. See [CLI Reference](cli-reference.md#issue) for all options.
 
-Draft protects incomplete requirements from consuming execution capacity. Mark
-an Issue ready only after its body and dependencies are usable.
+Draft protects an incomplete requirement from consuming execution capacity.
+Mark an Issue ready only when its body and prerequisites are usable.
 
-Without `--workflow-profile`, the Issue inherits the Project's default Profile.
-Use `--no-workflow` — mutually exclusive with `--workflow-profile` — when the
-work will be delivered outside the Mohist production line. Such an Issue runs
-no Workflow at all; see [Start an Issue](#start-an-issue). You may change the
-selection until the Issue starts. An active WorkflowRun continues to use the
-complete Definition that it bound when it started. A new selection or Profile
-edit applies only to a future Run. Clearing an explicit selection restores
-inheritance from the Project default.
+Without `--workflow-profile`, the Issue inherits the Project default Profile.
+Use `--no-workflow`, which conflicts with `--workflow-profile`, for work
+outside the Mohist production line. You may change the selection until the
+Issue starts. A running WorkflowRun keeps the complete Definition bound at its
+start. A new selection or Profile edit affects only a future Run. Clearing an
+explicit selection restores inheritance from the Project default.
 
 ### Web UI Fallback
 
@@ -44,20 +49,17 @@ body, priority, and labels.
 
 ### Target Repository and Child Issues
 
-- Each Issue has one **target repository**. Its branch, diff, and Integrate work
-  all occur in that repository. The target must not change after the Workflow
-  starts. See [Repositories](repositories.md).
-- When one requirement spans multiple repositories, split it into child Issues.
+- Each Issue has one target Repository. Its branch, diff, and Integrate work
+  occur there. The target cannot change after the Workflow starts. See
+  [Repositories](repositories.md).
+- When one requirement spans multiple Repositories, split it into child Issues.
   The parent tracks the complete requirement, and each child runs its own
   Workflow. See [Composite Issues and Child Issues](composite-issues.md).
 
 ### Write an Effective Issue Body
 
-Body quality determines Plan quality, and Plan quality determines the outcome
-of the Issue. Five minutes spent on a clear body can prevent much more time
-spent correcting the Plan.
-
-An effective body contains:
+Body quality affects Plan quality. An effective body states the problem, the
+goal, the boundaries, and the checks that prove completion:
 
 ```markdown
 ## Background
@@ -79,9 +81,9 @@ Do not use a body with too little context:
 Add search
 ```
 
-The Plan stage's Mohist Agent cannot determine what to search, which fields to include,
-whether to highlight matches, or whether to paginate. It can produce a Plan
-that solves the wrong problem.
+The Plan stage's Mohist Agent cannot infer what to search, which fields to
+include, or how to handle highlighting and pagination. It may produce a Plan
+for the wrong problem.
 
 Use a specific body instead:
 
@@ -107,24 +109,22 @@ Add a search field above the list. Filter in real time by a partial title match.
 
 ## View an Issue
 
-In an External Agent, ask directly for an Issue's progress, blockers, and
-pending actions. To use the CLI directly, run `mo issue list` for the Issue
-list and `mo issue view 42` for one Issue's details. Filters such as Stage,
-priority, and archived state are in [CLI Reference](cli-reference.md#issue).
+Ask an External Agent for an Issue's progress, blockers, and pending actions.
+Use `mo issue list` for the list and `mo issue view 42` for one Issue. Filters
+such as Stage, priority, and archived state are in
+[CLI Reference](cli-reference.md#issue).
 
 For a complete visual view or manual takeover, select an Issue card in the Web
 UI. The details page shows:
 
-- The current Stage, health, and Approval Point state.
+- Current Stage, health, and Approval Point state.
 - The complete body and comments.
-- The GitHub mirror — number, link, and sync health — when the target
-  repository is connected; see [GitHub](github.md).
-- The Workflow timeline.
-- The branch bar with the current branch state.
-- A diff and commit summary.
-- The latest Plan and Check artifacts.
-- Actions such as Start, Approve, Request Changes, Stop, and Retry.
-- AgentSessions that contain the Workflow execution conversations.
+- GitHub mirror number, link, and sync health when the target Repository is
+  connected. See [GitHub](github.md).
+- Workflow timeline, branch state, diff, and commit summary.
+- Latest Plan and Check artifacts.
+- Available actions such as Start, Approve, Request Changes, Stop, and Retry.
+- AgentSessions that contain Workflow execution conversations.
 
 ## Start an Issue
 
@@ -133,32 +133,31 @@ mo issue edit 42 --ready
 mo issue start 42
 ```
 
-An Issue can start only from `backlog`, when it is marked ready rather than
-Draft, and when its prerequisites and Repository binding permit a start.
-Starting an Issue with a Workflow Profile creates or reuses the named
-Workspace `issue-42` and enters Plan. Starting an Issue created with
-`--no-workflow` runs no Workflow: the Issue moves directly to in progress, and
-`mo issue done` or `mo issue close` completes its lifecycle. When its target
-repository is connected to GitHub, the linked GitHub Issue can drive the same
-lifecycle; see [GitHub](github.md#linked-pairs).
+An Issue starts only from `backlog`, when it is ready rather than Draft, and
+when its prerequisites and Repository binding permit a start. A Workflow
+Profile creates or reuses the named `issue-42` Workspace and enters Plan. An
+Issue created with `--no-workflow` moves directly to in progress. Complete it
+with `mo issue done` or `mo issue close`. When its target Repository is
+connected to GitHub, the linked GitHub Issue can drive the same lifecycle. See
+[GitHub](github.md#linked-pairs).
 
 ## Respond to an Approval Point
 
-After Plan or Check, the Issue enters `awaiting approval`. The Workflow stops
-at an Approval Point and waits for Approve or Request Changes:
+After Plan or Check, the Issue enters `awaiting approval`. The Workflow waits
+for Approve or Request Changes:
 
 ```bash
 mo run approve --issue 42     # Approve and enter the next Stage.
 mo run request-changes --issue 42 --message "Missing error handling in the plan"
 ```
 
-Decision and comment ownership come from the authenticated identity.
-Mohist does not need or accept a self-declared identity. `--display-name` is an
-optional display alias and does not change ownership. Request Changes requires
-`--message` or `-m` and is available only when the bound Definition declares
-Feedback Tasks. The approver can be a person or automation. See
-[Core Concepts: Approval Point](concepts.md#approval-point). For longer context,
-add a comment first and make the short message refer to it:
+Decision and comment ownership come from the authenticated identity. Mohist
+does not accept a self-declared identity. `--display-name` is only a display
+alias. Request Changes requires `--message` or `-m` and is available only when
+the bound Definition declares Feedback Tasks. The approver may be a person or
+automation. See [Core Concepts: Approval Point](concepts.md#approval-point).
+
+For longer context, add a comment first and make the short message refer to it:
 
 ```bash
 mo issue comment create 42 --display-name "Ada" --body "Changes needed: add error handling to the plan"
@@ -175,10 +174,8 @@ mo issue comment create 42 --display-name "Ada" --body "Looks good but check edg
 # The CLI does not currently delete comments. Use the Web UI or API.
 ```
 
-The comment area is at the bottom of the Issue details page in the Web UI.
-
-Comments are a lightweight collaboration channel between you and the stage's
-Mohist Agent. During Plan, the Agent reads them as additional context.
+The comment area is at the bottom of the Issue details page. During Plan, the
+stage's Mohist Agent reads comments as additional context.
 
 ## Prerequisites
 
@@ -189,11 +186,9 @@ mo issue prereq add 11 10    # Make #11 wait for #10.
 mo issue prereq remove 11 10 # Remove the dependency.
 ```
 
-When an Issue has a prerequisite, Mohist checks that it is complete before
-starting the Issue. Mohist rejects the start when the prerequisite is not
-complete.
-
-The Issue details page has an **Add Prerequisite** section.
+Mohist checks each prerequisite before starting an Issue and rejects the start
+when a prerequisite is incomplete. The Issue details page has an **Add
+Prerequisite** section.
 
 ## Mark an Issue Done Manually
 
@@ -203,18 +198,16 @@ When work was completed outside the Workflow, explicitly mark the Issue Done:
 mo issue done 42
 ```
 
-This command applies only to an in-progress Issue without child Issues whose
-Workflow has either stopped permanently or completed — including an Issue that
-runs no Workflow at all. A failed Workflow can
-still be retried. First use `mo run stop --issue 42 --yes` to end it explicitly,
-then mark the Issue Done. The command does not stop the Workflow or reset its
-Session for you.
+This command applies to an in-progress Issue without child Issues whose
+Workflow has stopped permanently or completed, including an Issue with no
+Workflow. A failed Workflow can still be retried. First use
+`mo run stop --issue 42 --yes` to end it explicitly, then mark the Issue Done.
+The command does not stop the Workflow or reset its AgentSession.
 
-Marking an Issue that is already Done succeeds without creating a second
-completion record. Manual completion preserves the original stopped or
-completed Workflow history and counts toward delivered Epic progress in the
-same way as normal Workflow completion. A parent Issue's Done state is still
-derived from its child Issues and must not be overridden manually.
+Marking an already Done Issue succeeds without creating a second completion
+record. Manual completion preserves the original stopped or completed Workflow
+history and counts toward delivered Epic progress. A parent Issue's Done state
+is derived from its child Issues and cannot be overridden manually.
 
 ## Pause, Stop, Complete, or Close
 
@@ -235,15 +228,11 @@ mo issue close 42
 mo issue reopen 42
 ```
 
-Use `pause` to stop temporarily, interrupt a stuck Agent, or preserve a
-recovery path; it ends the current turn and puts the Workflow in a paused
-state that supports `resume`. Use `stop` to end the Workflow Run permanently;
-it is terminal and cannot resume. Use `done` when the work was completed and
-delivered outside the Workflow; it moves the Issue to Done and preserves the
-Workflow history. Use `close` when the Issue will not be done; it moves the
-Issue to the `cancelled` terminal state and can be reopened. Use `reopen` to
-reverse an accidental closure or to do the work later; it returns the Issue to
-`backlog`.
+Use `pause` to preserve recovery and resume later. It ends the current AgentTurn
+and puts the Workflow in a paused state. Use `stop` to end the WorkflowRun
+permanently. Use `done` when work was delivered outside the Workflow. Use
+`close` when the Issue will not be done; it moves the Issue to `cancelled` and
+can be reopened. Use `reopen` to return a closed Issue to `backlog`.
 
 ## Recover from Failure
 
@@ -265,24 +254,28 @@ The Web UI has an Archive page.
 
 ## Edit an Issue
 
-Before an Issue starts, you may freely edit its title, body, priority, and
-labels:
+Before an Issue starts, edit its title, body, priority, and labels:
 
 ```bash
 mo issue edit 42 --title "New title" --priority p1
 ```
 
-See [CLI Reference](cli-reference.md#issue) for all edit options. Edit the body
-of an active Issue with care. The stage's Mohist Agent is already working from the
-previous body.
+See [CLI Reference](cli-reference.md) for all edit options. Edit the body of an
+active Issue with care because its Stage's Mohist Agent may already be working
+from the previous body.
 
 ## Complete CLI Reference
 
 See the Issue section in [CLI Reference](cli-reference.md) for the authoritative
-`mo issue` command surface. This document contains only scenario-based examples.
+`mo issue` command surface. This document contains scenario-based examples.
 Use `mo issue <command> --help` for all options.
+
+## Implementation Gaps
+
+The CLI cannot delete comments. Users must use the Web UI or API for that
+operation.
 
 ---
 
-Implementation source: `packages/server/src/Mohist.Server/Issue/`, `Api/IssueRoutes.*`, and the
-CLI under `packages/cli/`.
+Implementation source: `packages/server/src/Mohist.Server/Issue/`,
+`Api/IssueRoutes.*`, and the CLI under `packages/cli/`.

@@ -1,33 +1,40 @@
 # Composite Issues and Child Issues
 
-Some requirements are too large for one Issue. A common case spans multiple
-repositories, where each repository change must complete its own Workflow. A
-composite Issue tracks the complete requirement in one Issue while delegating
-execution to several child Issues.
+A Composite Issue divides one requirement into child Issues when one delivery
+needs coordinated changes. Each child remains a complete Issue with its own
+Repository and Workflow. The parent tracks the complete requirement.
+
+## Product Commitments
+
+- A parent Issue tracks one complete requirement. Its child Issues divide the work.
+- A child Issue is a normal Issue with its own Repository, Workflow, prerequisites, and Approval Points.
+- The hierarchy has one level. A child Issue cannot have children.
+- Parent state derives from child state and needs no manual maintenance.
+- Composite advancement starts every startable child in parallel and respects normal concurrency limits.
+- Parent completion requires terminal children. At least one `done` child produces `done`; all-cancelled children produce `cancelled`.
+- An Epic may contain a parent Issue but never a child Issue.
+- Detaching every child returns the parent to a normal Issue that can run its own Workflow.
 
 ## Mental Model
 
-- After an Issue gains child Issues, it becomes a **parent Issue**, also called
-  a composite Issue. The parent no longer runs its own Workflow. Delivery of
-  the parent equals delivery of all its children.
-- A **child Issue is a complete, normal Issue**. It has its own target
-  repository, Workflow, approval points, and prerequisites. Its execution is
-  identical to that of an independently created Issue.
-- The hierarchy has only one level. A child Issue must not have child Issues.
-- Composite Issues and Epics are independent. An Epic organizes and feeds work
-  for a product goal. A composite Issue divides the internal work of one
-  requirement. A child Issue does not belong to an Epic. An Epic treats the
-  parent as a normal Issue.
+When an Issue gains child Issues, it becomes a parent Issue, also called a
+Composite Issue. The parent no longer runs its own Workflow. Delivery of the
+parent represents delivery of all its children.
 
-Use an Epic when each part is independently valuable and each completion moves
-the product forward. Use a composite Issue when the parts are only divisions
-of one requirement and a partial result has no product value. For example, a
-server API without its required Web integration is only part of one delivery.
+A child Issue has its own target Repository, Workflow, Approval Points, and
+prerequisites. Its execution is the same as an independently created Issue.
+The hierarchy has one level only, so a child cannot have children.
+
+Composite Issues and Epics organize work in different ways. An Epic groups
+independently valuable deliverables under a product goal. A Composite Issue
+divides one requirement when a partial result has no product value. A child
+Issue never belongs to an Epic; an Epic treats the parent as a normal member.
 
 ## Split an Issue
 
-Put the shared background, complete goal, and overall acceptance criteria in
-the parent body. Give each child body a clear statement of its own scope.
+Use a Composite Issue when parts are only divisions of one delivery, such as a
+server API and its required Web integration. Put shared context in the parent
+body and give each child a clear scope.
 
 ```bash
 # Describe the complete requirement in the parent Issue.
@@ -46,28 +53,20 @@ mo issue edit 43 --ready
 mo issue edit 44 --ready
 ```
 
-Keep the parent and children as Drafts while assembling the split. This prevents
-partial structure from entering execution before every scope and prerequisite
-is visible. A Draft child remains intentionally excluded from composite
-advancement.
+Keep the parent and children as Drafts while assembling the split. This keeps
+partial structure out of execution until every scope and prerequisite is
+visible. A Draft child remains excluded from composite advancement.
 
-- To attach an existing backlog Issue, use
-  `mo issue edit 43 --parent 42`. To detach it, use
-  `mo issue edit 43 --parent none`.
-- A child Issue without an explicit priority inherits the parent's priority.
-- You or an External Agent acting for you decide how to split the work. Mohist
-  does not split it automatically.
-- When a child enters Plan, Mohist gives the Plan stage's Mohist Agent the parent title and
-  body as background context. You do not need to copy shared context into each
-  child body.
+- Attach an existing backlog Issue with `mo issue edit 43 --parent 42`.
+  Detach it with `mo issue edit 43 --parent none`.
+- A child without an explicit priority inherits the parent's priority.
+- You or an External Agent decide the split. Mohist does not split Issues automatically.
+- When a child enters Plan, its Mohist Agent receives the parent title and body
+  as background context. You do not need to copy shared context into each child.
 
-The following constraints apply:
-
-- An Issue that has entered a Workflow must not be split or attached as a child.
-  Stop it first.
-- A terminal parent must not accept another child. Reopen it first.
-- An Issue that has children must not become another Issue's child. The hierarchy
-  remains one level deep.
+An Issue that has entered a Workflow must not be split or attached as a child;
+stop it first. A terminal parent must be reopened before it accepts another
+child. An Issue with children cannot become another Issue's child.
 
 ## Advance a Composite Issue
 
@@ -78,86 +77,76 @@ mo issue start 42    # Starting the parent starts composite advancement.
 After the parent starts:
 
 1. Mohist starts all startable child Issues in parallel. Each child must be in
-   `backlog`, marked ready, and have all prerequisites satisfied. Each runs its
-   own Workflow in its own repository.
-2. Whenever a child reaches a terminal state, Mohist automatically starts any
-   children that the completion unblocked. This continues until all children
-   are terminal.
+   `backlog`, be ready, and have satisfied prerequisites. Each runs its own
+   Workflow in its own Repository.
+2. When a child reaches a terminal state, Mohist starts children that the
+   completion unblocked. This continues until all children are terminal.
 3. The normal concurrency limit still applies. Composite advancement does not
    bypass it.
 
-Composite advancement is parallel by design. This differs from the sequential
-feeding of an Epic. An Epic controls work in progress for one goal. Child Issues
-divide one delivery, so they should finish as early as possible. Prerequisites
-express any required order.
+You can start each child manually with `mo issue start` without starting the
+parent. Composite advancement is a convenience, not the only entry point.
 
-You can also start each child manually with `mo issue start` without starting
-the parent. Composite advancement is a convenience, not the only entry point.
-
-Approval, retry, rerun, pause, and stop operations all apply to child Issues.
-The parent has no Workflow and no approval points.
+Approval, retry, rerun, pause, and stop operations apply to child Issues. The
+parent has no Workflow and no Approval Points.
 
 ## State and Progress
 
-The parent state is derived from the child Issues and does not need manual
-maintenance. The parent is `backlog` when composite advancement has not
-started and no child has started. It is `in-progress` when composite
-advancement has started or any child has started. It becomes `done`
-automatically when all children are terminal and at least one is `done`, and
-`cancelled` automatically when all children are cancelled.
+The parent state derives from its children:
 
-- A parent has no Workflow Stage. Its details show the child list, delivered
-  progress such as X/Y Done, and the blocked count. Its board card shows a
-  progress badge and problem indicator.
-- When a child is blocked, run recovery actions such as retry, rerun, or resume
-  on that child.
+- `backlog`: composite advancement has not started and no child has started.
+- `in-progress`: composite advancement or any child has started.
+- `done`: all children are terminal and at least one child is `done`.
+- `cancelled`: all children are `cancelled`.
+
+A parent has no Workflow Stage. Its details show the child list, delivered
+progress such as X/Y Done, and blocked count. Its board card shows a progress
+badge and problem indicator. Run recovery actions such as retry, rerun, or
+resume on a blocked child.
 
 ## Lifecycle Details
 
 - **Close a parent**: All children must be terminal. Mohist rejects the action
-  otherwise, so handle each child first. Close does not cascade implicitly.
-- **Reopen a parent**: The parent returns to `backlog`. You can add more children
-  and start it again.
-- **Archive**: Archiving a parent also archives its children. A child must not be
+  otherwise. Close does not cascade implicitly.
+- **Reopen a parent**: The parent returns to `backlog`. You can add children and
+  start it again.
+- **Archive**: Archiving a parent also archives its children. A child cannot be
   archived separately.
 - **Detach a child**: The child becomes a normal Issue, and Mohist recalculates
   the parent immediately. After all children are detached, the parent becomes
   a normal Issue that can run its own Workflow.
-- When a child is reopened, a completed parent automatically returns to
-  `in-progress`.
+- **Reopen a child**: A completed parent returns automatically to `in-progress`.
 
 ## Relationship to Epics
 
-- A child Issue must not join an Epic. Mohist rejects the link, and Epic automatic
+- A child Issue cannot join an Epic. Mohist rejects the link, and Epic
   advancement never operates on a child.
 - A parent can join an Epic. The Epic treats it as a normal Issue. Starting the
   parent triggers composite advancement, and parent completion counts toward
-  Epic progress. The Epic does not inspect the composite structure, and this
-  capability does not otherwise change Epic behavior.
+  Epic progress.
+- The Epic does not inspect the Composite Issue structure, and these rules do
+  not otherwise change Epic behavior.
 
 ## Relationship to Prerequisites
 
-Prerequisite rules do not change. Common uses with a composite Issue are:
+Prerequisite rules do not change. Common uses with a Composite Issue are:
 
 - **Between child Issues**: Express internal order, such as server before Web.
   Composite advancement honors it.
-- **An external Issue depends on the parent**: Wait for the complete requirement
-  to finish.
-- **The parent depends on an external Issue**: Gate the start of composite
-  advancement.
+- **An external Issue depends on the parent**: Wait for the complete requirement.
+- **The parent depends on an external Issue**: Gate composite advancement.
 
 ## End-to-End Acceptance
 
-After each child Integrates, Mohist does not automatically run cross-repository
+After each child Integrates, Mohist does not automatically run cross-Repository
 integration validation. When needed, create an integration-validation child as
-the final child and make it depend on all other children. Coordinated release
-of multi-repository changes is a Non-goal. See [Repositories](repositories.md).
+the final child and make it depend on all other children. Coordinated release of
+multiple Repositories is not automatic. See [Repositories](repositories.md).
 
 ## Implementation Gaps
 
 Parent-child relationships, composite advancement, derived parent state, Epic
-isolation, and read-only parent context during a child Plan are implemented.
-Cross-repository integration remains an explicit
-final-child workflow when a requirement needs it; Mohist does not infer or hide
-that acceptance boundary. See
-[`design/composite-issues.md`](../design/composite-issues.md) for the design.
+isolation, and read-only parent context during child Plan are implemented.
+Cross-Repository integration remains an explicit final-child Workflow when a
+requirement needs it. Mohist does not infer or hide that acceptance boundary.
+See [`design/composite-issues.md`](../design/composite-issues.md) for the design.

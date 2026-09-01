@@ -6,8 +6,8 @@ and Git commands always use the workspace supplied by the host.
 
 In these examples, `${{ repository.baseBranch }}` and
 `${{ workspace.branch }}` come from the repository and workspace for the
-current run. `origin` is an explicitly selected remote name. See
-[Workflow Definition Reference](../workflow-definition.md#template-expressions)
+current run. `origin` is an explicitly selected remote name.
+See [Workflow Definition Reference](../workflow-definition.md#template-expressions)
 for the complete expression rules.
 
 ## `mohist/workspace-prepare`
@@ -43,7 +43,7 @@ Business error codes:
 
 ## `mohist/rebase`
 
-Rebases the current branch onto the base branch and can optionally squash the
+Rebases the current branch onto the base branch. It can optionally squash the
 rebased commits into one commit.
 
 ```yaml

@@ -1,9 +1,21 @@
 # Getting Started
 
-Goal: Start Mohist from zero in 30 minutes. Use a Mohist Agent, a third-party
-External Agent, or `mo` to move one real Issue through the complete Workflow and
-see its code merged. The Web UI is the fallback operations and visualization
-plane. You can also use it to configure and use a Mohist Agent directly.
+This guide takes a new deployment from source to one merged Issue. Choose a
+Mohist Agent, a third-party External Agent, or `mo`; all three paths use the
+same Project, Issue, and Workflow state. The Web UI is the fallback operations
+and visualization plane.
+
+## Product Commitments
+
+- A new deployment can build Mohist, install `mo`, start Server and Runner, and
+  choose an interaction path in this order.
+- The guide keeps every command and input needed to move one real Issue from
+  creation through Plan, approval, Build, Check, Integrate, and Done.
+- Mohist keeps Agent, Project, Issue, Workflow, and execution state unified
+  across the Web UI, CLI, and External Agent paths.
+- A lost CLI response can be retried with the same idempotency key without
+  starting a second Agent launch.
+- Plan and Check evidence remains available for approval and later diagnosis.
 
 ## Prerequisites
 
@@ -92,45 +104,37 @@ Agent directly. A third-party External Agent and `mo` do not require the Web UI.
 
 ## 5. Select an Interaction Path
 
-Mohist supports three complementary paths. They operate the same Project,
-Issue, and Workflow. They do not create three separate sets of state.
+All interaction paths operate the same Project, Issue, and Workflow state.
+Choose one:
 
-- **Mohist Agent**: Stores identity, Instructions, execution configuration, and
-  Skills in Mohist. Use it directly from the Web UI or CLI, then connect the
-  same Agent to Slack when necessary.
-- **Third-party External Agent**: Runs in Slack, an IDE, or another product. It
-  uses the Mohist Skill and `mo` to query, delegate to, and operate Mohist. It
-  is not a Mohist Agent.
-- **Direct `mo` use**: Suitable for deterministic manual operations, scripts,
-  and troubleshooting.
+- **Mohist Agent:** A reusable Mohist resource with identity, Instructions,
+  execution configuration, and Skills. Use it from the Web UI or CLI.
+- **Third-party External Agent:** An Agent in Slack, an IDE, or another product.
+  It uses the Mohist Skill and `mo` to operate Mohist. It is not a Mohist Agent.
+- **Direct `mo`:** Deterministic manual operations, scripts, and troubleshooting.
 
-To try a Mohist Agent directly, use the task-first startup path after selecting
-or creating a Project. `mo agent start` creates the Agent and launches its first
-work in one step. The definition-first `mo agent create` and `mo agent launch`
-commands remain available when you want to configure a reusable Agent before
-starting work. To let a third-party External Agent use Mohist, install the
-Mohist Skill into a supported local Agent:
+To use a Mohist Agent, select or create a Project, then run `mo agent start`.
+This task-first command creates the Agent and launches its first work. Use
+`mo agent create` followed by `mo agent launch` when you want to configure the
+Agent before starting work.
+
+To use an External Agent, install the Mohist Skill in that Agent:
 
 ```bash
 mo skill install
 ```
 
-You can then make a request in the Slack workspace, IDE, or other interaction
-location where the External Agent runs. For example, ask, "Which Mohist Issues
-are advancing, and do any need my attention?" The External Agent reads the
-appropriate Skill and uses `mo` to query or operate Mohist. See
-[Skills](skills.md) for the complete mechanism.
-
-The rest of this guide uses a third-party External Agent or `mo`. You do not
-need to create a Mohist Agent first. If you do not use an External Agent, run
-the `mo` commands in this guide directly.
+Then ask it to query or operate Mohist, for example: "Which Mohist Issues are
+advancing, and do any need my attention?" See [Skills](skills.md). The rest of
+this guide uses an External Agent or `mo`; you do not need to create a Mohist
+Agent first.
 
 ## 6. Configure the Agent Model
 
-Workflow Agent tasks run named Mohist Agents (`mohist/planner`,
-`mohist/builder`, `mohist/reviewer` by default). The Agent definition owns the
-execution backend (OpenCode or Pi), model, optional Reasoning Effort, and
-variant; a Workflow task cannot override them.
+Workflow Agent tasks use named Mohist Agents (`mohist/planner`,
+`mohist/builder`, and `mohist/reviewer` by default). The Agent definition owns
+the backend, model, optional Reasoning Effort, and variant. A Workflow task
+cannot override them.
 
 When using OpenCode, confirm that its CLI works:
 
@@ -139,10 +143,9 @@ When using OpenCode, confirm that its CLI works:
 opencode --help
 ```
 
-Without an explicit model, the Agent uses its runtime default. To select a
-model, configure it on the Agent or in Project Agent settings. See
-[Agents and AgentSessions](agent-sessions.md) and
-[Workflow Profiles](workflow-profiles.md#agent-tasks).
+Without a model, the Agent uses its runtime default. Configure a model on the
+Agent or in Project Agent settings. See [Agents and AgentSessions](agent-sessions.md)
+and [Workflow Profiles](workflow-profiles.md#agent-tasks).
 
 ## 7. Create Your First Project
 
@@ -320,3 +323,8 @@ In your repository, verify that `GET /hello` works.
   style
 - [CLI Reference](cli-reference.md): See all `mo` commands, options, and exit
   codes
+
+## Implementation Gaps
+
+Pi installation and provider credential setup remain outside Mohist. Configure
+Pi in the Runner user's environment before using a Pi-backed Agent.

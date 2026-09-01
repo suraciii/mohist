@@ -4,9 +4,9 @@
 > [`mohist/agent`](agent.md), not this Action directly.
 
 `mohist/pi` delegates one unit of work to Pi and reports the execution facts.
-It is a peer of [`mohist/opencode`](opencode.md): a Workflow selects one backend
-with `uses`; neither wraps the other or shares its input. The Action itself is not an Agent and
-does not find or start a Mohist Agent.
+It is a peer of [`mohist/opencode`](opencode.md). A Workflow selects one
+backend with `uses`; neither Action wraps the other or shares its input. The
+Action is not an Agent. It does not find or start a Mohist Agent.
 
 See [Agents and AgentSessions](../agent-sessions.md) for the overall
 relationship among Agent, AgentJob, and AgentSession.
@@ -43,7 +43,7 @@ stages:
           options: ${{ vars.agent }}
 ```
 
-The `agent` Variable follows the same merge rules as other Workflow Variables:
+The `agent` Variable follows the same merge rules as other Workflow Variables.
 Issue overrides Project, and Run overrides Issue. See the
 [`mohist/opencode`](opencode.md) basic usage. The same `agent` object can bind
 to either backend Action. For `mohist/pi`, `model`, `reasoningEffort`, and true
@@ -115,14 +115,13 @@ availability and the default model from configured credentials. The model list
 displayed by Mohist only helps with configuration.
 
 Pi does not ask for an Approval for every tool invocation and provides no
-sandbox. Tools run with the permissions of the Runner process. For
-deterministic unattended execution, Mohist does not load project-level Pi
-configuration from the work repository, including settings, extensions, and
-Skills under `.pi/`. A repository therefore cannot change Runner behavior by
-including Pi configuration. Root-level `AGENTS.md` and `CLAUDE.md` files are
-not Pi configuration; they are still provided to the model as context, as they
-are for OpenCode. Customize Pi behavior in the Runner user's global Pi
-configuration.
+sandbox. Tools run with the permissions of the Runner process. Mohist does not
+load project-level Pi configuration from the work repository. This includes
+settings, extensions, and Skills under `.pi/`. A repository therefore cannot
+change Runner behavior by including Pi configuration. Root-level `AGENTS.md`
+and `CLAUDE.md` files are not Pi configuration. Mohist still provides them to
+the model as context, as it does for OpenCode. Customize Pi behavior in the
+Runner user's global Pi configuration.
 
 Pi controls timeout and retry behavior for individual tools. Mohist controls
 only the deadline for the entire execution and interruption confirmation. It

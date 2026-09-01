@@ -4,7 +4,8 @@
 > [`mohist/agent`](agent.md), not this Action directly.
 
 `mohist/opencode` delegates one unit of work to OpenCode and reports the
-execution facts. The Action itself is not an Agent and does not find or start a Mohist Agent.
+execution facts. The Action is not an Agent. It does not find or start a
+Mohist Agent.
 
 See [Agents and AgentSessions](../agent-sessions.md) for the overall
 relationship among Agent, AgentJob, and AgentSession.
@@ -20,8 +21,8 @@ The minimal configuration contains only a prompt:
     prompt: ${{ prompts.plan }}
 ```
 
-To let a Project or Issue adjust OpenCode configuration, first set it in
-separate Variables:
+A Project or Issue can adjust OpenCode configuration through separate
+Variables:
 
 ```yaml
 vars:
@@ -57,8 +58,8 @@ select an OpenCode agent.
 
 The expanded Action Input is the only configuration fact for this execution.
 `mohist/opencode` does not read `vars.agent` implicitly. Without an explicit
-`options` binding, it uses the selection from the current OpenCode Session, or
-the OpenCode default for the first execution.
+`options` binding, it uses the current OpenCode Session's selection. It uses
+the OpenCode default for the first execution when no selection exists.
 
 ## Action Inputs
 
@@ -74,7 +75,7 @@ the OpenCode default for the first execution.
 
 Tools, plugins, permissions, default execution behavior, and automatic
 compaction remain OpenCode configuration. Mohist does not duplicate them as
-fields. Action Input does not need `agent`, `kind`, or `type`; `uses` already
+fields. Action Input does not need `agent`, `kind`, or `type`. `uses` already
 selects the execution backend.
 
 ## Workflow Session

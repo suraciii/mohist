@@ -1,7 +1,7 @@
 # Mohist Documentation
 
-This documentation is for **users**. It provides a reading path organized by
-product area. Architecture and domain analysis are under
+This documentation is for **users**. The index is organized by product area;
+each guide appears once. Architecture and domain analysis are under
 [`../design/`](../design/).
 
 If you are new to Mohist, read the [repository README](../README.md) first.
@@ -52,6 +52,13 @@ If you are new to Mohist, read the [repository README](../README.md) first.
 
 - [Action Contracts](actions/README.md): Workflow Action inputs, outputs, and
   behavior, including `mohist/opencode` and `mohist/pi`
+  - [Agent Action](actions/agent.md): Launch a named Mohist Agent
+  - [Core Actions](actions/core.md): Run processes, scripts, and marker checks
+  - [Git Actions](actions/git.md): Prepare, rebase, inspect, merge, and push
+  - [GitHub PR Actions](actions/github-pr.md): Create and deliver Pull Requests
+  - [OpenCode Action](actions/opencode.md): Run one input through OpenCode
+  - [Pi Action](actions/pi.md): Run one input through Pi
+  - [Task-list Action](actions/task-list.md): Expand planned Build tasks
 - [External Agent API](agent-api.md): Call the shipped private API to delegate
   Agent work, recover keyed writes, read public state, and resume Session events
 - [Runner Guide](runner.md): Run the execution plane and configure concurrency

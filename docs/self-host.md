@@ -3,37 +3,52 @@
 Mohist is a self-hosted product. This guide covers long-running deployment,
 startup at boot, remote access, backup, and upgrade.
 
+## Product Commitments
+
+- Server state remains in one durable data root or mounted Docker volume.
+- Runner remains on the host in both systemd and Docker deployments because it
+  operates repositories and invokes execution tools.
+- An optional `mohist-slack` service remains a host process and needs no public
+  inbound port.
+- Managed services start at boot, restart through their supported `mo`
+  commands, and keep their configured identities.
+- Backups include the complete Server data root, not only the SQLite database.
+- Remote access uses a VPN or TLS-terminating reverse proxy. Plain HTTP is not
+  exposed to the public Internet.
+- Upgrades create a rollback boundary before schema or repository migrations.
+- Observation is resource-bounded and cannot consume resources required by
+  product work.
+
 ## Deployment Modes
 
-Server supports two long-running deployment modes. In both modes, **Runner runs
-on the host** because it operates Git Repositories and invokes shell tools such
-as OpenCode, Git, and `gh`. Runner is not part of the Server container. When
-Slack Agent Connections are used, the optional `mohist-slack` managed service
-also runs on the host. It makes outbound connections to Slack and Server and
-needs no public inbound port.
+Choose one long-running mode:
 
-Server enables resource-bounded observation by default. Traces are retained for
-up to 72 hours within a 1 GiB observation storage budget. The OTLP receiver
-listens only on `localhost:4318`, and default deployment does not publish port
-4318. Run `mo otel status` to inspect `healthy`, `degraded`, or `off` state. To
-disable observation completely, set `Mohist:Otel:Enabled=false` and restart
-Server.
+- **systemd:** Use on Linux laptops, NUCs, NAS devices, or VPS hosts. `mo install`
+  creates native user services, enables startup, and can install Runner and the
+  optional Slack adapter.
+- **Docker:** Use when Docker isolation or migration is preferred. Server runs
+  in a container with state in a mounted volume. Runner and the optional Slack
+  adapter remain on the host.
 
-Use **systemd** mode on a Linux host such as a NUC, NAS, VPS, or laptop. It
-runs native processes: `mo install` creates units, enables startup, and can
-install Runner too. Use **Docker** mode when Docker is available and isolation
-or easy migration is preferred. Server runs in a container with all state in a
-mounted volume, and Runner connects from the host.
+In both modes, Runner operates Git repositories and invokes tools such as
+OpenCode, Git, and `gh`; it is not part of the Server container. The Slack
+adapter makes outbound connections to Slack and Server and needs no public
+inbound port.
 
-Choose one mode. Remote access, backup, and upgrade sections cover both.
+Server enables resource-bounded observation by default. Traces remain for up to
+72 hours within a 1 GiB observation budget. The OTLP receiver listens only on
+`localhost:4318`, and deployment does not publish port 4318. Run `mo otel status`
+to inspect `healthy`, `degraded`, or `off`. To disable observation, set
+`Mohist:Otel:Enabled=false` and restart Server.
 
-- Local development or trial: use the development scripts `dev:server`,
-  `dev:runner`, and `dev:web`. See [Getting Started](getting-started.md).
+Use the development scripts for a local trial. Use [Getting Started](getting-started.md)
+for that path. Use [Remote Access](#remote-access), [Backup](#backup), and
+[Upgrade](#upgrade) for either deployment mode.
+
 - Daily laptop use: systemd as a [Local daemon](#local-daemon).
-- Always-on home server or NAS: systemd or Docker. See
-  [Always-on server](#always-on-server-or-nas) or [Docker mode](#docker-mode).
-- Remote VPS: either mode with a reverse proxy or VPN. See
-  [Remote Access](#remote-access).
+- Always-on home server or NAS: systemd or Docker. See [Always-on server](#always-on-server-or-nas)
+  or [Docker mode](#docker-mode).
+- Remote VPS: either mode with a reverse proxy or VPN. See [Remote Access](#remote-access).
 
 ## systemd Mode
 
@@ -554,17 +569,13 @@ Prometheus or Uptime Kuma.
 - **Trust Repository content.** Agents read the code. Do not store secrets or
   tokens in a Repository.
 
-## Current Limitations
-
-- Authentication is designed for one Administrator. There are no additional
-  users, roles, or enterprise identity providers.
-- Mohist does not terminate public TLS. Remote access requires a VPN or a
-  TLS-terminating reverse proxy as described above.
-
-The default deployment listens on localhost and relies on host access as its
-outer trust boundary. Built-in credentials protect the application boundary.
-
----
-
 Implementation source: `mo install` under `packages/cli/` and `scripts/` for
 systemd; root `Dockerfile` and `docker-compose.yml` for Docker.
+
+## Implementation Gaps
+
+Authentication supports one Administrator only. Additional users, roles, and
+enterprise identity providers are not implemented. Mohist does not terminate
+public TLS; remote access requires a VPN or a TLS-terminating reverse proxy.
+The default deployment listens on localhost and relies on host access as its
+outer trust boundary.
