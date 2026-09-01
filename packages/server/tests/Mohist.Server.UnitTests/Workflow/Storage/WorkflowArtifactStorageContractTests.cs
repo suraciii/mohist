@@ -44,7 +44,7 @@ public class WorkflowArtifactStorageContractTests
         var result = await _storage.WriteFileAsync(
             storagePath,
             Bytes(payload),
-            WriteFor("openspec/changes/issue-55/review.md", payload.Length),
+            WriteFor("artifacts/changes/issue-55/review.md", payload.Length),
             SampleRecordedAt);
 
         Assert.Equal(WorkflowArtifactStorageKind.File, result.Kind);
@@ -56,7 +56,7 @@ public class WorkflowArtifactStorageContractTests
         var metadata = await _storage.ReadMetadataAsync(storagePath);
         Assert.NotNull(metadata);
         Assert.Equal("file", metadata!.Kind);
-        Assert.Equal("openspec/changes/issue-55/review.md", metadata.Path);
+        Assert.Equal("artifacts/changes/issue-55/review.md", metadata.Path);
         Assert.Equal("wr_1", metadata.WorkflowRunId);
         Assert.Equal("ai-review.1", metadata.ActionAttemptId);
         Assert.Equal("art_1", metadata.ArtifactId);

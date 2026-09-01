@@ -14,8 +14,8 @@ namespace Mohist.Server.UnitTests.Issue.StartVariableScope;
 /// <c>config.jsonc</c> bundle and the project <c>Variables</c> bundle
 /// (project wins, global fills gaps, symmetric for <c>vars</c> and each
 /// <c>stages.&lt;stage&gt;.vars</c>) and then layering the built-in calling
-/// context (<c>mohist</c> / <c>issue</c> / <c>project</c> / <c>repository</c>
-/// / <c>openspec*</c>) on top. The result is snapshotted once, at issue
+/// context (<c>mohist</c> / <c>issue</c> / <c>project</c> / <c>repository</c>)
+/// on top. The result is snapshotted once, at issue
 /// creation, so subsequent edits to project or global <c>Variables</c> do
 /// not retroactively change this issue's effective variables.
 /// </summary>
@@ -31,7 +31,7 @@ public class IssueVariableBuilderTests
     private static readonly WorkspaceIdentity Workspace = new(
         Path: "/tmp/mohist/test/issue-80",
         Branch: "mohist/run-wr_x",
-        ChangeDir: "openspec/changes/issue-80");
+        ChangeDir: "artifacts/changes/issue-80");
 
     private static MohistIssue TestIssue(int number = 80) => new()
     {
@@ -205,7 +205,7 @@ public class IssueVariableBuilderTests
     public void RuntimeLikeVariableNamesRemainUserVariables()
     {
         // Even if project or global vars try to override a context key
-        // (mohist / issue / project / repository / openspec*), the built-in
+        // (mohist / issue / project / repository), the built-in
         // context layered on top wins — the runtime reads these from the
         // issue profile as authoritative values.
         var globalBundle = BundleFrom(JsonSerializer.Serialize(new

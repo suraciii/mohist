@@ -22,8 +22,7 @@ namespace Mohist.Server.SpecTests.Specs.Events.Issue;
 /// Covers <see cref="IssueWorkflowCompletionHandler"/>: the
 /// <c>com.mohist.workflow.run.completed</c> subscription that
 /// transitions the owning in-progress issue to <c>Done</c> via
-/// <see cref="IIssueGrain.CompleteWorkAsync"/>. Spec:
-/// <c>openspec/changes/issue-307/specs/issue-workflow-completion/spec.md</c>.
+/// <see cref="IIssueGrain.CompleteWorkAsync"/>.
 /// </summary>
 public class IssueWorkflowCompletionHandlerSpecs : IssueWorkflowCompletionHandlerTestSupport
 {

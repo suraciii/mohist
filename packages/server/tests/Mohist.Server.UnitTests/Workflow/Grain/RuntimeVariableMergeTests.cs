@@ -21,7 +21,7 @@ public class RuntimeVariableMergeTests
         var events2 = run.StartTask("work-1", "runner-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         var task = run.CurrentStage().Tasks.First(t => t.DefinitionId == "proposal");
         task.Status = WorkflowActionAttemptStatus.Completed;
-        task.Output = JsonSerializer.Deserialize<JsonElement>("{\"openspecName\":\"issue-97\",\"changeDir\":\"openspec/changes/issue-97\"}");
+        task.Output = JsonSerializer.Deserialize<JsonElement>("{\"changeName\":\"issue-97\",\"changeDir\":\"artifacts/changes/issue-97\"}");
 
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
         WorkflowDispatchHelpers.MergeTaskOutputsIntoPayload(payload, run);
@@ -30,10 +30,10 @@ public class RuntimeVariableMergeTests
         var tasks = tasksEl!.Value;
         Assert.True(tasks.TryGetProperty("proposal", out var proposal));
         Assert.True(proposal.TryGetProperty("outputs", out var outputs));
-        Assert.True(outputs.TryGetProperty("openspecName", out var openspecName));
-        Assert.Equal("issue-97", openspecName.GetString());
+        Assert.True(outputs.TryGetProperty("changeName", out var changeName));
+        Assert.Equal("issue-97", changeName.GetString());
         Assert.True(outputs.TryGetProperty("changeDir", out var changeDir));
-        Assert.Equal("openspec/changes/issue-97", changeDir.GetString());
+        Assert.Equal("artifacts/changes/issue-97", changeDir.GetString());
     }
 
     [Fact]

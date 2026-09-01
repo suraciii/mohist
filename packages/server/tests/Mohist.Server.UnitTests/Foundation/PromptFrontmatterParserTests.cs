@@ -11,8 +11,8 @@ public class PromptFrontmatterParserTests
     {
         const string fileText = "---\n"
             + "name: \"Generate Proposal\"\n"
-            + "description: \"Creates the OpenSpec proposal.md for an issue\"\n"
-            + "tags: [plan, openspec]\n"
+            + "description: \"Creates the plan proposal.md for an issue\"\n"
+            + "tags: [plan, artifacts]\n"
             + "stage: plan\n"
             + "---\n"
             + "BODY LINE 1\n"
@@ -21,8 +21,8 @@ public class PromptFrontmatterParserTests
         var (frontmatter, body) = PromptFrontmatterParser.Parse(fileText, "proposal");
 
         Assert.Equal("Generate Proposal", frontmatter.Name);
-        Assert.Equal("Creates the OpenSpec proposal.md for an issue", frontmatter.Description);
-        Assert.Equal(new[] { "plan", "openspec" }, frontmatter.Tags);
+        Assert.Equal("Creates the plan proposal.md for an issue", frontmatter.Description);
+        Assert.Equal(new[] { "plan", "artifacts" }, frontmatter.Tags);
         Assert.Equal("plan", frontmatter.Stage);
         Assert.Equal("BODY LINE 1\nBODY LINE 2\n", body);
         Assert.DoesNotContain("---", body);

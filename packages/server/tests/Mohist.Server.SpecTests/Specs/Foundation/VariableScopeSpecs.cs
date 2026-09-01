@@ -116,13 +116,13 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         using (var proposalWith = JsonDocument.Parse(proposal.With))
         {
             Assert.False(proposalWith.RootElement.TryGetProperty("changeDir", out _));
-            Assert.False(proposalWith.RootElement.TryGetProperty("openspecChangeDir", out _));
+            Assert.False(proposalWith.RootElement.TryGetProperty("artifactChangeDir", out _));
             Assert.Equal("${{ prompts.plan }}", proposalWith.RootElement.GetProperty("prompt").GetString());
         }
         Assert.NotNull(proposal.Expect);
         using (var proposalExpect = JsonDocument.Parse(proposal.Expect!))
         {
-             Assert.Equal("openspec/changes/issue-${{ issue.number }}/proposal.md", proposalExpect.RootElement.GetProperty("files")[0].GetProperty("path").GetString());
+             Assert.Equal("artifacts/changes/issue-${{ issue.number }}/proposal.md", proposalExpect.RootElement.GetProperty("files")[0].GetProperty("path").GetString());
             Assert.False(proposalExpect.RootElement.TryGetProperty("markers", out _));
         }
         await ReportAsync(r1, proposal.WorkId, "completed");
@@ -142,7 +142,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         var (check, _) = await PollWorkAnyAsync();
         Assert.Equal("checks", check.WorkType);
         Assert.StartsWith("checks-", check.WorkId);
-         Assert.Contains("openspec/changes/issue-${{ issue.number }}", check.With);
+         Assert.Contains("artifacts/changes/issue-${{ issue.number }}", check.With);
         Assert.DoesNotContain("${{ artifacts.changeDir }}", check.With);
     }
 
@@ -160,7 +160,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         var (check, _) = await PollWorkAnyAsync();
 
         Assert.Equal("checks", check.WorkType);
-        Assert.Contains("mohist/openspec-artifacts", check.With);
+        Assert.Contains("mohist/plan-artifacts", check.With);
         Assert.Contains("core/marker", check.With);
         Assert.Contains("core/script", check.With);
         Assert.Contains("\"name\":\"health\"", check.With);
@@ -203,40 +203,40 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
                         { "session": "plan", "prompt": "${{ prompts.plan }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
-                         { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/proposal.md" } ] }
+                         { "files": [ { "path": "artifacts/changes/issue-${{ issue.number }}/proposal.md" } ] }
                         """)),
                     new("specs", "Write specs", "spec/task",
                         With("""
                         { "session": "plan", "prompt": "${{ prompts.specs }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
-                         { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/specs" } ] }
+                         { "files": [ { "path": "artifacts/changes/issue-${{ issue.number }}/specs" } ] }
                         """)),
                     new("design", "Create design", "spec/task",
                         With("""
                         { "session": "plan", "prompt": "${{ prompts.design }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
-                         { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/design.md" } ] }
+                         { "files": [ { "path": "artifacts/changes/issue-${{ issue.number }}/design.md" } ] }
                         """)),
                     new("tasks", "Generate tasks", "spec/task",
                         With("""
                         { "session": "plan", "prompt": "${{ prompts.tasks }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
-                         { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/tasks.json" } ] }
+                         { "files": [ { "path": "artifacts/changes/issue-${{ issue.number }}/tasks.json" } ] }
                         """)),
                     new("self-review", "Self review", "spec/task",
                         With("""
                         { "session": "plan", "prompt": "${{ prompts.self-review }}", "options": "${{ vars.agent }}" }
                         """),
                         Expect("""
-                         { "files": [ { "path": "openspec/changes/issue-${{ issue.number }}/self-review.md" } ] }
+                         { "files": [ { "path": "artifacts/changes/issue-${{ issue.number }}/self-review.md" } ] }
                         """)),
                 ],
                 [
-                     new("plan-artifacts", "Plan artifacts complete", "mohist/openspec-artifacts", new Dictionary<string, JsonElement?> { ["changeDir"] = JsonDocument.Parse("\"openspec/changes/issue-${{ issue.number }}\"").RootElement.Clone() }),
-                     new("self-review-passed", "Self review passed", "core/marker", new Dictionary<string, JsonElement?> { ["path"] = JsonDocument.Parse("\"openspec/changes/issue-${{ issue.number }}/self-review.md\"").RootElement.Clone(), ["expect"] = JsonDocument.Parse("\"<promise>PASS</promise>\"").RootElement.Clone() }),
+                     new("plan-artifacts", "Plan artifacts complete", "mohist/plan-artifacts", new Dictionary<string, JsonElement?> { ["changeDir"] = JsonDocument.Parse("\"artifacts/changes/issue-${{ issue.number }}\"").RootElement.Clone() }),
+                     new("self-review-passed", "Self review passed", "core/marker", new Dictionary<string, JsonElement?> { ["path"] = JsonDocument.Parse("\"artifacts/changes/issue-${{ issue.number }}/self-review.md\"").RootElement.Clone(), ["expect"] = JsonDocument.Parse("\"<promise>PASS</promise>\"").RootElement.Clone() }),
                     new("health", "Health", "core/script", new Dictionary<string, JsonElement?> { ["run"] = JsonDocument.Parse("\"git diff --check\"").RootElement.Clone() }),
                 ])
         ]);

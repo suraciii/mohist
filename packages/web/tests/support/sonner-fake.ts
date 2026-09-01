@@ -3,7 +3,7 @@ import { vi } from 'vitest'
 /**
  * sonner 的测试替身，经 vite.config.ts 的 test.alias 全局生效——所有测试
  * 文件看到同一个模块实现，不产生 per-file 注册表分叉，与 isolate:false
- * 终局兼容（openspec/changes/web-test-boundary-mocks plan §波3）。
+ * 终局兼容。
  *
  * toast 是出站通知边界：产品契约是"以什么文案/等级发出了通知"，由
  * 记录断言表达；真渲染 Toaster 的动画/时序不属于被测行为。断言用

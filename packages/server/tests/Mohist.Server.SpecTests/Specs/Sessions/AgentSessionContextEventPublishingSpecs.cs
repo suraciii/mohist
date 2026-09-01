@@ -15,8 +15,7 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
 /// <summary>
-/// Integration tests verifying that the new SSE event types from
-/// <c>openspec/changes/issue-110/specs/pipeline-session-events</c>
+/// Integration tests verifying that the new SSE event types
 /// (<c>compaction_event</c> and <c>context_health_update</c>) are
 /// emitted through the transcript publisher and persisted in the
 /// session stream log when the underlying events fire.

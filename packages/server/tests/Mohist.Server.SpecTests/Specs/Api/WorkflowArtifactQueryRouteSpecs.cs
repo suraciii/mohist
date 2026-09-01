@@ -74,7 +74,7 @@ public class WorkflowArtifactQueryRouteSpecs
                 ArtifactId = $"art_proposal_{Guid.NewGuid():N}",
                 WorkflowRunId = workflowRunId,
                 ActionAttemptId = "proposal.1",
-                Path = "openspec/changes/issue-55/proposal.md",
+                Path = "artifacts/changes/issue-55/proposal.md",
                 RecordedAt = baseTime,
                 ArtifactStoragePath = $"{workflowRunId}/tasks/proposal.1/artifacts/art_proposal/content",
                 Kind = "file",

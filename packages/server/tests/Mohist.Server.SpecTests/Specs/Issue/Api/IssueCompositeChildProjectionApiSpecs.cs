@@ -22,8 +22,6 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 ///   result set; an ordinary issue carries an empty <c>children</c>
 ///   array and no <c>childIssuesSummary</c>.</item>
 /// </list>
-/// Spec:
-/// <c>openspec/changes/issue-420/specs/composite-issue-detail/spec.md</c>.
 /// </summary>
 public class IssueCompositeChildProjectionApiSpecs
 {

@@ -17,7 +17,6 @@ namespace Mohist.Server.UnitTests.SystemSpecs;
 /// into the dead-letter row, and matched back to the relocated handler
 /// during operator-triggered redelivery, while the default identity
 /// (runtime full type name) keeps working for handlers that never move.
-/// Spec: <c>openspec/changes/issue-493/specs/server-architecture-alignment/spec.md#Domain-owned-durable-reactions</c>.
 /// </summary>
 public class EventDispatcherIdentitySpecs
 {

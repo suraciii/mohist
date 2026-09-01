@@ -11,9 +11,7 @@ namespace Mohist.Cli;
 /// (HTTP probe of <c>GET /otel/api/status</c>), and <c>traces</c>
 /// (typed recent-traces list against <c>GET /otel/api/traces</c>).
 /// All subcommands go through the Server; the CLI never opens the
-/// local SQLite database. See
-/// <c>openspec/changes/issue-529/specs/otel-cli-query/spec.md</c>
-/// and <c>openspec/changes/issue-530/specs/otel-cli-traces/spec.md</c>.
+/// local SQLite database.
 /// </summary>
 internal static class OtelCommands
 {
