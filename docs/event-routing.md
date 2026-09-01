@@ -1,81 +1,106 @@
 # Agent Event Routing
 
-In this document, Agent means a **Mohist Agent** with a stable ID, name, and
-Instructions. Every Workflow worker is also a Mohist Agent; there is no anonymous Agent capability.
-See [Agents and AgentSessions](agent-sessions.md) for their relationship.
+Event routing starts a Mohist Agent when a Project event matches a configured
+rule. The rule selects the Agent and supplies the response prompt. The Agent
+uses the same commands as a human owner. See [Agents and AgentSessions](agent-sessions.md)
+for Agent execution and [Event Protocol](../design/event-protocol.md) for event
+attributes and expressions.
 
-## Problem
+## Product Commitments
 
-Workflow, Issue, Epic, Runner, Workspace, and AgentSession all produce events.
-A stage waits for an Approval, a task fails, an Issue completes, an Epic has no
-Issue that can advance, or a Runner disconnects.
+- A Project owns one ordered routing table.
+- A rule names the event condition, responding Agent, and response prompt.
+- Mohist evaluates rules from top to bottom. The first matching rule wins by
+  default.
+- `continue` lets later matching rules respond to the same event.
+- A matching rule starts one AgentJob, AgentSession, SessionInput, and
+  AgentTurn through the normal Agent launch path.
+- Event attributes carry business lineage, so one expression can cover all
+  events under an Issue, Epic, or WorkflowRun.
+- Agent Instructions define identity. A rule response prompt defines the
+  reaction.
+- Routing does not create a privileged Agent channel or a second command
+  surface.
+- Users can inspect the matching rule, responding Agent, and resulting work.
 
-Workspace lifecycle publishes `com.mohist.workspace.created` and
-`com.mohist.workspace.archived`; the payload carries the Workspace identity,
-and the source records what created it (issue, manual, slack, web, or cli).
+## Event Model
 
-Event routing delegates responses to Agents. A Project maintains an ordered
-**routing table**. Each rule declares the event it matches, the Agent that
-responds, and the response prompt. When an event occurs, Mohist evaluates the
-table. A matching Agent starts automatically, reads context under the prompt,
-and performs actions.
+Workflow, Issue, Epic, Runner, Workspace, and AgentSession events can trigger a
+response. Each event carries attributes such as `event.type`, `event.issue`,
+`event.epic`, `event.workflowrunid`, and `event.stage` when the event family
+promotes them.
 
-Each match creates an AgentJob, an AgentSession, the first SessionInput, and the
-first AgentTurn. AgentJob records whether the response completed. AgentSession
-records input, execution turns, conversation, and tool calls.
+A rule matches these attributes with a Boolean expression. It does not match
+private payload data. The same attributes can appear in the response prompt as
+placeholders.
 
-Here an Agent is a proxy. It occupies a position that a human owner could hold
-in the production system. An owner can decide an Approval, analyze a failure,
-write a summary, or create a follow-up Issue; an Agent uses the same actions.
-It is not a privileged channel. The prompt contains decision logic. Mohist
-matches events, starts the Agent, and records the response.
+## Configure Rules
 
-## Three Mental Models
+A Project's ordered table contains rules. One Agent can have several rules.
+The Agent subscription view shows the same rules filtered by Agent; it does not
+create another subscription resource or change table order.
 
-### 1. Events Carry Business Lineage
+Agent Instructions remain shared by all rules for that Agent. A response prompt
+belongs to one rule. This keeps identity reusable and reaction-specific
+instructions local.
 
-Every event has **attributes** that locate it in the production system. They
-include event type (`event.type`), Issue (`event.issue`), Epic, WorkflowRun, and
-stage. Any event around an Issue carries that Issue number whether the event
-came from Workflow or Issue itself.
+## Evaluate Rules
 
-Watching everything under Issue #42 therefore needs only one expression.
+Mohist evaluates active rules in table order:
 
-### 2. Two Prompt Layers
+```text diagram
+      +------------+
+      | CloudEvent |
+      +------+-----+
+             |
+             v
+ +-----------------------+
+ | Project routing table |
+ +-----------+-----------+
+             |
+             v
+ +----------------------+
+ | ordered active rules |<-----+
+ +-----------+----------+      |
+             |                 |
+             v                 |
+        +--------+             |
+        | Match? +-------------++
+        +----+---+             ||
+             +--+              ||
+                vyes           ||
+      +-------------------+    ||
+      | launch Agent once |    ||
+      +---------+---------+    ||
+                |              ||
+                v              ||
+          +-----------+        ||
+          | Continue? |        ||
+          +-----+-----+        ||
+         +------+------+       ||
+         vyes          vno     ||
+   +-----------+   +------+  no||
+   | next rule +<--| stop |----++
+   +-----------+   +------+
+```
 
-An Agent's effective instruction has two layers:
+- A Project event without a Project identity matches no table.
+- A false condition advances to the next rule.
+- A match renders the response prompt and starts the named Agent.
+- An archived Agent or empty rendered prompt is skipped and recorded as a
+  structured routing result.
+- An expression evaluation error is treated as no match.
+- If another trigger already launched the same Agent for the event, Mohist
+  skips the duplicate and keeps the first rule for attribution.
+- A matching Agent uses current domain state and the normal command surface;
+  the event is a trigger, not a complete state snapshot.
 
-- **Agent Instructions define identity.** Configure them once. They remain
-  stable and are shared by every rule. For example: "You are the owner's proxy.
-  Decide Plan and Check Approvals carefully, and escalate uncertainty to the
-  owner."
-- **A rule response prompt defines this reaction.** Configure it on each rule.
-
-One Agent can respond to several event types. Putting every response into its
-identity would make the Agent definition large and hard to reuse. Identity
-belongs to the Agent; reaction belongs to the rule.
-
-### 3. Evaluate the Routing Table in Order
-
-Rules form an **ordered table**, like mail filters. Mohist evaluates each rule
-from top to bottom. On a match, it triggers that rule's Agent and stops by
-default. Mark an earlier rule as `continue` when several Agents should respond
-to the same event.
-
-This model expresses three needs:
-
-- **Exclusive response:** First match naturally selects one decision maker for
-  an Approval event.
-- **Parallel response:** After an Issue completes, one Agent can write release
-  notes and another can notify the owner. Mark the earlier rule as `continue`.
-- **Fallback and takeover:** Put a global fallback at the bottom and an
-  Issue-specific rule above it. Order makes precedence visible without a
-  separate priority calculation.
+Table order provides exclusive response, fallback, and takeover behavior.
+`continue` provides parallel response. There is no numeric priority setting.
 
 ## Expressions
 
-A rule matches event attributes with a Boolean expression. Operators include
-`==`, `!=`, `&&`, `||`, `in`, and `startsWith`.
+Operators include `==`, `!=`, `&&`, `||`, `in`, and `startsWith`.
 
 ```text literal
 # Approvals only for Issue #42
@@ -91,50 +116,38 @@ event.issue == "42"
 event.type == "com.mohist.issue.completed" && event.issue in ["42", "43"]
 ```
 
-Response prompts use the same attributes as placeholders, including
-`{{event.issue}}`, `{{event.workflowrunid}}`, and `{{event.stage}}`. The Agent
-uses them to retrieve details, decide, and act.
+Response prompts use the same attributes, including `{{event.issue}}`,
+`{{event.workflowrunid}}`, and `{{event.stage}}`. An Agent uses them to retrieve
+current details, decide, and act.
 
-## Scenario: Supervise an Issue
+## Supervise an Issue
 
-The central scenario delegates Issue supervision to an Agent. It decides an
-Approval, repairs a terminal failure, and involves the owner only when it stops.
-Install the built-in Agent, routing rules, and prompts with one command:
-`mo agent install supervisor`. See
-[Agent Supervision](agent-supervision.md) for its behavior.
+The built-in supervisor Agent can decide an Approval, repair a terminal
+failure, and involve the owner when it stops. Install it with:
+`mo agent install supervisor`. See [Agent Supervision](agent-supervision.md).
+
+The Agent is a proxy for an owner, not a privileged channel. It uses the same
+supported actions as the owner and scripts.
 
 ## Visibility
 
-Mohist does not impose strict configuration conflict prevention. It provides
-visibility so users can verify the intended routing:
+Users can:
 
-- From an event, inspect which rule and Agent responded.
-- From an AgentJob, inspect its triggering event and rule.
-- Run a **dry run** against a recent event to evaluate every routing rule and
-  show each match before waiting for a real event.
+- inspect which rule and Agent responded to an event;
+- inspect an AgentJob's triggering event and rule;
+- run a dry run against a recent event to evaluate every rule before waiting
+  for a real event.
 
-The user owns configuration correctness. The system owns observability.
+The user owns prompt and order correctness. Mohist owns event matching,
+launching, and response evidence.
 
-## More Scenarios
+## Other Uses
 
-The same routing table supports other scenarios:
+The same table supports completion summaries, follow-up Issue creation, and
+Runner or Epic maintenance. Only the condition and response prompt change.
 
-- **Automatic completion summary:** when an Issue completes, summarize
-  artifacts and write release notes.
-- **Follow-up generation:** when an Issue completes or a review finds risk,
-  create a follow-up Issue.
-- **Production maintenance:** when a Runner disconnects or an Epic cannot
-  advance an Issue, analyze the cause, notify the owner, or create a
-  maintenance Issue.
+## Boundary
 
-These rules use one table and expression language. Only the condition and
-response prompt differ.
-
-## Responsibility Boundary
-
-The user writes correct and safe response prompts and uses table order and
-`continue` for exclusivity, fallback, or parallel response. The system matches
-events accurately, starts Agents, and records the relationship between event
-and response. The system does not judge whether a prompt is correct or give
-Agents a privileged Approval path: Agents use the same supported path as the
-owner and scripts; see [Workflow](the-workflow.md).
+The user defines safe prompts and table order. Mohist matches events, starts
+Agents, and records attribution. Mohist does not judge prompt quality or give
+Agents a private Approval path.

@@ -1,28 +1,35 @@
 # Event Protocol
 
-This document defines Mohist's event envelope and its live delivery protocol.
-Web and non-SignalR clients, including `mo`, use the same project-scoped native
-WebSocket. The same router and expression language can subscribe to important
-events from any entity. See
-[`eventbus.md`](eventbus.md) for persistence and delivery and
-[`event-routing.md`](event-routing.md) for the Agent-facing routing table.
+This document defines Mohist's event envelope and project-scoped live delivery
+protocol. Web and non-SignalR clients, including `mo`, use the same native
+WebSocket. Event-bus subscriptions, Agent routing, and live notifications use
+the same event vocabulary. See [`eventbus.md`](eventbus.md) for persistence and
+delivery and [`event-routing.md`](event-routing.md) for the Agent-facing
+routing table.
+
+## Core Decisions
+
+- An envelope separates event type, emitting source, and business lineage.
+- Producers stamp lineage once. Consumers route from the envelope and never
+  query domain state to decide whether an event matched.
+- Event payloads are private to their domain. Routing uses promoted context
+  attributes only.
+- System subscriptions and Agent routing use the same event vocabulary.
+- The live socket is project-scoped and best effort. Its subscription state is
+  connection-local and has no replay cursor or durable queue.
 
 ## Three Orthogonal Axes
 
-Every event envelope answers three questions through separate properties:
-`type` says what happened, `source` says which entity emitted it, and context
-extension attributes say which business lineage contains it.
-
-`type` and `source` already have stable conventions. This protocol adds
-mandatory **business-lineage context stamping**. It makes "subscribe to
-everything under Issue #42" expressible as one predicate.
+Every envelope separates three facts: `type` says what happened, `source`
+says which entity emitted it, and context extension attributes identify its
+business lineage. Producers stamp lineage when they create the event, so a
+subscriber can match `Issue #42` without querying domain state.
 
 ## `type`: Event Taxonomy
 
 Types use `com.mohist.<domain>.<event>` and are registered in `EventCatalog`.
-The Catalog answers only which stable event types exist. An event family and
-its structure determine lineage requirements; the Catalog does not duplicate
-an attribute schema for every type.
+The Catalog lists stable types. The event family and structure determine
+lineage requirements; the Catalog does not duplicate those schemas.
 
 ### Historical Workflow interruption events
 
@@ -41,30 +48,26 @@ new production path emits these event types.
 
 ## `source`: Emitting Entity
 
-The source uses the emitting entity's domain identity, such as
+`source` uses the emitting entity's domain identity, such as
 `/mohist/workflow-runs/{workflowRunId}`,
 `/mohist/projects/{projectId}/issues/{issueNumber}`, or
 `/mohist/projects/{projectId}/epics/{epicNumber}`. Project scope is part of an
-Issue or Epic identity. Mutable business lineage such as Epic membership or
-Workflow origin is not encoded into source.
+Issue or Epic identity. Mutable lineage such as Epic membership or Workflow
+origin is not encoded in `source`.
 
 ## Context Attributes: Business-Lineage Stamping
 
 ### Rules
 
-1. **Stamp completely at production time**: The store layer writes the flat
-   extension attributes from lineage held by the producing aggregate at that
-   moment. An Issue uses its own `EpicNumber?`; a WorkflowRun uses its Issue
-   context. Stamping must not query another aggregate.
-2. **Route by envelope only**: Matchers and dispatchers read only the envelope
-   and never query the business domain. A domain reaction handler may read
-   current aggregate state before issuing an idempotent command, but that read
-   cannot change whether the route matched.
-3. **Snapshot truth**: Attributes record ownership at production time. Moving
-   an Issue to another Epic does not rewrite historical events.
-4. **Admission criterion**: Promote a business identity to an envelope
-   attribute when it is valuable as a routing dimension. Payload `data` never
-   participates in routing.
+1. The producer stamps flat extension attributes from lineage held by its
+   aggregate. It does not query another aggregate.
+2. Matchers and dispatchers read only the envelope. A reaction handler may read
+   current state before issuing an idempotent command, but that read cannot
+   change whether the route matched.
+3. Attributes record ownership at production time. Moving an Issue to another
+   Epic does not rewrite historical events.
+4. Promote a business identity to an envelope attribute only when it is a
+   routing dimension. Payload `data` never participates in routing.
 
 ### Names
 
@@ -117,9 +120,7 @@ depends on this attribute and no longer parses `data`.
 ## Match Expressions: CEL Subset
 
 A subscription or route matches an envelope with one Boolean expression. The
-syntax is a subset compatible with [CEL](https://cel.dev/). If later needs
-outgrow the subset, a complete implementation can replace it without changing
-stored expressions.
+syntax is a subset compatible with [CEL](https://cel.dev/).
 
 ### Syntax
 
@@ -163,15 +164,37 @@ event.type == "com.mohist.issue.completed" && has(event.epic)
   and routing cannot couple to it. Promote a required business dimension to a
   context attribute under the admission criterion.
 
-### Evaluator
-
-The evaluator is a small internal implementation, estimated at 300-400 lines
-plus a conformance suite, with no external dependency. `Cel` and `Cel.NET` are
-not used because evaluation targets only a flat string-to-string dictionary,
-does not need the CEL type system or protobuf integration, and neither library
-is a mainstream community dependency.
-
 ## Live WebSocket Protocol
+
+```text diagram
+                         +-------+
+                         | event |
+                         +---+---+
+                             |
+                             v
+                +-------------------------+
+                | envelope: type, source, |
+                |         context         |
+                +------------+------------+
+                   +---------+---------+
+                   v                   v
+               +-------+  +------------------------+
+               | match |  | WebSocket notification |
+               +---+---+  +------------------------+
+                   |
+                   v
+            +------------+
+            | dispatcher |
+            +------+-----+
+         +---------+--------+
+         v                  v
++----------------+   +------------+
+| system handler |   | user route |
++----------------+   +------------+
+```
+
+The same envelope feeds system handlers, Agent routing, and live notification
+projection. The socket never changes event facts or domain state.
 
 ### Boundary and Authentication
 
@@ -540,141 +563,24 @@ their state. A late publisher snapshot may target a closing connection; enqueue
 failure is a best-effort drop and cannot revive it. No disconnected connection
 state survives process or silo restart.
 
-### Migration
+## Non-Goals
 
-1. Freeze shared JSON fixtures for `subscription.set`, all three notifications,
-   JSON-RPC errors, and their exact nullability and casing. Add transport-neutral
-   Project routing metadata to transcript and task-log publication where needed.
-2. Implement the native socket registry, endpoint, domain bridge, and native
-   transcript and task-log publishers behind the existing producer interfaces.
-   The domain bridge embeds the object rendered by `WebhookPayloadRenderer`
-   rather than introducing another envelope DTO. Keep the endpoint dormant while
-   the SignalR path remains production-active.
-3. Implement one Web connection owner with fixed canonical domain and transcript
-   type sets, admission of at most 128 dynamic task-log scopes, and transcript
-   reconciliation callbacks. It performs set-before-reconcile on connect. Set
-   Vite's `/api` proxy to `ws: true`; it may preserve the browser's original
-   Host. Configure Caddy's local HTTPS proxy to send one `X-Forwarded-Proto` and
-   one `X-Forwarded-Host`. The endpoint uses those headers only from an immediate
-   loopback peer, while direct development requests continue to use
-   `Request.Scheme` and `Request.Host`. Adapt Web from the legacy SignalR
-   camelCase envelope to the structured CloudEvents object. Implement the same
-   JSON-RPC client in `mo event tail`, preserving NDJSON stdout and JSON selection
-   while emitting the standard `params.event` object unchanged.
-4. In one release candidate, activate the native publishers and both clients,
-   then delete `MohistHub`, its SignalR event bridge and publishers,
-   `ConnectionSubscriptionRegistry`, `IConnectionSubscriptionGrain`, SignalR
-   event tests and package dependencies, and `/hubs/events`. Do not fan one
-   publication through both carriers.
-5. Delete `GET /api/projects/{projectRef}/events/tail`,
-   `ProjectEventTailRoutes`, `IEventTailSource`, `EventTailSource`, their fakes,
-   and the old CLI NDJSON HTTP reader after `mo` uses the socket. Remove the old
-   tail projection with nested `extensions`; the native endpoint is the sole
-   live event transport and no compatibility mode remains.
-
-The migration preserves existing HTTP history, transcript, and task-log reads.
-It does not add a durable event log, replay API, cursor, acknowledgement, custom
-subscription language, or cross-Project observation socket.
+- The live socket has no durable subscription, replay cursor, acknowledgement,
+  or durable queue.
+- A socket observes one Project only; it cannot provide cross-Project events.
+- Event payload `data` is not a routing surface.
+- Event persistence and delivery retries belong to
+  [`eventbus.md`](eventbus.md), not this protocol.
 
 ## Dispatcher and Consumer Relationship
 
-One router, the single dispatcher in `eventbus.md`, serves two consumer types
-through the same protocol:
+The single dispatcher in `eventbus.md` serves two consumer types through the
+same event vocabulary:
 
 - **System consumers**: `[Subscription]` handlers registered at compile time.
 - **User consumers**: Agent routing tables in `event-routing.md`.
 
-See `eventbus.md` for how matching responsibilities differ between the two
-surfaces. **Symmetry is the acceptance criterion**: the protocol is broken if a
-system handler can receive an event that no user expression can subscribe to.
+A system handler must not receive an event that no user expression can
+subscribe to.
 
-## Conformance
 
-- `EventCatalog` maintains event types only and does not own another lineage
-  matrix.
-- Production rules are defined by aggregate event family. WorkflowRun, Issue,
-  Epic, AgentSession, Runner, and Workspace each have required base context.
-  Inbox-derived events inherit source-event context. Event structure, not a
-  handwritten type list, decides whether to stamp `stage`.
-- A spec suite traverses every real event-production path and asserts its
-  envelope by producer family and event structure. Forgetting lineage on a new
-  producer or emitted event fails the suite without an exception list.
-- The expression evaluator has an independent conformance suite for syntax,
-  missing attributes, regular-expression timeout, and determinism.
-- Shared Server, Web, and CLI fixtures cover `subscription.set`, the three
-  notification methods, JSON-RPC errors, exact JSON casing, nullability, and
-  limits. The shared domain fixture is the CloudEvents 1.0 structured JSON object
-  rendered by the same authoritative contract as outbound webhooks: lowercase
-  core attributes, top-level extension attributes, and `data`. Renderer tests
-  prove webhook bodies and `event.domain.params.event` are identical objects;
-  no camelCase `CloudEventEnvelope` contract exists for the socket. Web fixture
-  coverage asserts the intentional adaptation from the legacy SignalR shape,
-  and CLI fixture coverage asserts unchanged NDJSON emission of the standard
-  object and removal of nested `extensions`. Endpoint tests prove
-  `IntegrationProjectConstraint` is enforced before `101`, cookie-authenticated
-  upgrades require `Origin` to exactly match the canonical scheme and authority,
-  and bearer upgrades succeed without `Origin`. They cover direct
-  `Request.Scheme`/`Request.Host` matching; a loopback Caddy peer with one valid
-  forwarded proto/host pair; rejection of malformed, multiple, or incomplete
-  loopback forwarded values; and ignoring forwarded values from every
-  non-loopback peer. Development configuration tests assert the `/api` Vite
-  proxy enables WebSockets and may preserve Host; Caddy configuration tests
-  assert its local HTTPS proxy sends the single forwarded pair. No test enables
-  configurable trusted origins. Project-isolation tests prove that domain,
-  transcript, and task-log publishers skip missing or mismatched Project
-  metadata, including an `AgentSessionGrain` with no Project in session metadata.
-- Connection tests prove idless client objects are ignored without execution or
-  response but count as protocol errors; server notifications retain standard
-  idless JSON-RPC notification semantics. They also cover duplicate in-flight
-  IDs, malformed envelopes, unknown methods, invalid params, atomic replacement,
-  and response-before-new-notification ordering under concurrent publication.
-  Domain subscription tests prove arbitrary non-empty exact type strings are
-  trimmed and accepted without catalog coupling, while empty or whitespace types
-  are invalid and leave the prior state active. Transcript types remain catalog
-  validated.
-  The third-error tests assert an owed response is enqueued before close `1008`,
-  while a failed enqueue closes `1013` without promising that response.
-  Shutdown tests synchronize admission with `StopAsync` and prove both existing
-  and late sockets are fenced; send-failure tests prove expected transport
-  exceptions do not escape the upgraded request. Runtime match-failure tests
-  assert both structured logging and the telemetry counter.
-  Publisher tests prove transcript notifications carry explicit
-  Project scope, are emitted before persistence, and expose only transient raw
-  `id` and `sequence`. Client tests cover the single Web owner, its fixed
-  reverse-DNS-only domain set and fixed transcript type set, admission of at most
-  128 unique task-log scopes,
-  explicit no-handle failure and unchanged aggregate for the 129th, HTTP polling
-  fallback for its caller, duplicate-scope reference counting without another
-  slot, idempotent dispose handles, serialized/coalesced complete snapshots, and
-  unconditional post-ack reconciliation. Transcript tests hold the authoritative
-  HTTP read open, receive current-generation raw notifications, replace the
-  persisted base, and assert that buffered notifications are reapplied afterward
-  without cross-shape sequence deduplication. They also replace a runtime
-  identity during reconciliation, isolate a throwing task-log consumer, and
-  prove transcript and task-log buffer overflow remains bounded and reconnects.
-  A rejected authoritative read must clear buffering, close `4001`, and deliver
-  normally again only after the replacement connection reconciles.
-  CLI tests cover flag mapping, strict response and notification shapes, the
-  standard event object, compact one-object-per-line NDJSON rendering, bounded
-  peer-close acknowledgement, credential resolution and one-refresh `401`
-  recovery, bounded output fencing, and removal of both legacy live endpoints
-  after cutover.
-
-## Status
-
-Implemented: the three-axis envelope and event catalog; business-lineage
-stamping with Lineage and ProducerConformance coverage for each production
-path; the CEL-subset evaluator and user routing evaluation; promotion of the
-`stage` attribute; and Workspace create and archive events
-(`com.mohist.workspace.created` and `com.mohist.workspace.archived`) carrying
-`workspace` and `workspaceoriginkind`. Dual Issue and Epic identities and the
-old `issueid`, `epicid`, `issueno`, and `epicno` attributes are removed.
-
-Implemented: the project-scoped native WebSocket live protocol and removal of
-the SignalR and NDJSON live transports. The protocol fixes raw
-transcript delivery before persistence, generation-local transcript
-reconciliation, one fixed Web owner, canonical same-origin cookie upgrades, and
-one CloudEvents 1.0 Published Language shared unchanged with outbound webhooks. Web
-intentionally adapts from the legacy SignalR camelCase envelope, and
-`mo event tail` emits the standard object as NDJSON without the old nested
-`extensions` shape.

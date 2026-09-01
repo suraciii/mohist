@@ -1,110 +1,113 @@
 # Hermes Webhook
 
-Mohist uses Hermes as a notification delivery adapter for important Issue and
-Workflow events. This boundary keeps product decisions in Mohist while allowing
-Hermes to specialize in chat platforms such as Telegram and Weixin.
+Hermes is the notification delivery adapter for important Issue and Workflow
+events. Mohist owns notification policy and message content. Hermes owns
+subscription routing and delivery to the selected chat platform.
 
-See [Hermes Notifications](../docs/hermes-notifications.md) for notification
-semantics, enablement, setup, and operator verification. This document owns only
-the architectural boundary and the HTTP wire and security contracts.
+Product behavior is defined in
+[Hermes Notifications](../docs/hermes-notifications.md). This document defines
+the component boundary, event contract, HTTP contract, and security rules.
 
-## Drivers
+## Design Drivers
 
-### Keep Product Authority in Mohist
+- Mohist must remain authoritative for event identity, product state,
+  notification policy, message wording, and suggested action.
+- Chat delivery must not become a second state machine for Issue, Workflow,
+  AgentJob, or Approval state.
+- Platform and subscription secrets protect different trust relationships and
+  must never be interchangeable.
+- Chat delivery is a best-effort last hop. Durable history stays in Mohist.
+- A platform reply window can make a valid notification undeliverable. This is
+  channel availability, not product failure.
 
-Notification delivery must not become a second state machine for an Issue or
-Workflow. Mohist Server remains authoritative for event identity, current
-product state, notification policy, message wording, and suggested action.
-Hermes receives an already rendered message and owns only subscription routing
-and delivery to the selected chat platform.
+## Model
 
-This split prevents chat availability, template behavior, or a Hermes Agent
-loop from changing whether work succeeded or which action is valid. The Hermes
-subscription therefore delivers `body` directly; it must not reinterpret the
-message through an LLM.
+### Boundary
 
-### Use Separate Trust Boundaries
-
-Hermes has two independent secret levels because they protect different
-relationships:
-
-- The **platform-level secret** belongs entirely to the Hermes webhook platform.
-  Mohist neither stores nor sends it.
-- The **subscription-level secret** authenticates Mohist requests to the Mohist
-  Hermes subscription. Mohist `Secret` must match this value.
-
-Treating these secrets as interchangeable would expand the trust granted to one
-subscription into platform-wide trust. Configuration and diagnostics must name
-the level explicitly.
-
-### Keep Durable History Outside the Last Hop
-
-A chat message is useful for immediate attention but is not a durable product
-record. The Web Inbox retains what happened; the Hermes HTTP request is one
-best-effort delivery attempt. Delivery failure never changes or blocks Issue,
-Workflow, AgentJob, or Approval state.
-
-```mermaid
-flowchart TD
-    E["Durable Mohist event"] --> WI["Web Inbox: durable history"]
-    E --> PR["Mohist policy and renderer"]
-    PR -->|"signed JSON, one best-effort attempt"| HS["Hermes subscription"]
-    HS --> CP["Chat platform"]
+```text diagram
+           +----------------------+
+           | Durable Mohist event |
+           +-----------+----------+
+           +-----------+-----------+
+           v                       v
+ +-------------------+   +-------------------+
+ | Web Inbox history |   | Mohist policy and |
+ +-------------------+   |     renderer      |
+                         +---------+---------+
+                                   |
+                                   vone HTTP attempt
+                        +---------------------+
+                        | Hermes subscription |
+                        +----------+----------+
+                                   |
+                                   v
+                           +---------------+
+                           | Chat platform |
+                           +---------------+
 ```
 
-Mohist owns the event, state, policy, and rendered body. Hermes owns the
-subscription, destination, and platform delivery.
+- Mohist owns event selection, enabled notification types, Issue context, the
+  rendered `body`, the suggested action, and Web Inbox history.
+- Hermes owns subscription authentication, destination selection, and platform
+  delivery.
+- The chat platform owns provider acceptance, rate limits, and reply-window
+  rules.
+- Hermes must not reinterpret `body` through an Agent or LLM. It delivers the
+  rendered message directly.
+- Hermes must not own Issue or Workflow arbitration, message semantics, or a
+  second copy of Mohist state.
+- The chat platform must not own Mohist retry, completion, or Approval
+  decisions.
 
-The event bus provides at-least-once delivery to Mohist subscription handlers;
-see [Event Bus](eventbus.md). Once the Hermes handler accepts the event for
-background delivery, the HTTP last hop has no outbox, retry queue, or DLQ. A
-network error or non-success response is logged and consumed. This avoids making
-external chat availability part of product execution, but it also means the
-webhook does not promise replay or exactly-once delivery.
+### Secrets
 
-### Treat Reply Windows as Channel Availability
+The **platform-level secret** belongs to the Hermes webhook platform. Mohist
+neither stores nor sends it.
 
-Some chat platforms restrict when a Bot may initiate a message. Through iLink,
-Weixin permits delivery only for a limited window after the user's latest
-message, approximately 48 hours in current practice. After expiry it can return
-`ret=-2`, which Hermes reports as rate limited even though no rate quota was
-exhausted.
+The **subscription-level secret** authenticates Mohist requests to one Hermes
+subscription. Mohist `Secret` holds this value.
 
-This is a channel-availability constraint, not a Mohist state failure. It is
-especially unsuitable for completion notifications after long-running work.
-Telegram is therefore the default recommendation; use Weixin while its
-conversation is active. Sending a message to the Bot opens a new platform
-window, but does not replay notifications missed during the old one.
+These secrets are not interchangeable. Using the platform secret for one
+subscription would grant platform-wide trust.
 
-## Boundary Contract
+## Semantics
 
-Mohist Server owns event selection, enabled notification types, Issue context,
-the rendered `body`, the suggested action, and Web Inbox history. It must not
-own chat credentials, chat delivery state, or platform retry policy. Hermes
-owns subscription authentication, destination selection, and chat-platform
-delivery. It must not own Issue or Workflow arbitration, message semantics, or
-a second copy of Mohist state. The chat platform owns provider acceptance, rate
-limits, and reply-window rules. It must not own Mohist retry, completion, or
-Approval decisions.
+### Delivery
 
-The minimum Mohist configuration contract has three settings. `WebhookUrl` is
-the target Hermes subscription endpoint; missing or empty disables Hermes
-delivery. `Secret` is the optional subscription-level secret used to sign the
-exact request body; it is never the Hermes platform-level secret.
-`EnabledTypes` is an allowlist of `notificationType` values; events outside the
-list produce no request.
+Mohist sends one best-effort HTTP request. The Web Inbox remains the durable
+record. Hermes has no Mohist outbox, retry queue, or dead-letter queue for this
+last hop.
 
-The Hermes subscription must accept the request contract below, deliver the
-rendered `body` without an Agent loop, and select an explicit destination when a
-platform has no default home channel. Exact Mohist and Hermes commands, file
-locations, service reloads, and end-to-end checks belong in
-[Hermes Notifications](../docs/hermes-notifications.md), not in this design.
+A network error or non-success response is a delivery failure. It does not
+change or block Issue, Workflow, AgentJob, or Approval state. The webhook does
+not promise replay or exactly-once delivery.
 
-## Event Types
+Some platforms accept Bot messages only for a limited period after the user's
+latest message. Hermes reports an expired Weixin reply window as a delivery
+failure, even when the platform labels it rate limited. Telegram is the
+recommended default for completion notifications. Use Weixin while its
+conversation remains active.
+
+### Configuration
+
+The configuration has three settings:
+
+- `WebhookUrl`: the Hermes subscription endpoint. Missing or empty disables
+  delivery.
+- `Secret`: the optional subscription-level signing secret.
+- `EnabledTypes`: the allowlist of `notificationType` values. Events outside
+  the list produce no request.
+
+Hermes must deliver the rendered `body` and select an explicit destination when
+the platform has no default home channel. Setup commands and operator checks
+belong in [Hermes Notifications](../docs/hermes-notifications.md).
+
+### Event Types
 
 `notificationType` is the compact subscription and template value.
-`eventType` preserves the triggering Mohist event for traceability. Five pairs
-exist:
+`eventType` preserves the triggering Mohist event for traceability.
+
+The supported pairs are:
 
 - `approval_requested` for `com.mohist.workflow.stage.approval-requested`
 - `workflow_failed` for `com.mohist.workflow.run.failed`
@@ -112,26 +115,24 @@ exist:
 - `issue_started` for `com.mohist.issue.work-started`
 - `agent_response_failed` for `com.mohist.agent.job.failed`
 
-All are enabled by default except `issue_started`.
+All types are enabled by default except `issue_started`.
 
-## HTTP Request
+### HTTP Request
 
 Mohist sends one HTTP `POST` to `WebhookUrl` with:
 
 - `Content-Type: application/json`
 - `X-Mohist-Event: <notificationType>`
 - `X-Hub-Signature-256: sha256=<lowercase-hex-hmac>` when `Secret` is set
-- The camelCase JSON payload below as the request body
+- the camelCase JSON payload below as the request body
 
-Any 2xx response confirms only that Hermes accepted this delivery request. A
-non-2xx response or transport failure is a last-hop delivery failure and follows
-the best-effort policy above. Mohist does not use the response body as product
-state.
+A 2xx response confirms only that Hermes accepted this delivery request. A
+non-2xx response or transport failure is a last-hop delivery failure. Mohist
+does not use the response body as product state.
 
 The payload is a notification projection, not a CloudEvent envelope. It carries
-the source event identity and occurrence time so operators can correlate a chat
-delivery with durable Mohist history without exposing the complete event or
-internal state.
+source identity and occurrence time so operators can correlate a delivery with
+Mohist history without receiving the complete event or internal state.
 
 ```json
 {
@@ -152,43 +153,39 @@ internal state.
 
 The payload fields are:
 
-- `notificationType`: one value from the event list above, repeated in
-  `X-Mohist-Event`.
-- `eventType`: the full Mohist type of the source event.
-- `sourceEventId`: the stable source-event identity for correlation; it is not
-  a new webhook-attempt ID.
-- `occurredAt`: the source-event occurrence time in ISO 8601 form.
+- `notificationType`: one supported value, repeated in `X-Mohist-Event`.
+- `eventType`: the full type of the source event.
+- `sourceEventId`: the stable source-event identity, not a webhook-attempt ID.
+- `occurredAt`: the source-event time in ISO 8601 form.
 - `projectId`, `issueNumber`, `issueTitle`: the required Issue identity and
   current title used to render the notification.
 - `epicNumber`: present only when the Issue currently belongs to an Epic.
 - `workflowRunId`: present when the source event identifies a WorkflowRun.
-- `stage`: present for an Approval-point notification.
+- `stage`: present for an Approval Point notification.
 - `failureReason`: present for Workflow or Agent response failure when a short
-  reason is available; it never contains a stack trace.
-- `suggestedAction`: actionable text that always includes the Issue number.
-- `body`: the complete user-facing message rendered by Mohist in its configured
-  language. This is the default and recommended Hermes template input.
+  reason is available. It never contains a stack trace.
+- `suggestedAction`: actionable text that includes the Issue number.
+- `body`: the complete user-facing message rendered by Mohist.
 
 Nullable fields are omitted rather than sent as JSON `null`.
 
-## Signature Contract
+### Signature
 
 When `Secret` is configured, Mohist computes HMAC-SHA256 over the exact UTF-8
 bytes sent as the JSON request body. It encodes the digest as lowercase
-hexadecimal and sends the GitHub-compatible header:
+hexadecimal and sends:
 
 ```text literal
 X-Hub-Signature-256: sha256=<lowercase-hex-hmac>
 ```
 
-Hermes verifies this signature with the Mohist subscription's secret before
-template rendering or chat delivery. The platform-level Hermes secret never
-participates in this calculation. Changing JSON whitespace, field order, or any
-body byte changes the signature, so verification must use the received bytes
-rather than reserialized JSON.
+Hermes verifies this signature with the subscription-level secret before
+template rendering or chat delivery. The platform-level secret never
+participates in the calculation. Verification uses the received bytes rather
+than reserialized JSON because whitespace, field order, or any body byte
+changes the signature.
 
-When `Secret` is absent, Mohist sends no signature header. That is an explicit
-deployment trust choice, not evidence that the sender is authenticated. HMAC
-authenticates body integrity and possession of the shared subscription secret;
-it does not itself provide freshness, replay protection, durable delivery, or
-exactly-once semantics.
+When `Secret` is absent, Mohist sends no signature header. This is an explicit
+deployment trust choice, not sender authentication. HMAC authenticates body
+integrity and possession of the subscription secret. It does not provide
+freshness, replay protection, durable delivery, or exactly-once semantics.

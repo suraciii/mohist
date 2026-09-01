@@ -1,54 +1,68 @@
 # Observability
 
-Mohist should signal problems before they affect work and retain enough
-evidence to explain their cause. Observation itself must not slow or block
-work.
+Observability helps users find and explain runtime problems. It must not slow,
+block, or change product work. See [Observability design](../design/observability.md)
+for storage, signal, and protocol contracts.
 
-## What Users Can Learn
+## Product Commitments
 
-A user should be able to answer four questions quickly:
+- Users can see whether Mohist is `healthy`, `degraded`, or `off`.
+- Users can identify slow, failing, resource-heavy, or dropped operations.
+- Users can determine when a problem started and what it affects.
+- Users can see the next inspection or recovery action.
+- Issue, Workflow, AgentSession, and Runner work continue when observability
+  fails or is disabled.
+- Observation data is bounded and gives up space before it consumes resources
+  needed by product work.
 
-1. Is Mohist working correctly now?
-2. Which operations are slow, failing, or consuming unusual resources?
-3. When did the problem start, and what is its impact?
-4. What should the user inspect or do next?
+## Signal Types
 
-A live process is not necessarily a healthy system. Health must also reflect
-slow responses, resource pressure, and observation data that has stopped or
-been dropped.
+Each signal has one job:
 
-## Three Signal Types
+- **Metrics** show trends in request volume, duration, resource use, data
+  growth, and dropped or rejected observation data.
+- **Traces** explain one operation and show where time and effort were spent.
+- **Logs** record a discrete failure, rejection, drop, or degradation and its
+  cause.
 
-- **Metrics detect problems:** They show trends in speed, request volume,
-  resource use, and data growth.
-- **Traces explain problems:** They show the steps in one operation and where
-  time and effort were spent.
-- **Logs record events:** They record a specific failure, rejection, drop, or
-  degradation and its cause.
-
-Each signal type has one job. A user should not need to inspect many traces
-manually to discover a problem.
+Users should not need to inspect many traces to discover a problem.
 
 ## Safety Boundary
 
-- Issues, Workflows, and AgentSessions continue to work when observation is
-  disabled or fails.
-- Observation data uses separate, bounded storage and does not compete with
-  product data for disk space.
-- When data grows too quickly, Mohist reduces or drops observation data before
-  sacrificing core work.
-- The status page clearly reports whether observation is off, healthy, or
-  degraded, including storage use and dropped data.
-- Default configuration supports long-running use without regular manual
-  cleanup.
-- Built-in observation is enabled by default with a separate 1 GiB storage
-  budget and 72-hour retention. The OTLP receiver listens only on
-  `localhost:4318` by default and is not exposed externally.
-- Set `Mohist:Otel:Enabled=false` and restart Server to disable collection,
-  receiving, diagnostic sampling, and background maintenance when resource or
-  binding problems occur.
+Observation data uses separate, bounded storage. It does not compete with
+product data for disk space. When observation data grows too quickly, Mohist
+reduces or drops it before it sacrifices core work.
 
-## Inspecting Status
+The default configuration supports long-running use without regular manual
+cleanup:
 
-Run `mo otel status` to see whether observation is `healthy`, `degraded`, or
-`off`, and to inspect current resource protection.
+- Trace retention is 72 hours.
+- Trace storage is limited to 1 GiB.
+- The OTLP receiver listens on `localhost:4318` and is not exposed externally.
+- Built-in observation is enabled by default.
+
+Set `Mohist:Otel:Enabled=false` and restart Server to disable collection,
+receiving, diagnostic sampling, and background maintenance when resource or
+binding problems occur.
+
+## Runtime Status
+
+`mo otel status` reports:
+
+- `healthy`: collection and storage work without protection;
+- `degraded`: collection or storage is unavailable, or data is being dropped;
+- `off`: the user disabled observability.
+
+It also reports storage use, storage budget, received and stored counts,
+rejected and unexpectedly dropped data, the latest degradation reason, current
+resource pressure, and the latest bounded route summary.
+
+Observability degradation does not mean that the business service is
+unavailable. Status must make that distinction clear.
+
+## Implementation Gaps
+
+Metrics, the bounded route summary, `mo otel status`, and the Server and Runner
+log contract are implemented. Mohist does not yet send automatic anomaly
+notifications. An anomalous route appears in status but is not surfaced
+proactively.
