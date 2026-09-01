@@ -83,3 +83,6 @@ changing a document in `design/`.
 - [decisions/squashed-baseline.md](decisions/squashed-baseline.md) — Point-in-time record of the accepted schema deltas at the current migration squash baseline.
 - [decisions/workflow-run-profile-naming.md](decisions/workflow-run-profile-naming.md) — Why Run Variables retain the historical WorkflowRunProfile persistence name.
 - [decisions/workflow-agent-binding.md](decisions/workflow-agent-binding.md) — Workflow tasks bind Agents through the ordinary `mohist/agent` Action.
+- [decisions/routing-agent-reference.md](decisions/routing-agent-reference.md) — Routing commands accept one Agent reference resolved to a stable ID by the CLI; rule edits encode field presence explicitly.
+- [decisions/volatile-runtime-event-evidence.md](decisions/volatile-runtime-event-evidence.md) — Receipt-wait evidence belongs to the active bounded waiter interval, not to the queued record.
+- [decisions/openspec-removal.md](decisions/openspec-removal.md) — OpenSpec carries no role in the product; archived material lives outside the repository.

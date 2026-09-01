@@ -141,14 +141,15 @@ These rules govern every specification document, in `docs/`, `design/`, and
 - Commands and examples must run or parse as written, each one independently.
   The documentation gate cannot prove that a command has the documented
   effect; verify examples against the owning implementation.
-- Draw diagrams in Mermaid when a boundary, ownership relation, dependency,
-  sequence, hierarchy, or state transition is easier to understand as a
-  picture. Prefer `flowchart` and `sequenceDiagram`. Give every arrow a
-  meaning, and draw only real concepts. Do not draw when prose is already
-  clear. Write key rules in prose, so a diagram is never the only source of
-  truth.
-- The `text diagram` fence is legacy. Migrate it to Mermaid when you touch its
-  document. Use `text literal` for command output, syntax, protocols,
+- Draw a diagram when a boundary, ownership relation, dependency, sequence,
+  hierarchy, or state transition is easier to understand as a picture. Author
+  the diagram in Mermaid, render it to ASCII with `grok-mermaid`, and store
+  the rendered art in a `text diagram` fence. Keep node and edge labels short
+  so the render stays legible; give every arrow a meaning, and draw only real
+  concepts. Do not draw when prose is already clear. Write key rules in prose,
+  so a diagram is never the only source of truth.
+- Do not commit raw `mermaid` fences; Mermaid is the authoring form, ASCII
+  the storage form. Use `text literal` for command output, syntax, protocols,
   pseudocode, and data shapes. A bare `text` fence is invalid.
 - Do not use raw HTML, including HTML comments. Markdown is the only document
   markup.
