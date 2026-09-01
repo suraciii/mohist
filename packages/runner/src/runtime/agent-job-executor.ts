@@ -502,7 +502,7 @@ async function resolveWorkspaceBinding(
 // so the AgentJob and mechanical actions address one physical repository.
 function buildWorkspaceAnchor(workDir: string, repositoryName?: string, workspaceName?: string): string {
   if (repositoryName && workspaceName) {
-    return `Working directory: ${workDir}. All workspace files live here — do not search $HOME. The repository checkout is REPOS/${repositoryName} on branch mohist/ws-${workspaceName}; use that checkout for repository work. Plans, research, and other work products belong at the workspace root.`
+    return `Working directory: ${workDir}. All workspace files live here — do not search $HOME. The repository checkout is the absolute path ${workDir}/REPOS/${repositoryName} on branch mohist/ws-${workspaceName}; use that checkout for repository work. Plans, research, and other work products belong at the workspace root.`
   }
   return `Working directory: ${workDir}. All workspace files live here — do not search $HOME. Repository checkouts belong under repos/ in this directory; plans, research, and other work products belong at the workspace root.`
 }
