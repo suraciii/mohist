@@ -96,7 +96,7 @@ test('evaluateTrack: enforce=true fails on a percentile breach', () => {
 
 test('evaluateTrack: expected rule population fails closed', () => {
   const track: TrackConfig = {
-    id: 'server-unit',
+    id: 'server-l0',
     kind: 'report-only',
     specKinds: ['Design', 'Product'],
     report: 'x',

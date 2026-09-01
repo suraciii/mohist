@@ -1,20 +1,24 @@
-import { createHash } from "node:crypto"
-import { join, resolve } from "node:path"
-import { deleteDirectory, ensureDir, exists, readText, runCommand } from "../system/process.js"
-import { currentRunnerFileSystem } from "../system/filesystem.js"
-import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
-import type { ServerConnection } from "../server/connection.js"
-import type { NamedWorkspaceRegistry } from "./workspace-registry.js"
-import { slugify, withManagedWorkspaceHandle } from "./workspace.js"
+import { createHash } from 'node:crypto'
+import { join, resolve } from 'node:path'
+import { deleteDirectory, ensureDir, exists, readText, runCommand } from '../system/process.js'
+import { currentRunnerFileSystem } from '../system/filesystem.js'
+import { NETWORK_COMMAND_TIMEOUT_MS } from '../actions/git.js'
+import type { ServerConnection } from '../server/connection.js'
+import type { TaskLogger } from './task-log.js'
+import {
+  sanitizeWorkspaceDiagnostic,
+  workspaceNetworkTimeout,
+  WorkspaceIdentityMismatchError,
+} from './workspace-errors.js'
+import { repositoryWorkspacePath } from './workspace-identity.js'
+import { validateWorkspaceOrigin, workspacePrepSink } from './workspace-managed.js'
+import type { NamedWorkspaceRegistry } from './workspace-registry.js'
+import { slugify, withManagedWorkspaceHandle } from './workspace.js'
 
-// Named workspace (Workspace entity) materialization. The named
-// workspace is a PERSISTENT EMPTY-OR-ACCUMULATED directory — it is
-// deliberately NOT a clone/run-branch workspace: no git organization at
-// all. The agent self-organizes (clone under `repos/`, work products at
-// the workspace root, per the prompt convention). Materialization only
-// guarantees the directory exists, is not a symlink (the managed-path
-// walk), and carries an identity marker so cleanup guards can match
-// disk reality to the runner-local registry.
+// Named workspace materialization keeps the Workspace root as the shared
+// boundary for plans and repository checkouts. Issue-bound workflow work
+// uses the fixed REPOS/<repository> layout so AgentJobs and mechanical tasks
+// observe the same checkout and branch.
 
 export interface NamedWorkspaceRepository {
   name: string
@@ -36,16 +40,16 @@ export interface NamedWorkspaceMaterializeResult {
   created: boolean
 }
 
-const MARKER_RELATIVE_PATH = ".mohist/workspace.json"
+const MARKER_RELATIVE_PATH = '.mohist/workspace.json'
 
 // Deterministic per-(projectId, workspaceName) directory under the
 // managed workspace parent. The slug disambiguates the common case and
 // a short content hash keeps rare slug collisions (e.g. "a b" vs "a-b")
 // from mapping two distinct workspaces onto one directory.
 export function namedWorkspacePath(runnerRoot: string, projectId: string, workspaceName: string): string {
-  const digest = createHash("sha256").update(`${projectId}/${workspaceName}`).digest("hex").slice(0, 8)
+  const digest = createHash('sha256').update(`${projectId}/${workspaceName}`).digest('hex').slice(0, 8)
   const component = `${slugify(projectId)}-${slugify(workspaceName)}-${digest}`
-  return resolve(join(runnerRoot, "workspaces", component))
+  return resolve(join(runnerRoot, 'workspaces', component))
 }
 
 export function namedWorkspaceMarkerPath(workspacePath: string): string {
@@ -58,13 +62,14 @@ export async function readNamedWorkspaceMarker(workspacePath: string): Promise<N
   try {
     const raw = await readText(path)
     const parsed = JSON.parse(raw) as Partial<NamedWorkspaceMarker>
-    if (typeof parsed.projectId !== "string" || typeof parsed.workspaceName !== "string") return null
+    if (typeof parsed.projectId !== 'string' || typeof parsed.workspaceName !== 'string') return null
     const repositories = Array.isArray(parsed.repositories)
       ? parsed.repositories.filter(
           (r): r is NamedWorkspaceRepository =>
-            typeof r === "object" && r !== null
-            && typeof (r as NamedWorkspaceRepository).name === "string"
-            && typeof (r as NamedWorkspaceRepository).gitUrl === "string",
+            typeof r === 'object' &&
+            r !== null &&
+            typeof (r as NamedWorkspaceRepository).name === 'string' &&
+            typeof (r as NamedWorkspaceRepository).gitUrl === 'string',
         )
       : []
     return { projectId: parsed.projectId, workspaceName: parsed.workspaceName, repositories }
@@ -97,14 +102,17 @@ export async function materializeNamedWorkspace(
       await currentRunnerFileSystem().ensureDir(managedWorkspacePath)
       created = true
     }
-    const markerDir = join(managedWorkspacePath, ".mohist")
+    const markerDir = join(managedWorkspacePath, '.mohist')
     await currentRunnerFileSystem().ensureDir(markerDir)
     const marker: NamedWorkspaceMarker = {
       projectId: options.projectId,
       workspaceName: options.workspaceName,
       repositories: options.repositories ? [...options.repositories] : [],
     }
-    await currentRunnerFileSystem().writeText(join(managedWorkspacePath, MARKER_RELATIVE_PATH), JSON.stringify(marker, null, 2))
+    await currentRunnerFileSystem().writeText(
+      join(managedWorkspacePath, MARKER_RELATIVE_PATH),
+      JSON.stringify(marker, null, 2),
+    )
   })
   await options.registry.register({
     projectId: options.projectId,
@@ -114,16 +122,255 @@ export async function materializeNamedWorkspace(
   return { path: workspacePath, created }
 }
 
+interface IssueWorkspaceRepositoryOptions {
+  workspacePath: string
+  displayPath: string
+  repositoryName: string
+  gitUrl: string
+  baseBranch: string
+  runBranch: string
+  signal: AbortSignal
+  log?: TaskLogger | null
+}
+
+async function ensureIssueWorkspaceRepository(options: IssueWorkspaceRepositoryOptions): Promise<void> {
+  const repositoryPath = repositoryWorkspacePath(options.workspacePath, options.repositoryName)
+  const displayRepositoryPath = repositoryWorkspacePath(options.displayPath, options.repositoryName)
+  const preparationPath = `${repositoryPath}.preparing`
+  const sink = workspacePrepSink(options.log)
+  const commandOptions = sink
+    ? { onLine: (line: string) => sink.log.write(sink.source, line), timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+    : { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS }
+
+  await ensureDir(join(repositoryPath, '..'))
+  if (!exists(repositoryPath)) {
+    if (exists(preparationPath)) await deleteDirectory(preparationPath)
+    const cloneResult = await runCommand(
+      'git',
+      ['clone', '--filter=blob:none', '--no-checkout', '--no-tags', options.gitUrl, preparationPath],
+      '.',
+      options.signal,
+      undefined,
+      commandOptions,
+    )
+    if (cloneResult.status === 'timeout') {
+      throw workspaceNetworkTimeout(
+        'git-clone',
+        `clone ${options.gitUrl}`,
+        cloneResult,
+        preparationPath,
+        displayRepositoryPath,
+      )
+    }
+    if (cloneResult.exitCode !== 0) {
+      await deleteDirectory(preparationPath).catch(() => {})
+      throw new Error(`git clone failed for ${options.gitUrl}: ${cloneResult.stderr || cloneResult.stdout}`)
+    }
+    try {
+      await validateWorkspaceOrigin(preparationPath, options.gitUrl, options.signal, options.log, displayRepositoryPath)
+      await restoreIssueWorkspaceBranch(
+        preparationPath,
+        displayRepositoryPath,
+        options.baseBranch,
+        options.runBranch,
+        options.signal,
+        options.log,
+      )
+      await currentRunnerFileSystem().rename(preparationPath, repositoryPath)
+    } catch (error) {
+      await deleteDirectory(preparationPath).catch(() => {})
+      throw error
+    }
+    return
+  }
+
+  if (!exists(join(repositoryPath, '.git'))) {
+    throw new WorkspaceIdentityMismatchError(
+      `Repository path ${displayRepositoryPath} exists but is not a Git checkout`,
+      displayRepositoryPath,
+    )
+  }
+  await validateWorkspaceOrigin(repositoryPath, options.gitUrl, options.signal, options.log, displayRepositoryPath)
+  await reenterIssueWorkspaceBranch(options, displayRepositoryPath)
+}
+
+async function restoreIssueWorkspaceBranch(
+  repositoryPath: string,
+  displayRepositoryPath: string,
+  baseBranch: string,
+  runBranch: string,
+  signal: AbortSignal,
+  log?: TaskLogger | null,
+): Promise<void> {
+  const sink = workspacePrepSink(log)
+  const commandOptions = sink ? { onLine: (line: string) => sink.log.write(sink.source, line) } : undefined
+  const remoteBranch = `refs/remotes/origin/${runBranch}`
+  const hasRunBranch = await runCommand(
+    'git',
+    ['-C', repositoryPath, 'rev-parse', '--verify', remoteBranch],
+    '.',
+    signal,
+    undefined,
+    commandOptions,
+  )
+  const source = hasRunBranch.exitCode === 0 ? `origin/${runBranch}` : `origin/${baseBranch}`
+  const checkout = await runCommand(
+    'git',
+    ['-C', repositoryPath, 'checkout', '-B', runBranch, source],
+    '.',
+    signal,
+    undefined,
+    commandOptions,
+  )
+  if (checkout.exitCode !== 0) {
+    const diagnostic = sanitizeWorkspaceDiagnostic(
+      checkout.stderr || checkout.stdout || `exit ${checkout.exitCode}`,
+      repositoryPath,
+      displayRepositoryPath,
+    )
+    throw new Error(`Failed to create run branch ${runBranch} from ${source}: ${diagnostic}`)
+  }
+}
+
+async function reenterIssueWorkspaceBranch(
+  options: IssueWorkspaceRepositoryOptions,
+  displayRepositoryPath: string,
+): Promise<void> {
+  const residualPaths = ['.git/rebase-merge', '.git/rebase-apply', '.git/MERGE_HEAD', '.git/CHERRY_PICK_HEAD']
+  const residual = residualPaths.find((path) =>
+    exists(join(options.workspacePath, repositoryWorkspacePathSuffix(options.repositoryName), path)),
+  )
+  if (residual) {
+    throw new WorkspaceIdentityMismatchError(
+      `Repository ${options.repositoryName} has residual Git operation state (${residual})`,
+      displayRepositoryPath,
+    )
+  }
+
+  const sink = workspacePrepSink(options.log)
+  const commandOptions = sink ? { onLine: (line: string) => sink.log.write(sink.source, line) } : undefined
+  const repositoryPath = repositoryWorkspacePath(options.workspacePath, options.repositoryName)
+  const branch = await runCommand(
+    'git',
+    ['-C', repositoryPath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+    '.',
+    options.signal,
+    undefined,
+    commandOptions,
+  )
+  if (branch.exitCode !== 0) {
+    throw new WorkspaceIdentityMismatchError(
+      `Repository ${displayRepositoryPath} branch probe failed: ${sanitizeWorkspaceDiagnostic(branch.stderr || branch.stdout || `exit ${branch.exitCode}`, repositoryPath, displayRepositoryPath)}`,
+      displayRepositoryPath,
+    )
+  }
+
+  const status = await runCommand(
+    'git',
+    ['-C', repositoryPath, 'status', '--porcelain'],
+    '.',
+    options.signal,
+    undefined,
+    commandOptions,
+  )
+  if (status.exitCode !== 0) {
+    throw new WorkspaceIdentityMismatchError(
+      `Repository ${displayRepositoryPath} status probe failed: ${sanitizeWorkspaceDiagnostic(status.stderr || status.stdout || `exit ${status.exitCode}`, repositoryPath, displayRepositoryPath)}`,
+      displayRepositoryPath,
+    )
+  }
+  if (status.stdout.trim() !== '') {
+    const reset = await runCommand(
+      'git',
+      ['-C', repositoryPath, 'reset', '--hard', options.runBranch],
+      '.',
+      options.signal,
+      undefined,
+      commandOptions,
+    )
+    if (reset.exitCode !== 0) {
+      throw new WorkspaceIdentityMismatchError(
+        `Repository ${displayRepositoryPath} reset failed: ${sanitizeWorkspaceDiagnostic(reset.stderr || reset.stdout || `exit ${reset.exitCode}`, repositoryPath, displayRepositoryPath)}`,
+        displayRepositoryPath,
+      )
+    }
+    const clean = await runCommand(
+      'git',
+      ['-C', repositoryPath, 'clean', '-fd'],
+      '.',
+      options.signal,
+      undefined,
+      commandOptions,
+    )
+    if (clean.exitCode !== 0) {
+      throw new WorkspaceIdentityMismatchError(
+        `Repository ${displayRepositoryPath} clean failed: ${sanitizeWorkspaceDiagnostic(clean.stderr || clean.stdout || `exit ${clean.exitCode}`, repositoryPath, displayRepositoryPath)}`,
+        displayRepositoryPath,
+      )
+    }
+  }
+  if (branch.stdout.trim() !== options.runBranch) {
+    const checkout = await runCommand(
+      'git',
+      ['-C', repositoryPath, 'checkout', options.runBranch],
+      '.',
+      options.signal,
+      undefined,
+      commandOptions,
+    )
+    if (checkout.exitCode !== 0) {
+      throw new WorkspaceIdentityMismatchError(
+        `Repository ${displayRepositoryPath} checkout of ${options.runBranch} failed: ${sanitizeWorkspaceDiagnostic(checkout.stderr || checkout.stdout || `exit ${checkout.exitCode}`, repositoryPath, displayRepositoryPath)}`,
+        displayRepositoryPath,
+      )
+    }
+  }
+
+  const finalBranch = await runCommand(
+    'git',
+    ['-C', repositoryPath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+    '.',
+    options.signal,
+    undefined,
+    commandOptions,
+  )
+  const finalStatus = await runCommand(
+    'git',
+    ['-C', repositoryPath, 'status', '--porcelain'],
+    '.',
+    options.signal,
+    undefined,
+    commandOptions,
+  )
+  if (
+    finalBranch.exitCode !== 0 ||
+    finalStatus.exitCode !== 0 ||
+    finalBranch.stdout.trim() !== options.runBranch ||
+    finalStatus.stdout.trim() !== ''
+  ) {
+    throw new WorkspaceIdentityMismatchError(
+      `Repository ${displayRepositoryPath} failed run-branch health check for ${options.runBranch}`,
+      displayRepositoryPath,
+    )
+  }
+}
+
+function repositoryWorkspacePathSuffix(repositoryName: string): string {
+  return join('REPOS', repositoryName)
+}
+
 export interface IssueWorkspaceCloneOptions {
   runnerRoot: string
   projectId: string
   workspaceName: string
+  repositoryName: string
   gitUrl: string
   baseBranch: string
   runBranch: string
   registry: NamedWorkspaceRegistry
   signal: AbortSignal
   now?: () => Date
+  log?: TaskLogger | null
 }
 
 export async function materializeIssueWorkspace(
@@ -132,55 +379,68 @@ export async function materializeIssueWorkspace(
   const workspacePath = namedWorkspacePath(options.runnerRoot, options.projectId, options.workspaceName)
   let created = false
   await withManagedWorkspaceHandle(options.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
-    if (exists(managedWorkspacePath)) {
-      const marker = await readNamedWorkspaceMarker(managedWorkspacePath)
-      if (!marker || marker.projectId !== options.projectId || marker.workspaceName !== options.workspaceName) {
-        throw new Error(`Named workspace marker mismatch at ${managedWorkspacePath}`)
+    const existed = exists(managedWorkspacePath)
+    if (!existed) created = true
+    const existingMarker = await readNamedWorkspaceMarker(managedWorkspacePath)
+    if (
+      (existed && !existingMarker) ||
+      (existingMarker &&
+        (existingMarker.projectId !== options.projectId || existingMarker.workspaceName !== options.workspaceName))
+    ) {
+      throw new WorkspaceIdentityMismatchError(`Named workspace marker mismatch at ${workspacePath}`, workspacePath)
+    }
+    if (existed && exists(join(managedWorkspacePath, '.git'))) {
+      throw new WorkspaceIdentityMismatchError(
+        `Named workspace ${workspacePath} contains an obsolete root-level Git checkout; expected REPOS/${options.repositoryName}`,
+        workspacePath,
+      )
+    }
+    const conflictingRepository = existingMarker?.repositories.find(
+      (repository) => repository.name === options.repositoryName && repository.gitUrl.trim() !== options.gitUrl.trim(),
+    )
+    if (conflictingRepository) {
+      throw new WorkspaceIdentityMismatchError(
+        `Named workspace repository '${options.repositoryName}' origin does not match the requested repository`,
+        workspacePath,
+      )
+    }
+
+    try {
+      await Promise.all([
+        ensureDir(join(managedWorkspacePath, '.mohist')),
+        ensureDir(join(managedWorkspacePath, 'REPOS')),
+        ensureDir(join(managedWorkspacePath, 'PLANS')),
+        ensureDir(join(managedWorkspacePath, 'RESEARCH')),
+        ensureDir(join(managedWorkspacePath, '.scratch')),
+      ])
+      await ensureIssueWorkspaceRepository({
+        workspacePath: managedWorkspacePath,
+        displayPath: workspacePath,
+        repositoryName: options.repositoryName,
+        gitUrl: options.gitUrl,
+        baseBranch: options.baseBranch,
+        runBranch: options.runBranch,
+        signal: options.signal,
+        log: options.log,
+      })
+
+      const repositories = [
+        ...(existingMarker?.repositories.filter((repository) => repository.name !== options.repositoryName) ?? []),
+        { name: options.repositoryName, gitUrl: options.gitUrl },
+      ]
+      const marker: NamedWorkspaceMarker = {
+        projectId: options.projectId,
+        workspaceName: options.workspaceName,
+        repositories,
       }
-      return
+      await currentRunnerFileSystem().writeText(
+        join(managedWorkspacePath, MARKER_RELATIVE_PATH),
+        JSON.stringify(marker, null, 2),
+      )
+    } catch (error) {
+      if (created) await deleteDirectory(workspacePath).catch(() => {})
+      throw error
     }
-
-    const preparationPath = `${managedWorkspacePath}.preparing`
-    if (exists(preparationPath)) await deleteDirectory(preparationPath)
-    await ensureDir(join(preparationPath, ".."))
-
-    const cloneResult = await runCommand("git", ["clone", options.gitUrl, preparationPath], ".", options.signal, undefined, { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS })
-    if (cloneResult.exitCode !== 0) {
-      await deleteDirectory(preparationPath).catch(() => {})
-      throw new Error(`git clone failed for ${options.gitUrl}: ${cloneResult.stderr || cloneResult.stdout}`)
-    }
-
-    const originResult = await runCommand("git", ["-C", preparationPath, "remote", "get-url", "origin"], ".", options.signal)
-    if (originResult.exitCode !== 0 || originResult.stdout.trim() !== options.gitUrl.trim()) {
-      await deleteDirectory(preparationPath).catch(() => {})
-      throw new Error(`Workspace clone origin mismatch: expected ${options.gitUrl}, got ${originResult.stdout.trim()}`)
-    }
-
-    const hasRemote = await runCommand("git", ["-C", preparationPath, "rev-parse", "--verify", `refs/remotes/origin/${options.runBranch}`], ".", options.signal)
-    if (hasRemote.exitCode === 0) {
-      const checkoutResult = await runCommand("git", ["-C", preparationPath, "checkout", "-B", options.runBranch, `origin/${options.runBranch}`], ".", options.signal)
-      if (checkoutResult.exitCode !== 0) {
-        await deleteDirectory(preparationPath).catch(() => {})
-        throw new Error(`Failed to checkout run branch ${options.runBranch}: ${checkoutResult.stderr || checkoutResult.stdout}`)
-      }
-    } else {
-      const branchResult = await runCommand("git", ["-C", preparationPath, "checkout", "-B", options.runBranch, `origin/${options.baseBranch}`], ".", options.signal)
-      if (branchResult.exitCode !== 0) {
-        await deleteDirectory(preparationPath).catch(() => {})
-        throw new Error(`Failed to create run branch ${options.runBranch} from ${options.baseBranch}: ${branchResult.stderr || branchResult.stdout}`)
-      }
-    }
-
-    const markerDir = join(preparationPath, ".mohist")
-    await currentRunnerFileSystem().ensureDir(markerDir)
-    const marker: NamedWorkspaceMarker = {
-      projectId: options.projectId,
-      workspaceName: options.workspaceName,
-      repositories: [{ name: options.gitUrl.split("/").pop()?.replace(".git", "") ?? "unknown", gitUrl: options.gitUrl }],
-    }
-    await currentRunnerFileSystem().writeText(join(preparationPath, MARKER_RELATIVE_PATH), JSON.stringify(marker, null, 2))
-    await currentRunnerFileSystem().rename(preparationPath, managedWorkspacePath)
-    created = true
   })
   await options.registry.register({
     projectId: options.projectId,
@@ -193,10 +453,10 @@ export async function materializeIssueWorkspace(
 // Thrown when the server refused the materialization report because
 // another runner already owns the workspace home (first writer wins).
 export class WorkspaceHomeClaimedError extends Error {
-  readonly kind = "workspace-home-claimed"
+  readonly kind = 'workspace-home-claimed'
   constructor(message: string) {
     super(message)
-    this.name = "WorkspaceHomeClaimedError"
+    this.name = 'WorkspaceHomeClaimedError'
   }
 }
 
@@ -217,6 +477,7 @@ export class NamedWorkspaceManager {
   async materializeForIssue(
     projectId: string,
     workspaceName: string,
+    repositoryName: string,
     gitUrl: string,
     baseBranch: string,
     signal: AbortSignal,
@@ -226,6 +487,7 @@ export class NamedWorkspaceManager {
       runnerRoot: this.runnerRoot,
       projectId,
       workspaceName,
+      repositoryName,
       gitUrl,
       baseBranch,
       runBranch,

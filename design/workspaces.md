@@ -207,8 +207,9 @@ WorkflowRun assignment remains pinned to its original Runner, so cross-Runner
 Workflow rematerialization is not implemented. Slack channel archive events do
 not yet reach the Server archive boundary.
 
-A per-WorkflowRun Workspace manager and Runner registry still serve dispatches
-without a named Workspace. They are fallback implementation paths that callers
+Issue dispatches now resolve the named Issue Workspace; the per-WorkflowRun
+Workspace manager and Runner registry still serve dispatches without a named
+Workspace. They are fallback implementation paths that callers
 are removing rather than extending, and they do not define Workspace identity.
 Compound-Issue Repository attachment and Runtime Binding after rematerialization
 remain open questions.
