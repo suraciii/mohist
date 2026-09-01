@@ -1,14 +1,20 @@
 # Generic Agent Reasoning Capability
 
-## Design pressure
+A reasoning effort is a generic Agent execution choice. A Runtime adapts that
+choice to its native thinking setting. The generic contract must not depend on
+Pi, or encode an effort as a Runtime variant.
 
-`reasoningEffort` is a user-facing execution choice, while a runtime's native
-thinking level is an adapter detail. The current catalog exposes models and
-variants only, and the Pi registration has previously placed native thinking
-levels in the variant map. That makes a saved effort either silently unused or
-incorrectly coupled to one runtime.
+## Design Drivers
 
-## Canonical execution tuple
+- The user selects `reasoningEffort`; the Runtime owns its native setting.
+- Model, effort, and variant have separate meanings and failure modes.
+- A dispatch must keep the capability meaning it had when it was created.
+- Admission must distinguish missing capability evidence from an explicit
+  unsupported configuration.
+
+## Model
+
+### Canonical execution tuple
 
 Every prepared Agent execution freezes one tuple:
 
@@ -16,49 +22,75 @@ Every prepared Agent execution freezes one tuple:
 (runtime, model, reasoningEffort, variant)
 ```
 
-`reasoningEffort` is one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`,
-or `max`, or is unset. It is independent from `variant`; an effort is never
-encoded as a variant and a variant is never interpreted as an effort.
+`reasoningEffort` is optional. When set, it is one of `off`, `minimal`, `low`,
+`medium`, `high`, `xhigh`, or `max`. It is independent from `variant`. An
+effort is never encoded as a variant, and a variant is never interpreted as an
+effort.
 
-The tuple is frozen in the durable dispatch snapshot. Later catalog changes do
-not rewrite an existing dispatch. A capability revision is stored beside the
-tuple so a Runner can reject a stale snapshot rather than silently changing
-its meaning.
+The tuple and a capability revision belong to the durable dispatch snapshot.
+Later catalog changes do not rewrite an existing dispatch. The Runner rejects
+a stale snapshot rather than silently changing its meaning.
 
-## Versioned runtime catalog
+### Runtime catalog
 
-Each runtime catalog entry reports:
+Each Runtime catalog entry reports:
 
-- `models`: model identities known by the runtime;
-- `variants`: variant values by model, independent of effort;
-- `reasoningEfforts`: canonical effort values by model;
-- `supportsReasoningEffort`: whether this runtime has an effort adapter; and
-- `complete` plus `capabilityRevision`: whether the entry is authoritative and
+- `models`: model identities known by the Runtime.
+- `variants`: variant values by model, independent of effort.
+- `reasoningEfforts`: canonical effort values by model.
+- `supportsReasoningEffort`: whether the Runtime has an effort adapter.
+- `complete` and `capabilityRevision`: whether the entry is authoritative and
   which immutable catalog revision produced it.
 
-Legacy or incomplete entries are not proof of support. A missing entry is
-`needs-setup` while a complete entry that explicitly rejects a tuple is
-`unsupported_execution_configuration` or
-`incompatible_execution_configuration` as described below.
+A legacy or incomplete entry is not proof of support. A missing entry means
+`needs-setup`. A complete entry that rejects a tuple means an explicit
+configuration error.
 
-## One resolver, two adapters
+## Semantics
 
-The Server owns a pure resolver for the frozen tuple and the selected runner's
-catalog witness. It returns one of:
+### Resolution
 
-- `supported`: tuple and capability revision match;
-- `needs-setup`: catalog or capability revision is unavailable;
-- `unavailable`: the runtime is known but not ready for admission;
-- `unsupported_execution_configuration`: the runtime explicitly does not
-  support reasoning effort; or
-- `incompatible_execution_configuration`: model, effort, or variant is
-  explicitly absent from a complete catalog.
+The Server owns one pure resolver. It receives the frozen tuple and the
+selected Runner's catalog witness.
 
-Only `supported` may be admitted. `needs-setup` and `unavailable` remain
-pending; they are not terminal failures. The two explicit configuration
-errors are deterministic preflight failures and must be recorded with the
-frozen tuple.
+```text diagram
+                                +------------------------+
+                                | frozen tuple + catalog |
+                                |        witness         |
+                                +------------+-----------+
+                                             |
+                                             v
+                                    +-----------------+
+                                    | Server resolver |
+                                    +--------++-------+
+       +--------------------+----------------++-----------------+------------------+
+       v                    v                 v                 v                  v
+ +-----------+       +-------------+   +-------------+   +-------------+   +--------------+
+ | supported |       | needs-setup |   | unavailable |   | unsupported |   | incompatible |
+ +-----+-----+       +------+------+   +------+------+   +------+------+   +-------+------+
+       +---+                +--------+--------+                 +--------+---------+
+           v                         v                                   v
+       +-------+            +----------------+             +--------------------------+
+       | admit |            | remain pending |             | record preflight failure |
+       +-------+            +----------------+             +--------------------------+
+```
 
-The Runner owns runtime-native adapters. Pi maps canonical effort to its
-private `thinkingLevel` input. Other runtimes may provide a different adapter;
-none may receive a Pi-specific value through the generic `variant` field.
+The resolver returns one of:
+
+- `supported`: the tuple and capability revision match.
+- `needs-setup`: the catalog or capability revision is unavailable.
+- `unavailable`: the Runtime is known but not ready for admission.
+- `unsupported_execution_configuration`: the Runtime explicitly does not
+  support reasoning effort.
+- `incompatible_execution_configuration`: the complete catalog explicitly
+  lacks the model, effort, or variant.
+
+Only `supported` is admitted. `needs-setup` and `unavailable` remain pending;
+they are not terminal failures. The two explicit configuration errors are
+deterministic preflight failures and record the frozen tuple.
+
+### Runtime adapters
+
+The Runner owns Runtime-native adapters. Pi maps canonical effort to its
+private `thinkingLevel` input. Another Runtime may use another adapter. No
+Runtime receives a Pi-specific value through generic `variant`.

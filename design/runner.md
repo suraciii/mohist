@@ -5,21 +5,34 @@ state. A Runner's self-report is used only to discover work that needs
 redelivery. It is not authoritative; authority is always reconstructed from the
 current store contents.
 
-Every fact has exactly one owner:
+## System Boundary
 
-```mermaid
-flowchart LR
-    Q1["What work was dispatched to whom"] --> O1["WorkflowRun / AgentJob<br/>each its own queryable dispatch ledger"]
-    Q2["What is executing right now"] --> O2["Runner process memory<br/>reported on each poll"]
-    Q3["Whether a Runner is alive"] --> O3["RunnerGrain.lastSeen"]
+Each fact must have exactly one owner:
+
+```text diagram
+                          +------------------------+
++--------------------+    | WorkflowRun / AgentJob |
+| Dispatch ownership +--->|    dispatch ledger     |
++--------------------+    +------------------------+
+
+                          +------------------------+
++---------------+         | Runner memory reported |
+| Execution now +-------->|        on poll         |
++---------------+         +------------------------+
+
+
++--------------+          +----------------------+
+| Runner alive +--------->| RunnerGrain.lastSeen |
++--------------+          +----------------------+
 ```
 
-There is no second copy. No component stages dispatch or work state owned by
-another owner; it reconstructs that state from the owner's persisted state when
-needed. Dispatch coordination therefore needs no reconciliation because there
-is no duplicate fact to reconcile.
+## Core Decisions
 
-Invariants:
+There is no second copy. Components reconstruct state from its owner's
+persisted facts instead of staging it. Dispatch needs no reconciliation because
+there is no duplicate fact.
+
+The dispatch invariants are:
 
 ```text literal
 Every WorkflowRun / AgentJob is its own dispatch ledger.
@@ -40,22 +53,31 @@ heartbeat-repair, and cleared on unregister.
 A Runner holds no work records. Work records fail the ownership test: the
 slot invariant is not owned by the Runner, the running-work set can be derived
 by querying both owner stores (`Pending/Running WHERE AssignedRunnerId=R`),
-and no Runner behavior accepts a work record. Runtime state reads are derived
-the same way — assembled from the owner stores, never stored.
+and no Runner behavior accepts a work record. Runtime state reads use the same
+queries and are never stored.
 
 ## Dispatch Protocol: Claim / Pull / Report
 
-```mermaid
-flowchart TD
-    subgraph Server
-        WG["WorkflowRun / AgentJob<br/>each its own dispatch ledger<br/>owns assignment and lifecycle: Pending / Running / terminal<br/>ClaimNext: atomic Pending → Running<br/>consumes reports idempotently; no timer, no Runner concept"]
-        RG["RunnerGrain<br/>owns presence, slots, and closeout<br/>holds no work records"]
-        DS["DispatchService — stateless, not a grain<br/>each poll: executable desired − reported → dispatches<br/>owner-withheld unresolved Agent work → reserved, no dispatch<br/>no cursor, cache, or ledger"]
-    end
-    RP["Runner process<br/>one critical loop owns polling and report retry<br/>each poll reports the full inFlight ∪ awaitingAck set"]
-    RP -->|poll / report| DS
-    DS -->|ClaimNext| WG
-    DS -->|TouchPresence| RG
+```text diagram
+                 +--------------------------+
+                 | Runner process polls and |
+                 |     retries reports      |
+                 +-------------+------------+
+                               |
+                               vpoll / report
+ + Server ---------------------------------------------------+
+ |                    +-----------------+                    |
+ |                    | DispatchService |                    |
+ |                    | stateless poll  |                    |
+ |                    |   computation   |                    |
+ |                    +--------+--------+                    |
+ |              +--------------+--------------+              |
+ |              vClaimNext                    vTouchPresence |
+ |+--------------------------+    +-----------------------+  |
+ || Owner ledgers assignment |    | RunnerGrain presence, |  |
+ ||      and lifecycle       |    |    slots, closeout    |  |
+ |+--------------------------+    +-----------------------+  |
+ +-----------------------------------------------------------+
 ```
 
 ### Transport
@@ -67,8 +89,8 @@ unregister, and heartbeat-repair; a poll never updates it.
 
 The target Server-to-Runner Workspace and Session control transport uses one
 outbound WebSocket connection. It does not carry work or replace HTTP poll,
-report, or reconciliation. The SignalR-to-WebSocket migration is authoritative
-in [`runner-transport.md`](runner-transport.md).
+report, or reconciliation. The current Server-to-Runner control transport is
+defined in [`runner-transport.md`](runner-transport.md).
 
 ### Poll Computation
 
@@ -77,12 +99,32 @@ no cursor, cache, or ledger. A poll carries the Runner's reported set
 (`inFlight` union `awaitingAck`) and its readiness signal, and doubles as
 the presence heartbeat.
 
-```mermaid
-flowchart TD
-    P["poll(inFlight ∪ awaitingAck, readiness)"] --> W["0. owner-withheld<br/>unresolved Agent settlement<br/>reserve slot; emit no dispatch"]
-    W --> R1["1. redelivery<br/>remaining Running assigned to me − reported<br/>repay debts first"]
-    R1 --> R2["2. mine<br/>Pending assigned to me, ReadySince ASC"]
-    R2 --> R3["3. claimable<br/>unassigned Pending, ReadySince ASC"]
+```text diagram
+  +----------------------+
+  | poll: reported set + |
+  |      readiness       |
+  +-----------+----------+
+              |
+              v
+   +---------------------+
+   | withhold unresolved |
+   |     settlement      |
+   +----------+----------+
+              |
+              v
+ +------------------------+
+ | redeliver Running work |
+ +------------+-----------+
+              |
+              v
+  +-----------------------+
+  | mine assigned Pending |
+  +-----------+-----------+
+              |
+              v
++--------------------------+
+| claim unassigned Pending |
++--------------------------+
 ```
 
 A newly delivered dispatch joins the reported set synchronously, before the
@@ -132,11 +174,14 @@ lifecycles.
 lock, marks it Running under the Runner identity, and persists it in one atomic
 write. There is no offer phase and no Runner-side preregistration.
 
-```mermaid
-flowchart LR
-    P[PENDING] -->|ClaimNext| R[RUNNING]
-    R -->|"report(success)"| C[COMPLETED]
-    R -->|"report(fail)"| F[FAILED]
+```text diagram
+                                  complete  +-----------+
+                                 +--------->| COMPLETED |
++---------+ claim     +---------+|          +-----------+
+| PENDING +---------->| RUNNING ++
++---------+           +---------+|fail      +--------+
+                                 +--------->| FAILED |
+                                            +--------+
 ```
 
 A failed claim, from stage-lock contention or changed state, returns null and
@@ -163,11 +208,22 @@ Stamp `ReadySince` whenever work enters or re-enters Ready. Within a candidate
 tier, mix Workflow and AgentJob work by `ORDER BY ReadySince ASC`. This produces
 round-robin service with no scheduler state:
 
-```mermaid
-flowchart TD
-    Q["Ready queue, ORDER BY ReadySince ASC"] --> S["head: longest-waiting item is served"]
-    S --> N["owner advances; next work becomes Pending,<br/>ReadySince := now, joins the tail"]
-    N --> Q
+```text diagram
++------------------------+
+| Ready queue ReadySince |
+|          ASC           |<+
++------------+-----------+ |
+             |             |
+             v             |
+  +--------------------+   |
+  | serve longest wait |   |
+  +----------+---------+   |
+             |             |
+             v             |
+   +-------------------+   |
+   | requeue next work |   |
+   | ReadySince := now +---+
+   +-------------------+
 ```
 
 The policy is strict FIFO. Any priority between work types must be a
@@ -175,40 +231,49 @@ declared policy, not an implicit bias.
 
 ### Capacity
 
-`slots` limits all work executing concurrently on a Runner, Workflow and
-AgentJob combined. Claim is the only final capacity decision: every new claim
-rechecks the Runner's live registration and capacity. Everything earlier —
-poll admission, the AgentJob precheck — is advisory. Lowering capacity
-constrains subsequent claims without cancelling running work; the Runner
-process enforces no capacity rule of its own.
+`slots` limits concurrent Workflow and AgentJob work on a Runner. Claim is the
+only final capacity decision: every claim rechecks live registration and
+capacity. Poll admission and the AgentJob precheck are advisory. Lowering
+capacity affects later claims and never cancels running work; the Runner adds
+no second capacity rule.
 
-The AgentJob precheck exists to give the caller synchronous backpressure when
-every live Runner is full. Passing it promises nothing: another work item may
-consume capacity between precheck and claim, in which case the job remains
-Pending for the next poll. No synchronous capacity promise could be kept
-because every decision has a window before actual execution; the two-step
-design narrows the promise to one the system can uphold.
+The AgentJob precheck provides synchronous backpressure when every live Runner
+is full. It does not reserve capacity. If another item claims the capacity
+first, the AgentJob remains Pending for the next poll.
 
 ### Report
 
 Reports go directly to the owning grain through a stateless translation path:
 
-```mermaid
-flowchart LR
-    R["Runner"] -->|"report (owner, work, attempt)"| T["API route<br/>stateless translation"]
-    T --> G["owner grain<br/>settle by identity"]
-    G -->|"accepted → retire"| R
-    G -->|"refused → retire"| R
-    G -.->|"outstanding / no answer →<br/>retry from memory, fixed cadence"| R
+```text diagram
+               +--------+
+               | Runner |
+               +----+---+
+                    |
+                    vreport
+         +---------------------+
+         | API route stateless |
+         +----------+----------+
+                    |
+                    v
+       +------------------------+
+       | Owner ledger settle by |
+       |        identity        |
+       +------------+-----------+
+         +----------+----------+
+         vaccepted / refused   voutstanding
+ +---------------+   +-------------------+
+ | retire report |   | retry from memory |
+ +---------------+   +-------------------+
 ```
 
 Process death ends retry; the work is closed out.
 
-A report is a Runner's assertion of an execution fact — a claim in the sense
-of [`conventions.md`](conventions.md#facts-claims-and-settlement). Settlement
-is idempotent by report identity (owner, work, attempt) — an attempt is one
-Running episode of a work item, from claim to its terminal report — and
-answers one of three verdicts:
+A report is a Runner's assertion of an execution fact: a claim in the sense of
+[`conventions.md`](conventions.md#facts-claims-and-settlement). Settlement is
+idempotent by report identity (owner, work, attempt). An attempt is one Running
+episode from claim to terminal report. Settlement answers one of three
+verdicts:
 
 ```text literal
 accepted      the fact is recorded; a duplicate report gets the same verdict
@@ -267,7 +332,7 @@ Each failure condition has exactly one owner:
   dispatch timeouts, are decided by owner reminders and are unrelated to
   dispatch.
 
-Presence has three refresh paths — register, poll, heartbeat — so a Runner
+Presence has three refresh paths: register, poll, and heartbeat. A Runner
 stays visible while its process lives, even when it cannot complete a poll.
 Explicit unregister clears presence and closes out assigned work.
 
@@ -282,19 +347,16 @@ a report. It cannot bypass the closed report vocabulary or directly transition
 WorkflowRun or AgentJob. Likewise, managed-update `draining` fences new claims
 but proves no execution result.
 
-Legacy WorkflowRun State may still contain interrupted status or
-`WorkInterruption` fields until cold-start migration removes them. They are
-migration input only: no Runner closeout path may create, renew, or act on them.
-Historical interruption events follow the independent compatibility boundary in
+Legacy interruption status and `WorkInterruption` fields are migration input
+only. No Runner closeout path may create, renew, or act on them. Historical
+interruption events follow the independent compatibility boundary in
 [`event-protocol.md`](event-protocol.md#historical-workflow-interruption-events).
 
 ## Restart and Crash Semantics
 
 The recovery goal is flow progress, not result preservation. A Runner crash
-loses whatever the process alone remembered; the Workflow's existing failure
-semantics — recovery handlers, budgets, retry, blocked, manual decision —
-decide what follows. A crash is one failure code among others, not a special
-event with its own machinery.
+loses process-only memory. Workflow recovery rules decide what follows. A
+crash is one failure code, not a separate recovery mechanism.
 
 Three forces shape this boundary:
 
@@ -358,19 +420,34 @@ Once the replacement process registers, generation closeout fails the old work
 before new claims resume; Workflow and AgentJob then use their ordinary failure
 and retry semantics.
 
-```mermaid
-sequenceDiagram
-    participant G1 as Runner gen1
-    participant S as Server
-    participant G2 as Runner gen2
-    G1->>S: claim X
-    G1->>G1: execute X
-    G1--xS: (process dies)
-    G2->>S: register(gen2)
-    Note over S: before gen2's first poll:<br/>X, Running under gen1, becomes FAILED(runner-lost)
-    S->>S: workflow recovery → retry → new attempt X'
-    G2->>S: poll, claim X', execute
-    Note over G2: the retrying agent reads<br/>the Workspace scene and continues
+```text diagram
++------------+  +--------+                 +------------+
+| old Runner |  | Server |                 | new Runner |
++------+-----+  +----+---+                 +------+-----+
+       |             |                            |
+       |   claim X   |                            |
+       +------------>|                            |
+       |             |                            |
+       |process dies |                            |
+       +------------x|                            |
+       |             |                            |
+       |             |    register generation     |
+       |             |<---------------------------+
+       |             |                            |
+       |             +--+                         |
+       |             |  | close X as runner-lost  |
+       |             |<-+                         |
+       |             |                            |
+       |             +--+                         |
+       |             |  | recovery creates X'     |
+       |             |<-+                         |
+       |             |                            |
+       |             |     poll and claim X'      |
+       |             |<---------------------------+
+       |             |                            |
++------+-----+  +----+---+                 +------+-----+
+| old Runner |  | Server |                 | new Runner |
++------------+  +--------+                 +------------+
 ```
 
 The Runner scopes every execution to a per-work process group. On startup,
@@ -442,17 +519,18 @@ settlement and poll recomputation, not shared files. The Server never reads
 or writes Runner-local files.
 
 A fact must have at least one durable witness, and the Runner is not one.
-Facts the Runner witnesses are either reported — and the Server becomes the
-durable witness — or lost with the process, and their work is closed out.
-A Runner-side journal would only buy result preservation across a crash, a
-capability this design deliberately declines (see
+Facts the Runner witnesses either reach Server as the durable witness or are
+lost with the process and trigger work closeout. A Runner-side journal would
+preserve results across a crash but would create a second authority; this
+design deliberately declines that trade-off (see
 [Restart and Crash Semantics](#restart-and-crash-semantics)).
 
 A Runner may keep the rebuildable Workspace materialization indexes at
 `<runnerRoot>/.mohist/workspaces.json` and
-`<runnerRoot>/.mohist/named-workspaces.json`. They are never authoritative and
-fail open: a corrupt or missing index is rebuilt from the filesystem and from
-Server answers. There is no general Runner state directory.
+`<runnerRoot>/.mohist/named-workspaces.json`. It does not persist operation
+journals, execution receipts, or terminal task-log delivery stores. Indexes are
+never authoritative and fail open: a corrupt or missing index is rebuilt from
+the filesystem and Server answers. There is no general Runner state directory.
 
 Runtime events and task-log batches are volatile evidence. The Runner retries
 them from bounded process memory in per-session emission order, but a crash may
@@ -472,16 +550,6 @@ or retire the record under the ordinary queue rules, but it cannot create
 ownerless evidence or change a newer interval. The ownership trade-off is
 recorded in
 [`decisions/volatile-runtime-event-evidence.md`](decisions/volatile-runtime-event-evidence.md).
-
-The Runner does not persist operation journals, execution receipts, or
-terminal task-log delivery stores. Runtime events and task-log batches are
-bounded volatile queues: a live process retries them, but a process restart may
-lose undelivered evidence. Only the two rebuildable Workspace indexes remain on
-disk, and they are never authoritative.
-
-The runtime-event queue does not yet enforce waiter-interval ownership for
-receipt evidence. A late retryable delivery can recreate evidence after its
-bounded waiter ends or can write into a later waiter for the same record.
 
 ### Stop Operations Stay Available and Settle by Identity
 
@@ -503,8 +571,8 @@ the target Turn. A stop verdict records only what that witness confirms:
   not-cancellable.
 - A redelivered stop under an already-claimed operationId settles by identity
   first: it probes the target Turn and records the settled verdict. An
-  outcome the witness cannot settle — stop-requested or unavailable — leaves
-  the claim outstanding and is never recorded as a verdict. Once a verdict
+  outcome the witness cannot settle, such as stop-requested or unavailable,
+  leaves the claim outstanding and is never recorded as a verdict. Once a verdict
   is recorded, every later redelivery returns it unchanged.
 
 Session commands such as Compact and Reset are idempotent under the Server's
@@ -513,8 +581,8 @@ Runner dispatch and retains a tombstone across restart. A completed identity
 replays its terminal outcome; an admitted identity without an outcome fails
 closed and is never dispatched again under that identity. A replacement
 Runner process may retry only with a new identity after process-generation
-validation. Stop differs because its intent is checkable — whether the target
-Turn still exists — while a Compact or Reset effect is not.
+validation. Stop differs because its intent is checkable: whether the target
+Turn still exists. A Compact or Reset effect is not checkable.
 
 Stop remains settled by identity and Runtime witness. Unconfirmed delivery
 stays unavailable or stop-requested rather than being converted to idle; a
@@ -522,4 +590,10 @@ provably absent target settles ended. Evidence delivery never gates cleanup or
 operation admission. Under the certainty vocabulary, fabricating a stop or
 estimating an operation outcome is a defect
 ([`conventions.md`](conventions.md#facts-claims-and-settlement)).
+
+## Status
+
+The runtime-event queue does not yet enforce waiter-interval ownership for
+receipt evidence. A late retryable delivery can recreate evidence after its
+bounded waiter ends or can write into a later waiter for the same record.
 

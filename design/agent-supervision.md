@@ -1,41 +1,53 @@
 # Agent Supervision Preset
 
-The supervision preset turns "the owner delegates production-line operation to an Agent" into
-one command. It installs a supervision Agent and two routing rules in the Project. The Agent
-takes responsibility for Approval Point decisions and terminal failure handling; the owner steps in
-only when the Agent stops.
+The supervision preset turns owner delegation of production-line operation into
+one command. It installs one supervision Agent and two Project routing rules.
+The Agent handles Approval Point decisions and terminal failure repair; the
+owner takes over when the Agent stops.
 
-This document defines the preset content, installation semantics, and Agent behavior policy.
-Routing-table evaluation, Agent launch, and the AgentSession model are defined in
+This document defines preset content, installation, and behavior policy.
+Routing evaluation, Agent launch, and AgentSession semantics live in
 [`event-routing.md`](event-routing.md) and [`agent-execution.md`](agent-execution.md).
+
+## Design Drivers
+
+- Installation creates ordinary Agent and RoutingRule resources, not a new
+  supervision resource or execution lifecycle.
+- Installation is idempotent by resource name and never overwrites user edits.
+- Approval requests and terminal run failures are the only triggers. Automatic
+  recovery remains separate from supervision.
+- The Agent owns correctness and repair decisions. Product direction, Issue
+  closure, and stopping the whole Run remain owner decisions.
+- Each trigger gets an independent AgentJob and AgentSession. Issue comments
+  provide the durable handoff memory between executions.
+- Stopping is escalation. The Agent never hides an unresolved Approval Point or
+  failed Run behind a successful-looking response.
 
 ## Model
 
-The preset is not a new domain resource. It is a set of text resources shipped with the CLI.
-Installation produces an ordinary Mohist Agent and ordinary RoutingRules. Once installed, the
-resources are detached from the preset: users may modify them with `mo agent edit` and
-`mo routing rule edit`. A later `install` neither writes over them nor tracks drift.
+The preset is a set of text resources shipped with the CLI, not a domain
+resource. Installation produces an ordinary Mohist Agent and ordinary
+RoutingRules. After installation, users may edit those resources with
+`mo agent edit` and `mo routing rule edit`; later installation does not track
+drift or write over them.
 
-The preset contains one Agent and two RoutingRules:
+The preset contains one Agent and two rules:
 
-- An Agent named `supervisor`, with identity instructions (see
-  [Preset policy and sources](#preset-policy-and-sources)) and no AgentConfig, Skills, or
-  concurrency override.
-- A RoutingRule named `supervisor-approval` that matches approval-request events, with response
-  policy in [Preset policy and sources](#preset-policy-and-sources).
-- A RoutingRule named `supervisor-failure` that matches terminal run-failure events, with response
-  policy in [Preset policy and sources](#preset-policy-and-sources).
+- `supervisor`: an Agent with identity instructions and no AgentConfig, Skills,
+  or concurrency override.
+- `supervisor-approval`: a fallback rule for approval-request events.
+- `supervisor-failure`: a fallback rule for terminal run-failure events.
 
-The two rule match expressions are:
+The rules match:
 
 ```text literal
 event.type == "com.mohist.workflow.stage.approval-requested"
 event.type == "com.mohist.workflow.run.failed"
 ```
 
-The rules have no Issue filter: supervision covers the whole Project. They do not set
-`Continue`, so the response is exclusive. `run.failed` is a terminal event; supervision does not
-run while automatic recovery emits `run.retrying`.
+Neither rule has an Issue filter, so supervision covers the Project. Neither
+sets `Continue`, so the response is exclusive. `run.failed` is terminal;
+supervision does not run while automatic recovery emits `run.retrying`.
 
 ## Semantics
 
@@ -45,124 +57,117 @@ run while automatic recovery emits `run.retrying`.
 mo agent install supervisor
 ```
 
-`install` accepts a built-in preset name. The only current name is `supervisor`; an unknown name
-is rejected with a list of available presets. Installation performs these steps in order. Each
-step is idempotent by name: an existing resource is skipped and reported.
+`install` accepts a built-in preset name. The only current name is `supervisor`;
+an unknown name is rejected with the available presets. Installation performs
+these steps in order, skipping and reporting an existing resource:
 
-1. Create the `supervisor` Agent. If an Agent with that name already exists, reuse it without
-   changing it.
-2. Append `supervisor-approval` and then `supervisor-failure` to the routing table. Appending
-   makes them fallback rules: existing targeted rules remain above them and match first. Skip
-   either rule when a rule with the same name already exists.
+1. Create or reuse the `supervisor` Agent without changing an existing Agent.
+2. Append `supervisor-approval`, then `supervisor-failure`, to the routing
+   table. Their tail position makes them fallback rules, so existing targeted
+   rules match first. Skip a rule when its name already exists.
 
-Installation does not move existing rules, overwrite instructions on an existing Agent, change
+Installation does not move existing rules, overwrite Agent instructions, change
 notification settings, or write a skill stub into the repository.
 
 ### Preflight checks
 
-Installation only checks prerequisites; it does not repair them. A failed check does not prevent
-installation, but the output must report it clearly:
+Preflight checks report prerequisites but do not repair them. A failed check does
+not prevent installation:
 
-- Check whether the Agent can discover the `mohist` skill stub
-  (`.agents/skills/mohist`) in the default repository workspace. If it is missing, tell the user
-  to run `mo skill install --path <repo>`.
-- Supervision relies on the owner retaining default notifications for approval requests,
-  failures, and completions. If notifications are disabled, explain that the owner can discover
-  an Agent handoff only by checking proactively.
+- Check whether the Agent can discover `.agents/skills/mohist` in the default
+  repository Workspace. If missing, tell the owner to run
+  `mo skill install --path <repo>`.
+- Check whether default notifications for approval requests, failures, and
+  completions remain enabled. If disabled, explain that the owner must inspect
+  proactively to discover a handoff.
 
 ### Escalation model
 
-The preset adds neither an `escalate` command nor a new event type. Escalation combines four
+The preset adds no `escalate` command and no event type. Escalation combines
 existing mechanisms:
 
-1. **Notifications remain enabled.** Approval requests and failure events already notify the
-   owner. A notification says that something happened on the production line; it does not by
-   itself mean that the owner must act.
-2. **A `[supervisor]` comment carries the escalation.** The Agent writes one comment beginning
-   with `[supervisor]` for every intervention. When it stops, the comment states the root-cause
-   conclusion, actions already attempted, and the exact decision needed from the owner. The
-   owner reads the comment from the notification and can continue from there.
-3. **Stopping is escalation.** The strongest escalation signal is that the Agent takes no further
-   action. The supervisor stops its response and hands off; it does not execute `mo run stop`. The
-   Approval Point remains pending or the Run remains failed, and the owner takes over using the
-   normal command surface (`approve` / `request-changes` / `retry` / `rerun`).
-4. **Agent failure surfaces too.** When the response cannot start or fails while running, the
-   default notification path includes `agent.job.failed`. The state "the owner thinks it is being
-   handled, but it is not" must never be silent. See [`event-response.md`](event-response.md).
+1. Existing notifications report approval requests and failure events. A
+   notification says that something happened; it does not itself require the
+   owner to act.
+2. The Agent writes one comment beginning with `[supervisor]` for every
+   intervention. When it stops, that comment states the root-cause conclusion,
+   attempted actions, and exact decision needed from the owner.
+3. The Agent stops its response to hand off. It does not execute `mo run stop`.
+   The Approval Point remains pending or the Run remains failed, and the owner
+   uses `approve`, `request-changes`, `retry`, or `rerun`.
+4. A response that cannot start or fails while running follows the default
+   `agent.job.failed` notification path. The owner must not believe the Agent
+   is handling work when it is not. See [`event-response.md`](event-response.md).
 
 ### Behavior principles
 
-Preset text supplies identity, goal, boundaries, and a memory protocol. It leaves how to review,
-how to repair, and when to stop to the Agent's judgment. This is deliberate: whether to select
-Approve or Request Changes at an Approval Point and whether another repair is worthwhile are
-contextual decisions. Encoding them as a decision tree would reduce the Agent to a rule engine and
-prevent useful rework loops.
+Preset text supplies identity, goal, boundaries, and the memory protocol. The
+Agent decides how to review, repair, and stop because Approval versus Request
+Changes and another repair attempt depend on context. A fixed decision tree
+would turn the Agent into a rule engine.
 
-- **Goal:** keep the production line from waiting for a person. Resolve work at the Agent level
-  whenever possible instead of passing it to the owner.
-- **Memory:** each trigger creates an independent AgentJob and a new AgentSession. Issue comments
-  are the only memory between executions. Before acting, read `[supervisor]` comments on the
-  Issue. Write one for every intervention, recording what was assessed, what was done, and why.
-- **Escalate by judgment, not a counter:** the Agent recognizes from its own record when repeated
-  intervention on the same problem has produced no new progress, then stops and escalates.
-  Repetition is a signal for detecting a loop, not a mechanical threshold. Loop prevention
-  therefore depends on Agent judgment and owner observation through notifications; the system
-  imposes no retry count.
-- **Do not guess:** when a decision depends on product direction, external constraints, or
-  missing information, write a comment explaining the uncertainty and leave it to the owner.
-- **Delegation boundary:** the Agent owns "is this done correctly?"; the owner owns "should this
-  be done?" The Agent only proposes terminal decisions such as abandoning an Issue (`close`),
-  stopping the whole run (`stop`), or changing the Issue objective. It does not execute them; when
-  it cannot continue, it stops its response and hands off to the owner. Identity instructions and
-  auditing enforce this boundary; the system does not hard-code it.
-- **Action surface:** use the same `mo` command surface and Issue workspace as a person. There is
-  no privileged channel and no enumerated action allowlist. The only boundary is not changing
-  Issues, configuration, or code unrelated to the current event.
+- **Goal:** keep the production line from waiting for a person. Resolve work at
+  Agent level when possible.
+- **Memory:** each trigger creates an independent AgentJob and AgentSession.
+  Before acting, read all `[supervisor]` comments on the Issue. Write one for
+  every intervention, recording what was assessed, done, and why. Comments are
+  the only memory between executions.
+- **Escalation:** recognize a no-progress loop from the supervision record and
+  stop by judgment. Repetition is a signal, not a mechanical threshold; the
+  system imposes no retry count.
+- **Uncertainty:** when product direction, external constraints, or missing
+  information matter, explain the uncertainty in a comment and leave the
+  decision to the owner.
+- **Delegation:** the Agent owns "is this done correctly?" The owner owns
+  "should this be done?" The Agent may propose closing an Issue, stopping a
+  Run, or changing its objective, but it never executes those terminal product
+  decisions. Identity instructions and audit enforce this boundary; the system
+  does not hard-code it.
+- **Action surface:** use the same `mo` command surface and Issue Workspace as a
+  person. There is no privileged channel or enumerated allowlist. The Agent
+  must not change Issues, configuration, or unrelated code.
 
-The default topology uses one Agent. Rule prompts carry the differences between the two response
-types, while identity and Issue memory remain shared. Users may customize the topology by using
-separate Agents for approval and repair and changing the Agent references in the rules; no new
-mechanism is required. In that topology, each Agent needs a distinguishable marker and each set
-of identity instructions must preserve the rule "read all supervision comments on the Issue
-first." Otherwise, neither side can see the rework loop between Approval Feedback and repair.
+The default topology uses one Agent. Rule prompts distinguish approval and
+repair while identity and Issue memory remain shared. Users may use separate
+Agents by changing rule references. Each customized Agent needs a distinct
+marker and must preserve the rule to read all supervision comments first, or
+the Agents cannot see the rework loop between Approval Feedback and repair.
 
 ### Preset policy and sources
 
-The preset wording is executable configuration owned by the CLI resources. The design document
-does not duplicate that wording because a prose copy can drift and a documentation translation
-must not silently change Agent behavior. Installation copies these resources verbatim:
+Preset wording is executable CLI configuration. This design does not duplicate
+it, because a prose copy can drift. Installation copies these resources
+verbatim:
 
 - [identity instructions](../packages/cli/Mohist.Cli/presets/supervisor/instructions.md);
 - [approval response prompt](../packages/cli/Mohist.Cli/presets/supervisor/approval.md);
 - [failure response prompt](../packages/cli/Mohist.Cli/presets/supervisor/failure.md).
 
-The [preset manifest](../packages/cli/Mohist.Cli/presets/manifest.json) binds those resources to
-the Agent and routing rules. `{{event.*}}` placeholders belong to RoutingRule runtime syntax; the
-CLI preserves them for response-time rendering.
+The [preset manifest](../packages/cli/Mohist.Cli/presets/manifest.json) binds
+resources to the Agent and rules. `{{event.*}}` placeholders belong to
+RoutingRule runtime syntax; the CLI preserves them for response-time
+rendering.
 
-The three resources separate stable identity from event-specific work. The identity instructions
-carry the authority boundary and memory protocol once, so approval and failure responses cannot
-silently develop different identities. Each rule prompt supplies only the event context and the
-decision required for that trigger.
+The identity resource owns the shared authority and memory policy. Each rule
+prompt supplies only event context and the decision required for that trigger.
+The policy preserves these boundaries:
 
-The identity policy protects four boundaries:
+- `[supervisor]` comments are durable memory and the handoff surface.
+- Comments and approval decisions identify `supervisor` as author, so history
+  records who acted and Agent-authored mentions cannot recursively launch an
+  Agent.
+- The Agent owns correctness decisions and repair attempts. Product direction,
+  objective changes, Issue closure, and stopping the whole Run remain owner
+  decisions.
+- A mention is one bounded task. Continued attention requires Issue watch; the
+  preset does not pretend that an Agent process remains continuously active.
 
-- Issue comments beginning with `[supervisor]` are durable memory across otherwise independent
-  executions and the handoff surface when the Agent stops.
-- Comments and approval decisions identify `supervisor` as their author so history can answer who
-  acted and Agent-authored mentions cannot recursively launch another Agent.
-- The Agent owns correctness decisions and repair attempts. Product direction, objective changes,
-  Issue closure, and stopping the whole run remain owner decisions.
-- A mention is one bounded task. Continued attention requires Issue watch; the preset does not
-  pretend that an Agent process remains continuously active.
-
-The approval prompt asks the Agent to approve correct work, select Request Changes with
-specific Approval Feedback, or Stop and hand a product-direction decision to the owner. The failure
-prompt runs only after automatic recovery is exhausted; it asks the Agent to use prior supervision
-comments, repair and retry when new progress is likely, or stop with a root-cause handoff when it is
-not.
-Both prompts require one `[supervisor]` comment so the next execution and the owner share the same
-reasoning trail.
+The approval prompt asks the Agent to approve correct work, select Request
+Changes with specific Approval Feedback, or stop with a product-direction
+handoff. The failure prompt runs only after automatic recovery is exhausted; it
+asks the Agent to use prior comments, repair and retry when new progress is
+likely, or stop with a root-cause handoff. Both prompts require one
+`[supervisor]` comment.
 
 ## Examples
 
@@ -177,8 +182,8 @@ warning: .agents/skills/mohist not found in repository 'web-app';
          run `mo skill install --path web-app` so the agent can discover the mo command surface
 ```
 
-Repeated installation after the user has edited the identity instructions does not overwrite
-them:
+Repeated installation after the owner edits identity instructions does not
+overwrite them:
 
 ```text literal
 $ mo agent install supervisor
@@ -189,11 +194,13 @@ exists, skipped: routing rule supervisor-failure
 
 ## Status
 
-Implemented: `mo agent install supervisor` idempotently creates the preset Agent and two
-tail-position routing rules by name; `mo issue watch` supports watching and muting; Agent response
-failures (`agent.job.failed`) enter the inbox and Hermes notifications; authenticated identity owns
-approval and comment attribution, while `--display-name` is a presentation alias.
+Implemented: `mo agent install supervisor` idempotently creates the preset Agent
+and two tail-position routing rules by name. `mo issue watch` supports watching
+and muting. Agent response failures (`agent.job.failed`) enter the inbox and
+Hermes notifications. Authenticated identity owns approval and comment
+attribution; `--display-name` is a presentation alias.
 
-Agent Skills are pinned into each execution definition. The preset adds no Skills override;
-discovery of the `mohist` skill still depends on the stub file in the execution workspace, so
-installation only checks and reports it and cannot decide to modify the user's repository.
+Agent Skills are pinned into each execution definition. The preset adds no
+Skills override. Discovery of the `mohist` Skill still depends on the stub in
+the execution Workspace, so installation reports a missing stub but does not
+modify the user's repository.

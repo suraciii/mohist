@@ -1,37 +1,54 @@
 # Task Log
 
-TaskLog preserves the execution evidence needed to explain a Task without
-turning high-volume process output into Workflow state.
+TaskLog preserves bounded execution evidence for a Task. It explains how work
+reached a WorkResult without making high-volume process output part of Workflow
+state.
 
 ## Design Drivers
 
-- A WorkResult answers whether work succeeded. A TaskLog explains how execution
-  reached that result. Combining them would make a large or failed log upload
-  threaten result reliability.
-- Transcript records what an Agent said, and Artifacts record files it produced.
+- WorkResult answers whether work succeeded. TaskLog explains execution. They
+  have separate reliability boundaries.
+- Transcript records Agent conversation. Artifacts record produced files.
   Process output has a different owner, retention policy, and access pattern.
-- Every line must pass one ordering and redaction boundary before buffering.
-  Allowing each Action to invent a log path would make sequence and secret
-  handling inconsistent.
-- Logs are bounded evidence. When the cap is reached, recent error context is
-  more useful than early setup chatter, so retention keeps the tail.
-
-## Boundary
-
-TaskLog belongs to Runner execution. It is associated with Workflow or Agent
-work but never stored inside WorkflowRun or AgentJob result state.
-
-```mermaid
-flowchart LR
-    T["task execution"] --> S["ordered/redacted log sink"] --> B["bounded buffer"] --> C["TaskLog channel"] --> ST["store"]
-    T --> W["WorkResult channel"] --> WO["work owner"]
-```
-
-The two channels are separate facts. TaskLog may be associated with
-`workflow-runs` or `agent-jobs`; owner, work ID, and sequence identify its read
-boundary.
+- Every line passes one ordering and redaction boundary before buffering. An
+  Action cannot choose its own log path or secret-handling rules.
+- The log is bounded. On overflow, keep recent error context and continue the
+  sequence.
 
 ## Model
+
+TaskLog belongs to Runner execution. It may be associated with Workflow or
+Agent work, but it is not WorkflowRun state or AgentJob result state.
+
+```text diagram
+               +----------------+
+               | Task execution |
+               +--------+-------+
+             +----------+----------+
+             v                     v
+ +-----------------------+  +------------+
+ | ordered/redacted sink |  | WorkResult |
+ +-----------+-----------+  +------+-----+
+             |                     |
+             v                     v
+    +----------------+      +------------+
+    | bounded buffer |      | work owner |
+    +--------+-------+      +------------+
+             |
+             v
+        +---------+
+        | TaskLog |
+        +----+----+
+             |
+             v
+         +-------+
+         | store |
+         +-------+
+```
+
+The log and result are separate facts. TaskLog may be associated with
+`workflow-runs` or `agent-jobs`. Owner, work ID, and sequence define its read
+boundary.
 
 ```text literal
 Work
@@ -46,67 +63,65 @@ Work
       text
 ```
 
-stdout and stderr share one ordered stream. `source` preserves the meaningful
-execution boundary without claiming that operating-system streams have separate
+stdout and stderr share one ordered stream. `source` preserves a meaningful
+execution boundary without giving the operating-system streams separate
 product semantics.
 
 ## Collection
 
 ### Single funnel
 
-All output enters one sink. The sink masks configured secrets before text can
-enter a buffer, assigns a monotonic sequence, records injected time and source,
-and appends to the per-work collector.
+All output enters one sink. The sink masks configured secrets before buffering,
+assigns a monotonic sequence, records injected time and source, and appends to
+the per-work collector.
 
-Process collection must capture the final line even without a trailing newline,
-drain readable output after process exit, and terminate a stuck read when the
-process timeout kills execution. These are evidence-completeness rules, not an
-Action-specific logging API.
+Collection must capture a final line without a trailing newline, drain readable
+output after process exit, and terminate a stuck read when a timeout kills the
+process. These are evidence-completeness rules, not an Action-specific logging
+API.
 
 ### Collector
 
-The per-work collector is append-only between flushes. Its capacity is bounded;
-overflow removes the oldest retained entries while sequence numbers continue
-to increase. This makes truncation compatible with cursor reads and preserves
-the most recent failure context.
+The per-work collector is append-only between flushes and has bounded
+capacity. On overflow, remove the oldest retained entries while sequence
+numbers continue to increase. Cursor reads then remain valid and recent failure
+context stays available.
 
 ## Delivery and Failure Isolation
 
 TaskLog uses a separate upload channel and never enters the WorkResult payload.
-A terminal flush sends the retained entries before the final work report so
-completed work has its available evidence. Incremental flushes publish batches
-periodically for live viewing; live delivery is best effort and the store
-remains authoritative.
+A terminal flush sends retained entries before the final work report. Incremental
+flushes publish batches for live viewing, but live delivery is best effort and
+the store remains authoritative.
 
-Log delivery failure is diagnostic state and must not rewrite TaskRun or
-AgentJob success. Conversely, a successful WorkResult does not imply that every
-live log delta reached every viewer.
+Log delivery failure is diagnostic state. It must not rewrite TaskRun or
+AgentJob success. A successful WorkResult does not imply that every live log
+delta reached every viewer.
 
 ### Terminal Ownership
 
-Settlement records which work owns the terminal log. When a TaskRun or
-AgentJob settles, the settling owner persists the terminal-log ownership as
-part of the settlement record: owner kind, owner identity, work identity, and
-the producing Runner. The store accepts a terminal flush only when it matches
-a recorded ownership; it reads the record and never derives ownership from
-run status, task order, or task counts. Ownership that was never recorded is
-a missing fact, not a state to estimate
-([`conventions.md`](conventions.md#facts-claims-and-settlement)).
-
-Gap: the current store derives terminal ownership heuristically from run
-state, and acceptance tests lock that derivation.
+Settlement records which work owns the terminal log: owner kind, owner identity,
+work identity, and producing Runner. The store accepts a terminal flush only
+when it matches recorded ownership. It never derives ownership from run status,
+task order, or task counts. Missing ownership is a missing fact, not an
+estimated state.
 
 ## Read Contract
 
 Each entry exposes only monotonic `seq`, timestamp, source, and redacted text.
-Reads are scoped by owner and work identity and use sequence as the cursor and
-jump anchor. Storage layout and index names are implementation details; the
-durable contract is ordered, bounded, redacted evidence with monotonic sequence.
+Reads use owner and work identity, with sequence as cursor and jump anchor.
+Storage layout and index names are not part of this contract.
 
-## Relationship to existing
+The related records have separate meanings:
 
-TaskLog answers why execution reached this result; it belongs to Runner
-execution. Transcript answers what the Agent said and did conversationally; it
-belongs to the Session. Artifact answers which files were produced; it belongs
-to the Workflow. WorkResult answers whether the work succeeded and what
-structured result it returned; it belongs to the AgentJob.
+- Transcript records what the Agent said and did. It belongs to the Session.
+- Artifact records which files were produced. It belongs to the Workflow.
+- WorkResult records whether work succeeded and its structured result. It
+  belongs to the AgentJob.
+- TaskLog records execution evidence. It belongs to Runner execution.
+
+## Status
+
+The current store derives terminal ownership heuristically from WorkflowRun
+state. The target design requires settlement to persist ownership before
+accepting the terminal flush.
