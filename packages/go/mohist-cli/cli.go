@@ -38,19 +38,20 @@ type Wait func(context.Context, time.Duration) error
 
 // Dependencies makes process boundaries explicit and keeps command tests local.
 type Dependencies struct {
-	HTTPClient  *http.Client
-	Stdout      io.Writer
-	Stderr      io.Writer
-	Lookup      EnvLookup
-	ReadFile    ReadFile
-	WriteFile   WriteFile
-	HomeDir     func() (string, error)
-	Execute     Execute
-	OpenBrowser Execute
-	Input       io.Reader
-	Now         func() time.Time
-	Wait        Wait
-	Executable  func() string
+	HTTPClient       *http.Client
+	Stdout           io.Writer
+	Stderr           io.Writer
+	Lookup           EnvLookup
+	ReadFile         ReadFile
+	WriteFile        WriteFile
+	HomeDir          func() (string, error)
+	Execute          Execute
+	OpenBrowser      Execute
+	Input            io.Reader
+	Now              func() time.Time
+	Wait             Wait
+	Executable       func() string
+	CurrentDirectory func() string
 }
 
 type Config struct {
@@ -102,7 +103,8 @@ func defaultDependencies() Dependencies {
 				return nil
 			}
 		},
-		Executable: func() string { return os.Args[0] },
+		Executable:       func() string { return os.Args[0] },
+		CurrentDirectory: func() string { value, _ := os.Getwd(); return value },
 	}
 }
 
@@ -140,6 +142,9 @@ func ResolveConfig(deps Dependencies) (Config, error) {
 	}
 	if deps.Executable == nil {
 		deps.Executable = defaults.Executable
+	}
+	if deps.CurrentDirectory == nil {
+		deps.CurrentDirectory = defaults.CurrentDirectory
 	}
 
 	cfg := Config{ServerURL: DefaultServerURL, OperatorID: DefaultOperatorID}
@@ -310,6 +315,9 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if strings.HasPrefix(command.kind, "auth-") {
 		return runAuth(ctx, deps, client, cfg, command)
 	}
+	if strings.HasPrefix(command.kind, "project-") || strings.HasPrefix(command.kind, "repo-") || strings.HasPrefix(command.kind, "workspace-") {
+		return runProjectSpace(ctx, deps, client, command)
+	}
 	data, err := client.get(ctx, command.path)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
@@ -365,6 +373,9 @@ func parse(args []string) (command, error) {
 		}
 		return c, err
 	}
+	if args[0] == "project" || args[0] == "repo" || args[0] == "workspace" {
+		return parseProjectSpace(args[0], args[1:])
+	}
 	if args[0] == "run" && len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
 		return command{help: true, helpText: runGroupHelp()}, nil
 	}
@@ -377,9 +388,9 @@ func parse(args []string) (command, error) {
 	if len(args) < 2 || args[1] != "why" {
 		return command{}, &usageError{message: "error: incomplete command\nusage: mo run why <run-ref> [--json [fields]]"}
 	}
-	c, err := parseLeaf("why", args[2:], "", diagnosisFields, "mo run why <run-ref>")
+	c, err := parseLeaf("why", args[2:], "", diagnosisFields, "run why <run-ref>")
 	if c.help {
-		c.helpText = "USAGE\n    mo run why <run-ref> [--json [fields]]\n\nRead the diagnostic chain for a WorkflowRun."
+		c.helpText = "USAGE\n    mo run why <run-ref> [--json [fields]]\n\nJSON FIELDS\n" + strings.Join(diagnosisFields, "\n")
 	}
 	return c, err
 }
@@ -445,6 +456,9 @@ func rootUsage() string {
 }
 
 func groupHelp(name string) string {
+	if name == "project" || name == "repo" || name == "workspace" {
+		return projectSpaceHelp(name)
+	}
 	if name == "workflow" {
 		return "USAGE\n    mo workflow [<action>] [flags]\n\nProject-scoped Workflow Profiles.\n\nActions: list, view, create, edit, delete, validate\nSee also: mo run --help"
 	}
@@ -489,7 +503,7 @@ type envelope struct {
 }
 
 func (c *client) get(ctx context.Context, path string) (json.RawMessage, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base.String()+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base.String()+path, strings.NewReader(""))
 	if err != nil {
 		return nil, &operationError{message: "error: request could not be created [request_error]"}
 	}
