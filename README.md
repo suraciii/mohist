@@ -36,16 +36,30 @@ take over manually. It is not another daily workspace.
 
 The arrows show how a work request reaches the execution environment.
 
-```mermaid
-flowchart TD
-    Slack["Slack"] -->|"Agent Connection"| MA["Mohist Agent"]
-    IDE["IDE / Agent host"] --> EA["External Agent"]
-    EA -->|"Skill + mo"| Server["Mohist Server"]
-    WebCLI["Web UI / CLI"]
-    MA --> Server
-    WebCLI -->|"direct use"| Server
-    Server -->|"dispatch"| Runner["Runner"]
-    Runner -->|"executes in"| WS["Workspace / repository"]
+```text diagram
+ +-------+   +------------------+   +--------------+
+ | Slack |   | IDE / Agent host |   | Web UI / CLI +------------+
+ +---+---+   +---------+--------+   +--------------+            |
+     +-------------+   +---------------+                        |
+                   vAgent Connection   v                        |
+           +--------------+   +----------------+                |
+           | Mohist Agent |   | External Agent |                |
+           +-------+------+   +--------+-------+                |
+                   +---------+---------+                        |
+                             vSkill + mo                        |
+                     +---------------+               direct use |
+                     | Mohist Server |<-------------------------+
+                     +-------+-------+
+                             |
+                             vdispatch
+                        +--------+
+                        | Runner |
+                        +----+---+
+                             |
+                             vexecutes in
+                +------------------------+
+                | Workspace / repository |
+                +------------------------+
 ```
 
 ## Workflow
@@ -54,9 +68,40 @@ A Workflow Profile defines how an Issue enters the production line. Its stages,
 tasks, checks, and approval points are configurable. The default Profile is
 `mohist/local`:
 
-```mermaid
-flowchart LR
-    Draft -->|"mark ready"| Backlog -->|"start"| Plan --> Build --> Check --> Integrate --> Done
+```text diagram
+   +-------+
+   | Draft |
+   +---+---+
+       |
+       vmark ready
+  +---------+
+  | Backlog |
+  +----+----+
+       |
+       vstart
+   +------+
+   | Plan |
+   +---+--+
+       |
+       v
+   +-------+
+   | Build |
+   +---+---+
+       |
+       v
+   +-------+
+   | Check |
+   +---+---+
+       |
+       v
+ +-----------+
+ | Integrate |
+ +-----+-----+
+       |
+       v
+   +------+
+   | Done |
+   +------+
 ```
 
 Draft and Backlog belong to the Issue lifecycle rather than the Profile. This

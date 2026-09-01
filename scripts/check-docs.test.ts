@@ -55,9 +55,8 @@ test('accepts English Markdown, ASCII text diagrams, and structurally ignored li
         '[also not a link](missing.md)',
         '```',
         '',
-        '```mermaid',
-        'flowchart LR',
-        '  Server --> Runner',
+        '```js',
+        'const server = new Runner()',
         '```',
       ].join('\n'),
     )
@@ -133,7 +132,7 @@ test('checks image alt and link titles as prose and rejects raw HTML', () => {
   })
 })
 
-test('rejects known non-mermaid diagram fence languages case-insensitively', () => {
+test('rejects diagram fence languages case-insensitively', () => {
   withFixture((root) => {
     write(
       root,
@@ -165,11 +164,16 @@ test('rejects known non-mermaid diagram fence languages case-insensitively', () 
         '```svgbob',
         'Client --> Server',
         '```',
+        '',
+        '```Mermaid',
+        'flowchart LR',
+        '  Client --> Server',
+        '```',
       ].join('\n'),
     )
 
     const violations = checkDocumentation(root).violations.filter((item) => item.rule === 'ascii-diagram-only')
-    assert.equal(violations.length, 6)
+    assert.equal(violations.length, 7)
     assert.ok(violations.every((item) => item.description.includes('mermaid')))
   })
 })
