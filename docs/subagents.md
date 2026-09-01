@@ -1,202 +1,180 @@
 # Subagents and Session Trees
 
-A Mohist Agent can decompose a task from its own session by starting a new
-session for another Agent. Decomposition can continue through multiple levels
-to form a **session tree**. A parent session delegates work, a child session
-performs it, and the result returns to the parent.
+A Mohist Agent can delegate from its Session by starting a Session for another
+Agent. The Sessions form a tree. Agent resources stay flat: **Subagent** is a
+role in Session context, not an Agent property.
 
-Agent resources are always flat and have no hierarchy: **Subagent is a role in
-session context, not an Agent property**. The same Agent is a top-level Agent
-when a user starts it directly and a Subagent when another session spawns it.
-The parent-child relationship belongs to AgentSessions. This is like a process
-tree: programs have no parent-child relation, but processes do.
+## Product Commitments
 
-```mermaid
-flowchart TD
-    subgraph CP["Control plane: flat Agent resources, with no parent-child relation"]
-        direction LR
-        lead["lead"] --- terra["terra"] --- luna["luna"] --- e2e["e2e"] --- reviewer["reviewer"]
-    end
-    lead -.->|"mo agent launch: the user starts the tree root"| S1
-    subgraph EP["Execution plane: a recorded session tree that grows during work"]
-        S1["S1: lead"] -->|"spawn"| S2["S2: terra"]
-        S1 -->|"spawn"| S3["S3: luna"]
-        S1 -->|"spawn"| S4["S4: reviewer"]
-        S3 -->|"spawn"| S5["S5: e2e"]
-    end
+- A parent Session delegates work. A child Session performs it and returns a
+  result to the parent.
+- The same Agent is top-level when started by a user and a Subagent when
+  started by another Session. The parent-child relation belongs to Sessions.
+- A child inherits the parent's Workspace and working directory.
+- A Workflow defines its shape before execution. A Session Tree decides its
+  shape during execution. A Session Tree does not replace a Workflow.
+- Mohist provides capabilities. The Agent owns decomposition, assignment,
+  waiting, verification, and correction. Mohist does not provide automatic
+  fork-join, restart, or inspection.
+- An Agent cannot spawn another Agent unless its available Agent list declares
+  that target. The list is fixed when the AgentJob starts.
+- An archived Agent rejects new delegations. An unauthorized spawn is rejected
+  without creating a child.
+- A child starts with empty context. The spawn brief and its references are
+  the child's only initial input.
+- The caller and an idempotency key identify one delegation intent. Retrying
+  with that key returns the same child or rejection; a new key means new work.
+- A child failure does not retry automatically. The parent chooses retry,
+  another Agent, or escalation.
+- Stop, detach, and spawn races are resolved by the Session owner. See
+  [Subagent Design](../design/subagents.md) for the design contract.
+
+## Session Tree
+
+Agent resources have no parent-child relation. Session records do:
+
+```text diagram
+         +--------------------------+
+         | Agent resources are flat |
+         +-------------+------------+
+                       :
+                       v
+                 +----------+
+                 | S1: lead |
+                 +----++----+
+       +--------------++---------------+
+       vspawn         vspawn           vspawn
+ +-----------+  +----------+   +--------------+
+ | S2: terra |  | S3: luna |   | S4: reviewer |
+ +-----------+  +-----+----+   +--------------+
+                      |
+                      vspawn
+                 +---------+
+                 | S5: e2e |
+                 +---------+
 ```
 
-Child sessions inherit the parent working directory. For file isolation, the
-Agent can use git inside that directory.
+The user starts the root Session. A parent creates child Sessions through
+`mo agent spawn`. Each child keeps the parent Workspace and working directory.
 
-## Division of Work with a Workflow
+## Workflow or Session Tree
 
-- A Workflow orchestrates work with a **known shape**. Its Definition specifies
-  stages, tasks, checks, and approval points in advance.
-- A session tree orchestrates work whose **shape becomes known only at runtime**.
-  After reading a task, the lead Agent decides how many parts to create, who
-  receives each part, and when to collect the results.
-
-A process that can be defined in advance belongs in a Workflow. Decomposition
-that depends on information found at runtime and requires Agent judgment belongs
-in a session tree. A session tree neither passes through nor replaces a
-Workflow.
-
-## Mental Model
-
-- **Mohist provides capabilities; the Agent plans the work**. Mohist provides
-  the CLI, Skills, and messages. An Agent combines them to inspect, wait,
-  accept, and correct work. Mohist does not include built-in fork-join,
-  automatic restart, or automatic inspection processes. An Agent explicitly
-  schedules a timed input when it needs to wake at a specific time.
-- **The Agent owns work discipline**. Nonoverlapping assignments, required
-  delivery reports, result verification, and git as the final arbiter are lead
-  Agent disciplines carried by Skills and Instructions, not product mechanisms.
+Use a Workflow when its stages, tasks, checks, and Approval Points are known
+before execution. Use a Session Tree when the lead Agent must choose the
+number of parts, assignments, and collection order after reading the task.
 
 ## Capability Declaration
 
-By default, an Agent cannot use any Subagent. When managing an Agent, use its
-**available Agent list** to declare which defined Mohist Agents it can spawn.
+The available Agent list is part of the Agent execution definition. It names
+which defined Agents the Agent may spawn. The declaration is fixed when the
+AgentJob starts. Renaming an Agent does not change permission. An archived
+Agent does not accept new delegations.
 
-The declaration is part of the execution definition. It is fixed when the
-AgentJob starts, and edits affect only work started later. Renaming an Agent in
-the list does not change permission. An archived Agent no longer accepts new
-delegations. An unauthorized spawn is rejected and reports the declaring
-Agent's permitted scope.
-
-Creating a lead Agent that can decompose work requires three control-plane
-settings, all in the existing Agent configuration:
+A lead Agent that can decompose work needs all three settings in its existing
+Agent configuration:
 
 1. Add the Subagent collaboration discipline through **Skills**.
 2. **Declare** the available Subagents.
-3. Define the division-of-work policy in **Instructions**, including which work
-   goes to which Agent and when to stop.
+3. Define the division-of-work policy in **Instructions**, including assignment
+   and stopping rules.
 
 ## Known at Startup
 
-The available Subagent list loads into the session with the AgentJob through the
-same mechanism as a Skill. From its first Turn, the Agent knows its session
-identity, whether it can decompose work, which Agents it can invoke, and how to
-invoke them. Each list entry contains a name and description. The description
-answers when that Agent should be selected.
+The available Agent list loads with the AgentJob through the same mechanism as
+Skills. From its first Turn, the Agent knows its Session identity, whether it
+can decompose work, which Agents it may invoke, and how to invoke them. Each
+entry has a name and description. The description states when to select it.
 
 Mohist does not recommend or route automatically. Agent selection is the lead
-Agent's judgment. When it needs more information, the Agent can query
-`mo agent list` and `mo agent view`.
+Agent's judgment. The Agent may query `mo agent list` and `mo agent view`.
 
 ## Spawn and Context
 
-`mo agent spawn` starts a child session:
+`mo agent spawn` starts a child Session:
 
 ```bash
 mo agent spawn reviewer --project <project-id> --parent-session <session-id> --prompt "Review changes in the current working directory, focusing on the token storage path" --idempotency-key <key>
 ```
 
-A child session always inherits the parent session's working directory and uses
-the same Workspace. Spawn does not accept an alternate Workspace or path. When
-an assignment needs file isolation, the Agent can create a git worktree in the
-shared directory. A git worktree is a git tool whose use the Agent decides; the
-platform has no child-specific Workspace primitive.
+Spawn is a normal Agent launch with an explicit parent-child relation.
+`--parent-session` names the delegating Session because a working directory
+does not prove delegation. The caller and `--idempotency-key` identify one
+intent. A retry with the same key returns the same child or rejection.
 
-Spawn is a normal Agent launch plus an explicit parent-child relation.
-`--parent-session` names the delegating session because a working directory does
-not prove delegation. The caller and `--idempotency-key` identify one delegation
-intent, so a retry after interruption returns the same child or the same
-rejection instead of starting duplicate work. Only a new key means new work.
+The spawn boundary rejects a parent without an inheritable working directory,
+a target outside the declared scope, a target that Needs setup, or an archived
+Agent. A failed check leaves no executable child. Temporary loss of the
+parent execution environment may be retried with the same key.
 
-Before Mohist accepts the relation, a failed check leaves no executable child.
-Temporary loss of the parent's execution environment may be retried with the
-same key. Mohist rejects the delegation when the parent has no inheritable
-working directory, the target is outside the declared scope, the target Needs
-setup, or the target is archived. After acceptance, the child is ordinary work:
-later parent changes do not rewrite its history, and stop follows the
-normal child lifecycle. See [Subagent Design](../design/subagents.md) for the
-concurrency and recovery protocol behind this guarantee.
+The child always inherits the parent's current Workspace and working
+directory. Spawn accepts no alternate Workspace or path. For file isolation,
+the Agent may create a git worktree in the inherited directory. The platform
+has no child-specific Workspace primitive.
 
-Context rules:
-
-- **Clean context and explicit brief**: A child session starts with empty
-  context. Its only input is the spawn prompt and context references. The parent
-  must put all necessary information in the brief; the child cannot read the
-  parent's conversation history.
-- **Working directory inherited from the parent**: The child session
-  starts with the parent's currently available working directory and uses the
-  same Workspace. The caller cannot specify a path; the working directory must
-  be the one currently available to the parent. If the parent has no such
-  directory or usable execution environment, spawn is explicitly rejected and
-  does not silently run elsewhere. For isolation, the child can create a git
-  worktree in the inherited directory. The parent's assignment discipline must
-  still prevent file conflicts, and git is the final arbiter. Any parent without
-  an authoritative working directory and usable execution environment is
-  rejected; the source of the parent Session does not bypass that check.
+A child starts with empty context. The parent must put all required information
+in the brief. The child cannot read the parent's conversation history. Later
+parent changes do not rewrite the child's history. After acceptance, the child
+is ordinary work and follows the normal child lifecycle.
 
 ## Messages Between Parent and Child
 
-Three messages flow between parent and child. A terminal report goes from
-child to parent automatically: when the child's first delegation ends, the
-parent receives an Input that identifies the child session, its result, and
-the result location. A steer goes from parent to child, and a request for help
-goes from child to parent; both use `mo session followup`, and the child
-learns its parent session during spawn.
+A terminal report goes from child to parent automatically when the child's
+first delegation ends. It identifies the child Session, its result, and the
+result location. The parent retrieves details from the transcript, working
+directory, and git state. The report wakes an idle parent and waits in order
+while the parent is busy. Only terminal state is reported.
 
-A terminal report is only a pointer. The parent retrieves details from the
-transcript, working directory, and git state. The Input wakes an idle parent and
-starts a new Turn; it waits in order while the parent is busy. Only terminal
-state is reported, so progress does not interrupt the parent.
+A steer goes from parent to child. A request for help goes from child to parent.
+Both use `mo session followup`. The child learns its parent Session during
+spawn.
 
-Inspection and waiting are parent responsibilities. The parent Agent decides
-when to query, when to wait for reports, and whether to verify results.
-`mo session tree` shows the complete session tree and each node's state and is
-the parent's inspection entry point:
+Inspection and waiting belong to the parent Agent. `mo session tree` shows the
+complete tree and each node's state:
 
 ```bash
 mo session tree <session-id>
 ```
 
-For a large tree, results are paginated. Continuous pagination fixes the tree
-shape observed by the first request and neither duplicates nor omits nodes.
-Sessions added or detached during pagination appear only in a new read.
+Results are paginated for a large tree. Pagination fixes the tree shape seen by
+the first request. Sessions added or detached during pagination appear only in
+a new read.
 
 ## Lifecycle
 
-- **Cascade stop**: Stopping a session stops active work throughout the subtree
-  still attached below it at that time. A queued Turn ends locally; a running
-  Turn ends after Runtime confirmation; both are recorded cancelled. The
-  sessions remain and can be continued explicitly later. An unconfirmed stop
-  result is shown accurately and can be retried. Stop, detach, and spawn can
-  race; [Subagent Design](../design/subagents.md) defines how the Session
-  owner arbitrates them.
+### Cascade stop
+
+Stopping a Session stops active work throughout the attached subtree at that
+time. A queued Turn ends locally. A running Turn ends after Runtime
+confirmation. Both are recorded cancelled. Sessions remain and can be
+continued explicitly. An unconfirmed stop result is shown accurately and can
+be retried.
 
 ```bash
 mo session stop <session-id> --idempotency-key <key>
 ```
 
-- **Detach is the escape hatch**: When a child session produces independent
-  value and must remain, detach it from the tree first. A later parent stop no
-  longer affects it. For example, detach an exploration session to hand it to
-  the user.
+### Detach
+
+Detach a child when its independent value must remain after a parent stop. A
+detached Session is no longer affected by later parent stops.
 
 ```bash
 mo session detach <session-id>
 ```
 
-- **No automatic restart**: A child failure does not retry automatically. After
-  a failure report, the parent decides whether to retry, select another Agent,
-  or escalate to the user.
-- **No depth or breadth limit**: Mohist does not reject decomposition based on
-  the number of levels or sessions in a tree. Normal Agent concurrency and
-  queue resource boundaries still apply, and large trees use pagination. The
-  parent Agent remains responsible for decomposition and waiting.
+### Restart and failure
+
+Mohist does not restart a child automatically. After a failure report, the
+parent chooses whether to retry, select another Agent, or escalate. Mohist does
+not impose a depth or breadth limit. Normal Agent concurrency and queue limits
+still apply.
 
 ## Scheduled Input
 
-A caller can schedule an **input delivered only at a specified time**. It records
-the text and due time now. At that time, Mohist appends it to the session as an
-ordinary Input through the same acceptance and execution path as a follow-up.
-The scheduler can be a user or the Agent itself. A parent can schedule a later
-question for a child, and an Agent can schedule a check if it is still waiting.
-This is not automatic inspection. Mohist does not decide when to remind anyone;
-only an explicitly created schedule triggers.
+A schedule delivers one Input to a Session at an explicitly specified time. It
+stores the text and due time immediately. At the due time, Mohist appends the
+Input through the ordinary acceptance and execution path. A user or Agent may
+create the schedule. This is not automatic inspection.
 
 ```bash
 mo session schedule create <session-id> --at 2026-08-06T14:00:00+08:00 --text "Report current progress" --idempotency-key <key>
@@ -204,39 +182,34 @@ mo session schedule list <session-id>
 mo session schedule cancel <session-id> <schedule-id>
 ```
 
-- **One-time absolute time**: `--at` accepts only RFC 3339 with a time-zone
-  offset, such as `2026-08-06T14:00:00+08:00` or `...Z`. A time without an
-  offset or in the past is rejected. There is no repeated schedule; create
-  another schedule to wake again.
-- **At the due time**: An idle session wakes and starts a new Turn. A busy
-  session receives the Input in ordinary order. When Mohist cannot confirm
-  session state, the Input remains pending delivery and delivery continues
-  after confirmation recovers. Mohist never pretends that it delivered the
-  Input or silently discards it.
-- **Cancel**: A schedule not yet delivered can be cancelled and will not
-  deliver. Cancelling an already delivered schedule has no effect on its Input.
-  A schedule does not expire automatically; cancellation is its only exit.
-- **Independent from lifecycle**: Stop, cascade stop, detach, Reset, and Compact
-  do not delete schedules. Delivery that meets a stop in progress waits until
-  stop finishes. A detached session still receives its scheduled Input at the
-  due time.
+- `--at` accepts only RFC 3339 with a time-zone offset, such as
+  `2026-08-06T14:00:00+08:00` or `...Z`. A time without an offset or in the
+  past is rejected.
+- A schedule is one-time. There is no repeated schedule; create another one.
+- An idle Session wakes and starts a Turn. A busy Session receives the Input in
+  ordinary order.
+- If Session state is unknown, the Input remains pending delivery and delivery
+  continues after confirmation recovers. Mohist never pretends delivery or
+  silently discards the Input.
+- A schedule not yet delivered can be cancelled. Cancelling a delivered
+  schedule does not change its Input. A schedule does not expire automatically.
+- Stop, cascade stop, detach, Reset, and Compact do not delete schedules.
+  Delivery that meets a stop waits until stop finishes. A detached Session
+  still receives its scheduled Input.
 
-The first version does not include repeated or periodic scheduling such as
-cron, relative times such as "in 30 minutes," attachments, automatic launch of
-a new session at the due time, or schedule display in `mo session view` or
-`mo session tree`.
+The first version excludes repeated or periodic schedules, relative times,
+attachments, automatic launch of a new Session at the due time, and schedule
+display in `mo session view` or `mo session tree`.
 
 ## Implementation Gaps
 
 Capability declaration, startup awareness, `mo agent spawn`, terminal reports,
-`mo session tree`, cascade stop, detach, and scheduled input are implemented.
-A child always inherits the parent Workspace and working directory. Git
-isolation remains an Agent and Git concern rather than a second Session Tree
-Workspace lifecycle.
+`mo session tree`, cascade stop, detach, and scheduled Input are implemented.
+A child inherits the parent Workspace and working directory. Git isolation
+remains an Agent and Git concern, not a second Session Tree Workspace
+lifecycle.
 
-Temporary anonymous child sessions are intentionally excluded. A child
-session identity must come from a defined Agent so that configuration has one
-owner and remains visible, adjustable, and reusable in the control plane. The
-spawn task brief provides runtime flexibility without a temporary role. A
-future incremental capability can add runtime-customized roles if a concrete
-need appears without changing this model.
+Temporary anonymous child Sessions are excluded. A child Session identity must
+come from a defined Agent so configuration has one owner and remains visible,
+adjustable, and reusable. The spawn brief provides runtime flexibility without
+a temporary role.
