@@ -78,6 +78,22 @@ public class DispatchSnapshotStoreTests
     }
 
     [Fact]
+    public async Task SaveFirstAsync_ConcurrentCallsReturnTheFirstStoredUnchanged()
+    {
+        await using var harness = await CreateHarnessAsync();
+        var first = BuildDispatch("wr_concurrent", "task-1.1", uses: "spec/first");
+        var second = BuildDispatch("wr_concurrent", "task-1.1", uses: "spec/second");
+
+        var results = await Task.WhenAll(
+            SaveFirstAsync(harness.Store, "wr_concurrent", "task-1.1", first),
+            SaveFirstAsync(harness.Store, "wr_concurrent", "task-1.1", second));
+
+        var winner = Assert.Single(results.Distinct());
+        Assert.Contains(winner, new[] { first, second });
+        Assert.Equal(winner, await LoadAsync(harness.Store, "wr_concurrent", "task-1.1"));
+    }
+
+    [Fact]
     public async Task DeleteAsync_RemovesRowThatExists()
     {
         await using var harness = await CreateHarnessAsync();

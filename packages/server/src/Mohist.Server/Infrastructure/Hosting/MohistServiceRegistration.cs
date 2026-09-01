@@ -174,6 +174,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IStateStore<Mohist.Server.Agent.Domain.Agent>, AgentStore>();
         services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         services.AddScoped<WorkflowRunQuerier>();
+        services.AddScoped<DiagnosisAssembler>();
         services.AddScoped<IWorkflowRunWorkProjection, WorkflowRunWorkProjection>();
         services.AddScoped<IDispatchSnapshotStore, DispatchSnapshotStore>();
         services.AddScoped<IWorkspaceStore, WorkspaceStore>();
@@ -306,6 +307,7 @@ public static class MohistServiceRegistration
         services.TryAddSingleton<IProcessStartTimeProvider, ProcessStartTimeProvider>();
         services.AddHostedService<SystemUpdateRecoveryService>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
+        services.AddScoped<IDoctorFactSource, DoctorFactSource>();
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IFileSystem, PhysicalFileSystem>();
         services.AddSingleton<IRuntimeSourceIdentity, RuntimeSourceIdentity>();
