@@ -89,11 +89,10 @@
         { "id": "arch" }
       ]
     },
-    // Two collection workers match the shared CI runner: the application host, the in-process
-    // Orleans silo, concurrent cluster fixtures, and three workers oversubscribe a four-vCPU
-    // machine and inflate per-Spec wall time into the p95 budget (#719). Capacity is a resource
-    // bound, not a speed control.
-    { "id": "server-l1", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKinds": ["Product"], "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.L1Tests/Mohist.Server.L1Tests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "2"], "report": "reports/server-l1.trx", "reportFormat": "trx", "deadlineMs": 300000, "enforce": true, "rules": [
+    // A single collection worker keeps the application host and in-process Orleans silo within
+    // the shared CI runner's CPU budget. More workers inflate per-Spec wall time into the p95
+    // budget; this resource cap is a stability control, not a throughput target.
+    { "id": "server-l1", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKinds": ["Product"], "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.L1Tests/Mohist.Server.L1Tests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "1"], "report": "reports/server-l1.trx", "reportFormat": "trx", "deadlineMs": 300000, "enforce": true, "rules": [
         { "id": "spec", "percentile": 95, "percentileMs": 500 }
       ]
     },
