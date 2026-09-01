@@ -410,7 +410,7 @@ test('prepareReportTarget creates the report parent and removes stale output bef
 test('lane sandbox gives every lane distinct temporary resources and isolates server runtime only when requested', () => {
   const web = laneSandbox('/evidence', 'web', { PATH: '/bin' }, 0)
   const runner = laneSandbox('/evidence', 'runner', { PATH: '/bin' }, 1)
-  const serverSpec = laneSandbox('/evidence', 'server-spec', { PATH: '/bin' }, 2, true)
+  const serverSpec = laneSandbox('/evidence', 'server-l1', { PATH: '/bin' }, 2, true)
 
   assert.equal(web.environment.TMPDIR, web.tempDir)
   assert.equal(web.environment.TEMP, web.tempDir)
@@ -437,11 +437,11 @@ test('lane sandbox gives every lane distinct temporary resources and isolates se
   assert.notEqual(web.homeDir, runner.homeDir)
   assert.notEqual(web.databasePath, serverSpec.databasePath)
   assert.notEqual(web.otelDatabasePath, serverSpec.otelDatabasePath)
-  assert.match(serverSpec.databasePath, /^\/evidence\/tmp\/server-spec\/mohist\/mohist\.db$/)
-  assert.match(serverSpec.otelDatabasePath, /^\/evidence\/tmp\/server-spec\/mohist\/otel\.db$/)
+  assert.match(serverSpec.databasePath, /^\/evidence\/tmp\/server-l1\/mohist\/mohist\.db$/)
+  assert.match(serverSpec.otelDatabasePath, /^\/evidence\/tmp\/server-l1\/mohist\/otel\.db$/)
   assert.match(web.homeDir, /^\/evidence\/tmp\/web\/home$/)
 
-  const verbose = laneSandbox('/evidence', 'server-spec', { Logging__LogLevel__Default: 'Debug' })
+  const verbose = laneSandbox('/evidence', 'server-l1', { Logging__LogLevel__Default: 'Debug' })
   assert.equal(verbose.environment.Logging__LogLevel__Default, 'Debug')
 })
 
@@ -655,7 +655,7 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
     enforce: false,
   }
   const unit: TrackConfig = {
-    id: 'server-unit',
+    id: 'server-l0',
     kind: 'dotnet-apphost',
     apphost: 'bin/unit',
     report: 'reports/unit.trx',
@@ -683,7 +683,7 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
     enforce: false,
   }
   const spec: TrackConfig = {
-    id: 'server-spec',
+    id: 'server-l1',
     kind: 'dotnet-apphost',
     apphost: 'bin/spec',
     apphostArgs: ['-parallel', 'collections', '-parallelAlgorithm', 'conservative', '-maxThreads', '2'],
@@ -692,36 +692,36 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
     deadlineMs: 1000,
     enforce: false,
   }
-  const planned = planTracks([spec, unit, runner, web, cli], '/evidence', ['cli', 'server-spec'], 'runner')
+  const planned = planTracks([spec, unit, runner, web, cli], '/evidence', ['cli', 'server-l1'], 'runner')
   const byId = new Map(planned.map((plan) => [plan.lane.id, plan.lane]))
 
   assert.deepEqual(byId.get('cli')?.dependsOn, undefined)
   assert.ok(byId.get('cli')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(byId.get('server-unit')?.dependsOn, ['server-spec'])
-  assert.ok(!byId.get('server-unit')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(byId.get('runner')?.dependsOn, ['server-spec'])
+  assert.deepEqual(byId.get('server-l0')?.dependsOn, ['server-l1'])
+  assert.ok(!byId.get('server-l0')?.resources?.includes('duration-measurement'))
+  assert.deepEqual(byId.get('runner')?.dependsOn, ['server-l1'])
   assert.ok(byId.get('runner')?.resources?.includes('duration-measurement'))
   assert.deepEqual(byId.get('web')?.dependsOn, ['runner'])
-  assert.deepEqual(byId.get('server-spec')?.dependsOn, ['cli'])
-  assert.ok(byId.get('server-spec')?.resources?.includes('duration-measurement'))
-  assert.ok(byId.get('server-spec')?.resources?.includes('server-spec'))
+  assert.deepEqual(byId.get('server-l1')?.dependsOn, ['cli'])
+  assert.ok(byId.get('server-l1')?.resources?.includes('duration-measurement'))
+  assert.ok(byId.get('server-l1')?.resources?.includes('server-l1'))
 
-  const partial = planTracks([unit, spec], '/evidence', ['cli', 'server-spec'], 'runner')
+  const partial = planTracks([unit, spec], '/evidence', ['cli', 'server-l1'], 'runner')
   assert.deepEqual(
     partial.map((plan) => plan.lane.id),
-    ['server-unit', 'server-spec'],
+    ['server-l0', 'server-l1'],
   )
   const partialById = new Map(partial.map((plan) => [plan.lane.id, plan.lane]))
-  assert.deepEqual(partialById.get('server-spec')?.dependsOn, undefined)
-  assert.ok(partialById.get('server-spec')?.resources?.includes('duration-measurement'))
-  assert.deepEqual(partialById.get('server-unit')?.dependsOn, ['server-spec'])
+  assert.deepEqual(partialById.get('server-l1')?.dependsOn, undefined)
+  assert.ok(partialById.get('server-l1')?.resources?.includes('duration-measurement'))
+  assert.deepEqual(partialById.get('server-l0')?.dependsOn, ['server-l1'])
 
   const zeroMatchInput = planTracks([unit], '/evidence', [], 'runner').map((plan) => ({
     ...plan,
     lane: { ...plan.lane, dependsOn: ['existing-precondition'] },
   }))
   const zeroMatchSnapshot = JSON.stringify(zeroMatchInput)
-  const zeroMatch = applyDurationMeasurementPhase(zeroMatchInput, ['cli', 'server-spec'], 'runner')
+  const zeroMatch = applyDurationMeasurementPhase(zeroMatchInput, ['cli', 'server-l1'], 'runner')
   assert.equal(JSON.stringify(zeroMatch), zeroMatchSnapshot)
   assert.equal(JSON.stringify(zeroMatchInput), zeroMatchSnapshot)
 })

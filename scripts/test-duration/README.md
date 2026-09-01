@@ -92,7 +92,7 @@ database, logical endpoint scope, and report path. Fixtures use Orleans
 in-memory transport and never probe or bind host ports. Node TypeScript checks
 run through `node --import tsx` without a shared IPC server.
 
-The Server L0 lane is the `server-unit` track. Grain activation and dispatch
+The Server L0 lane is the `server-l0` track. Grain activation and dispatch
 Specs run in its `OrleansGrainL0` collection through the controlled in-process
 fixture in TestSupport; ordinary L0 tests do not acquire that fixture. The first
 budget rule selects the grain Spec classes, pins their expected population at

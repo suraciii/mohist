@@ -6,7 +6,7 @@ namespace Mohist.Server.TestSupport;
 /// In-memory <see cref="IDispatchStreamLeaseStore"/> mirroring the SQL
 /// store's semantics: exclusive claim, expiry steal, backoff parking, and
 /// owner-checked mutation. Used by dispatcher unit specs; the SQL store's
-/// own behavior is covered by SpecTests against real SQLite.
+/// own behavior is covered by L1 application tests against real SQLite.
 /// </summary>
 public sealed class FakeDispatchStreamLeaseStore : IDispatchStreamLeaseStore
 {

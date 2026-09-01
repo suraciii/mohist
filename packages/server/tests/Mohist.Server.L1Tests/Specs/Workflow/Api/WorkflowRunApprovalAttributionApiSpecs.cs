@@ -1,0 +1,65 @@
+using System.Net;
+using System.Net.Http.Json;
+using Mohist.Server.L1Tests.Support;
+using Mohist.Server.Workflow.Domain.Run;
+using Xunit;
+
+namespace Mohist.Server.L1Tests.Specs.Workflow.Api;
+
+public partial class WorkflowRunControlApiSpecs
+{
+    /// <summary>
+    /// #323 AC1: approval attribution comes from the authenticated
+    /// principal, never from a self-declared request parameter. The spec
+    /// fixture authenticates with the operator credential, which resolves
+    /// to the service principal (id <c>service</c>), so every approval in
+    /// this collection records <c>service</c> as decidedBy no matter what
+    /// the request body claims.
+    /// </summary>
+    [Fact]
+    public async Task Approve_WithDisplayName_AttributesToPrincipalAndKeepsAliasForDisplay()
+    {
+        var (_, _, _, wrId) = await SeedAwaitingApprovalWorkflowAsync();
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/approve",
+            new { displayName = "supervisor" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        var plan = run!.Stages.Single(s => s.Id == "plan");
+        Assert.Equal("service", plan.ApprovalStatus?.DecidedBy);
+        Assert.Equal("supervisor", plan.ApprovalStatus?.DisplayName);
+    }
+
+    [Fact]
+    public async Task Approve_WithoutDisplayName_OnIssueRoute_AttributesToAuthenticatedPrincipal()
+    {
+        var (projectId, issueNumber, _, wrId) = await SeedAwaitingApprovalWorkflowAsync();
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/approve",
+            new { });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        var plan = run!.Stages.Single(s => s.Id == "plan");
+        Assert.Equal(StageRunStatus.Completed, plan.Status);
+        Assert.Equal("service", plan.ApprovalStatus?.DecidedBy);
+    }
+
+    [Fact]
+    public async Task RequestChanges_WithoutDisplayName_AttributesToAuthenticatedPrincipal()
+    {
+        var (_, _, _, wrId) = await SeedAwaitingApprovalWorkflowAsync();
+
+        var response = await _client.PostAsJsonAsync(
+            $"/api/workflow-runs/{wrId}/request-changes",
+            new { message = "needs more detail" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        Assert.Single(run!.Feedback);
+        Assert.Equal("service", run.Stages.Single(s => s.Id == "plan").ApprovalStatus?.DecidedBy);
+    }
+}

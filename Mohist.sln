@@ -7,7 +7,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Server", "packages\s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Cli", "packages\cli\Mohist.Cli\Mohist.Cli.csproj", "{A1B2C3D4-0002-0002-0002-000000000002}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Server.SpecTests", "packages\server\tests\Mohist.Server.SpecTests\Mohist.Server.SpecTests.csproj", "{A1B2C3D4-0003-0003-0003-000000000003}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Server.L1Tests", "packages\server\tests\Mohist.Server.L1Tests\Mohist.Server.L1Tests.csproj", "{A1B2C3D4-0003-0003-0003-000000000003}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "packages", "packages", "{809F86A1-1C4C-B159-0CD4-DF9D33D876CE}"
 EndProject
@@ -27,7 +27,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{B89EF008
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Cli.Tests", "packages\cli\tests\Mohist.Cli.Tests\Mohist.Cli.Tests.csproj", "{E2CF616E-7F27-41A3-AACA-E78E00858850}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Server.UnitTests", "packages\server\tests\Mohist.Server.UnitTests\Mohist.Server.UnitTests.csproj", "{B2776360-BAF2-4D60-908B-D73225F8D307}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Server.L0Tests", "packages\server\tests\Mohist.Server.L0Tests\Mohist.Server.L0Tests.csproj", "{B2776360-BAF2-4D60-908B-D73225F8D307}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

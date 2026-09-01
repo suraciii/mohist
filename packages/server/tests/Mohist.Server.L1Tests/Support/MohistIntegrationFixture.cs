@@ -1,0 +1,520 @@
+using Mohist.Server.TestSupport;
+using System.Net;
+using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Api;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Auth.Identity;
+using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.PublicApi;
+using Mohist.Server.Infrastructure.Slack.Ports;
+using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.GitHub.Ports;
+using Mohist.Server.Logging;
+using Mohist.Server.Otel;
+using Mohist.Server.Runner.Services;
+using Mohist.Server.Sessions.Services;
+using Mohist.Server.Slack.Services;
+using Mohist.Server.SystemInfo;
+using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services.Prompts;
+using OpenTelemetry;
+using OpenTelemetry.Exporter;
+using Xunit;
+using EnvironmentAbstractions.TestHelpers;
+
+namespace Mohist.Server.L1Tests.Support;
+
+public class MohistIntegrationFixture : IAsyncLifetime
+{
+    public const string OperatorToken = "test-operator-token-0123456789abcdef";
+    public const string AdminToken = "test-admin-token-0123456789abcdef";
+    private const string VirtualRunnerRoot = "/mohist-tests/runner";
+    private const string VirtualSystemUpdateStatePath = "/mohist-tests/system-update.json";
+    private const string VirtualLogsPath = "/mohist-tests/logs";
+    private static readonly object WorkspaceCodegenWarmupLock = new();
+    private static Task? _workspaceCodegenWarmup;
+    private SqliteConnection _keeper = null!;
+    private MohistWebApplicationFactory _factory = null!;
+    private readonly bool _otelEnabled;
+    private readonly bool _manualPublicProjection;
+    public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
+    public HttpClient Client { get; private set; } = null!;
+    public IServiceProvider Services => _factory.Services;
+    public HttpClient CreateClient() => _factory.CreateClient();
+    public WebSocketClient CreateWebSocketClient() => _factory.Server.CreateWebSocketClient();
+    public FakeRunnerWorkspaceClient RunnerWorkspace => _factory.Services.GetRequiredService<FakeRunnerWorkspaceClient>();
+    public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
+    public AgentLaunchParticipantProbe LaunchFaults => _factory.Services.GetRequiredService<AgentLaunchParticipantProbe>();
+    public ReportPersistenceFailureProbe ReportPersistenceFailures =>
+        _factory.Services.GetRequiredService<ReportPersistenceFailureProbe>();
+    public AgentSessionPersistenceTestProbe Persistence => _factory.Persistence;
+    public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
+
+    public string ConnectionString { get; private set; } = null!;
+    public string RunnerRoot => VirtualRunnerRoot;
+
+    public MohistIntegrationFixture()
+        : this(otelEnabled: false)
+    {
+    }
+
+    protected MohistIntegrationFixture(bool otelEnabled, bool manualPublicProjection = false)
+    {
+        _otelEnabled = otelEnabled;
+        _manualPublicProjection = manualPublicProjection;
+    }
+
+    public async ValueTask InitializeAsync()
+    {
+        var dbName = $"mohist-{Guid.NewGuid():N}";
+        ConnectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
+        _keeper = new SqliteConnection(ConnectionString);
+        await _keeper.OpenAsync();
+        MigratedSqliteTemplate.CopyTo(_keeper);
+
+        _factory = new MohistWebApplicationFactory(
+            ConnectionString,
+            VirtualRunnerRoot,
+            VirtualSystemUpdateStatePath,
+            VirtualLogsPath,
+            TimeProvider,
+            otelEnabled: _otelEnabled,
+            manualPublicProjection: _manualPublicProjection);
+        Client = _factory.CreateClient();
+        Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {OperatorToken}");
+        Client.DefaultRequestHeaders.Add(
+            Mohist.Server.Slack.Services.SlackAdapterOperatorAuthenticator.OperatorIdHeaderName,
+            "spec-operator");
+        await _factory.EnsureSchemaAsync();
+        await EnsureWorkspaceCodegenWarmAsync();
+    }
+
+    private Task EnsureWorkspaceCodegenWarmAsync()
+    {
+        // Orleans serializer codegen is process-wide, so every integration
+        // collection can share the first fixture's completed warm-up.
+        lock (WorkspaceCodegenWarmupLock)
+            return _workspaceCodegenWarmup ??= WarmUpWorkspaceCodegenAsync();
+    }
+
+    /// <summary>
+    /// Activates a WorkspaceGrain and round-trips a workspace through it so
+    /// Orleans serializer/codegen for the workspace types is paid during
+    /// fixture setup (unmeasured) instead of inside the first spec that
+    /// creates a workspace. The first workspace-touching test of a
+    /// collection used to absorb 1-10s of codegen under parallel load and
+    /// could exceed the per-test spec budget.
+    /// </summary>
+    private async Task WarmUpWorkspaceCodegenAsync()
+    {
+        try
+        {
+            await using var scope = Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var projectId = $"warmup-{Guid.NewGuid():N}";
+            db.Projects.Add(new Mohist.Server.Infrastructure.Data.Project.ProjectRow
+            {
+                Id = projectId,
+                Name = projectId,
+                CreatedAt = TimeProvider.GetUtcNow(),
+                UpdatedAt = TimeProvider.GetUtcNow(),
+            });
+            await db.SaveChangesAsync();
+            var name = $"warmup-{Guid.NewGuid():N}";
+            var origin = new Mohist.Server.Workspace.Domain.WorkspaceOrigin.Slack("T-warmup", "C-warmup");
+            var grain = Grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
+                Mohist.Server.Infrastructure.Orleans.GrainKey.Workspace(projectId, name));
+            await grain.CreateAsync(name, origin, [], TimeProvider.GetUtcNow());
+            await grain.ArchiveByOriginAsync(origin, TimeProvider.GetUtcNow());
+            // Remove the scratch rows: spec classes share this fixture's
+            // database and some query project-wide state (e.g. repository
+            // data upgrades) that must not see warm-up artifacts.
+            db.WorkspaceEvents.RemoveRange(db.WorkspaceEvents
+                .Where(row => row.Source.StartsWith("/mohist/projects/" + projectId + "/workspaces/")));
+            db.Workspaces.RemoveRange(db.Workspaces
+                .Where(row => row.ProjectId == projectId));
+            db.Projects.Remove(db.Projects.Single(row => row.Id == projectId));
+            await db.SaveChangesAsync();
+        }
+        catch
+        {
+            // Warm-up is best-effort; specs must not depend on it.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Client?.Dispose();
+        _factory?.Dispose();
+        if (_keeper is not null)
+            await _keeper.DisposeAsync();
+    }
+}
+
+/// <summary>
+/// Resource-suite host for specs whose behavior is defined over process or
+/// cluster state rather than a single project.
+/// </summary>
+public sealed class IsolatedMohistIntegrationFixture : MohistIntegrationFixture;
+
+public sealed class PublicProjectionIntegrationFixture : MohistIntegrationFixture
+{
+    public PublicProjectionIntegrationFixture()
+        : base(otelEnabled: false, manualPublicProjection: true)
+    {
+    }
+
+    public async Task DrainPublicProjectionAsync(CancellationToken ct = default)
+    {
+        var engine = Services.GetRequiredService<PublicApiProjectionEngine>();
+        while (await engine.ProcessPendingAsync(ct))
+        {
+        }
+    }
+
+    public async Task ProjectSessionAsync(string sessionId, CancellationToken ct = default)
+    {
+        var engine = Services.GetRequiredService<PublicApiProjectionEngine>();
+        while (await engine.ProcessSessionAsync(sessionId, ct))
+        {
+        }
+
+        while (await engine.ProcessPendingAsync(ct))
+        {
+        }
+    }
+}
+
+public sealed class OtelIntegrationFixture : MohistIntegrationFixture
+{
+    public OtelIntegrationFixture()
+        : base(otelEnabled: true)
+    {
+    }
+}
+
+public class MohistWebApplicationFactory : WebApplicationFactory<Program>
+{
+    private readonly string _connectionString;
+    private readonly string _runnerRoot;
+    private readonly string _systemUpdateStatePath;
+    private readonly string _logsPath;
+    private readonly FakeTimeProvider _timeProvider;
+    private readonly bool _otelEnabled;
+    private readonly bool _manualPublicProjection;
+    public AgentSessionPersistenceTestProbe Persistence { get; }
+    // Keeper for the in-memory OtelDb override; disposed with the factory.
+    private SqliteConnection? _otelKeeper;
+
+    public string ArtifactStorageRoot => "/mohist-tests/artifacts";
+    public string LogsPath => _logsPath;
+
+    public MohistWebApplicationFactory(
+        string connectionString,
+        string runnerRoot,
+        string systemUpdateStatePath,
+        FakeTimeProvider? timeProvider = null,
+        bool otelEnabled = false,
+        bool manualPublicProjection = false)
+        : this(
+            connectionString,
+            runnerRoot,
+            systemUpdateStatePath,
+            "/mohist-tests/logs",
+            timeProvider,
+            otelEnabled,
+            manualPublicProjection)
+    {
+    }
+
+    public MohistWebApplicationFactory(
+        string connectionString,
+        string runnerRoot,
+        string systemUpdateStatePath,
+        string logsPath,
+        FakeTimeProvider? timeProvider = null,
+        bool otelEnabled = false,
+        bool manualPublicProjection = false)
+    {
+        _connectionString = connectionString;
+        _runnerRoot = runnerRoot;
+        _systemUpdateStatePath = systemUpdateStatePath;
+        _logsPath = logsPath;
+        _timeProvider = timeProvider ?? new FakeTimeProvider(TestTime.UtcNow);
+        _otelEnabled = otelEnabled;
+        _manualPublicProjection = manualPublicProjection;
+        Persistence = new AgentSessionPersistenceTestProbe(
+            () => _timeProvider.Advance(TimeSpan.FromSeconds(1)));
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        // WebApplicationFactory must never fall through to the production
+        // Kestrel listener. This is a logical TestServer URL; no socket is
+        // opened and requests stay inside the in-process handler.
+        builder.UseTestServer(options => options.PreserveExecutionContext = true);
+        builder.UseSetting(WebHostDefaults.ServerUrlsKey, "http://localhost");
+        builder.UseEnvironment(MohistHostEnvironment.Testing);
+        builder.UseSetting("Mohist:Testing:InMemoryOrleansTransport", "true");
+        builder.UseSetting("Mohist:ServerUrl", "http://localhost");
+        builder.UseSetting("Mohist:Otel:Endpoint", "http://localhost/otel");
+        // OTel tracing remains enabled for this fixture, but its inbound
+        // collector is intentionally disabled. TestServer and the in-memory
+        // exporter cover the observable path without touching an OS port.
+        builder.UseSetting("Mohist:Otel:Port", "0");
+        builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
+        builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
+        builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
+        builder.UseSetting("Mohist:ArtifactStorage:Root", ArtifactStorageRoot);
+        builder.UseSetting("Mohist:LogsPath", _logsPath);
+        builder.UseSetting("Mohist:Otel:Enabled", _otelEnabled ? "true" : "false");
+        builder.UseSetting("Mohist:Otel:ExportEnabled", "false");
+
+        builder.ConfigureServices(services =>
+        {
+            services.RemoveAll<IAgentSessionPersistenceObserver>();
+            services.AddSingleton<IAgentSessionPersistenceObserver>(Persistence);
+        });
+
+        builder.ConfigureAppConfiguration((_, config) =>
+        {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Mohist:SqliteConnectionString"] = _connectionString,
+                ["Mohist:ServerUrl"] = "http://localhost",
+                ["Mohist:Otel:Endpoint"] = "http://localhost/otel",
+                ["Mohist:Otel:Port"] = "0",
+                ["Mohist:RunnerRoot"] = _runnerRoot,
+                ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
+                ["Mohist:ArtifactStorage:Root"] = ArtifactStorageRoot,
+                ["Mohist:LogsPath"] = _logsPath,
+                ["Mohist:Otel:Enabled"] = _otelEnabled ? "true" : "false",
+                ["Mohist:Otel:ExportEnabled"] = "false",
+                ["Mohist:Testing:InMemoryOrleansTransport"] = "true",
+                ["Mohist:AgentJob:DispatchBackoffInitial"] = "00:00:00.050",
+                ["Mohist:AgentJob:DispatchBackoffCap"] = "00:00:00.200",
+                ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",
+                ["Mohist:AgentJob:JobTimeout"] = "00:00:08",
+                ["Mohist:Notifications:Hermes:WebhookUrl"] = null,
+                ["Mohist:OperatorToken"] = MohistIntegrationFixture.OperatorToken,
+                ["Mohist:AdminToken"] = MohistIntegrationFixture.AdminToken,
+            });
+        });
+
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IWorkflowReportPersistenceFailureInjector>();
+            services.RemoveAll<IAgentJobReportPersistenceFailureInjector>();
+            services.AddSingleton<ReportPersistenceFailureProbe>();
+            services.AddSingleton<IWorkflowReportPersistenceFailureInjector>(provider =>
+                provider.GetRequiredService<ReportPersistenceFailureProbe>());
+            services.AddSingleton<IAgentJobReportPersistenceFailureInjector>(provider =>
+                provider.GetRequiredService<ReportPersistenceFailureProbe>());
+
+            // Selection recovery/expiry Specs invoke ProcessPendingAsync on
+            // demand. The shared assembly fixture must not run the autonomous
+            // loop against the common integration database while unrelated
+            // tests advance its fake clock.
+            RemoveHostedService<SlackAgentSelectionObligationWorker>(services);
+
+            if (_manualPublicProjection)
+            {
+                RemoveHostedService<PublicExecutionProjector>(services);
+            }
+
+            services.RemoveAll<IGitHubAppClient>();
+            services.AddSingleton<FakeGitHubAppClient>();
+            services.AddSingleton<IGitHubAppClient>(provider => provider.GetRequiredService<FakeGitHubAppClient>());
+            services.RemoveAll<IFileCredentialStore>();
+            services.AddSingleton<IFileCredentialStore>(new InMemoryFileCredentialStore());
+            for (var index = services.Count - 1; index >= 0; index--)
+            {
+                if (services[index].ServiceType == typeof(ILoggerProvider))
+                    services.RemoveAt(index);
+            }
+            services.AddSingleton<ILoggerProvider, InMemoryLoggerProvider>();
+            services.RemoveAll<ILogTailSource>();
+            services.AddSingleton<InMemoryLogTailSource>();
+            services.AddSingleton<ILogTailSource>(provider => provider.GetRequiredService<InMemoryLogTailSource>());
+            services.RemoveAll<Mohist.Server.SystemInfo.IFileSystem>();
+            services.AddSingleton<Mohist.Server.SystemInfo.IFileSystem, InMemoryServerFileSystem>();
+            services.RemoveAll<ISystemUpdateStore>();
+            services.AddSingleton<InMemorySystemUpdateStore>();
+            services.AddSingleton<ISystemUpdateStore>(provider => provider.GetRequiredService<InMemorySystemUpdateStore>());
+            services.RemoveAll<IManagedAssetCatalog>();
+            services.AddSingleton<IManagedAssetCatalog, InMemoryManagedAssetCatalog>();
+            services.RemoveAll<IAttachmentStorage>();
+            services.AddSingleton<InMemoryAttachmentStorage>();
+            services.AddSingleton<IAttachmentStorage>(provider => provider.GetRequiredService<InMemoryAttachmentStorage>());
+            services.RemoveAll<IWorkflowArtifactStorage>();
+            services.AddSingleton<InMemoryWorkflowArtifactStorage>();
+            services.AddSingleton<IWorkflowArtifactStorage>(provider => provider.GetRequiredService<InMemoryWorkflowArtifactStorage>());
+            services.RemoveAll<IWebContentProvider>();
+            services.AddSingleton<IWebContentProvider, InMemoryWebContentProvider>();
+            services.RemoveAll<IPromptLoader>();
+            services.AddSingleton<IPromptLoader>(_ => new InMemoryPromptLoader());
+            services.AddSingleton<IStartupFilter, LoopbackTestConnectionStartupFilter>();
+            services.RemoveAll<IRunnerWorkspaceClient>();
+            services.AddSingleton<FakeRunnerWorkspaceClient>();
+            services.AddSingleton<IRunnerWorkspaceClient>(provider => provider.GetRequiredService<FakeRunnerWorkspaceClient>());
+            services.RemoveAll<TimeProvider>();
+            services.AddSingleton<TimeProvider>(_timeProvider);
+            services.PostConfigure<OtlpExporterOptions>("tracing", ConfigureInMemoryOtlpExporter);
+            services.PostConfigure<OtlpExporterOptions>("metrics", ConfigureInMemoryOtlpExporter);
+            // Checkpoint-rewind specs need a stable observation window;
+            // explicit nudge calls drive their recovery without the hosted
+            // timer repairing the checkpoint before the lag assertion.
+            services.Configure<PublicProjectionOptions>(options =>
+                options.SweepInterval = TimeSpan.FromHours(1));
+            services.RemoveAll<IAgentJobDispatchObserver>();
+            services.AddSingleton<AgentJobDispatchProbe>();
+            services.AddSingleton<IAgentJobDispatchObserver>(provider => provider.GetRequiredService<AgentJobDispatchProbe>());
+            services.RemoveAll<IAgentLaunchParticipantProbe>();
+            services.AddSingleton<AgentLaunchParticipantProbe>();
+            services.AddSingleton<IAgentLaunchParticipantProbe>(provider => provider.GetRequiredService<AgentLaunchParticipantProbe>());
+            services.RemoveAll<IAgentSessionPersistenceObserver>();
+            services.AddSingleton<IAgentSessionPersistenceObserver>(Persistence);
+            services.RemoveAll<IRunnerControlTransport>();
+            services.RemoveAll<IRunnerSessionCommandTransport>();
+            services.AddSingleton<RecordingRunnerControlTransport>();
+            services.AddSingleton<IRunnerControlTransport>(provider => provider.GetRequiredService<RecordingRunnerControlTransport>());
+            services.AddSingleton<IRunnerSessionCommandTransport>(provider => provider.GetRequiredService<RecordingRunnerControlTransport>());
+            services.RemoveAll<ConfigService>();
+            services.RemoveAll<IConfigDocumentStore>();
+            services.AddSingleton<InMemoryConfigDocumentStore>();
+            services.AddSingleton<IConfigDocumentStore>(provider => provider.GetRequiredService<InMemoryConfigDocumentStore>());
+            services.RemoveAll<IEnvironmentVariableProvider>();
+            services.AddSingleton<IEnvironmentVariableProvider>(_ =>
+            {
+                var environment = new MockEnvironmentVariableProvider();
+                environment[MohistWorkspaceLayout.RunnerRootEnvironmentVariable] = _runnerRoot;
+                return environment;
+            });
+            services.AddSingleton(provider => new ConfigService(
+                provider.GetRequiredService<IConfiguration>(),
+                provider.GetRequiredService<IEnvironmentVariableProvider>(),
+                provider.GetRequiredService<ILogger<ConfigService>>(),
+                provider.GetRequiredService<IConfigDocumentStore>()));
+            // The production Slack port adapters reach Slack over the typed
+            // SlackApiTransport client. Replace its handler chain with the
+            // scripted fake so no spec can ever touch the real network, and
+            // access-policy specs drive users.info / conversations.info
+            // through the production adapter + transport against scripted
+            // responses. The handler is transient and delegates to the
+            // singleton script; the typed client may dispose its handler
+            // chain without disposing shared test state.
+            services.RemoveAll<SlackApiTransport>();
+            services.AddSingleton<SlackApiTestScript>();
+            services.AddTransient<SlackApiTestHandler>();
+            services.AddHttpClient<SlackApiTransport>(client =>
+            {
+                client.BaseAddress = new Uri("https://slack.test/api/");
+            }).ConfigurePrimaryHttpMessageHandler<SlackApiTestHandler>();
+
+            services.RemoveAll<IDbContextFactory<MohistDbContext>>();
+            services.AddDbContextFactory<MohistDbContext>(options =>
+                options
+                    .UseSqlite(_connectionString)
+                    .AddInterceptors(new RequestWorkDbCommandInterceptor()));
+            // Replace the file-backed production OtelDb (which would otherwise
+            // resolve to $HOME/.mohist/otel.db) with an in-memory instance so
+            // the integration factory never creates a real otel.db file
+            // (design/testing.md "No External Environment"). The keeper connection is
+            // owned by this factory and disposed in Dispose(bool).
+            var (otelDb, otelKeeper) = InMemoryOtelDb.Create();
+            _otelKeeper = otelKeeper;
+            services.RemoveAll<OtelDb>();
+            services.AddSingleton(otelDb);
+        });
+    }
+
+    private static void RemoveHostedService<T>(IServiceCollection services)
+    {
+        for (var index = services.Count - 1; index >= 0; index--)
+        {
+            var descriptor = services[index];
+            if (descriptor.ServiceType == typeof(IHostedService)
+                && descriptor.ImplementationType == typeof(T))
+            {
+                services.RemoveAt(index);
+            }
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _otelKeeper?.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    public async Task EnsureSchemaAsync()
+    {
+        await using var scope = Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS "LabelDefinitions" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_LabelDefinitions" PRIMARY KEY,
+                "ProjectId" TEXT NOT NULL,
+                "Key" TEXT NOT NULL,
+                "Description" TEXT NOT NULL,
+                "SupportedValuesJson" TEXT NOT NULL DEFAULT '[]',
+                "CreatedAt" TEXT NOT NULL,
+                "UpdatedAt" TEXT NOT NULL
+            );
+            """);
+        await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS \"IX_LabelDefinitions_ProjectId_Key\" ON \"LabelDefinitions\" (\"ProjectId\", \"Key\");");
+
+        // Issue-318 T-002: Program.cs already calls db.Database.Migrate()
+        // during host startup, but the migration that materializes the
+        // WorkflowRuns STORED status computed column is produced in T-004.
+        // Apply the test-only schema fixup so the new status-filter
+        // queries (FindAssignableAsync / FindAssignedToAsync /
+        // CountRunningAssignedToAsync) have the column and index they
+        // expect. Idempotent — safe to call before/after Migrate().
+        GrainTestConfig.ApplyWorkflowRunsStatusSchemaFix(db);
+    }
+
+    private static void ConfigureInMemoryOtlpExporter(OtlpExporterOptions options)
+    {
+        options.ExportProcessorType = ExportProcessorType.Simple;
+        options.HttpClientFactory = () => new HttpClient(new InMemoryOtlpExporterHandler());
+    }
+
+}
+
+public sealed class LoopbackTestConnectionStartupFilter : IStartupFilter
+{
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+    {
+        app.Use(async (context, continuation) =>
+        {
+            if (context.Request.Headers.TryGetValue("X-Test-Remote-Address", out var requestedAddress)
+                && IPAddress.TryParse(requestedAddress.ToString(), out var parsedAddress))
+                context.Connection.RemoteIpAddress = parsedAddress;
+            context.Connection.RemoteIpAddress ??= IPAddress.Loopback;
+            context.Connection.LocalIpAddress ??= IPAddress.Loopback;
+            await continuation();
+        });
+        next(app);
+    };
+}

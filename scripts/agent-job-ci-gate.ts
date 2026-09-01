@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseAssemblyName, resolveFocusedCommand } from './test-duration/focused.js'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const csproj = 'packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj'
+const csproj = 'packages/server/tests/Mohist.Server.L1Tests/Mohist.Server.L1Tests.csproj'
 const timeoutArgs = ['--signal=TERM', '--kill-after=30s', '180s'] as const
 
 export const gateRounds = 10
@@ -14,11 +14,11 @@ export const gateRounds = 10
 export const targets = [
   {
     id: 'observer',
-    className: 'Mohist.Server.SpecTests.Specs.Agent.Grain.AgentJobDispatchObserverSpecs',
+    className: 'Mohist.Server.L1Tests.Specs.Agent.Grain.AgentJobDispatchObserverSpecs',
   },
   {
     id: 'grain',
-    className: 'Mohist.Server.SpecTests.Specs.Agent.Grain.AgentJobGrainSpecs',
+    className: 'Mohist.Server.L1Tests.Specs.Agent.Grain.AgentJobGrainSpecs',
   },
 ] as const
 

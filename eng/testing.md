@@ -495,11 +495,11 @@ review guidelines. The source-file ratchet is the automated size gate.
 
 ## Server L0 Resource Ownership
 
-Server L0 has two Resource boundaries inside `Mohist.Server.UnitTests`.
+Server L0 has two Resource boundaries inside `Mohist.Server.L0Tests`.
 Component and module Specs that do not need Orleans use ordinary class or
 collection fixtures. Specs whose claim includes activation, serialization,
 reminder, reentrancy, or real grain dispatch use the `OrleansGrainL0`
-collection and its shared TestSupport fixture. The `server-unit` track combines
+collection and its shared TestSupport fixture. The `server-l0` track combines
 both boundaries into the complete Server L0 population while retaining a
 separate 50 ms budget bucket for the grain Specs. This is one
 application-and-Level track, not a project or track per Resource lane.

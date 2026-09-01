@@ -204,24 +204,24 @@ test('scheduler waits for all dependencies before admitting a join lane', async 
 })
 
 test('scheduler completes the bounded Spec phase before throughput fan-out', async () => {
-  const starts = startSignals('cli', 'server-spec', 'server-unit', 'runner')
+  const starts = startSignals('cli', 'server-l1', 'server-l0', 'runner')
   const cli = deferred<boolean>()
   const spec = deferred<boolean>()
   const unit = deferred<boolean>()
   const runner = deferred<boolean>()
   const deferredById = new Map<string, Deferred<boolean>>([
     ['cli', cli],
-    ['server-spec', spec],
-    ['server-unit', unit],
+    ['server-l1', spec],
+    ['server-l0', unit],
     ['runner', runner],
   ])
 
   const pending = scheduleLanes(
     [
       { id: 'cli', resources: ['host', 'dotnet', 'duration-measurement'] },
-      { id: 'server-spec', dependsOn: ['cli'], resources: ['host', 'dotnet', 'duration-measurement'] },
-      { id: 'server-unit', dependsOn: ['server-spec'], resources: ['host', 'dotnet'] },
-      { id: 'runner', dependsOn: ['server-spec'], resources: ['host', 'node', 'duration-measurement'] },
+      { id: 'server-l1', dependsOn: ['cli'], resources: ['host', 'dotnet', 'duration-measurement'] },
+      { id: 'server-l0', dependsOn: ['server-l1'], resources: ['host', 'dotnet'] },
+      { id: 'runner', dependsOn: ['server-l1'], resources: ['host', 'node', 'duration-measurement'] },
     ],
     (lane): RunningLane<boolean> => {
       starts.record(lane.id)
@@ -234,11 +234,11 @@ test('scheduler completes the bounded Spec phase before throughput fan-out', asy
   await starts.waitFor('cli')
   assert.deepEqual(starts.started, ['cli'])
   cli.resolve(true)
-  await starts.waitFor('server-spec')
-  assert.deepEqual(starts.started, ['cli', 'server-spec'])
+  await starts.waitFor('server-l1')
+  assert.deepEqual(starts.started, ['cli', 'server-l1'])
   spec.resolve(true)
-  await Promise.all([starts.waitFor('server-unit'), starts.waitFor('runner')])
-  assert.deepEqual(starts.started, ['cli', 'server-spec', 'server-unit', 'runner'])
+  await Promise.all([starts.waitFor('server-l0'), starts.waitFor('runner')])
+  assert.deepEqual(starts.started, ['cli', 'server-l1', 'server-l0', 'runner'])
   unit.resolve(true)
   runner.resolve(true)
 
