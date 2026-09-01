@@ -1,117 +1,141 @@
 # Agent Event Routing
 
-A Mohist Agent responds to system events automatically through a
-Project-scoped **event routing table**, without a manual launch. Agent means a
-Mohist Agent throughout this document; see
-[`agent-execution.md`](agent-execution.md) for terminology and ownership
-invariants. See [`event-protocol.md`](event-protocol.md) for the envelope and
-match-expression syntax.
+A Project-scoped routing table starts Mohist Agents from system events. This
+document defines the table, matching, prompt rendering, and launch boundary.
+[`event-protocol.md`](event-protocol.md) defines the event envelope and match
+language. [`agent-execution.md`](agent-execution.md) defines Agent ownership and
+lifecycle.
 
-This design replaces the earlier subscription plus priority-arbitration model,
-which used a separate AgentSubscription aggregate and Arbitrate operation. The
-current Agent subscription surface is an Agent-scoped configuration view over
-the same RoutingRule table for API, CLI, and Web addressing. It does not
-reintroduce a separate persisted object, matcher, or arbitrator.
+## Core Decisions
 
-## Boundary
+- One ordered Project table owns routing rules. An Agent subscription is an
+  Agent-scoped view of that table, not another resource.
+- Matching reads only the event envelope. It never queries a domain aggregate.
+- Table order supplies priority. `Continue` supplies fanout.
+- A rule starts an Agent through `IAgentLauncher`; it does not own execution.
+- An event starts one Agent at most once, even when several trigger paths match.
+- A rule that cannot execute is a skipped match, not a routing failure.
+- Rules use the same event attributes and expression language for matching and
+  prompt rendering.
+- Routing has no `Priority`, `Arbitrate`, or `CoordinationMode` concept.
 
-Routing belongs to the Agent context and consumes the CloudEvent PL from the
+## System Boundary
+
+```text diagram
+      +------------+
+      | CloudEvent |
+      +------+-----+
+             |
+             v
+ +-----------------------+
+ | Project routing table |
+ +-----------+-----------+
+             |
+             v
+ +----------------------+
+ | ordered active rules |<-----+
+ +-----------+----------+      |
+             |                 |
+             v                 |
+        +--------+             |
+        | Match? +-------------++
+        +----+---+             ||
+             +--+              ||
+                vyes           ||
+      +-------------------+    ||
+      | launch Agent once |    ||
+      +---------+---------+    ||
+                |              ||
+                v              ||
+          +-----------+        ||
+          | Continue? |        ||
+          +-----+-----+        ||
+         +------+------+       ||
+         vyes          vno     ||
+   +-----------+   +------+  no||
+   | next rule +<--| stop |----++
+   +-----------+   +------+
+```
+
+The routing table consumes the CloudEvent Published Language from the
 infrastructure layer. It cannot import `Workflow.Domain` or `Issue.Domain`.
-Matching and rendering use only the envelope and perform no cross-domain query.
+System subscription handlers consume the same envelope through the dispatcher,
+but routing rules remain the user-facing Agent consumer. An Agent response uses
+normal commands such as `mo run approve` and `mo issue comment create`.
 
 ## Model
 
 ```text literal
 RoutingRule (one ordered, Project-scoped table)
   Id, ProjectId, Name
-  Position                  Unique position; evaluation uses this order
-  Match                     CEL-subset expression from event-protocol.md
-  AgentId                   Agent that responds
-  ResponsePrompt            Template with {{event.<attr>}} placeholders
-  Continue                  Continue evaluation after a match; default false
+  Position                  unique order used for evaluation
+  Match                     CEL-subset expression
+  AgentId                   responding Agent
+  ResponsePrompt            {{event.<attr>}} template
+  Continue                  continue after a match; default false
   Status                    active | archived | deleted
 ```
 
-Each Project has one table. Rules reference Agents, while execution ownership
-remains in the Project-scoped table. The Agent subscription view shows and
-modifies rules for one `AgentId`. It can express that one Agent has several
-subscriptions without moving ordering, fallback, or takeover order under the
-Agent.
+Each rule references an Agent in the same Project. The Agent subscription view
+filters and edits rules by `AgentId` without changing their order or semantics.
 
 ## Evaluation Semantics
 
-The routing table is Project-scoped. An event envelope without `projectid`
-enters no routing table, consistent with existing dispatch behavior. When an
-event with `projectid` arrives, Mohist reads that Project's active rules in
+For an event with `projectid`, Mohist reads active rules for that Project in
 ascending `Position` order:
 
-1. Evaluate `Match`. Continue to the next rule when it does not match.
-2. On a match, render `ResponsePrompt` and launch the Agent through
-   `IAgentLauncher`. Stop when `Continue == false`; otherwise evaluate the next
+1. Evaluate `Match`. A false result advances to the next rule.
+2. On a match, render `ResponsePrompt` and attempt one Agent launch.
+3. Skip a rule when its Agent is archived or its rendered prompt is empty. Log
+   the reason as a structured routing result and continue.
+4. Treat an expression evaluation error as no match, as defined by
+   [`event-protocol.md`](event-protocol.md).
+5. Stop after a launch when `Continue` is false. Otherwise evaluate the next
    rule.
-3. Treat a match that cannot execute as no match, write a structured log, and
-   continue. This includes an archived Agent or an empty rendered prompt.
-4. Treat a runtime expression error as no match, as defined in
-   `event-protocol.md`.
-5. Launch the same Agent at most once for one event. When an earlier rule or
-   watch declaration launched it, log and skip any later matching rule for that
-   Agent. Use the response prompt from the first rule that launched it.
+6. If another rule or watch already launched the same Agent for the event, log
+   and skip the later launch. Keep the first rule for attribution.
 
-This produces:
+An event without `projectid` enters no routing table. A matching Agent is
+launched through the normal Agent API and receives the event context through
+its response prompt.
 
-- **Exclusive by default**: First match wins. Table order is priority, without
-  numeric priority arithmetic.
-- **Fanout**: An earlier rule sets `Continue`.
-- **Fallback and takeover**: Specific rules appear above fallback rules.
-
-There is no Arbitrate operation, Priority field, or CoordinationMode.
+The order gives first-match exclusivity and visible fallback precedence. An
+earlier `Continue` gives fanout. There is no numeric priority calculation.
 
 ## Write-time Validation
 
-Creating or updating a rule rejects:
+Rule creation and update reject:
 
-- A `Match` expression that does not compile.
-- A missing or inactive `AgentId`.
-- An empty `ResponsePrompt`.
+- an expression that does not compile;
+- a missing or inactive `AgentId`;
+- an empty `ResponsePrompt`.
 
-Runtime performs evaluation only. It does not repeat validation as a fallback;
-an Agent archived after validation is a runtime skip.
+The write path owns validation. Runtime does not repeat it. An Agent archived
+after validation is skipped at evaluation time.
 
-## Rendering
+## Prompt Rendering
 
-`{{event.<attr>}}` directly substitutes an envelope property from the same
-namespace used by Match. Rendering is envelope-only and uses no template
-engine. An unresolved placeholder remains unchanged. The old
-`{{workflow_run_id}}`, `{{stage}}`, and `{{event_type}}` tokens remain aliases.
-`{{event.stage}}` depends on `stage` being promoted into a Workflow-family
-envelope and does not parse `data`.
+`{{event.<attr>}}` substitutes an envelope property from the same namespace as
+`Match`. Rendering is envelope-only and uses no general template engine. An
+unresolved placeholder remains unchanged. The aliases
+`{{workflow_run_id}}`, `{{stage}}`, and `{{event_type}}` remain supported.
+`{{event.stage}}` works only when the event family promotes `stage`; rendering
+never parses `data`.
 
 ## Idempotency and Visibility
 
-- Launcher key is `hash(projectId, eventId, agentId)`. One event launches one
-  Agent at most once, regardless of trigger path through routing rule, watch,
-  or mention. Duplicate delivery does not create another Job because it uses
-  the AgentLauncher idempotent-launch mechanism. The matching rule is trigger
-  attribution only and does not enter the idempotency key.
-- A triggered AgentSession carries `mohist.io/trigger/event-id` and
-  `mohist.io/trigger/rule-id`. Event, rule, and AgentJob are queryable in both
-  directions.
-- AgentJob determines response completion. AgentSession provides conversation
-  and audit evidence through SessionInput, AgentTurn, and transcript.
+The launch key is `hash(projectId, eventId, agentId)`. It is shared by routing,
+watch, and mention trigger paths. The matching rule is attribution only and
+is not part of the key.
 
-`deleted` is only the RoutingRule storage tombstone, not a readable or routable
-resource. Deleted rules do not appear in rule or Agent-subscription list and
-read results and do not participate in matching. Repeating deletion of a known
-rule returns the same `deleted` confirmation; an unknown ID returns `404`.
-Because name uniqueness applies only to readable states, a non-deleted rule can
-reuse the name after deletion.
+A triggered AgentSession carries `mohist.io/trigger/event-id` and
+`mohist.io/trigger/rule-id`. Event, rule, and AgentJob are queryable in both
+directions. AgentJob owns response completion; AgentSession owns conversation
+and audit evidence.
 
-## System Handler Relationship
-
-The routing table is the user consumer surface. `[Subscription]` handlers are
-the system consumer surface. Both consume the same envelope protocol through
-the same dispatcher. Agents have no special channel; a response uses normal
-commands such as `mo run approve` and `mo issue comment create`.
+`deleted` is a storage tombstone. Deleted rules do not appear in reads and do
+not match. Repeating deletion of a known rule returns the same confirmation;
+an unknown ID returns `404`. A readable rule may reuse a deleted rule's name.
 
 ## Command Surface
 
@@ -119,41 +143,35 @@ Names follow [`cli.md`](cli.md): the resource comes first, and Project scope
 uses the active Project or `--project`.
 
 `mo routing rule create --agent` and `mo routing rule edit --agent` accept a
-project-scoped Agent name or stable ID. The CLI resolves either form before
-mutation and sends only the stable `AgentId`. Edit sends only fields the caller
-supplied; omitted fields remain unchanged. The PATCH presence vocabulary is
-`name`, `match`, `agentId`, `responsePrompt`, and `continue`. The Server does
-not resolve Agent names or accept alternate field casing. The boundary and its
-trade-offs are recorded in
-[`decisions/routing-agent-reference.md`](decisions/routing-agent-reference.md).
+Project-scoped Agent name or stable ID. The CLI resolves the reference before
+mutation and sends only the stable `AgentId`. Edit sends only supplied fields;
+omitted fields remain unchanged. Its PATCH presence vocabulary is `name`,
+`match`, `agentId`, `responsePrompt`, and `continue`. The Server does not
+resolve names or accept alternate field casing. See
+[`decisions/routing-agent-reference.md`](decisions/routing-agent-reference.md)
+for this boundary.
 
-## Non-goals
+## Non-Goals
 
-- An Agent-specific approval channel; Agents use the regular command surface.
-- Strict conflict detection; dry-run and visibility replace it.
-- Per-rule retry or outbox; reuse dispatcher delivery guarantees and AgentJob
-  failure visibility.
-- Matching `event.data.*`; promote an attribute under the admission criterion
-  in `event-protocol.md`.
-- A per-Agent concurrency gate; rules and visibility provide initial control.
-- Trigger rate limits or cooldowns. In the short term, response prompts limit a
-  supervising Agent's loop risk, such as failure -> rerun -> failure -> another
-  trigger, by using a comment count. System rate limiting waits for a concrete
-  need.
+- A separate AgentSubscription resource, matcher, or arbitrator.
+- An Agent-specific approval channel. Agents use the regular command surface.
+- Per-rule retry, outbox, trigger rate limits, cooldowns, or a per-Agent
+  concurrency gate.
+- Strict conflict prevention. Dry-run and visibility expose the configuration.
+- Matching `event.data.*`. Promote a required routing dimension to an envelope
+  attribute under [`event-protocol.md`](event-protocol.md).
 
 ## Status
 
-Implemented: the Project-scoped ordered routing table with `Position` and
-`Continue`; CEL-subset matching with write-time compilation;
-`{{event.*}}` rendering; envelope-only self-response protection; the
-`mo routing rule` surface and `mo routing test` dry-run; `mo event tail --match`;
-and `mo agent subscription`, API, and Web views over the same RoutingRule
-facts.
+The Project-scoped ordered table, `Position`, `Continue`, CEL-subset matching,
+`{{event.*}}` rendering, envelope-only self-response protection, `mo routing
+rule`, `mo routing test`, `mo event tail --match`, and the Agent subscription,
+API, and Web views are implemented.
 
 Implementation gaps:
 
-- The durable launch-pipeline key is still `(projectId, eventId, ruleId)`, so
-  event-and-Agent coalescing applies only within one dispatch.
-- Routing-rule create and edit still send the raw CLI Agent value. Edit also
-  serializes omitted values and the Server PATCH presence vocabulary does not
-  yet match store application.
+- The durable launch key is still `(projectId, eventId, ruleId)`, so event and
+  Agent coalescing applies only within one dispatch.
+- Rule create and edit still send the raw CLI Agent value. Edit also serializes
+  omitted values, and the Server PATCH presence vocabulary does not yet match
+  store application.
