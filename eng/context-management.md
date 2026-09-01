@@ -131,6 +131,8 @@ These rules govern every specification document, in `docs/`, `design/`, and
   claim compliance. Keep domain identifiers, field names, API names, commands,
   serialized values, and code symbols in their exact spelling. Use `must`,
   `may`, and `must not` for requirements, options, and prohibitions.
+- Write only statements an implementation can be checked against. A sentence
+  that no implementation could violate is not a spec rule; delete it.
 - Keep terms consistent with [`CONTEXT.md`](../CONTEXT.md). Define a term
   once and link to it.
 - A document states its current gaps in its own Status or Implementation Gaps
