@@ -52,6 +52,9 @@
       { "command": "npm", "args": ["run", "docs:check"] },
       { "command": "npm", "args": ["run", "archtest"] },
       { "command": "npm", "args": ["run", "build:slack"] },
+      { "command": "npm", "args": ["run", "build:cli"] },
+      { "command": "npm", "args": ["run", "check:cli-go-format"] },
+      { "command": "npm", "args": ["run", "test:cli"] },
       { "command": "go", "args": ["-C", "packages/go/mohist-slack", "vet", "./..."] },
       { "command": "go", "args": ["-C", "packages/go/mohist-slack", "test", "./..."] }
     ],
