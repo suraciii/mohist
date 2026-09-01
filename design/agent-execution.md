@@ -119,11 +119,20 @@ materialization are authoritative in [`workspaces.md`](workspaces.md#binding-and
 AgentJob and AgentSession have separate write authorities, so launch is not one cross-aggregate
 transaction. The durable protocol instead makes every partial state queryable:
 
-```mermaid
-flowchart LR
-    C["caller launchRequestId"] --> P["AgentJob prepare"]
-    P -->|"durable accept request"| S["AgentSession"]
-    S -->|"durable accept result"| P
+```text diagram
++------------------------+
+| caller launchRequestId |
++------------+-----------+
+             |
+             v
+   +------------------+    durable accept result
+   | AgentJob prepare |<-------------------------+
+   +---------+--------+                          |
+             |                                   |
+             vdurable accept request             |
+     +--------------+                            |
+     | AgentSession +----------------------------+
+     +--------------+
 ```
 
 - The caller supplies a stable `launchRequestId`. After authentication and authorization, Server
@@ -143,15 +152,26 @@ The launch projection and null rules are authoritative in
 
 ### AgentSession invariants
 
-```mermaid
-flowchart TD
-    S["AgentSession (stable logical identity)"] -->|"owns in order"| SI["SessionInput"]
-    SI -->|"belongs to exactly one"| AT["AgentTurn"]
-    S --> TF["Transcript facts"]
-    S --> CG["current ContextGeneration"]
-    S --> CB["CurrentBinding"]
-    CB --> RS["one physical Runtime Session"]
-    S --> AO["at most one ActiveOperation"]
+```text diagram
+                 owns in order  +--------------+      exactly one    +-----------+
+                +-------------->| SessionInput +-------------------->| AgentTurn |
+                |               +--------------+                     +-----------+
+                |
+                |               +------------------+
+                +-------------->| Transcript facts |
+                |               +------------------+
+                |
++--------------+|               +-------------------+
+| AgentSession ++-------------->| ContextGeneration |
++--------------+|               +-------------------+
+                |
+                |               +----------------+                   +-----------------+
+                +-------------->| CurrentBinding +------------------>| Runtime Session |
+                |               +----------------+                   +-----------------+
+                |
+                |               +-----------------+
+                +-------------->| ActiveOperation |
+                                +-----------------+
 ```
 
 The invariants are:
@@ -177,6 +197,7 @@ The invariants are:
 - User input contains visible text or an explicit attachment. Attachment-only input does not gain
   a hidden prompt.
 - AgentSession has no `completed`, `failed`, `stopped`, or `closed` lifecycle.
+- At most one ActiveOperation is open at a time.
 - An ActiveOperation cannot be cleared merely because its owner disappeared or a response was
   lost. It remains queryable until it reaches a definite terminal result or is explicitly
   superseded under the canonical operation contract.
@@ -234,20 +255,25 @@ AgentSession has only these Activity states:
 - `unknown`: Input acceptance, a Turn result, a Runtime effect, Binding, or an operation cannot be
   confirmed.
 
-```mermaid
-stateDiagram-v2
-    idle --> active : accepted Input
-    active --> idle : all current work settles definitively
-    active --> active : final result still expected (outcome_pending)
-    active --> unknown : acceptance or effect becomes uncertain
-    unknown --> active : authoritative reconciliation
-    unknown --> idle : authoritative reconciliation
-    unknown --> unknown : reconciliation may leave it unknown
-    note right of unknown
-        explicit force-reset: unknown old facts
-        plus a new current context
-    end
+```text diagram
+                   +------+                   work settles
+                   | idle |<-------------------------------+
+                   +---+--+                                |
+                       |                                   |
+                       vaccepted Input                     |
+                  +--------+                     reconciled|
+                  | active +<------------------------------++
+                  +----++--+                               ||
+                       || ^  outcome_pending               ||
+                       |+-+                                ||
+                       |                                   |
+                       veffect uncertain                   |
+                  +---------+                              ||
+                  | unknown +------------------------------++
+                  +---------+
 ```
+
+An explicit force-reset leaves old facts unknown and starts a new current context.
 
 Activity is derived from the current `ContextGeneration`. Unresolved facts from older generations
 remain visible through `unresolvedPrevious`, `unresolvedPreviousCount`, and `nextAction`; they do
@@ -412,14 +438,26 @@ current Runtime Session is missing and the current generation is otherwise safe:
 `idle`, admission is `ready`, no Turn is running or `outcome_pending`, and no Input, dispatch,
 Runtime effect, or operation is `unknown`.
 
-```mermaid
-flowchart TD
-    CB["CurrentBinding"] -->|"resolve on the same Runner"| R{"evidence"}
-    R -->|"ready"| RE["reuse CurrentBinding"]
-    R -->|"definitely missing + safe"| CC["create candidate with stable key"]
-    CC -->|"complete candidate"| CAS["fenced CAS"]
-    CC -->|"uncertain"| KB["keep old Binding, block"]
-    R -->|"absent evidence or uncertain"| KB
+```text diagram
+                          +----------------+
+                          | CurrentBinding |
+                          +--------+-------+
+                                   |
+                                   vresolve on same Runner
+                             +----------+
+                             | evidence +-----------------------------------+
+                             +-----+----+                                   |
+            +----------------------+-----+                                  |
+            vready                       vmissing + safe                    |
++----------------------+   +--------------------------+                     |
+| reuse CurrentBinding |   | create candidate, stable |                     |
++----------------------+   |           key            |                     |
+                           +-------------+------------+                     |
+                           +-------------+---------+                        |
+                           vcomplete               vuncertain               |
+                    +------------+    +-------------------------+ uncertain |
+                    | fenced CAS |    | keep old Binding, block |<----------+
+                    +------------+    +-------------------------+
 ```
 
 When recovery is unsafe, Mohist retains the original Binding and Turn, sets
