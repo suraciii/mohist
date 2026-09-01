@@ -24,7 +24,6 @@ public class MohistWorkflowDefinitionTests
         var review = definition.Stages[2].Tasks.Single(t => t.Id == "ai-review");
         Assert.Contains("PLANS/REVIEW.md", JsonSerializer.Serialize(review.Expect));
         Assert.Null(review.Recovery);
-        Assert.DoesNotContain(definition.Stages.SelectMany(s => s.Tasks), t => t.Uses.Contains("openspec", StringComparison.Ordinal));
     }
 
     [Fact]

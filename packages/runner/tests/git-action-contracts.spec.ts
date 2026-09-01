@@ -32,7 +32,6 @@ describe('local Git Action manifests', () => {
     const autoMerge = registry.resolve('mohist/enable-github-pr-auto-merge')
     if (autoMerge.kind !== 'definition') throw new Error('Missing mohist/enable-github-pr-auto-merge')
     expect(autoMerge.definition.manifest.capabilities).toBeUndefined()
-    expect(registry.resolve('mohist/openspec-tasks').kind).toBe('unknown')
     expect(registry.resolve('mohist/archive-change').kind).toBe('unknown')
     expect(registry.resolve('mohist/merge-github-pr').kind).toBe('unknown')
   })

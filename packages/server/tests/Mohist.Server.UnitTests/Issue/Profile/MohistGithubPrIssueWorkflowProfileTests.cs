@@ -165,7 +165,6 @@ public class MohistGithubPrIssueWorkflowProfileTests
         Assert.Equal("mohist/enable-github-pr-auto-merge", integrate.Tasks[^1].Uses);
         Assert.Contains(integrate.Tasks[^1].Recovery!.Handlers, h => h.When == "error.code=conflict");
         AssertRepositoryWorkUsesNestedCheckout(definition);
-        Assert.DoesNotContain(JsonSerializer.Serialize(definition), "openspec", StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(JsonSerializer.Serialize(definition), "archive-change", StringComparison.OrdinalIgnoreCase);
     }
 

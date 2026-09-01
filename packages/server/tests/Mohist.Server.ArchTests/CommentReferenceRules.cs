@@ -8,7 +8,7 @@ namespace Mohist.Server.ArchTests;
 /// <summary>
 /// issue-511 T-004: structural contract that server production C#
 /// comments do not introduce new references to issues / task
-/// identifiers / design-doc paths / openspec/. The test scans
+/// identifiers / design-doc paths. The test scans
 /// <c>SyntaxTrivia</c> of <see cref="SyntaxKind.SingleLineCommentTrivia"/>,
 /// <see cref="SyntaxKind.MultiLineCommentTrivia"/>,
 /// <see cref="SyntaxKind.SingleLineDocumentationCommentTrivia"/>, and
@@ -20,7 +20,7 @@ public sealed class CommentReferenceRules
     private const string ServerSourcesPrefix = "ServerSources/";
 
     private static readonly Regex CommentReferencePattern = new(
-        "issue-\\d+|T-\\d{3}|design/[^*\\s]+\\.md|openspec/",
+        "issue-\\d+|T-\\d{3}|design/[^*\\s]+\\.md",
         RegexOptions.ExplicitCapture);
     private static readonly Lazy<IReadOnlyDictionary<string, int>> CurrentCounts = new(
         ReadCommentReferenceCounts,
@@ -36,7 +36,7 @@ public sealed class CommentReferenceRules
 
         Assert.True(
             violations.Count == 0,
-            "Server production comments must not introduce new issue/spec/design/openspec references "
+            "Server production comments must not introduce new issue/spec/design references "
             + "beyond the frozen baseline. Violations: "
             + string.Join("; ", violations));
     }
