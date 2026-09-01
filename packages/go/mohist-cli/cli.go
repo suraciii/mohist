@@ -16,16 +16,16 @@ import (
 )
 
 const (
-	DefaultServerURL = "http://localhost:3456"
+	DefaultServerURL  = "http://localhost:3456"
 	DefaultOperatorID = "mohist-cli"
-	operatorIDHeader = "X-Mohist-Operator-Id"
+	operatorIDHeader  = "X-Mohist-Operator-Id"
 )
 
 const (
-	ExitOK       = 0
+	ExitOK        = 0
 	ExitOperation = 1
-	ExitUsage    = 2
-	ExitCanceled = 130
+	ExitUsage     = 2
+	ExitCanceled  = 130
 )
 
 type EnvLookup func(string) (string, bool)
@@ -213,6 +213,7 @@ type command struct {
 
 var diagnosisFields = []string{"workflowRunId", "status", "failure", "tasks", "dispatch", "events"}
 var doctorFields = []string{"name", "status", "detail", "nextAction"}
+
 const maxDiagnosisEvents = 200
 
 func parse(args []string) (command, error) {
