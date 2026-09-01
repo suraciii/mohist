@@ -22,6 +22,8 @@ Mohist.
 - **One surface for people and Agents**: Agents and people use the same
   commands, help, and errors. Mohist does not maintain a second Agent-only
   command surface.
+- **Complete for Agents**: Every fact an Agent needs for its work is queryable
+  through `mo`.
 
 ## Usage
 

@@ -95,6 +95,10 @@ A builtin `.prompt` is product content that applies to every Project:
 - Keep content independent of a product repository and technology stack.
 - Refer to Mohist surfaces only when they are valid in every managed Project,
   such as the `mo` CLI, documented template namespaces, and Workflow Variables.
+- Give the Agent identity pointers and self-service guidance, not payloads. A
+  Prompt names the Issue, parent, Epic, or Repository to inspect and lets the
+  Agent fetch details through the `mo` CLI. It does not embed Issue, Epic, or
+  parent bodies.
 - State only task, input, output, and machine-verifiable contract requirements.
   Do not prescribe process details, problem classifications, or report
   templates.

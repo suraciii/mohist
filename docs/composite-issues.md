@@ -61,8 +61,9 @@ visible. A Draft child remains excluded from composite advancement.
   Detach it with `mo issue edit 43 --parent none`.
 - A child without an explicit priority inherits the parent's priority.
 - You or an External Agent decide the split. Mohist does not split Issues automatically.
-- When a child enters Plan, its Mohist Agent receives the parent title and body
-  as background context. You do not need to copy shared context into each child.
+- A child knows its parent through the `parent` reference. When the work needs
+  shared context, its Mohist Agent reads the parent with `mo issue view`. You
+  do not need to copy shared context into each child.
 
 An Issue that has entered a Workflow must not be split or attached as a child;
 stop it first. A terminal parent must be reopened before it accepts another
@@ -145,8 +146,10 @@ multiple Repositories is not automatic. See [Repositories](repositories.md).
 
 ## Implementation Gaps
 
-Parent-child relationships, composite advancement, derived parent state, Epic
-isolation, and read-only parent context during child Plan are implemented.
+Parent-child relationships, composite advancement, derived parent state, and
+Epic isolation are implemented. The dispatch boundary still assembles the
+parent title and body as read-only background for a child Plan. The target is
+pointer-only context: the Agent reads the parent through the CLI when needed.
 Cross-Repository integration remains an explicit final-child Workflow when a
 requirement needs it. Mohist does not infer or hide that acceptance boundary.
 See [`design/composite-issues.md`](../design/composite-issues.md) for the design.

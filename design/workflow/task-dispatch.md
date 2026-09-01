@@ -154,10 +154,11 @@ the tombstone and returns its guidance as a non-retryable error.
 
 ### Parent Context for a Child-Issue Plan
 
-A child-Issue Plan `mohist/agent` task may receive the current parent Issue title and body as optional read-only
-context. Other Stages, Actions, AgentJobs, and ordinary Issues do not receive it. Parent context is not
-persisted in WorkflowRun State, task input, Variables, or Prompts, and it creates no template namespace. The
-current child-Issue body remains authoritative for delivery scope.
+Dispatch carries no parent payload. A child-Issue Plan `mohist/agent` task starts from the child Issue body,
+which remains the only delivery-scope authority. The child knows its parent through the `parent` reference, and
+the Agent reads the parent Issue through the `mo` CLI when the work needs shared context. Nothing about the
+parent is persisted in WorkflowRun State, task input, Variables, or Prompts, and no template namespace exposes
+it.
 
 WorkflowRun stores its bound Repository snapshot and write-once Pull Request identity. Neither is a Run
 Variable. The Issue's Repository binding supplies the snapshot at start, and dispatch uses that stable

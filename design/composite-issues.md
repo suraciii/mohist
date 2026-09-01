@@ -41,11 +41,10 @@ The decision result is recorded in
 - Workflow has no parent-child awareness. A child WorkflowRun behaves like an
   ordinary Issue run. A parent creates no WorkflowRun. The static
   `Issue -> Workflow` dependency remains one way.
-- At the HTTP dispatch-response boundary, child Plan receives the current parent
-  title and body as assembled background. The background is not part of
-  WorkflowRun, Workflow WorkDispatch, or task input. Runner's
-  `mohist/opencode` Action treats it as read-only. The child body remains the
-  delivery-scope authority. See [`workflow/task-dispatch.md`](workflow/task-dispatch.md).
+- Dispatch carries no parent payload. A child Issue knows its parent through
+  the `parent` reference, and its Agent reads the parent with the `mo` CLI
+  when the work requires it. The child body remains the delivery-scope
+  authority. See [`workflow/task-dispatch.md`](workflow/task-dispatch.md).
 - Project Space owns the Repository collection and default resolution. Dispatch
   resolves the target Repository to its path and base branch.
 - Parent and child are separate Issue aggregates. A child terminal or reopen
@@ -99,6 +98,7 @@ indicators, and blocked presentation.
 ## Status
 
 The parent-child model, derived parent state, composite advancement, Epic
-isolation, parent context for child planning, and CLI/Web surfaces are
-implemented. Cross-repository acceptance uses an explicit final integration
+isolation, and CLI/Web surfaces are implemented. The dispatch boundary still
+assembles read-only parent context for child planning; the pull model above is
+the target. Cross-repository acceptance uses an explicit final integration
 child.
