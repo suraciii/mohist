@@ -9,6 +9,7 @@ using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Workflow.Definition;
 using Xunit;
 
@@ -64,6 +65,22 @@ public sealed class WorkflowGrainDispatchSnapshotSpecs
         Assert.Equal(a.Dispatch, second);
         var loaded = await LoadAsync(a.Snapshots, a.RunId, a.WorkId!);
         Assert.Equal(a.Dispatch, loaded);
+    }
+
+    [Fact]
+    public async Task RejectedOrMismatchedDispatch_DoesNotCreateSnapshot()
+    {
+        var a = await ArrangeAsync("wr-snap-rejected");
+
+        var rejected = a.Dispatch with { Variables = "not-json" };
+        await Assert.ThrowsAsync<WorkflowDispatchRejectedException>(() =>
+            a.Grain.StoreActiveWorkDispatchAsync(a.WorkerId, a.WorkId!, rejected));
+        Assert.Null(await LoadAsync(a.Snapshots, a.RunId, a.WorkId!));
+
+        var mismatched = a.Dispatch with { WorkId = "other.1" };
+        Assert.Null(await a.Grain.StoreActiveWorkDispatchAsync(a.WorkerId, a.WorkId!, mismatched));
+        Assert.Null(await LoadAsync(a.Snapshots, a.RunId, a.WorkId!));
+        Assert.Null(await LoadAsync(a.Snapshots, a.RunId, "other.1"));
     }
 
     [Fact]
