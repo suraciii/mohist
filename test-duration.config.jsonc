@@ -81,7 +81,7 @@
       ]
     },
     { "id": "server-l0", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKinds": ["Design", "Product"], "level": "L0", "resources": ["orleans", "sqlite", "server-runtime", "duration-measurement"], "csproj": "packages/server/tests/Mohist.Server.L0Tests/Mohist.Server.L0Tests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "1"], "report": "reports/server-l0.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
-        { "id": "spec", "namePattern": "(RunnerBuildIdentitySpecs|WorkflowRecoveryContinuationSpecs)\\.", "expectedTotal": 2, "percentile": 95, "percentileMs": 50 },
+        { "id": "spec", "namePattern": "(OtelOrleansSourceNameSpecs|RunnerBuildIdentitySpecs|WorkflowRecoveryContinuationSpecs)\\.", "expectedTotal": 4, "percentile": 95, "percentileMs": 50 },
         { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
     },
