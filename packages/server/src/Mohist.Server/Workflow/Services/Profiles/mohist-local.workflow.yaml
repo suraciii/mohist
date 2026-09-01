@@ -74,6 +74,7 @@ stages:
         uses: mohist/agent
         with:
           name: mohist/builder
+          timeout: 1800000
   - id: build-health
     title: Health
     uses: core/script
