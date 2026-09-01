@@ -1,0 +1,1 @@
+{"success":true,"data":{"workflowRunId":"wr-1","status":"Failed","failure":null,"tasks":[],"dispatch":{"status":"present"},"events":[{"id":7,"eventId":"evt-7","type":"TaskStarted","source":"server","time":"2026-09-02T00:00:00Z"}]}}

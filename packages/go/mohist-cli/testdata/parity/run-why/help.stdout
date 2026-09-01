@@ -1,0 +1,10 @@
+USAGE
+    mo run why <run-ref> [--json [fields]]
+
+JSON FIELDS
+workflowRunId
+status
+failure
+tasks
+dispatch
+events
