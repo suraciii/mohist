@@ -120,12 +120,14 @@ export class WorkExecutor {
     try {
       const wsName = readWorkspaceName(work)
       if (wsName && this.namedWorkspaceManager && work.projectId) {
-        const gitUrl = stringInput(work.variables ?? {}, 'repository.gitUrl')
-        const baseBranch = stringInput(work.variables ?? {}, 'repository.baseBranch')
-        if (gitUrl && baseBranch) {
+        const repositoryName = stringAt(work.variables ?? {}, ['repository', 'name'])
+        const gitUrl = stringAt(work.variables ?? {}, ['repository', 'gitUrl'])
+        const baseBranch = stringAt(work.variables ?? {}, ['repository', 'baseBranch'])
+        if (repositoryName && gitUrl && baseBranch) {
           const info = await this.namedWorkspaceManager.materializeForIssue(
             work.projectId,
             wsName,
+            repositoryName,
             gitUrl,
             baseBranch,
             signal,

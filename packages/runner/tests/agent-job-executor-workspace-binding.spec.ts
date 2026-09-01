@@ -127,6 +127,51 @@ describe('AgentJobExecutor resolves a named workspace binding', () => {
     expect(request.prompt).toContain('repos/')
   })
 
+  it('materializes the workflow repository into REPOS and anchors its branch', async () => {
+    const runtime = makeFakeRuntime()
+    const connection = makeFakeConnection()
+    const materialize = vi.fn(async () => ({ path: '/runner-root/workspaces/mohist-pay-abc123', created: false }))
+    const materializeForIssue = vi.fn(async () => ({
+      path: '/runner-root/workspaces/mohist-pay-abc123',
+      created: false,
+    }))
+    const executor = new AgentJobExecutor(
+      connection.connection,
+      makeAccessors(runtime.runtime),
+      '/virtual/runner',
+      undefined,
+      { materialize, materializeForIssue } as never,
+    )
+
+    const work = buildAgentJobWork({
+      workflowRunId: 'wr-1',
+      projectId: 'proj-1',
+      variables: {
+        workspace: { name: 'pay' },
+        repository: {
+          name: 'server',
+          gitUrl: 'https://github.com/mohist/server.git',
+          baseBranch: 'main',
+        },
+      },
+    })
+    const result = await executor.execute(work, new AbortController().signal)
+
+    expect(result.status).toBe('completed')
+    expect(materializeForIssue).toHaveBeenCalledWith(
+      'proj-1',
+      'pay',
+      'server',
+      'https://github.com/mohist/server.git',
+      'main',
+      expect.any(AbortSignal),
+    )
+    const request = runtime.runTurnCalls[0]
+    expect(request.target.workDir).toBe('/runner-root/workspaces/mohist-pay-abc123')
+    expect(request.prompt).toContain('REPOS/server')
+    expect(request.prompt).toContain('mohist/ws-pay')
+  })
+
   it('skips the anchor when bound through the legacy workspace.path branch', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
