@@ -1,13 +1,26 @@
 # Workflow Variables
 
-Workflow Variables are resources that are independent of WorkflowProfile. Project, Issue, and
-WorkflowRun can each store Variables. The system merges them in a deterministic order and produces
-Effective Variables for the current Stage.
+Workflow Variables are resources independent of Workflow Profile. Project, Issue,
+and WorkflowRun can each store Variables. Mohist merges them in deterministic
+scope and Stage order to produce Effective Variables for the current Stage.
+This document defines the resource shape, merge rules, and effect timing.
 
-This document defines only the Variable resource shape, merge rules, and effect timing. See
-[`profile.md`](profile.md) for Profile selection and structure,
+See [`profile.md`](profile.md) for Profile selection and structure,
 [`task-dispatch.md`](task-dispatch.md) for template namespaces, and
-[`actions.md`](actions.md#setvars) for projection from Action output to Run Variables.
+[`actions.md`](actions.md#setvars) for Action-output projection into Run
+Variables.
+
+## Design Drivers
+
+- Project, Issue, and Run values use one resource shape and one merge algorithm.
+- More specific scopes override less specific scopes. Stage values override
+  Workflow values regardless of scope.
+- Effective Variables are derived and read-only. They are never stored as a
+  second source of truth.
+- A dispatched attempt uses an immutable Variables snapshot. Later changes
+  affect only future dispatches and new attempts.
+- `setVars` writes only Run Workflow Variables. It cannot alter execution
+  context or Stage Variables.
 
 ## Model
 
@@ -22,36 +35,44 @@ Project, Issue, and WorkflowRun Variables use the same shape:
 }
 ```
 
-- `vars` contains Workflow Variables that apply to all Stages.
-- `stages.<stage>.vars` applies only to the specified Stage.
+- `vars` applies to all Stages.
+- `stages.<stage>.vars` applies only to that Stage.
 - Project Variables provide shared values for Workflows in the Project.
 - Issue Variables override or add to Project Variables for one Issue.
-- Run Variables store dynamic values for one WorkflowRun. A task `setVars` writes here.
+- Run Variables store dynamic values for one WorkflowRun. A task `setVars`
+  writes here.
 
-WorkflowProfile can reference a Variable, but it does not own, declare, or restrict Variable keys. A
-Variable affects execution only when a Profile, task, check, recovery, or Prompt references it.
+A Workflow Profile may reference Variables, but it does not own, declare, or
+restrict their keys. A Variable affects execution only when a Profile, task,
+check, recovery, or Prompt references it.
 
-```mermaid
-flowchart LR
-    subgraph WM["Workflow merge"]
-        PV["Project.vars"] --> IV["Issue.vars"] --> RV["Run.vars"] --> EW["Effective Workflow Variables"]
-    end
-    subgraph SM["Stage merge"]
-        EW2["Effective Workflow Variables"] --> PS["Project.stages[current].vars"] --> IS["Issue.stages[current].vars"] --> RS["Run.stages[current].vars"] --> ES["Effective Stage Variables"]
-    end
+The diagram abbreviates Project, Issue, and Run as `P`, `I`, and `R`; `WF` and
+`ST` mean Effective Workflow and Effective Stage Variables:
+
+```text diagram
++ Workflow merge --------------------------------+
+|                                                |
+|+--------+    +--------+    +--------+    +----+|
+|| P.vars +--->| I.vars +--->| R.vars +--->| WF ||
+|+--------+    +--------+    +--------+    +----+|
++------------------------------------------------+
+
++ Stage merge ------------------------------------------------+
+|                                                             |
+|+----+    +---------+    +---------+    +---------+    +----+|
+|| WF +--->| P.stage +--->| I.stage +--->| R.stage +--->| ST ||
+|+----+    +---------+    +---------+    +---------+    +----+|
++-------------------------------------------------------------+
 ```
 
-Later sources override earlier sources.
-Both Effective Variable results are read-only, derived, and not stored.
-
-- **Effective Workflow Variables:** The Stage-independent result after merging `vars` in Project,
-  Issue, and Run order.
-- **Effective Stage Variables:** The result after starting with Effective Workflow Variables and then
-  merging the current Stage's `stages.<stage>.vars` in Project, Issue, and Run order.
-
-Both kinds of Effective Variables are read-only derived values. They are not persisted separately.
+Later sources override earlier sources. Effective Workflow Variables merge
+`vars` in Project, Issue, Run order. Effective Stage Variables start with that
+result and merge `stages.<stage>.vars` in the same order. Both results are
+read-only and derived.
 
 ## Semantics
+
+### Resolution
 
 Resolution merges Workflow Variables first and then the current Stage Variables:
 
@@ -74,17 +95,17 @@ resolve(currentStage, project, issue, run):
   return effectiveStageVariables
 ```
 
-The complete priority order, from lowest to highest, is:
+The priority order from lowest to highest is:
 
-```mermaid
-flowchart LR
-    PV["project.vars"] --> IV["issue.vars"] --> RV["run.vars"] --> EW["Effective Workflow Variables"]
-    EW --> PS["project.stages[current].vars"] --> IS["issue.stages[current].vars"] --> RS["run.stages[current].vars"] --> ES["Effective Stage Variables"]
-```
+1. `project.vars`
+2. `issue.vars`
+3. `run.vars`
+4. `project.stages[current].vars`
+5. `issue.stages[current].vars`
+6. `run.stages[current].vars`
 
-Variables for the current Stage are more specific than Workflow Variables from any scope. Therefore, they
-always apply after Effective Workflow Variables. Among Stage Variables, Run overrides Issue, and Issue
-overrides Project.
+Stage Variables are more specific than Workflow Variables from every scope.
+Among Stage Variables, Run overrides Issue, and Issue overrides Project.
 
 ### Merge
 
@@ -92,8 +113,9 @@ An absent field inherits the existing value. An object merges recursively by
 field. A scalar replaces the existing value. An array replaces the complete
 array and never merges by element.
 
-The root of `vars` and each `stages.<stage>.vars` must be an object. Merge does not modify a source
-resource. A persisted Variables document does not accept a `null` value.
+The root of `vars` and each `stages.<stage>.vars` must be an object. Merge does
+not modify a source resource. A persisted Variables document cannot contain a
+`null` value.
 
 ### Writes
 
@@ -102,13 +124,13 @@ address selects Project (`/api/projects/{projectRef}/variables`), Issue
 (`/api/projects/{projectRef}/issues/{number}/variables`), or Run
 (`/api/workflow-runs/{workflowRunId}/variables`) scope.
 
-- `GET` reads the Variables stored in that scope. It does not resolve across scopes.
+- `GET` reads the Variables stored in that scope. It does not resolve scopes.
 - `PUT` replaces the scope value with a complete Variables document.
-- `PATCH` deep-merges a partial Variables document into the scope. `null` is only a deletion instruction.
-  It removes the field from the target scope, so the field inherits from the preceding scope again. `null`
-  is not persisted.
+- `PATCH` deep-merges a partial Variables document into the scope. `null` is
+  only a deletion instruction. It removes the field from the target scope so
+  the field inherits from the preceding scope again. `null` is not persisted.
 
-Effective Variables are a separate read-only resource under Run:
+Effective Variables are a separate read-only Run resource:
 
 ```text literal
 GET /api/workflow-runs/{workflowRunId}/variables/effective
@@ -116,47 +138,49 @@ GET /api/workflow-runs/{workflowRunId}/variables/effective?stage={stage}
 GET /api/workflow-runs/{workflowRunId}/variables/effective/{keyPath}
 ```
 
-Without `stage`, the resource returns Effective Workflow Variables. With `stage`, it returns Effective
-Stage Variables.
+Without `stage`, the resource returns Effective Workflow Variables. With
+`stage`, it returns Effective Stage Variables.
 
-The Project and Issue settings surfaces can modify both `vars` and `stages`. Task `setVars` is not a
-separate API. The Runner projects Action output into a PATCH body that contains only `vars`, then calls the
-Run Variables resource:
+Project and Issue settings can modify both `vars` and `stages`. Task `setVars`
+is not a separate API. Runner projects Action output into a PATCH body that
+contains only `vars`, then calls the Run Variables resource:
 
 ```json
 { "vars": { "change": { "prNumber": 42 } } }
 ```
 
-Task `setVars` does not generate a `stages` parameter, so it modifies only the Run's Workflow Variables.
-The Run Variables resource still lets other callers modify `stages` explicitly.
+Task `setVars` never generates a `stages` parameter, so it modifies only Run
+Workflow Variables. Other callers may modify Run `stages` explicitly.
 
 ### Changes
 
-- Each time the Server dispatches a task, it resolves Effective Stage Variables for the current Stage and
-  sends the result with dispatch as part of the immutable attempt snapshot. See
-  [`task-dispatch.md`](task-dispatch.md) for attempt snapshot semantics and evaluation timing.
-- After an attempt is dispatched, its snapshot remains unchanged for the lifetime of that attempt. A later
-  Variables change affects only tasks that are not yet dispatched and later attempts, including retry,
-  recovery continuation, and rerun-from-stage. A dispatched attempt does not read the latest Variables.
-- A task that is not yet dispatched uses the latest Variables. A retry is a new dispatch, so it carries the
-  Effective Stage Variables from the retry time.
-- Task `setVars` runs after the Action returns successfully and before the task reports completion. If any
-  output projection fails, Run Variables remain unchanged and the task fails.
+- Each Server task dispatch resolves Effective Stage Variables for the current
+  Stage and includes the result in the immutable attempt snapshot. See
+  [`task-dispatch.md`](task-dispatch.md) for snapshot timing.
+- The snapshot remains unchanged for the attempt lifetime. A later Variables
+  change affects tasks not yet dispatched and later attempts, including retry,
+  recovery continuation, and rerun-from-stage.
+- A task not yet dispatched uses the latest Variables. A retry is a new dispatch
+  and uses the Variables resolved at retry time.
+- `setVars` runs after a successful Action and before task completion. If any
+  projection fails, Run Variables remain unchanged and the task fails.
 
-Profile-owned template declarations receive Effective Variables only through an explicit
-`${{ vars.* }}` reference. Template evaluation occurs at the Runner execution entry point before it calls the
-Action. The Action sees only input that Runner has rendered and validated; it cannot read the
-Variables resource again.
+Profile-owned templates receive Effective Variables only through an explicit
+`${{ vars.* }}` reference. Runner evaluates templates before calling the
+Action. The Action sees rendered, validated input and cannot read Variables
+again.
 
-Runtime context such as `workflow.*`, `stage.*`, `issue.*`, and `repository.*`, plus
-`tasks.<id>.outputs.*` and `prompts.*`, are separate namespaces. They do not participate in the Variables
-merge. In particular, `workflow.verification.command` is a Project-owned startup fact,
-not a Variable: built-in verification reads the value frozen on WorkflowRun binding. A `ci.verify`
-Variable must never override or configure that command.
+`workflow.*`, `stage.*`, `issue.*`, and `repository.*`, plus
+`tasks.<id>.outputs.*` and `prompts.*`, are separate namespaces. They do not
+participate in the Variables merge. In particular,
+`workflow.verification.command` is a Project-owned startup fact. Built-in
+verification reads the value frozen on WorkflowRun binding. A `ci.verify`
+Variable must not override or configure that command.
 
-Invalid Variables, an impossible `setVars`, and other semantic errors must be rejected at the write
-boundary. The operation must return a domain error and keep the original value unchanged. It must not
-silently ignore the error or expose only a parser stack trace.
+Invalid Variables, an impossible `setVars`, and other semantic errors are
+rejected at the write boundary. The operation returns a domain error and keeps
+the original value unchanged. It must not ignore the error or expose only a
+parser stack trace.
 
 ## Examples
 
@@ -198,9 +222,9 @@ effectiveStageVariables:
 ```
 
 Run does not override `agent`. Issue Workflow Variables replace the Project
-model with `model-b`, while the Project variant remains `variant-a`. The
-Project's `check` Stage Variables then select `variant-b`, and the Issue Stage
-Variables replace it with `variant-c`.
+model with `model-b`, while the Project variant remains `variant-a`. Project
+`check` Stage Variables select `variant-b`, and Issue Stage Variables replace it
+with `variant-c`.
 
 ### Live adjustment
 
@@ -211,13 +235,14 @@ Variables replace it with `variant-c`.
 
 ## Status
 
-Implemented: Project, Issue, and Run Variables resources with common PUT and PATCH semantics; `null` only
-as a deletion instruction and never persisted; shape validation at the write boundary, including rejection
-of a non-object root; dispatch carrying only the original declarations and an immutable attempt snapshot;
-common rendering at the Runner execution entry point; and task `setVars` projection through a Run Variables
-PATCH.
+Implemented: Project, Issue, and Run Variables resources with common PUT and
+PATCH semantics; `null` only as a deletion instruction and never persisted;
+shape validation at the write boundary, including non-object root rejection;
+dispatch carrying original declarations and an immutable attempt snapshot;
+common rendering at the Runner execution entry point; and `setVars` projection
+through a Run Variables PATCH.
 
 The dispatch snapshot lifecycle is defined in
-[`task-dispatch.md`](task-dispatch.md). The historical persistence-name decision
-is recorded in
+[`task-dispatch.md`](task-dispatch.md). The historical persistence-name
+decision is recorded in
 [`../decisions/workflow-run-profile-naming.md`](../decisions/workflow-run-profile-naming.md).
