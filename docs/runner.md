@@ -1,23 +1,32 @@
 # Runner Guide
 
-Runner is Mohist's execution backend. Server decides what to do; Runner performs
-the work.
+Runner is Mohist's execution backend. Server decides what work means and
+whether it may proceed. Runner performs the assigned work on a host.
+
+## Product Commitments
+
+- Server retains workflow and execution decisions when Runner crashes,
+  disconnects, or is replaced.
+- Runner executes only work that Server assigns and reports facts back to Server.
+- A Runner never decides workflow state, AgentJob result, Session state, or
+  whether an uncertain external effect succeeded.
+- Server limits Runner capacity and dispatches work only to eligible capacity.
+- A named Workspace remains the product identity even when its materialization
+  moves or is rebuilt on a Runner.
+- Runner manages every process it starts and does not leave child processes
+  affecting later work.
 
 ## Why Runner Exists
 
-Mohist separates the **control plane from the execution plane**.
+Mohist separates the control plane from the execution plane:
 
-- **Server, the control plane:** Maintains state, makes decisions, and emits
-  events.
-- **Runner, the execution plane:** Executes Actions, operates Git, writes files,
-  and connects to execution backends such as OpenCode.
+- **Server** maintains durable state, makes decisions, and emits events.
+- **Runner** executes Actions, operates Git, writes files, and connects to
+  execution backends such as OpenCode.
 
-This separation matters because:
-
-- Runner can crash, restart, or be replaced without losing Server state.
-- Future Runner instances can execute concurrently on different machines with
-  different capacities.
-- Server validates ownership instead of trusting Runner reports implicitly.
+A Runner can crash, restart, or be replaced without losing Server state. Multiple
+Runners can execute on different machines with independent capacity. Server
+validates ownership instead of trusting a Runner report by itself.
 
 ## Starting Runner
 
@@ -31,29 +40,25 @@ The first installation requests a one-time enrollment from the running Server.
 Runner exchanges it for a machine credential and stores that credential under
 its root. Later starts reuse the credential.
 
-After startup, Runner connects to the local Server at
-`http://localhost:3456` by default, registers itself with its capacity and
-capabilities, and then waits for Server to assign work.
-
-Start Runner **after Server**. It cannot connect while Server is unavailable.
+Runner connects to `http://localhost:3456` by default, registers its capacity and
+capabilities, and waits for Server assignments. Start Runner after Server;
+Runner cannot connect while Server is unavailable.
 
 ## Connection and Recovery
 
-Runner may lose its Server connection without losing Server-owned work. During
-a disconnect:
+Runner may lose its Server connection without losing Server-owned work:
 
 - Server-owned work remains available for redelivery.
-- Work results continue retrying after connectivity returns.
-- Session mutation recovery follows that operation's documented contract.
-- New work waits until Runner can report current presence and readiness.
-- A live Workspace inspection fails as unavailable instead of returning a guessed
-  filesystem result.
-- A mutating retry keeps its original business operation identity; reconnecting
-  does not create a replacement intent.
+- Results retry after connectivity returns.
+- Session mutation recovery follows the operation's contract.
+- New work waits until Runner reports current presence and readiness.
+- A live Workspace inspection fails as unavailable instead of returning a
+  guessed filesystem result.
+- A mutating retry keeps its original operation identity.
 
-Mohist does not infer success, failure, or a missing Runtime Session from a
-transport timeout. Retry only through the operation-specific recovery path with
-the original identity.
+A transport timeout does not prove success, failure, or a missing Runtime
+Session. Retry only through the operation-specific recovery path with the
+original identity.
 
 ## Checking Runner State
 
@@ -62,58 +67,46 @@ mo runner status
 # Output includes Runner state
 ```
 
-The Web UI also shows Runner state:
-
-- The Runner-unavailable banner above the board.
-- The Runners page and each Runner detail page.
-- Runner heartbeat events on the Activity page.
+The Web UI shows the Runner-unavailable banner above the board, the Runners page,
+each Runner detail page, and heartbeat events on the Activity page.
 
 ## Concurrent Capacity
 
-Server gives each Runner one shared execution slot by default:
+Server gives each Runner one shared execution slot by default. At most one
+Workflow task or AgentJob executes on that Runner at once. Additional work waits
+for capacity after acceptance.
 
-- At most one Workflow task or AgentJob executes on that Runner at once.
-- Additional work waits for capacity after it starts.
-
-Change slots on the Runner detail page in the Web UI. Server owns this limit so
-the next dispatch observes a change without restarting Runner.
-
-Do not increase capacity without accounting for resource use:
-
-- Each executing AgentSession consumes CPU and memory.
-- Excess concurrency can trigger model API limits, overload the host, and cause
-  Git lock conflicts.
-- Increase from the default only after observing the host and provider limits.
+Change slots on the Runner detail page in the Web UI. Server owns this limit, so
+the next dispatch observes a change without restarting Runner. Increase capacity
+only after observing host and provider limits because each AgentSession consumes
+CPU and memory, and excess concurrency can hit model limits or Git locks.
 
 ## Execution Ownership
 
-Runner owns host-specific side effects because they are replaceable execution
-state. Server owns durable work decisions because a Runner can disappear at any
-time. This boundary explains why an interrupted Runner can be replaced without
-changing Workflow truth, and why unreported or uncommitted files cannot be
-treated as a durable result.
+Runner owns host-specific effects because they are replaceable execution state.
+Server owns durable work decisions because a Runner can disappear. Unreported or
+uncommitted files are not durable results.
 
-For one task, Runner prepares an isolated workspace, resolves the declared
-Action input, invokes the execution backend, and reports facts and outputs to
-Server. It validates declared output expectations before reporting success and
-reclaims the workspace when the Workflow no longer needs it. The complete
-Action contract is in [Action Contracts](actions/README.md).
+For one task, Runner prepares an isolated Workspace, resolves the declared Action
+input, invokes the execution backend, and reports facts and outputs. It validates
+output expectations before reporting success and reclaims the Workspace when the
+Workflow no longer needs it. The complete Action contract is in
+[Action Contracts](actions/README.md).
 
-Runner owns the complete process tree for every host command it starts. A
-command result includes output produced before the command exits; leftover
-subprocesses cannot keep the result open or write into later work.
+Runner owns the complete process tree for every host command. A command result
+includes output produced before exit. A leftover subprocess cannot keep the
+result open or write into later work.
 
-When a Workflow workspace is first materialized, Runner transfers only the
-repository data needed to establish its base and run branches. Later stages can
-still rebase and integrate that branch normally. Repository transfers remain
-bounded, and a failed materialization does not publish or retain a partial
-workspace.
+When a Workflow Workspace is first materialized, Runner transfers only the
+repository data needed to establish its base and run branches. Later Stages can
+rebase and integrate that branch. Transfers remain bounded, and failed
+materialization does not publish or retain a partial Workspace.
 
 ## Workspace Location
 
 An Issue uses a named Workspace such as `issue-42`. Runner materializes it under
-its configured root and records the actual home Runner and path. Inspect that
-binding instead of guessing an internal directory:
+its configured root and records the home Runner and path. Inspect that binding
+instead of guessing an internal directory:
 
 ```bash
 mo workspace view issue-42 --json home
@@ -125,24 +118,24 @@ Do not manually delete or change its branch, marker, or origin while work runs.
 
 ## Runner Failure
 
-If the Runner process crashes:
+- Workflow work that has not begun waits for an eligible Runner.
+- Executing Workflow work and AgentJobs fail with `runner-lost`.
+- Mohist does not claim that an unconfirmed external effect continued safely.
+- Retry or rerun blocked Workflow work explicitly after Runner returns. A later
+  AgentJob is a new work intent, not an automatic replay.
 
-- A Workflow that has not begun execution waits for an available Runner.
-- Executing Workflow work and AgentJobs fail with `runner-lost`; Mohist does not
-  claim that an unconfirmed external effect can continue transparently.
-- After Runner returns, retry or rerun blocked Workflow work explicitly. A later
-  AgentJob is a new work intent rather than an automatic replay.
-
-Workflow state is not lost because it lives in Server, not Runner.
+Workflow state remains in Server, not Runner.
 
 ## Multiple Runners
 
-Server can register multiple Runners and enforces each Runner's slots
-independently. New work uses eligible capacity. A materialized Workspace has a
-home Runner so later Sessions can reuse its files. AgentJob scheduling can clear
-an offline home and rematerialize on another Runner. A WorkflowRun remains
-assigned to its Runner and does not migrate automatically; restore that Runner
-before retrying the Workflow. Unpushed local files cannot move between hosts.
+Server registers multiple Runners and enforces each Runner's slots independently.
+New work uses eligible capacity. A materialized Workspace has a home Runner so
+later Sessions can reuse its files.
+
+AgentJob scheduling may clear an offline home and rematerialize on another
+Runner. A WorkflowRun remains assigned to its Runner and does not migrate
+automatically; restore that Runner before retrying the Workflow. Unpushed local
+files cannot move between hosts.
 
 ## Debugging Runner
 
@@ -163,55 +156,45 @@ mo session list --issue <number>     # AgentSessions for the Issue
 
 ### Common Runner Problems
 
-- The board shows "No runner is connected": Runner is not running. Run
-  `mo service start runner`.
-- An Issue waits after starting: no Runner has capacity. Start Runner; the
+- **No runner is connected:** Run `mo service start runner`.
+- **An Issue waits after starting:** Runner has no capacity. Start Runner; the
   Workflow continues automatically.
-- A task produces no output for a long time: OpenCode is stuck. Run
+- **A task produces no output:** OpenCode may be stuck. Run
   `mo run pause --issue <number>` and inspect logs.
-- Workspace identity error: the marker, branch, or origin was changed
-  manually. Preserve required commits, remove that workspace, and retry.
-- Git push failed: a remote Repository permission problem. Configure an SSH
-  key or token.
+- **Workspace identity error:** Preserve required commits, remove the Workspace,
+  and retry after a manual marker, branch, or origin change.
+- **Git push failed:** Configure an SSH key or token with permission for the
+  remote Repository.
 
-`mo service start runner` preserves the enrolled managed-service configuration.
-Use `npm run dev:runner` only when running Runner from a source checkout for
-development.
+`mo service start runner` preserves enrolled managed-service configuration. Use
+`npm run dev:runner` only from a source checkout for development.
 
 ## Runner Configuration
 
-Configure host-local Runner behavior with environment variables installed by
-the service manager. Configurable values include:
+Configure host-local behavior with environment variables installed by the service
+manager. The configurable values are Server URL, Runner identity, root directory,
+and poll, heartbeat, and cleanup intervals.
 
-- Server URL.
-- Runner identity and root directory.
-- Poll, heartbeat, and cleanup intervals.
-
-Dispatch slots are control-plane state and are changed from the Runner detail
-page, not through Runner startup options.
+Dispatch slots are control-plane state. Change them from the Runner detail page,
+not through Runner startup options.
 
 ### Execution boundaries
 
-The Runner does not impose a hidden per-work memory, RSS, wall-clock, or turn
-budget. Actions use only the timeout explicitly declared by the action or
-workflow, and every command still honours explicit cancellation by terminating
-its process group. Host-level service protection remains the deployment
-owner's responsibility; a host may use systemd, a container limit, or an
-equivalent supervisor without changing workflow semantics.
+Runner does not impose a hidden per-work memory, RSS, wall-clock, or Turn budget.
+Actions use only the timeout declared by the Action or Workflow. Every command
+honors explicit cancellation by terminating its process group. Host-level service
+protection remains the deployment owner's responsibility.
 
-Runner does not select a global Runtime backend through `type`. A Workflow
-Agent task names a Mohist Agent through `mohist/agent`; the Agent definition
-selects the execution-backend Action (`mohist/opencode` or `mohist/pi`), which
-is an internal Agent-to-Runner contract. Agent Input supplies model options. See
+Runner does not select a global Runtime through `type`. A Workflow Agent task
+names a Mohist Agent through `mohist/agent`; the Agent definition selects
+`mohist/opencode` or `mohist/pi`. Agent Input supplies model options. See
 [Action Contracts](actions/README.md).
 
-Runtime replacement and shutdown are bounded by two host-local settings, both
-millisecond values set in the service manager configuration:
-`QUARANTINE_DRAIN_TIMEOUT_MS` (default 60 seconds) bounds how long a
-quarantined Runtime generation drains before its active turns fail, and
-`RUNTIME_SHUTDOWN_TIMEOUT_MS` (default 30 seconds) bounds graceful Runtime
-shutdown. See [Runner design](../design/runner.md) for the drain and shutdown
-protocol.
+Runtime replacement and shutdown use two host-local millisecond settings in
+service-manager configuration: `QUARANTINE_DRAIN_TIMEOUT_MS` (default 60 seconds)
+bounds a quarantined Runtime generation, and `RUNTIME_SHUTDOWN_TIMEOUT_MS`
+(default 30 seconds) bounds graceful shutdown. See [Runner design](../design/runner.md)
+for the drain and shutdown protocol.
 
 ## Self-hosting
 
@@ -220,11 +203,11 @@ For a long-running Runner managed as a service instead of foreground
 
 ## Implementation Gaps
 
-Some live Runner operations can still return unavailable when their connection
-drops after delivery. Original-outcome recovery is not yet uniform for
-Follow-up, Stop, Session commands, and Workspace removal. Workflow terminal
-status already reconciles after a lost notification. Until this gap closes, do
-not treat an unavailable response as proof that a local effect did not happen.
+- Original-outcome recovery is not uniform for Follow-up, Stop, Session
+  commands, and Workspace removal when the connection drops after delivery.
+- Workflow terminal status reconciles after a lost notification, but other live
+  Runner operations can still return unavailable. An unavailable response does
+  not prove that a local effect did not happen.
 
 ---
 
