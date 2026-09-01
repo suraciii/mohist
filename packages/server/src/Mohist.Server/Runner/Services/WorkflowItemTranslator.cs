@@ -505,7 +505,11 @@ public sealed class WorkflowItemTranslator : IScopedService
             ? JSON.SerializeToElement(new { name = repository.Name, gitUrl = repository.GitUrl, baseBranch = repository.BaseBranch })
             : JSON.SerializeToElement<object?>(null);
         payload["workspace"] = ReadIssueNumber(run) is { } issueNumber
-            ? JSON.SerializeToElement(new { name = $"issue-{issueNumber}" })
+            ? JSON.SerializeToElement(new
+            {
+                name = $"issue-{issueNumber}",
+                branch = $"mohist/ws-issue-{issueNumber}",
+            })
             : run.Workspace is { } workspace
                 ? JSON.SerializeToElement(new { path = workspace.Path, branch = workspace.Branch })
                 : JSON.SerializeToElement<object?>(null);
