@@ -103,6 +103,94 @@ func TestDoctorFailureReturnsOperationExit(t *testing.T) {
 	if code := Run(context.Background(), []string{"doctor"}, deps); code != ExitOperation || !strings.Contains(out.String(), "migrations") || errOut.Len() != 0 { t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String()) }
 }
 
+func TestDoctorAllChecksRenderInServerOrderAndPass(t *testing.T) {
+	body := `{"success":true,"data":[{"name":"revision-alignment","status":"ok","detail":"aligned","nextAction":null},{"name":"migrations","status":"ok","detail":"current","nextAction":null}]}`
+	calls := 0
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.URL.Path != "/api/doctor/checks" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		return response(200, body), nil
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"doctor"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if calls != 1 || strings.Index(out.String(), "revision-alignment") > strings.Index(out.String(), "migrations") {
+		t.Fatalf("calls=%d output=%q", calls, out.String())
+	}
+	for _, expected := range []string{"name: revision-alignment", "status: ok", "detail: aligned", "name: migrations", "detail: current"} {
+		if !strings.Contains(out.String(), expected) {
+			t.Errorf("output missing %q: %s", expected, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "next action:") || errOut.Len() != 0 {
+		t.Fatalf("unexpected output=%q stderr=%q", out.String(), errOut.String())
+	}
+}
+
+func TestDoctorMixedChecksRenderFailedNextActionAndFail(t *testing.T) {
+	body := `{"success":true,"data":[{"name":"first","status":"ok","detail":"fine","nextAction":null},{"name":"second","status":"fail","detail":"broken","nextAction":"repair it"},{"name":"third","status":"fail","detail":"also broken","nextAction":"retry"}]}`
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) { return response(200, body), nil }), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"doctor"}, deps); code != ExitOperation {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if strings.Count(out.String(), "next action:") != 2 || strings.Contains(out.String(), "fine\nnext action:") {
+		t.Fatalf("next-action rendering=%q", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("unexpected stderr=%q", errOut.String())
+	}
+}
+
+func TestDoctorAllFailingChecksReturnFailureAfterRenderingAll(t *testing.T) {
+	body := `{"success":true,"data":[{"name":"first","status":"fail","detail":"one","nextAction":"fix one"},{"name":"second","status":"fail","detail":"two","nextAction":"fix two"}]}`
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) { return response(200, body), nil }), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"doctor"}, deps); code != ExitOperation {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	for _, expected := range []string{"name: first", "detail: one", "next action: fix one", "name: second", "detail: two", "next action: fix two"} {
+		if !strings.Contains(out.String(), expected) {
+			t.Errorf("output missing %q: %s", expected, out.String())
+		}
+	}
+}
+
+func TestDoctorJSONDiscoveryAndProjection(t *testing.T) {
+	calls := 0
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return response(200, `{"success":true,"data":[{"name":"migrations","status":"fail","detail":"pending","nextAction":"migrate"}]}`), nil
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"doctor", "--json"}, deps); code != ExitOK || calls != 0 || errOut.Len() != 0 {
+		t.Fatalf("discovery code=%d calls=%d stdout=%q stderr=%q", code, calls, out.String(), errOut.String())
+	}
+	if out.String() != "name\nstatus\ndetail\nnextAction\n" {
+		t.Fatalf("fields=%q", out.String())
+	}
+	*out, *errOut = strings.Builder{}, strings.Builder{}
+	if code := Run(context.Background(), []string{"doctor", "--json", "name,nextAction"}, deps); code != ExitOperation || calls != 1 || errOut.Len() != 0 {
+		t.Fatalf("projection code=%d calls=%d stdout=%q stderr=%q", code, calls, out.String(), errOut.String())
+	}
+	if out.String() != `[{"name":"migrations","nextAction":"migrate"}]`+"\n" {
+		t.Fatalf("projection=%q", out.String())
+	}
+}
+
+func TestDoctorRejectsMalformedChecksWithoutRendering(t *testing.T) {
+	for _, body := range []string{
+		`{"success":true,"data":{}}`,
+		`{"success":true,"data":[null]}`,
+		`{"success":true,"data":[{"name":"migrations","status":"unknown","detail":"bad","nextAction":null}]}`,
+		`{"success":true,"data":[{"name":"migrations","status":"fail","detail":"bad"}]}`,
+	} {
+		deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) { return response(200, body), nil }), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+		if code := Run(context.Background(), []string{"doctor"}, deps); code != ExitOperation || out.Len() != 0 || !strings.Contains(errOut.String(), "invalid_response") {
+			t.Fatalf("body=%s code=%d stdout=%q stderr=%q", body, code, out.String(), errOut.String())
+		}
+	}
+}
+
 func TestClientRejectsMalformedAndFailedResponses(t *testing.T) {
 	for _, body := range []string{"not-json", `{"success":false,"error":"nope","code":"forbidden"}`} {
 		deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) { return response(500, body), nil }), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})

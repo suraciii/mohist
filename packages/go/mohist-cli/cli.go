@@ -379,6 +379,10 @@ func render(out io.Writer, c command, data json.RawMessage) error {
 		if err := validateDiagnosis(data); err != nil {
 			return err
 		}
+	} else if c.kind == "doctor" {
+		if _, err := decodeDoctorChecks(data); err != nil {
+			return err
+		}
 	}
 	if len(c.fields) > 0 {
 		return project(out, data, c.fields, c.kind == "doctor")
@@ -390,20 +394,86 @@ func render(out io.Writer, c command, data json.RawMessage) error {
 }
 
 func renderDoctor(out io.Writer, data json.RawMessage) error {
-	var checks []map[string]any
-	if err := json.Unmarshal(data, &checks); err != nil || checks == nil {
-		return errors.New("error: Doctor response has an invalid shape [invalid_response]")
+	checks, err := decodeDoctorChecks(data)
+	if err != nil {
+		return err
 	}
 	for _, check := range checks {
-		fmt.Fprintf(out, "%v: %v\n", check["name"], check["status"])
-		if detail, ok := check["detail"].(string); ok && detail != "" {
-			fmt.Fprintln(out, "  "+detail)
+		fmt.Fprintf(out, "name: %s\nstatus: %s\ndetail: %s\n", check.Name, check.Status, check.Detail)
+		if check.Status == "fail" && check.NextAction != nil && *check.NextAction != "" {
+			fmt.Fprintln(out, "next action: "+*check.NextAction)
 		}
-		if next, ok := check["nextAction"].(string); ok && next != "" {
-			fmt.Fprintln(out, "  next: "+next)
-		}
+		fmt.Fprintln(out)
 	}
 	return nil
+}
+
+type doctorCheck struct {
+	Name       string
+	Status     string
+	Detail     string
+	NextAction *string
+}
+
+func decodeDoctorChecks(data json.RawMessage) ([]doctorCheck, error) {
+	var rawChecks []json.RawMessage
+	if err := json.Unmarshal(data, &rawChecks); err != nil || rawChecks == nil {
+		return nil, errors.New("error: Doctor response has an invalid shape [invalid_response]")
+	}
+
+	checks := make([]doctorCheck, 0, len(rawChecks))
+	for _, rawCheck := range rawChecks {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(rawCheck, &fields); err != nil || fields == nil {
+			return nil, errors.New("error: Doctor response has an invalid shape [invalid_response]")
+		}
+
+		name, ok := doctorStringField(fields, "name")
+		if !ok {
+			return nil, errors.New("error: Doctor response has an invalid shape [invalid_response]")
+		}
+		status, ok := doctorStringField(fields, "status")
+		if !ok || (status != "ok" && status != "fail") {
+			return nil, errors.New("error: Doctor response has an invalid shape [invalid_response]")
+		}
+		detail, ok := doctorStringField(fields, "detail")
+		if !ok {
+			return nil, errors.New("error: Doctor response has an invalid shape [invalid_response]")
+		}
+		nextAction, ok := doctorNullableStringField(fields, "nextAction")
+		if !ok {
+			return nil, errors.New("error: Doctor response has an invalid shape [invalid_response]")
+		}
+		checks = append(checks, doctorCheck{Name: name, Status: status, Detail: detail, NextAction: nextAction})
+	}
+	return checks, nil
+}
+
+func doctorStringField(fields map[string]json.RawMessage, name string) (string, bool) {
+	raw, present := fields[name]
+	if !present || strings.TrimSpace(string(raw)) == "null" {
+		return "", false
+	}
+	var value string
+	if json.Unmarshal(raw, &value) != nil {
+		return "", false
+	}
+	return value, true
+}
+
+func doctorNullableStringField(fields map[string]json.RawMessage, name string) (*string, bool) {
+	raw, present := fields[name]
+	if !present {
+		return nil, false
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return nil, true
+	}
+	value, ok := doctorStringField(fields, name)
+	if !ok {
+		return nil, false
+	}
+	return &value, true
 }
 
 func renderDiagnosis(out io.Writer, data json.RawMessage) error {
@@ -628,10 +698,8 @@ func pick(value map[string]json.RawMessage, fields []string) map[string]json.Raw
 }
 
 func doctorFailed(data json.RawMessage) bool {
-	var checks []struct {
-		Status string `json:"status"`
-	}
-	if json.Unmarshal(data, &checks) != nil {
+	checks, err := decodeDoctorChecks(data)
+	if err != nil {
 		return true
 	}
 	for _, check := range checks {
