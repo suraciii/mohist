@@ -490,7 +490,10 @@ describe('mohist/rebase', () => {
       }
     })
 
-    const result = await callAction(rebaseAction, context({ baseBranch: 'master', squash: true, message: 'Deliver the change' }))
+    const result = await callAction(
+      rebaseAction,
+      context({ baseBranch: 'master', squash: true, message: 'Deliver the change' }),
+    )
     expect(result.error).toBeDefined()
     expect(result.error).toMatchObject({ code: 'nothing-to-integrate' })
     expect(result.error?.message).toContain('no committed change to integrate')
