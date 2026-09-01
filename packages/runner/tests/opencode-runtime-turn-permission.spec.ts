@@ -104,7 +104,13 @@ describe("OpenCodeRuntime turn permissions", () => {
     })
     await new Promise((resolve) => setImmediate(resolve))
 
-    expect(turn.permissionReply).not.toHaveBeenCalled()
+    // A subagent under the same directory is part of this turn tree; its ask
+    // is answered so the headless turn cannot hang on it.
+    expect(turn.permissionReply).toHaveBeenCalledTimes(1)
+    expect(turn.permissionReply).toHaveBeenLastCalledWith(
+      expect.objectContaining({ requestID: "perm_other", directory: DIRECTORY, reply: "once" }),
+      expect.anything(),
+    )
     resolvePrompt({ data: { parts: [{ type: "text", text: "completed" }] } })
     expect((await resultPromise).ok).toBe(true)
   })

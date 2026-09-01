@@ -326,11 +326,14 @@ interface RetryTracker {
 
 function permissionRequestIdFor(
   event: RuntimeGlobalEvent,
-  expectedSessionId: string,
+  _expectedSessionId: string,
   expectedDirectory: string,
 ): string | null {
+  // Directory, not session identity, scopes the reply: subagents run under
+  // their own session IDs inside the same turn tree, and an unanswered ask
+  // from a subagent hangs the whole headless turn until the report deadline.
+  // The directory admits one active turn, so no foreign turn can race this.
   if (event.type !== 'permission.asked') return null
-  if (event.sessionID !== expectedSessionId) return null
   if (event.directory !== undefined && event.directory !== expectedDirectory) return null
   const requestId = event.payload?.['id']
   return typeof requestId === 'string' && requestId.length > 0 ? requestId : null
