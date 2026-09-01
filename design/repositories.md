@@ -1,9 +1,22 @@
 # Repository Execution
 
-A Repository is a named execution resource owned by a Project Space. An Issue
-stores the target Repository resource name. A WorkflowRun captures the bound
-Repository snapshot and may record one write-once Pull Request identity. A Runner
-Workspace does not become a second source of truth for Repository identity.
+A Repository is a named execution resource declared by a Project. An Issue
+binds one target Repository, and a WorkflowRun captures that Repository's
+values when it starts. Workspace materialization is not a second authority for
+Repository identity.
+
+## Design Drivers
+
+- A Project is a product boundary and may contain several isolated
+  Repositories.
+- The Repository resource must remain the write authority for its Git URL and
+  base branch.
+- An unfinished Issue needs stable source-control properties for its entire
+  WorkflowRun.
+- Repository selection and Workspace location answer different questions and
+  must not be merged.
+- A temporary remote check can protect a checkout without creating another
+  persisted identity or lock key.
 
 ## Model
 
@@ -27,113 +40,115 @@ WorkflowRun
   PullRequestIdentity
 ```
 
-- Project Repository is the only write authority for `GitUrl` and
+- The Project Repository is the only write authority for `GitUrl` and
   `BaseBranch`.
-- An Issue's `RepositoryName` is a stable reference to a Project Repository.
-  The Issue cannot be rebound after its first start.
-- A WorkflowRun stores the bound Repository snapshot (name, Git URL, and base
-  branch) captured at start. It may also store one write-once Pull Request
-  identity for that Repository.
-- A Workspace is a first-class execution-environment resource under a Project,
-  with its own identity, origin, and lifecycle. Its Repository references are
-  access grants, not copies of Repository definitions. See
-  [`workspaces.md`](workspaces.md).
-- A normalized Git remote is a temporary validation value, not a domain field.
-  The system does not persist `RemoteFingerprint` or
-  `RemoteIdentityVersion`.
+- `Issue.RepositoryName` references a Project Repository. It is immutable after
+  the Issue's first start.
+- WorkflowRun stores the bound Repository snapshot: name, Git URL, and base
+  branch. It may store one write-once Pull Request identity for that
+  Repository.
+- A Workspace stores Repository references as access grants, not Repository
+  definitions. Its identity, materialization, affinity, and loss behavior are
+  defined in [`workspaces.md`](workspaces.md).
+- A normalized Git remote is a temporary validation value. Mohist does not
+  persist `RemoteFingerprint` or `RemoteIdentityVersion`.
 
 ## Semantics
 
-### Repository Changes
+### Resource Changes
 
-A Project may add a Repository, change the default, and modify `GitUrl` or
-`BaseBranch` or delete a Repository when no unfinished Issue uses it.
+A Project may add Repositories, change its default, edit a Repository, or
+delete one when no unfinished Issue uses it.
 
-Both backlog and `in_progress` Issues occupy their target Repository:
+```text diagram
+ +--------------+             +-------------+
+ | Project Repo |             | Repo change |
+ +-------+------+             +------+------+
+         |                           |
+         v                           v
+ +---------------+         +-------------------+
+ | Issue binding |         | Issue unfinished? |
+ +-------+-------+         +---------+---------+
+         |                     +-----+------+
+         v                     vyes         vno
+ +--------------+         +--------+   +--------+
+ | Run snapshot |         | Reject |   | Commit |
+ +-------+------+         +--------+   +--------+
+         |
+         v
+ +---------------+
+ | Task dispatch |
+ +---------------+
+```
 
-- changing that Repository's `GitUrl` or `BaseBranch` is rejected;
-- deleting that Repository is rejected;
-- changing the Project default is unaffected because the Issue stores an
-  explicit `RepositoryName`;
-- done and cancelled Issues retain only the historical resource name and do not
-  block modification or deletion.
+- Backlog and `in_progress` Issues occupy their target Repository. Editing its
+  Git URL or base branch, or deleting it, is rejected.
+- Done and cancelled Issues retain their historical Repository name but do not
+  block editing or deletion.
+- Changing the Project default does not rewrite existing Issue bindings.
+- The default Repository cannot be deleted. Select another default first.
+- Two Repository names in one Project must not point to equivalent Git remotes.
+  The alias check may normalize URLs during the write, but it must not persist
+  a hash. A Repository name identifies exactly one remote, so an integration
+  lock cannot split one physical Repository into two locks.
 
-Repository update and Issue create, reassign, reopen, and remove must pass
-through the same Project-scoped coordination boundary. It evaluates unfinished
-Issue bindings and commits or rejects the change as one serialized decision.
-Issue start needs no new coordination protocol because a backlog Issue already
-occupies its Repository.
+Repository update and Issue create, reassign, reopen, and remove use one
+Project-scoped coordination boundary. It serializes the check of unfinished
+Issue bindings with the commit or rejection. Issue start needs no new
+coordination protocol because a backlog Issue already occupies its Repository.
+Integration locks use `(ProjectId, RepositoryName)`.
 
-Two Repository names in one Project may not point to equivalent Git remotes.
-The alias check may normalize URLs temporarily during a write, but it does not
-persist a hash. Integration locks remain keyed by
-`(ProjectId, RepositoryName)`. Because a resource name identifies exactly one
-remote, the lock cannot split one physical repository into two locks.
+### Issue Binding and Dispatch
 
-### Dispatch
+An Issue selects a Repository at creation. Without an explicit repository it
+uses the current Project default. Before first start, the Issue may be
+reassigned. After first start, reassignment is rejected.
 
-Each task dispatch uses the WorkflowRun's bound Repository snapshot. The
-snapshot is not a Run Variable and is not resolved again from the Project
-Repository collection. There is no fallback to the Project default, `main`, or
-legacy variables.
+Every task dispatch uses the WorkflowRun snapshot. It does not resolve the
+Project Repository again and has no fallback to the Project default, `main`, or
+legacy variables. Source properties therefore remain stable for the run.
 
-An unfinished Issue locks the Repository's execution properties before the run
-starts, so every dispatch in that WorkflowRun uses stable `GitUrl` and
-`BaseBranch` values. The first `github.pr.number` carrier through the Workflow
-grain records the run's write-once Pull Request identity; a conflicting number
-is rejected.
+The first `github.pr.number` carrier through the Workflow grain records the
+run's Pull Request identity. A conflicting number is rejected. A missing bound
+Repository context fails the task with an actionable Repository error.
 
-### Workspace
+### Workspace Separation
 
 Repository resolution answers which source material a dispatch may use.
-Workspace resolution answers where that work executes. Combining the two would
-make a WorkflowRun, checkout, or Runner directory a second authority for both
-resources.
+Workspace resolution answers where it executes. An Issue holds both
+`RepositoryName` and `WorkspaceName`; WorkflowRun carries the Repository
+snapshot while dispatch passes Workspace independently.
 
-An Issue therefore holds both stable references: `RepositoryName` selects the
-Project Repository and `WorkspaceName` selects the Project Workspace. WorkflowRun
-carries the bound Repository snapshot, while dispatch passes the Workspace name
-independently. Workspace identity, Origin, materialization, affinity, and loss
-behavior are defined only in [`workspaces.md`](workspaces.md).
+The materialized checkout must belong to the bound Git URL. If the Runner
+cannot confirm the remote, preparation fails before fetch, push, or rebase.
+This check does not make the remote URL, checkout path, or branch part of
+Workspace identity.
 
-Repository preparation still protects one local invariant: the materialized
-checkout must belong to the bound `GitUrl`. If the Runner cannot confirm the
-remote, it fails preparation before fetch, push, or rebase. This validation does
-not make the remote URL, checkout path, or branch part of Workspace identity.
-
-### Workspace Queries and Cleanup
-
-Workspace operations are addressed by `(ProjectId, WorkspaceName)`. A
-WorkflowRun ID may locate workflow history, but it never identifies a
-Workspace. The Server resolves the Workspace Home to a Runner; Repository data
-is supplied only to operations that need source control context.
-
-The Workspace lifecycle and reclamation grant come from the Workspace view, not
-Repository existence or WorkflowRun status. Runner-side registry and deletion
-fence rules are authoritative in
-[`workspaces.md`](workspaces.md#runner-side-directory-reclamation).
+Workspace operations use `(ProjectId, WorkspaceName)`. A WorkflowRun ID may
+locate workflow history but never identifies a Workspace. Workspace lifecycle
+and reclamation come from the Workspace view, not Repository existence or
+WorkflowRun status. See
+[`workspaces.md#runner-side-directory-reclamation`](
+workspaces.md#runner-side-directory-reclamation).
 
 ## Failure Semantics
 
-- Changing the Git URL or base branch while an unfinished Issue uses the
-  Repository is rejected and identifies the blocking Issue.
-- When a run lacks the required bound Repository context, the task fails with
-  an actionable Repository error.
-- When preparation cannot confirm that the materialized checkout belongs to the
-  bound Repository, it fails before fetch, push, or rebase.
+- An edit or deletion blocked by an unfinished Issue identifies that Issue.
+- A task without required bound Repository context fails with an actionable
+  Repository error.
+- Preparation fails before source-control mutation when the checkout remote
+  cannot be confirmed against the bound Git URL.
 
 ## Status
 
-Repository occupancy locking is implemented: `GitUrl` and `BaseBranch` updates
-and deletion first query blockers among unfinished Issues. Issue dispatch also
-passes the named `issue-N` Workspace, and the Runner materializes that Workspace
-through the first-class Workspace path.
+Repository occupancy locking is implemented. Git URL and base branch updates
+and deletion query blockers among unfinished Issues. Issue dispatch passes the
+named `issue-N` Workspace, and the Runner materializes it through the first-class
+Workspace path.
 
-The remaining gaps point in one direction only. `WorkflowRun` still retains
-legacy `WorkflowRepositoryContext` and `WorkspaceIdentity` copies, some
-Workspace query wires still carry Project, Issue, Repository, path, and branch,
-and the Runner retains a per-WorkflowRun Workspace manager and registry as a
-fallback when a dispatch lacks the named Workspace fact. These fields and the
-`workspaces.json` fallback are retired implementation paths. They do not define
-Workspace identity and must be removed as callers converge on
-`(ProjectId, WorkspaceName)`.
+Legacy `WorkflowRepositoryContext` and `WorkspaceIdentity` copies remain in
+WorkflowRun. Some Workspace query wires still carry Project, Issue, Repository,
+path, and branch, and the Runner retains a per-WorkflowRun Workspace manager
+and registry for dispatches without a named Workspace. The `workspaces.json`
+fallback is also a retired implementation path. These paths do not define
+Workspace identity. Callers are converging on `(ProjectId, WorkspaceName)`.

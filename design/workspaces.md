@@ -1,26 +1,25 @@
 # Workspace
 
-A Workspace is a first-class named execution-environment resource under a
-Project: a persistent directory plus access to a set of repositories. Its
-lifecycle is independent of any AgentSession or WorkflowRun.
+A Workspace is a named execution environment under a Project. It has a durable
+identity, an Origin, Repository references, and Runner materialization facts.
+Its lifecycle is independent of AgentSessions and WorkflowRuns.
 
-Boundary: a Workspace holds only identity, origin, Repository references,
-status, and materialization routing facts. Directory contents and Git layout
-(clone / branch / worktree) belong to Workflow preparation or Agent behavior,
-not Workspace entity schema.
+The Server owns the logical Workspace. A Runner owns only its local
+materialization and is the only component that touches its filesystem.
+Directory contents and Git layout are execution details, not Workspace fields.
+A Workspace gives multi-repository work a home for plans, research, and other
+products that do not belong to one Repository.
 
-A Workspace is the home of the work, while repositories are its materials.
-Repository checkouts live under the Workspace, and work products such as plans
-and research belong at the Workspace level. For Workflow Workspaces this layout
-is a platform contract owned by Workflow preparation (see Initialization); for
-interactive Workspaces it remains a prompt convention. It gives cross-repository
-work a place for artifacts that do not belong to any one repository.
+## Design Drivers
 
-Reference analogy, for explanation only and not as a terminology source:
-Runner ~= Node, WorkflowRun ~= Pod, AgentSession ~= Container, and Workspace ~=
-local PersistentVolume. Its lifecycle is independent of its consumers, its
-materialization location determines scheduling affinity, it is lost with its
-node, and it is shared within one consumer group.
+- Workspace identity must survive Runner loss while its directory may not.
+- Project isolation requires one active Workspace for each Origin within a
+  Project.
+- Repository access must stay separate from checkout state and Git layout.
+- Workflow execution needs a clean, repeatable layout. Interactive work needs
+  a reusable directory without platform-imposed checkout rules.
+- A lost directory must rematerialize empty. Workflow recovery therefore uses
+  the Workflow branch and uploaded artifacts, not directory continuity.
 
 ## Model
 
@@ -28,13 +27,12 @@ node, and it is shared within one consumer group.
 Project.Workspace
   Name                 # Unique within the Project; derived from Origin by default
   Origin               # Source binding; see below
-  RepositoryNames[]    # References to Project Repository resources (access grants)
+  RepositoryNames[]    # Project Repository references and access grants
   Status               # active | archived
   Home                 # Materialization route: runnerId + path; empty before materialization
 ```
 
-Origin is both the source from which the Workspace was created and its unique
-resolution key:
+`Origin` is the source and unique resolution key:
 
 ```text literal
 Origin = { kind: issue, issueNumber }
@@ -44,163 +42,173 @@ Origin = { kind: issue, issueNumber }
        | { kind: manual }
 ```
 
-- At most one active Workspace may have a given Origin within a Project.
-- Workspace creation and archival emit `com.mohist.workspace.created` and
-  `com.mohist.workspace.archived`. See the Workspace family in
-  [`event-protocol.md`](event-protocol.md) for event lineage.
-- Reverse resolution for the Workflow path goes through the Issue: the Issue
-  holds WorkspaceName, while the Workspace does not duplicate Issue state.
-- An AgentSession holds WorkspaceName. A Workspace does not hold a Session
-  list; "which Sessions are currently bound" is a query over Sessions.
-- RepositoryNames are access grants and default checkout targets, not evidence
-  of materialized checkouts. Workflow preparation owns the clean Issue checkout;
-  an interactive Agent organizes its own checkout layout.
-- The Server owns the logical Workspace and its lifecycle; the Runner owns
-  only the local materialization and is the only component that touches that
-  filesystem. Losing the directory never deletes the durable identity; later
-  use rematerializes the same logical Workspace.
+- At most one active Workspace in a Project may have a given Origin.
+- An Issue holds `WorkspaceName` for Workflow resolution. A Workspace does
+  not duplicate Issue state.
+- An AgentSession holds `WorkspaceName`. A Workspace does not hold a Session
+  list; bound Sessions are a query over Sessions.
+- `RepositoryNames` grant access and name default checkout targets. They do
+  not prove that a checkout exists.
+- Workspace creation and archival emit
+  `com.mohist.workspace.created` and `com.mohist.workspace.archived`. Event
+  lineage is defined in [`event-protocol.md`](event-protocol.md).
 
 ## Semantics
 
-### Creation (Dynamic Provisioning)
+### Creation and Resolution
 
-A Workspace is provisioned dynamically when its Origin first needs to execute;
-there is no separate global creation flow:
+A Workspace is provisioned when its Origin first needs execution. There is no
+separate global creation flow.
 
-- Workflow path: starting an Issue's first run creates
-  `Origin = { issue, n }`, with Name derived as `issue-<n>`. Retry and rerun
-  reuse the same Workspace.
-- Interactive path: the first trigger from an ingress context, such as a Slack
-  channel or Web conversation, creates the corresponding Origin. Its Name is
-  derived from the context and made unique within the Project.
-- Manual path: `mo workspace create <name>` creates a Workspace explicitly with
-  `Origin = { manual }`.
+```text diagram
+                   +--------+
+                   | Origin |
+                   +----+---+
+                        |
+                        v
+              +------------------+
+              | Active Workspace |
+              +---------+--------+
+            +-----------+-----------+
+            v                       vIssue done or close
+     +-------------+          +----------+
+     | Runner Home |          | Archived |
+     +------+------+          +-----+----+
+            |                       |
+            vlost or unavailable    v
+ +---------------------+   +-----------------+
+ | Rematerialize empty |   | No new bindings |
+ +---------------------+   +-----------------+
+```
 
-Creation establishes only the entity and Repository references. The Runner
-materializes the directory on first dispatch. A manual Name is supplied by the
-user and must be unique within the Project.
-
-### Repository Membership
-
-- `mo workspace repo add/remove <name> <repo>` changes RepositoryNames. Reject
-  the change while the Workspace has active bound Sessions, and tell the user
-  to stop those Sessions or wait.
-- The Workflow path initially contains the Issue's RepositoryName. A compound
-  Issue can attach additional repositories with `repo add`; the attachment
-  timing remains an open question under Status.
-- During materialization, the Runner injects Repository access credentials for
-  RepositoryNames through the same channel used by Workflow prepare
-  (`GH_TOKEN` / Git credentials; see
-  [`github-integration.md`](github-integration.md)). Agent-managed clones do not
-  need to know credential details.
+- Starting an Issue first creates `Origin = { issue, n }` and normally derives
+  the Name `issue-<n>`. Retries and reruns reuse that Workspace.
+- A Slack channel, Web conversation, or other ingress creates its corresponding
+  Origin on the first trigger. The Name is derived from the context and is
+  unique within the Project.
+- `mo workspace create <name>` creates `Origin = { manual }`. The supplied
+  Name must be unique within the Project.
+- Creation establishes only the Workspace entity and Repository references. The
+  Runner materializes its directory on first dispatch.
+- A root Session resolves its ingress context to an active Workspace. For
+  Slack, each Project resolves the channel independently, so Agents from
+  different Projects use separate Workspaces.
+- An invited Agent joins the enclosing Session or ingress Workspace.
+- A child Session inherits its parent Workspace. Spawn cannot select another
+  Workspace.
+- `mo agent launch <agent> --workspace <name>` binds to an existing Workspace.
+  Without the option, the command uses the current Project's default CLI
+  Workspace, provisioning one when necessary, and returns the actual Name.
 
 ### Binding and Resolution
 
-- Workflow task dispatch binds through the WorkspaceName held by the Issue.
-- Starting a root Session resolves the ingress context to an Origin and then to
-  an active Workspace, provisioning one if none exists. For Slack, the
-  Workspace belongs to the triggered Agent's Project. If Agents from different
-  Projects use the same channel, each Project owns a separate Workspace.
-- An invited Agent joins the Workspace of the enclosing Session or ingress
-  context.
-- A delegated child Session always inherits its parent Session's Workspace. A
-  spawn request cannot select another Workspace.
-- Explicit override: `mo agent launch <agent> --workspace <name>` binds a new
-  Session to an existing Workspace. Without `--workspace`, it binds to the
-  current Project's default CLI Workspace, provisioning one when necessary;
-  the launch response returns its actual Name.
+- Workflow task dispatch resolves the `WorkspaceName` held by the Issue.
+- A delegated child cannot override its parent's Workspace.
+- Workspace operations use `(ProjectId, WorkspaceName)`. A WorkflowRun ID may
+  locate history, but never identifies a Workspace.
+- The Server resolves `Home` to a Runner. Repository data is supplied only to
+  operations that need source control context.
+
+### Repository Membership
+
+- `mo workspace repo add/remove <name> <repo>` changes `RepositoryNames`.
+  Reject the change while an active Session is bound and tell the user to stop
+  those Sessions or wait.
+- A Workflow Workspace starts with the Issue's Repository. A composite Issue
+  may attach more Repositories with `repo add`; attachment timing remains open
+  under Status.
+- During materialization, the Runner injects credentials for declared
+  Repositories through the same channel used by Workflow preparation. Agents
+  do not need to know credential details.
 
 ### Scheduling Affinity and Rematerialization
 
-- Once a Workspace is materialized on Runner R, all subsequent dispatches bound
-  to it route to R.
-- If R is unreachable or the directory has been reclaimed, rematerialize the
-  Workspace on an available Runner: replace Home and start from an empty
-  directory. Unpushed Git state and unpersisted artifacts in the old directory
-  are lost; the platform does not guarantee directory continuity.
-- Workflow recovery semantics stay unchanged: the Profile's push discipline is
-  the recovery point, and prepare clones and checks out again in the new
-  directory.
+- After materialization on Runner R, later dispatches for the Workspace route
+  to R.
+- If R is unreachable or its directory is reclaimed, an available Runner
+  rematerializes the Workspace with an empty directory and replaces `Home`.
+  Unpushed Git state and unpersisted directory artifacts are lost.
+- Workflow recovery uses the Profile's push discipline. Preparation clones
+  again and checks out the required branch in the new directory.
 
-### Initialization
+### Layout
 
-- Workflow path: clean initialization. Prepare materializes a fixed root
-  layout and performs a fresh clone from the Repository resource into it:
-  `.mohist/` for platform marker and identity files, `REPOS/<repository-name>/`
-  for the checkout, and `PLANS/`, `RESEARCH/`, `.scratch/` for Workspace-local
-  work material. Only `REPOS/` participates in Git; plan and review material
-  under `PLANS/` never enters a commit, branch, or Pull Request, and its
-  durable record is the uploaded run artifact (see
-  [`workflow/plan-artifacts.md`](workflow/plan-artifacts.md)). Workspaces for parallel
-  Issues use separate directories with no shared checkout or dependency cache.
-- Workflow dispatch keeps its execution directory separate from its Repository
-  guard directory. The execution directory defaults to the Workspace root and
-  can be selected by the Task's `working-directory`; the guard directory is
-  derived from the target Repository as `REPOS/<repository-name>`. Branch
-  stability, residual Git state, dirty-worktree detection, and Git cleanup use
-  the guard directory regardless of where the Action or Agent executes.
-- Interactive path: an empty directory plus Repository access. The Agent
-  organizes it according to convention; the platform creates no internal
-  layout in advance.
+Workflow preparation owns this fixed root layout. Prepare creates a clean
+Workspace directory and fresh-clones the target Repository into `REPOS/`.
+
+```text literal
+issue-<number>/
+├── .mohist/                  # Platform marker and identity files
+├── REPOS/<repository-name>/  # Repository checkout; only this tree enters Git
+├── PLANS/                    # Plans, designs, review reports, and task list
+├── RESEARCH/                 # Research notes and exploration material
+└── .scratch/                 # Temporary files
+```
+
+Only `REPOS/` participates in Git. `PLANS/`, `RESEARCH/`, and `.scratch/` are
+Workspace-local material. Plans and reviews under `PLANS/` never enter a
+commit, branch, or Pull Request. Their durable record is the uploaded run
+artifact described in
+[`workflow/plan-artifacts.md`](workflow/plan-artifacts.md). Separate Issue
+Workspaces never share checkouts or dependency caches.
+
+Each Workflow dispatch has two directory boundaries:
+
+- The execution directory is the Workspace root unless the Task selects a
+  Workspace-relative `working-directory`.
+- The Repository guard directory is always
+  `REPOS/<repository-name>` for the target Repository. Branch checks, dirty
+  worktree checks, residual Git checks, and cleanup use this directory.
+
+An interactive Workspace starts empty except for Repository access. The Agent
+organizes its own checkout layout.
 
 ### Archival
 
-Archival is the Workspace's only terminal operation:
+Archival is the only terminal Workspace operation:
 
-- Workflow path: archive automatically when the Issue becomes done or
+- An Issue Workflow Workspace archives when the Issue becomes done or
   cancelled.
-- Interactive path: `mo workspace close <name>` archives explicitly. Loss of an
-  ingress, such as Slack channel archival, also triggers archival. Archival
-  releases the Origin, so the next trigger in that channel provisions a new
-  Workspace.
-- Reject `mo workspace close` while active Sessions remain bound and tell the
-  user to stop them or wait. A Workspace whose Origin is an Issue does not
-  accept manual close; direct the user to `issue done / close`, because only an
-  Issue terminal transition may archive it.
-- After archival, retain the entity for queries, reject new bindings, and grant
-  the Runner permission to reclaim the directory.
+- `mo workspace close <name>` archives an interactive or manual Workspace.
+  An Issue Workspace can end only through `mo issue done` or `mo issue close`.
+- Loss of an ingress, such as Slack channel archival, also archives its
+  Workspace. Archival releases the Origin, so the next trigger provisions a
+  new one.
+- Reject close while active Sessions remain bound and direct the user to stop
+  them or wait.
+- After archival, retain the entity for history, reject new bindings, and let
+  the Runner reclaim its directory.
 
 ### Runner-Side Directory Reclamation
 
-The Runner keeps its existing periodic retention and storage-budget
-maintenance. The reclamation guard changes from "WorkflowRun is terminal" to
-the Workspace view: reclamation is forbidden while the Workspace is active
-with active bound Sessions; an active Workspace without active bindings may be
-reclaimed by disk policy, and the entity remains so the next binding
-rematerializes it; an archived Workspace is deleted under the reclamation
-grant.
+The Runner may reclaim an active Workspace with no active bound Sessions under
+its disk policy. It must not reclaim an active Workspace with active bindings.
+An archived Workspace may be deleted under the reclamation grant. The logical
+Workspace remains after active-directory reclamation so a later binding can
+rematerialize it.
 
-Every deletion must still acquire the directory's Runtime removal fence; that
-invariant does not change.
+Every directory deletion must acquire the directory's Runtime removal fence.
 
 ### Prompt Anchoring
 
 For execution bound to a Workspace, the Runner injects a Workspace-root anchor
-containing the absolute path and the instruction "all Workspace files are here;
-do not search `$HOME`". `working-directory` selects the Action execution
-directory; it does not redefine the Workspace root or the Repository guard.
-AGENTS.md and prompt conventions define the internal layout; it is not
-Workspace entity schema.
+with the absolute path and the instruction: `all Workspace files are here; do
+not search $HOME`. `working-directory` selects the Action execution directory;
+it does not redefine the Workspace root or Repository guard. AGENTS.md and
+prompt conventions define internal layout, not Workspace schema.
 
 ## Status
 
-Workspace identity and explicit create/archive lifecycle are implemented.
-Issue, Slack, Web, and CLI origins resolve or provision Workspaces; named Runner
-materialization, cross-Session reuse, home affinity, and Workspace-aware
-reclamation guards are also implemented for their current owners. AgentJob
-scheduling can clear an offline Home and rematerialize elsewhere. WorkflowRun
-assignment remains pinned to its original Runner, so the cross-Runner Workflow
-rematerialization target above is not implemented. The Slack adapter also does
-not yet propagate a provider channel-archive event to the Server's archive
-boundary.
+Workspace identity, explicit create and archive lifecycle, Issue and ingress
+resolution, named Runner materialization, cross-Session reuse, home affinity,
+and Workspace-aware reclamation guards are implemented for current owners.
+AgentJob scheduling can clear an offline Home and rematerialize elsewhere.
+WorkflowRun assignment remains pinned to its original Runner, so cross-Runner
+Workflow rematerialization is not implemented. Slack channel archive events do
+not yet reach the Server archive boundary.
 
-The per-WorkflowRun Workspace manager and its Runner-side registry remain an
-implementation gap for dispatches that still lack a named Workspace. New code
-must not extend that fallback; removing it needs no compatibility model
-because Runner materializations are reconstructible.
-
-Open questions concern compound-Issue repository attachment and Runtime
-Binding after rematerialization. The earlier question about Workflow plan
-artifacts is resolved: they belong at the Workspace root under `PLANS/`, never
-inside the Repository checkout. Git worktrees remain a Git implementation
-detail; a spawned Session always inherits its parent Workspace.
+A per-WorkflowRun Workspace manager and Runner registry still serve dispatches
+without a named Workspace. They are fallback implementation paths that callers
+are removing rather than extending, and they do not define Workspace identity.
+Compound-Issue Repository attachment and Runtime Binding after rematerialization
+remain open questions.

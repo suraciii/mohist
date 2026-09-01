@@ -1,433 +1,323 @@
 # CLI Design
 
-`mo` is Mohist's operational language for people and Agents. It encodes domain intent as stable
-commands and places the smallest accurate execution context at the current level.
+`mo` is Mohist's operational language for people and Agents. It expresses domain
+intent as stable commands and uses the smallest accurate execution context at
+each level.
 
-This document defines domain ownership, design rationale, and implementation constraints for the
-command language. [`docs/cli-reference.md`](../docs/cli-reference.md) is the sole authority for its
-user-visible rules: syntax, verbs, flags, input channels, output, and error contracts. This document
-does not repeat those rules. It retains only their construction rationale, implementation
-mechanisms, and verification approach.
+[`docs/cli-reference.md`](../docs/cli-reference.md) is the sole authority for
+user-visible syntax, verbs, flags, input channels, output, and error contracts.
+This design records command ownership, construction rules, context boundaries,
+and implementation constraints. It does not repeat the reference.
 
-## Goals
+## Core Decisions
 
-- An Agent can discover and execute common operations accurately using only the Mohist Skill and
-  `mo --help` from the current version.
-- People and Agents use the same command surface, help, output, and errors. There is no parallel
-  protocol.
-- Commands can be derived from domain objects and actions. Each capability has one canonical path.
-- Default output is readable by people, while structured output lets callers request only the
-  fields needed for a decision.
-- Non-interactive behavior is deterministic. Parameters, state, and failures provide the next step
-  in one response.
-- Help and the Skill stay small. Every sentence changes a choice, input, or recovery action.
+- People and Agents use the same command tree, help, output, and errors. There
+  is no parallel Agent protocol.
+- Each capability has one canonical command path. Navigation follows user intent
+  and domain ownership, not code modules or aggregate names.
+- Default output is readable by people. Callers select fields or a stream when
+  they need structured output.
+- Non-interactive behavior is deterministic. Parameters, state, and failures
+  return the next action in one response.
+- The Skill and help stay small. Every sentence changes a choice, input, or
+  recovery action.
+- The CLI is a constrained domain DSL. It is not a generic service client or a
+  second product interface.
+- `gh` is an interaction reference, not a compatibility target. Mohist adopts
+  layered help, separate workflow and run ownership, field-selecting JSON, and a
+  lightweight Skill entry point.
 
-`mo` does not:
+## System Boundary
 
-- teach general shell, JSON, Git, or Agent reasoning in the Skill or help;
-- put a complete product manual, internal interface, or implementation history in `--help`;
-- invent resources without product meaning for the sake of syntactic regularity;
-- become a generic pass-through client for arbitrary service interfaces;
-- provide an Agent mode separate from commands used by people.
+The CLI translates user or Agent input into domain commands and renders semantic
+results. It does not own domain state, create a second lifecycle, or infer state
+from presentation.
 
-## Model
+- `docs/cli-reference.md` owns target product semantics and user-facing command
+  behavior.
+- The C# command tree is the executable syntax authority after implementation.
+- The Server read model is the field authority. `ResourceOutputCatalog` is only
+  its CLI projection.
+- Help is local and side-effect free. Remote operations begin only after local
+  parsing, validation, and Project resolution.
+- A renderer cannot change request parameters, resource selection, or state
+  transitions.
 
-CLI navigation starts with user intent while respecting domain ownership. Top-level commands do
-not mechanically mirror code modules or aggregates. An object merits a top-level area only when it
-is independently addressable or users directly start operations from it.
+## Command Model
 
-- `project` — Project: root entry point for a Project Space; owns Prompts and Project Variables.
-- `repo` — Repository: named execution resource scoped to a Project; Issue only references it.
-- `workspace` — Workspace: persistent execution environment scoped to a Project; repository
-  membership is its child resource.
-- `issue` — Issue: work item and its own lifecycle; `start` begins work.
-- `epic` — Epic: shares the bounded context with Issue but has an independent identity and
-  lifecycle.
-- `workflow` — WorkflowProfile: Project-scoped Workflow Definition entry point; does not represent
-  one execution.
-- `run` — WorkflowRun: one Workflow execution and its Approval Point decisions, recovery, and termination actions.
-- `agent` — Mohist Agent: reusable Agent scoped to a Project; AgentJob is a work child resource and
-  Agent Connection is an external access child resource.
-- `session` — AgentSession: stable logical Session addressed uniformly regardless of origin.
-- `activity` — AgentOps Activity feed: Project-scoped, cross-domain, read-only activity records.
-- `runner` — Runner: execution resource registered with Server, including presence and capacity.
-- `server` — Mohist Server: currently connected control-plane application, including status,
-  health, and application logs.
-- `service` — Managed Service: locally managed Server, Runner, or optional `mohist-slack` process;
-  not a domain context.
-- `event` — Event delivery operations: live envelope stream and dead-letter recovery; not a
-  business-domain resource.
-- `label` — Label definition: Project-scoped label vocabulary referenced by Issues and Epics.
-- `routing` — Routing rule: ordered Project-scoped event routing rules and dry-run evaluation.
-- `notification` — Notification channel: local outbound notification channel configuration; not a
-  business-domain resource.
-- `otel` — OpenTelemetry traces: local trace storage and queries; an observability tool, not a
-  business-domain resource.
-- `skill` — Mohist Skill: packaged Skill assets installed into a local Agent directory; not a
-  business-domain resource.
+Top-level commands represent independently addressable objects or operations
+that users start directly:
 
-Runtime adapters, Runtime Sessions, and the model catalog do not form top-level areas. Runtime is a
-dimension of Agent configuration, Session binding, or Action selection. The model catalog supports
-configuration through `agent model list --runtime`. A root-level `config` is not a product resource
-either. Settings with different owners remain within explicit Project, Agent, Run, or local Service
-boundaries and cannot be reaggregated through arbitrary key/value commands.
+- `project`: Project entry point. It owns Prompts, Project Variables, and default
+  references.
+- `repo`: Repository named by a Project and referenced by an Issue.
+- `workspace`: persistent Project execution environment and repository members.
+- `issue`: work item and its lifecycle. `start` begins work.
+- `epic`: product goal with an independent identity and lifecycle.
+- `workflow`: Workflow Profile collection. It does not represent one execution.
+- `run`: one WorkflowRun and its Approval Point, recovery, and termination actions.
+- `agent`: reusable Mohist Agent. AgentJob and Agent Connection are child
+  resources.
+- `session`: stable AgentSession, independent of origin.
+- `activity`: read-only Project activity feed across domains.
+- `runner`: Runner registration, presence, and capacity.
+- `server`: connected Mohist Server status, health, and application logs.
+- `service`: local lifecycle for a Server, Runner, or optional `mohist-slack`.
+- `event`: event stream and dead-letter recovery operations.
+- `label`: Project label vocabulary referenced by Issues and Epics.
+- `routing`: ordered Project event-routing rules and dry-run evaluation.
+- `notification`: local outbound notification-channel configuration.
+- `otel`: local OpenTelemetry trace queries.
+- `skill`: packaged Skill assets installed into a local Agent directory.
 
-`run` is the CLI short name for WorkflowRun. `workflow` is the navigation name for
-WorkflowProfile. The first sentence of group help must say that it manages Workflow Profiles so
-users do not interpret it as WorkflowRun. A CLI short name introduces no new domain concept and
-does not change the ownership defined by [`domain-analysis.md`](domain-analysis.md).
+Runtime adapters, Runtime Sessions, and the model catalog are not product
+resources. Runtime is a dimension of Agent configuration, Session binding, or
+Action selection. Model discovery uses `agent model list --runtime`. There is
+no root-level `config` area. Settings remain under their Project, Agent, Run,
+or local Service owner.
 
-`workflow edit` modifies a Profile resource for future WorkflowRuns. The product
-[Workflow Profile specification](../docs/workflow-profiles.md#select-a-profile) defines Profile and
-Definition binding and the separate dispatch timing for Variables and Prompts. CLI does not copy a
-second set of lifecycle rules. `workflow edit --help` must state that an active Run keeps its bound
-Definition and link to `run --help` to distinguish a Profile from an execution.
+`run` is the short CLI name for WorkflowRun. `workflow` is the navigation name
+for Workflow Profile. Group help must state this distinction and link the two
+areas. A short name introduces no new domain concept.
+
+`workflow edit` changes a Profile for future WorkflowRuns. An active Run keeps
+its bound Definition. `workflow edit --help` must state that fact and link to
+`run --help`.
 
 ### Canonical Ownership
 
-Every domain intent has one canonical entry point. The area represents the main object or
-relationship the user is expressing. The aggregate that persists a field is an implementation
-detail and does not mechanically choose command navigation. A relationship across contexts must
-show the Scope that owns the relationship in its path. It cannot masquerade as a property of the
-referenced resource:
+Every intent has one entry point. A cross-context relationship shows the Scope
+that owns it instead of masquerading as a property of the referenced resource.
 
-- `issue start` begins one work item and obtains its current WorkflowRun. It is an Issue action.
-- `run approve/request-changes/retry/rerun/pause/resume/stop` changes WorkflowRun and is not
-  duplicated under `issue`.
-- `project workflow set-default` changes the Project's default Profile reference. `workflow`
-  manages only the Profile collection. `issue create/edit --workflow-profile` changes an Issue's
-  explicit selection and `issue edit --inherit-workflow-profile` clears it; the two flags are
-  mutually exclusive. The default repository follows the same rule and changes through
-  `project repo set-default`.
-- `agent launch` starts a Mohist Agent and returns an AgentJob, AgentSession, first SessionInput, and
-  first AgentTurn. Job arbitrates the initial launch execution and Session carries the ongoing
-  conversation. Neither claims the other's state or result.
-- `workspace create/list/view/close` manages Workspace entities, while
-  `workspace repo add/remove` manages repository membership. Session has one explicit Workspace
-  override entry point: `agent launch --workspace`. Without that override, the entry point resolves
-  the Workspace from its Origin; CLI launch uses the Project's `cli-current` Workspace. This is a
-  binding decision, not permission to pass a Runner directory. Origin resolution and
-  materialization are authoritative in [`workspaces.md`](workspaces.md). Issue, Slack, and Web do not
-  duplicate Workspace commands under `issue` or `session`. The Workspace field in
-  `session list --workspace` and `session view` is read-only.
-- `slack install-agent/list/view/claim-owner/edit/transfer-owner/enable/disable/remove-binding`
-  manages the Slack access relationship of one Agent. `permanent-delete` permanently deletes its
-  Agent App only when no active binding exists. These actions do not modify the Agent definition.
-  `install-agent` is the domain action that installs an existing Agent into a Slack workspace and
-  creates or recovers the Connection and Agent App. Access actions live directly under root-level
-  `slack`; there is no generic connection subgroup.
-- `session transcript/followup/compact/reset/stop` reads or changes AgentSession. `stop` is the
-  only end-work operation. With `--turn-id` it ends one frozen Turn; without it, `stop` creates the
-  durable cascade rooted at the selected Session. Membership and retry are
-  authoritative in [`subagents.md#cascade-stop`](subagents.md#cascade-stop). Paths are not
-  duplicated by Issue origin and Agent origin.
-- `epic add/remove` expresses the user intent of Epic membership. Issue remains the sole write
-  authority for current EpicNumber, and CLI does not expose cross-aggregate coordination.
-- `--issue`, `--run`, and `--agent` are resolution or filtering conditions. They do not transfer
-  ownership of an action.
+- `issue start` begins one work item and obtains its current WorkflowRun.
+  `run approve`, `request-changes`, `retry`, `rerun`, `pause`, `resume`, and
+  `stop` change that WorkflowRun.
+- `project workflow set-default` changes the Project default Profile.
+  `workflow` manages the Profile collection. `issue create/edit
+  --workflow-profile` selects an Issue Profile, while
+  `issue edit --inherit-workflow-profile` clears that selection. The two Issue
+  flags are mutually exclusive. `project repo set-default` changes the default
+  Repository.
+- `agent launch` starts a Mohist Agent and returns an AgentJob, AgentSession,
+  first SessionInput, and first AgentTurn. The Job owns initial launch
+  arbitration. The Session owns the continuing conversation.
+- `workspace create`, `list`, `view`, and `close` manage Workspaces.
+  `workspace repo add/remove` manage repository membership. `agent launch
+  --workspace` is the explicit Workspace override. Without it, the entry point
+  resolves the Workspace from Origin; CLI launch uses the Project's `cli-current`
+  Workspace. Origin and Materialization rules live in
+  [`workspaces.md`](workspaces.md).
+- `slack install-agent`, `list`, `view`, `claim-owner`, `edit`,
+  `transfer-owner`, `enable`, `disable`, and `remove-binding` manage one
+  Agent's Slack access relationship. `permanent-delete` deletes its Agent App
+  only when no active binding exists. These actions do not edit the Agent
+  definition. Installation creates or recovers the Connection and Agent App.
+- `session transcript`, `followup`, `compact`, `reset`, and `stop` operate on
+  AgentSession. `stop` is the only end-work operation. With `--turn-id` it ends
+  one frozen Turn. Without it, it starts the durable Session-rooted cascade.
+  Membership and retry rules are defined in
+  [`subagents.md#cascade-stop`](subagents.md#cascade-stop).
+- `epic add/remove` expresses membership intent. Issue remains the write
+  authority for current EpicNumber.
+- `--issue`, `--run`, and `--agent` resolve or filter resources. They never
+  transfer ownership of an action.
 
-A subarea represents a subordinate resource without an independent operation entry point, such as
-`issue comment`, `project workflow prompt`, or `agent job`; a narrow catalog used by one area, such
-as `issue template`, `routing rule`, or `agent model`; or a relationship under its owner's Scope,
-such as `project workflow` or `project repo`. AgentSession has a stable ID, independent lifecycle,
-and frequent direct operations, so it must remain the top-level `session` area.
+A subarea serves a subordinate resource without an independent operation entry
+point, a catalog used by one area, or a relationship under its owner's Scope.
+Examples are `issue comment`, `project workflow`, `project repo`, `agent job`,
+`issue template`, `routing rule`, and `agent model`. AgentSession remains a top-
+level area because it has a stable ID, independent lifecycle, and direct
+operations.
 
-## Command Language
+## Command Construction
 
-[`docs/cli-reference.md`](../docs/cli-reference.md) is the sole authority for user-visible command
-shape, verb vocabulary, flag vocabulary, and input channels. This section retains only the design
-decisions used to construct a command:
+- Identify domain intent and its sole entry point before choosing a short,
+  idiomatic command word.
+- Use stable, usually singular English words such as `repo`, `run`, and `skill`.
+  Do not mirror type names such as `repository`, `workflow-run`, or `skills`.
+- Keep one action category consistent across areas. Shared implementation does
+  not make different semantics one action.
+- Use a flag only when variants share semantics, validation, and results.
+  Different behavior remains a separate action.
 
-- First identify domain intent and its sole entry point, then choose the shortest idiomatic command
-  word. This is a constrained command DSL, not a requirement that every sentence have the same
-  syntactic appearance.
-- Areas use short, stable, usually singular English words such as `repo`, `run`, and `skill`. They
-  do not mirror type names as `repository`, `workflow-run`, or `skills`.
-- The same action belongs to the same action category in every area. Different semantics cannot
-  share a word merely because their implementations are reused.
-- Variants can become flags only when they share semantics, validation, and results. Different
-  behavior remains a different action.
+Rejected choices remain concise decisions:
 
-### Reference Baseline
+- Do not add direct task roots merely to avoid resource wrappers. Artificial
+  paths such as `component install` and `system info` are less coherent than
+  direct `install`, `update`, and `info` actions.
+- Do not copy a complete command table into the Skill or add a machine-readable
+  catalog. Runtime help and the command tree are the authorities.
+- Do not wrap every result in `{ok,data,error}`. Successful output is the
+  resource; failures use exit status and stderr.
+- Do not make complete JSON the default. Human output is the default and callers
+  explicitly select fields.
+- Keep remote resource behavior under `runner` or `server`, and local process
+  lifecycle under `service <action> <target>`. Do not merge their semantics.
+- Keep `server logs` separate from `service logs server` because their sources,
+  permissions, and failure results differ.
+- Do not create `runtime` or root-level model commands. Runtime remains a
+  configuration dimension and model discovery uses `agent model list --runtime`.
+- Do not create root-level `config get/set`. Add typed settings under their
+  owners.
+- Keep Slack access under root-level `slack`. `setup` and `status` operate the
+  Workspace installation; other actions manage Slack access resources.
+- Use `slack install-agent <agent>`. `setup-agent` conflicts with Agent Readiness
+  setup and `create` falsely implies that the Agent or Connection is created.
+- Do not expose `rotate-credentials`. Credential rotation belongs to the one
+  resumable installation path.
+- Do not use `--agent-config <json>` as the public configuration surface. Typed
+  flags such as `--runtime`, `--model`, `--variant`, `--skills`, and
+  `--avatar-file` keep validation discoverable.
+- Do not add one-off database audit commands. `otel` is the telemetry entry
+  point; direct database reads remain a developer path.
+- `mo otel query` uses the Server query capability. It does not read local trace
+  storage directly because that would bypass query safeguards and remote-server
+  boundaries.
+- `run view --yaml` returns the complete Definition bound to the Run. A JSON-only
+  view would hide a required resource source.
+- Keep default references under `project`: use `project repo set-default` and
+  `project workflow set-default`, not resource-local variants.
 
-`gh` is an interaction-design reference, not a compatibility target. `mo` adopts four proven
-shapes: layered [root, group, and leaf help](https://cli.github.com/manual/gh), separate
-[workflow](https://cli.github.com/manual/gh_workflow) and
-[run](https://cli.github.com/manual/gh_run) ownership,
-[field-selecting JSON](https://cli.github.com/manual/gh_help_formatting), and a lightweight
-[Skill entry point](https://cli.github.com/manual/gh_skill).
+## Context and Help
 
-`mo` does not copy `gh api`, built-in `--jq`, a template renderer, or an alias system. Those features
-address GitHub's scope and compatibility requirements. Mohist adds similar capabilities only after
-its own repeated use cases appear.
+An Agent uses progressive disclosure:
 
-### Main Trade-Offs
+1. Mohist Skill selects a scenario, first read, dangerous action, or recovery.
+2. Root or group help identifies the available capability and object boundary.
+3. Leaf help makes one invocation executable.
+4. The result or actionable error returns the facts needed for the next choice.
 
-- **Allow only domain nouns at root and wrap every task as a resource.** The syntax looks regular
-  but creates artificial levels such as `component install` and `system info`. Rejected: keep
-  direct `install`, `update`, and `info` task entry points.
-- **Maintain the full command table in the Skill or add a machine-readable command catalog.** The
-  initial read looks complete but duplicates the running version, becomes stale, and consumes
-  substantial context. Rejected: the Skill makes decisions and runtime help discovers syntax.
-- **Wrap every result in a generic `{ok,data,error}` envelope.** The transport shape is uniform but
-  adds fields without information and forces human output around the same model. Rejected:
-  successful output is the resource itself; failures use exit status and stderr.
-- **Dump complete JSON by default and make the Agent filter it.** Implementation is simple but every
-  call pays in irrelevant fields and tokens. Rejected: default to a human view; automation
-  explicitly selects JSON fields.
-- **Put both remote resource behavior and local process lifecycle under `runner` or `server`.**
-  There are fewer root commands, but one action changes target, permission, and failure semantics
-  by area and machine state. Rejected: remote objects remain under `runner` and `server`; local
-  lifecycle is uniformly `service <action> <target>`.
-- **Merge application logs and local service logs as `server logs --source`.** The surface is
-  shorter, but connection, permission, stream, and failure results differ. Rejected: keep the
-  distinct `server logs` and `service logs server` behaviors.
-- **Create `runtime list/view/model list` for execution backends.** It looks symmetric but promotes
-  an internal Runner adapter and configuration catalog into a nonexistent product resource.
-  Rejected: Runtime remains a configuration dimension; model discovery is `agent model list
-  --runtime`.
-- **Keep root-level `config get/set`.** Adding settings is easy but hides different Project, Agent,
-  Workflow, and local Service owners. Rejected: add only typed settings under the resource that
-  owns them.
-- **Choose the command surface for Slack access.** A generic provider subgroup anticipated multiple
-  future providers, but Slack is the only provider and the abstraction hides binding, permission,
-  and lifecycle behind a generic noun. Decision: use root-level `slack`, where `setup` and `status`
-  orchestrate workspace installation while other actions manage Slack access resources. Keep no
-  compatibility command. Reassess when a second provider exists.
-- **Name the action that adds an existing Agent to Slack.** `setup-agent` conflicts with Agent
-  Readiness setup and gives workspace-level `slack setup` a second subject; `create` incorrectly
-  suggests creating an Agent or Connection. Decision: use `slack install-agent <agent>`. The
-  subject is an existing Agent and the result is a recoverable Slack installation. App creation,
-  authorization, credentials, and binding remain internal steps.
-- **Keep `rotate-credentials` for credential rotation.** It overlaps the resumable credential step
-  in `install-agent`; once Connection no longer owns credentials, the command has no target.
-  Rejected: rerun `setup` or `install-agent` and explicitly provide credentials again. One
-  installation record has one path.
-- **Use `--agent-config <json>` as the long-term Agent configuration surface.** Implementation is
-  short but pushes schema, mutual exclusion, and errors onto users and Agents. Rejected: public CLI
-  uses typed flags such as `--runtime`, `--model`, `--variant`, `--skills`, and `--avatar-file`.
-- **Add storage or database audit commands for table size, freelist, and row counts.** They cover
-  internal Server audits, but those are development operations. Architectural prohibitions
-  constrain domain operations and do not justify expanding the command surface for a one-off audit.
-  Rejected: `otel` is the telemetry entry point; direct database reads for an internal Server audit
-  are a valid developer path.
-- **Let `mo otel query` read local trace storage directly.** Queries survive Server outage, but
-  they bypass the API and query safeguards, couple the storage schema, have no query budget or size
-  limit, and silently read local data when CLI points at a remote Server. Rejected: `query` uses
-  the Server query capability. Direct database access during Server failure is a developer path.
-- **Give `run view` only `--json`.** There is one less source view, but callers cannot inspect the
-  Definition bound to the Run. Rejected: `run view --yaml` returns the complete bound Definition
-  and parallels `workflow view --yaml` as a resource-content view.
-- **Put `set-default` under the resource being made default as `repo set-default` or
-  `workflow set-default`.** The path is shorter, but a default reference is Project state and two
-  conventions are less derivable than one. Rejected: use `project repo set-default` and
-  `project workflow set-default` consistently.
+Each layer omits the next layer's details. Skill does not copy the command tree.
+Root help does not contain leaf flags. Group help does not contain other group
+manuals. Leaf help does not contain source paths, implementation interfaces, or
+compatibility history. Results omit unrelated resource snapshots. Errors omit
+internal call chains and vague generic advice.
 
-## Context Architecture
+Review help, Skills, and errors for six properties: authoritative, relevant,
+sufficient, concise, executable, and current. Text must derive from the command
+model, output fields, or domain state. It must omit no required input,
+precondition, destructive consequence, or recovery action.
 
-An Agent obtains context in this order: Mohist Skill, root or group help, leaf help, then result
-or actionable error. Each layer makes one decision:
+### Help Contract
 
-- The Mohist Skill selects a scenario, first read, dangerous action, or nearby recovery action. It
-  must not contain the complete command tree, common flags, or implementation startup commands.
-- Root help establishes the product capability map. It must not contain leaf flags or complete
-  state semantics.
-- Group help explains the object boundary and chooses an action. It must not contain reference
-  manuals for other groups.
-- Leaf help makes one invocation executable without guessing. It must not contain source code,
-  interface paths, or compatibility history.
-- A result returns facts needed by this operation. It must not contain complete snapshots of
-  unrelated resources.
-- An error explains this failure and a deterministic next step. It must not contain internal call
-  chains or vague generic advice.
+Every help operation is local, fast, side-effect free, successful, and
+independent of Server.
 
-### Context Quality
+Root help uses this order:
 
-Review all help, Skills, and error text on six dimensions:
-
-- Authoritative: derived from the current command model, output field definition, or domain state
-  instead of guessed from a prose copy.
-- Relevant: answers only the choice required at the current layer.
-- Sufficient: omits no required parameter, precondition, destructive consequence, or recovery
-  action.
-- Concise: removes sentences that do not change the next action and avoids repeating another
-  authoritative layer.
-- Executable: examples parse under the current command tree and hints can be run directly or
-  completed.
-- Current: help matches the binary version and the Skill does not freeze a volatile flag list.
-
-## Syntax Authority
-
-[`docs/cli-reference.md`](../docs/cli-reference.md) specifies the target product semantics and
-command surface. Once implemented, the C# `System.CommandLine` tree is the sole executable syntax
-authority for that version:
-
-- `mo --help`, group help, and leaf help are generated from the command tree.
-- One argument definition validates required values, mutual exclusion, defaults, and allowed values.
-- One field definition drives selection, serialization, and leaf help for JSON fields in each
-  resource result.
-- Command examples in the Skill must pass parsing by the same command tree.
-- Do not add a separate `mo command list/get` catalog. It would copy the command tree and expand the
-  synchronization surface.
-
-When the spec precedes implementation, only the product document Status records the gap. A change
-that completes a migration must update the command tree, generated help, example tests, and gap
-statement together. Two authorities must not persist.
-
-## Help Contract
-
-Every `--help` operation is local, fast, side-effect free, successful, and independent of Server.
-
-### Root Help
-
-Use this fixed order:
-
-1. One product description.
+1. Product description.
 2. `USAGE`.
-3. Commands grouped under Work, Automation, Operations, and Tools, with a one-sentence result for
-   each command.
-4. Two or three examples covering discovery, reading, and recovery.
+3. Work, Automation, Operations, and Tools groups with one result sentence per
+   command.
+4. Two or three discovery, reading, and recovery examples.
 5. `mo help <topic>` and the documentation entry point.
 
-Root help is an index. It neither displays every shared flag nor expands subcommands.
+Group help uses this order:
 
-### Group Help
-
-Use this fixed order:
-
-1. One sentence identifying the area and its Scope.
+1. Area and Scope sentence.
 2. `USAGE`.
-3. An action list with a one-sentence result for every action.
+3. One result sentence for every action.
 4. `SEE ALSO` only for a genuine common ambiguity.
 
-For example, `workflow --help` must state that it manages Workflow Profiles and link to
-`run --help`. `run --help` must state that it manages WorkflowRun and can resolve one through a Run
-ID or `--issue`.
+Leaf help uses this order:
 
-### Leaf Help
-
-Use this fixed order:
-
-1. One precise result sentence in product and domain language.
-2. One or more valid `USAGE` forms.
-3. Arguments and options, including required values, defaults, mutual exclusion, and allowed values.
-4. State preconditions, irreversible consequences, or distinctions from nearby actions only when
-   they affect the choice.
+1. Result sentence in product and domain language.
+2. Valid `USAGE` forms.
+3. Arguments and options, including required values, defaults, exclusions, and
+   allowed values.
+4. Preconditions, irreversible consequences, or distinctions that affect the
+   choice.
 5. `JSON FIELDS` for a resource result.
-6. At most three independently executable `EXAMPLES`.
+6. At most three executable examples.
 7. Necessary `SEE ALSO` entries.
 
-Leaf help must not contain:
+Help must not expose API routes, HTTP methods, DTOs, grains, handlers, source
+paths, Issue numbers, migration stages, old commands, compatibility claims,
+generic shell instruction, or unconstrained promotion. Common content used by
+three or more groups belongs in `mo help output`, `environment`, or
+`exit-codes`. Content used by one or two commands stays local.
 
-- an API route, HTTP method, DTO, grain, handler, class, or source path;
-- an Issue number, migration stage, old command, or compatibility statement;
-- generic shell instruction or common Agent-operating knowledge;
-- promotional text without a behavioral constraint.
+### Skill Contract
 
-Content shared by three or more command groups and not self-explanatory from argument definitions
-moves to `mo help output`, `mo help environment`, or `mo help exit-codes`. A rule used by only one
-or two commands remains in leaf help to avoid a premature help topic abstraction.
+The entry Skill contains only high-value decisions:
 
-## Skill Contract
+1. Scope and trigger.
+2. First facts to read for an existing Issue or Run.
+3. Scenario routing to skills such as explore, create-Issue, and create-Epic.
+4. Hard distinctions such as `retry/rerun`, `pause/stop`, and `compact/reset`.
+5. CLI handoff to leaf help and `--json` for required fields.
 
-The Mohist Skill uses progressive disclosure. The entry Skill contains only high-value decisions
-and loads a sibling Skill when a scenario needs detail.
+It does not copy lifecycle tables, common flags, startup instructions, removed
+implementations, compatibility history, or details already expressed by leaf
+help. Examples are few, canonical, and parseable. Additional hierarchy requires
+a real scenario branch.
 
-The entry Skill body has a fixed structure:
+## Execution Contracts
 
-1. Scope: when to use the Mohist Skill.
-2. First read: which current facts to read first for an existing Issue or Run.
-3. Scenario routing: when to load explore, create-Issue, create-Epic, and other Skills.
-4. Hard decisions: distinctions that generic CLI cannot derive, including `retry/rerun`,
-   `pause/stop`, and `compact/reset`.
-5. CLI handoff: use leaf help to confirm exact flags, then request only required fields through
-   `--json`.
+### Syntax and Input
 
-The entry Skill does not copy:
+The command tree is the executable syntax authority after implementation. One
+argument definition validates required values, mutual exclusions, defaults, and
+allowed values. One field definition drives field selection, serialization, and
+leaf help. Skill examples must parse against the same tree.
 
-- a complete Issue or Epic lifecycle table;
-- every read-only helper or common flag;
-- Server, Runner, test, or source startup instructions;
-- removed implementations or compatibility history;
-- parameter details already expressed accurately by leaf help.
+Project-scoped commands use one inherited `--project <name-or-id>` option and one
+resolver. Name, ID, and current Project are input forms of one ProjectRef.
+Mutually exclusive inputs such as body and body-file, or target and selector,
+fail locally and cannot overwrite one another. Help, list, view, and local
+validation never trigger a setup prompt.
 
-The Skill frontmatter description only determines triggering. Body examples must be few, canonical,
-and parseable. Complex scenarios belong in sibling Skills or references. Do not add another file
-hierarchy level unless scenario routing has a real branch.
+### Output and Fields
 
-## Input and Scope
+A command computes a semantic result before selecting a renderer. The reference
+owns human output, `--json`, NDJSON, and source-view rules. Implementation must
+validate each JSON field locally before remote work and return the valid list on
+an unknown field. A default table keeps only scanning and next-action columns.
+Color follows terminal capability and `NO_COLOR`; redirected stderr has no
+control sequence. Add a renderer only after three independent repeated use
+cases cannot be served clearly by existing tools.
 
-[`docs/cli-reference.md`](../docs/cli-reference.md) is the sole authority for product rules around
-Project resolution order and interaction. Implementation adds only three constraints:
+The Server DTO read model is the field authority. The CLI catalog must cover
+all DTO JSON properties and must not add an unregistered field. Contract tests
+must fail in both directions when a property is missing or a field is extra.
+One declaration table records deliberate differences as `resource`, `field`,
+and `reason`: `omit` hides a DTO property, and `local` identifies a CLI-only
+value such as degraded output while Server is unavailable. Each TableShape maps
+to a DTO type in the comparison tests. Reflection derives JSON names from the
+Server assembly and serialization attributes. No runtime endpoint, shared
+assembly, or manual property list replaces this check.
 
-- Every Project-scoped command reuses one inherited `--project <name-or-id>` option and the same
-  resolver. Resolution must be unique. Name, ID, and current Project are input forms for the same
-  ProjectRef, not distinct handler paths.
-- Mutually exclusive inputs such as body and body-file or target and selector fail locally. One
-  cannot silently overwrite the other.
-- Help, list, view, and local validation never trigger a setup prompt.
+### Errors and Exit Status
 
-## Output Contract
+The reference owns error format, stable codes, and exit status. A stable code
+uses lowercase snake_case and names a product error, not an exception type. A
+transport error distinguishes definitely not submitted from unknown submission.
+The CLI never resends a state-changing request automatically and gives a retry
+hint only when retry is confirmed safe.
 
-A command produces a semantic result before selecting a renderer. TTY detection and output format
-cannot change the request, resource selection, or state transition.
-[`docs/cli-reference.md`](../docs/cli-reference.md) is the sole authority for user-visible output
-rules, including the human view, field selection with `--json`, field discovery with bare `--json`,
-the NDJSON stream, and source views. Implementation adds:
+## Non-Goals
 
-- Validate each `--json` field locally before a remote operation. An unknown field returns the
-  valid field list and a usage error without making a remote request.
-- A default table retains only columns needed for scanning and choosing the next action.
-- Color follows terminal capability and `NO_COLOR`; redirected stderr contains no control sequence.
-- Adopt a new renderer only after at least three independent, repeated use cases that external
-  tools cannot solve clearly.
-
-## Field Contract
-
-The Server read model, represented by API response DTOs, is the sole authority for fields of each
-resource. The CLI field catalog, `ResourceOutputCatalog`, is a projection of the DTO rather than a
-second fact. It must cover every JSON property of the DTO. Only two explicitly registered
-differences are allowed:
-
-- **Coverage is bidirectional.** If the catalog omits a DTO property, `--json` rejects a valid
-  field and forces callers to bypass CLI for the API. If the catalog lists a property absent from
-  the DTO, CLI silently renders a null column. Both are contract failures that must fail tests.
-- **Differences are explicit.** One declaration table registers each difference as resource,
-  field, and reason. Omit means a DTO property intentionally hidden from the catalog. Local means
-  a catalog property absent from the DTO and synthesized locally by CLI, such as degraded output
-  when Server is unavailable. A new DTO property or catalog field fails tests until registered.
-  This converts the discipline to update CLI with a DTO into a mechanical check. Each declaration
-  is a deliberate review decision rather than a fallback for omissions.
-- **Mappings are explicit.** Contract comparison tests contain the `TableShape -> DTO type` map.
-  Adding a resource without a mapping fails, preventing a new shape from silently escaping the
-  contract.
-- **Mechanism.** Tests reflect DTO types from the Server assembly, derive property names from JSON
-  serialization naming policy and `[JsonPropertyName]`, and compare the set with the CLI field
-  catalog for each resource. There is no runtime endpoint, shared assembly, or manual property list.
-
-## Errors and Exit Status
-
-[`docs/cli-reference.md`](../docs/cli-reference.md) is the sole authority for the user-visible error
-format, stable error codes, and exit status. Implementation adds:
-
-- A stable code uses lowercase snake_case and represents a product error on which a caller can
-  branch. It does not represent an internal exception type.
-- A transport error distinguishes definitely not submitted from submission result unknown. CLI
-  does not automatically resend a state-changing request and provides a retry hint only when retry
-  is confirmed safe.
+- General shell, JSON, Git, and Agent reasoning instruction in Skill or help.
+- A complete product manual, internal interface, or implementation history in
+  `--help`.
+- Resources without product meaning, arbitrary service pass-through, or a
+  separate Agent command mode.
+- A second command catalog, generic result envelope, alias system, or root
+  `config` resource.
 
 ## Status
 
-The Project, Issue, and Run Variables command slices are delivered. All three Scopes use
-`variable list/get/set/unset`; a positional value always stores a string, explicit JSON types enter
-only through `--value-json <json>`, and effective reads for Run remain read-only.
+Project, Issue, and Run Variables command slices are delivered. Each Scope uses
+`variable list`, `get`, `set`, and `unset`. Positional values store strings;
+explicit JSON types use `--value-json <json>`. Effective Run reads remain
+read-only.
 
-The main gaps between the current implementation and target design are recorded under
-[`docs/cli-reference.md`](../docs/cli-reference.md#implementation-gaps). Delivery first establishes
-shared contracts for field-selecting JSON, a consistent ProjectRef, stdout and stderr, exit status,
-and non-interactive operation. Domain slices can proceed in parallel on that foundation. Each slice
-delivers its own leaf help and contract tests so the command tree, help, and tests remain internally
-consistent at every point. Do not publish one command surface and use a Skill to explain another.
+The remaining implementation gaps are listed in
+[`docs/cli-reference.md`](../docs/cli-reference.md#implementation-gaps). The
+shared foundation covers field-selecting JSON, ProjectRef, stdout and stderr,
+exit status, and non-interactive operation. Each domain slice must deliver its
+leaf help and contract tests with the command tree and update its gap statement
+when complete.
 
-The WorkflowProfile and Variables slices must build on the existing separation between Definition
-and Variables, attempt context snapshots, and the authoritative validation chain.
+The Workflow Profile and Variables slices build on Definition and Variables
+separation, attempt-context snapshots, and the authoritative validation chain.

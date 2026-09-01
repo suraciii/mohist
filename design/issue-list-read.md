@@ -1,64 +1,56 @@
 # Low-bandwidth Issue List Reads and Request Isolation
 
 The Issue list is a Project-scoped summary read model for boards, archived
-lists, CLI lists, and a small number of aggregate reads. `IssueReadModel` from
-`GET /issues/{number}` remains responsible for Issue details.
+lists, CLI lists, and small aggregate reads. `IssueReadModel` from
+`GET /issues/{number}` remains the detail contract.
 
 ## Design Drivers
 
-- **List cost follows list size:** Comments, attachments, history, and merged
-  Variables can grow independently of the number of Issues. A board read must
-  not pay those costs for every row.
-- **Invalidation follows resource identity:** One event should refresh only the
-  Project, Issue, Workflow, artifact, or Inbox resource it can change. A broad
-  cache prefix turns unrelated activity into repeated reads.
-- **Cold transfer follows the current route:** Opening the shell should not load
-  every page, dialog, or candidate collection. The user pays for a route or
-  optional workflow only when entering it.
+- List cost follows returned Issues, not comments, attachments, history, or
+  merged Variables.
+- Invalidation follows the identity of the resource an event can change.
+- Cold transfer follows the current route. Optional pages and dialogs load only
+  when used.
 
 ## Model
 
 ### IssueListItem
 
 `IssueListItem` is the shared Server, Web, and CLI list contract. It contains
-only current state, actionability, and compact relationship summaries used by
-lists and boards. It excludes the body, comments, attachments, feedback, Agent
-configuration, and configuration merged from each Issue's Variable layers;
-detail reads own those facts.
+current state, actionability, and compact relationship summaries. It excludes
+body, comments, attachments, feedback, Agent configuration, and merged
+Variable layers. Detail and subresource reads own those facts.
 
-An `IssueListItem` is identified by `(projectId, number)`. Existing Project,
-status, label, priority, repository, parent, and archived or all filters for
-`GET /issues` do not change. Results remain sorted by ascending `number`.
-`GET /issues/{number}` does not become a summary and still returns 404 for a
-missing Issue.
+The identity is `(projectId, number)`. Existing Project, status, label, priority,
+Repository, parent, archived, and all filters for `GET /issues` remain. Results
+sort by ascending `number`. `GET /issues/{number}` remains a detail read and
+returns 404 for a missing Issue.
 
 ### ParentCandidate
 
-`ParentCandidate` contains only `number` and `title`. It belongs to one Project
-and includes only an unarchived backlog Issue whose Workflow has not started
-and which has no parent. Server returns candidates by ascending number. Web no
-longer derives them from a complete Issue list.
+`ParentCandidate` contains `number` and `title`. It belongs to one Project and
+includes only an unarchived Backlog Issue whose Workflow has not started and
+which has no parent. Server returns candidates in ascending number order. Web
+must not derive candidates from a complete Issue list.
 
 ### InboxUnreadCount
 
 `InboxUnreadCount` contains only `unreadCount`. It counts unarchived Inbox rows
-with null `ReadAt` in the current Project. Only the Inbox page uses the complete
-Inbox read model.
+with null `ReadAt` in the current Project. Only the Inbox page reads the full
+Inbox model.
 
 ## Semantics
 
 ### Collection Cost Boundary
 
-`GET /issues` projects current Project-scoped Issue state and joins only the
-current Workflow and compact relationship facts required by `IssueListItem`.
-Workflow, parent, child, prerequisite, and Epic facts are read in batches.
-Filtering and sorting operate on that bounded projection.
+`GET /issues` projects current Project-scoped Issue state and joins only current
+Workflow and compact relationship facts needed by `IssueListItem`. Workflow,
+parent, child, prerequisite, and Epic facts are read in batches. Filtering and
+sorting use that bounded projection.
 
 The list path never reads comments, attachments, feedback, history, or merged
-Variable layers. Detail and independent subresource reads own those facts.
-Therefore list work grows with the number of returned Issues and their compact
-relationships, not with unrelated detail volume, and it performs no per-Issue
-database or HTTP query.
+Variable layers. Work therefore grows with returned Issues and compact
+relationships. It performs no per-Issue database or HTTP query.
 
 ### HTTP Endpoints
 
@@ -76,14 +68,13 @@ GET /unread-count
   data: { unreadCount }
 ```
 
-Both endpoints use the existing Project resolution filter. The filter still
-returns 404 for an unknown Project; the SPA fallback cannot turn it into a
-successful response.
+Both endpoints use the existing Project resolution filter. An unknown Project
+returns 404. SPA fallback must not turn that response into success.
 
 ### Request and Cache Isolation
 
-Web uses separate key factories rather than one `['issues']` prefix for every
-resource:
+Web uses separate key factories. It must not use one `['issues']` prefix for
+all resources:
 
 ```text literal
 issue-list       project + list filters
@@ -95,54 +86,50 @@ inbox-list       project
 inbox-count      project
 ```
 
-Invalidation for detail, Workflow, artifact, candidate, and Inbox list or count
-matches only its own namespace. Every read carries the caller's cancellation
-signal through the shared request boundary so leaving a route can stop work that
-no longer has a consumer.
+Invalidation for detail, Workflow, artifact, candidates, Inbox list, and Inbox
+count matches its own namespace. Every read carries the caller cancellation
+signal through the shared request boundary. Leaving a route can stop work with
+no consumer.
 
-The Create Issue dialog does not exist in the active component tree while
-closed, so it cannot request candidates. Opening it reads Project-scoped parent
-candidates. The prerequisite picker likewise loads compact summaries only after
-the user expands it. A successful create invalidates the affected Project list
-and candidates plus only the details and relationships of an affected parent.
+The closed Create Issue dialog is absent from the active component tree and
+cannot request candidates. Opening it reads Project-scoped candidates. The
+prerequisite picker loads compact summaries only when expanded. Successful
+creation invalidates the affected Project list and candidates, plus only the
+details and relationships of an affected parent.
 
-The Inbox shell badge uses `unread-count`; the Inbox page continues to use
-complete `/inbox`. Read, read-all, and archive operations invalidate both
-`inbox-list` and `inbox-count`, so HTTP truth reconciles the badge and page. A
-real-time hint does not synthesize an Inbox item.
+The Inbox shell badge uses `unread-count`; the Inbox page uses complete
+`/inbox`. Read, read-all, and archive invalidate both `inbox-list` and
+`inbox-count`. A real-time hint never synthesizes an Inbox item.
 
 ### Event-to-resource Invalidation
 
-`projectId` and `issueNumber` from the event envelope route invalidation. An
-event without the current Project ID does not touch its cache; a different
-Project ID is ignored. An event with an Issue number invalidates only detail,
-Workflow, and artifact keys for `(projectId, issueNumber)`, never a broad key
-unrelated to the Issue number.
+`projectId` and `issueNumber` in the event envelope route invalidation. An event
+without the current Project ID does not touch its cache. A different Project ID
+is ignored. An event with an Issue number invalidates only detail, Workflow, and
+artifact keys for `(projectId, issueNumber)`, plus an active list when the event
+can change list structure. It never invalidates a broad unrelated key.
 
-Invalidating an inactive list marks it stale without forcing a network request.
-Detail keys match the Issue number exactly. An event for Issue #474 therefore
-does not request Issue #473, and an unrelated event burst that does not change
-list structure does not refresh the collection. Every reread uses HTTP truth;
-an event is an invalidation hint and never becomes synthesized list state.
+Invalidating an inactive list marks it stale without forcing a request. Detail
+keys match Issue number exactly. An event for Issue #474 cannot request Issue
+#473. Every reread uses HTTP truth. Events are invalidation hints, not
+synthesized list state.
 
 ### Cold Transfer and Static Serving
 
-The production shell contains only startup providers and route selection. Page
-modules and the Create Issue dialog load on demand, so a static dependency from
-the shell cannot pull an unused route into the cold entry. Production assets are
+The production shell contains startup providers and route selection only. Page
+modules and the Create Issue dialog load on demand. A static shell dependency
+must not pull an unused route into the cold entry. Production assets are
 minified, omit source maps, and use Brotli or gzip when supported.
 
 Static-file cache boundaries are:
 
 - `/assets/*`: `Cache-Control: public,max-age=31536000,immutable`.
 - `index.html` and SPA fallback: `Cache-Control: no-cache`.
-- `/api/*` and `/otel/v1/*` do not enter the SPA fallback, and unknown paths
-  return 404.
+- `/api/*` and `/otel/v1/*` bypass SPA fallback. Unknown paths return 404.
 
-Fingerprinted assets, no source maps, independent route chunks, and compressed
-size budgets are observable transfer contracts, as are cache headers, HTML
-fallback, and API 404 behavior. They do not require a specific bundler
-implementation.
+Fingerprinted assets, source-map absence, route chunks, compressed-size
+budgets, cache headers, HTML fallback, and API 404 behavior are observable
+transfer contracts. They do not require a specific bundler.
 
 ## Examples
 
@@ -150,22 +137,22 @@ implementation.
 
 Given an Issue with 20 comments, 12 attachments, several feedback and history
 records, and Workflow Variables, `GET /issues` still returns only
-`IssueListItem`. Those counts do not change collection-assembly work.
+`IssueListItem`. Those counts do not change collection assembly work.
 `GET /issues/{number}` still returns body, comments, attachments, feedback, and
-other fields required by details.
+other detail fields.
 
 ### Event Isolation
 
-The current Project is viewing `473`, with detail key `('project', 473)` in the
-cache. A Workflow event carrying `projectId = project` and `issueNumber = 474`
-can mark only detail and Workflow keys for `474`, plus an active list explicitly
-required by that event. It cannot match the detail key for `473`. An event with
-the same Issue number in another Project touches no Issue key in the current
-Project.
+The current Project is viewing Issue `473`, with detail key
+`('project', 473)` in cache. A Workflow event carrying `projectId = project` and
+`issueNumber = 474` can mark only detail and Workflow keys for `474`, plus an
+active list explicitly required by that event. It cannot match the detail key
+for `473`. The same Issue number in another Project touches no current-Project
+Issue key.
 
 ## Status
 
-The low-bandwidth list, isolated query namespaces, request cancellation, lazy
-route transfer, compression, and cache boundaries are implemented. A later
+Low-bandwidth lists, isolated query namespaces, request cancellation, lazy
+route transfer, compression, and cache boundaries are implemented. A future
 list-field or event-contract extension must preserve the three design drivers
-and update the Server/Web contract and behavioral checks together.
+and update Server, Web, and behavioral checks together.
