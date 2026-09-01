@@ -2,32 +2,71 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.TestSupport;
 
 namespace Mohist.Server.L0Tests.Support;
 
-public sealed class TestSqliteDatabase : IDisposable
+public sealed class TestSqliteDatabase : IDisposable, IAsyncDisposable
 {
     private TestSqliteDatabase(SqliteConnection keeper)
     {
         Keeper = keeper;
+        ConnectionString = keeper.ConnectionString;
         Options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(keeper.ConnectionString)
+            .UseSqlite(ConnectionString)
             .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning))
             .Options;
     }
 
     public SqliteConnection Keeper { get; }
 
+    public string ConnectionString { get; }
+
     public DbContextOptions<MohistDbContext> Options { get; }
 
-    public static TestSqliteDatabase CreateModelSchema()
+    internal int DisposeCount { get; private set; }
+
+    public MohistDbContext CreateContext() => new(Options);
+
+    public static TestSqliteDatabase CreateMigrated() => Create(MigratedSqliteTemplate.CopyTo);
+
+    public static TestSqliteDatabase CreateModelSchema() => Create(MigratedSqliteTemplate.CopyModelSchemaTo);
+
+    public static TestSqliteDatabase CreateEmpty() => Create(static _ => { });
+
+    public void Dispose()
     {
-        var keeper = new SqliteConnection($"Data Source=test-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+        DisposeCount++;
+        Keeper.Dispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        DisposeCount++;
+        await Keeper.DisposeAsync();
+    }
+
+    private static TestSqliteDatabase Create(Action<SqliteConnection> copySchema)
+        => Create(
+            () => new SqliteConnection($"Data Source=test-{Guid.NewGuid():N};Mode=Memory;Cache=Shared"),
+            copySchema);
+
+    internal static TestSqliteDatabase Create(
+        Func<SqliteConnection> createKeeper,
+        Action<SqliteConnection> copySchema)
+        => Create(createKeeper, copySchema, static keeper => new TestSqliteDatabase(keeper));
+
+    internal static TestSqliteDatabase Create(
+        Func<SqliteConnection> createKeeper,
+        Action<SqliteConnection> copySchema,
+        Func<SqliteConnection, TestSqliteDatabase> construct)
+    {
+        var keeper = createKeeper();
         try
         {
             keeper.Open();
-            SqliteSchemaTemplate.CopyModelSchemaTo(keeper);
-            return new TestSqliteDatabase(keeper);
+            copySchema(keeper);
+            return construct(keeper);
         }
         catch
         {
@@ -35,8 +74,4 @@ public sealed class TestSqliteDatabase : IDisposable
             throw;
         }
     }
-
-    public MohistDbContext CreateContext() => new(Options);
-
-    public void Dispose() => Keeper.Dispose();
 }
