@@ -1,6 +1,8 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Sessions.Domain;
 
 namespace Mohist.Server.Infrastructure.Data.Sessions;
 
@@ -26,6 +28,7 @@ public sealed record AgentRetryOperation(
     string PreAllocatedSessionId,
     string PreAllocatedInputId,
     string PreAllocatedTurnId,
+    AgentSessionInputProvenance? ReplyProvenance,
     AgentRetryOperationState State,
     string? ResultState,
     string? ResultText,
@@ -70,6 +73,7 @@ public sealed class AgentRetryOperationStore : IScopedService
         string preAllocatedSessionId,
         string preAllocatedInputId,
         string preAllocatedTurnId,
+        AgentSessionInputProvenance? replyProvenance = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
@@ -94,6 +98,7 @@ public sealed class AgentRetryOperationStore : IScopedService
             PreAllocatedSessionId = preAllocatedSessionId,
             PreAllocatedInputId = preAllocatedInputId,
             PreAllocatedTurnId = preAllocatedTurnId,
+            ReplyProvenanceJson = replyProvenance is null ? null : JsonSerializer.Serialize(replyProvenance),
             State = AgentRetryOperationState.Pending.ToString().ToLowerInvariant(),
             CreatedAt = now,
             UpdatedAt = now,
@@ -208,6 +213,7 @@ public sealed class AgentRetryOperationStore : IScopedService
         row.PreAllocatedSessionId,
         row.PreAllocatedInputId,
         row.PreAllocatedTurnId,
+        ToReplyProvenance(row),
         Enum.TryParse<AgentRetryOperationState>(row.State, ignoreCase: true, out var state) ? state : throw new InvalidOperationException($"Unknown retry operation state '{row.State}'."),
         row.ResultState,
         row.ResultText,
@@ -218,4 +224,13 @@ public sealed class AgentRetryOperationStore : IScopedService
         row.CreatedAt,
         row.UpdatedAt,
         row.FinishedAt);
+
+    private static AgentSessionInputProvenance? ToReplyProvenance(AgentRetryOperationRow row)
+    {
+        if (row.ReplyProvenanceJson is null)
+            return null;
+
+        return JsonSerializer.Deserialize<AgentSessionInputProvenance>(row.ReplyProvenanceJson)
+            ?? throw new InvalidOperationException($"Retry operation '{row.OperationId}' has invalid reply provenance.");
+    }
 }

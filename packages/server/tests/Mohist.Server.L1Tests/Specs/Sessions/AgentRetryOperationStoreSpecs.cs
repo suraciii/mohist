@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -31,15 +32,19 @@ public sealed class AgentRetryOperationStoreSpecs : IAsyncLifetime
     [Fact]
     public async Task ClaimOrCreate_ReplaysByIdempotencyAndSessionTurn()
     {
+        var firstProvenance = new AgentSessionInputProvenance(
+            "slack", "workspace", "conversation", "thread-1", "member", "message-1", "connection", "thread-1");
         var first = await _store.ClaimOrCreateAsync(
             "project", "failed-session", "failed-turn", "click-1",
-            AgentRetryOperationKind.Root, "new-session", "new-input", "new-turn");
+            AgentRetryOperationKind.Root, "new-session", "new-input", "new-turn", firstProvenance);
         var sameKey = await _store.ClaimOrCreateAsync(
             "project", "failed-session", "failed-turn", "click-1",
-            AgentRetryOperationKind.Root, "other-session", "other-input", "other-turn");
+            AgentRetryOperationKind.Root, "other-session", "other-input", "other-turn",
+            firstProvenance with { MessageId = "message-2" });
         var differentKey = await _store.ClaimOrCreateAsync(
             "project", "failed-session", "failed-turn", "click-2",
-            AgentRetryOperationKind.Root, "other-session", "other-input", "other-turn");
+            AgentRetryOperationKind.Root, "other-session", "other-input", "other-turn",
+            firstProvenance with { MessageId = "message-3" });
 
         Assert.False(first.AlreadyExists);
         Assert.True(sameKey.AlreadyExists);
@@ -47,6 +52,7 @@ public sealed class AgentRetryOperationStoreSpecs : IAsyncLifetime
         Assert.Equal(first.Operation.OperationId, sameKey.Operation.OperationId);
         Assert.Equal(first.Operation.OperationId, differentKey.Operation.OperationId);
         Assert.Equal("new-session", differentKey.Operation.PreAllocatedSessionId);
+        Assert.Equal(firstProvenance, differentKey.Operation.ReplyProvenance);
 
         await using var db = new MohistDbContext(_database.Options);
         Assert.Equal(1, await db.AgentRetryOperations.CountAsync());

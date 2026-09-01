@@ -61,6 +61,12 @@ Each entry states one decision; the body below carries the rules.
   App DM is already an authorization boundary; no draft approval state.
 - **Server chooses the reply target** and injects a reply anchor with the
   input; the model never guesses a thread from memory.
+- **Recovery preserves the current reply target.** Before dispatching a
+  replacement execution, the retry receipt durably records the current Slack
+  input's reply anchor. The failed input remains execution lineage, but cannot
+  become the replacement reply destination. The first receipt for a failed
+  Session Turn fixes that anchor; concurrent ingress and pending recovery reuse
+  the winner instead of overwriting it.
 - **Signed action buttons, no slash commands.** Buttons reuse one verified
   mechanism and the same operations as CLI and Web; slash commands are a
   third grammar that forces manifest changes and reinstalls.
