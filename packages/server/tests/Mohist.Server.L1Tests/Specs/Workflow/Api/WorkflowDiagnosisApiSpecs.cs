@@ -25,6 +25,7 @@ public sealed class WorkflowDiagnosisApiSpecs(MohistIntegrationFixture fixture)
         Assert.Equal(runId, data.GetProperty("workflowRunId").GetString());
         Assert.True(data.GetProperty("events").GetArrayLength() <= 1);
         Assert.DoesNotContain("/proc/", data.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("/fd/", data.GetRawText(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
