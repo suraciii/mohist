@@ -319,7 +319,7 @@ public class IssueMetricsStageDurationsSpecs
                     RequiresApproval = true,
                     Status = "Completed",
                     Tasks = new[] { new { Id = "proposal", DefinitionId = "proposal", Attempt = 1, Title = "Plan proposal", Status = "Completed", Uses = "mohist/opencode" } },
-                    Checks = new[] { new { Name = "plan-ok", Title = "Plan ok", Uses = "mohist/openspec-checks", Status = "Passed", Message = "ok" } },
+                    Checks = new[] { new { Name = "plan-ok", Title = "Plan ok", Uses = "mohist/plan-checks", Status = "Passed", Message = "ok" } },
                     ApprovalStatus = new { Result = "approved", RequestedAt = requestedAt.ToString("O"), RespondedAt = respondedAt.ToString("O") },
                 },
                 new
@@ -442,7 +442,7 @@ public class IssueMetricsStageDurationsSpecs
                     RequiresApproval = true,
                     Status = "Completed",
                     Tasks = new[] { new { Id = "proposal", DefinitionId = "proposal", Attempt = 1, Title = "Plan proposal", Status = "Completed", Uses = "mohist/opencode" } },
-                    Checks = new[] { new { Name = "plan-ok", Title = "Plan ok", Uses = "mohist/openspec-checks", Status = "Passed", Message = "ok" } },
+                    Checks = new[] { new { Name = "plan-ok", Title = "Plan ok", Uses = "mohist/plan-checks", Status = "Passed", Message = "ok" } },
                     ApprovalStatus = new
                     {
                         Result = "approved",

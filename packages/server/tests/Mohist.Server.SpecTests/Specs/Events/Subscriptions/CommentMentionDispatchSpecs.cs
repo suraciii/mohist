@@ -20,10 +20,9 @@ namespace Mohist.Server.SpecTests.Specs.Events.Subscriptions;
 /// The handler under test is the workspace-optional manual launch path
 /// (design Decision 1). The launcher fake captures each mention launch
 /// without consulting a workflow run / workspace, so a mention fires
-/// regardless of issue state — exactly the contract the spec verifies.
+/// regardless of issue state — exactly the contract under test.
 /// </para>
-///
-/// Spec: <c>openspec/changes/issue-490/specs/comment-mention/spec.md</c>.
+
 /// </summary>
 public sealed class CommentMentionDispatchSpecs
 {

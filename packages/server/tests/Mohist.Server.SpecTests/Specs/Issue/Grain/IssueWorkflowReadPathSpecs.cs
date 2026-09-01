@@ -38,8 +38,7 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Grain;
 /// <c>Done</c>). Issue → <c>Done</c> transitions are owned solely by the
 /// <c>com.mohist.workflow.run.completed</c> event subscription
 /// (<see cref="Mohist.Server.Issue.Subscriptions.IssueWorkflowCompletionHandler"/>).
-///
-/// Spec: <c>openspec/changes/issue-307/specs/issue-workflow-run-reference/spec.md#workflow-status-read-path-is-a-pure-query</c>.
+
 /// </summary>
 [Collection("MohistDb")]
 public class IssueWorkflowReadPathSpecs

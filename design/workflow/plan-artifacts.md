@@ -3,11 +3,7 @@
 The default Workflow separates free-form planning from machine execution
 without inventing a new concept for it. Everything the plan Stage produces is
 a run artifact; exactly one of those artifacts, `tasks.json`, is
-machine-readable and expands into the Build Stage's tasks. This replaces the
-previous arrangement in which OpenSpec was the Workflow's implicit protocol: a
-fixed change directory, fixed file names, three dedicated Actions
-(`openspec-tasks`, `openspec-task-prompt`, `openspec-artifacts`), and an
-`archive-change` Task that committed plan material into the Repository.
+machine-readable and expands into the Build Stage's tasks.
 
 ## The Task List
 

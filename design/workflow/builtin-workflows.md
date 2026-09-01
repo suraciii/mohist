@@ -36,9 +36,9 @@ mo issue create "..." --workflow-profile mohist/github-pr
   for Repository work; plan material is Workspace-local, and its loss is an
   accepted loss recovered by rerunning from Plan. Publishing the branch is
   visible in the Definition.
-- OpenSpec is not the Workflow's protocol. The only machine-readable plan
-  artifact the Workflow consumes is the task list; all other planning material
-  is the Agent's free organization. See [`plan-artifacts.md`](plan-artifacts.md).
+- The only machine-readable plan artifact the Workflow consumes is the task
+  list; all other planning material is the Agent's free organization. See
+  [`plan-artifacts.md`](plan-artifacts.md).
 
 ## Shared Structure
 

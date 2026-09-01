@@ -139,7 +139,7 @@ public class ActivityEvidenceAssemblerSpecs
                     },
                     Checks = new[]
                     {
-                        new { Name = "plan-ok", Title = "Plan ok", Uses = "mohist/openspec-checks", Status = "Passed", Message = "ok" },
+                        new { Name = "plan-ok", Title = "Plan ok", Uses = "mohist/plan-checks", Status = "Passed", Message = "ok" },
                     },
                     ApprovalStatus = new
                     {

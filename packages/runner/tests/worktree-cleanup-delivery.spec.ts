@@ -416,14 +416,14 @@ describe('worktree cleanup before delivery', () => {
     const cleanupPrompts: string[] = []
     resources.cleanupAgentAction = async (_host, inputs) => {
       cleanupPrompts.push(String(inputs.prompt ?? ''))
-      commitCleanup(worktree, ['openspec/changes/issue-596/proposal.md'], 'pi-cleanup-sha')
+      commitCleanup(worktree, ['artifacts/changes/issue-596/proposal.md'], 'pi-cleanup-sha')
       return { output: { commitSha: 'pi-cleanup-sha' } }
     }
 
     const registry = buildRegistry({
       'mohist/pi': {
         run: async () => {
-          worktree.untracked = ['openspec/changes/issue-596/proposal.md']
+          worktree.untracked = ['artifacts/changes/issue-596/proposal.md']
           return { output: null }
         },
         inputs: { prompt: { types: ['string', 'object'] } },
@@ -437,7 +437,7 @@ describe('worktree cleanup before delivery', () => {
     expect(agentResult.cleanupAttempts).toBe(1)
     expect(cleanupPrompts).toHaveLength(1)
     expect(worktree.cleanupCommits).toEqual([
-      { files: ['openspec/changes/issue-596/proposal.md'], sha: 'pi-cleanup-sha' },
+      { files: ['artifacts/changes/issue-596/proposal.md'], sha: 'pi-cleanup-sha' },
     ])
     expect(worktree.untracked).toEqual([])
   })

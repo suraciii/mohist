@@ -40,7 +40,7 @@ public class WorkflowRunRepositoryContextTests
         new(
             Path: $"/run/workspaces/{wrId}",
             Branch: $"mohist/run-{wrId}",
-            ChangeDir: "/openspec/changes/issue-417");
+            ChangeDir: "/artifacts/changes/issue-417");
 
     private static WorkflowRun NewRun()
     {

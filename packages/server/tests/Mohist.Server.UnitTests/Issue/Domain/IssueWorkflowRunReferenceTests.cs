@@ -10,7 +10,6 @@ namespace Mohist.Server.UnitTests.Issue.Domain;
 /// Covers the rename from <c>ActiveWorkflowRunId</c> to a single
 /// neutral <c>WorkflowRunId</c> and the rule that the reference
 /// survives <c>Archive</c>/<c>Close</c> because it is an execution fact.
-/// Spec: <c>openspec/changes/issue-264/specs/issue-workflow-run-reference/spec.md</c>.
 /// </summary>
 public class IssueWorkflowRunReferenceTests
 {

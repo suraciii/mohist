@@ -679,7 +679,7 @@ public class WorkflowArtifactUploadServiceSpecs
         {
             WorkflowRunId = workflowRunId,
             WorkId = workId,
-            Path = "openspec/changes/issue-55/review.md",
+            Path = "artifacts/changes/issue-55/review.md",
             ContentType = "text/markdown",
             ContentHash = "sha256:tpl",
             Size = payload.LongLength,
@@ -700,7 +700,7 @@ public class WorkflowArtifactUploadServiceSpecs
         var declaredArtifacts = new TaskArtifactCapture(
             new List<TaskArtifactDeclaration>
             {
-             new("openspec/changes/issue-${{ issue.number }}/review.md"),
+             new("artifacts/changes/issue-${{ issue.number }}/review.md"),
             });
         var bindResult = await bindService.BindAsync(
             workflowRunId, workId, actionAttemptId,
@@ -715,7 +715,7 @@ public class WorkflowArtifactUploadServiceSpecs
             .AsNoTracking()
             .Where(a => a.WorkflowRunId == workflowRunId)
             .SingleAsync();
-        Assert.Equal("openspec/changes/issue-55/review.md", bound.Path);
+        Assert.Equal("artifacts/changes/issue-55/review.md", bound.Path);
         Assert.Equal(actionAttemptId, bound.ActionAttemptId);
         Assert.Equal("file", bound.Kind);
     }
@@ -740,7 +740,7 @@ public class WorkflowArtifactUploadServiceSpecs
         {
             WorkflowRunId = workflowRunId,
             WorkId = workId,
-            Path = "openspec/changes/issue-55/review.md",
+            Path = "artifacts/changes/issue-55/review.md",
             ContentType = "text/markdown",
             ContentHash = "sha256:missing-var",
             Size = payload.LongLength,
@@ -757,7 +757,7 @@ public class WorkflowArtifactUploadServiceSpecs
         var declaredArtifacts = new TaskArtifactCapture(
             new List<TaskArtifactDeclaration>
             {
-             new("openspec/changes/issue-${{ issue.number }}/review.md"),
+             new("artifacts/changes/issue-${{ issue.number }}/review.md"),
             });
         var bindResult = await bindService.BindAsync(
             workflowRunId, workId, actionAttemptId,

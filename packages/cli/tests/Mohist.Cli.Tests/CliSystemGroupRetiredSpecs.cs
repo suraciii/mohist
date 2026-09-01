@@ -12,11 +12,6 @@ namespace Mohist.Cli.Tests;
 //   * `mo system --help` MUST NOT resolve (exit non-zero).
 //   * `mo logs` (root) — the earlier #387 retirement — also stays gone.
 //
-// See:
-//   - openspec/changes/issue-480/specs/server-commands/spec.md
-//     "Application logs have a single entry point"
-//   - openspec/changes/archive/2026-07-06-issue-387/ (the prior retirement
-//     of the root-level `logs` command)
 public class CliSystemGroupRetiredSpecs
 {
     [Fact]

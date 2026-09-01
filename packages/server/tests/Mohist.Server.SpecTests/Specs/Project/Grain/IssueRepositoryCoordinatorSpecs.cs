@@ -12,9 +12,7 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Project.Grain;
 
 /// <summary>
-/// issue-417 T-005: locks the persisted-fence coordinator contract
-/// spelled out in
-/// <c>openspec/changes/issue-417/specs/project-management/spec.md#binding-changes-and-deletion-cannot-create-an-orphan</c>.
+/// issue-417 T-005: locks the persisted-fence coordinator contract.
 /// <para>
 /// Coverage:
 /// <list type="bullet">

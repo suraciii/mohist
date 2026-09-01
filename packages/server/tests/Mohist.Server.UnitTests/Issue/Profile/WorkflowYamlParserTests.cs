@@ -148,11 +148,11 @@ public class WorkflowYamlParserTests
                   prompt: ${{ prompts.plan }}
                 expect:
                   files:
-                    - path: openspec/changes/issue-${{ issue.number }}/proposal.md
+                    - path: artifacts/changes/issue-${{ issue.number }}/proposal.md
                 artifacts:
                   files:
-                    - path: openspec/changes/issue-${{ issue.number }}/proposal.md
-                    - path: openspec/changes/issue-${{ issue.number }}/specs
+                    - path: artifacts/changes/issue-${{ issue.number }}/proposal.md
+                    - path: artifacts/changes/issue-${{ issue.number }}/specs
               - id: design
                 title: Design
                 uses: mohist/opencode
@@ -160,7 +160,7 @@ public class WorkflowYamlParserTests
                   prompt: ${{ prompts.design }}
                 artifacts:
                   files:
-                    - path: openspec/changes/issue-${{ issue.number }}/design.md
+                    - path: artifacts/changes/issue-${{ issue.number }}/design.md
             checks: []
         """);
 
@@ -169,15 +169,15 @@ public class WorkflowYamlParserTests
         Assert.Equal(
             new[]
             {
-                "openspec/changes/issue-${{ issue.number }}/proposal.md",
-                "openspec/changes/issue-${{ issue.number }}/specs",
+                "artifacts/changes/issue-${{ issue.number }}/proposal.md",
+                "artifacts/changes/issue-${{ issue.number }}/specs",
             },
             proposal.Artifacts!.Files.Select(f => f.Path).ToArray());
 
         var design = definition.Stages.Single().Tasks.Single(t => t.Id == "design");
         Assert.NotNull(design.Artifacts);
         Assert.Equal(
-            new[] { "openspec/changes/issue-${{ issue.number }}/design.md" },
+            new[] { "artifacts/changes/issue-${{ issue.number }}/design.md" },
             design.Artifacts!.Files.Select(f => f.Path).ToArray());
     }
 
@@ -249,19 +249,19 @@ public class WorkflowYamlParserTests
                   prompt: Review
                 expect:
                   markers:
-                    - path: openspec/changes/issue-${{ issue.number }}/review.md
+                    - path: artifacts/changes/issue-${{ issue.number }}/review.md
                       oneOf:
                         - <promise>PASS</promise>
                         - <promise>FAIL</promise>
                 artifacts:
                   files:
-                    - path: openspec/changes/issue-${{ issue.number }}/review.md
+                    - path: artifacts/changes/issue-${{ issue.number }}/review.md
             checks: []
         """);
 
         var task = definition.Stages.Single().Tasks.Single();
         Assert.NotNull(task.Artifacts);
-        Assert.Equal(new[] { "openspec/changes/issue-${{ issue.number }}/review.md" }, task.Artifacts!.Files.Select(f => f.Path).ToArray());
+        Assert.Equal(new[] { "artifacts/changes/issue-${{ issue.number }}/review.md" }, task.Artifacts!.Files.Select(f => f.Path).ToArray());
         Assert.NotNull(task.Expect);
         var expectJson = JsonSerializer.Serialize(task.Expect);
         Assert.Contains("markers", expectJson);

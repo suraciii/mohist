@@ -31,9 +31,6 @@ namespace Mohist.Server.SpecTests.Specs.Events.Issue;
 /// <item><see cref="IssueCompositeChildReopenedHandler"/> on <c>reopened</c></item>
 /// <item><see cref="IssueCompositeParentChangedHandler"/> on <c>parent-changed</c></item>
 /// </list>
-/// Spec:
-/// <c>openspec/changes/issue-419/specs/compound-advancement/spec.md#requirement-status-recompute-shall-be-event-driven-idempotent-and-eventually-consistent</c>
-/// and <c>openspec/changes/issue-419/specs/parent-status-aggregation/spec.md</c>.
 /// </summary>
 public class IssueCompositeHandlersSpecs
 {

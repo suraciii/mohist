@@ -19,7 +19,6 @@ coverage/
 # Docs, design, tests — not needed to build the server image
 docs/
 design/
-openspec/
 test/
 *.md
 !packages/web/**/*.md

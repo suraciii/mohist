@@ -25,11 +25,11 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 }
 
 describe('IntegrateFailurePanel', () => {
-  it('does not classify an archive message as an OpenSpec archive step', () => {
+  it('does not classify an archive message as a known integrate step', () => {
     render(<IntegrateFailurePanel issue={makeIssue({ blockedReason: 'archive change task failed' })} />)
 
     expect(screen.getByText('Failing step:').parentElement).toHaveTextContent('unknown')
-    expect(screen.queryByText('Archive OpenSpec change')).not.toBeInTheDocument()
+    expect(screen.queryByText('Archive change')).not.toBeInTheDocument()
     expect(screen.queryByText(/Retry the archive step/i)).not.toBeInTheDocument()
   })
 })
