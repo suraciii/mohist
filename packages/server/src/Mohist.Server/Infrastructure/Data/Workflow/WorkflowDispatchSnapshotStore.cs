@@ -59,38 +59,20 @@ public sealed class DispatchSnapshotStore : IDispatchSnapshotStore
             throw new ArgumentException("workflowRunId and workId must be non-empty");
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var existing = await db.WorkflowDispatchSnapshots.AsNoTracking()
-            .FirstOrDefaultAsync(s => s.WorkflowRunId == workflowRunId && s.WorkId == workId, ct);
-        if (existing is not null)
-            return existing.SnapshotJson;
+        // The primary key arbitrates concurrent claims. INSERT OR IGNORE makes
+        // the winner selection atomic and leaves the original JSON untouched.
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT OR IGNORE INTO "WorkflowDispatchSnapshots"
+                ("WorkflowRunId", "WorkId", "SnapshotJson")
+            VALUES ({workflowRunId}, {workId}, {snapshotJson});
+            """, ct);
 
-        var newRow = new WorkflowDispatchSnapshotRow
-        {
-            WorkflowRunId = workflowRunId,
-            WorkId = workId,
-            SnapshotJson = snapshotJson,
-        };
-        db.WorkflowDispatchSnapshots.Add(newRow);
-        try
-        {
-            await db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateException ex)
-        {
-            // A concurrent writer inserted the same key first (race between grains
-            // or a retry after grain reactivation). Honor first-write-wins by
-            // reloading the existing row.
-            _log.LogDebug(ex,
-                "dispatch snapshot concurrent insert for run {run} work {work}; reloading winner",
-                workflowRunId, workId);
-            await db.Entry(newRow).ReloadAsync(ct);
-            var winner = await db.WorkflowDispatchSnapshots.AsNoTracking()
-                .FirstOrDefaultAsync(s => s.WorkflowRunId == workflowRunId && s.WorkId == workId, ct)
-                ?? throw new InvalidOperationException(
-                    $"DispatchSnapshotStore could not persist or load snapshot for workflow {workflowRunId} work {workId}");
-            return winner.SnapshotJson;
-        }
-        return snapshotJson;
+        return await db.WorkflowDispatchSnapshots.AsNoTracking()
+            .Where(s => s.WorkflowRunId == workflowRunId && s.WorkId == workId)
+            .Select(s => s.SnapshotJson)
+            .FirstOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException(
+                $"DispatchSnapshotStore could not persist or load snapshot for workflow {workflowRunId} work {workId}");
     }
 
     public async Task DeleteAsync(string workflowRunId, string workId, CancellationToken ct = default)

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
@@ -39,6 +40,28 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
 
         var redelivery = Assert.Single((await Dispatch().PollAsync(_runnerId!, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         Assert.Equal(first, redelivery);
+    }
+
+    [Fact]
+    public async Task NewTaskClaim_PersistsExactlyOneSnapshotBeforeDispatchIsAccepted()
+    {
+        await StartWorkflowAsync(SingleStage(
+            tasks: [new("task-1", "Task 1", "spec/task")],
+            checks: []));
+
+        var (dispatch, _) = await PollWorkAnyAsync();
+
+        await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var rows = await db.WorkflowDispatchSnapshots
+            .Where(row => row.WorkflowRunId == _workflowId)
+            .ToListAsync();
+
+        var row = Assert.Single(rows);
+        Assert.Equal(dispatch.WorkflowRunId, row.WorkflowRunId);
+        Assert.Equal(dispatch.WorkId, row.WorkId);
+        Assert.Equal(dispatch, JSON.Deserialize<WorkDispatch>(row.SnapshotJson));
     }
 
     [Fact]
