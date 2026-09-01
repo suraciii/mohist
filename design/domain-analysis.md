@@ -1,267 +1,273 @@
 # Domain Analysis
 
-Where does a change belong? First: problem space (subdomains). Then: solution space (bounded contexts).
+This document assigns Mohist behavior to problem-space subdomains and
+solution-space bounded contexts. The relationship map is normative. Detailed
+component contracts live in the linked context specifications.
 
-## Subdomains
+## Design Drivers
 
-### Core: Workflow
+- A business fact has one owner and one business language.
+- A bounded context may publish a contract without exposing its internal model.
+- A read-side report may depend on all business contexts but must not become a
+  write authority.
+- The relationship map describes domain direction. It does not describe static
+  source-code dependency direction.
 
-Autonomous work pipeline. Advance, schedule, approve, repair, resume. Interpret AgentJob results
-and decide the next state. Workflow owns Project-scoped WorkflowProfile and WorkflowRun. An
-Agent-backed task uses `mohist/agent`; Workflow supplies its input and decides when to launch it but
-owns no Agent execution job, Runtime selection, or Agent Runner contract. Mechanical Actions remain
-Workflow orchestration.
+## Model
 
-### Supporting
+### Subdomains
 
-- Issue: what work is, how organized, what progress. Ubiquitous language: issue, epic, child issue,
-  parent issue, status, prerequisite, priority, risk, draft, done.
-- Project Space: Project-scoped named configuration. Ubiquitous language: project, repository (named
-  resource, default, git URL, base branch), variable, prompt.
-- Workspace: the place where work happens. A first-class named execution environment whose lifecycle
-  is independent of any AgentSession or WorkflowRun: an Issue gets a dedicated Workspace, an
-  interaction context (Slack channel, Web conversation) reuses a shared one, and explicit creation
-  starts a new one. Ubiquitous language: workspace, origin, materialization, archive.
-- Agent: reusable named intelligence, every Agent execution job, Runner dispatch, and external
-  connections. A `mohist/agent` Workflow task, Web, CLI, Agent Connection, event route, or mention
-  starts the same Mohist Agent
-  launch path. Ubiquitous language: Mohist Agent, Agent Readiness, Agent Availability, AgentJob,
-  Agent Connection, execution snapshot, provider identity, access policy, WorkResult.
-- Session: logical execution conversation, input delivery, turn execution, compression, query,
-  audit. Ubiquitous language: AgentSession, SessionInput, AgentTurn, Runtime Binding, Activity,
-  Transcript, Context, Usage.
-- Runner: execution resource availability and capacity. Ubiquitous language: resource, presence,
-  registration, capacity.
-- External surfaces: Mohist's identity, binding, projection, and delivery lifecycle on external
-  collaboration surfaces. Workspace-level enrollment/connection facts and resource-level external
-  projections must survive restarts; adapters hold only transient protocol state. Bounded contexts:
-  - Slack: Server-side workspace Mohist App enrollment and managed Agent App external lifecycle
-    (App create/install approval, manifest, Socket readiness, operation fence, unknown outcome).
-    Ubiquitous language: Slack workspace, Mohist App, Agent App, enrollment, App lifecycle,
-    authorization, manifest drift, Socket readiness.
-  - GitHub: repository-level mirroring of Issues, command intake from GitHub comments, progress
-    projection, and external identity. Ubiquitous language: GitHub connection, GitHub mirror, link,
-    `/mohist` command, write-back.
-  - Notification: notification policy, message wording, and suggested action for important Issue
-    and Workflow events. Hermes is the delivery adapter; the policy decisions are Mohist's.
-  - Outbound webhook: Project-scoped WebhookSubscription, Mohist's external OHS/PL over CloudEvents.
+**Core: Workflow.** Workflow is the autonomous production line. It advances,
+schedules, approves, repairs, and resumes work. It owns Project-scoped
+Workflow Profiles and Workflow Runs. An Agent-backed task uses `mohist/agent`.
+Workflow supplies input and interprets the AgentJob result. It does not own
+Agent execution, Runtime selection, or Runner dispatch. Mechanical Actions
+remain Workflow orchestration.
 
-Epic is Issue granularity (organizing facet), not a separate subdomain.
-Issue and Epic are two aggregates in the same bounded context. Issue holds its current `EpicNumber?`.
-Epic holds the goal and advancement policy, but it does not hold a second authoritative membership set.
-Epic membership, progress, and candidate Issues are query results from the current Issue state.
-Child/parent is also Issue-internal organization (work decomposition axis, orthogonal to Epic's goal/feeding axis); Workflow never sees it. See [`composite-issues.md`](composite-issues.md).
-Prompt belongs to Project Space (Project is the only configurable scope). Builtin `.prompt` is
-loader fallback, not another Prompt resource.
+**Supporting subdomains:**
 
-Repository belongs to Project Space. Issue stores only the target Repository name; WorkflowRun
-stores only the Project/Issue identity needed to resolve that resource. An unfinished Issue prevents
-changes to its Repository execution attributes, so Workflow does not need a Repository snapshot.
+- **Issue:** work units, organization, prerequisites, priority, risk, and
+  progress. Its language includes Issue, Epic, parent, child, status, Draft,
+  and Done.
+- **Project Space:** Project-scoped repositories, variables, prompts, and
+  defaults. A Project is the only configurable scope. A builtin `.prompt` is a
+  loader fallback, not a Prompt resource.
+- **Workspace:** the named execution environment. An Issue gets a dedicated
+  Workspace. An interaction origin such as a Slack channel or Web conversation
+  may reuse one. Explicit creation starts another. Workspace lifecycle is
+  independent of AgentSession and WorkflowRun.
+- **Agent:** reusable Mohist Agents, AgentJobs, Runner dispatch, and external
+  Connections. Web, CLI, Workflow, events, mentions, and Agent Connections use
+  the same Agent launch boundary.
+- **Session:** logical execution conversations, input delivery, turns,
+  compression, query, transcript, context, usage, and audit.
+- **Runner:** execution resource registration, presence, and capacity.
+- **External surfaces:** persistent enrollment, binding, projection, and
+  delivery facts for collaboration providers. Adapters hold only transient
+  protocol state.
+
+External-surface bounded contexts are:
+
+- **Slack:** workspace Mohist App enrollment and managed Agent App lifecycle,
+  including App creation, installation approval, manifests, Socket readiness,
+  operation fences, and unknown outcomes.
+- **GitHub:** Repository-level Issue mirroring, GitHub comment commands,
+  progress projection, and external identity.
+- **Notification:** notification policy, wording, and suggested action for
+  Issue and Workflow events. Hermes is only the delivery adapter.
+- **Outbound Webhook:** Project-scoped `WebhookSubscription` and the external
+  OHS/PL over CloudEvents.
+
+Epic is an Issue organizing facet, not a separate subdomain. Issue and Epic are
+aggregates in one bounded context. Issue owns its optional `EpicNumber`.
+Epic owns the goal and advancement policy, but no independent membership set.
+Membership, progress, and candidates are queries over current Issue state.
+Parent and child are also Issue-internal organization. They express work
+decomposition, not Epic feeding. Workflow does not inspect that relationship.
+See [`composite-issues.md`](composite-issues.md).
+
+Repository belongs to Project Space. Issue stores only the target Repository
+name. WorkflowRun stores the Project and Issue identity needed to resolve it.
+An unfinished Issue prevents changes to its Repository execution attributes.
 See [`repositories.md`](repositories.md).
 
-Workspace is its own supporting subdomain, not part of Project Space configuration. Issue and
-entry contexts resolve to a Workspace through its Origin, and Runner materializes it as a
-directory. Execution placement is a collaboration: Workflow decides dispatch from Workspace
-routing facts and Runner capacity. See [`workspaces.md`](workspaces.md).
+Workspace is separate from Project Space configuration. Issue and interaction
+origins resolve to Workspace through Origin. Runner materializes it as a
+directory. Workflow uses Workspace routing facts and Runner capacity to choose
+dispatch. See [`workspaces.md`](workspaces.md).
 
-### Agent and Session terms
+See [`../CONTEXT.md`](../CONTEXT.md) for shared Agent terms and
+[`agent-execution.md`](agent-execution.md) for lifecycle ownership and
+invariants.
 
-See [`../CONTEXT.md`](../CONTEXT.md) for the shared definitions of Action, Mohist Agent, AgentJob,
-AgentSession, and Runtime Session. See [`agent-execution.md`](agent-execution.md) for lifecycle
-ownership, call paths, and the complete invariants.
-
-### Read-side: AgentOps
-
-Cross-domain read-only reports (activity feed, delivery cost, cross-aggregate board). Allowed to depend on all business domains. This makes Session a true leaf.
+**Read-side: AgentOps.** AgentOps assembles cross-domain, read-only reports
+such as activity feeds, delivery cost, and cross-aggregate boards. Session is a
+leaf of the business model.
 
 ### Not subdomains
 
-- Artifact: belongs to Workflow. No independent problem class.
-- External Agent hosts, CLI, Web UI, Slack and the Slack adapter (`mohist-slack`) are interaction
-  adapters, not business domains. Agent Connection belongs to Agent because its binding, access policy and
-  lifecycle are persistent Agent-facing product behavior; Slack protocol state does not. The Server-side
-  Slack integration control plane (Slack workspace enrollment and managed Agent App lifecycle) is a separate
-  supporting context (see External surfaces above): it holds external-App business facts that must survive restarts, and
-  is distinct from the stateless protocol adapter and from the Agent domain.
-- Skills: capability-description content, not a business domain. The Skill catalog, distribution, and
-  install are CLI-carried product content (loader content, like builtin `.prompt`); a Mohist Agent's
-  selected Skills are part of its configuration in the Agent context. Requirement refinement
-  ("explore") is a usage scenario whose output is a ready Issue; it is not a subdomain.
-- Generic: Label, User, SystemInfo — infrastructure.
-- Technical layers: Events, Api, Infrastructure — not business domains.
+- Artifact belongs to Workflow and has no independent problem class.
+- External Agent hosts, CLI, Web UI, Slack, and `mohist-slack` are adapters.
+  Agent Connection remains in Agent because its binding, access policy, and
+  lifecycle are persistent product behavior. Slack protocol state is not.
+- Slack workspace enrollment and Managed Agent App lifecycle form a Server-side
+  supporting context. They are separate from the stateless Slack protocol
+  adapter and from Agent state.
+- Skills describe capabilities. The catalog, distribution, and installation
+  are CLI-carried product content. Selected Skills are Agent configuration.
+  Requirement refinement is a usage scenario that produces a ready Issue, not
+  a subdomain.
+- Label, User, and SystemInfo are Generic infrastructure concepts.
+- Events, API, and Infrastructure are technical layers, not business domains.
 
-## Bounded contexts and relationships
+### Bounded contexts and relationships
 
-DDD patterns: Customer/Supplier (C/S), Conformist (C), ACL, OHS, Published Language (PL), Shared Kernel (SK).
+The following list is the complete relationship map. Each entry names the DDD
+upstream, downstream, relationship pattern, and published flow. C/S means
+Customer/Supplier, C means Conformist, ACL means Anti-Corruption Layer, OHS
+means Open Host Service, PL means Published Language, and SK means Shared
+Kernel.
 
-The following list is the normative and complete relationship map. Each entry gives the DDD
-upstream, the downstream, the relationship pattern, and what flows. These are DDD
-upstream-to-downstream relationships, not static source-code dependencies.
+Workflow is the DDD upstream of Issue in entry 1. This does not change the
+static `Issue -> Workflow` dependency described under Dependency invariants.
 
-In particular, entry 1 makes Workflow the DDD upstream of Issue. This does not conflict with the static
-`Issue -> Workflow` code dependency defined in [Dependency invariants](#dependency-invariants).
+Core context map:
 
-The two diagrams render the same entries. The list below remains the normative form.
-
-Core domain contexts:
-
-```mermaid
-flowchart TD
-    WF["Workflow"]
-    IS["Issue + Epic"]
-    PS["Project Space"]
-    WS["Workspace"]
-    AG["Agent"]
-    RN["Runner"]
-    RP["runner process (infrastructure)"]
-    SS["Session"]
-    AO["AgentOps (read side)"]
-    GN["Generic"]
-    CO["IssueRepositoryCoordinator (process manager)"]
-
-    WF -->|"1 C/S"| IS
-    AG -->|"2 OHS+PL"| WF
-    PS -->|"3 PL"| WF
-    PS -->|"4 SK"| IS
-    WS -->|"5 PL"| WF
-    WS -->|"5 PL"| AG
-    AG -->|"6 OHS+PL"| RN
-    AG -->|"7 C"| RP
-    RN -->|"8 PL"| RP
-    GN -->|"11 SK/PL"| IS
-    SS -->|"12 OHS+PL"| IS
-    SS -->|"12 OHS+PL"| WF
-    SS -->|"12 OHS+PL"| AO
-    RN -->|"13 PL"| SS
-    AG -->|"13 PL"| SS
-    IS -->|"14 OHS"| AO
-    WF -->|"14 OHS"| AO
-    AG -->|"14 OHS"| AO
-    RN -->|"14 OHS"| AO
-    IS -->|"15 C"| CO
-    PS -->|"16 C"| CO
+```text diagram
+ +---------------+   +-----------+   +---------+
+ | Project Space +---| Workspace +---| Generic +----+++
+ +---------------+   +-----+-----+   +---------+    |||
+                +----------+                        |||
+                v                                   |||
+            +-------+                               |||
+            | Agent +-------------------------------++++
+            +---+---+                               ||||
+                |                                   ||||
+                v                                   ||||
+           +--------+                               ||||
+           | Runner +-------------------------------+++++
+           +----+---+                               |||||
+          +-----+----------+                        |||||
+          v                v                        |||||
+ +----------------+   +---------+                   ||||
+ | runner process |<--| Session +<------------------+++++
+ +----------------+   +----+----+                   |||||
+                  +--------+                        |||||
+                  v                                 |||||
+            +----------+                            |||||
+            | Workflow +<---------------------------++++|
+            +-----+----+                             ||||
+                  +------+                           ||||
+                         v                           ||||
+                 +--------------+                    ||||
+                 | Issue + Epic |<-------------------+|||
+                 +-------+------+                     |||
+           +-------------+------------+               ||||
+           v                          v               ||||
++--------------------+   +------------------------+   |||
+| AgentOps read side |<--| Repository coordinator |<--+++
++--------------------+   +------------------------+
 ```
 
-Entry and adapter surfaces:
+Entry and adapter map:
 
-```mermaid
-flowchart TD
-    SV["Server application (hosts the business contexts)"]
-    AS["Agent / Session contexts"]
-    WEB["Web UI"]
-    CLI["CLI (mo)"]
-    PA["provider adapters (Slack, GitHub)"]
-
-    SV -->|"9, 10 OHS+PL: API DTO"| WEB
-    SV -->|"9, 10 OHS+PL: API DTO"| CLI
-    AS -->|"17 OHS+PL: management, launch, results, events"| WEB
-    AS -->|"17 OHS+PL"| CLI
-    AS -->|"17 OHS+PL"| PA
+```text diagram
++--------------------+    +-------------------+
+| Server application |    | Agent and Session |
++----------+---------+    +---------+---------+
+           +-+------------+---------+-------+
+             +------------+---------+       |
+             v9, 10 OHS + vL: API DTO       v17 OHS + PL
+        +--------+   +--------+   +-------------------+
+        | Web UI |   | CLI mo |   | provider adapters |
+        +--------+   +--------+   +-------------------+
 ```
 
-1. Workflow -> Issue (C/S): WorkflowProfile, run creation, verdict/output.
-2. Agent -> Workflow (OHS+PL): Agent launch contract, readiness, AgentJob result.
-3. Project Space -> Workflow (PL): default Profile ref, Repository resource,
-   Project Variables, Prompt key/body.
-4. Project Space -> Issue (SK): ProjectId, repo ref.
-5. Workspace -> Workflow/Agent (PL): Workspace identity, Origin resolution, routing facts.
-6. Agent -> Runner (OHS+PL): job scheduling, dispatch, capacity and fact report.
-7. Agent -> runner process (C): AgentJob dispatch with Agent definition snapshot.
-8. Runner -> runner process (PL): registration, poll presence.
-9. Server -> Web (OHS+PL): API DTO.
-10. Server -> CLI (OHS+PL): API DTO.
-11. Generic -> Issue etc. (SK/PL): labels, user identity.
-12. Session -> Issue/Workflow/API/AgentOps (OHS+PL): session DTO.
-13. Runner/Agent -> Session (PL): Session input, activity, Runtime observations.
-14. Session/Issue/Workflow/Agent/Runner -> AgentOps (OHS): cross-domain report assembly.
-15. Issue -> IssueRepositoryCoordinator (C): narrow participant commands (create / reassign / reopen).
-16. Project Space -> IssueRepositoryCoordinator (C): narrow participant commands (repository removal).
-17. Agent/Session -> Web, CLI, provider adapters (OHS+PL): Agent and Connection management, launch,
-    Job result, Session Input/Turn/transcript/events.
+1. Workflow -> Issue (C/S): Workflow Profile, run creation, verdict, and
+   output.
+2. Agent -> Workflow (OHS + PL): launch contract, readiness, and AgentJob
+   result.
+3. Project Space -> Workflow (PL): default Profile, Repository, Project
+   Variables, and Prompt.
+4. Project Space -> Issue (SK): ProjectId and Repository reference.
+5. Workspace -> Workflow and Agent (PL): Workspace identity, Origin resolution,
+   and routing facts.
+6. Agent -> Runner (OHS + PL): scheduling, dispatch, capacity, and reports.
+7. Agent -> runner process (C): AgentJob dispatch with the Agent snapshot.
+8. Runner -> runner process (PL): registration and polling presence.
+9. Server -> Web (OHS + PL): API DTO.
+10. Server -> CLI (OHS + PL): API DTO.
+11. Generic -> Issue and related contexts (SK + PL): labels, users, and system
+    information.
+12. Session -> Issue, Workflow, API, and AgentOps (OHS + PL): session DTO.
+13. Runner and Agent -> Session (PL): SessionInput, Activity, and Runtime
+    observations.
+14. Issue, Workflow, Agent, and Runner -> AgentOps (OHS): report facts.
+15. Issue -> IssueRepositoryCoordinator (C): create, reassign, and reopen
+    participant commands.
+16. Project Space -> IssueRepositoryCoordinator (C): Repository removal
+    commands.
+17. Agent and Session -> Web, CLI, and provider adapters (OHS + PL):
+    management, launch, results, Session Input, Turn, and events.
 
-Runner process (TS) is infrastructure, not a context. It follows Agent Action and AgentJob dispatch
-contracts and reports presence through Runner.
+The TypeScript Runner process is infrastructure. It follows Agent Action and
+AgentJob contracts and reports presence through Runner. The
+`IssueRepositoryCoordinator` is a Project-scoped application process manager,
+not a business context. It stores no Issue, Project, or Repository facts. It
+provides serialization and redelivery safety for the narrow command class in
+entries 15 and 16. Participants do not call it synchronously.
 
-`IssueRepositoryCoordinator` is a single-grain, Project-scoped application process manager. See
-[Durable application process manager](architecture.md#durable-application-process-manager). It is not
-an independent business bounded context. It holds no Issue, Project, or Repository facts and does not
-participate in read projections. It provides Project-level serialization and failure-redelivery safety
-only for the command class that establishes or breaks a non-terminal binding. Its two relationship
-entries, 15 and 16, mean that the coordinator calls narrow Issue and Project participant interfaces in one
-direction. A participant does not call the coordinator back in that synchronous call stack.
+## Semantics
 
-## Dependency invariants
+### Dependency invariants
 
-- Aggregates in the same bounded context may depend on each other. An aggregate boundary limits a
-  transaction; it does not prohibit collaboration. Issue and Epic may send commands to each other, but
-  each command commits only the receiving aggregate. A synchronous call must not call back and form a cycle.
-- Issue is the only write authority for its current Epic membership. Epic does not store independently
-  mutable membership. It queries Issue state to select candidates and lets Issue accept or reject an
-  advancement command in the Issue transaction.
-- Do not introduce a generic `OwnerRef`, controller aggregate, or relationship aggregate. `EpicNumber?`
-  completely expresses the one optional membership that Issue needs. Generalization would hide the business
-  language and write authority.
-- Workflow depends on Agent only through the launch/result Published Language. It names an Agent,
-  supplies input and Workflow attribution, and interprets the resulting AgentJob output; it does not
-  read Agent configuration, select a Runtime, snapshot an Agent definition, dispatch to Runner, or own
-  execution retry and recovery.
-- `Issue -> Workflow` remains the static dependency direction. Issue gives WorkflowRun only a run context
-  containing `ProjectId`, `IssueNumber`, and `EpicNumber?`. These scalars are association information in
-  the Published Language. They do not give Workflow a behavioral dependency on Issue. An Issue-side
-  handler consumes Workflow result events.
-- AgentJob is the sole top-level Agent execution owner. Every `mohist/agent` Workflow task and every
-  direct Agent launch creates an AgentJob through the same launch boundary. Mechanical Action attempts
-  remain Workflow orchestration and create no AgentJob. TaskRun, Inline Agent, and Agent Definition
-  Reference are not domain concepts. The unified Agent lifecycle and Session invariants are listed once in
+- Aggregates in one bounded context may collaborate. Each transaction saves one
+  aggregate and its events. A synchronous call chain must have one direction
+  and must not form a callback cycle.
+- Issue alone writes current Epic membership. Epic queries Issue state, then
+  sends an advancement command that Issue validates in its own transaction.
+- Do not add a generic `OwnerRef`, controller aggregate, or relationship
+  aggregate. `EpicNumber?` is the complete Issue membership relation.
+- Workflow uses Agent only through the launch and result Published Language. It
+  does not read Agent configuration, select a Runtime, snapshot definitions,
+  dispatch Runner work, or own execution retry and recovery.
+- The static `Issue -> Workflow` dependency remains one way. Issue supplies
+  WorkflowRun with `ProjectId`, `IssueNumber`, and `EpicNumber?` as association
+  data. An Issue-side handler consumes Workflow result events.
+- AgentJob is the only top-level Agent execution owner. Every `mohist/agent`
+  Workflow task and direct Agent launch uses the same launch boundary.
+  Mechanical Action attempts remain Workflow orchestration. `TaskRun`, Inline
+  Agent, and Agent Definition Reference are not domain concepts. See
   [`agent-execution.md`](agent-execution.md).
-- Agent consumes Runner scheduling facts and Session association through narrow published contracts.
+- Agent consumes narrow Runner scheduling facts and Session association facts.
   Session has no reverse dependency on Agent behavior.
-- Agent context owns Agent Connection as a separate resource. Connection references one Agent but does
-  not copy or modify its execution definition; adding Slack does not add provider fields to Mohist Agent.
-- Agent Connection is the authority for external binding, lifecycle and access policy. Durable provider
-  ingress, Slack conversation mappings and pending deliveries are integration records owned by Server
-  infrastructure, not Agent Connection or Session facts. The adapter holds only transient protocol state
-  and cannot become a second authority for Agent, Job or Session.
-- The Slack integration supporting context owns two independent aggregates: `SlackWorkspaceEnrollment`
-  (workspace-level Mohist App identity/capability/lifecycle and credential refs; key without Project by
-  default) and `ManagedSlackAgentApp` (an Agent App's external lifecycle/install/manifest/Socket/fence/unknown/audit,
-  referencing an `AgentConnectionId`). They are not Agent-domain and not process managers; AgentApp -> Connection
-  converges via durable fact + idempotent bind, not a cross-aggregate transaction.
-- Agent Connection supports staged binding for the `install-agent` path: `AgentId + WorkspaceTeamId` are fixed at
-  creation, while `AppId + BotUserId` go from both-empty to both-set exactly once and atomically; half-binding,
-  team re-binding and second app/bot re-binding are rejected. Removing a Connection does not delete a
-  separately-retained managed Agent App; Agent App runtime secrets and the Mohist App credential are
-  addressed by their owning aggregate (AgentApp / Enrollment), not by Agent Connection.
-- SessionInput and AgentTurn are AgentSession-owned child records. They express ordered input and one
-  continuous Runtime processing lifecycle, not new top-level work or a replacement for AgentJob result.
-- Session is horizontal leaf. Model evolves independently. No reverse dependencies.
-- runner process is infrastructure: conforms to Agent execution contracts, registers with Runner and proves presence by polling.
+- Agent owns Agent Connection as a separate resource. The Connection references
+  one Agent and never copies or changes its execution definition.
+- Agent Connection owns external binding, lifecycle, and access policy.
+  Provider ingress, Slack conversation mapping, and pending delivery are
+  Server integration records. The adapter holds transient protocol state only.
+- Slack has two independent supporting aggregates: `SlackWorkspaceEnrollment`
+  owns the workspace Mohist App; `ManagedSlackAgentApp` owns one external Agent
+  App. AgentApp binds to Connection through a durable fact and idempotent
+  command, not a cross-aggregate transaction.
+- Agent Connection staged binding fixes `AgentId + WorkspaceTeamId` at create.
+  `AppId + BotUserId` move atomically from both empty to both set exactly once.
+  Partial binding and rebinding are rejected. Removing a Connection does not
+  delete a retained Agent App.
+- SessionInput and AgentTurn are AgentSession-owned child records. They do not
+  replace AgentJob or create a second top-level work unit.
+- Session is a horizontal read and execution leaf. It has no reverse business
+  dependency.
+- The Runner process is infrastructure. It conforms to Agent contracts and
+  proves presence by polling Runner.
 - ProjectId is shared identity, not a Workflow model dependency.
-- Artifact belongs to Workflow, not independent.
-- `IssueRepositoryCoordinator` is a narrow special-case process manager. It is used only when the
-  downstream command needs Project-level serialization and redelivery safety, and its result can break
-  the invariant that a non-terminal Issue must have a declared Repository. This applies to Issue creation,
-  target Repository reassignment, reopening a cancelled Issue, and Repository deletion. The coordinator
-  persists only the fence for an uncertain command. It **must not** write multiple aggregates, make a
-  synchronous callback, or store duplicate business facts. See
-  [`architecture.md`](architecture.md#durable-application-process-manager) for the complete rules. Issue
-  and Project participants do not reference the coordinator from their commands. Event routing and other
-  contexts continue to use the existing interfaces.
+- Artifact belongs to Workflow.
+- The IssueRepositoryCoordinator is used only when Project-level serialization
+  and redelivery safety protect a non-terminal Issue Repository binding. It
+  persists only an uncertain-command fence. It must not write multiple
+  aggregates, callback synchronously, or duplicate business facts. See
+  [`architecture.md`](architecture.md#durable-application-process-manager).
 
-## Judgment rules
+### Judgment rules
 
-- If it defines stages, task ordering, checks, mechanical Action attempts, state advance, approval,
-  or when an Agent should launch, it goes in Workflow.
-- If it defines work unit properties, lifecycle, deps, or organization, it goes in Issue.
-- If it defines repo binding, isolation, execution config, or the prompt library, it goes in
+- Stages, task order, checks, mechanical Actions, state advance, approval, and
+  Agent launch timing belong to Workflow.
+- Work properties, lifecycle, dependencies, and organization belong to Issue.
+- Repository binding, isolation, execution configuration, and prompts belong to
   Project Space.
-- If it defines the work place, origin resolution, materialization, or archive, it goes in
-  Workspace.
-- If it defines Agent configuration, execution job lifecycle, Runner dispatch, retry, recovery, or
-  execution report validation, it goes in Agent.
-- If it defines External Agent binding, provider identity, access policy, or connection lifecycle,
-  it goes in Agent.
-- If it defines execution recording, transcript, context, usage, or query, it goes in Session.
-- If it defines resource registration, presence, or capacity, it goes in Runner.
-- If it defines cross-domain read report assembly, it goes in AgentOps.
-- If it defines labels, users, or system info, it goes in Generic.
+- Work location, Origin, materialization, and archive belong to Workspace.
+- Agent configuration, execution jobs, Runner dispatch, retry, recovery, and
+  report validation belong to Agent.
+- External Agent binding, provider identity, access policy, and Connection
+  lifecycle belong to Agent.
+- Execution records, transcript, context, usage, and query belong to Session.
+- Registration, presence, and capacity belong to Runner.
+- Cross-domain read reports belong to AgentOps.
+- Labels, users, and system information belong to Generic.
+
+## Status
+
+The current design uses Workflow as the core domain, with Issue, Project Space,
+Workspace, Agent, Session, Runner, external surfaces, and AgentOps as supporting
+contexts. The context map contains seventeen published relationships and the
+IssueRepositoryCoordinator is the only named application process manager.
