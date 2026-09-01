@@ -30,10 +30,6 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 /// <item>POST /api/projects/{p}/issues/{n}/archive on a composite
 ///   parent cascades to its terminal children (Done + Cancelled).</item>
 /// </list>
-/// Spec:
-/// <c>openspec/changes/issue-419/specs/compound-advancement/spec.md</c>
-/// and
-/// <c>openspec/changes/issue-419/specs/parent-status-aggregation/spec.md</c>.
 /// </summary>
 public class IssueCompositeAdvancementApiSpecs
 {

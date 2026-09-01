@@ -5,9 +5,7 @@ namespace Mohist.Server.UnitTests.Sessions;
 
 /// <summary>
 /// Unit tests for <see cref="ContextHealthClassifier"/> covering the
-/// traffic-light classification rules in
-/// <c>openspec/changes/issue-110/specs/pipeline-session-events/spec.md</c>
-/// and <c>openspec/changes/issue-110/specs/session-health-visibility/spec.md</c>.
+/// traffic-light classification rules.
 /// </summary>
 public class ContextHealthClassifierTests
 {

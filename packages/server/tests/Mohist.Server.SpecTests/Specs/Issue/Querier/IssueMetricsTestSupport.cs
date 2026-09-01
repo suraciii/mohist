@@ -249,7 +249,7 @@ internal static class IssueMetricsTestSupport
                     },
                     Checks = new[]
                     {
-                        new { Name = "plan-ok", Title = "Plan ok", Uses = "mohist/openspec-checks", Status = "Passed", Message = "ok" },
+                        new { Name = "plan-ok", Title = "Plan ok", Uses = "mohist/plan-checks", Status = "Passed", Message = "ok" },
                     },
                     ApprovalStatus = new
                     {
@@ -270,7 +270,7 @@ internal static class IssueMetricsTestSupport
                     },
                     Checks = new[]
                     {
-                        new { Name = "check-ok", Title = "Check ok", Uses = "mohist/openspec-checks", Status = "Passed", Message = "ok" },
+                        new { Name = "check-ok", Title = "Check ok", Uses = "mohist/plan-checks", Status = "Passed", Message = "ok" },
                     },
                     ApprovalStatus = new
                     {
@@ -306,7 +306,7 @@ internal static class IssueMetricsTestSupport
                     },
                     Checks = new[]
                     {
-                        new { Name = "plan-ok", Title = "Plan ok", Uses = "mohist/openspec-checks", Status = "Passed", Message = "ok" },
+                        new { Name = "plan-ok", Title = "Plan ok", Uses = "mohist/plan-checks", Status = "Passed", Message = "ok" },
                     },
                     ApprovalStatus = new
                     {

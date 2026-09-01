@@ -16,7 +16,7 @@ namespace Mohist.Server.Issue.Services;
 ///
 /// The issue profile stores ONLY the issue's static identity context
 /// (<c>mohist</c> / <c>issue</c> / <c>project</c> / <c>repository</c> /
-/// <c>openspec*</c> / <c>workspace</c>) plus any explicit overrides the user
+/// <c>workspace</c>) plus any explicit overrides the user
 /// sets on the issue page. It deliberately does NOT bake in global
 /// (<c>config.jsonc</c>) or project <c>Variables</c>: those layers are merged
 /// live at resolution time (dispatch + display) so that subsequent edits to

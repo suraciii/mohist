@@ -87,7 +87,7 @@ public sealed class WorkflowGrainDispatchVariablesSpecs
             files = new[] { new { path = "src/FeatureFlags.cs" } },
             markers = new[]
             {
-                new { path = "openspec/changes/issue-1/tasks.json", contains = "\"passes\": true" },
+                new { path = "artifacts/changes/issue-1/tasks.json", contains = "\"passes\": true" },
             },
         });
 
@@ -330,8 +330,8 @@ public sealed class WorkflowGrainDispatchVariablesSpecs
             proposal,
             output: JsonSerializer.SerializeToElement(new
             {
-                openspecName = "issue-97",
-                changeDir = "openspec/changes/issue-97",
+                changeName = "issue-97",
+                changeDir = "artifacts/changes/issue-97",
             }),
             addTasks: null);
 
@@ -342,8 +342,8 @@ public sealed class WorkflowGrainDispatchVariablesSpecs
 
         var variables = JsonSerializer.Deserialize<JsonElement>(specs.Variables);
         var outputs = variables.GetProperty("tasks").GetProperty("proposal").GetProperty("outputs");
-        Assert.Equal("issue-97", outputs.GetProperty("openspecName").GetString());
-        Assert.Equal("openspec/changes/issue-97", outputs.GetProperty("changeDir").GetString());
+        Assert.Equal("issue-97", outputs.GetProperty("changeName").GetString());
+        Assert.Equal("artifacts/changes/issue-97", outputs.GetProperty("changeDir").GetString());
     }
 
     [Fact]
@@ -383,15 +383,15 @@ public sealed class WorkflowGrainDispatchVariablesSpecs
         var proposal = (await arrangement.AssignAndClaimAsync())!;
         await arrangement.ReportTaskResultAsync(
             proposal,
-            output: JsonSerializer.SerializeToElement(new { openspecName = "runtime-value" }),
+            output: JsonSerializer.SerializeToElement(new { changeName = "runtime-value" }),
             addTasks: null);
 
         var specsItem = (await arrangement.AssignAndClaimAsync())!;
         var specs = await ToDispatchAsync(arrangement, specsItem);
         Assert.NotNull(specs.Variables);
         var variables = JsonSerializer.Deserialize<JsonElement>(specs.Variables);
-        var openspecName = variables.GetProperty("tasks").GetProperty("proposal").GetProperty("outputs").GetProperty("openspecName");
-        Assert.Equal("runtime-value", openspecName.GetString());
+        var changeName = variables.GetProperty("tasks").GetProperty("proposal").GetProperty("outputs").GetProperty("changeName");
+        Assert.Equal("runtime-value", changeName.GetString());
     }
 
     [Fact]

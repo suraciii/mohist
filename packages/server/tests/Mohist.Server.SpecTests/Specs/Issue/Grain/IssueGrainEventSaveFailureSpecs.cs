@@ -32,7 +32,7 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Grain;
 /// when an event-aware save fails and the store rolls back, the in-memory
 /// issue aggregate is already mutated. The activation MUST be quarantined so
 /// a subsequent command on the same activation cannot persist the dirty
-/// state through the no-events path. Spec: openspec/changes/issue-361.
+/// state through the no-events path.
 /// </summary>
 [Collection("MohistDb")]
 public class IssueGrainEventSaveFailureSpecs

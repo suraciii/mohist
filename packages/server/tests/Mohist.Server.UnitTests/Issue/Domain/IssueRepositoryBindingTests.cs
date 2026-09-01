@@ -9,9 +9,7 @@ namespace Mohist.Server.UnitTests.Issue.Domain;
 /// <summary>
 /// issue-417 T-003: cover the Issue aggregate's required-repository,
 /// permanent start lock, repository reassignment, and reopen-target
-/// behaviors. Acceptance criteria for these scenarios are spelled out
-/// in
-/// <c>openspec/changes/issue-417/specs/issue-repository-binding/spec.md</c>.
+/// behaviors. These tests cover those scenarios.
 /// </summary>
 public class IssueRepositoryBindingTests
 {

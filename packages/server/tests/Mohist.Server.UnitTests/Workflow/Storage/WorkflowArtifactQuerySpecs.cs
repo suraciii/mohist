@@ -52,7 +52,7 @@ public class WorkflowArtifactQuerySpecs
             .CreateDbContextAsync();
 
         db.WorkflowArtifacts.AddRange(
-            Row(workflowRunId, "proposal.1", "openspec/changes/issue-55/proposal.md", "file", BaseTime),
+            Row(workflowRunId, "proposal.1", "artifacts/changes/issue-55/proposal.md", "file", BaseTime),
             Row(workflowRunId, "ai-review.1", "review.md", "file", BaseTime.AddMinutes(5)),
             Row(workflowRunId, "ai-review.2", "review.md", "file", BaseTime.AddMinutes(10)),
             Row(workflowRunId, "design.1", "specs/", "directory", BaseTime.AddMinutes(2)));

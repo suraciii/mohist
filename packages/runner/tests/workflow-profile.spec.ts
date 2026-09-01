@@ -118,7 +118,7 @@ stages:
           expectedBranch: \${{ workspace.branch }}
       - id: load-tasks
         with:
-          path: openspec/changes/issue-\${{ issue.number }}/tasks.json
+          path: artifacts/changes/issue-\${{ issue.number }}/tasks.json
       - id: build-health
         uses: core/script
         with:
@@ -182,7 +182,7 @@ stages:
           expectedBranch: \${{ workspace.branch }}
       - id: load-tasks
         with:
-          path: openspec/changes/issue-\${{ issue.number }}/tasks.json
+          path: artifacts/changes/issue-\${{ issue.number }}/tasks.json
       ${verificationTaskYaml(fixCiRecoveryGithubPr)}
       - id: push
         uses: mohist/push

@@ -365,7 +365,7 @@ describe('WorkExecutor artifact capture', () => {
     // substitute that variable (against `work.variables`) so the
     // capture layer reads from the resolved workspace-relative
     // path, not a literal template directory.
-    const changeDir = 'openspec/changes/issue-55'
+    const changeDir = 'artifacts/changes/issue-55'
     const reviewPath = `${changeDir}/review.md`
     const reviewAbsolute = join(workDir, changeDir, 'review.md')
     await mkdir(join(workDir, changeDir), { recursive: true })
@@ -396,7 +396,7 @@ describe('WorkExecutor artifact capture', () => {
     // Same template-substitution contract for a directory artifact:
     // the runner resolves the issue-number path before the
     // capture layer walks the directory.
-    const changeDir = 'openspec/changes/issue-55'
+    const changeDir = 'artifacts/changes/issue-55'
     const specsPath = `${changeDir}/specs`
     const specsAbsolute = join(workDir, changeDir, 'specs')
     await mkdir(join(specsAbsolute, 'sub'), { recursive: true })
@@ -509,7 +509,7 @@ describe('WorkExecutor artifact capture', () => {
     // Whole-string unresolvable reference in a declared artifact
     // path: the runner should surface a clean error rather than
     // attempt to capture from a literal `${{ ... }}` directory.
-    const work = buildWork(workDir, { files: [{ path: 'openspec/changes/issue-${{ issue.number }}/review.md' }] })
+    const work = buildWork(workDir, { files: [{ path: 'artifacts/changes/issue-${{ issue.number }}/review.md' }] })
 
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(

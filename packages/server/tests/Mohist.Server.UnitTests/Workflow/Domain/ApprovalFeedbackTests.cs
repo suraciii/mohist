@@ -732,8 +732,7 @@ public partial class ApprovalFeedbackTests
     [Fact]
     public void ApprovalFeedbackStatus_JsonLowercase_RoundTrips()
     {
-        // Matches the spec at openspec/changes/issue-109/specs/approval-feedback-cli/spec.md:67-71
-        // — the wire format must be "open" / "resolved" lowercase.
+        // The wire format must be "open" / "resolved" lowercase.
         var open = JsonSerializer.Deserialize<ApprovalFeedbackStatus>("\"open\"");
         var resolved = JsonSerializer.Deserialize<ApprovalFeedbackStatus>("\"resolved\"");
         Assert.Equal(ApprovalFeedbackStatus.Open, open);

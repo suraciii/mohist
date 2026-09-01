@@ -13,10 +13,6 @@ namespace Mohist.Cli.Tests;
 // off the root. This file is the regression gate that keeps the
 // converged shape honest.
 //
-// See:
-//   - openspec/changes/issue-387/specs/root-command-shape/spec.md
-//   - openspec/changes/issue-387/design.md D1 (uniform no-alias policy),
-//     D4 (test strategy — root-shape guard is the new third class).
 public class CliRootCommandShapeTests
 {
     [Fact]

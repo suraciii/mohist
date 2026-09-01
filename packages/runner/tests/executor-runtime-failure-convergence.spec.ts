@@ -343,8 +343,8 @@ describe('WorkExecutor runtime failure convergence', () => {
           diagnostics: [],
         }
       }
-      const proposalPath = join(request.target.workDir, 'openspec/changes/issue-557/proposal.md')
-      await currentRunnerFileSystem().ensureDir(join(request.target.workDir, 'openspec/changes/issue-557'))
+      const proposalPath = join(request.target.workDir, 'artifacts/changes/issue-557/proposal.md')
+      await currentRunnerFileSystem().ensureDir(join(request.target.workDir, 'artifacts/changes/issue-557'))
       await currentRunnerFileSystem().writeText(proposalPath, 'proposal')
       return {
         ok: true as const,
@@ -377,7 +377,7 @@ describe('WorkExecutor runtime failure convergence', () => {
     const result = await executor.execute(
       {
         ...work(retryWorkDir),
-        expect: { files: [{ path: 'openspec/changes/issue-557/proposal.md' }] },
+        expect: { files: [{ path: 'artifacts/changes/issue-557/proposal.md' }] },
       },
       new AbortController().signal,
     )

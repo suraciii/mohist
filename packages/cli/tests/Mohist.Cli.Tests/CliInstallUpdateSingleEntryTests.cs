@@ -10,11 +10,6 @@ namespace Mohist.Cli.Tests;
 // `mo update [component]`. The pre-existing `mo runner update` invariant
 // (it never existed) is preserved and pinned here as a regression guard.
 //
-// See:
-//   - openspec/changes/issue-388/specs/install-single-entry/spec.md
-//   - openspec/changes/issue-388/specs/update-single-entry/spec.md
-//   - openspec/changes/issue-388/design.md D1 (no-alias policy) and
-//     D3 (explicit `mo runner update` invariant).
 public class CliInstallUpdateSingleEntryTests
 {
     [Fact]

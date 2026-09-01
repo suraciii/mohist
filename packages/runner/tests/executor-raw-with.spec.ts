@@ -279,7 +279,7 @@ describe('WorkExecutor action input boundary', () => {
         variables: {
           workspace: { path: workDir, branch: null },
           prompts: { build: 'build instructions' },
-          vars: { archive: 'openspec/changes/archive/2026-08-14-issue-589' },
+          vars: { archive: 'artifacts/changes/archive/2026-08-14-issue-589' },
         },
       },
       new AbortController().signal,
@@ -290,7 +290,7 @@ describe('WorkExecutor action input boundary', () => {
       { buildPrompt: 'build instructions' },
       {
         buildPrompt: 'build instructions',
-        archiveHint: 'openspec/changes/archive/2026-08-14-issue-589',
+        archiveHint: 'artifacts/changes/archive/2026-08-14-issue-589',
       },
     ])
   })

@@ -9,8 +9,7 @@ namespace Mohist.Server.UnitTests.Issue.Services;
 /// pure (time-bounded event stream + ordered stage set → single
 /// attributed stage) and is consumed by both the
 /// <c>workflow-stage-duration-metrics</c> surface and the
-/// stage-population snapshot job. Spec: <c>openspec/changes/
-/// issue-297/specs/stage-population-snapshot/spec.md</c>.
+/// stage-population snapshot job.
 /// </summary>
 public class IssueStageAttributionTests
 {

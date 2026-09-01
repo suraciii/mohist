@@ -13,8 +13,7 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Project.Grain;
 
 /// <summary>
-/// issue-417 T-004: lock the repository deletion contract spelled out in
-/// <c>openspec/changes/issue-417/specs/project-management/spec.md</c>.
+/// issue-417 T-004: lock the repository deletion contract.
 /// <para>
 /// Coverage:
 /// <list type="bullet">

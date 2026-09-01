@@ -6,8 +6,7 @@ namespace Mohist.Server.UnitTests.Sessions;
 
 /// <summary>
 /// Unit tests for <see cref="ContextExhaustionClassifier"/> covering the
-/// exhaustion classification rules in
-/// <c>openspec/changes/issue-110/specs/context-exhaustion-detection/spec.md</c>.
+/// exhaustion classification rules.
 /// </summary>
 public class ContextExhaustionClassifierTests
 {
