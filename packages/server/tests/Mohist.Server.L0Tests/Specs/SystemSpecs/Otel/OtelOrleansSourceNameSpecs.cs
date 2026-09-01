@@ -1,12 +1,12 @@
 using System.Diagnostics;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.L1Tests.Specs.Workflow.Grain;
 using Mohist.Server.TestSupport;
 using Orleans;
+using Mohist.Server.L0Tests.Support;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.SystemSpecs.Otel;
+namespace Mohist.Server.L0Tests.Specs.SystemSpecs.Otel;
 
 /// <summary>
 /// Pinning test that documents the Orleans 10 native ActivitySource
@@ -30,12 +30,12 @@ namespace Mohist.Server.L1Tests.Specs.SystemSpecs.Otel;
 /// OpenTelemetry's <c>AddSource</c> — it accepts exact names only.
 /// </para>
 /// </summary>
-[Collection("OtelTracing")]
-public class OtelOrleansSourceNameSpecs : IClassFixture<BacklogFixture>
+[Collection("OrleansGrainL0")]
+public class OtelOrleansSourceNameSpecs
 {
-    private readonly BacklogFixture _fixture;
+    private readonly OrleansL0WorkflowGrainFixture _fixture;
 
-    public OtelOrleansSourceNameSpecs(BacklogFixture fixture)
+    public OtelOrleansSourceNameSpecs(OrleansL0WorkflowGrainFixture fixture)
     {
         _fixture = fixture;
     }
