@@ -307,6 +307,7 @@ public static class MohistServiceRegistration
         services.TryAddSingleton<IProcessStartTimeProvider, ProcessStartTimeProvider>();
         services.AddHostedService<SystemUpdateRecoveryService>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
+        services.AddScoped<IDoctorFactSource, DoctorFactSource>();
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IFileSystem, PhysicalFileSystem>();
         services.AddSingleton<IRuntimeSourceIdentity, RuntimeSourceIdentity>();
