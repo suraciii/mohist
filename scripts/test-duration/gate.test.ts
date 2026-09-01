@@ -24,7 +24,7 @@ function config(): SuiteConfig {
   })
   return {
     suiteDeadlineMs: 300_000,
-    tracks: [track('server-unit', 'server'), track('web-unit', 'web')],
+    tracks: [track('server-l0', 'server'), track('web-unit', 'web')],
     plan: {
       applications: ['server', 'web'],
       repositoryScope: 'repository',
@@ -81,14 +81,14 @@ test('Gate parses only its evidence root and help', () => {
     skippedScopes: ['web', 'runner'],
     help: false,
   })
-  assert.throws(() => parseArgs(['--track', 'server-unit']), /unknown gate argument/)
+  assert.throws(() => parseArgs(['--track', 'server-l0']), /unknown gate argument/)
 })
 
 // A scope CI deliberately skipped (no tracked path changed) is exempt from
 // the evidence requirement, but an unknown skip name is still a config error.
 test('Gate exempts declared skipped scopes and rejects unknown ones', () => {
   const root = mkdtempSync(join(tmpdir(), 'mohist-gate-'))
-  writeScope(root, 'server', 'server-unit')
+  writeScope(root, 'server', 'server-l0')
   writeScope(root, 'repository', '')
   assert.deepEqual(validateEvidence(config(), root, undefined, ['web']), [])
   const errors = validateEvidence(config(), root, undefined, ['docs'])
@@ -97,7 +97,7 @@ test('Gate exempts declared skipped scopes and rejects unknown ones', () => {
 
 test('Gate accepts complete application and Repository evidence', () => {
   const root = mkdtempSync(join(tmpdir(), 'mohist-gate-'))
-  writeScope(root, 'server', 'server-unit')
+  writeScope(root, 'server', 'server-l0')
   writeScope(root, 'web', 'web-unit')
   writeScope(root, 'repository', '')
   assert.deepEqual(validateEvidence(config(), root), [])
@@ -105,7 +105,7 @@ test('Gate accepts complete application and Repository evidence', () => {
 
 test('Gate rejects missing, unexpected, and non-passing evidence', () => {
   const root = mkdtempSync(join(tmpdir(), 'mohist-gate-'))
-  writeScope(root, 'server', 'server-unit')
+  writeScope(root, 'server', 'server-l0')
   writeScope(root, 'web', 'web-unit')
   writeScope(root, 'repository', '')
   mkdirSync(join(root, 'extra'), { recursive: true })

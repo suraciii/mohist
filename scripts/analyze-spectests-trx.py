@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reconstruct the xUnit collection timeline from a SpecTests TRX file.
+"""Reconstruct the xUnit collection timeline from an L1 test TRX file.
 
 Usage: python3 scripts/analyze-spectests-trx.py <run.trx> [source-root]
 """
@@ -13,7 +13,7 @@ from datetime import datetime
 
 
 NS = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
-DEFAULT_SOURCE_ROOT = "packages/server/tests/Mohist.Server.SpecTests"
+DEFAULT_SOURCE_ROOT = "packages/server/tests/Mohist.Server.L1Tests"
 
 
 def duration_seconds(value: str) -> float:
