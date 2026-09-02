@@ -47,23 +47,12 @@ internal sealed class WorkflowWorkLifecycle
             }
             var hasFollowUpTasks = taskAttempts.Count > 0;
             var isFeedbackTask = currentTask?.CausedByFeedbackId is not null;
+            var feedbackId = currentTask?.CausedByFeedbackId;
             events.AddRange(run.CompleteTask(
                 stageId,
                 actionAttemptId,
                 now,
                 advance: !hasFollowUpTasks && !isFeedbackTask));
-
-            ApprovalFeedback? resolved = null;
-            if (currentTask?.CausedByFeedbackId is { } feedbackId)
-            {
-                resolved = run.ResolveFeedback(feedbackId, currentTask.Id, report.Output, now);
-                if (resolved is not null)
-                {
-                    _owner.Log.LogInformation(
-                        "Workflow {Id} resolved feedback {FeedbackId} via task {TaskId}",
-                    _owner.GrainKey, feedbackId, currentTask.Id);
-                }
-            }
 
             if (hasFollowUpTasks)
             {
@@ -77,11 +66,24 @@ internal sealed class WorkflowWorkLifecycle
                 var followUpEvents = run.AddRuntimeTaskAttempts(
                     taskAttempts,
                     now,
-                    recoverySourceTaskId);
+                    recoverySourceTaskId,
+                    feedbackId);
                 events.AddRange(followUpEvents);
                 _owner.Log.LogInformation(
                     "Workflow {Id} task {TaskId} produced {Count} follow-up tasks",
                     _owner.GrainKey, actionAttemptId, taskAttempts.Count);
+            }
+
+            ApprovalFeedback? resolved = null;
+            if (feedbackId is not null && currentTask is not null)
+            {
+                resolved = run.ResolveFeedback(feedbackId, currentTask.Id, report.Output, now);
+                if (resolved is not null)
+                {
+                    _owner.Log.LogInformation(
+                        "Workflow {Id} resolved feedback {FeedbackId} via task {TaskId}",
+                    _owner.GrainKey, feedbackId, currentTask.Id);
+                }
             }
 
             if (resolved is not null)

@@ -6,6 +6,7 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Workflow.Definition;
 using Xunit;
@@ -148,6 +149,98 @@ public sealed class WorkflowGrainFeedbackRerunSpecs
         Assert.Equal(uploadId, artifact.SourceUploadId);
         Assert.Equal(actionAttemptId, artifact.ActionAttemptId);
         Assert.Equal("feedback.md", artifact.Path);
+    }
+
+    [Fact]
+    public async Task FinalFeedbackTaskFollowUp_CompletesBeforeReplacementStageStarts()
+    {
+        var arrangement = await ArrangeAsync(
+            "wr-feedback-rerun-follow-up",
+            new StageDefinition(
+                "check",
+                [new("review", "Review", "spec/review")],
+                [new("repository-check", "Repository check", "spec/repository-check")],
+                RequiresApproval: true));
+        await DriveToApprovalAsync(arrangement);
+
+        await arrangement.Grain.RequestChangesAsync("apply the correction", "operator-1");
+        var apply = (await arrangement.AssignAndClaimAsync())!;
+        await arrangement.ReportCompletedAsync(apply);
+
+        var publish = (await arrangement.AssignAndClaimAsync())!;
+        await arrangement.ReportTaskResultAsync(
+            publish,
+            output: null,
+            addTasks: [new RuntimeTaskInput("feedback-follow-up", "Follow up", "spec/follow-up")]);
+
+        var pending = await RequireRunAsync(arrangement);
+        Assert.Equal(1, pending.CurrentStage().Attempt);
+        Assert.Equal(ApprovalFeedbackStatus.Open, pending.Feedback.Single().Status);
+        var followUp = (await arrangement.AssignAndClaimAsync())!;
+        Assert.Equal("feedback-follow-up.1", followUp.Id);
+        Assert.Equal(pending.Feedback.Single().Id,
+            pending.CurrentStage().Tasks.Single(task => task.Id == followUp.Id).CausedByFeedbackId);
+
+        await arrangement.ReportCompletedAsync(followUp);
+
+        var replacement = await RequireRunAsync(arrangement);
+        Assert.Equal(2, replacement.CurrentStage().Attempt);
+        Assert.Equal("review.s2.1", (await arrangement.AssignAndClaimAsync())!.Id);
+        Assert.DoesNotContain(replacement.CurrentStage().Tasks,
+            task => task.DefinitionId == "feedback-follow-up");
+    }
+
+    [Fact]
+    public async Task ArtifactFeedbackInitializationFailure_PersistsFailureAndLeavesArtifactTransactionUnchanged()
+    {
+        var arrangement = await ArrangeAsync(
+            "wr-feedback-rerun-artifact-failure",
+            new StageDefinition(
+                "check",
+                [new("review", "Review", "spec/review")],
+                [new("repository-check", "Repository check", "spec/repository-check")],
+                RequiresApproval: true),
+            finalFeedbackArtifacts: new TaskArtifactCapture([
+                new TaskArtifactDeclaration("feedback.md")
+            ]));
+        await DriveToApprovalAsync(arrangement);
+
+        await arrangement.Grain.RequestChangesAsync("publish the correction", "operator-1");
+        var apply = (await arrangement.AssignAndClaimAsync())!;
+        await arrangement.ReportCompletedAsync(apply);
+        var publish = (await arrangement.AssignAndClaimAsync())!;
+        var actionAttemptId = (await RequireRunAsync(arrangement)).CurrentStage().RunningTask!.Id;
+        var uploadId = await SeedPendingUploadAsync(
+            arrangement.RunId, publish.Id!, actionAttemptId, "feedback.md");
+
+        var corrupted = await RequireRunAsync(arrangement);
+        corrupted.BoundWorkflowDefinitionJson = "not-json";
+        await arrangement.Store.SaveAsync(corrupted);
+        var grain = await WorkflowGrainContractSupport.ReactivateAsync(arrangement, TimeProvider);
+
+        await Assert.ThrowsAsync<WorkflowDefinitionResolutionException>(() =>
+            grain.ReceiveTaskReportAsync(
+                arrangement.WorkerId,
+                publish.Id!,
+                new TaskReport(
+                    publish.Id!,
+                    TaskReportStatus.Succeeded,
+                    Output: null,
+                    Artifacts: null,
+                    ArtifactUploadIds: [uploadId],
+                    ActionAttemptId: actionAttemptId)));
+
+        var failed = await RequireRunAsync(arrangement);
+        Assert.Equal(WorkflowRunStatus.Failed, failed.Status);
+        Assert.Equal(FailureReason.DefinitionResolutionFailed, failed.EffectiveFailure()!.Reason);
+        Assert.Contains(
+            await arrangement.Events.ListAsync(arrangement.RunId),
+            evt => evt.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunFailed);
+        await using var db = CreateDb();
+        Assert.Empty(await db.WorkflowArtifacts.Where(a => a.WorkflowRunId == arrangement.RunId).ToListAsync());
+        var pendingUpload = await db.WorkflowArtifactPendingUploads
+            .SingleAsync(upload => upload.UploadId == uploadId);
+        Assert.Equal(actionAttemptId, pendingUpload.ActionAttemptId);
     }
 
     private async Task AssertFeedbackRerunAsync(

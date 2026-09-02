@@ -315,7 +315,8 @@ public static partial class WorkflowRunExtensions
         internal IReadOnlyList<WorkflowEvent> AddRuntimeTaskAttempts(
             IReadOnlyList<(TaskDefinition Definition, int? RecoveryRemaining)> tasks,
             DateTimeOffset now,
-            string? causedByFailedTaskId = null)
+            string? causedByFailedTaskId = null,
+            string? causedByFeedbackId = null)
         {
             var current = run.CurrentStage();
             var sourceTask = causedByFailedTaskId is null
@@ -366,12 +367,14 @@ public static partial class WorkflowRunExtensions
                         current.Attempt,
                         remaining,
                         run.Stages.SelectMany(candidate => candidate.Tasks),
+                        causedByFeedbackId,
                         causedByFailedTaskId: sourceTask?.Id)
                     : WorkflowActionAttempt.MakeTask(
                         current.Tasks,
                         definition,
                         current.Attempt,
                         run.Stages.SelectMany(candidate => candidate.Tasks),
+                        causedByFeedbackId,
                         causedByFailedTaskId: sourceTask?.Id);
 
                 current.Tasks.Insert(insertIndex, newTask);
