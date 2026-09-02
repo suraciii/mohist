@@ -1063,7 +1063,7 @@ public static partial class SlackConnectionRoutes
         "• Invite me to a channel and @ me there to assign work.\n" +
         "• Reply in the thread of my message to follow up on a task.";
 
-    private static async Task<SlackProviderInboxRouteDraft> ResolveInboxRouteDraftAsync(
+    internal static async Task<SlackProviderInboxRouteDraft> ResolveInboxRouteDraftAsync(
         string projectId,
         string connectionId,
         string conversationId,
@@ -1126,26 +1126,20 @@ public static partial class SlackConnectionRoutes
         }
 
         var prompt = RemoveBotMention(body.Text ?? string.Empty, connection.BotUserId);
-        if (string.IsNullOrWhiteSpace(prompt) && body.Files.Count == 0)
-        {
-            const string reason = "Please send a task for the Agent to perform.";
-            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
-            return ApiResults.Ok(new { kind = "rejected", reason });
-        }
-
         var isNewTask = TryStripNewTaskMarker(prompt, out var newTaskPrompt);
-        if (isNewTask && string.IsNullOrWhiteSpace(newTaskPrompt) && body.Files.Count == 0)
+        var emptyTaskReason = SlackDmIngressPolicy.EmptyTaskRejectionReason(
+            prompt, isNewTask, newTaskPrompt, body.Files.Count);
+        if (emptyTaskReason is not null)
         {
-            const string reason = "Please send a task for the Agent to perform.";
-            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
-            return ApiResults.Ok(new { kind = "rejected", reason });
+            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, emptyTaskReason, null, ct, body.ThreadTs);
+            return ApiResults.Ok(new { kind = "rejected", reason = emptyTaskReason });
         }
 
         var admissionService = req.Services.GetRequiredService<SlackAdmissionService>();
         var currentSessionId = isNewTask
             ? null
             : await req.DmMapping.GetCurrentSessionIdAsync(projectId, connection.Id, body.ConversationId, ct);
-        var isNewWork = isNewTask || string.IsNullOrWhiteSpace(currentSessionId);
+        var isNewWork = SlackDmIngressPolicy.RequiresNewWorkAdmission(isNewTask, currentSessionId);
         if (isNewWork)
         {
             var existingNudge = await admissionService.FindExistingNudgeAsync(projectId, connection, req.Identity, ct);
