@@ -68,15 +68,15 @@ func parityDeps(transport *parityTransport) (Dependencies, *strings.Builder, *st
 		Stderr:     stderr,
 		Lookup: func(name string) (string, bool) {
 			values := map[string]string{
-				"MOHIST_SERVER_URL": "http://parity.example",
-				"MOHIST_TOKEN":      "parity-token",
+				"MOHIST_SERVER_URL":  "http://parity.example",
+				"MOHIST_TOKEN":       "parity-token",
 				"MOHIST_OPERATOR_ID": "parity-test",
 			}
 			value, ok := values[name]
 			return value, ok
 		},
-		ReadFile:   func(string) (string, error) { return "", io.EOF },
-		HomeDir:    func() (string, error) { return "/parity-home", nil },
+		ReadFile:    func(string) (string, error) { return "", io.EOF },
+		HomeDir:     func() (string, error) { return "/parity-home", nil },
 		WriteFile:   func(string, string, os.FileMode) error { return nil },
 		Execute:     func(context.Context, string, []string) error { return nil },
 		OpenBrowser: func(context.Context, string, []string) error { return nil },
