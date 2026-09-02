@@ -785,9 +785,26 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         if (_run is null) return;
         try
         {
+            IReadOnlyList<WorkflowEvent> resolved;
+            try
+            {
+                resolved = await _stageInitializer.InitializeFreshStagesAsync(events);
+            }
+            catch (WorkflowDefinitionResolutionException ex)
+            {
+                resolved = _run.FailDefinitionResolution(ex.Message);
+                _runDirty = true;
+                await SaveRunAsync(resolved);
+                throw;
+            }
+
             _runDirty = true;
-            await _runStore.SaveWithArtifactsAsync(_run, events, artifacts);
+            await _runStore.SaveWithArtifactsAsync(_run, resolved, artifacts);
             _runDirty = false;
+        }
+        catch (WorkflowDefinitionResolutionException)
+        {
+            throw;
         }
         catch
         {

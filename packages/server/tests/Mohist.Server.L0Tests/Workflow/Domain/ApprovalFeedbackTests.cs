@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
@@ -612,6 +613,108 @@ public partial class ApprovalFeedbackTests
         Assert.NotNull(resolved);
         Assert.Equal(ApprovalFeedbackStatus.Resolved, resolved!.Status);
         Assert.Equal(publish.Id, resolved.ResolutionTaskId);
+    }
+
+    [Fact]
+    public void FeedbackCompletionBatch_DoesNotResolveOrRequestApprovalBeforeFinalTask()
+    {
+        var run = BuildAwaitingApprovalRun();
+        var feedbackId = NextFeedbackId(run);
+        run.RequestChanges("publish the correction", feedbackId, DateTimeOffset.UnixEpoch, TestOperator,
+        [
+            new TaskDefinition("apply-feedback", "Apply approval feedback", "mohist/opencode"),
+            new TaskDefinition("publish-feedback", "Publish approval feedback", "mohist/push"),
+        ]);
+
+        var tasks = run.CurrentStage().Tasks.Where(task => task.CausedByFeedbackId == feedbackId).ToList();
+        var apply = tasks.Single(task => task.DefinitionId == "apply-feedback");
+        var publish = tasks.Single(task => task.DefinitionId == "publish-feedback");
+
+        run.StartTask(apply.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
+        var firstBatch = run.CompleteTask(DateTimeOffset.UnixEpoch.AddSeconds(1), advance: false);
+        var firstResolution = run.ResolveFeedback(
+            feedbackId,
+            apply.Id,
+            JSON.DeserializeElement("\"applied\""),
+            DateTimeOffset.UnixEpoch.AddSeconds(2));
+
+        Assert.Null(firstResolution);
+        Assert.Equal(1, run.CurrentStage().Attempt);
+        Assert.Equal(StageRunStatus.Running, run.CurrentStage().Status);
+        Assert.Equal(ApprovalFeedbackStatus.Open, run.Feedback.Single().Status);
+        Assert.DoesNotContain(firstBatch, evt => WorkflowEventSerializer.Unwrap(evt) is StageApprovalRequested);
+        Assert.Equal(WorkflowActionAttemptStatus.Completed, apply.Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, publish.Status);
+
+        run.StartTask(publish.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch.AddSeconds(3));
+        var finalBatch = run.CompleteTask(DateTimeOffset.UnixEpoch.AddSeconds(4), advance: false).ToList();
+        var finalResolution = run.ResolveFeedback(
+            feedbackId,
+            publish.Id,
+            JSON.DeserializeElement("\"published\""),
+            DateTimeOffset.UnixEpoch.AddSeconds(5));
+
+        Assert.NotNull(finalResolution);
+        Assert.Equal(ApprovalFeedbackStatus.Resolved, run.Feedback.Single().Status);
+        Assert.DoesNotContain(finalBatch, evt => WorkflowEventSerializer.Unwrap(evt) is StageApprovalRequested);
+    }
+
+    [Fact]
+    public void FailedFeedbackTask_LeavesFeedbackOpenWithoutStartingReplacementAttempt()
+    {
+        var run = BuildAwaitingApprovalRun();
+        var feedbackId = NextFeedbackId(run);
+        run.RequestChanges("apply the correction", feedbackId, DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
+
+        var feedbackTask = run.CurrentStage().Tasks.Single(task => task.CausedByFeedbackId == feedbackId);
+        run.StartTask(feedbackTask.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
+        var events = run.FailTask(
+            new TaskResult("failed", "could not apply feedback"),
+            DateTimeOffset.UnixEpoch.AddSeconds(1));
+
+        Assert.Equal(1, run.CurrentStage().Attempt);
+        Assert.Equal(StageRunStatus.Failed, run.CurrentStage().Status);
+        Assert.Equal(ApprovalFeedbackStatus.Open, run.Feedback.Single().Status);
+        Assert.Equal(WorkflowActionAttemptStatus.Failed, feedbackTask.Status);
+        Assert.DoesNotContain(events, evt => WorkflowEventSerializer.Unwrap(evt) is StageStarted);
+    }
+
+    [Fact]
+    public void ResolvedFeedback_RerunMaterializesFreshAttemptAndRetainsResolutionHistory()
+    {
+        var run = BuildAwaitingApprovalRun();
+        var originalTaskId = run.CurrentStage().Tasks.Single().Id;
+        var feedbackId = NextFeedbackId(run);
+        run.RequestChanges("apply the correction", feedbackId, DateTimeOffset.UnixEpoch, TestOperator, ConfiguredFeedbackTasks());
+
+        var feedbackTask = run.CurrentStage().Tasks.Single(task => task.CausedByFeedbackId == feedbackId);
+        run.StartTask(feedbackTask.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
+        var completion = run.CompleteTask(DateTimeOffset.UnixEpoch.AddSeconds(1), advance: false);
+        var resolved = run.ResolveFeedback(
+            feedbackId,
+            feedbackTask.Id,
+            JSON.DeserializeElement("\"applied\""),
+            DateTimeOffset.UnixEpoch.AddSeconds(2));
+        Assert.NotNull(resolved);
+
+        var rerun = run.Rerun(DateTimeOffset.UnixEpoch.AddSeconds(3));
+        var batch = completion.Concat(rerun).ToList();
+        run.InitializeStage(
+            [new("draft", "Draft", "spec/task")],
+            [new("plan-ok", "Plan OK", "spec/check")],
+            DateTimeOffset.UnixEpoch.AddSeconds(4),
+            advance: false);
+
+        var replacement = run.CurrentStage();
+        var replacementTask = replacement.Tasks.Single();
+        Assert.Equal(2, replacement.Attempt);
+        Assert.NotEqual(originalTaskId, replacementTask.Id);
+        Assert.Equal(WorkflowActionAttemptStatus.Pending, replacementTask.Status);
+        Assert.DoesNotContain(replacement.Tasks, task => task.CausedByFeedbackId is not null);
+        Assert.All(replacement.Checks, check => Assert.Equal(StageCheckStatus.Pending, check.Status));
+        Assert.Equal(ApprovalFeedbackStatus.Resolved, run.Feedback.Single(feedback => feedback.Id == feedbackId).Status);
+        Assert.Contains(batch, evt => WorkflowEventSerializer.Unwrap(evt) is StageStarted);
+        Assert.DoesNotContain(batch, evt => WorkflowEventSerializer.Unwrap(evt) is StageApprovalRequested);
     }
 
     [Fact]
