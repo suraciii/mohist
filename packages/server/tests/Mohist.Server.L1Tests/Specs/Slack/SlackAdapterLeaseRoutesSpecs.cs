@@ -48,6 +48,33 @@ public sealed class SlackAdapterLeaseRoutesSpecs
     }
 
     [Fact]
+    public async Task ReadonlyPatWithOperatorIdentity_CannotDiscoverLeaseTargets()
+    {
+        using var issuer = _fixture.CreateOperatorClient(OperatorId);
+        using var created = await issuer.PostAsJsonAsync("/api/auth/tokens", new
+        {
+            name = $"readonly-lease-discovery-{Guid.NewGuid():N}",
+            scope = "readonly",
+            ttlHours = 720,
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var token = (await created.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data")
+            .GetProperty("token")
+            .GetString();
+        Assert.False(string.IsNullOrWhiteSpace(token));
+
+        using var readonlyClient = _fixture.Factory.CreateClient();
+        readonlyClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        readonlyClient.DefaultRequestHeaders.Add(
+            SlackAdapterOperatorAuthenticator.OperatorIdHeaderName,
+            OperatorId);
+        using var response = await readonlyClient.GetAsync(TargetsPath);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Discovery_returns_only_app_token_targets_and_never_secrets()
     {
         var manager = new SlackLeaseTargetRef.Manager(NewId("enr"), "T_DISCOVER");
@@ -263,6 +290,63 @@ public sealed class SlackAdapterLeaseRoutesSpecs
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(expectedCode, await CodeAsync(response));
+    }
+
+    [Fact]
+    public async Task Acquire_and_hello_require_adapter_id_lease_id_and_app_id()
+    {
+        using var client = _fixture.CreateOperatorClient(OperatorId);
+
+        using var noAdapter = await client.PostAsJsonAsync(AcquirePath, new
+        {
+            kind = SlackLeaseKind.Validation,
+            target = new { kind = SlackLeaseTargetKind.Manager, enrollmentId = "enr_missing", workspaceTeamId = "T_MISSING" },
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, noAdapter.StatusCode);
+
+        using var noLease = await client.PostAsJsonAsync(HelloPath, new
+        {
+            target = new { kind = SlackLeaseTargetKind.Manager, enrollmentId = "enr_missing", workspaceTeamId = "T_MISSING" },
+            appId = "A_MISSING",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, noLease.StatusCode);
+
+        using var noApp = await client.PostAsJsonAsync(HelloPath, new
+        {
+            target = new { kind = SlackLeaseTargetKind.Manager, enrollmentId = "enr_missing", workspaceTeamId = "T_MISSING" },
+            leaseId = "lease_missing",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, noApp.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(AcquirePath)]
+    [InlineData(HelloPath)]
+    [InlineData(RenewPath)]
+    public async Task Post_routes_reject_a_missing_or_null_target_without_server_error(string path)
+    {
+        using var client = _fixture.CreateOperatorClient(OperatorId);
+
+        using var missing = await client.PostAsJsonAsync(path, new
+        {
+            kind = SlackLeaseKind.Validation,
+            adapterId = "adapter-A",
+            leaseId = "lease_x",
+            appId = "A_X",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+        Assert.Equal("invalid_target", await CodeAsync(missing));
+
+        using var nullTarget = await client.PostAsJsonAsync(path, new
+        {
+            target = (object?)null,
+            kind = SlackLeaseKind.Validation,
+            adapterId = "adapter-A",
+            leaseId = "lease_x",
+            appId = "A_X",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, nullTarget.StatusCode);
+        Assert.Equal("invalid_target", await CodeAsync(nullTarget));
     }
 
     private static object AcquireBody(SlackLeaseTargetRef target, string adapterId) => new

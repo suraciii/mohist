@@ -29,6 +29,33 @@ public sealed class SlackDeliveryOutcomesSpecs
     public SlackDeliveryOutcomesSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
+    public async Task List_deliveries_returns_all_rows_with_state_and_reason()
+    {
+        var connection = await CreateConnectionAsync();
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var uncertain = await outbox.EnqueueAsync(new SlackOutboxDraft(
+            connection.ProjectId,
+            connection.Id,
+            connection.WorkspaceTeamId,
+            "D1",
+            SlackOutboxKinds.TerminalResult,
+            "agentjob_uncertain",
+            "{\"text\":\"uncertain\"}"));
+        await outbox.MarkDeliveryUncertainAsync(connection.ProjectId, uncertain.Id, "claim timeout");
+
+        using var response = await _fixture.Client.GetAsync(Path(connection, "/deliveries"));
+        response.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var entries = document.RootElement.GetProperty("data").GetProperty("entries");
+        Assert.Equal(1, entries.GetArrayLength());
+        var entry = entries[0];
+        Assert.Equal(uncertain.Id, entry.GetProperty("id").GetString());
+        Assert.Equal(SlackOutboxStates.DeliveryUncertain, entry.GetProperty("state").GetString());
+        Assert.Equal("claim timeout", entry.GetProperty("lastError").GetString());
+    }
+
+    [Fact]
     public async Task Resend_endpoint_transitions_uncertain_to_pending_without_touching_execution_result()
     {
         var connection = await CreateConnectionAsync();
@@ -76,6 +103,27 @@ public sealed class SlackDeliveryOutcomesSpecs
     }
 
     [Fact]
+    public async Task Resend_endpoint_rejects_non_uncertain_row_with_409()
+    {
+        var connection = await CreateConnectionAsync();
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var pending = await outbox.EnqueueAsync(new SlackOutboxDraft(
+            connection.ProjectId,
+            connection.Id,
+            connection.WorkspaceTeamId,
+            "D1",
+            SlackOutboxKinds.TerminalResult,
+            "agentjob_pending",
+            "{\"text\":\"pending\"}"));
+
+        using var resend = await _fixture.Client.PostAsync(
+            Path(connection, $"/deliveries/{pending.Id}/resend"), content: null);
+
+        Assert.Equal(HttpStatusCode.Conflict, resend.StatusCode);
+    }
+
+    [Fact]
     public async Task Agent_reply_route_requires_the_complete_anchor_for_every_dispatch()
     {
         var connection = await CreateConnectionAsync();
@@ -117,6 +165,24 @@ public sealed class SlackDeliveryOutcomesSpecs
         Assert.Equal(HttpStatusCode.BadRequest, missingTrigger.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, legacy.StatusCode);
         Assert.True(anchored.IsSuccessStatusCode, await anchored.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Agent_reply_with_invalid_base64_file_is_rejected_before_enqueue()
+    {
+        var connection = await CreateConnectionAsync();
+        await CreateDmMappingAsync(connection, "D-render-invalid");
+
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{connection.ProjectId}/slack-connections/reply",
+            ReplyBody("D-render-invalid", fileName: "x.png", fileContentBase64: "not-base64!!"));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Empty(await db.SlackOutboxRows.AsNoTracking()
+            .Where(r => r.ProjectId == connection.ProjectId && r.ConversationId == "D-render-invalid")
+            .ToListAsync());
     }
 
     private async Task CreateDmMappingAsync(AgentConnection connection, string dmConversationId)

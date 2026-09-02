@@ -90,6 +90,172 @@ public sealed class SlackManagerConversationSpecs
         Assert.Null(scope.ServiceProvider.GetService<SlackManagerToolExecutionFenceStore>());
     }
 
+    [Fact]
+    public async Task Initial_mapping_is_published_before_submit_and_concurrent_message_is_one_followup()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var team = $"T_MANAGER_MAPPING_FENCE_{suffix}";
+        var appId = $"A_MANAGER_MAPPING_FENCE_{suffix}";
+        var owner = $"U_MANAGER_MAPPING_FENCE_{suffix}";
+        var enrollmentId = await SetupAndClaimAsync(team, appId, owner);
+        var firstTs = "1710001000.000010";
+        var sessionId = $"manager-session-{AgentLaunchCoordinatorCodec.StableToken(string.Join('\n',
+            enrollmentId,
+            team,
+            "D_MANAGER_CONVERSATION_NEW"))}";
+
+        // Scope the fence to THIS session's initial-launch participant: an
+        // unscoped one-shot SubmitJob block can be stolen by any unrelated
+        // background launch in the shared host, releasing the wait before
+        // this conversation published its mapping. EnsureInitialLaunch
+        // carries the deterministic session id and fires before submit.
+        _fixture.LaunchFaults.BlockNext(
+            LaunchParticipantGate.EnsureInitialLaunch,
+            participantId => participantId == sessionId);
+        try
+        {
+            var firstTask = SendManagerMessageAsync(
+                appId, team, owner, firstTs, "Inspect the current Manager state.");
+            await _fixture.LaunchFaults.WaitUntilBlockedAsync(LaunchParticipantGate.EnsureInitialLaunch);
+
+            await using (var scope = _fixture.Services.CreateAsyncScope())
+            {
+                var mapping = await scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>()
+                    .GetCurrentSessionIdAsync(
+                        BuiltInAgentCatalog.MohistSlackProjectId,
+                        enrollmentId,
+                        team,
+                        "D_MANAGER_CONVERSATION_NEW");
+                Assert.Equal(sessionId, mapping);
+            }
+
+            var laterTask = SendManagerMessageAsync(
+                appId, team, owner, "1710001000.000011", "Also summarize the result.");
+            var later = await laterTask;
+            Assert.Equal("accepted", later.GetProperty("decision").GetString());
+            Assert.Equal(sessionId, later.GetProperty("sessionId").GetString());
+
+            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.EnsureInitialLaunch);
+            var first = await firstTask;
+            Assert.Equal("accepted", first.GetProperty("decision").GetString());
+
+            var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            Assert.Equal(2, (await session.ListTurnsAsync()).Count);
+            await using var finalScope = _fixture.Services.CreateAsyncScope();
+            var database = finalScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            Assert.Single(await database.AgentJobs.Where(row => row.AgentSessionId == sessionId).ToListAsync());
+        }
+        finally
+        {
+            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.EnsureInitialLaunch);
+        }
+    }
+
+    [Fact]
+    public async Task Replay_during_initial_launch_never_creates_a_second_input()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var team = $"T_MANAGER_REPLAY_RACE_{suffix}";
+        var appId = $"A_MANAGER_REPLAY_RACE_{suffix}";
+        var owner = $"U_MANAGER_REPLAY_RACE_{suffix}";
+        var enrollmentId = await SetupAndClaimAsync(team, appId, owner);
+        var firstTs = "1710002000.000010";
+        var sessionId = $"manager-session-{AgentLaunchCoordinatorCodec.StableToken(string.Join('\n',
+            enrollmentId,
+            team,
+            "D_MANAGER_CONVERSATION_NEW"))}";
+
+        _fixture.LaunchFaults.BlockNext(
+            LaunchParticipantGate.EnsureInitialLaunch,
+            participantId => participantId == sessionId);
+        try
+        {
+            var firstTask = SendManagerMessageAsync(
+                appId, team, owner, firstTs, "Inspect the current Manager state.");
+            await _fixture.LaunchFaults.WaitUntilBlockedAsync(LaunchParticipantGate.EnsureInitialLaunch);
+
+            // Slack replays the SAME message while the initial launch is
+            // still between inbox acceptance and route stamping: the replay
+            // must be the existing acceptance, never a second input, turn,
+            // or management execution.
+            var replay = await SendManagerMessageAsync(
+                appId, team, owner, firstTs, "Inspect the current Manager state.");
+            Assert.Equal("duplicate", replay.GetProperty("decision").GetString());
+
+            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.EnsureInitialLaunch);
+            var first = await firstTask;
+            Assert.Equal("accepted", first.GetProperty("decision").GetString());
+
+            var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            Assert.Single(await session.ListTurnsAsync());
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var database = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            Assert.Single(await database.AgentJobs.Where(row => row.AgentSessionId == sessionId).ToListAsync());
+        }
+        finally
+        {
+            _fixture.LaunchFaults.ReleaseBlocked(LaunchParticipantGate.EnsureInitialLaunch);
+        }
+    }
+
+    [Fact]
+    public async Task Missing_runtime_replaces_the_mapping_and_accepts_the_current_message_once()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var team = $"T_MANAGER_RECOVERY_{suffix}";
+        var appId = $"A_MANAGER_RECOVERY_{suffix}";
+        var owner = $"U_MANAGER_RECOVERY_{suffix}";
+        var enrollmentId = await SetupAndClaimAsync(team, appId, owner);
+
+        var initial = await SendManagerMessageAsync(
+            appId, team, owner, "1710000001.000002", "Start the Manager conversation.");
+        Assert.Equal("accepted", initial.GetProperty("decision").GetString());
+        await using (var beforeScope = _fixture.Services.CreateAsyncScope())
+        {
+            var beforeMapping = await beforeScope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>()
+                .GetCurrentSessionIdAsync(
+                    BuiltInAgentCatalog.MohistSlackProjectId,
+                    enrollmentId,
+                    team,
+                    "D_MANAGER_CONVERSATION_NEW");
+            Assert.NotNull(beforeMapping);
+        }
+        var originalSessionId = $"manager-session-{AgentLaunchCoordinatorCodec.StableToken(string.Join('\n',
+            enrollmentId,
+            team,
+            "D_MANAGER_CONVERSATION_NEW"))}";
+
+        var replacementTs = "1710000001.000003";
+        var replacement = await SendManagerMessageAsync(
+            appId, team, owner, replacementTs, "Continue after the runtime session disappeared.");
+        Assert.Equal("accepted", replacement.GetProperty("decision").GetString());
+        var replacementSessionId = $"manager-session-{AgentLaunchCoordinatorCodec.StableToken(string.Join('\n',
+            enrollmentId,
+            team,
+            "D_MANAGER_CONVERSATION_NEW",
+            replacementTs))}";
+        Assert.NotEqual(originalSessionId, replacementSessionId);
+        Assert.Equal(replacementSessionId, replacement.GetProperty("sessionId").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var mapping = await scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>()
+            .GetCurrentSessionIdAsync(
+                BuiltInAgentCatalog.MohistSlackProjectId,
+                enrollmentId,
+                team,
+                "D_MANAGER_CONVERSATION_NEW");
+        Assert.Equal(replacementSessionId, mapping);
+        var database = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var replacementInbox = await database.SlackProviderInboxRows.SingleAsync(row =>
+            row.ConnectionId == enrollmentId
+            && row.SlackMessageIdentity == $"{team}/D_MANAGER_CONVERSATION_NEW/{replacementTs}");
+        Assert.Equal(replacementSessionId, replacementInbox.RouteSessionId);
+
+        var replay = await SendManagerMessageAsync(appId, team, owner, replacementTs, "Continue after the runtime session disappeared.");
+        Assert.Equal("duplicate", replay.GetProperty("decision").GetString());
+        Assert.Single(await database.AgentJobs.Where(row => row.AgentSessionId == replacementSessionId).ToListAsync());
+    }
+
     private async Task<string> SetupAndClaimAsync(string team, string appId, string owner)
     {
         using var setupResponse = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/setup", new
