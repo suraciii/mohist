@@ -304,10 +304,17 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         if (_run.Status is not (WorkflowRunStatus.Created or WorkflowRunStatus.Pending or WorkflowRunStatus.Ready or WorkflowRunStatus.Running or WorkflowRunStatus.AwaitingApproval or WorkflowRunStatus.Paused or WorkflowRunStatus.Failed))
             throw new InvalidOperationException($"Cannot stop workflow in {_run.Status} state");
 
+        var isLegacyFailedRun = _run.Status == WorkflowRunStatus.Failed
+            && string.IsNullOrWhiteSpace(_run.BoundWorkflowDefinitionJson);
         var stopEvents = _run.Stop();
 
-        var abandonedWorkId = _run.CurrentStage().RunningTask?.WorkId;
-        var abandonedEvents = await _workLifecycle.AbandonRunningWorkAsync(_run!, reason ?? "stopped");
+        var abandonedWorkId = (string?)null;
+        IReadOnlyList<WorkflowEvent> abandonedEvents = [];
+        if (!isLegacyFailedRun)
+        {
+            abandonedWorkId = _run.CurrentStage().RunningTask?.WorkId;
+            abandonedEvents = await _workLifecycle.AbandonRunningWorkAsync(_run, reason ?? "stopped");
+        }
         var events = abandonedEvents.Concat(stopEvents).ToArray();
 
         _log.LogInformation("Workflow {Id} stopped: {Reason}", GrainKey, reason);
