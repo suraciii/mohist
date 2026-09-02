@@ -8,12 +8,12 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
-using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.L0Tests.Support;
 using Xunit;
 using Mohist.Server.Workflow.Grains;
 
-namespace Mohist.Server.L1Tests.Specs.Slack;
+namespace Mohist.Server.L0Tests.Specs.Slack;
 
 public sealed class SlackStatusProjectionSpecs
 {
