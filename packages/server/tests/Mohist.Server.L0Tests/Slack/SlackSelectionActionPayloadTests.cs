@@ -86,6 +86,36 @@ public sealed class SlackSelectionActionPayloadTests
         Assert.False(blocks.HasValue);
     }
 
+    [Theory]
+    [InlineData("[null,null]")]
+    [InlineData("[{\"projectId\":\"project-a\",\"connectionId\":\"connection-a\"},null]")]
+    [InlineData("[{\"projectId\":\"\",\"connectionId\":\"connection-a\"},{\"projectId\":\"project-b\",\"connectionId\":\"connection-b\"}]")]
+    public void Malformed_candidate_references_are_rejected_without_throwing(string candidateJson)
+    {
+        var payload = new SlackSelectionActionPayload(
+            "v1",
+            SlackSelectionActionPayload.ActionName,
+            "project-owner",
+            "connection-owner",
+            "team-1",
+            "channel-1",
+            "100.001",
+            null,
+            SlackAmbiguityKinds.RootMultiMention,
+            "UACTOR",
+            JSON.Deserialize<List<SlackSelectionCandidateReference>>(candidateJson)!,
+            "project-a",
+            "connection-a",
+            "nonce",
+            new DateTimeOffset(2026, 8, 23, 12, 0, 0, TimeSpan.Zero),
+            "signed");
+
+        var exception = Record.Exception(() =>
+            Assert.False(SlackSelectionActionPayload.IsStructurallyValid(payload)));
+
+        Assert.Null(exception);
+    }
+
     [Fact]
     public void Candidate_order_is_part_of_the_canonical_signed_form()
     {
