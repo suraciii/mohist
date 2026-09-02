@@ -400,8 +400,6 @@ public static partial class SlackConnectionRoutes
         var projectId = req.ProjectId;
         var connection = req.Connection;
 
-        var labelSummary = string.Join(", ", candidates.Select(candidate => candidate.BotUserId));
-        var promptText = $"Multiple Agents could answer this: {labelSummary}. Re-mention a single Bot explicitly to proceed.";
         var dispatchRef = SlackAmbiguousPromptStore.PromptDispatchRef(
             body.TeamId, body.ConversationId, body.MessageTs);
         var candidateReferences = candidates
@@ -439,6 +437,12 @@ public static partial class SlackConnectionRoutes
         if (claim.Snapshot.SelectionState != SlackSelectionStates.Pending)
             return ApiResults.Ok(new { kind = "ambiguous", reason = "This Agent selection is no longer active." });
 
+        var durableCandidates = JSON.Deserialize<List<SlackSelectionCandidateReference>>(
+            claim.Snapshot.CandidateReferencesJson)!;
+        var labels = durableCandidates
+            .Select(candidate => candidate.BotUserId ?? candidate.ConnectionId)
+            .ToArray();
+        var promptText = $"Multiple Agents could answer this: {string.Join(", ", labels)}. Re-mention a single Bot explicitly to proceed.";
         var signer = req.Services.GetRequiredService<ISlackActionSigner>();
         var expiresAt = req.Services.GetRequiredService<TimeProvider>().GetUtcNow()
             .Add(SlackSelectionActionPayload.Lifetime);
@@ -451,8 +455,8 @@ public static partial class SlackConnectionRoutes
             body.ThreadTs,
             req.SenderSlackUserId,
             ambiguityKind,
-            candidateReferences,
-            candidates.Select(candidate => candidate.BotUserId).ToArray(),
+            durableCandidates,
+            labels,
             expiresAt,
             ct);
         await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,

@@ -477,7 +477,8 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
                 snapshot.CandidateReferencesJson);
             return candidates is { Count: >= 2 }
                 && candidates.All(candidate =>
-                    !string.IsNullOrWhiteSpace(candidate.ProjectId)
+                    candidate is not null
+                    && !string.IsNullOrWhiteSpace(candidate.ProjectId)
                     && !string.IsNullOrWhiteSpace(candidate.ConnectionId));
         }
         catch (JsonException)

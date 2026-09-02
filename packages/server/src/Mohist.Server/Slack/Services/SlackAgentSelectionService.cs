@@ -139,7 +139,8 @@ internal sealed class SlackAgentSelectionService : IScopedService
 
         var selectedCandidate = DeserializeCandidates(claim!.CandidateReferencesJson)
             .FirstOrDefault(candidate =>
-                string.Equals(candidate.ProjectId, payload.ChosenProjectId, StringComparison.Ordinal)
+                candidate is not null
+                && string.Equals(candidate.ProjectId, payload.ChosenProjectId, StringComparison.Ordinal)
                 && string.Equals(candidate.ConnectionId, payload.ChosenConnectionId, StringComparison.Ordinal));
         if (selectedCandidate is null)
             return Rejected("stale_action", "The selected Agent is no longer one of the durable chooser candidates.");

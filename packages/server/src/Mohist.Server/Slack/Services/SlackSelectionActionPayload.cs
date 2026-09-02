@@ -70,7 +70,8 @@ public sealed record SlackSelectionActionPayload(
         && !string.IsNullOrWhiteSpace(payload.ChosenConnectionId)
         && payload.CandidateReferences is { Count: >= 2 }
         && payload.CandidateReferences.All(candidate =>
-            !string.IsNullOrWhiteSpace(candidate.ProjectId)
+            candidate is not null
+            && !string.IsNullOrWhiteSpace(candidate.ProjectId)
             && !string.IsNullOrWhiteSpace(candidate.ConnectionId))
         && !string.IsNullOrWhiteSpace(payload.Signature);
 }
@@ -91,7 +92,9 @@ internal static class SlackSelectionChooserRenderer
         DateTimeOffset expiresAt,
         CancellationToken ct)
     {
-        if (candidates.Count is < 2 or > 5)
+        if (candidates.Count is < 2 or > 5
+            || candidates.Count != labels.Count
+            || candidates.Any(candidate => candidate is null))
             return null;
 
         var buttons = new List<object>(candidates.Count);
