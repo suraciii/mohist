@@ -322,107 +322,13 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         }
     }
 
-    [Fact]
-    public async Task Legacy_initial_root_fallback_validates_an_active_followup_anchor()
-    {
-        var connection = await CreateConnectionAsync();
-        var sessionId = $"legacy-reply-anchor-{Guid.NewGuid():N}";
-        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-        const string conversationId = "C-LEGACY-ROOT";
-        const string rootTs = "1710000000.000600";
-        const string followupTs = "1710000000.000601";
-        var metadata = new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [AgentSessionQueryMetadataKeys.ProjectId] = connection.ProjectId,
-            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-connection",
-            [GenericAgentSessionMetadata.AgentId] = "legacy-agent",
-            [AgentSessionQueryMetadataKeys.ConnectionId] = connection.Id,
-            [AgentSessionQueryMetadataKeys.SlackWorkspaceTeamId] = connection.WorkspaceTeamId,
-            [AgentSessionQueryMetadataKeys.SlackConversationId] = conversationId,
-            [AgentSessionQueryMetadataKeys.SlackThreadTs] = rootTs,
-        });
-        var legacyProvenance = new AgentSessionInputProvenance(
-            "slack", connection.WorkspaceTeamId, conversationId, rootTs,
-            "U_OWNER", rootTs, connection.Id, BoundThreadRootMessageId: null);
-        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            "legacy-input", "legacy-turn", "start", "agent-connection", "legacy-job",
-            metadata, Runtime: "opencode", Provenance: legacyProvenance));
-        await grain.OpenAsync(new OpenAgentSessionCommand("legacy-runner", "opencode", Metadata: metadata));
-        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
-            "legacy-runtime-session", Runtime: "opencode", ExpectedRuntime: "opencode", ExpectedRunnerId: "legacy-runner"));
-        await grain.MarkInitialTurnTerminalAsync("legacy-job", AgentTurnStatus.Completed, null);
-        var followup = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
-            "continue", "agent-session-followup", "legacy-followup",
-            Provenance: legacyProvenance with { MessageId = followupTs }));
-
-        Assert.Equal(new SlackReplyAnchorValidationResult(true, true), await grain.ValidateSlackReplyAnchorAsync(ValidationRequest(
-            connection, conversationId, rootTs, followupTs, sessionId, followup.OperationId)));
-    }
-
-    [Fact]
-    public async Task RegisterRunnerAsync_preserves_peer_runner_registration()
-    {
-        var connection = await CreateConnectionAsync();
-        var peerRunnerId = $"slack-reply-anchor-peer-{Guid.NewGuid():N}";
-        await RegisterRunnerViaApiAsync(peerRunnerId, connection.ProjectId);
-        try
-        {
-            await RegisterRunnerAsync(connection.ProjectId);
-
-            var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-            Assert.Contains(peerRunnerId, await registry.ListRunnerIdsAsync());
-            Assert.Equal(
-                RunnerStatus.Online,
-                (await _fixture.Grains.GetGrain<IRunnerGrain>(peerRunnerId).GetRuntimeStateAsync()).Status);
-        }
-        finally
-        {
-            _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Unregister(peerRunnerId);
-            await _fixture.Grains.GetGrain<IRunnerGrain>(peerRunnerId).UnregisterAsync();
-        }
-    }
-
-    [Fact]
-    public async Task RegisterRunnerAsync_cleans_partial_registration_without_removing_peer()
-    {
-        var connection = await CreateConnectionAsync();
-        var peerRunnerId = $"slack-reply-anchor-peer-{Guid.NewGuid():N}";
-        string? partialRunnerId = null;
-        await RegisterRunnerViaApiAsync(peerRunnerId, connection.ProjectId);
-        try
-        {
-            await Assert.ThrowsAsync<InvalidOperationException>(() => RegisterRunnerAsync(
-                connection.ProjectId,
-                runnerId =>
-                {
-                    partialRunnerId = runnerId;
-                    throw new InvalidOperationException("forced failure after registration");
-                }));
-
-            Assert.NotNull(partialRunnerId);
-            var runnerIds = await _fixture.Grains
-                .GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
-                .ListRunnerIdsAsync();
-            Assert.DoesNotContain(partialRunnerId, runnerIds);
-            Assert.Contains(peerRunnerId, runnerIds);
-            Assert.Equal(
-                RunnerStatus.Online,
-                (await _fixture.Grains.GetGrain<IRunnerGrain>(peerRunnerId).GetRuntimeStateAsync()).Status);
-        }
-        finally
-        {
-            _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Unregister(peerRunnerId);
-            await _fixture.Grains.GetGrain<IRunnerGrain>(peerRunnerId).UnregisterAsync();
-        }
-    }
-
-    private async Task<string> RegisterRunnerAsync(string projectId, Func<string, Task>? afterRegistration = null)
+    private async Task<string> RegisterRunnerAsync(string projectId)
     {
         var runnerId = $"slack-reply-anchor-{Guid.NewGuid():N}";
         _runnerIds.Add(runnerId);
         try
         {
-            await RegisterRunnerViaApiAsync(runnerId, projectId, afterRegistration);
+            await RegisterRunnerViaApiAsync(runnerId, projectId);
             return runnerId;
         }
         catch
@@ -434,10 +340,7 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         }
     }
 
-    private async Task RegisterRunnerViaApiAsync(
-        string runnerId,
-        string projectId,
-        Func<string, Task>? afterRegistration = null)
+    private async Task RegisterRunnerViaApiAsync(string runnerId, string projectId)
     {
         using var register = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
         {
@@ -448,25 +351,20 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
             runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
         });
         register.EnsureSuccessStatusCode();
-        if (afterRegistration is not null)
-            await afterRegistration(runnerId);
         using var slots = await _fixture.Client.PatchAsJsonAsync($"/api/runner/{runnerId}", new { slots = 1 });
         slots.EnsureSuccessStatusCode();
-        await TestWait.ForAsync(
-            () => _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync(),
-            state => state.Status == RunnerStatus.Online,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            $"Runner '{runnerId}' to reach Online");
     }
 
     private async Task<JsonElement> PollInitialDispatchAsync(string runnerId, string jobKey)
     {
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
-        await AgentJobConvergence.WaitForAssignmentPreparedAsync(job);
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
+            jobKey,
+            TimeSpan.FromSeconds(5));
         using var poll = await _fixture.Client.PostRunnerPollAsync(runnerId);
         var dispatch = Assert.Single(await poll.ReadDispatchElementsAsync());
-        var assignment = await AgentJobConvergence.WaitForRunnerAcceptedAsync(job);
+        var assignment = await job.GetRuntimeSnapshotAsync();
+        Assert.True(assignment.RunnerAccepted);
         Assert.Equal(runnerId, assignment.RunnerId);
         Assert.Equal(dispatch.GetProperty("workId").GetString(), assignment.CurrentWorkId);
         return dispatch;

@@ -15,97 +15,17 @@ public sealed partial class AgentSessionGrain
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!string.Equals(request.SessionId, SessionId, StringComparison.Ordinal))
-            return InvalidSlackReplyAnchor();
+            return new SlackReplyAnchorValidationResult(false, false);
 
         RejectIfReloadRequired();
         var session = _session ?? await _stateStore.LoadAsync(SessionId);
-        if (session is null)
-            return InvalidSlackReplyAnchor();
-        var metadata = session.Metadata;
-        if (!string.Equals(metadata?.Label(AgentSessionQueryMetadataKeys.ProjectId), request.ProjectId, StringComparison.Ordinal))
-            return InvalidSlackReplyAnchor();
-
-        var inputs = session.Status.Inputs ?? [];
-        var turns = session.Status.Turns ?? [];
-        var initialInput = inputs
-            .Where(input => !string.IsNullOrWhiteSpace(input.JobId))
-            .OrderBy(input => input.Sequence)
-            .FirstOrDefault();
-        var initialProvenance = initialInput?.Provenance;
-
-        var matchingInputs = inputs.Where(input => MatchesSlackReplyProvenance(input.Provenance, request)).ToArray();
-        if (matchingInputs.Length != 1)
-            return InvalidSlackReplyAnchor();
-        var input = matchingInputs[0];
-
-        // The expected thread root mirrors dispatch-time anchor resolution:
-        // channel-thread replies stay under the session's durable bound root,
-        // while DM follow-ups thread under their own triggering message so
-        // the terminal delivery replaces the progress projection in place.
-        var expectedThreadRoot = !string.IsNullOrWhiteSpace(input.Provenance!.ThreadId)
-            ? DurableBoundRoot(initialProvenance) ?? input.Provenance.ThreadId
-            : input.Provenance.MessageId;
-        if (string.IsNullOrWhiteSpace(expectedThreadRoot)
-            || !string.Equals(expectedThreadRoot, request.ThreadRootMessageId, StringComparison.Ordinal))
-            return InvalidSlackReplyAnchor();
-
-        if (string.Equals(input.Id, initialInput?.Id, StringComparison.Ordinal))
-        {
-            if (!string.Equals(request.DispatchRef, $"slack:{SessionId}:{input.Id}", StringComparison.Ordinal))
-                return InvalidSlackReplyAnchor();
-            var initialTurn = turns.FirstOrDefault(turn =>
-                !string.IsNullOrWhiteSpace(turn.JobId)
-                && turn.InputIds.Contains(input.Id, StringComparer.Ordinal));
-            if (initialTurn is null)
-                return InvalidSlackReplyAnchor();
-            return new SlackReplyAnchorValidationResult(
-                Valid: true,
-                TurnActive: initialTurn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing);
-        }
-
-        var followupTurn = turns.SingleOrDefault(turn =>
-            string.IsNullOrWhiteSpace(turn.JobId)
-            && turn.InputIds.Contains(input.Id, StringComparer.Ordinal));
-        if (followupTurn is null)
-            return InvalidSlackReplyAnchor();
-        var expectedDispatchRef = followupTurn.OperationId
-            ?? GetPendingFollowups(session)
-                .SingleOrDefault(lease => string.Equals(lease.TurnId, followupTurn.Id, StringComparison.Ordinal))
-                ?.OperationId;
-        if (string.IsNullOrWhiteSpace(expectedDispatchRef))
-        {
-            return followupTurn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing
-                ? InvalidSlackReplyAnchor()
-                : new SlackReplyAnchorValidationResult(Valid: true, TurnActive: false);
-        }
-        if (!string.Equals(request.DispatchRef, expectedDispatchRef, StringComparison.Ordinal))
-            return InvalidSlackReplyAnchor();
-        return new SlackReplyAnchorValidationResult(
-            Valid: true,
-            TurnActive: followupTurn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing);
+        return session is null
+            ? new SlackReplyAnchorValidationResult(false, false)
+            : SlackReplyAnchorValidator.Validate(session, request);
     }
 
     private static string? RedactFailureReason(string? value) =>
         value is null ? null : SlackSecretRedactor.Redact(value);
-
-    private static SlackReplyAnchorValidationResult InvalidSlackReplyAnchor() => new(false, false);
-
-    private static string? DurableBoundRoot(AgentSessionInputProvenance? provenance) =>
-        !string.IsNullOrWhiteSpace(provenance?.BoundThreadRootMessageId)
-            ? provenance.BoundThreadRootMessageId
-            : !string.IsNullOrWhiteSpace(provenance?.ThreadId)
-                ? provenance.ThreadId
-                : provenance?.MessageId;
-
-    private static bool MatchesSlackReplyProvenance(
-        AgentSessionInputProvenance? provenance,
-        SlackReplyAnchorValidationRequest request) =>
-        provenance is not null
-        && string.Equals(provenance.ProviderKind, "slack", StringComparison.Ordinal)
-        && string.Equals(provenance.WorkspaceId, request.WorkspaceId, StringComparison.Ordinal)
-        && string.Equals(provenance.ConnectionId, request.ConnectionId, StringComparison.Ordinal)
-        && string.Equals(provenance.ConversationId, request.ConversationId, StringComparison.Ordinal)
-        && string.Equals(provenance.MessageId, request.TriggeringMessageId, StringComparison.Ordinal);
 
     private async Task TryEmitFollowupDeliveryAsync(AgentSession session, AgentTurnRecord turn)
     {
