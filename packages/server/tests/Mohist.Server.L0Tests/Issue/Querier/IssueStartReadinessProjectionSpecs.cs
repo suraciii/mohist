@@ -5,12 +5,11 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
-using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
-namespace Mohist.Server.L1Tests.Specs.Issue.Querier;
+namespace Mohist.Server.L0Tests.Issue.Querier;
 
 /// <summary>
 /// Projection specs for the start-readiness fields on
@@ -18,7 +17,7 @@ namespace Mohist.Server.L1Tests.Specs.Issue.Querier;
 /// <c>Blocker</c>. The querier resolves the read-model via
 /// <c>IssueQuerier.GetAsync</c> + <c>IssueQuerier.ListAsync</c>; the
 /// projection rules mirror the pure-domain decisions in
-/// <see cref="Mohist.Server.L1Tests.Specs.Issue.Domain.IssueStartReadinessDomainSpecs"/>
+/// <see cref="Mohist.Server.L0Tests.Issue.Domain.IssueStartReadinessDomainSpecs"/>
 /// but exercised through the read-model instead of the aggregate.
 /// </summary>
 [Collection("MohistDb")]
