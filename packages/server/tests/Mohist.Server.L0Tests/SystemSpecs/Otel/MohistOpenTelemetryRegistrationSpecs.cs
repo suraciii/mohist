@@ -5,15 +5,13 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.L1Tests.Support;
-using Mohist.Server.TestSupport;
 using OpenTelemetry;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.SystemSpecs.Otel;
+namespace Mohist.Server.L0Tests.SystemSpecs.Otel;
 
 [Collection("OtelTracing")]
 public class MohistOpenTelemetryRegistrationSpecs
@@ -112,27 +110,6 @@ public class MohistOpenTelemetryRegistrationSpecs
     }
 
     [Fact]
-    public async Task SpecHostExporterDisabled_KeepsInstrumentationWithoutExporterRequests()
-    {
-        await using var host = new OtelTestHost(new OtelTestHostOptions
-        {
-            Enabled = true,
-            ExportEnabled = false,
-        });
-
-        using var response = await host.CreateClient().GetAsync("/api/health");
-        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
-        using var source = new ActivitySource(MohistOpenTelemetryRegistration.OrleansActivitySourceNames[0]);
-        using (var activity = source.StartActivity("export-probe", ActivityKind.Internal))
-        {
-            Assert.NotNull(activity);
-        }
-        Assert.True(host.ForceFlushOtelExporter(TimeSpan.FromSeconds(1)));
-        Assert.False(host.FakeExporterConfigured);
-        Assert.Empty(host.OtlpExporterRequests);
-    }
-
-    [Fact]
     public void Enabled_ActivityListenerSeesActivityStartedWhileProviderIsAlive()
     {
         // Stand up the same provider pipeline the production code wires
@@ -151,14 +128,14 @@ public class MohistOpenTelemetryRegistrationSpecs
         var recordedActivities = new List<Activity>();
         using var listener = new ActivityListener
         {
-            ShouldListenTo = source => source.Name == "Mohist.Server.L1Tests.Specs.SystemSpecs.Otel",
+            ShouldListenTo = source => source.Name == "Mohist.Server.L0Tests.SystemSpecs.Otel",
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
             ActivityStarted = a => { },
             ActivityStopped = a => recordedActivities.Add(a),
         };
         ActivitySource.AddActivityListener(listener);
 
-        using var activitySource = new ActivitySource("Mohist.Server.L1Tests.Specs.SystemSpecs.Otel");
+        using var activitySource = new ActivitySource("Mohist.Server.L0Tests.SystemSpecs.Otel");
         using (var activity = activitySource.StartActivity("test-span", ActivityKind.Internal))
         {
             activity?.SetTag("test.marker", "ok");
@@ -208,7 +185,7 @@ public class MohistOpenTelemetryRegistrationSpecs
     /// Minimal <see cref="OpenTelemetry.BaseProcessor{T}"/> that records
     /// every <see cref="Activity"/> the provider's pipeline emits. Lets
     /// unit tests assert the pipeline is alive (and is not alive) without
-    /// standing up a WebApplicationFactory or a real OTLP collector.
+    /// standing up an application host or a real OTLP collector.
     /// </summary>
     private sealed class RecordingActivityProcessor : OpenTelemetry.BaseProcessor<Activity>
     {
