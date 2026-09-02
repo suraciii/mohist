@@ -214,11 +214,10 @@ public class AttachmentApiSpecs
 
     private async Task<int> CreateIssueAsync(string projectId, string title, string? body)
     {
-        var counter = _fixture.Grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId));
-        var issueNumber = await counter.NextAsync();
-        await _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)))
-            .CreateAsync(projectId, issueNumber, title, body, null, null, isDraft: false);
-        return issueNumber;
+        var issue = await _fixture.Client.PostDataAsync<JsonElement>(
+            $"/api/projects/{projectId}/issues",
+            new { title, body });
+        return issue.GetProperty("number").GetInt32();
     }
 
     private sealed record AttachmentUploadResponse(

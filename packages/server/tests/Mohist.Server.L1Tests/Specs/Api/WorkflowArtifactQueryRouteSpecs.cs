@@ -54,15 +54,9 @@ public class WorkflowArtifactQueryRouteSpecs
         var issueJson = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
         var issueNumber = issueJson.GetProperty("data").GetProperty("number").GetInt32();
 
-        using var startResp = await _fixture.Client.PostAsync(
-            $"/api/projects/{projectId}/issues/{issueNumber}/start", null);
-        Assert.Equal(HttpStatusCode.OK, startResp.StatusCode);
-
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(
-            GrainKey.Issue(new IssueKey(projectId, issueNumber)));
-        var issueStatus = await issueGrain.GetWorkflowStatusAsync();
-        var workflowRunId = issueStatus!.WorkflowRunId!;
-        Assert.False(string.IsNullOrEmpty(workflowRunId));
+        var workflowRunId = await _fixture.Grains.GetGrain<IIssueGrain>(
+            GrainKey.Issue(new IssueKey(projectId, issueNumber)))
+            .StartWorkAsync();
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();

@@ -251,11 +251,9 @@ public class WorkflowArtifactUploadRouteSpecs
         var issueJson = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
         var issueNumber = issueJson.GetProperty("data").GetProperty("number").GetInt32();
 
-        using (var startResp = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/issues/{issueNumber}/start", new { }))
-        {
-            Assert.Equal(HttpStatusCode.OK, startResp.StatusCode);
-        }
+        var workflowRunId = await _fixture.Grains
+            .GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)))
+            .StartWorkAsync();
         await DispatchEventsAsync();
 
         var runnerId = $"upload-test-{Guid.NewGuid():N}";
@@ -266,11 +264,6 @@ public class WorkflowArtifactUploadRouteSpecs
             hostname = "test-host",
             projectId,
         });
-
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
-        var issueStatus = await issueGrain.GetWorkflowStatusAsync();
-        var workflowRunId = issueStatus!.WorkflowRunId!;
-        Assert.False(string.IsNullOrEmpty(workflowRunId));
 
         var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
         await workflow.AssignWorkerAsync(runnerId);

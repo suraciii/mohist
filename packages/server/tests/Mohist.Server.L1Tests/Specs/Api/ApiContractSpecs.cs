@@ -57,10 +57,14 @@ public class ApiContractSpecs
     [Fact]
     public async Task OpencodeModels_ReturnsRunnerReportedModels()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"models-{Guid.NewGuid():N}", verificationCommand = "true", repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" } });
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new
+        {
+            name = $"models-{Guid.NewGuid():N}",
+            verificationCommand = "true",
+            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
+        });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 
         var runnerId = $"model-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -87,10 +91,14 @@ public class ApiContractSpecs
     [Fact]
     public async Task AgentStatus_ReportsRegisteredRunnerWorkflowSlots()
     {
-        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"slots-{Guid.NewGuid():N}", verificationCommand = "true", repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" } });
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new
+        {
+            name = $"slots-{Guid.NewGuid():N}",
+            verificationCommand = "true",
+            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
+        });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
-        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
 
         // Capacity.Max is summed across all currently-registered global
         // runners, so we need a clean registry to assert against this

@@ -337,11 +337,11 @@ public sealed class GitHubReviewApprovalSpecs
         var issueNumber = await _fixture.Grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId)).NextAsync();
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
         await issueGrain.CreateAsync(projectId, issueNumber, "Implement the second feature", null, null, "p2", repositoryRef: RepoName, isDraft: false);
-        var workflowRunId = await issueGrain.StartWorkAsync();
-        Assert.Equal(
-            "AwaitingApproval",
-            await _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId).GetRunStatusAsync());
-        await PatchPullRequestVariableAsync(workflowRunId);
+        await issueGrain.StartWorkAsync();
+        var status = await LoadWorkflowStatusAsync(projectId, issueNumber);
+        Assert.Equal("awaiting-approval", status!.Workflow!.Status);
+        Assert.Equal("check", status.Workflow.CurrentStage);
+        await PatchPullRequestVariableAsync(status.WorkflowRunId!);
         return issueNumber;
     }
 
@@ -365,18 +365,26 @@ public sealed class GitHubReviewApprovalSpecs
         var issueNumber = await _fixture.Grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(project.Id)).NextAsync();
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issueNumber)));
         await issueGrain.CreateAsync(project.Id, issueNumber, "Implement the feature", null, null, "p2", repositoryRef: RepoName, isDraft: false);
-        var workflowRunId = await issueGrain.StartWorkAsync();
-        Assert.Equal(
-            "AwaitingApproval",
-            await _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId).GetRunStatusAsync());
+        await issueGrain.StartWorkAsync();
+        var status = await LoadWorkflowStatusAsync(project.Id, issueNumber);
+        Assert.Equal("awaiting-approval", status!.Workflow!.Status);
+        Assert.Equal("check", status.Workflow.CurrentStage);
 
-        await PatchPullRequestVariableAsync(workflowRunId);
+        var variables = new
+        {
+            vars = new
+            {
+                github = new { pr = new { number = PullRequestNumber } },
+            },
+        };
+        await Client.PatchDataAsync<JsonElement>(
+            $"/api/workflow-runs/{status.WorkflowRunId}/variables", variables);
 
         await using (var variableScope = _fixture.Services.CreateAsyncScope())
         {
             var dbFactory = variableScope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
             await using var verifyDb = await dbFactory.CreateDbContextAsync();
-            var runRow = await verifyDb.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == workflowRunId);
+            var runRow = await verifyDb.WorkflowRuns.SingleAsync(row => row.WorkflowRunId == status.WorkflowRunId);
             Assert.Equal(PullRequestNumber, runRow.PullRequestNumber);
             Assert.Contains("pullRequestIdentity", runRow.State, StringComparison.Ordinal);
         }

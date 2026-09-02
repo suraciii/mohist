@@ -5,7 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Workspace;
-using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
@@ -216,7 +215,11 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 
     private async Task StartIssueAndAssignmentRunnerAsync(string projectId, int number)
     {
-        await _client.PostOkAsync($"/api/projects/{projectId}/issues/{number}/start");
+        using var start = await _client.PostAsync($"/api/projects/{projectId}/issues/{number}/start", null);
+        start.EnsureSuccessStatusCode();
+        var startEnvelope = await start.Content.ReadFromJsonAsync<JsonElement>();
+        var workflowRunId = startEnvelope.GetProperty("data").GetProperty("workflowRunId").GetString()
+            ?? throw new InvalidOperationException("Issue started but no workflow run id was returned");
         await DispatchEventsAsync();
 
         var runnerId = $"repo-resolution-runner-{Guid.NewGuid():N}";
@@ -229,12 +232,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         });
         _runnerIds.Add(runnerId);
 
-        var issue = await _client.GetDataAsync<IssueDto>($"/api/projects/{projectId}/issues/{number}");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issue.Number)));
-        var issueStatus = await issueGrain.GetWorkflowStatusAsync();
-        var wrId = issueStatus!.WorkflowRunId!;
-
-        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(wrId);
+        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
         await workflow.AssignWorkerAsync(runnerId);
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.PollAsync(_fixture.Services);
