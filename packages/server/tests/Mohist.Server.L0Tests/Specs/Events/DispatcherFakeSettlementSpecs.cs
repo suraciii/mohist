@@ -1,8 +1,9 @@
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Events;
+namespace Mohist.Server.L0Tests.Specs.Events;
 
 public sealed class DispatcherFakeSettlementSpecs
 {

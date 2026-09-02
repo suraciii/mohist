@@ -16,12 +16,12 @@ using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
-using Mohist.Server.L1Tests.Support;
+using Mohist.Server.L0Tests.Support;
 using Mohist.Server.TestSupport;
 using Orleans;
 using System.Text.Json;
 using Xunit;
-namespace Mohist.Server.L1Tests.Specs.Events;
+namespace Mohist.Server.L0Tests.Specs.Events;
 
 public abstract class EpicAutoDoneHandlerTestSupport
 {
@@ -259,7 +259,7 @@ public abstract class EpicAutoDoneHandlerTestSupport
                 identity.Runtime,
                 _dbFactory,
                 new FakeTimeProvider(TestTime.UtcNow),
-                new NoopEventStore(),
+                new Mohist.Server.L0Tests.Support.NoopEventStore(),
                 NullLogger<EpicGrain>.Instance,
                 this,
                 new EventDispatchSignal());

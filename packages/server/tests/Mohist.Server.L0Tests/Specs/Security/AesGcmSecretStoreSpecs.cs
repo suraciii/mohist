@@ -7,11 +7,11 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Security.Secrets;
-using Mohist.Server.L1Tests.Support;
+using Mohist.Server.L0Tests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Security;
+namespace Mohist.Server.L0Tests.Specs.Security;
 
 public class AesGcmSecretStoreSpecs
 {

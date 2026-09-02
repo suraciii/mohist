@@ -5,18 +5,18 @@ using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Services;
 using Mohist.Server.TestSupport;
-using Mohist.Server.L1Tests.Specs.Workflow;
-using Orleans.Core.Internal;
+using Mohist.Server.L0Tests.Support;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Project.Grain;
+namespace Mohist.Server.L0Tests.Specs.Project.Grain;
 
-public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
+[Collection("OrleansGrainL0")]
+public class ProjectGrainSpecs
 {
-    private readonly WorkflowGrainFixture _fixture;
+    private readonly OrleansL0WorkflowGrainFixture _fixture;
     private readonly IGrainFactory _grains;
 
-    public ProjectGrainSpecs(WorkflowGrainFixture fixture)
+    public ProjectGrainSpecs(OrleansL0WorkflowGrainFixture fixture)
     {
         _fixture = fixture;
         _grains = fixture.Grains;
@@ -346,7 +346,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
 
         var retried = await grain.AddRepositoryAsync("web", "git@example.com:web.git", "main");
         Assert.Equal(2, retried!.Repositories.Count);
-        await grain.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
+        await grain.Deactivate();
         var reactivated = await NewProjectGrain(id).GetAsync();
         Assert.Equal(2, reactivated!.Repositories.Count);
     }
@@ -426,7 +426,7 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         await grain.SetDefaultRepositoryAsync("server");
 
         var activeAfter = await grain.GetAsync();
-        await grain.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
+        await grain.Deactivate();
         var reactivated = NewProjectGrain(id);
         await reactivated.SetDefaultRepositoryAsync("server");
         var after = await reactivated.GetAsync();

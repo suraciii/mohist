@@ -1,6 +1,7 @@
 using EnvironmentAbstractions.TestHelpers;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Data.Db;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -23,10 +24,12 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public IGrainFactory Grains => Cluster.Client;
     public RecordingEventStore EventStore => _sharedEventStore;
     public string ConnectionString => _keeper.ConnectionString;
+    public DbContextOptions<MohistDbContext> DbOptions { get; private set; } = null!;
     public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     public AgentSessionPersistenceTestProbe Persistence { get; }
     public ReportPersistenceFailureProbe ReportPersistenceFailures { get; } = new();
     public ControllableDispatchPollObserver DispatchPollObserver { get; } = new();
+    public RecordingTranscriptEventPublisher RecordingTranscriptPublisher { get; } = new();
 
     private readonly RecordingEventStore _sharedEventStore = new();
     private readonly InMemoryEventBus _sharedEventBus;
@@ -48,6 +51,9 @@ public class WorkflowGrainFixture : IAsyncLifetime
         var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
         _keeper = new SqliteConnection(connectionString);
         _keeper.Open();
+        DbOptions = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_keeper)
+            .Options;
 
         MigratedSqliteTemplate.CopyTo(_keeper);
 
@@ -62,6 +68,8 @@ public class WorkflowGrainFixture : IAsyncLifetime
                 _sharedEventStore,
                 TimeProvider,
                 Persistence);
+            siloBuilder.Services.RemoveAll<ITranscriptEventPublisher>();
+            siloBuilder.Services.AddSingleton<ITranscriptEventPublisher>(RecordingTranscriptPublisher);
             siloBuilder.Services.AddSingleton(ReportPersistenceFailures);
             siloBuilder.Services.AddSingleton<Mohist.Server.Workflow.Grains.IWorkflowReportPersistenceFailureInjector>(
                 services => services.GetRequiredService<ReportPersistenceFailureProbe>());
@@ -170,6 +178,25 @@ public class WorkflowGrainFixture : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
+}
+
+public sealed class RecordingTranscriptEventPublisher : ITranscriptEventPublisher
+{
+    public List<TranscriptEnvelope> Published { get; } = [];
+    public List<string> ProjectIds { get; } = [];
+
+    public void Clear()
+    {
+        Published.Clear();
+        ProjectIds.Clear();
+    }
+
+    public Task PublishAsync(string projectId, TranscriptEnvelope envelope, CancellationToken ct = default)
+    {
+        ProjectIds.Add(projectId);
+        Published.Add(envelope);
+        return Task.CompletedTask;
+    }
 }
 
 public sealed class ControllableDispatchPollObserver : IDispatchPollObserver

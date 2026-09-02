@@ -6,11 +6,11 @@ using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Services;
-using Mohist.Server.L1Tests.Support;
+using Mohist.Server.L0Tests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Project.Grain;
+namespace Mohist.Server.L0Tests.Specs.Project.Grain;
 
 /// <summary>
 /// issue-417 T-004: lock the repository deletion contract.
@@ -36,13 +36,14 @@ namespace Mohist.Server.L1Tests.Specs.Project.Grain;
 /// </list>
 /// </para>
 /// </summary>
+[Collection("OrleansGrainL0")]
 public class RepositoryDeletionProtectionSpecs
 {
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly OrleansL0WorkflowGrainFixture _fixture;
     private readonly IGrainFactory _grains;
     private readonly string _connectionString;
 
-    public RepositoryDeletionProtectionSpecs(MohistIntegrationFixture fixture)
+    public RepositoryDeletionProtectionSpecs(OrleansL0WorkflowGrainFixture fixture)
     {
         _fixture = fixture;
         _grains = fixture.Grains;

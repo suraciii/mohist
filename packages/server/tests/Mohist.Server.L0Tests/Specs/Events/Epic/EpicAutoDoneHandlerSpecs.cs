@@ -1,4 +1,4 @@
-using Mohist.Server.L1Tests.Support;
+using Mohist.Server.L0Tests.Support;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -22,7 +22,7 @@ using Orleans;
 using System.Text.Json;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Events;
+namespace Mohist.Server.L0Tests.Specs.Events;
 
 public class EpicAutoDoneHandlerSpecs : EpicAutoDoneHandlerTestSupport
 {
@@ -170,7 +170,7 @@ public class EpicAutoDoneHandlerSpecs : EpicAutoDoneHandlerTestSupport
         var grains = new TestEpicGrainFactory(database.Factory);
         var handler = new EpicAutoDoneHandler(querier, grains, NullLogger<EpicAutoDoneHandler>.Instance);
 
-        var store = new RecordingEventStore();
+        var store = new Mohist.Server.L0Tests.Support.RecordingEventStore();
         var subscriptions = new List<Subscription>
         {
             new(EventCatalog.ReverseDns.IssueCompleted, handler, (h, e, ct) =>

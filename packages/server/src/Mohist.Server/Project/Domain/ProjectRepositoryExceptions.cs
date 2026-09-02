@@ -1,3 +1,5 @@
+using Orleans;
+
 namespace Mohist.Server.Project.Domain;
 
 /// <summary>
@@ -7,6 +9,7 @@ namespace Mohist.Server.Project.Domain;
 /// <c>repository_in_use</c> envelope without mutating Project or Issue
 /// state.
 /// </summary>
+[GenerateSerializer]
 public sealed class RepositoryInUseException : InvalidOperationException
 {
     public RepositoryInUseException(string repositoryName)
@@ -15,6 +18,7 @@ public sealed class RepositoryInUseException : InvalidOperationException
         RepositoryName = repositoryName;
     }
 
+    [Id(0)]
     public string RepositoryName { get; }
 }
 
@@ -25,6 +29,7 @@ public sealed class RepositoryInUseException : InvalidOperationException
 /// <see cref="Mohist.Server.Issue.Domain.IssueRepositoryStaleRevisionException"/>
 /// so the coordinator treats both surfaces uniformly.
 /// </summary>
+[GenerateSerializer]
 public sealed class ProjectRepositoryStaleRevisionException : Exception
 {
     public ProjectRepositoryStaleRevisionException(string commandId, long expected, long actual)
@@ -35,8 +40,11 @@ public sealed class ProjectRepositoryStaleRevisionException : Exception
         ActualRevision = actual;
     }
 
+    [Id(0)]
     public string CommandId { get; }
+    [Id(1)]
     public long ExpectedRevision { get; }
+    [Id(2)]
     public long ActualRevision { get; }
 }
 
@@ -47,6 +55,7 @@ public sealed class ProjectRepositoryStaleRevisionException : Exception
 /// existing not-found / default precedence on the API surface is
 /// preserved.
 /// </summary>
+[GenerateSerializer]
 public sealed class ProjectRepositoryNotFoundException : Exception
 {
     public ProjectRepositoryNotFoundException(string repositoryName)
@@ -55,5 +64,6 @@ public sealed class ProjectRepositoryNotFoundException : Exception
         RepositoryName = repositoryName;
     }
 
+    [Id(0)]
     public string RepositoryName { get; }
 }

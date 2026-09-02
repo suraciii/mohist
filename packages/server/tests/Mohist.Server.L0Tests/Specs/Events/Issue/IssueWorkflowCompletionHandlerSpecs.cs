@@ -16,7 +16,7 @@ using Orleans;
 using Xunit;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
-namespace Mohist.Server.L1Tests.Specs.Events.Issue;
+namespace Mohist.Server.L0Tests.Specs.Events.Issue;
 
 /// <summary>
 /// Covers <see cref="IssueWorkflowCompletionHandler"/>: the

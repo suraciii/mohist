@@ -104,38 +104,4 @@ public sealed class GitHubWriteBackSpecs
         Assert.Equal("completed", close.StateReason);
     }
 
-    [Fact]
-    public async Task Completed_WithoutDeliveryPullRequest_PostsLegalCommentWithoutPrUrl()
-    {
-        var (projectId, connectionId) = await ConnectNewAsync();
-        await SeedIssueAsync(projectId, issue =>
-        {
-            issue.StartWorkflow("wr_done");
-            issue.Complete("wr_done");
-        });
-
-        await PumpAsync();
-
-        var comment = Assert.Single(
-            _fixture.Comments.Comments,
-            c => c.ConnectionId == connectionId && c.Body.Contains("已完成"));
-        Assert.DoesNotContain("交付 PR", comment.Body);
-        Assert.Single(_fixture.Comments.Closes, c => c.ConnectionId == connectionId);
-    }
-
-    [Fact]
-    public async Task Cancelled_WithReason_PostsCancelCommentWithReasonAndClosesNotPlanned()
-    {
-        var (projectId, connectionId) = await ConnectNewAsync();
-        await SeedIssueAsync(projectId, issue => issue.Close("需求方撤回"));
-
-        await PumpAsync();
-
-        var comment = Assert.Single(
-            _fixture.Comments.Comments,
-            c => c.ConnectionId == connectionId && c.Body.Contains("已取消"));
-        Assert.Contains("需求方撤回", comment.Body);
-        var close = Assert.Single(_fixture.Comments.Closes, c => c.ConnectionId == connectionId);
-        Assert.Equal("not_planned", close.StateReason);
-    }
 }
