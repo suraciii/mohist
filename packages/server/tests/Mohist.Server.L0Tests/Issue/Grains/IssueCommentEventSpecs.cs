@@ -14,14 +14,13 @@ using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Services;
-using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Services;
 using Xunit;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
-namespace Mohist.Server.L1Tests.Specs.Issue.Grain;
+namespace Mohist.Server.L0Tests.Issue.Grains;
 
 /// <summary>
 /// issue-490 T-001: high-integration spec for the comment-added event emission
