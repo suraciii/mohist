@@ -134,9 +134,9 @@ func TestUpdateCLIUsesCanonicalGoAssets(t *testing.T) {
 	var buildName string
 	var buildArgs []string
 	code := Run(context.Background(), []string{"update", "cli", "--repo-root", root, "--cli-path", target}, Dependencies{
-		Stdout: &stdout,
-		Stderr: &stderr,
-		HomeDir: func() (string, error) { return home, nil },
+		Stdout:           &stdout,
+		Stderr:           &stderr,
+		HomeDir:          func() (string, error) { return home, nil },
 		CurrentDirectory: func() string { return filepath.Join(t.TempDir(), "caller") },
 		Executable:       func() string { return target },
 		Execute: func(_ context.Context, name string, args []string) error {
