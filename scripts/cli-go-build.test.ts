@@ -19,10 +19,7 @@ test('root scripts expose the static Go CLI build and installer', () => {
     packageJson.scripts['check:cli-go-format'],
     'test -z "$(gofmt -l packages/go/mohist-cli/*.go packages/go/mohist-cli/cmd/mo/*.go)"',
   )
-  assert.equal(
-    packageJson.scripts['install:cli'],
-    'bash scripts/install-mo.sh',
-  )
+  assert.equal(packageJson.scripts['install:cli'], 'bash scripts/install-mo.sh')
 })
 
 test('repository verification includes the Go CLI checks', () => {
