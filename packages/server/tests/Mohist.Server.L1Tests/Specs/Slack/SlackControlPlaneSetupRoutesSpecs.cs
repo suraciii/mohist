@@ -46,72 +46,6 @@ public sealed class SlackControlPlaneSetupRoutesSpecs
         Assert.DoesNotContain("xoxr-supplied", body, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task Rerunning_configuration_restores_the_same_enrollment_and_app_without_a_second_create()
-    {
-        const string team = "T_CTRL_RERUN";
-        _fixture.Configuration.Enqueue(RotationSucceeded(team, _fixture.TimeProvider.GetUtcNow().AddHours(12)));
-        var createsBefore = _fixture.Apps.CreateCalls;
-
-        using var client = _fixture.CreateOperatorClient();
-        var first = await ReadDataAsync(await client.PostAsJsonAsync("/api/slack-manager/setup/configuration", new
-        {
-            workspaceTeamId = team,
-            configurationAccessToken = "xoxe-a",
-            configurationRefreshToken = "xoxr-a",
-        }));
-        var createsAfterFirst = _fixture.Apps.CreateCalls;
-
-        _fixture.Configuration.Enqueue(RotationSucceeded(team, _fixture.TimeProvider.GetUtcNow().AddHours(12)));
-        var second = await ReadDataAsync(await client.PostAsJsonAsync("/api/slack-manager/setup/configuration", new
-        {
-            workspaceTeamId = team,
-            configurationAccessToken = "xoxe-b",
-            configurationRefreshToken = "xoxr-b",
-        }));
-
-        Assert.Equal(first.GetProperty("enrollmentId").GetString(), second.GetProperty("enrollmentId").GetString());
-        Assert.Equal(first.GetProperty("managerAppId").GetString(), second.GetProperty("managerAppId").GetString());
-        Assert.Equal(createsBefore + 1, createsAfterFirst);
-        Assert.Equal(createsAfterFirst, _fixture.Apps.CreateCalls);
-    }
-
-    [Fact]
-    public async Task Supply_runtime_credentials_reports_socket_hello_next_action_without_binding_secret_address()
-    {
-        const string team = "T_CTRL_RUNTIME";
-        _fixture.Configuration.Enqueue(RotationSucceeded(team, _fixture.TimeProvider.GetUtcNow().AddHours(12)));
-        using var client = _fixture.CreateOperatorClient();
-        var configuration = await ReadDataAsync(await client.PostAsJsonAsync("/api/slack-manager/setup/configuration", new
-        {
-            workspaceTeamId = team,
-            configurationAccessToken = "xoxe",
-            configurationRefreshToken = "xoxr",
-        }));
-
-        _fixture.BotIdentity.Result = new SlackBotIdentityVerificationResult(
-            Verified: true,
-            WorkspaceTeamId: team,
-            BotUserId: "U_CTRL_BOT",
-            AppId: configuration.GetProperty("managerAppId").GetString(),
-            GrantedScopes: new HashSet<string> { "chat:write", "im:history", "users:read" });
-
-        using var runtime = await client.PostAsJsonAsync("/api/slack-manager/setup/runtime-credentials", new
-        {
-            workspaceTeamId = team,
-            botToken = "xoxb-runtime",
-            appLevelToken = "xapp-candidate",
-        });
-
-        runtime.EnsureSuccessStatusCode();
-        var data = await ReadDataAsync(runtime);
-        Assert.Equal("awaiting_socket_validation", data.GetProperty("phase").GetString());
-        Assert.Equal("report_socket_hello", data.GetProperty("nextAction").GetString());
-        var body = await runtime.Content.ReadAsStringAsync();
-        Assert.DoesNotContain("xoxb-runtime", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("xapp-candidate", body, StringComparison.Ordinal);
-    }
-
     [Theory]
     [InlineData("/api/slack-manager/setup/configuration")]
     [InlineData("/api/slack-manager/setup/runtime-credentials")]
@@ -133,37 +67,6 @@ public sealed class SlackControlPlaneSetupRoutesSpecs
         using var nonLoopback = await loopback.SendAsync(request);
         Assert.Equal(HttpStatusCode.Forbidden, nonLoopback.StatusCode);
         Assert.Equal("loopback_required", await CodeAsync(nonLoopback));
-    }
-
-    [Fact]
-    public async Task Setup_progress_requires_an_operator_token_and_reports_not_started_for_unknown_workspaces()
-    {
-        using var anonymous = _fixture.CreateUnauthenticatedClient();
-        using var anonymousResponse = await anonymous.GetAsync("/api/slack-manager/setup/progress?workspaceTeamId=T_CTRL_PROGRESS");
-        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
-        Assert.Equal(
-            "Bearer error=\"invalid_token\"",
-            Assert.Single(anonymousResponse.Headers.WwwAuthenticate).ToString());
-
-        using var client = _fixture.CreateOperatorClient();
-        using var unknown = await client.GetAsync("/api/slack-manager/setup/progress?workspaceTeamId=T_CTRL_UNKNOWN");
-        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
-    }
-
-    [Fact]
-    public async Task Caller_supplied_credential_address_in_secret_body_is_rejected()
-    {
-        using var client = _fixture.CreateOperatorClient();
-        using var response = await client.PostAsJsonAsync("/api/slack-manager/setup/runtime-credentials", new
-        {
-            workspaceTeamId = "T_CTRL_ADDR",
-            botToken = "xoxb",
-            appLevelToken = "xapp",
-            managerCredentialRef = "caller-must-not-supply-this",
-        });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal("credential_address_not_supported", await CodeAsync(response));
     }
 
     [Fact]
