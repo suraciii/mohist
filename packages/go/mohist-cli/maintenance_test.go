@@ -202,9 +202,9 @@ func TestUpdateCLIRenameFailurePreservesInstallation(t *testing.T) {
 	writeTestSkill(t, managed, "old-skill")
 	var failTarget string
 	code := Run(context.Background(), []string{"update", "cli", "--repo-root", root, "--cli-path", target}, Dependencies{
-		HomeDir: func() (string, error) { return home, nil },
+		HomeDir:          func() (string, error) { return home, nil },
 		CurrentDirectory: func() string { return root },
-		Executable: func() string { return target },
+		Executable:       func() string { return target },
 		Execute: func(_ context.Context, _ string, args []string) error {
 			for i := 0; i+1 < len(args); i++ {
 				if args[i] == "-o" {
@@ -239,9 +239,9 @@ func TestUpdateCLIFinalBinaryRenameFailurePreservesInstallation(t *testing.T) {
 	writeTestSkill(t, managed, "old-skill")
 	failed := false
 	code := Run(context.Background(), []string{"update", "cli", "--repo-root", root, "--cli-path", target}, Dependencies{
-		HomeDir: func() (string, error) { return home, nil },
+		HomeDir:          func() (string, error) { return home, nil },
 		CurrentDirectory: func() string { return root },
-		Executable: func() string { return target },
+		Executable:       func() string { return target },
 		Execute: func(_ context.Context, _ string, args []string) error {
 			for i := 0; i+1 < len(args); i++ {
 				if args[i] == "-o" {

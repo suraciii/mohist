@@ -556,6 +556,7 @@ func commitStaged(ctx context.Context, deps Dependencies, artifacts []stagedArti
 		cleanup()
 	}
 	for i, artifact := range artifacts {
+		backups[i].artifact = artifact
 		if _, err := os.Stat(artifact.target); err == nil {
 			backupPath, err := temporaryBackupPath(artifact.target)
 			if err != nil {
