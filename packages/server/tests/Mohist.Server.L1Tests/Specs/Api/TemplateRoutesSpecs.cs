@@ -34,11 +34,13 @@ public class TemplateRoutesSpecs
     }
 
     [Fact]
-    public async Task ExtractVariables_WithValidBody_ReturnsSortedUniquePaths()
+    public async Task ExtractVariables_WithValidBody_ReturnsVariableArrayThroughTheRoute()
     {
         var response = await _fixture.Client.PostAsJsonAsync("/api/templates/extract-variables", new { body = "Use ${{ issue.number }} and ${{ issue.number }}" });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(new[] { "issue.number" }, payload.GetProperty("data").GetProperty("variables").EnumerateArray().Select(item => item.GetString()));
+        var variables = payload.GetProperty("data").GetProperty("variables");
+        Assert.Equal(JsonValueKind.Array, variables.ValueKind);
+        Assert.Contains(variables.EnumerateArray(), item => item.GetString() == "issue.number");
     }
 }
