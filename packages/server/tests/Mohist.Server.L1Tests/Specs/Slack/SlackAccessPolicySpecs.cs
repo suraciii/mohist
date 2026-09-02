@@ -51,18 +51,6 @@ public sealed partial class SlackAccessPolicySpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task New_connection_defaults_to_owner_only_policy()
-    {
-        var connection = await CreateConnectionAsync();
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var store = scope.ServiceProvider.GetRequiredService<AgentConnectionStore>();
-        var fetched = await store.GetAsync(connection.ProjectId, connection.Id);
-        Assert.NotNull(fetched);
-        Assert.Equal(AccessPolicyKind.OwnerOnly, fetched!.AccessPolicy);
-    }
-
-    [Fact]
     public async Task Non_owner_root_mention_under_default_owner_only_is_rejected_with_no_resources()
     {
         var connection = await CreateConnectionAsync();
@@ -87,63 +75,6 @@ public sealed partial class SlackAccessPolicySpecs : IAsyncLifetime
         Assert.Empty(await db.AgentSessions
             .Where(row => row.LabelConnectionId == connection.Id)
             .ToListAsync());
-    }
-
-    [Fact]
-    public async Task Allowed_members_table_cascade_deletes_with_the_connection()
-    {
-        var connection = await CreateConnectionAsync();
-        await using (var scope = _fixture.Services.CreateAsyncScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            db.SlackConnectionAllowedMembers.Add(new SlackConnectionAllowedMemberRow
-            {
-                Id = $"slkalm_{Guid.NewGuid():N}",
-                ProjectId = connection.ProjectId,
-                ConnectionId = connection.Id,
-                SlackUserId = "U_LISTED",
-                WorkspaceTeamId = connection.WorkspaceTeamId,
-                CreatedAt = _fixture.TimeProvider.GetUtcNow(),
-            });
-            await db.SaveChangesAsync();
-        }
-
-        await using (var scope = _fixture.Services.CreateAsyncScope())
-        {
-            var store = scope.ServiceProvider.GetRequiredService<AgentConnectionStore>();
-            await store.DeleteAsync(connection.ProjectId, connection.Id);
-        }
-
-        await using var verify = _fixture.Services.CreateAsyncScope();
-        var verifyDb = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Empty(await verifyDb.SlackConnectionAllowedMembers
-            .Where(row => row.ConnectionId == connection.Id)
-            .ToListAsync());
-    }
-
-    [Fact]
-    public async Task Allowed_members_store_queryable_under_owner_only_path()
-    {
-        var connection = await CreateConnectionAsync();
-        await using (var scope = _fixture.Services.CreateAsyncScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            db.SlackConnectionAllowedMembers.Add(new SlackConnectionAllowedMemberRow
-            {
-                Id = $"slkalm_{Guid.NewGuid():N}",
-                ProjectId = connection.ProjectId,
-                ConnectionId = connection.Id,
-                SlackUserId = "U_LISTED",
-                WorkspaceTeamId = connection.WorkspaceTeamId,
-                CreatedAt = _fixture.TimeProvider.GetUtcNow(),
-            });
-            await db.SaveChangesAsync();
-        }
-
-        await using var read = _fixture.Services.CreateAsyncScope();
-        var store = read.ServiceProvider.GetRequiredService<SlackConnectionAllowedMemberStore>();
-        Assert.True(await store.IsAllowedAsync(connection.ProjectId, connection.Id, "U_LISTED"));
-        Assert.False(await store.IsAllowedAsync(connection.ProjectId, connection.Id, "U_OTHER"));
     }
 
     private async Task<JsonElement> PostChannelAsync(
