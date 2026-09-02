@@ -22,7 +22,8 @@ internal static class SlackAgentSelectionPolicy
         try
         {
             return DeserializeCandidates(durableJson).Any(candidate =>
-                string.Equals(candidate.ProjectId, projectId, StringComparison.Ordinal)
+                candidate is not null
+                && string.Equals(candidate.ProjectId, projectId, StringComparison.Ordinal)
                 && string.Equals(candidate.ConnectionId, connectionId, StringComparison.Ordinal));
         }
         catch (System.Text.Json.JsonException)
@@ -37,7 +38,10 @@ internal static class SlackAgentSelectionPolicy
     {
         try
         {
-            return DeserializeCandidates(durableJson).SequenceEqual(signed);
+            var durable = DeserializeCandidates(durableJson);
+            return durable.All(candidate => candidate is not null)
+                && signed.All(candidate => candidate is not null)
+                && durable.SequenceEqual(signed);
         }
         catch (System.Text.Json.JsonException)
         {
@@ -49,7 +53,8 @@ internal static class SlackAgentSelectionPolicy
         AgentConnection selected,
         SlackSelectionCandidateReference candidate,
         string workspaceTeamId) =>
-        AgentConnectionStore.HasBoundIdentity(selected)
+        candidate is not null
+        && AgentConnectionStore.HasBoundIdentity(selected)
         && string.Equals(selected.WorkspaceTeamId, workspaceTeamId, StringComparison.Ordinal)
         && (string.IsNullOrWhiteSpace(candidate.BotUserId)
             || string.Equals(selected.BotUserId, candidate.BotUserId, StringComparison.Ordinal));

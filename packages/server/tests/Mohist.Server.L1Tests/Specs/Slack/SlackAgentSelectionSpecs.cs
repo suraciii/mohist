@@ -83,6 +83,91 @@ public sealed partial class SlackMultiAgentIngressSpecs
     }
 
     [Fact]
+    public async Task Ambiguous_prompt_redelivery_reuses_durable_candidate_snapshot_after_candidate_drift()
+    {
+        const string owner = "U_SELECTION_RETRY";
+        var promptOwner = await CreateConnectionAsync("retry-owner", "T-selection-retry", owner, "A_SELECTION_RETRY_OWNER");
+        var selected = await CreateConnectionAsync("retry-selected", "T-selection-retry", owner, "A_SELECTION_RETRY_SELECTED");
+        var identity = new SlackMessageIdentity(
+            promptOwner.WorkspaceTeamId!,
+            "C-selection-retry",
+            "1710000000.020050");
+
+        var first = await PostChannelAsync(
+            promptOwner,
+            identity.ConversationId,
+            identity.MessageTs,
+            threadTs: null,
+            mentions: [promptOwner.BotUserId!, selected.BotUserId!],
+            text: $"<@{promptOwner.BotUserId}> <@{selected.BotUserId}> retry the chooser",
+            senderSlackUserId: owner);
+        Assert.Equal("ambiguous", first.GetProperty("kind").GetString());
+
+        var drifted = await CreateConnectionAsync("retry-drifted", "T-selection-retry", owner, "A_SELECTION_RETRY_DRIFTED");
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var selectedRow = await db.AgentConnections.SingleAsync(row =>
+                row.ProjectId == selected.ProjectId && row.Id == selected.Id);
+            var driftedRow = await db.AgentConnections.SingleAsync(row =>
+                row.ProjectId == drifted.ProjectId && row.Id == drifted.Id);
+            driftedRow.BotUserId = selected.BotUserId!;
+            selectedRow.BotUserId = "U_SELECTION_DRIFTED";
+            await db.SlackOutboxRows
+                .Where(row => row.ProjectId == promptOwner.ProjectId
+                    && row.ConnectionId == promptOwner.Id
+                    && row.Kind == SlackOutboxKinds.UserAction
+                    && row.DispatchRef == SlackAmbiguousPromptStore.PromptDispatchRef(
+                        identity.WorkspaceTeamId,
+                        identity.ConversationId,
+                        identity.MessageTs))
+                .ExecuteDeleteAsync();
+            await db.SaveChangesAsync();
+        }
+
+        var retry = await PostChannelAsync(
+            promptOwner,
+            identity.ConversationId,
+            identity.MessageTs,
+            threadTs: null,
+            mentions: [promptOwner.BotUserId!, selected.BotUserId!],
+            text: $"<@{promptOwner.BotUserId}> <@{selected.BotUserId}> retry the chooser",
+            senderSlackUserId: owner);
+        Assert.Equal("ambiguous", retry.GetProperty("kind").GetString());
+
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var prompts = verify.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>();
+        var claim = await prompts.FindAsync(
+            identity.WorkspaceTeamId,
+            identity.ConversationId,
+            identity.MessageTs);
+        Assert.NotNull(claim);
+        var durableCandidates = JSON.Deserialize<List<SlackSelectionCandidateReference>>(
+            claim!.CandidateReferencesJson)!;
+        var outbox = verify.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var chooser = await outbox.FindByDispatchRefAsync(
+            promptOwner.ProjectId,
+            promptOwner.Id,
+            SlackOutboxKinds.UserAction,
+            SlackAmbiguousPromptStore.PromptDispatchRef(
+                identity.WorkspaceTeamId,
+                identity.ConversationId,
+                identity.MessageTs));
+        Assert.NotNull(chooser);
+        var blocks = SlackDeliveryPayload.Parse(chooser!.PayloadJson).Blocks;
+        Assert.NotNull(blocks);
+        var rendered = JSON.Deserialize<SlackSelectionActionPayload>(
+            blocks!.Value[0].GetProperty("elements")[0].GetProperty("value").GetString()!);
+        Assert.NotNull(rendered);
+        Assert.Equal(durableCandidates, rendered!.CandidateReferences);
+        Assert.DoesNotContain(rendered.CandidateReferences,
+            candidate => candidate.ConnectionId == drifted.Id);
+        Assert.Contains(rendered.CandidateReferences,
+            candidate => candidate.ConnectionId == selected.Id
+                && candidate.BotUserId == selected.BotUserId);
+    }
+
+    [Fact]
     public async Task Signed_selection_route_follows_up_the_already_bound_thread_with_retained_files()
     {
         const string owner = "U_SELECTION_BOUND";

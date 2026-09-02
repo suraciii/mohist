@@ -344,7 +344,6 @@ public static class GrainTestConfig
             opts.DispatchBackoffInitial = TimeSpan.FromMilliseconds(50);
             opts.DispatchBackoffCap = TimeSpan.FromMilliseconds(200);
             opts.DispatchRetryBound = TimeSpan.FromSeconds(5);
-            opts.JobTimeout = TimeSpan.FromSeconds(10);
         });
     }
 
