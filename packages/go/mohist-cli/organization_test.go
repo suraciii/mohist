@@ -88,17 +88,17 @@ func TestIssueCancellationReturns130(t *testing.T) {
 
 func TestIssueViewRendersBoundedHumanOutput(t *testing.T) {
 	deps, out, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return response(http.StatusOK, `{"success":true,"data":{"number":42,"title":"Ship it","status":"Ready","workflowStatus":"Running","workflowStage":"verify","workflowRunId":"wr-42","priority":"high","repositoryName":"mohist","blocker":"waiting on review","body":"first line\nsecond line","comments":[{"body":"secret"}],"feedback":[{"text":"secret"}],"children":[{"number":43}],"attachments":[{"url":"secret"}],"labels":["bug"]}}`), nil
+		return response(http.StatusOK, `{"success":true,"data":{"number":42,"title":"Ship it","status":"Ready","workflowStatus":"Running","workflowStage":"verify","workflowRunId":"wr-42","priority":"high","repositoryName":"mohist","blocker":"waiting on review","body":"first line\nsecond line","comments":[{"body":"comment secret"}],"feedback":[{"text":"feedback secret"}],"children":[{"number":43}],"attachments":[{"url":"attachment secret"}],"labels":["bug"],"prereq":[{"number":41}],"watching":[{"agent":"agent secret"}]}}`), nil
 	}))
 	if code := Run(context.Background(), []string{"issue", "view", "42", "--project", "proj"}, deps); code != ExitOK {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
-	for _, expected := range []string{"Number: 42", "Title: Ship it", "Status: Ready", "Workflow:", "Priority: high", "Repository: mohist", "Blocker: waiting on review", "Body:\nfirst line\nsecond line", "Comments: 1", "Feedback: 1", "Children: 1", "Attachments: 1", "Labels: 1"} {
+	for _, expected := range []string{"Number: 42", "Title: Ship it", "Status: Ready", "Workflow:", "Priority: high", "Repository: mohist", "Blocker: waiting on review", "Body:\nfirst line\nsecond line", "Comments: 1", "Feedback: 1", "Children: 1", "Attachments: 1", "Labels: 1", "Prereq: 1", "Watching: 1"} {
 		if !strings.Contains(out.String(), expected) {
 			t.Errorf("output missing %q: %s", expected, out.String())
 		}
 	}
-	if strings.Contains(out.String(), `{"body":"secret"}`) || errOut.Len() != 0 {
+	if strings.HasPrefix(out.String(), "{") || strings.Contains(out.String(), "secret") || strings.Contains(out.String(), "\"") || errOut.Len() != 0 {
 		t.Fatalf("unbounded or stderr output: stdout=%q stderr=%q", out.String(), errOut.String())
 	}
 }
@@ -115,6 +115,40 @@ func TestIssueViewOmitsMissingOptionalFieldsAndSanitizesText(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Title: Ship") || !strings.Contains(out.String(), "Body:\nline\nnext") || errOut.Len() != 0 {
 		t.Fatalf("output=%q stderr=%q", out.String(), errOut.String())
+	}
+}
+
+func TestIssueViewOutputHasNoTerminalControlSequencesWithOrWithoutNoColor(t *testing.T) {
+	for _, noColor := range []bool{false, true} {
+		name := "normal"
+		if noColor {
+			name = "NO_COLOR"
+		}
+		t.Run(name, func(t *testing.T) {
+			deps, out, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return response(http.StatusOK, `{"success":true,"data":{"number":42,"title":"\u001b[32mShip it\u001b[0m","status":"Ready","body":"plain\u001b[2K"}}`), nil
+			}))
+			if noColor {
+				baseLookup := deps.Lookup
+				deps.Lookup = func(name string) (string, bool) {
+					if name == "NO_COLOR" {
+						return "1", true
+					}
+					return baseLookup(name)
+				}
+			}
+			if code := Run(context.Background(), []string{"issue", "view", "42", "--project", "proj"}, deps); code != ExitOK {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+			for _, char := range out.String() {
+				if char < 0x20 && char != '\n' && char != '\r' && char != '\t' {
+					t.Fatalf("control sequence byte %q in output %q", char, out.String())
+				}
+			}
+			if errOut.Len() != 0 {
+				t.Fatalf("unexpected stderr=%q", errOut.String())
+			}
+		})
 	}
 }
 
@@ -142,7 +176,7 @@ func TestIssueViewBareJSONListsLocalCatalogWithoutHTTP(t *testing.T) {
 		calls++
 		return nil, errors.New("must not call")
 	}))
-	if code := Run(context.Background(), []string{"issue", "view", "42", "--project", "proj", "--json"}, deps); code != ExitOK || calls != 0 || !strings.Contains(out.String(), "comments") || errOut.Len() != 0 {
+	if code := Run(context.Background(), []string{"issue", "view", "42", "--project", "proj", "--json"}, deps); code != ExitOK || calls != 0 || out.String() != strings.Join(issueFields, "\n")+"\n" || errOut.Len() != 0 {
 		t.Fatalf("code=%d calls=%d stdout=%q stderr=%q", code, calls, out.String(), errOut.String())
 	}
 }
