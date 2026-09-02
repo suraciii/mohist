@@ -468,7 +468,7 @@ public static class MohistServiceRegistration
         return dbPath;
     }
 
-    private static void CopyJsonOptions(System.Text.Json.JsonSerializerOptions source, System.Text.Json.JsonSerializerOptions target)
+    internal static void CopyJsonOptions(System.Text.Json.JsonSerializerOptions source, System.Text.Json.JsonSerializerOptions target)
     {
         target.DefaultIgnoreCondition = source.DefaultIgnoreCondition;
         target.PropertyNameCaseInsensitive = source.PropertyNameCaseInsensitive;
