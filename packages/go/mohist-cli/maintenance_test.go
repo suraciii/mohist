@@ -240,7 +240,7 @@ func TestCrossRevisionCLIUpdateSynchronizesTargetSkills(t *testing.T) {
 	fixtureRoot := t.TempDir()
 	oldRoot := filepath.Join(fixtureRoot, "old")
 	targetRoot := filepath.Join(fixtureRoot, "target")
-	archiveRevision(t, repoRoot, olderGoUpdaterRevision, oldRoot)
+	archiveRevision(t, repoRoot, olderGoUpdaterRevision, filepath.Join(oldRoot, "packages", "go", "mohist-cli"))
 	copyDirectory(t, moduleRoot, filepath.Join(targetRoot, "packages", "go", "mohist-cli"))
 	targetSkill := filepath.Join(targetRoot, "packages", "go", "mohist-cli", "skill-data", "target-only", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(targetSkill), 0o700); err != nil {
@@ -291,6 +291,9 @@ func currentGoModuleRoot(t *testing.T) string {
 
 func archiveRevision(t *testing.T, repoRoot, revision, destination string) {
 	t.Helper()
+	if err := os.MkdirAll(destination, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	command := exec.Command("git", "archive", "--format=tar", revision, "packages/go/mohist-cli")
 	command.Dir = repoRoot
 	archive, err := command.Output()
