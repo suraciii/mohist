@@ -62,12 +62,14 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             ProjectId: projectId,
             AgentId: "agent-manual-effort",
             Variant: "balanced",
-            ReasoningEffort: "high");
+            ReasoningEffort: "high",
+            TimeoutMilliseconds: 123_000);
 
         var canonical = await job.PrepareManualLaunchAsync(command);
         Assert.Equal("high", canonical.ReasoningEffort);
         Assert.Equal("balanced", canonical.Variant);
         Assert.Equal("openai/gpt-5.5", canonical.Model);
+        Assert.Equal(123_000, canonical.TimeoutMilliseconds);
 
         // Re-delivery of the same plan is idempotent.
         var replay = await job.PrepareManualLaunchAsync(command);
