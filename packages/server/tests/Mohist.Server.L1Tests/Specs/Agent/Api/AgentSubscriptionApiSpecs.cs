@@ -1,16 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Domain;
-using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
-using Mohist.Server.Infrastructure;
-using Mohist.Server.Infrastructure.Data.AgentJobs;
-using Mohist.Server.Infrastructure.Data.Agent;
-using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -196,78 +188,6 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
         };
         request.Headers.Add("Idempotency-Key", key);
         return await Client.SendAsync(request);
-    }
-
-    private async Task<HttpResponseMessage> PatchRawAsync(string path, string json)
-    {
-        return await Client.PatchAsync(path, new StringContent(json, Encoding.UTF8, "application/json"));
-    }
-
-    private async Task SeedConnectionAsync(string projectId, string agentId)
-    {
-        await using var scope = fixture.Services.CreateAsyncScope();
-        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await using var db = await factory.CreateDbContextAsync();
-        db.AgentConnections.Add(new AgentConnectionRow
-        {
-            Id = $"connection_{Guid.NewGuid():N}",
-            ProjectId = projectId,
-            AgentId = agentId,
-            ProviderKind = ConnectionProviderKind.Slack,
-            WorkspaceTeamId = "",
-            AppId = "",
-            BotUserId = "",
-            BotName = "",
-            SetupProgress = SetupProgressKind.WaitingForSlackService,
-            DesiredState = DesiredStateKind.Enabled,
-            ConnectionHealth = ConnectionHealthKind.Unhealthy,
-            AgentReadiness = AgentReadinessKind.Unknown,
-            AccessPolicy = AccessPolicyKind.OwnerOnly,
-            CreatedAt = fixture.TimeProvider.GetUtcNow(),
-            UpdatedAt = fixture.TimeProvider.GetUtcNow(),
-        });
-        await db.SaveChangesAsync();
-    }
-
-    private async Task SeedFailedExecutionAsync(string projectId, string agentId, string failureCategory)
-    {
-        var terminalAt = fixture.TimeProvider.GetUtcNow();
-        var jobKey = $"subscription-readiness-{Guid.NewGuid():N}";
-        await using var scope = fixture.Services.CreateAsyncScope();
-        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await using var db = await factory.CreateDbContextAsync();
-        db.AgentJobs.Add(new AgentJobRow
-        {
-            JobKey = jobKey,
-            State = JSON.Serialize(new AgentJobState
-            {
-                Status = AgentJobStatus.Failed,
-                SubmittedAt = terminalAt,
-                TerminalAt = terminalAt,
-                Input = new AgentJobInput(
-                    "previous execution",
-                    Model: "openai/gpt-5.6",
-                    ProjectId: projectId,
-                    Runtime: "pi",
-                    AgentId: agentId,
-                    AgentInstructions: "subscription spec instructions",
-                    Skills: []),
-                PendingSessionClose = new PendingSessionClose(
-                    $"agent-job:{jobKey}:terminal",
-                    AgentJobStatus.Failed.ToString(),
-                    1,
-                    failureCategory,
-                    failureCategory,
-                    terminalAt),
-            }),
-            ProjectId = projectId,
-            AgentId = agentId,
-            Status = AgentJobStatus.Failed.ToString().ToLowerInvariant(),
-            SubmittedAt = terminalAt.ToString("O"),
-            TerminalAt = terminalAt.ToString("O"),
-            LaunchVisibility = "visible",
-        });
-        await db.SaveChangesAsync();
     }
 
     private sealed record ProjectDto(string Id);

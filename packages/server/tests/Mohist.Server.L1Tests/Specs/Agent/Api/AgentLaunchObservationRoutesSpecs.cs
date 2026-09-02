@@ -14,14 +14,12 @@ using Mohist.Server.Workflow.Grains;
 namespace Mohist.Server.L1Tests.Specs.Agent.Api;
 
 /// <summary>
-/// Issue-512 T-002 specs for Unknown-safe launch reconciliation and
-/// the composite launch-observation read API. Covers:
-/// - launch and composite observation during queued / terminal states
-/// - cross-project isolation returns 404
+/// Issue-512 T-002 route specs for the launch-observation read API. Covers:
 /// - launch 201 surfaces all four stable references plus the observation URL
-/// Projection details for Unknown/recovering, terminal fields, project
-/// isolation, and missing links are covered by the L0 assembler specs;
-/// lifecycle/reconciliation behavior remains covered by AgentJob grain specs.
+/// - project-scoped observation reads preserve the cross-project 404 boundary
+/// Projection details for queued, terminal, and recovering states are covered
+/// by the L0 assembler specs; lifecycle/reconciliation remains covered by the
+/// AgentJob grain specs.
 /// </summary>
 [Collection("LaunchIntegration")]
 public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSupport
@@ -90,12 +88,4 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
         Assert.Equal(HttpStatusCode.OK, sameRead.StatusCode);
     }
 
-    private async Task<JsonElement?> ReadObservationAsync(string projectId, string jobId)
-    {
-        using var response = await _fixture.Client.GetAsync(
-            $"/api/projects/{projectId}/agent-jobs/{jobId}/launch-observation");
-        if (response.StatusCode == HttpStatusCode.NotFound) return null;
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        return await response.Content.ReadFromJsonAsync<JsonElement>();
-    }
 }

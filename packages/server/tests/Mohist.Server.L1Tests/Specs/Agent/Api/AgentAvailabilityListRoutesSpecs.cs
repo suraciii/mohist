@@ -257,26 +257,6 @@ public sealed class AgentAvailabilityListRoutesSpecs : IClassFixture<AgentAvaila
         await store.SaveAsync(jobKey, JsonSerializer.Serialize(state, JSON.Options));
     }
 
-    private async Task SeedCompletedJobAsync(string projectId, string agentId, string agentName)
-    {
-        var store = _fixture.Services.GetRequiredService<IAgentJobStore>();
-        var state = new AgentJobState
-        {
-            Status = AgentJobStatus.Completed,
-            Input = new AgentJobInput(
-                Prompt: "seed for readiness test",
-                Model: "openai/gpt-5.6",
-                ProjectId: projectId,
-                Runtime: "opencode",
-                AgentId: agentId,
-                AgentInstructions: $"instructions for {agentName}",
-                Skills: ["coding"]),
-            SubmittedAt = _fixture.TimeProvider.GetUtcNow(),
-            TerminalAt = _fixture.TimeProvider.GetUtcNow(),
-        };
-        await store.SaveAsync($"completed-{Guid.NewGuid():N}", JsonSerializer.Serialize(state, JSON.Options));
-    }
-
     private async Task AcquireConcurrencyPermitAsync(string projectId, string agentId, string token)
     {
         var grains = _fixture.Services.GetRequiredService<Orleans.IGrainFactory>();

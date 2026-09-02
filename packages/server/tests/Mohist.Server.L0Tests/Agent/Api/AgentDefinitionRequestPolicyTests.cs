@@ -69,9 +69,20 @@ public sealed class AgentDefinitionRequestPolicyTests
     }
 
     [Fact]
-    public void PermissionVocabulary_RejectsMalformedEntriesWithoutAcceptingAnEmptyTerm()
+    public void PermissionVocabulary_RejectsNonStringEntries()
     {
-        using var document = JsonDocument.Parse("{\"permissions\":[42,\"\"]}");
+        using var document = JsonDocument.Parse("{\"permissions\":[42]}");
+
+        var error = AgentPermissionVocabulary.Validate(document.RootElement);
+
+        Assert.NotNull(error);
+        Assert.Contains("non-empty terms", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PermissionVocabulary_RejectsEmptyEntries()
+    {
+        using var document = JsonDocument.Parse("{\"permissions\":[\"\"]}");
 
         var error = AgentPermissionVocabulary.Validate(document.RootElement);
 

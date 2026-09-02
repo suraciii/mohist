@@ -54,6 +54,34 @@ public sealed class AgentSubscriptionRoutePolicyTests
     }
 
     [Fact]
+    public void DeriveState_ReportsUnavailableWhenSetupIsIncomplete()
+    {
+        var connection = Connection(
+            ConnectionHealthKind.Healthy,
+            setupProgress: SetupProgressKind.WaitingForSlackService);
+
+        Assert.Equal("unavailable", AgentSubscriptionRoutes.DeriveState(
+            Agent(AgentExecutabilityStates.Unknown),
+            [],
+            [connection]));
+        Assert.Equal("unavailable", AgentSubscriptionRoutes.DeriveConnectionState([connection]));
+    }
+
+    [Fact]
+    public void DeriveState_ReportsUnavailableWhenConnectionIsDisabled()
+    {
+        var connection = Connection(
+            ConnectionHealthKind.Healthy,
+            desiredState: DesiredStateKind.Disabled);
+
+        Assert.Equal("unavailable", AgentSubscriptionRoutes.DeriveState(
+            Agent(AgentExecutabilityStates.Unknown),
+            [],
+            [connection]));
+        Assert.Equal("unavailable", AgentSubscriptionRoutes.DeriveConnectionState([connection]));
+    }
+
+    [Fact]
     public void DeriveState_ReportsEmptyForHealthyConnectionWithoutSubscriptions()
     {
         var state = AgentSubscriptionRoutes.DeriveState(
@@ -110,6 +138,16 @@ public sealed class AgentSubscriptionRoutePolicyTests
     }
 
     [Fact]
+    public async Task UpdateRequestBinder_MapsInvalidBooleanToContractError()
+    {
+        var request = await BindAsync("{\"continue\":1}");
+
+        Assert.Equal("invalid_subscription_request", request.ContractErrorCode);
+        Assert.Contains("boolean or null", request.ContractError, StringComparison.Ordinal);
+        Assert.Empty(request.Fields);
+    }
+
+    [Fact]
     public async Task UpdateRequestBinder_TracksPresenceAndPreservesBooleanValue()
     {
         var request = await BindAsync("{\"continue\":true}");
@@ -144,13 +182,16 @@ public sealed class AgentSubscriptionRoutePolicyTests
         "2026-01-01T00:00:00Z",
         new AgentExecutabilityResult(executability, [], null));
 
-    private static AgentConnection Connection(string health) => new()
+    private static AgentConnection Connection(
+        string health,
+        string setupProgress = SetupProgressKind.Complete,
+        string desiredState = DesiredStateKind.Enabled) => new()
     {
         Id = "connection-1",
         ProjectId = "project-1",
         AgentId = "agent-1",
-        SetupProgress = SetupProgressKind.Complete,
-        DesiredState = DesiredStateKind.Enabled,
+        SetupProgress = setupProgress,
+        DesiredState = desiredState,
         ConnectionHealth = health,
     };
 
