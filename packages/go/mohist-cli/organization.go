@@ -516,7 +516,7 @@ func renderIssueView(out interface{ Write([]byte) (int, error) }, data json.RawM
 		fmt.Fprintf(out, "Body:\n%s\n", body)
 	}
 
-	for _, field := range issueFields {
+	for _, field := range []string{"labels", "comments", "feedback", "children", "attachments", "prerequisiteNumbers", "prereq", "watching", "muted"} {
 		if count, ok := collectionCount(issue[field]); ok && count > 0 {
 			fmt.Fprintf(out, "%s: %d\n", issueFieldLabel(field), count)
 		}

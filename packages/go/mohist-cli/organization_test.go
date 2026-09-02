@@ -88,7 +88,7 @@ func TestIssueCancellationReturns130(t *testing.T) {
 
 func TestIssueViewRendersBoundedHumanOutput(t *testing.T) {
 	deps, out, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return response(http.StatusOK, `{"success":true,"data":{"number":42,"title":"Ship it","status":"Ready","workflowStatus":"Running","workflowStage":"verify","workflowRunId":"wr-42","priority":"high","repositoryName":"mohist","blocker":"waiting on review","body":"first line\nsecond line","comments":[{"body":"comment secret"}],"feedback":[{"text":"feedback secret"}],"children":[{"number":43}],"attachments":[{"url":"attachment secret"}],"labels":{"bug":""},"prereq":[{"number":41}],"watching":[{"agent":"agent secret"}]}}`), nil
+		return response(http.StatusOK, `{"success":true,"data":{"number":42,"title":"Ship it","status":"Ready","workflowStatus":"Running","workflowStage":"verify","workflowRunId":"wr-42","priority":"high","repositoryName":"mohist","repository":{"name":"mohist","url":"repository secret"},"blocker":"waiting on review","body":"first line\nsecond line","comments":[{"body":"comment secret"}],"feedback":[{"text":"feedback secret"}],"children":[{"number":43}],"attachments":[{"url":"attachment secret"}],"labels":{"bug":""},"prereq":[{"number":41}],"watching":[{"agent":"agent secret"}],"agentConfig":{"model":"internal"},"stageModels":{"build":"internal"},"stageModelVariants":{"build":"internal"},"approvalState":{"status":"internal"},"attention":{"reason":"internal"},"github":{"url":"internal"},"epic":{"number":1}}}`), nil
 	}))
 	if code := Run(context.Background(), []string{"issue", "view", "42", "--project", "proj"}, deps); code != ExitOK {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
@@ -100,6 +100,9 @@ func TestIssueViewRendersBoundedHumanOutput(t *testing.T) {
 	}
 	if strings.HasPrefix(out.String(), "{") || strings.Contains(out.String(), "secret") || strings.Contains(out.String(), "\"") || errOut.Len() != 0 {
 		t.Fatalf("unbounded or stderr output: stdout=%q stderr=%q", out.String(), errOut.String())
+	}
+	if strings.Count(out.String(), "Repository:") != 1 || strings.Contains(out.String(), "AgentConfig:") || strings.Contains(out.String(), "StageModels:") || strings.Contains(out.String(), "StageModelVariants:") || strings.Contains(out.String(), "ApprovalState:") || strings.Contains(out.String(), "Attention:") || strings.Contains(out.String(), "Github:") || strings.Contains(out.String(), "Epic:") {
+		t.Fatalf("internal object counts or duplicate repository: stdout=%q", out.String())
 	}
 }
 
