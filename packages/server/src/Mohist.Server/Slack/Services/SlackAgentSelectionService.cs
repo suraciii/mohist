@@ -143,10 +143,10 @@ internal sealed class SlackAgentSelectionService : IScopedService
                 && string.Equals(candidate.ConnectionId, payload.ChosenConnectionId, StringComparison.Ordinal));
         if (selectedCandidate is null)
             return Rejected("stale_action", "The selected Agent is no longer one of the durable chooser candidates.");
-        if (!AgentConnectionStore.HasBoundIdentity(selected)
-            || !string.Equals(selected.WorkspaceTeamId, payload.WorkspaceTeamId, StringComparison.Ordinal)
-            || (!string.IsNullOrWhiteSpace(selectedCandidate.BotUserId)
-                && !string.Equals(selected.BotUserId, selectedCandidate.BotUserId, StringComparison.Ordinal)))
+        if (!SlackAgentSelectionPolicy.MatchesSelectedCandidate(
+                selected,
+                selectedCandidate,
+                payload.WorkspaceTeamId))
             return Rejected("no_longer_valid", "The selected Agent is no longer bound to this Slack workspace.");
 
         var selectedLease = await ResolveSelectedLeaseAsync(
@@ -186,16 +186,9 @@ internal sealed class SlackAgentSelectionService : IScopedService
                 claim.ThreadTs!,
                 ct);
 
-        var dispatchKind = claim.AmbiguityKind switch
-        {
-            SlackAmbiguityKinds.RootMultiMention => SlackSelectionDispatchKinds.RootLaunch,
-            SlackAmbiguityKinds.ThreadMultiMention => binding is null
-                ? SlackSelectionDispatchKinds.ThreadLaunch
-                : SlackSelectionDispatchKinds.ThreadFollowup,
-            SlackAmbiguityKinds.MultiBoundThreadReply when binding is not null => SlackSelectionDispatchKinds.ThreadFollowup,
-            SlackAmbiguityKinds.MultiBoundThreadReply => null,
-            _ => null,
-        };
+        var dispatchKind = SlackAgentSelectionPolicy.DispatchKindFor(
+            claim.AmbiguityKind,
+            binding is not null);
         if (dispatchKind is null)
             return Rejected("no_longer_valid", "The selected Agent is no longer bound to this thread.");
 
@@ -599,8 +592,10 @@ internal sealed class SlackAgentSelectionService : IScopedService
             || !string.Equals(claim.WinningConnectionId, postingConnection.Id, StringComparison.Ordinal)
             || !string.Equals(claim.AmbiguityKind, payload.AmbiguityKind, StringComparison.Ordinal)
             || !string.Equals(claim.ThreadTs, payload.ThreadTs, StringComparison.Ordinal)
-            || !CandidateSnapshotsEqual(claim.CandidateReferencesJson, payload.CandidateReferences)
-            || !CandidateSnapshotsContain(
+            || !SlackAgentSelectionPolicy.CandidateSnapshotsEqual(
+                claim.CandidateReferencesJson,
+                payload.CandidateReferences)
+            || !SlackAgentSelectionPolicy.CandidateSnapshotsContain(
                 claim.CandidateReferencesJson,
                 payload.ChosenProjectId,
                 payload.ChosenConnectionId))
@@ -649,37 +644,6 @@ internal sealed class SlackAgentSelectionService : IScopedService
             : null;
     }
 
-    private static bool CandidateSnapshotsContain(
-        string durableJson,
-        string projectId,
-        string connectionId)
-    {
-        try
-        {
-            return DeserializeCandidates(durableJson).Any(candidate =>
-                string.Equals(candidate.ProjectId, projectId, StringComparison.Ordinal)
-                && string.Equals(candidate.ConnectionId, connectionId, StringComparison.Ordinal));
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
-
-    private static bool CandidateSnapshotsEqual(
-        string durableJson,
-        IReadOnlyList<SlackSelectionCandidateReference> signed)
-    {
-        try
-        {
-            var durable = DeserializeCandidates(durableJson);
-            return durable.SequenceEqual(signed);
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
 
     private static bool IsDirectMessage(string conversationId) =>
         conversationId.StartsWith("D", StringComparison.Ordinal);
@@ -687,9 +651,7 @@ internal sealed class SlackAgentSelectionService : IScopedService
     internal static bool IsSelectedSessionTarget(
         CanonicalFollowupTarget? target,
         AgentConnection selected) =>
-        target is not null
-        && string.Equals(target.AgentId, selected.AgentId, StringComparison.Ordinal)
-        && string.Equals(target.ConnectionId, selected.Id, StringComparison.Ordinal);
+        SlackAgentSelectionPolicy.IsSelectedSessionTarget(target, selected);
 
     private static IReadOnlyList<SlackSelectionCandidateReference> DeserializeCandidates(string json) =>
         JSON.Deserialize<List<SlackSelectionCandidateReference>>(json) ?? [];

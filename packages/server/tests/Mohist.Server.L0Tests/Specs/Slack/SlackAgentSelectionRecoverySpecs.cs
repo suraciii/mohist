@@ -7,10 +7,10 @@ using Mohist.Server.TestSupport;
 using Mohist.Server.L0Tests.Support;
 using Xunit;
 
-namespace Mohist.Server.L0Tests.Slack;
+namespace Mohist.Server.L0Tests.Specs.Slack;
 
 [Collection("MohistDb")]
-public sealed class SlackAmbiguousPromptStoreTests
+public sealed class SlackAgentSelectionRecoverySpecs
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 21, 12, 0, 0, TimeSpan.Zero);
 
@@ -33,6 +33,39 @@ public sealed class SlackAmbiguousPromptStoreTests
         Assert.Equal("connection-a", other.WinningConnectionId);
         Assert.Equal("1.000", other.ThreadTs);
         Assert.Equal(["connection-a", "connection-b"], other.MentionedConnectionIds);
+    }
+
+    [Fact]
+    public async Task Concurrent_writers_have_exactly_one_durable_winner()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        var left = NewStore(database);
+        var right = NewStore(database);
+        var candidates = new[]
+        {
+            new SlackSelectionCandidateReference("project-a", "connection-a"),
+            new SlackSelectionCandidateReference("project-a", "connection-b"),
+        };
+
+        var results = await Task.WhenAll(
+            left.TryClaimAsync(
+                "project-a", "team-race", "channel-race", "1.101", "1.100",
+                "connection-a", candidates, "user-race", "left", "[]",
+                SlackAmbiguityKinds.RootMultiMention),
+            right.TryClaimAsync(
+                "project-a", "team-race", "channel-race", "1.101", "1.100",
+                "connection-b", candidates, "user-race", "right", "[]",
+                SlackAmbiguityKinds.RootMultiMention));
+
+        Assert.Equal(2, results.Length);
+        var winner = Assert.Single(results, result => result.Claimed);
+        var loser = Assert.Single(results, result => !result.Claimed);
+        Assert.Equal(winner.RowId, loser.RowId);
+        Assert.Equal(winner.WinningConnectionId, loser.WinningConnectionId);
+        Assert.Equal(winner.Snapshot.TaskText, loser.Snapshot.TaskText);
+        Assert.Equal(
+            winner.Snapshot,
+            (await left.FindAsync("team-race", "channel-race", "1.101")));
     }
 
     [Fact]
@@ -189,10 +222,18 @@ public sealed class SlackAmbiguousPromptStoreTests
         await store.TryDecideAsync(
             "team-life", "channel-life", "7.002", "project-a", "connection-a",
             SlackSelectionDispatchKinds.RootLaunch, "session", "input", "turn");
+        const int retryIntervalMinutes = 1;
+        var retryInterval = TimeSpan.FromMinutes(retryIntervalMinutes);
         Assert.True(await store.TryBeginDispatchAsync(
-            decided.RowId, Now, TimeSpan.FromMinutes(1)));
+            decided.RowId, time.GetUtcNow(), retryInterval));
+        time.Advance(TimeSpan.FromSeconds(59));
         Assert.False(await store.TryBeginDispatchAsync(
-            decided.RowId, Now, TimeSpan.FromMinutes(1)));
+            decided.RowId, time.GetUtcNow(), retryInterval));
+        time.Advance(TimeSpan.FromSeconds(1));
+        Assert.True(await store.TryBeginDispatchAsync(
+            decided.RowId, time.GetUtcNow(), retryInterval));
+        Assert.Equal(2, (await store.FindAsync(
+            "team-life", "channel-life", "7.002"))!.AttemptCount);
         Assert.True(await store.MarkCompletedAsync(decided.RowId, "accepted"));
 
         await using (var db = database.CreateContext())
