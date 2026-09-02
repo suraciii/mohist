@@ -27,12 +27,12 @@
       "server-runtime": 1,
       "duration-measurement": 1
     },
-    // CLI and the isolated Spec measurement precede the remaining fan-out.
-    "durationMeasurementTracks": ["cli", "server-l1"],
+    // The isolated Server measurement precedes the remaining fan-out.
+    "durationMeasurementTracks": ["server-l1"],
     "durationIsolationTrack": "runner"
   },
   "plan": {
-    "applications": ["server", "web", "cli", "runner"],
+    "applications": ["server", "web", "runner"],
     "repositoryScope": "repository",
     "applicationBuilds": {
       "server": [
@@ -40,9 +40,6 @@
       ],
       "web": [
         { "command": "npm", "args": ["run", "build", "-w", "packages/web"] }
-      ],
-      "cli": [
-        { "command": "dotnet", "args": ["build", "packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj"] }
       ],
       "runner": [
         { "command": "npm", "args": ["run", "build", "-w", "packages/runner"] }
@@ -70,12 +67,6 @@
   },
   "tracks": [
     { "id": "runner", "kind": "vitest", "trackType": "behavior", "application": "runner", "specKinds": ["Design"], "level": "L0", "resources": [], "run": ["npm","run","test:duration","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": true, "rules": [
-        { "id": "unit", "percentile": 95, "percentileMs": 50 }
-      ]
-    },
-    // Four collection workers retain parallelism without letting concurrent cold command-tree construction dominate native test execution time.
-    { "id": "cli", "kind": "dotnet-apphost", "trackType": "behavior", "application": "cli", "specKinds": ["Product", "Design"], "level": "L1", "resources": [], "csproj": "packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj", "apphostArgs": ["-preEnumerateTheories", "-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "4"], "report": "reports/cli.trx", "executionLedger": "reports/cli.execution-ledger.json", "executionProvenance": "reports/cli.execution-provenance.json", "executionSourceRoots": ["packages/cli", "Directory.Build.props", "Directory.Packages.props", "global.json"], "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
-        { "id": "spec", "namePattern": "Specs\\.", "percentile": 95, "percentileMs": 500 },
         { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
     },

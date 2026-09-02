@@ -46,7 +46,7 @@ npm ci
 npm run build
 ```
 
-This command compiles the ASP.NET Core server and CLI, Web, Runner, and the
+This command compiles the ASP.NET Core server, Web, Runner, and the
 optional statically linked Slack adapter at
 `packages/go/mohist-slack/bin/build/mohist-slack` (or `mohist-slack.exe` on
 Windows). `mo install slack` promotes that artifact to the service's runtime

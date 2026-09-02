@@ -37,28 +37,17 @@ Read the writing rules before editing documents:
 review, re-read the code behind any fact you state, and check that every
 example runs and every link resolves.
 
-## Focused C# Tests
+## Focused CLI Tests
 
-C# test projects use Microsoft Testing Platform with xUnit v3. VSTest
-`--filter` does not select focused tests in these projects. Run the compiled
-apphost directly with `-class` or `-method`.
-
-Build the selected project once, list the target, and then run it:
+The CLI is a static Go binary. Run its hermetic tests directly:
 
 ```bash
-dotnet build packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore
-packages/cli/tests/Mohist.Cli.Tests/bin/Debug/net11.0/Mohist.Cli.Tests \
-  -list classes -noColor -noLogo \
-  -class Mohist.Cli.Tests.Skills.SkillsContentTests
-packages/cli/tests/Mohist.Cli.Tests/bin/Debug/net11.0/Mohist.Cli.Tests \
-  -noColor -noLogo \
-  -class Mohist.Cli.Tests.Skills.SkillsContentTests
+npm run test:cli
+npm run check:cli-go-format
 ```
 
-Confirm the apphost supports the selector with `--help`. In a new worktree, run
-`npm ci` first. If the selected project has no `obj/project.assets.json`, run an
-explicit `dotnet restore` before the `--no-restore` build. Focused runs are
-development evidence; `npm run verify` remains the final local gate.
+In a new worktree, run `npm ci` first. `npm run verify` remains the final local
+gate.
 
 ## License
 

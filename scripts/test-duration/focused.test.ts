@@ -1,57 +1,66 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { parseAssemblyName, parseTargetFramework, resolveApphostPath, resolveDiscoveryCommand, resolveFocusedCommand } from './focused.js'
+import {
+  parseAssemblyName,
+  parseTargetFramework,
+  resolveApphostPath,
+  resolveDiscoveryCommand,
+  resolveFocusedCommand,
+} from './focused.js'
 
 const CSPROJ = `
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net11.0</TargetFramework>
-    <AssemblyName>Mohist.Cli.Tests</AssemblyName>
+    <AssemblyName>Mohist.Server.L0Tests</AssemblyName>
   </PropertyGroup>
 </Project>`
 
 test('parseTargetFramework and parseAssemblyName read csproj properties', () => {
   assert.equal(parseTargetFramework(CSPROJ), 'net11.0')
-  assert.equal(parseAssemblyName(CSPROJ), 'Mohist.Cli.Tests')
+  assert.equal(parseAssemblyName(CSPROJ), 'Mohist.Server.L0Tests')
   assert.equal(parseTargetFramework('<Project></Project>'), undefined)
 })
 
 test('parseTargetFramework takes the first TargetFrameworks entry', () => {
-  assert.equal(
-    parseTargetFramework('<TargetFrameworks>net11.0;net8.0</TargetFrameworks>'),
-    'net11.0',
-  )
+  assert.equal(parseTargetFramework('<TargetFrameworks>net11.0;net8.0</TargetFrameworks>'), 'net11.0')
 })
 
 test('resolveApphostPath points at the compiled apphost next to the assembly', () => {
   const path = resolveApphostPath({ csprojXml: CSPROJ })
-  assert.equal(path, 'bin/Debug/net11.0/Mohist.Cli.Tests')
+  assert.equal(path, 'bin/Debug/net11.0/Mohist.Server.L0Tests')
   const withDir = resolveApphostPath({
     csprojXml: CSPROJ,
-    projectDir: 'packages/cli/tests/Mohist.Cli.Tests',
+    projectDir: 'packages/server/tests/Mohist.Server.L0Tests',
     configuration: 'Release',
   })
-  assert.equal(withDir, 'packages/cli/tests/Mohist.Cli.Tests/bin/Release/net11.0/Mohist.Cli.Tests')
+  assert.equal(withDir, 'packages/server/tests/Mohist.Server.L0Tests/bin/Release/net11.0/Mohist.Server.L0Tests')
 })
 
 test('resolveFocusedCommand emits apphost -class, never dotnet --filter', () => {
-  const cmd = resolveFocusedCommand({ csprojXml: CSPROJ, className: 'Mohist.Cli.Tests.Api.Foo' })
+  const cmd = resolveFocusedCommand({ csprojXml: CSPROJ, className: 'Mohist.Server.L0Tests.Api.Foo' })
   assert.ok(cmd.args.includes('-class'))
-  assert.ok(cmd.args.includes('Mohist.Cli.Tests.Api.Foo'))
+  assert.ok(cmd.args.includes('Mohist.Server.L0Tests.Api.Foo'))
   assert.ok(cmd.args.includes('-noColor'))
   assert.ok(cmd.args.includes('-noLogo'))
-  assert.equal(cmd.args.some((a) => a.includes('--filter')), false)
+  assert.equal(
+    cmd.args.some((a) => a.includes('--filter')),
+    false,
+  )
   assert.equal(cmd.apphost.includes('dotnet test'), false)
   assert.deepEqual(cmd.verify, ['-list', 'classes', '-noColor', '-noLogo'])
   const reported = cmd.report('reports/foo.trx')
   assert.deepEqual(reported.slice(-2), ['-trx', 'reports/foo.trx'])
-  assert.equal(reported.some((a) => a === '-class'), true)
+  assert.equal(
+    reported.some((a) => a === '-class'),
+    true,
+  )
 })
 
 test('resolveDiscoveryCommand uses the compiled apphost and emits a nonzero-list request', () => {
   const cmd = resolveDiscoveryCommand({ csprojXml: CSPROJ })
-  assert.equal(cmd.apphost, 'bin/Debug/net11.0/Mohist.Cli.Tests')
+  assert.equal(cmd.apphost, 'bin/Debug/net11.0/Mohist.Server.L0Tests')
   assert.deepEqual(cmd.args, ['-list', 'full/json', '-preEnumerateTheories', '-noColor', '-noLogo'])
   assert.equal(cmd.args.includes('--filter'), false)
 })

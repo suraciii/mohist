@@ -36,7 +36,7 @@
     "dev:web": "npm run dev -w packages/web",
     "dev:server": "dotnet run --project packages/server/src/Mohist.Server/Mohist.Server.csproj",
     "dev": "concurrently -n server,web -c blue,green \"npm run dev:server\" \"npm run dev:web\"",
-    "install:cli": "dotnet pack packages/cli/Mohist.Cli/Mohist.Cli.csproj -c Release -o ./nupkg && dotnet tool install -g Mohist.Cli --add-source ./nupkg"
+    "install:cli": "bash scripts/install-mo.sh"
   },
   "devDependencies": {
     "@babel/parser": "^7.29.7",

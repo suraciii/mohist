@@ -36,7 +36,7 @@ test('governance covers first-party source under packages/, excluding EF-generat
   assert.equal(isGovernedPath('packages/server/src/Mohist.Server/Api/Routes.cs'), true)
   assert.equal(isGovernedPath('packages/web/src/pages/epics/ui/EpicListPage.test.tsx'), true)
   assert.equal(isGovernedPath('packages/runner/src/runtime/host.ts'), true)
-  assert.equal(isGovernedPath('packages/cli/Mohist.Cli/MohistCliCommands.Slack.cs'), true)
+  assert.equal(isGovernedPath('packages/go/mohist-cli/maintenance.go'), false)
   assert.equal(isGovernedPath('scripts/check-file-sizes.ts'), false)
   assert.equal(isGovernedPath('packages/web/src/pages/page.md'), false)
   assert.equal(

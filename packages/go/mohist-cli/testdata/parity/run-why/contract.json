@@ -1,0 +1,25 @@
+{
+  "command": "run why",
+  "catalog": [
+    "workflowRunId",
+    "status",
+    "failure",
+    "tasks",
+    "dispatch",
+    "events"
+  ],
+  "helpArgs": ["run", "why", "--help"],
+  "humanArgs": ["run", "why", "wr-1"],
+  "selectedArgs": ["run", "why", "wr-1", "--json", "workflowRunId,status"],
+  "usageArgs": ["run", "why", "wr-1", "--json", "unknown"],
+  "request": {
+    "method": "GET",
+    "path": "/api/runs/wr-1/diagnosis",
+    "headers": {
+      "Accept": ["application/json"],
+      "Authorization": ["Bearer parity-token"],
+      "X-Mohist-Operator-Id": ["parity-test"]
+    },
+    "body": ""
+  }
+}
