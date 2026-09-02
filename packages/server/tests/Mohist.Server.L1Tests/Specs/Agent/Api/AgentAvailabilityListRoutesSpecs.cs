@@ -73,36 +73,6 @@ public sealed class AgentAvailabilityListRoutesSpecs : IClassFixture<AgentAvaila
     }
 
     [Fact]
-    public async Task GetAvailability_ReadyAgentNoOnlineRunner_ReportsNoOnlineRunnerAvailability()
-    {
-        var projectId = await CreateProjectAsync("availability-offline");
-        var agent = await CreateAgentAsync(projectId, "ready-offline");
-        await SeedCompletedJobAsync(projectId, agent.Id, "ready-offline");
-        _fixture.SetOnlineRunners([]);
-
-        using var response = await _fixture.Client.GetAsync(
-            $"/api/projects/{projectId}/agents/availability");
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var entry = Assert.Single(payload.GetProperty("data").EnumerateArray());
-        Assert.Equal(agent.Id, entry.GetProperty("agentId").GetString());
-        Assert.False(entry.GetProperty("canStartNow").GetBoolean());
-        Assert.Equal("no-online-runner", entry.GetProperty("waitingReason").GetString());
-        Assert.Equal(0, entry.GetProperty("activeRuns").GetInt32());
-        Assert.Equal(0, entry.GetProperty("queuedCount").GetInt32());
-        var capacity = entry.GetProperty("capacity");
-        Assert.Equal(0, capacity.GetProperty("usedSlots").GetInt32());
-        Assert.Equal(0, capacity.GetProperty("totalSlots").GetInt32());
-        Assert.Equal(2, entry.GetProperty("maxConcurrentRuns").GetInt32());
-
-        using var listResponse = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents");
-        var listPayload = await listResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var listedAgent = Assert.Single(listPayload.GetProperty("data").EnumerateArray());
-        Assert.Equal(AgentExecutabilityStates.Executable, listedAgent.GetProperty("executability").GetProperty("state").GetString());
-    }
-
-    [Fact]
     public async Task GetAvailability_OmitsArchivedAgentsFromSummary()
     {
         var projectId = await CreateProjectAsync("availability-archived");

@@ -26,7 +26,7 @@ public class AgentGrainSpecs
         var grain = CreateGrain(factory, timeProvider, "project_1", "agent_1");
 
         var instructions = "Review literally {{issue.title}} and ${MODEL}\nDo not render.";
-        var config = JsonDocument.Parse("{\"type\":\"opencode\",\"model\":\"openai/gpt-5.5\"}").RootElement.Clone();
+        var config = JsonDocument.Parse("{\"type\":\"opencode\",\"model\":\"openai/gpt-5.5\",\"variant\":\"balanced\",\"reasoningEffort\":\"high\"}").RootElement.Clone();
         var created = await grain.CreateAsync(new AgentCreateData(
             "project_1",
             "reviewer",
@@ -43,6 +43,8 @@ public class AgentGrainSpecs
         Assert.Equal(instructions, created.Instructions);
         Assert.Equal("https://example.test/avatar.svg", created.Avatar);
         Assert.Equal("openai/gpt-5.5", created.AgentConfig!.Value.GetProperty("model").GetString());
+        Assert.Equal("balanced", created.AgentConfig.Value.GetProperty("variant").GetString());
+        Assert.Equal("high", created.AgentConfig.Value.GetProperty("reasoningEffort").GetString());
         Assert.Equal(["debugging-code", "software-design"], created.Skills);
         Assert.Equal(2, created.MaxConcurrentRuns);
 
@@ -282,6 +284,60 @@ public class AgentGrainSpecs
             Assert.Null(result);
             Assert.Null(await factory.CreateDbContext().Agents.FindAsync(GrainKey.Agent("project_1", "agent_missing")));
         }
+    }
+
+    [Fact]
+    public async Task Update_WithExplicitNullOptionalFields_ClearsThoseFieldsWithoutChangingIdentity()
+    {
+        await using var database = CreateModelSchemaDatabase();
+        await using var context = database.CreateDbContext();
+        var factory = database.Factory;
+        var timeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+        var grain = CreateGrain(factory, timeProvider, "project_optional", "agent_optional");
+
+        var created = await grain.CreateAsync(new AgentCreateData(
+            "project_optional",
+            "optional-agent",
+            "description",
+            "instructions",
+            JsonDocument.Parse("{\"model\":\"provider/model\"}").RootElement.Clone(),
+            ["coding"],
+            2,
+            Avatar: "avatar",
+            Purpose: "purpose",
+            Permissions: ["repo:read"]));
+
+        var updated = await grain.UpdateAsync(new AgentUpdateData(
+            Name: null,
+            Description: null,
+            Instructions: null,
+            AgentConfig: null,
+            Skills: null,
+            MaxConcurrentRuns: null,
+            Fields: new HashSet<string>
+            {
+                nameof(AgentUpdateData.Description),
+                nameof(AgentUpdateData.Purpose),
+                nameof(AgentUpdateData.AgentConfig),
+                nameof(AgentUpdateData.Skills),
+                nameof(AgentUpdateData.MaxConcurrentRuns),
+                nameof(AgentUpdateData.Avatar),
+                nameof(AgentUpdateData.Permissions),
+            },
+            Avatar: null,
+            Purpose: null,
+            Permissions: null));
+
+        Assert.NotNull(updated);
+        Assert.Equal(created.Id, updated!.Id);
+        Assert.Equal(created.Name, updated.Name);
+        Assert.Equal(string.Empty, updated.Description);
+        Assert.Null(updated.Purpose);
+        Assert.Null(updated.AgentConfig);
+        Assert.Empty(updated.Skills);
+        Assert.Null(updated.MaxConcurrentRuns);
+        Assert.Null(updated.Avatar);
+        Assert.Empty(updated.Permissions!);
     }
 
     private static AgentGrain CreateGrain(TestDbContextFactory factory, string projectId, string agentId)
