@@ -495,7 +495,8 @@ func renderIssueView(out interface{ Write([]byte) (int, error) }, data json.RawM
 	if err := json.Unmarshal(data, &issue); err != nil || issue == nil {
 		return errors.New("error: response has an invalid shape [invalid_response]")
 	}
-	if value := rawText(issue["number"]); value == "" {
+	var number int
+	if err := json.Unmarshal(issue["number"], &number); err != nil || number <= 0 {
 		return errors.New("error: response has an invalid shape [invalid_response]")
 	}
 

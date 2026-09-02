@@ -173,6 +173,39 @@ func TestIssueViewEmptyObjectFails(t *testing.T) {
 	}
 }
 
+func TestIssueViewRequiresPositiveIntegerNumber(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		number string
+		valid  bool
+	}{
+		{name: "object", number: `{}`},
+		{name: "array", number: `[]`},
+		{name: "non-numeric string", number: `"42"`},
+		{name: "null", number: `null`},
+		{name: "zero", number: `0`},
+		{name: "negative", number: `-1`},
+		{name: "fractional", number: `1.5`},
+		{name: "positive integer", number: `42`, valid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			deps, out, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return response(http.StatusOK, `{"success":true,"data":{"number":`+test.number+`}}`), nil
+			}))
+			code := Run(context.Background(), []string{"issue", "view", "42", "--project", "proj"}, deps)
+			if test.valid {
+				if code != ExitOK || out.String() != "Number: 42\n" || errOut.Len() != 0 {
+					t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+				}
+				return
+			}
+			if code != ExitOperation || out.Len() != 0 || !strings.Contains(errOut.String(), "invalid_response") {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+		})
+	}
+}
+
 func TestIssueViewSelectedJSONRemainsJSON(t *testing.T) {
 	deps, out, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return response(http.StatusOK, `{"success":true,"data":{"number":42,"title":"Ship it","comments":[{"body":"secret"}]}}`), nil
