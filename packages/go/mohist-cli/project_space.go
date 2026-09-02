@@ -669,7 +669,14 @@ func resourceRequest(ctx context.Context, deps Dependencies, c *client, method, 
 		if collection {
 			if list, ok := v.([]any); ok && len(list) == 0 {
 				message := "No results"
-				switch cmd.kind { case "project-list": message = "No projects"; case "repo-list": message = "No repositories found"; case "workspace-list": message = "No workspaces" }
+				switch cmd.kind {
+				case "project-list":
+					message = "No projects"
+				case "repo-list":
+					message = "No repositories found"
+				case "workspace-list":
+					message = "No workspaces"
+				}
 				fmt.Fprintln(deps.Stdout, message)
 				return ExitOK
 			}
@@ -703,6 +710,9 @@ func (c *client) request(ctx context.Context, method, path string, body any) (js
 	}
 	resp, e := c.http.Do(req)
 	if e != nil {
+		if errors.Is(e, context.Canceled) || errors.Is(e, context.DeadlineExceeded) {
+			return nil, e
+		}
 		return nil, &operationError{message: "error: Mohist Server request failed [service_unavailable]"}
 	}
 	defer resp.Body.Close()

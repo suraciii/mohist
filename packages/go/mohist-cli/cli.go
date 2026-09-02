@@ -324,6 +324,9 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if strings.HasPrefix(command.kind, "workflow-") || strings.HasPrefix(command.kind, "run-") {
 		return runWorkflow(ctx, deps, client, command)
 	}
+	if strings.HasPrefix(command.kind, "agent-") || strings.HasPrefix(command.kind, "session-") {
+		return runAgentSession(ctx, deps, client, command)
+	}
 	data, err := client.get(ctx, command.path)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
@@ -387,6 +390,12 @@ func parse(args []string) (command, error) {
 	}
 	if args[0] == "workflow" {
 		return parseWorkflow(args[1:])
+	}
+	if args[0] == "agent" {
+		return parseAgent(args[1:])
+	}
+	if args[0] == "session" {
+		return parseSession(args[1:])
 	}
 	if args[0] != "run" {
 		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") && contains(rootGroups(), args[0]) {
@@ -530,6 +539,9 @@ func (c *client) get(ctx context.Context, path string) (json.RawMessage, error) 
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
 		return nil, &operationError{message: "error: Mohist Server request failed [service_unavailable]"}
 	}
 	defer resp.Body.Close()
