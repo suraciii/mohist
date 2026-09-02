@@ -46,16 +46,22 @@ internal sealed class WorkflowWorkLifecycle
                 currentTask.Error = report.Error;
             }
             var hasFollowUpTasks = taskAttempts.Count > 0;
-            events.AddRange(run.CompleteTask(stageId, actionAttemptId, now, advance: !hasFollowUpTasks));
+            var isFeedbackTask = currentTask?.CausedByFeedbackId is not null;
+            events.AddRange(run.CompleteTask(
+                stageId,
+                actionAttemptId,
+                now,
+                advance: !hasFollowUpTasks && !isFeedbackTask));
 
+            ApprovalFeedback? resolved = null;
             if (currentTask?.CausedByFeedbackId is { } feedbackId)
             {
-                var resolved = run.ResolveFeedback(feedbackId, currentTask.Id, report.Output, now);
+                resolved = run.ResolveFeedback(feedbackId, currentTask.Id, report.Output, now);
                 if (resolved is not null)
                 {
                     _owner.Log.LogInformation(
                         "Workflow {Id} resolved feedback {FeedbackId} via task {TaskId}",
-                        _owner.GrainKey, feedbackId, currentTask.Id);
+                    _owner.GrainKey, feedbackId, currentTask.Id);
                 }
             }
 
@@ -77,6 +83,9 @@ internal sealed class WorkflowWorkLifecycle
                     "Workflow {Id} task {TaskId} produced {Count} follow-up tasks",
                     _owner.GrainKey, actionAttemptId, taskAttempts.Count);
             }
+
+            if (resolved is not null)
+                events.AddRange(run.Rerun(now));
         }
         else
         {

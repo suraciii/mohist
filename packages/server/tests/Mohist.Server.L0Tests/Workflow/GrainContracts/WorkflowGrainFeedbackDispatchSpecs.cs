@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Workflow.Definition;
 using Xunit;
@@ -153,8 +154,11 @@ public sealed class WorkflowGrainFeedbackDispatchSpecs
         Assert.Null(feedback.ResolutionSummary);
         Assert.NotNull(feedback.ResolvedAt);
 
-        var rerunCheck = await arrangement.AssignAndClaimAsync();
-        Assert.Equal("checks", rerunCheck!.WorkType);
+        var rerunTask = await arrangement.AssignAndClaimAsync();
+        Assert.Equal("draft.s2.1", rerunTask!.Id);
+        Assert.Equal("task", rerunTask.WorkType);
+        Assert.DoesNotContain((await RequireRunAsync(arrangement)).CurrentStage().Tasks,
+            task => task.CausedByFeedbackId is not null);
     }
 
     [Fact]
@@ -217,6 +221,41 @@ public sealed class WorkflowGrainFeedbackDispatchSpecs
     }
 
     [Fact]
+    public async Task AwaitingApproval_RequestChanges_MultipleFeedbackTasks_StaysDispatchableUntilFinalTask()
+    {
+        var arrangement = await WorkflowGrainArrangement.CreateAsync(
+            _fixture,
+            "wr-feedback-multiple",
+            ApprovalStageWithFeedbackTasks(),
+            TimeProvider);
+        await DrivePlanToGateAsync(arrangement);
+
+        var feedbackId = await arrangement.Grain.RequestChangesAsync("apply and publish", "operator-1");
+        var approvalRequestCount = (await arrangement.Events.ListAsync(arrangement.RunId))
+            .Count(evt => evt.Envelope.Type == EventCatalog.ReverseDns.StageApprovalRequested);
+
+        var apply = (await arrangement.AssignAndClaimAsync())!;
+        Assert.Equal("apply-feedback.1", apply.Id);
+        await arrangement.ReportCompletedAsync(apply);
+
+        var afterApply = await RequireRunAsync(arrangement);
+        Assert.Equal(ApprovalFeedbackStatus.Open, afterApply.Feedback.Single(f => f.Id == feedbackId).Status);
+        var publish = (await arrangement.AssignAndClaimAsync())!;
+        Assert.Equal("publish-feedback.1", publish.Id);
+        Assert.Equal(approvalRequestCount, (await arrangement.Events.ListAsync(arrangement.RunId))
+            .Count(evt => evt.Envelope.Type == EventCatalog.ReverseDns.StageApprovalRequested));
+
+        await arrangement.ReportCompletedAsync(publish);
+
+        var resolved = await RequireRunAsync(arrangement);
+        Assert.Equal(ApprovalFeedbackStatus.Resolved, resolved.Feedback.Single(f => f.Id == feedbackId).Status);
+        Assert.Equal(2, resolved.CurrentStage().Attempt);
+        Assert.Equal("draft.s2.1", (await arrangement.AssignAndClaimAsync())!.Id);
+        Assert.Equal(approvalRequestCount, (await arrangement.Events.ListAsync(arrangement.RunId))
+            .Count(evt => evt.Envelope.Type == EventCatalog.ReverseDns.StageApprovalRequested));
+    }
+
+    [Fact]
     public async Task AwaitingApproval_RequestChanges_FeedbackTaskCompletesWithoutSummary_StillResolves()
     {
         var arrangement = await ArrangeAsync("wr-feedback-no-summary");
@@ -264,6 +303,10 @@ public sealed class WorkflowGrainFeedbackDispatchSpecs
 
         var feedbackTask = (await arrangement.AssignAndClaimAsync())!;
         await arrangement.ReportCompletedAsync(feedbackTask);
+
+        var rerunTask = (await arrangement.AssignAndClaimAsync())!;
+        Assert.Equal("draft.s2.1", rerunTask.Id);
+        await arrangement.ReportCompletedAsync(rerunTask);
 
         var rerunCheck = (await arrangement.AssignAndClaimAsync())!;
         await arrangement.ReportChecksPassAsync(rerunCheck, "plan-ok");
@@ -342,5 +385,22 @@ public sealed class WorkflowGrainFeedbackDispatchSpecs
                 ["session"] = JsonSerializer.SerializeToElement("plan"),
                 ["prompt"] = JsonSerializer.SerializeToElement("${{ prompts.apply-feedback }}"),
             })
+    ])));
+
+    private static WorkflowDefinition ApprovalStageWithFeedbackTasks() => new(
+    [
+        new StageDefinition(
+            "plan",
+            [new("draft", "Draft", "spec/task")],
+            [new("plan-ok", "Plan OK", "spec/check")],
+            RequiresApproval: true),
+        new StageDefinition(
+            "build",
+            [new("compile", "Compile", "spec/task")],
+            [new("build-ok", "Build OK", "spec/check")]),
+    ],
+    Approval: new ApprovalConfig(new ApprovalFeedbackConfig([
+        new TaskDefinition("apply-feedback", "Apply approval feedback", "spec/task"),
+        new TaskDefinition("publish-feedback", "Publish approval feedback", "spec/task"),
     ])));
 }
