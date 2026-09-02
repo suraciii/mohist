@@ -158,6 +158,14 @@ func skillRoot(deps Dependencies) string {
 
 func directoryExists(path string) bool { info, err := os.Stat(path); return err == nil && info.IsDir() }
 
+func canonicalGoCLIPath(repoRoot string) string {
+	return filepath.Join(repoRoot, "packages", "go", "mohist-cli")
+}
+
+func canonicalGoSkillDataPath(repoRoot string) string {
+	return filepath.Join(canonicalGoCLIPath(repoRoot), "skill-data")
+}
+
 func discoverSkills(root string) ([]localSkill, error) {
 	if root == "" {
 		return nil, errors.New("no packaged skill assets found; run 'mo update' or 'scripts/install-mo.sh'")
@@ -452,7 +460,7 @@ func syncSkills(ctx context.Context, deps Dependencies, repoRoot, source string,
 		if repoRoot == "" {
 			repoRoot = deps.CurrentDirectory()
 		}
-		source = filepath.Join(repoRoot, "packages", "go", "mohist-cli", "skill-data")
+		source = canonicalGoSkillDataPath(repoRoot)
 	}
 	home, err := deps.HomeDir()
 	if err != nil {
@@ -473,44 +481,120 @@ func syncDirectory(ctx context.Context, deps Dependencies, source, target, requi
 		writeError(deps.Stderr, fmt.Errorf("source skill-data directory %q is missing", source))
 		return ExitOperation
 	}
-	parent := filepath.Dir(target)
-	if err := deps.MkdirAll(parent, 0o700); err != nil {
-		writeError(deps.Stderr, err)
-		return ExitOperation
-	}
-	temp, err := os.MkdirTemp(parent, "skill-data.tmp-")
+	temp, err := stageDirectory(ctx, deps, source, target, required)
 	if err != nil {
 		writeError(deps.Stderr, err)
 		return ExitOperation
 	}
-	keep := true
-	defer func() {
-		if keep {
-			_ = deps.RemoveAll(temp)
-		}
-	}()
-	if err := copyTree(ctx, source, temp, deps); err != nil {
+	if err := commitStaged(ctx, deps, []stagedArtifact{{temp: temp, target: target}}); err != nil {
 		writeError(deps.Stderr, err)
 		return ExitOperation
 	}
-	found, _ := filepath.Glob(filepath.Join(temp, "*", required))
-	if len(found) == 0 {
-		writeError(deps.Stderr, errors.New("prepared skill-data contains no skill assets"))
-		return ExitOperation
-	}
-	if directoryExists(target) {
-		if err := deps.RemoveAll(target); err != nil {
-			writeError(deps.Stderr, err)
-			return ExitOperation
-		}
-	}
-	if err := deps.Rename(temp, target); err != nil {
-		writeError(deps.Stderr, err)
-		return ExitOperation
-	}
-	keep = false
 	fmt.Fprintf(deps.Stdout, "Synchronized managed skill assets to %s\n", target)
 	return ExitOK
+}
+
+type stagedArtifact struct {
+	temp   string
+	target string
+}
+
+func stageDirectory(ctx context.Context, deps Dependencies, source, target, _ string) (string, error) {
+	parent := filepath.Dir(target)
+	if err := deps.MkdirAll(parent, 0o700); err != nil {
+		return "", err
+	}
+	temp, err := os.MkdirTemp(parent, "skill-data.tmp-")
+	if err != nil {
+		return "", err
+	}
+	if err := copyTree(ctx, source, temp, deps); err != nil {
+		_ = deps.RemoveAll(temp)
+		return "", err
+	}
+	prepared, err := discoverSkills(temp)
+	if err != nil {
+		_ = deps.RemoveAll(temp)
+		return "", err
+	}
+	if len(prepared) == 0 {
+		_ = deps.RemoveAll(temp)
+		return "", errors.New("prepared skill-data contains no skill assets")
+	}
+	return temp, nil
+}
+
+func commitStaged(ctx context.Context, deps Dependencies, artifacts []stagedArtifact) error {
+	type backup struct {
+		artifact stagedArtifact
+		path     string
+		created  bool
+	}
+	backups := make([]backup, len(artifacts))
+	committed := make([]bool, len(artifacts))
+	cleanup := func() {
+		for _, artifact := range artifacts {
+			_ = deps.RemoveAll(artifact.temp)
+		}
+		for _, item := range backups {
+			if item.path != "" {
+				_ = deps.RemoveAll(item.path)
+			}
+		}
+	}
+	rollback := func() {
+		for i := len(artifacts) - 1; i >= 0; i-- {
+			if committed[i] {
+				_ = deps.RemoveAll(artifacts[i].target)
+			}
+		}
+		for i := len(backups) - 1; i >= 0; i-- {
+			if backups[i].created {
+				_ = deps.Rename(backups[i].path, backups[i].artifact.target)
+			}
+		}
+		cleanup()
+	}
+	for i, artifact := range artifacts {
+		backups[i].artifact = artifact
+		if _, err := os.Stat(artifact.target); err == nil {
+			backupPath, err := temporaryBackupPath(artifact.target)
+			if err != nil {
+				rollback()
+				return err
+			}
+			backups[i].path = backupPath
+			if err := deps.Rename(artifact.target, backupPath); err != nil {
+				rollback()
+				return err
+			}
+			backups[i].created = true
+		}
+	}
+	for i, artifact := range artifacts {
+		if err := deps.Rename(artifact.temp, artifact.target); err != nil {
+			rollback()
+			return err
+		}
+		committed[i] = true
+	}
+	if err := ctx.Err(); err != nil {
+		rollback()
+		return err
+	}
+	cleanup()
+	return nil
+}
+
+func temporaryBackupPath(target string) (string, error) {
+	directory, err := os.MkdirTemp(filepath.Dir(target), ".mohist-backup-")
+	if err != nil {
+		return "", err
+	}
+	if err := os.Remove(directory); err != nil {
+		return "", err
+	}
+	return directory, nil
 }
 
 func copyTree(ctx context.Context, source, target string, deps Dependencies) error {
@@ -668,7 +752,8 @@ func updateCLI(ctx context.Context, deps Dependencies, repoRoot, explicit string
 		writeError(deps.Stderr, err)
 		return ExitOperation
 	}
-	if err := deps.Execute(ctx, "go", []string{"-C", filepath.Join(repoRoot, "packages", "go", "mohist-cli"), "build", "-tags", "netgo,osusergo", "-trimpath", "-buildvcs=false", "-o", temp, "./cmd/mo"}); err != nil {
+	goCLI := canonicalGoCLIPath(repoRoot)
+	if err := deps.Execute(ctx, "go", []string{"-C", goCLI, "build", "-tags", "netgo,osusergo", "-trimpath", "-buildvcs=false", "-o", temp, "./cmd/mo"}); err != nil {
 		_ = deps.RemoveAll(temp)
 		writeError(deps.Stderr, err)
 		return ExitOperation
@@ -678,11 +763,22 @@ func updateCLI(ctx context.Context, deps Dependencies, repoRoot, explicit string
 		writeError(deps.Stderr, err)
 		return ExitOperation
 	}
-	if err := deps.Rename(temp, target); err != nil {
+	managedHome, err := deps.HomeDir()
+	if err != nil {
 		_ = deps.RemoveAll(temp)
 		writeError(deps.Stderr, err)
 		return ExitOperation
 	}
-	source := filepath.Join(repoRoot, "packages", "go", "mohist-cli", "skill-data")
-	return syncSkills(ctx, deps, repoRoot, source, false)
+	managed := filepath.Join(managedHome, ".mohist", "cli", "skill-data")
+	skillTemp, err := stageDirectory(ctx, deps, canonicalGoSkillDataPath(repoRoot), managed, "SKILL.md")
+	if err != nil {
+		_ = deps.RemoveAll(temp)
+		writeError(deps.Stderr, err)
+		return ExitOperation
+	}
+	if err := commitStaged(ctx, deps, []stagedArtifact{{temp: skillTemp, target: managed}, {temp: temp, target: target}}); err != nil {
+		writeError(deps.Stderr, err)
+		return ExitOperation
+	}
+	return ExitOK
 }
