@@ -56,6 +56,10 @@ type Dependencies struct {
 	CurrentDirectory func() string
 	EventTail        EventTail
 	HealthProbe      HealthProbe
+	MkdirAll         func(string, os.FileMode) error
+	RemoveAll        func(string) error
+	Rename           func(string, string) error
+	Chmod            func(string, os.FileMode) error
 }
 
 type Config struct {
@@ -167,6 +171,18 @@ func ResolveConfig(deps Dependencies) (Config, error) {
 	if deps.CurrentDirectory == nil {
 		deps.CurrentDirectory = defaults.CurrentDirectory
 	}
+	if deps.MkdirAll == nil {
+		deps.MkdirAll = os.MkdirAll
+	}
+	if deps.RemoveAll == nil {
+		deps.RemoveAll = os.RemoveAll
+	}
+	if deps.Rename == nil {
+		deps.Rename = os.Rename
+	}
+	if deps.Chmod == nil {
+		deps.Chmod = os.Chmod
+	}
 
 	cfg := Config{ServerURL: DefaultServerURL, OperatorID: DefaultOperatorID}
 	if value, ok := deps.Lookup("MOHIST_SERVER_URL"); ok && strings.TrimSpace(value) != "" {
@@ -261,6 +277,18 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 		ctx = context.Background()
 	}
 	defaults := defaultDependencies()
+	if deps.MkdirAll == nil {
+		deps.MkdirAll = os.MkdirAll
+	}
+	if deps.RemoveAll == nil {
+		deps.RemoveAll = os.RemoveAll
+	}
+	if deps.Rename == nil {
+		deps.Rename = os.Rename
+	}
+	if deps.Chmod == nil {
+		deps.Chmod = os.Chmod
+	}
 	if deps.Stdout == nil {
 		deps.Stdout = defaults.Stdout
 	}
@@ -337,6 +365,9 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	}
 	if command.kind == "info" {
 		return runInfo(deps, command)
+	}
+	if strings.HasPrefix(command.kind, "skill-") || strings.HasPrefix(command.kind, "install-") || strings.HasPrefix(command.kind, "update-") {
+		return runMaintenance(ctx, deps, command)
 	}
 	if command.kind == "ops-service" || command.kind == "ops-notification" {
 		return runOperations(ctx, deps, nil, command)
@@ -418,6 +449,9 @@ func parse(args []string) (command, error) {
 	}
 	if args[0] == "info" {
 		return parseInfo(args[1:])
+	}
+	if args[0] == "skill" || args[0] == "install" || args[0] == "update" {
+		return parseMaintenance(args[0], args[1:])
 	}
 	if args[0] == "auth" {
 		return parseAuth(args[1:])
