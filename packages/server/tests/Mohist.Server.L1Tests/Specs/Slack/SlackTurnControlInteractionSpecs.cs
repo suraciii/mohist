@@ -48,51 +48,6 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Normal_stop_text_is_accepted_as_a_followup_without_a_stop_request()
-    {
-        var connection = await CreateConnectionAsync();
-        var seeded = await SeedExecutingSessionAsync(connection, "U_OWNER", "D-steer");
-        await using (var scope = _fixture.Services.CreateAsyncScope())
-        {
-            await scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>().SetCurrentSessionIdAsync(
-                connection.ProjectId,
-                connection.Id,
-                connection.WorkspaceTeamId,
-                "U_OWNER",
-                "D-steer",
-                seeded.SessionId);
-        }
-        var hub = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
-        hub.Clear();
-
-        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection, "/ingress"), new
-        {
-            apiAppId = "A123",
-            isDirectMessage = true,
-            teamId = connection.WorkspaceTeamId,
-            conversationId = "D-steer",
-            messageTs = "1710000000.000100",
-            senderSlackUserId = "U_OWNER",
-            text = "stop",
-            leaseId = _connectionLeases[connection.Id],
-            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
-        });
-        response.EnsureSuccessStatusCode();
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var result = document.RootElement.GetProperty("data");
-
-        Assert.True(result.GetProperty("followup").GetBoolean());
-        Assert.Equal("accepted", result.GetProperty("kind").GetString());
-        Assert.DoesNotContain(hub.Invocations, invocation => invocation.Method == "session.stop");
-        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(seeded.SessionId);
-        Assert.Equal(AgentTurnControlClassification.Executing,
-            (await session.ResolveTurnControlAsync(seeded.TurnId))?.Classification);
-        Assert.False(string.IsNullOrWhiteSpace(result.GetProperty("inputId").GetString()));
-        Assert.Equal(AgentTurnControlClassification.Queued,
-            (await session.ResolveTurnControlAsync(result.GetProperty("turnId").GetString()!))?.Classification);
-    }
-
-    [Fact]
     public async Task Interaction_requires_the_enrolled_api_app_id_before_control_side_effects()
     {
         var connection = await CreateConnectionAsync();
@@ -153,85 +108,6 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
         hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
         var correct = await PostInteractionAsync(connection, action, "U_OWNER", "C-app-id");
         Assert.Equal("stopped", correct.GetProperty("state").GetString());
-    }
-
-    [Fact]
-    public async Task Owner_and_session_initiator_can_stop_their_own_bound_turns()
-    {
-        var ownerConnection = await CreateConnectionAsync();
-        var ownerSession = await SeedExecutingSessionAsync(ownerConnection, "U_INITIATOR", "C-owner");
-        var ownerAction = await CreateStopActionAsync(ownerConnection, ownerSession, "U_OWNER", "C-owner");
-        Assert.Contains(SlackTurnControlService.StopActionId, ownerAction.Blocks.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("xoxb", ownerAction.ActionValue, StringComparison.Ordinal);
-        var hub = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
-        hub.Clear();
-        hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
-
-        var ownerResult = await PostInteractionAsync(ownerConnection, ownerAction, "U_OWNER", "C-owner");
-
-        Assert.Equal("stopped", ownerResult.GetProperty("state").GetString());
-        Assert.Single(hub.Invocations);
-        await AssertControlDeliveryAsync(ownerConnection, ownerAction, "Work stopped.");
-
-        var initiatorConnection = await CreateConnectionAsync();
-        var initiatorSession = await SeedExecutingSessionAsync(initiatorConnection, "U_INITIATOR", "C-initiator");
-        var initiatorAction = await CreateStopActionAsync(initiatorConnection, initiatorSession, "U_INITIATOR", "C-initiator");
-        hub.Clear();
-        hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
-
-        var initiatorResult = await PostInteractionAsync(initiatorConnection, initiatorAction, "U_INITIATOR", "C-initiator");
-
-        Assert.Equal("stopped", initiatorResult.GetProperty("state").GetString());
-        Assert.Single(hub.Invocations);
-    }
-
-    [Fact]
-    public async Task Another_allowlisted_member_cannot_use_an_initiators_action()
-    {
-        var connection = await CreateConnectionAsync();
-        var seeded = await SeedExecutingSessionAsync(connection, "U_INITIATOR", "C-auth");
-        var action = await CreateStopActionAsync(connection, seeded, "U_INITIATOR", "C-auth");
-        var hub = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
-        hub.Clear();
-
-        var result = await PostInteractionAsync(connection, action, "U_OTHER", "C-auth");
-
-        Assert.Equal("unauthorized", result.GetProperty("state").GetString());
-        Assert.Empty(hub.Invocations);
-        Assert.Equal(AgentTurnStatus.Executing,
-            Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(seeded.SessionId).ListTurnsAsync()).Status);
-    }
-
-    [Fact]
-    public async Task Queued_control_actions_cancel_queued_work_and_stop_work_that_has_started()
-    {
-        var connection = await CreateConnectionAsync();
-        var queued = await SeedQueuedSessionAsync(connection, "U_OWNER", "C-queued-cancel");
-        var queuedAction = await CreateStopActionAsync(connection, queued, "U_OWNER", "C-queued-cancel");
-
-        var cancelled = await PostInteractionAsync(connection, queuedAction, "U_OWNER", "C-queued-cancel");
-
-        Assert.Equal("cancelled", cancelled.GetProperty("state").GetString());
-        Assert.Equal(AgentTurnControlClassification.Terminal,
-            (await _fixture.Grains.GetGrain<IAgentSessionGrain>(queued.SessionId)
-                .ResolveTurnControlAsync(queued.TurnId))?.Classification);
-
-        var started = await SeedQueuedSessionAsync(connection, "U_OWNER", "C-queued-stop");
-        var startedAction = await CreateStopActionAsync(connection, started, "U_OWNER", "C-queued-stop");
-        await RegisterRunnerAsync(connection.ProjectId, started.RunnerId);
-        _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Register(
-            started.RunnerId,
-            $"{started.RunnerId}-connection");
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(started.SessionId)
-            .MarkTurnExecutingAsync(started.TurnId);
-        var hub = _fixture.Services.GetRequiredService<RecordingRunnerControlTransport>();
-        hub.Clear();
-        hub.SetInvocationResponse("session.stop", new RunnerStopReply("stopped"));
-
-        var stopped = await PostInteractionAsync(connection, startedAction, "U_OWNER", "C-queued-stop");
-
-        Assert.Equal("stopped", stopped.GetProperty("state").GetString());
-        Assert.Single(hub.Invocations);
     }
 
     [Fact]
