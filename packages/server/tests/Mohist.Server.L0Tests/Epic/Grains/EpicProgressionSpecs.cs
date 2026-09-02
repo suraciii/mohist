@@ -13,7 +13,7 @@ using Mohist.Server.Issue.Grains;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Epic.Grain;
+namespace Mohist.Server.L0Tests.Epic.Grains;
 
 public class EpicProgressionSpecs : EpicProgressionTestSupport
 {

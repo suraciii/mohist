@@ -238,7 +238,7 @@ public class IssueApiSpecs
         // route returns 400 Bad Request. The underlying blocker
         // projection (IssueQuerier.GetAsync.Blocker = waiting-for)
         // and start-readiness domain logic are sunk into
-        // IssueStartReadinessProjectionSpecs + IssueStartReadinessDomainSpecs
+        // IssueStartReadinessProjectionSpecs + IssueStartReadinessDomainTests
         // (batch A); the route just propagates the rejection.
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"web-prereq-gate-{Guid.NewGuid():N}");
 

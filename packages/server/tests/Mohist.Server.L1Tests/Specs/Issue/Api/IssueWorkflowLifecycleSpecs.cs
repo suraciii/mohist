@@ -267,25 +267,6 @@ public class IssueWorkflowLifecycleSpecs
         Assert.Contains("workflow_profile_locked", body, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task StartIssue_WithIncompletePrerequisite_IsRejectedByWorkflowGate()
-    {
-        // Contract: POST /api/projects/{ref}/issues/{n}/start on an
-        // issue with an undelivered prerequisite returns 400. The
-        // grain-level prereq-blocks-StartWorkAsync assertion is sunk
-        // into IssueWorkflowLifecycleGrainSpecs (batch C).
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"web-prereq-gate-{Guid.NewGuid():N}");
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var prereq = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Gate prereq", projectId = project.Id, isDraft = false });
-        var dependent = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Gate dependent", projectId = project.Id, isDraft = false });
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{dependent.Number}/prerequisites", new { prerequisiteNumber = prereq.Number });
-
-        using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{dependent.Number}/start", null);
-
-        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
-    }
-
     private async Task<(string projectId, string projectName)> SeedProjectAsync()
     {
         var id = $"proj_{Guid.NewGuid():N}";

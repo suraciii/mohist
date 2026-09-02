@@ -3,11 +3,11 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
-using Mohist.Server.L1Tests.Support;
+using TestSqliteDatabase = Mohist.Server.L0Tests.Support.TestSqliteDatabase;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Sessions;
+namespace Mohist.Server.L0Tests.Sessions;
 
 public sealed class AgentRetryOperationStoreSpecs : IAsyncLifetime
 {

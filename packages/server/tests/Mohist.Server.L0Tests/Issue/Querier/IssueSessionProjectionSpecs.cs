@@ -22,8 +22,7 @@ namespace Mohist.Server.L0Tests.Issue.Querier;
 /// <c>MohistDbContext</c> + the transcript parts/turns tables so the
 /// projection is exercised against the production query path.
 ///
-/// Three calculation cases sunk from
-/// <c>Specs/Issue/Api/IssueSessionApiSpecs.cs</c> cover:
+/// Three calculation cases cover:
 /// <list type="bullet">
 /// <item><c>partCount</c> in the metadata envelope reflects the merged
 ///   transcript (message.delta batches fold together; tool_call.started
@@ -39,7 +38,7 @@ namespace Mohist.Server.L0Tests.Issue.Querier;
 /// </list>
 /// The route contract (404 unknown session, 200 metadata JSON shape with
 /// positive + negative field assertions, 200 transcript shape) stays in
-/// <c>IssueSessionApiSpecs</c>.
+/// <c>AgentSessionReadApiSpecs</c> and related session route Specs.
 /// </summary>
 [Collection("MohistDb")]
 public class IssueSessionProjectionSpecs
