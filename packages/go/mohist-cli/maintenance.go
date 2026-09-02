@@ -158,6 +158,14 @@ func skillRoot(deps Dependencies) string {
 
 func directoryExists(path string) bool { info, err := os.Stat(path); return err == nil && info.IsDir() }
 
+func canonicalGoCLIPath(repoRoot string) string {
+	return filepath.Join(repoRoot, "packages", "go", "mohist-cli")
+}
+
+func canonicalGoSkillDataPath(repoRoot string) string {
+	return filepath.Join(canonicalGoCLIPath(repoRoot), "skill-data")
+}
+
 func discoverSkills(root string) ([]localSkill, error) {
 	if root == "" {
 		return nil, errors.New("no packaged skill assets found; run 'mo update' or 'scripts/install-mo.sh'")
@@ -452,7 +460,7 @@ func syncSkills(ctx context.Context, deps Dependencies, repoRoot, source string,
 		if repoRoot == "" {
 			repoRoot = deps.CurrentDirectory()
 		}
-		source = filepath.Join(repoRoot, "packages", "go", "mohist-cli", "skill-data")
+		source = canonicalGoSkillDataPath(repoRoot)
 	}
 	home, err := deps.HomeDir()
 	if err != nil {
@@ -493,8 +501,12 @@ func syncDirectory(ctx context.Context, deps Dependencies, source, target, requi
 		writeError(deps.Stderr, err)
 		return ExitOperation
 	}
-	found, _ := filepath.Glob(filepath.Join(temp, "*", required))
-	if len(found) == 0 {
+	prepared, err := discoverSkills(temp)
+	if err != nil {
+		writeError(deps.Stderr, err)
+		return ExitOperation
+	}
+	if len(prepared) == 0 {
 		writeError(deps.Stderr, errors.New("prepared skill-data contains no skill assets"))
 		return ExitOperation
 	}
@@ -668,7 +680,8 @@ func updateCLI(ctx context.Context, deps Dependencies, repoRoot, explicit string
 		writeError(deps.Stderr, err)
 		return ExitOperation
 	}
-	if err := deps.Execute(ctx, "go", []string{"-C", filepath.Join(repoRoot, "packages", "go", "mohist-cli"), "build", "-tags", "netgo,osusergo", "-trimpath", "-buildvcs=false", "-o", temp, "./cmd/mo"}); err != nil {
+	goCLI := canonicalGoCLIPath(repoRoot)
+	if err := deps.Execute(ctx, "go", []string{"-C", goCLI, "build", "-tags", "netgo,osusergo", "-trimpath", "-buildvcs=false", "-o", temp, "./cmd/mo"}); err != nil {
 		_ = deps.RemoveAll(temp)
 		writeError(deps.Stderr, err)
 		return ExitOperation
@@ -678,11 +691,14 @@ func updateCLI(ctx context.Context, deps Dependencies, repoRoot, explicit string
 		writeError(deps.Stderr, err)
 		return ExitOperation
 	}
+	if code := syncSkills(ctx, deps, repoRoot, canonicalGoSkillDataPath(repoRoot), false); code != ExitOK {
+		_ = deps.RemoveAll(temp)
+		return code
+	}
 	if err := deps.Rename(temp, target); err != nil {
 		_ = deps.RemoveAll(temp)
 		writeError(deps.Stderr, err)
 		return ExitOperation
 	}
-	source := filepath.Join(repoRoot, "packages", "go", "mohist-cli", "skill-data")
-	return syncSkills(ctx, deps, repoRoot, source, false)
+	return ExitOK
 }
