@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-test('root scripts expose the static Go CLI build without changing C# install', () => {
+test('root scripts expose the static Go CLI build and installer', () => {
   const packageJson = JSON.parse(readFileSync(resolve(repositoryRoot, 'package.json'), 'utf8')) as {
     scripts: Record<string, string>
   }
@@ -21,7 +21,7 @@ test('root scripts expose the static Go CLI build without changing C# install', 
   )
   assert.equal(
     packageJson.scripts['install:cli'],
-    'dotnet pack packages/cli/Mohist.Cli/Mohist.Cli.csproj -c Release -o ./nupkg && dotnet tool install -g Mohist.Cli --add-source ./nupkg',
+    'bash scripts/install-mo.sh',
   )
 })
 

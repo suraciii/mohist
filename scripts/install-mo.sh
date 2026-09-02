@@ -40,7 +40,7 @@ CGO_ENABLED=0 go -C packages/go/mohist-cli build \
 
 rm -rf "$SOURCE_SKILL_DATA"
 mkdir -p "$SOURCE_SKILL_DATA"
-cp -R "$REPO_ROOT/packages/cli/Mohist.Cli/skill-data/." "$SOURCE_SKILL_DATA/"
+cp -R "$REPO_ROOT/packages/go/mohist-cli/skill-data/." "$SOURCE_SKILL_DATA/"
 
 # 安装可执行文件
 if [ ! -f "$PUBLISH_DIR/mo" ]; then

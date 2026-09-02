@@ -149,7 +149,7 @@ func skillRoot(deps Dependencies) string {
 			return path
 		}
 	}
-	path := filepath.Join(deps.CurrentDirectory(), "packages", "cli", "Mohist.Cli", "skill-data")
+	path := filepath.Join(deps.CurrentDirectory(), "packages", "go", "mohist-cli", "skill-data")
 	if directoryExists(path) {
 		return path
 	}
@@ -452,7 +452,7 @@ func syncSkills(ctx context.Context, deps Dependencies, repoRoot, source string,
 		if repoRoot == "" {
 			repoRoot = deps.CurrentDirectory()
 		}
-		source = filepath.Join(repoRoot, "packages", "cli", "Mohist.Cli", "skill-data")
+		source = filepath.Join(repoRoot, "packages", "go", "mohist-cli", "skill-data")
 	}
 	home, err := deps.HomeDir()
 	if err != nil {
@@ -683,6 +683,6 @@ func updateCLI(ctx context.Context, deps Dependencies, repoRoot, explicit string
 		writeError(deps.Stderr, err)
 		return ExitOperation
 	}
-	source := filepath.Join(repoRoot, "packages", "cli", "Mohist.Cli", "skill-data")
+	source := filepath.Join(repoRoot, "packages", "go", "mohist-cli", "skill-data")
 	return syncSkills(ctx, deps, repoRoot, source, false)
 }

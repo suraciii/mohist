@@ -569,7 +569,7 @@ Prometheus or Uptime Kuma.
 - **Trust Repository content.** Agents read the code. Do not store secrets or
   tokens in a Repository.
 
-Implementation source: `mo install` under `packages/cli/` and `scripts/` for
+Implementation source: `mo install` under `packages/go/mohist-cli/` and `scripts/` for
 systemd; root `Dockerfile` and `docker-compose.yml` for Docker.
 
 ## Implementation Gaps
