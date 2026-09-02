@@ -185,7 +185,7 @@ public class MohistOpenTelemetryRegistrationSpecs
     /// Minimal <see cref="OpenTelemetry.BaseProcessor{T}"/> that records
     /// every <see cref="Activity"/> the provider's pipeline emits. Lets
     /// unit tests assert the pipeline is alive (and is not alive) without
-    /// standing up a WebApplicationFactory or a real OTLP collector.
+    /// standing up an application host or a real OTLP collector.
     /// </summary>
     private sealed class RecordingActivityProcessor : OpenTelemetry.BaseProcessor<Activity>
     {
