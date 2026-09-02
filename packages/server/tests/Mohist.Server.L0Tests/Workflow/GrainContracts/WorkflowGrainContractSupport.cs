@@ -350,7 +350,16 @@ internal sealed record WorkflowGrainArrangement(
             runId,
             timeProvider);
         await grain.OnActivateAsync(CancellationToken.None);
-        await grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, issueNumber, null));
+        if (issueNumber > 0)
+        {
+            await grain.EnsureStartedAsync(new WorkflowIssueContext(projectId, issueNumber, null));
+        }
+        else
+        {
+            await grain.StartAsync(new WorkflowStartInput(
+                Metadata: new WorkflowRunMetadata(Name: null, CreatedAt: Fixed, ProjectId: projectId),
+                VerificationCommand: "true"));
+        }
         return new WorkflowGrainArrangement(
             grain,
             store,

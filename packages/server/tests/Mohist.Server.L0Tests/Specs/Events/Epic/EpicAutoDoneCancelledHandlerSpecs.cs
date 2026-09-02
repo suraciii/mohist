@@ -20,7 +20,7 @@ using Mohist.Server.TestSupport;
 using Orleans;
 using System.Text.Json;
 using Xunit;
-namespace Mohist.Server.L1Tests.Specs.Events;
+namespace Mohist.Server.L0Tests.Specs.Events;
 
 public class EpicAutoDoneCancelledHandlerSpecs : EpicAutoDoneHandlerTestSupport
 {
