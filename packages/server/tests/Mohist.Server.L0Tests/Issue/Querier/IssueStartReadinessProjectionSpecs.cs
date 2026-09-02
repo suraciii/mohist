@@ -17,7 +17,7 @@ namespace Mohist.Server.L0Tests.Issue.Querier;
 /// <c>Blocker</c>. The querier resolves the read-model via
 /// <c>IssueQuerier.GetAsync</c> + <c>IssueQuerier.ListAsync</c>; the
 /// projection rules mirror the pure-domain decisions in
-/// <see cref="Mohist.Server.L0Tests.Issue.Domain.IssueStartReadinessDomainSpecs"/>
+/// <see cref="Mohist.Server.L0Tests.Issue.Domain.IssueStartReadinessDomainTests"/>
 /// but exercised through the read-model instead of the aggregate.
 /// </summary>
 [Collection("MohistDb")]
