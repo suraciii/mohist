@@ -256,15 +256,7 @@ public sealed class AgentSessionRetryService : IScopedService
             : null;
 
         var replyProvenance = operation.ReplyProvenance ?? provenance;
-        var origin = new ConnectionLaunchOrigin(
-            replyProvenance.ConnectionId
-                ?? throw new InvalidOperationException("Retry target has no durable Connection identity."),
-            replyProvenance.WorkspaceId,
-            replyProvenance.MemberId,
-            replyProvenance.ConversationId,
-            replyProvenance.MessageId,
-            replyProvenance.BoundThreadRootMessageId ?? replyProvenance.ThreadId,
-            replyProvenance.OriginMarker);
+        var origin = BuildConnectionLaunchOrigin(replyProvenance);
         var launch = await _launcher.LaunchConnectionAsync(
             agent,
             input.Text,
@@ -300,6 +292,17 @@ public sealed class AgentSessionRetryService : IScopedService
             string.Equals(candidate.Id, command.TurnId, StringComparison.Ordinal));
         return new RetryTarget(command.ProjectId, record.Session, turn, inputs);
     }
+
+    internal static ConnectionLaunchOrigin BuildConnectionLaunchOrigin(AgentSessionInputProvenance provenance) =>
+        new(
+            provenance.ConnectionId
+                ?? throw new InvalidOperationException("Retry target has no durable Connection identity."),
+            provenance.WorkspaceId,
+            provenance.MemberId,
+            provenance.ConversationId,
+            provenance.MessageId,
+            provenance.BoundThreadRootMessageId ?? provenance.ThreadId,
+            provenance.OriginMarker);
 
     private static bool IsLaunchTurn(AgentTurnRecord turn) => !string.IsNullOrWhiteSpace(turn.JobId);
 
