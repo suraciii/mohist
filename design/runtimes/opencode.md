@@ -357,15 +357,28 @@ explicit denials remain denied; `ask` delegates one operation to the caller.
 For a `permission.asked` event belonging to the current headless execution,
 reply `once` through the SDK.
 
-Route the event by current physical Session ID and, when present, matching
-`workDir`. Reply at most once per request ID in one execution. The reply changes
-only that permission request. It does not write OpenCode configuration, Session
-permission rules, or Workflow Approval.
+Ignore events without a valid, non-empty request ID. Explicit provider denials
+do not trigger an auto-reply.
 
-If reply throws or does not confirm success, abort immediately. After stop
-confirmation, return `permission-required`, not `interrupted`. OpenCode owns
-per-tool timeout and retry; Mohist owns the execution deadline and abort
-confirmation.
+Route the event using the current turn's `workDir` and parent Runtime Session ID.
+When `directory` is present, it must exactly match `workDir`; the matching event
+Session may be a same-directory child Session in the current turn's ephemeral
+runtime-local tree. When `directory` is missing, use the event Session ID, or the
+payload Session ID when the event-level ID is absent; that ID must equal the
+current parent Runtime Session ID. A missing directory is never a wildcard.
+Directory routing is supplemental evidence, not execution ownership.
+
+Reply `once` through `permission.reply` at most once per request ID in one
+execution. If the SDK reply throws or does not confirm success, abort the
+current parent Session and return `permission-required` through the existing
+cleanup path. The reply changes only that permission request. Permission
+handling does not create a persistent permission registry, Workspace rule,
+Runtime Session tree, or directory-level execution lock, and it does not write
+OpenCode configuration, Session permission rules, or Workflow Approval.
+
+After stop confirmation, return `permission-required`, not `interrupted`.
+OpenCode owns per-tool timeout and retry; Mohist owns the execution deadline
+and abort confirmation.
 
 Normalize SDK errors to `invalid-input`, `unavailable-runtime`,
 `missing-session`, `incompatible-runtime`, `permission-required`,
