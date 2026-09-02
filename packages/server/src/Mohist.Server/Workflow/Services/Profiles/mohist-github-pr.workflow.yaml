@@ -146,6 +146,7 @@ stages:
     with:
       name: mohist/reviewer
       session: check
+      timeout: 1800000
       prompt: ${{ prompts.review }}
     expect:
       files:
