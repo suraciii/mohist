@@ -785,6 +785,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         if (_run is null) return;
         try
         {
+            events = await _stageInitializer.InitializeFreshStagesAsync(events);
             _runDirty = true;
             await _runStore.SaveWithArtifactsAsync(_run, events, artifacts);
             _runDirty = false;

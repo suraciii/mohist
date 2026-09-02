@@ -1,5 +1,8 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.TestSupport;
@@ -107,13 +110,54 @@ public sealed class WorkflowGrainFeedbackRerunSpecs
         Assert.Null(visibleFeedback.Resolution);
     }
 
+    [Fact]
+    public async Task ArtifactBearingFinalFeedbackTask_InitializesReplacementStageAndRetainsArtifact()
+    {
+        var arrangement = await ArrangeAsync(
+            "wr-feedback-rerun-artifact",
+            new StageDefinition(
+                "check",
+                [new("review", "Review", "spec/review")],
+                [new("repository-check", "Repository check", "spec/repository-check")],
+                RequiresApproval: true),
+            finalFeedbackArtifacts: new TaskArtifactCapture([
+                new TaskArtifactDeclaration("feedback.md")
+            ]));
+        await DriveToApprovalAsync(arrangement);
+
+        await arrangement.Grain.RequestChangesAsync("publish the correction", "operator-1");
+        var apply = (await arrangement.AssignAndClaimAsync())!;
+        await arrangement.ReportCompletedAsync(apply);
+
+        var publish = (await arrangement.AssignAndClaimAsync())!;
+        var actionAttemptId = (await RequireRunAsync(arrangement)).CurrentStage().RunningTask!.Id;
+        var uploadId = await SeedPendingUploadAsync(
+            arrangement.RunId, publish.Id!, actionAttemptId, "feedback.md");
+        await arrangement.ReportTaskResultAsync(
+            publish,
+            output: null,
+            addTasks: null,
+            artifactUploadIds: [uploadId]);
+
+        var replacement = await RequireRunAsync(arrangement);
+        Assert.True(replacement.CurrentStage().Initialized);
+        Assert.Equal("review.s2.1", (await arrangement.AssignAndClaimAsync())!.Id);
+
+        await using var db = CreateDb();
+        var artifact = await db.WorkflowArtifacts.SingleAsync(a => a.WorkflowRunId == arrangement.RunId);
+        Assert.Equal(uploadId, artifact.SourceUploadId);
+        Assert.Equal(actionAttemptId, artifact.ActionAttemptId);
+        Assert.Equal("feedback.md", artifact.Path);
+    }
+
     private async Task AssertFeedbackRerunAsync(
         string runId,
         StageDefinition stage,
         IReadOnlyList<string> originalTaskIds,
-        IReadOnlyList<string> checkNames)
+        IReadOnlyList<string> checkNames,
+        TaskArtifactCapture? finalFeedbackArtifacts = null)
     {
-        var arrangement = await ArrangeAsync(runId, stage);
+        var arrangement = await ArrangeAsync(runId, stage, finalFeedbackArtifacts);
         await DriveToApprovalAsync(arrangement);
 
         var initial = await RequireRunAsync(arrangement);
@@ -186,11 +230,14 @@ public sealed class WorkflowGrainFeedbackRerunSpecs
                 .Count(evt => evt.Envelope.Type == EventCatalog.ReverseDns.StageApprovalRequested));
     }
 
-    private async Task<WorkflowGrainArrangement> ArrangeAsync(string runId, StageDefinition stage) =>
+    private async Task<WorkflowGrainArrangement> ArrangeAsync(
+        string runId,
+        StageDefinition stage,
+        TaskArtifactCapture? finalFeedbackArtifacts = null) =>
         await WorkflowGrainArrangement.CreateAsync(
             _fixture,
             runId,
-            new WorkflowDefinition([stage], ApprovalDefinition()),
+            new WorkflowDefinition([stage], ApprovalDefinition(finalFeedbackArtifacts)),
             TimeProvider);
 
     private static async Task DriveToApprovalAsync(WorkflowGrainArrangement arrangement)
@@ -209,11 +256,45 @@ public sealed class WorkflowGrainFeedbackRerunSpecs
         }
     }
 
-    private static ApprovalConfig ApprovalDefinition() =>
+    private static ApprovalConfig ApprovalDefinition(TaskArtifactCapture? finalFeedbackArtifacts = null) =>
         new(new ApprovalFeedbackConfig([
             new TaskDefinition("apply-feedback", "Apply approval feedback", "spec/feedback-apply"),
-            new TaskDefinition("publish-feedback", "Publish approval feedback", "spec/feedback-publish"),
+            new TaskDefinition("publish-feedback", "Publish approval feedback", "spec/feedback-publish", Artifacts: finalFeedbackArtifacts),
         ]));
+
+    private async Task<string> SeedPendingUploadAsync(
+        string workflowRunId,
+        string workId,
+        string actionAttemptId,
+        string path)
+    {
+        await using var db = CreateDb();
+        var uploadId = $"artup_{Guid.NewGuid():N}";
+        db.WorkflowArtifactPendingUploads.Add(new WorkflowArtifactPendingUploadRow
+        {
+            UploadId = uploadId,
+            WorkflowRunId = workflowRunId,
+            WorkId = workId,
+            ActionAttemptId = actionAttemptId,
+            Path = path,
+            ContentType = "text/markdown",
+            ContentHash = $"sha256:{Guid.NewGuid():N}",
+            Size = 42,
+            StoragePath = $"workflows/{workflowRunId}/tasks/{actionAttemptId}/artifacts/{uploadId}/content",
+            CreatedAt = TimeProvider.GetUtcNow(),
+            ExpiresAt = TimeProvider.GetUtcNow().AddDays(1),
+        });
+        await db.SaveChangesAsync();
+        return uploadId;
+    }
+
+    private MohistDbContext CreateDb()
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .Options;
+        return new MohistDbContext(options);
+    }
 
     private async Task<WorkflowRun> RequireRunAsync(WorkflowGrainArrangement arrangement) =>
         await arrangement.Store.LoadAsync(arrangement.RunId)
