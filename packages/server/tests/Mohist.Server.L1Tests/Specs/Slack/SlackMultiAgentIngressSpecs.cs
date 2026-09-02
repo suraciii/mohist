@@ -86,6 +86,9 @@ public sealed partial class SlackMultiAgentIngressSpecs : IAsyncLifetime
             .Where(row => (row.ConnectionId == connectionA.Id || row.ConnectionId == connectionB.Id)
                 && row.ConversationId == "C-multi-bot")
             .ToListAsync());
+        Assert.Empty(await db.AgentJobs
+            .Where(row => row.ProjectId == connectionA.ProjectId || row.ProjectId == connectionB.ProjectId)
+            .ToListAsync());
         Assert.Empty(await db.SlackThreadSessionMappings
             .Where(row => row.ConversationId == "C-multi-bot")
             .ToListAsync());

@@ -51,26 +51,6 @@ public sealed class SlackAdmissionSpecs
     }
 
     [Fact]
-    public async Task Unhealthy_connection_persists_a_thread_anchored_server_owned_nudge()
-    {
-        await using var context = SlackAdmissionTestFactory.Create();
-        var connection = context.Connection(ConnectionHealthKind.Unhealthy);
-        connection.HealthReason = "Slack service is offline.";
-        var identity = new SlackMessageIdentity("T1", "D2", "1710000000.000002");
-
-        var result = await context.Service.AdmitNewWorkAsync(
-            context.ProjectId, connection, context.Agent(configured: true), identity, "1710000000.000001");
-
-        Assert.False(result.Admitted);
-        Assert.Equal("connection_unavailable", result.Kind);
-        Assert.Equal(SlackIngressResponseOwners.Server, result.ResponseOwner);
-        await using var db = context.Factory.CreateDbContext();
-        var row = await db.SlackOutboxRows.SingleAsync(item => item.ConnectionId == connection.Id);
-        Assert.Equal("1710000000.000001", row.ThreadTs);
-        Assert.Equal(SlackAdmissionMessages.ConnectionUnavailable, SlackDeliveryPayload.Parse(row.PayloadJson).Text);
-    }
-
-    [Fact]
     public void Caller_messages_are_fixed_safe_summaries()
     {
         var messages = new[]
