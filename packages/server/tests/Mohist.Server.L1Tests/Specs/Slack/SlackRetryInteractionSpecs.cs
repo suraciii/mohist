@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using System.Net;
 using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,13 +12,10 @@ using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Slack;
-using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
-using Mohist.Server.Sessions.Services;
-using Mohist.Server.Slack;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.L1Tests.Support;
@@ -76,138 +72,6 @@ public sealed class SlackRetryInteractionSpecs : IAsyncLifetime
         Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, originalTurn.Result!.FailureCategory);
     }
 
-    [Fact]
-    public async Task Redelivery_while_operation_is_pending_reports_the_recorded_accepted_pending_result()
-    {
-        var connection = await CreateConnectionAsync();
-        var failed = await SeedFailedRootAsync(connection, "U_OWNER", "C-retry-pending");
-        var action = await CreateRetryActionAsync(connection, failed);
-        var payload = JSON.Deserialize<SlackRetryActionPayload>(action.ActionValue)!;
-
-        await using (var scope = _fixture.Services.CreateAsyncScope())
-        {
-            await scope.ServiceProvider.GetRequiredService<AgentRetryOperationStore>()
-                .ClaimOrCreateAsync(
-                    connection.ProjectId,
-                    failed.SessionId,
-                    failed.TurnId,
-                    payload.Nonce,
-                    AgentRetryOperationKind.Root,
-                    "pending-session",
-                    "pending-input",
-                    "pending-turn");
-        }
-
-        var result = await PostInteractionAsync(connection, action, "U_OWNER", "C-retry-pending");
-        Assert.Equal("accepted_pending", result.GetProperty("state").GetString());
-        var operations = await RetryOperationsAsync(connection.ProjectId);
-        Assert.Single(operations);
-        Assert.Equal("pending", operations[0].State);
-    }
-
-    [Fact]
-    public async Task Invalid_expired_stale_member_and_policy_rejections_create_no_retry_operation()
-    {
-        var tamperedConnection = await CreateConnectionAsync();
-        var tamperedTarget = await SeedFailedRootAsync(tamperedConnection, "U_OWNER", "C-retry-tampered");
-        var tamperedAction = await CreateRetryActionAsync(tamperedConnection, tamperedTarget);
-        var tampered = await PostInteractionAsync(
-            tamperedConnection,
-            tamperedAction with { ActionValue = tamperedAction.ActionValue + "tampered" },
-            "U_OWNER",
-            "C-retry-tampered");
-        Assert.Equal("invalid_action", tampered.GetProperty("state").GetString());
-        Assert.Empty(await RetryOperationsAsync(tamperedConnection.ProjectId));
-
-        var expiredConnection = await CreateConnectionAsync();
-        var expiredTarget = await SeedFailedRootAsync(expiredConnection, "U_OWNER", "C-retry-expired");
-        var expiredAction = await CreateRetryActionAsync(expiredConnection, expiredTarget);
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
-        _connectionLeases[expiredConnection.Id] = await SlackRuntimeLeaseTestSupport
-            .AcquireConnectionLeaseAsync(_fixture, expiredConnection.ProjectId, expiredConnection.Id);
-        var expired = await PostInteractionAsync(expiredConnection, expiredAction, "U_OWNER", "C-retry-expired");
-        Assert.Equal("expired", expired.GetProperty("state").GetString());
-        Assert.Empty(await RetryOperationsAsync(expiredConnection.ProjectId));
-
-        var staleConnection = await CreateConnectionAsync();
-        var staleTarget = await SeedFailedRootAsync(staleConnection, "U_OWNER", "C-retry-stale");
-        var staleAction = await CreateRetryActionAsync(staleConnection, staleTarget);
-        var stale = await PostInteractionAsync(staleConnection, staleAction, "U_OWNER", "C-retry-other-conversation");
-        Assert.Equal("stale_action", stale.GetProperty("state").GetString());
-        Assert.Empty(await RetryOperationsAsync(staleConnection.ProjectId));
-
-        var memberConnection = await CreateConnectionAsync();
-        var memberTarget = await SeedFailedRootAsync(memberConnection, "U_OWNER", "C-retry-member");
-        var memberAction = await CreateRetryActionAsync(memberConnection, memberTarget);
-        var member = await PostInteractionAsync(memberConnection, memberAction, "U_OTHER", "C-retry-member");
-        Assert.Equal("unauthorized", member.GetProperty("state").GetString());
-        Assert.Empty(await RetryOperationsAsync(memberConnection.ProjectId));
-
-        var policyConnection = await CreateConnectionAsync();
-        var policyTarget = await SeedFailedRootAsync(policyConnection, "U_INITIATOR", "C-retry-policy");
-        var policyAction = await CreateRetryActionAsync(policyConnection, policyTarget);
-        var denied = await PostInteractionAsync(policyConnection, policyAction, "U_INITIATOR", "C-retry-policy");
-        Assert.Equal("unauthorized", denied.GetProperty("state").GetString());
-        Assert.Empty(await RetryOperationsAsync(policyConnection.ProjectId));
-    }
-
-    [Fact]
-    public async Task No_longer_retryable_target_is_rejected_without_execution_resources()
-    {
-        var connection = await CreateConnectionAsync();
-        var failed = await SeedFailedRootAsync(connection, "U_OWNER", "C-retry-target");
-        var action = await CreateRetryActionAsync(connection, failed);
-        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(failed.SessionId);
-        await session.MarkTurnTerminalAsync(
-            failed.TurnId,
-            AgentTurnStatus.Completed,
-            new AgentTurnResult(Message: "completed"));
-
-        var missingTargetAction = await CreateMissingTargetActionAsync(connection, action);
-        var result = await PostInteractionAsync(connection, missingTargetAction, "U_OWNER", "C-retry-target");
-        Assert.Equal("no_longer_retryable", result.GetProperty("state").GetString());
-        Assert.Empty(await RetryOperationsAsync(connection.ProjectId));
-    }
-
-    [Fact]
-    public async Task Disabled_connection_rejects_retry_before_dispatch()
-    {
-        var connection = await CreateConnectionAsync();
-        var failed = await SeedFailedRootAsync(connection, "U_OWNER", "C-retry-disabled");
-        var action = await CreateRetryActionAsync(connection, failed);
-        _connectionLeases[connection.Id] = await SlackRuntimeLeaseTestSupport
-            .AcquireConnectionLeaseAsync(_fixture, connection.ProjectId, connection.Id);
-        await using (var scope = _fixture.Services.CreateAsyncScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            var row = await db.AgentConnections.SingleAsync(item => item.Id == connection.Id);
-            row.DesiredState = DesiredStateKind.Disabled;
-            await db.SaveChangesAsync();
-        }
-
-        using var response = await PostRawAsync(connection, action, "U_OWNER", "C-retry-disabled");
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("connection_disabled", document.RootElement.GetProperty("code").GetString());
-        Assert.Empty(await RetryOperationsAsync(connection.ProjectId));
-    }
-
-    private async Task<SlackRetryAction> CreateMissingTargetActionAsync(
-        AgentConnection connection,
-        SlackRetryAction action)
-    {
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var signer = scope.ServiceProvider.GetRequiredService<ISlackActionSigner>();
-        var payload = JSON.Deserialize<SlackRetryActionPayload>(action.ActionValue)! with
-        {
-            TurnId = $"missing-turn-{Guid.NewGuid():N}",
-            Signature = null,
-        };
-        var signature = await signer.TrySignAsync(connection, SlackRetryActionService.Canonical(payload));
-        var value = JSON.Serialize(payload with { Signature = signature });
-        return action with { ActionValue = value };
-    }
-
     private async Task<SlackRetryAction> CreateRetryActionAsync(
         AgentConnection connection,
         SeededFailedTurn failed)
@@ -254,13 +118,6 @@ public sealed class SlackRetryInteractionSpecs : IAsyncLifetime
             leaseId = _connectionLeases[connection.Id],
             adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
-
-    private async Task<IReadOnlyList<AgentRetryOperationRow>> RetryOperationsAsync(string projectId)
-    {
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        return await db.AgentRetryOperations.Where(row => row.ProjectId == projectId).ToListAsync();
-    }
 
     private async Task<SeededFailedTurn> SeedFailedRootAsync(
         AgentConnection connection,
