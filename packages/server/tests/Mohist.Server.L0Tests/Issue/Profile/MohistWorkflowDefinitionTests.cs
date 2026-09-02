@@ -11,6 +11,10 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_UsesWorkspacePlanArtifactsAndEvidenceReview()
     {
+        var source = WorkflowProfileCatalog.GetDefinitionSource(WorkflowProfileCatalog.LocalId)!;
+        Assert.DoesNotContain("timeout: 1800000", source, StringComparison.Ordinal);
+        Assert.Contains("timeout: 900000", source, StringComparison.Ordinal);
+
         var definition = WorkflowProfileCatalog.Definition;
         Assert.Equal(["plan", "build", "check", "integrate"], definition.Stages.Select(s => s.Stage).ToArray());
         var plan = definition.Stages[0];
@@ -141,6 +145,10 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void GithubPrWorkflowDefinition_UsesOneProjectVerificationTask()
     {
+        var source = WorkflowProfileCatalog.GetDefinitionSource(WorkflowProfileCatalog.GithubPrId)!;
+        Assert.DoesNotContain("timeout: 1800000", source, StringComparison.Ordinal);
+        Assert.Contains("timeout: 900000", source, StringComparison.Ordinal);
+
         var build = WorkflowProfileCatalog.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "build");
         var verify = build.Tasks.Single(t => t.Id == "verify");
         Assert.Equal("${{ workflow.verification.command }}", ReadString(build, "verify"));

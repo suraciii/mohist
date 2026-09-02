@@ -564,7 +564,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task RunningJob_WithoutReport_JobTimeout_TransitionsToUnknown()
+    public async Task RunningJob_WithoutReport_UsesThirtyMinuteDefault()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-timeout-runner-{Guid.NewGuid():N}");
         var jobKey = $"agent-job-timeout-{Guid.NewGuid():N}";
@@ -574,9 +574,19 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(11));
-        await job.CheckTimeoutsAsync();
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        for (var minute = 0; minute < 30; minute++)
+        {
+            _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+            await runner.TouchPresenceAsync();
 
+            if (minute == 9)
+            {
+                await job.CheckTimeoutsAsync();
+                Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+            }
+        }
+        await job.CheckTimeoutsAsync();
         var terminal = await job.GetTerminalResultAsync();
         Assert.Equal(AgentJobStatus.Unknown, terminal.Status);
         Assert.StartsWith(AgentJobFailureReasons.ReportTimeout, terminal.FailureReason, StringComparison.Ordinal);
@@ -591,7 +601,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         var (_, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-polled-timeout-{Guid.NewGuid():N}");
         var job = JobGrain($"agent-job-polled-timeout-{Guid.NewGuid():N}");
 
-        await job.SubmitAsync(MakeInput("never reports after poll", projectId));
+        await job.SubmitAsync(MakeInput("never reports after poll", projectId) with { TimeoutMilliseconds = 10_000 });
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 
         _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(11));
@@ -606,7 +616,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             $"agent-job-timeout-away-{Guid.NewGuid():N}");
         var job = JobGrain($"agent-job-timeout-away-{Guid.NewGuid():N}");
 
-        await job.SubmitAsync(MakeInput("runner disappears before timeout", projectId));
+        await job.SubmitAsync(MakeInput("runner disappears before timeout", projectId) with { TimeoutMilliseconds = 10_000 });
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
@@ -648,7 +658,7 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         await Grains.GetGrain<IRunnerGrain>("runner-a").TouchPresenceAsync();
 
         var job = JobGrain($"agent-job-reset-{Guid.NewGuid():N}");
-        await job.SubmitAsync(new AgentJobInput("delayed failure", ProjectId: projectId, AgentSessionId: sessionId, AgentId: "agent-test"));
+        await job.SubmitAsync(new AgentJobInput("delayed failure", ProjectId: projectId, AgentSessionId: sessionId, AgentId: "agent-test", TimeoutMilliseconds: 10_000));
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
         Assert.True(await job.RecordRuntimeSessionBindingAsync("runner-a", workId, sessionId, "runtime-a"));

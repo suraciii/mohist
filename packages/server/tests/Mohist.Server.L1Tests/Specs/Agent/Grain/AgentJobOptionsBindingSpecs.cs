@@ -34,7 +34,7 @@ public class AgentJobOptionsBindingSpecs
         Assert.Equal(TimeSpan.FromMilliseconds(50), schedule.Initial);
         Assert.Equal(TimeSpan.FromMilliseconds(200), schedule.Cap);
         Assert.Equal(TimeSpan.FromSeconds(5), schedule.TotalBound);
-        Assert.Equal(TimeSpan.FromSeconds(10), optionsAccessor.Value.JobTimeout);
+        Assert.Equal(TimeSpan.FromMinutes(30), optionsAccessor.Value.JobTimeout);
         Assert.True(optionsAccessor.Value.RunnerLossRecoveryTimeout > TimeSpan.FromMinutes(2));
 
         var next = schedule.NextDelay(TimeSpan.Zero);
