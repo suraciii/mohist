@@ -9,6 +9,22 @@ namespace Mohist.Server.L0Tests.Runner.Services;
 public partial class WorkflowItemTranslatorSpecs
 {
     [Fact]
+    public async Task BuildAgentHandoffCommand_WithoutTimeout_LeavesTimeoutUnset()
+    {
+        var runId = $"wr-agent-default-timeout-{Guid.NewGuid():N}";
+        var input = With("""{"name":"mohist/builder","prompt":"build"}""");
+        var run = await SeedRunningWorkflowAsync(
+            runId,
+            "proj-agent-default-timeout",
+            taskDefinition: new TaskDefinition("task-1", "Agent", "mohist/agent", input));
+        var item = WorkItem.Task("build", "task-1.1", "Agent", "mohist/agent", input);
+
+        var command = await _translator.BuildAgentHandoffCommandAsync(item, runId, run);
+
+        Assert.Null(command.TimeoutMilliseconds);
+    }
+
+    [Fact]
     public async Task BuildAgentHandoffCommand_NamedSession_ReusesEarlierAgentSession()
     {
         var runId = $"wr-agent-reuse-{Guid.NewGuid():N}";
