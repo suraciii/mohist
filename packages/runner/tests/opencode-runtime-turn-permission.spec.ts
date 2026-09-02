@@ -4,6 +4,7 @@ import type { RuntimeEventSubscription, RuntimeGlobalEvent } from '../src/runtim
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 
 const SESSION_ID = 'ses_permission'
+const OTHER_SESSION_ID = 'ses_other'
 const DIRECTORY = '/tmp/projA'
 
 class FakeSubscription implements RuntimeEventSubscription {
@@ -23,9 +24,8 @@ class FakeSubscription implements RuntimeEventSubscription {
   }
 }
 
-function buildTurn() {
-  const subscription = new FakeSubscription()
-  const sessionCreate = vi.fn(async () => ({ data: { id: SESSION_ID } }))
+function buildTurn(sessionId = SESSION_ID, subscription = new FakeSubscription()) {
+  const sessionCreate = vi.fn(async () => ({ data: { id: sessionId } }))
   const sessionPrompt = vi.fn(async (): Promise<unknown> => ({ data: { parts: [] } }))
   const sessionAbort = vi.fn(async () => ({ data: true }))
   const sessionStatus = vi.fn(async () => ({ data: {} }))
@@ -91,7 +91,7 @@ describe('OpenCodeRuntime turn permissions', () => {
     expect((await resultPromise).ok).toBe(true)
   })
 
-  it('ignores permission requests for another Session or work directory', async () => {
+  it('answers same-directory child requests but ignores foreign-directory requests', async () => {
     const turn = buildTurn()
     let resolvePrompt: (value: unknown) => void = () => {}
     turn.sessionPrompt.mockImplementationOnce(
@@ -180,6 +180,53 @@ describe('OpenCodeRuntime turn permissions', () => {
 
     resolvePrompt({ data: { parts: [{ type: 'text', text: 'completed' }] } })
     expect((await resultPromise).ok).toBe(true)
+  })
+
+  it('isolates directory-less events between concurrent top-level Sessions sharing a directory', async () => {
+    const subscription = new FakeSubscription()
+    const current = buildTurn(SESSION_ID, subscription)
+    const unrelated = buildTurn(OTHER_SESSION_ID, subscription)
+    let resolveCurrent: (value: unknown) => void = () => {}
+    let resolveUnrelated: (value: unknown) => void = () => {}
+    current.sessionPrompt.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCurrent = resolve
+        }),
+    )
+    unrelated.sessionPrompt.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveUnrelated = resolve
+        }),
+    )
+
+    const currentResultPromise = startTurn(current)
+    const unrelatedResultPromise = startTurn(unrelated)
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(current.sessionPrompt).toHaveBeenCalledTimes(1)
+    expect(unrelated.sessionPrompt).toHaveBeenCalledTimes(1)
+    subscription.emit({
+      type: 'permission.asked',
+      sessionID: OTHER_SESSION_ID,
+      payload: { id: 'perm_unrelated', sessionID: OTHER_SESSION_ID },
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(current.permissionReply).not.toHaveBeenCalled()
+    expect(current.sessionAbort).not.toHaveBeenCalled()
+    expect(unrelated.permissionReply).toHaveBeenCalledTimes(1)
+    expect(unrelated.permissionReply).toHaveBeenCalledWith(
+      { requestID: 'perm_unrelated', directory: DIRECTORY, reply: 'once' },
+      { throwOnError: true },
+    )
+    expect(unrelated.sessionAbort).not.toHaveBeenCalled()
+
+    resolveCurrent({ data: { parts: [{ type: 'text', text: 'current completed' }] } })
+    resolveUnrelated({ data: { parts: [{ type: 'text', text: 'unrelated completed' }] } })
+    expect((await currentResultPromise).ok).toBe(true)
+    expect((await unrelatedResultPromise).ok).toBe(true)
   })
 
   it('fails immediately with permission-required when the once reply cannot be confirmed', async () => {
