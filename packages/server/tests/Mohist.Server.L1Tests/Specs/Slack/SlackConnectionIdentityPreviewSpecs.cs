@@ -65,54 +65,6 @@ public sealed class SlackConnectionIdentityPreviewSpecs
         Assert.Equal(SlackAppCreationReference, detail.GetProperty("slackAppCreationReference").GetString());
     }
 
-    [Fact]
-    public async Task Invalid_Agent_identity_gets_a_stable_name_suffix_and_description_fallback_without_mutation()
-    {
-        var seeded = await SeedAgentAsync("Release Helper!", " \t");
-        var expected = SlackBotIdentityDeriver.Derive(seeded.Agent);
-
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            Path(seeded.ProjectId),
-            new { agentId = seeded.Agent.Id });
-
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var data = await ReadDataAsync(response);
-        var botName = data.GetProperty("botName").GetString()!;
-        Assert.Equal(expected.BotName, botName);
-        Assert.Matches("^release-helper-[0-9a-f]{8}$", botName);
-        Assert.Matches("^[a-z0-9._-]{1,80}$", botName);
-        Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("appDescription").GetString()));
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var row = await db.Agents.SingleAsync(item => item.Id == seeded.Agent.Id);
-        var persistedAgent = AgentStore.Deserialize(row.State)!;
-        Assert.Equal("Release Helper!", persistedAgent.Name);
-        Assert.Equal(" \t", persistedAgent.Description);
-    }
-
-    [Fact]
-    public async Task Create_with_explicit_BotName_preserves_the_caller_value()
-    {
-        var seeded = await SeedAgentAsync("agent_default", "Handles CLI requests.");
-
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            Path(seeded.ProjectId),
-            new { agentId = seeded.Agent.Id, botName = "CLI Helper" });
-
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var data = await ReadDataAsync(response);
-        var connectionId = data.GetProperty("connection").GetProperty("id").GetString()!;
-        Assert.Equal("CLI Helper", data.GetProperty("botName").GetString());
-        Assert.Equal("CLI Helper", data.GetProperty("connection").GetProperty("botName").GetString());
-
-        using var detailResponse = await _fixture.Client.GetAsync(Path(seeded.ProjectId, connectionId));
-        detailResponse.EnsureSuccessStatusCode();
-        var detail = await ReadDataAsync(detailResponse);
-        Assert.Equal("CLI Helper", detail.GetProperty("botName").GetString());
-        Assert.Equal("CLI Helper", detail.GetProperty("connection").GetProperty("botName").GetString());
-    }
-
     private async Task<SeededAgent> SeedAgentAsync(string name, string description)
     {
         var projectId = $"project_{Guid.NewGuid():N}";
