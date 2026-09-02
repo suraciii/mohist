@@ -35,6 +35,8 @@ type ReadFile func(string) (string, error)
 type WriteFile func(string, string, os.FileMode) error
 type Execute func(context.Context, string, []string) error
 type Wait func(context.Context, time.Duration) error
+type EventTail func(context.Context, string, []string, string, io.Writer) error
+type HealthProbe func(context.Context, string) error
 
 // Dependencies makes process boundaries explicit and keeps command tests local.
 type Dependencies struct {
@@ -52,6 +54,8 @@ type Dependencies struct {
 	Wait             Wait
 	Executable       func() string
 	CurrentDirectory func() string
+	EventTail        EventTail
+	HealthProbe      HealthProbe
 }
 
 type Config struct {
@@ -142,6 +146,23 @@ func ResolveConfig(deps Dependencies) (Config, error) {
 	}
 	if deps.Executable == nil {
 		deps.Executable = defaults.Executable
+	}
+	if deps.HealthProbe == nil {
+		deps.HealthProbe = func(ctx context.Context, address string) error {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(address, "/")+"/health", nil)
+			if err != nil {
+				return err
+			}
+			resp, err := deps.HTTPClient.Do(req)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				return errors.New("health probe failed")
+			}
+			return nil
+		}
 	}
 	if deps.CurrentDirectory == nil {
 		deps.CurrentDirectory = defaults.CurrentDirectory
@@ -279,6 +300,23 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if deps.Executable == nil {
 		deps.Executable = defaults.Executable
 	}
+	if deps.HealthProbe == nil {
+		deps.HealthProbe = func(ctx context.Context, address string) error {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(address, "/")+"/health", nil)
+			if err != nil {
+				return err
+			}
+			resp, err := deps.HTTPClient.Do(req)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				return errors.New("health probe failed")
+			}
+			return nil
+		}
+	}
 
 	if err := ctx.Err(); err != nil {
 		writeError(deps.Stderr, err)
@@ -299,6 +337,9 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	}
 	if command.kind == "info" {
 		return runInfo(deps, command)
+	}
+	if command.kind == "ops-service" || command.kind == "ops-notification" {
+		return runOperations(ctx, deps, nil, command)
 	}
 
 	cfg, err := ResolveConfig(deps)
@@ -329,6 +370,9 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	}
 	if strings.HasPrefix(command.kind, "activity-") || strings.HasPrefix(command.kind, "routing-") || strings.HasPrefix(command.kind, "webhook-") {
 		return runActivityRoutingWebhook(ctx, deps, client, command)
+	}
+	if strings.HasPrefix(command.kind, "ops-") {
+		return runOperations(ctx, deps, client, command)
 	}
 	data, err := client.get(ctx, command.path)
 	if err != nil {
@@ -408,6 +452,9 @@ func parse(args []string) (command, error) {
 	}
 	if args[0] == "webhook" {
 		return parseWebhook(args[1:])
+	}
+	if contains([]string{"runner", "server", "service", "event", "audit", "github", "slack", "notification", "otel"}, args[0]) {
+		return parseOperations(args[0], args[1:])
 	}
 	if args[0] != "run" {
 		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") && contains(rootGroups(), args[0]) {
