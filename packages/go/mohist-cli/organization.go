@@ -26,6 +26,7 @@ var commentFields = []string{"id", "projectId", "issueNumber", "body", "createdA
 var watchFields = []string{"number", "watching", "muted"}
 
 var labelKeyPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+var ansiEscapePattern = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))`)
 
 func parseOrganization(group string, args []string) (command, error) {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "-h")) {
@@ -474,12 +475,159 @@ func runOrganization(ctx context.Context, deps Dependencies, c *client, cmd comm
 		fmt.Fprintln(deps.Stdout, "OK")
 		return ExitOK
 	}
+	if cmd.kind == "issue-view" {
+		if err := renderIssueView(deps.Stdout, data); err != nil {
+			writeError(deps.Stderr, err)
+			return ExitOperation
+		}
+		return ExitOK
+	}
 	var v any
 	if json.Unmarshal(data, &v) != nil {
 		writeError(deps.Stderr, errors.New("error: response has an invalid shape [invalid_response]"))
 		return ExitOperation
 	}
 	return writeJSON(deps.Stdout, v)
+}
+
+func renderIssueView(out interface{ Write([]byte) (int, error) }, data json.RawMessage) error {
+	var issue map[string]json.RawMessage
+	if err := json.Unmarshal(data, &issue); err != nil || issue == nil {
+		return errors.New("error: response has an invalid shape [invalid_response]")
+	}
+
+	writeIssueField(out, "Number", issue["number"])
+	writeIssueField(out, "Title", issue["title"])
+	writeIssueField(out, "Status", issue["status"])
+	if workflow := issueWorkflow(issue); workflow != "" {
+		fmt.Fprintf(out, "Workflow: %s\n", workflow)
+	}
+	writeIssueField(out, "Priority", issue["priority"])
+	if repository := firstRawValue(issue, "repositoryName", "repository"); repository != "" {
+		fmt.Fprintf(out, "Repository: %s\n", repository)
+	}
+	writeIssueField(out, "Blocker", issue["blocker"])
+
+	if body := rawText(issue["body"]); body != "" {
+		fmt.Fprintf(out, "Body:\n%s\n", body)
+	}
+
+	for _, field := range issueFields {
+		if count, ok := collectionCount(issue[field]); ok && count > 0 {
+			fmt.Fprintf(out, "%s: %d\n", issueFieldLabel(field), count)
+		}
+	}
+	return nil
+}
+
+func writeIssueField(out interface{ Write([]byte) (int, error) }, label string, raw json.RawMessage) {
+	if value := rawText(raw); value != "" {
+		fmt.Fprintf(out, "%s: %s\n", label, value)
+	}
+}
+
+func issueWorkflow(issue map[string]json.RawMessage) string {
+	parts := []string{}
+	for _, field := range []string{"workflowStatus", "workflowStage", "workflowRunId", "workflowProfileId", "workflowProfileMode"} {
+		if value := rawText(issue[field]); value != "" {
+			parts = append(parts, issueFieldLabel(field)+"="+value)
+		}
+	}
+	if len(parts) == 0 {
+		if value := rawText(issue["noWorkflow"]); value == "true" {
+			return "none"
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func firstRawValue(issue map[string]json.RawMessage, fields ...string) string {
+	for _, field := range fields {
+		if value := rawText(issue[field]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func rawText(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return ""
+	}
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return sanitizeIssueText(text)
+	}
+	if object, ok := value.(map[string]any); ok {
+		return issueObjectText(object)
+	}
+	if list, ok := value.([]any); ok {
+		return fmt.Sprintf("%d items", len(list))
+	}
+	return sanitizeIssueText(display(value))
+}
+
+func issueObjectText(object map[string]any) string {
+	parts := []string{}
+	for _, field := range []string{"name", "displayName", "fullName", "reason", "title", "number", "status", "url"} {
+		if value, ok := object[field]; ok && value != nil {
+			text := sanitizeIssueText(display(value))
+			if text != "" {
+				parts = append(parts, issueFieldLabel(field)+"="+text)
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return "available"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func rawCollection(raw json.RawMessage) ([]any, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, false
+	}
+	var values []any
+	if json.Unmarshal(raw, &values) != nil || values == nil {
+		return nil, false
+	}
+	return values, true
+}
+
+func collectionCount(raw json.RawMessage) (int, bool) {
+	values, ok := rawCollection(raw)
+	return len(values), ok
+}
+
+func issueFieldLabel(field string) string {
+	var words []string
+	for _, part := range strings.Split(field, "_") {
+		if part == "" {
+			continue
+		}
+		words = append(words, strings.ToUpper(part[:1])+part[1:])
+	}
+	if len(words) == 1 {
+		return words[0]
+	}
+	return strings.Join(words, " ")
+}
+
+func sanitizeIssueText(value string) string {
+	value = ansiEscapePattern.ReplaceAllString(value, "")
+	var clean strings.Builder
+	for _, char := range value {
+		if char == '\n' || char == '\t' || char == '\r' || char >= 0x20 {
+			clean.WriteRune(char)
+		}
+	}
+	return clean.String()
 }
 
 func operationExit(deps Dependencies, ctx context.Context, err error) int {
