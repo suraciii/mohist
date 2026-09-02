@@ -183,16 +183,16 @@ public static class AgentSubscriptionRoutes
         && string.Equals(existing.ResponsePrompt, Normalize(request.ResponsePrompt), StringComparison.Ordinal)
         && existing.Continue == request.Continue;
 
-    private static AgentSubscriptionCreateRequest Normalize(AgentSubscriptionCreateRequest request) => request with
+    internal static AgentSubscriptionCreateRequest Normalize(AgentSubscriptionCreateRequest request) => request with
     {
         Name = Normalize(request.Name),
         Match = Normalize(request.Match),
         ResponsePrompt = Normalize(request.ResponsePrompt),
     };
 
-    private static string? Normalize(string? value) => value?.Trim();
+    internal static string? Normalize(string? value) => value?.Trim();
 
-    private static string DeriveState(AgentInfo agent, IReadOnlyList<AgentSubscriptionDto> subscriptions, IReadOnlyList<AgentConnection> connections)
+    internal static string DeriveState(AgentInfo agent, IReadOnlyList<AgentSubscriptionDto> subscriptions, IReadOnlyList<AgentConnection> connections)
     {
         var executability = agent.Executability?.State ?? AgentExecutabilityStates.Unknown;
         if (executability == AgentExecutabilityStates.NotConfigured)
@@ -206,7 +206,7 @@ public static class AgentSubscriptionRoutes
         return subscriptions.Count == 0 ? "empty" : "configured";
     }
 
-    private static string DeriveConnectionState(IReadOnlyList<AgentConnection> connections) =>
+    internal static string DeriveConnectionState(IReadOnlyList<AgentConnection> connections) =>
         connections.Count == 0
             ? "no_connection"
             : connections.Any(connection => connection.SetupProgress == SetupProgressKind.Complete
@@ -299,7 +299,7 @@ public sealed record AgentSubscriptionUpdateRequest(
         return value.GetString();
     }
 
-    private static bool? GetBool(JsonElement raw, string name)
+    internal static bool? GetBool(JsonElement raw, string name)
     {
         if (!raw.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
             return null;

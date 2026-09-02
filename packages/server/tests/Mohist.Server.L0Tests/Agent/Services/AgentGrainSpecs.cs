@@ -14,7 +14,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Agent.Services;
 
-public class AgentGrainSpecs
+public partial class AgentGrainSpecs
 {
     [Fact]
     public async Task Create_show_update_and_archive_persist_agent_lifecycle()

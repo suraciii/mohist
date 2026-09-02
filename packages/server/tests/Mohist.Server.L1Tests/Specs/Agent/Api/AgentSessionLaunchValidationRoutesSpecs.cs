@@ -73,57 +73,6 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
     }
 
     [Fact]
-    public async Task Launch_WhitespacePrompt_Returns400_WithoutCreatingSessionOrJob()
-    {
-        const string prompt = "   ";
-        var projectId = await CreateProjectAsync("launch-bad-prompt");
-        var agent = await CreateAgentAsync(projectId, "bad-prompt-agent");
-
-        var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
-
-        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.False(payload.GetProperty("success").GetBoolean());
-        Assert.Contains("prompt", payload.GetProperty("error").GetString()!);
-
-        var sessionCountAfter = await CountAgentLaunchSessionsAsync(projectId);
-        Assert.Equal(sessionCountBefore, sessionCountAfter);
-    }
-
-    [Fact]
-    public async Task Launch_MissingPromptField_Returns400_WithoutCreatingSessionOrJob()
-    {
-        var projectId = await CreateProjectAsync("launch-missing-prompt");
-        var agent = await CreateAgentAsync(projectId, "missing-prompt-agent");
-
-        var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
-
-        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { context = new { issueNumber = 1 } });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-
-        var sessionCountAfter = await CountAgentLaunchSessionsAsync(projectId);
-        Assert.Equal(sessionCountBefore, sessionCountAfter);
-    }
-
-    [Fact]
-    public async Task Launch_NonStringPrompt_Returns400_WithoutCreatingSessionOrJob()
-    {
-        var projectId = await CreateProjectAsync("launch-non-string-prompt");
-        var agent = await CreateAgentAsync(projectId, "non-string-prompt-agent");
-        var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
-
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents/{agent.Id}/sessions",
-            new { prompt = 1 });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
-    }
-
-    [Fact]
     public async Task Launch_UnknownAgent_Returns404_WithoutCreatingSessionOrJob()
     {
         var projectId = await CreateProjectAsync("launch-unknown");

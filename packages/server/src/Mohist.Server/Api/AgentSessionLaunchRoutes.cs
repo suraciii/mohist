@@ -657,7 +657,7 @@ public sealed record AgentSessionLaunchBody(
         }
     }
 
-    private static async ValueTask<AgentSessionLaunchBody> BindCoreAsync(HttpContext context)
+    internal static async ValueTask<AgentSessionLaunchBody> BindCoreAsync(HttpContext context)
     {
         var raw = await JsonSerializer.DeserializeAsync<JsonElement>(context.Request.Body, JSON.Options);
         if (raw.ValueKind != JsonValueKind.Object)
