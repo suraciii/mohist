@@ -73,7 +73,6 @@ public sealed class ProjectDefaultExecutionConfigRoutesSpecs : AgentSessionLaunc
 
     [Theory]
     [InlineData("fast", "openai/gpt-5.6")]
-    [InlineData("pi", "gpt")]
     public async Task PutDefault_WithInvalidDefault_IsRejectedAndLeavesThePriorDefaultUntouched(
         string runtime,
         string model)

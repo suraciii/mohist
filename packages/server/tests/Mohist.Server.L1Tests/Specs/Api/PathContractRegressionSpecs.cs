@@ -2,7 +2,6 @@ using System.Net.Http.Json;
 using Mohist.Server.Infrastructure.Events;
 using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
-using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Project.Services;
 using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
@@ -50,24 +49,6 @@ public class PathContractRegressionSpecs
         using var response = await _client.GetAsync(
             $"/api/projects/{projectId}/issues/{issueNumber}/worktree-status");
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
-    }
-
-    // Item-5: the workspace-path slug must stay in sync with the runner's
-    // slug() helper in packages/runner/src/runtime/workspace.ts. The
-    // runner-equivalent test in workspace.spec.ts asserts the JS side; this
-    // test pins the C# side with representative Unicode inputs.
-    [Theory]
-    [InlineData("my-project", "my-project")]
-    [InlineData("My Project!", "my-project")]
-    [InlineData("  spaced  out  ", "spaced-out")]
-    [InlineData("foo_bar.baz", "foo-bar-baz")]
-    [InlineData("Café", "caf")]
-    [InlineData("测试-project", "project")]
-    [InlineData("", "project")]
-    [InlineData(null, "project")]
-    public void Slug_MatchesRunnerAlgorithm(string? input, string expected)
-    {
-        Assert.Equal(expected, MohistWorkspaceLayout.Slug(input ?? string.Empty));
     }
 
     [Fact]

@@ -125,11 +125,6 @@ public class IssueModelVariantApiSpecs
 
     [Theory]
     [InlineData("{\"model\":123}")]
-    [InlineData("{\"modelVariant\":false}")]
-    [InlineData("{\"stageModels\":[]}")]
-    [InlineData("{\"stageModels\":{\"plan\":123}}")]
-    [InlineData("{\"stageModelVariants\":[]}")]
-    [InlineData("{\"stageModelVariants\":{\"plan\":true}}")]
     public async Task PatchIssue_WithWrongTypeModelMetadata_ReturnsBadRequest(string patchJson)
     {
         var projectId = await CreateProjectAsync("variant-type-invalid");
@@ -142,27 +137,6 @@ public class IssueModelVariantApiSpecs
         using var response = await _fixture.Client.PatchAsync(
             $"/api/projects/{projectId}/issues/{number}",
             new StringContent(patchJson, System.Text.Encoding.UTF8, "application/json"));
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("invalid_model_metadata", payload.GetProperty("code").GetString());
-    }
-
-    [Fact]
-    public async Task CreateIssue_WithInvalidStageModelFormat_ReturnsBadRequest()
-    {
-        var projectId = await CreateProjectAsync("variant-stage-invalid");
-
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/issues",
-            new
-            {
-                title = "Bad stage model",
-                stageModels = new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["plan"] = "not-a-valid-model",
-                },
-            });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();

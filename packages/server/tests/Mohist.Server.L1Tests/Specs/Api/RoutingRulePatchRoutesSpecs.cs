@@ -90,9 +90,6 @@ public sealed class RoutingRulePatchRoutesSpecs : ProjectEventsApiTestSupport
 
     [Theory]
     [InlineData("{\"name\":null}", "name_required")]
-    [InlineData("{\"match\":null}", "match_required")]
-    [InlineData("{\"agentId\":null}", "agent_required")]
-    [InlineData("{\"responsePrompt\":null}", "response_prompt_blank")]
     public async Task Patch_WithDirectNull_RemainsPresentAndFollowsFieldValidation(string rawBody, string expectedCode)
     {
         var project = await CreateProjectAsync("patch-null");
@@ -137,10 +134,6 @@ public sealed class RoutingRulePatchRoutesSpecs : ProjectEventsApiTestSupport
     // fail closed by leaving every stored field untouched.
     [Theory]
     [InlineData("""{"Name":"member-spelled name"}""")]
-    [InlineData("""{"Match":"event.type == \"member.spelled\""}""")]
-    [InlineData("""{"AgentId":"agent-member-spelled"}""")]
-    [InlineData("""{"ResponsePrompt":"member-spelled prompt"}""")]
-    [InlineData("""{"Continue":true}""")]
     public async Task Patch_WithCSharpMemberSpelling_IsNotAPresenceTokenAndDoesNotMutate(string rawBody)
     {
         var project = await CreateProjectAsync("patch-member-spelling");

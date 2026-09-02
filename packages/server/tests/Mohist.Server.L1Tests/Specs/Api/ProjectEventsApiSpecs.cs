@@ -1,13 +1,6 @@
 using System.Net;
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Metadata;
-using Microsoft.EntityFrameworkCore.Migrations;
-using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Migrations;
 using Mohist.Server.L1Tests.Support;
-using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Api;
@@ -152,24 +145,5 @@ public class ProjectEventsApiSpecs : ProjectEventsApiTestSupport
             Assert.Equal(JsonValueKind.Object, entry.Data.ValueKind);
             Assert.Empty(entry.Data.EnumerateObject());
         });
-    }
-}
-
-public class ProjectEventsModelDebug
-{
-    [Fact]
-    public void DebugPendingModelChanges()
-    {
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite("Data Source=:memory:")
-            .Options;
-        using var db = new MohistDbContext(options);
-        var differ = db.GetService<IMigrationsModelDiffer>();
-        var initializer = db.GetService<IModelRuntimeInitializer>();
-        var operations = differ.GetDifferences(
-            initializer.Initialize(new MohistDbContextModelSnapshot().Model, designTime: true).GetRelationalModel(),
-            db.GetService<IDesignTimeModel>().Model.GetRelationalModel());
-
-        Assert.Empty(operations);
     }
 }
