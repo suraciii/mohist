@@ -5,7 +5,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.L1Tests.Support;
+using Mohist.Server.L0Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
@@ -13,7 +13,7 @@ using Mohist.Server.Workflow.Services;
 using Mohist.Workflow.Definition;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Workflow;
+namespace Mohist.Server.L0Tests.Workflow.Services;
 
 public class WorkflowProfileCollectionSpecs : IAsyncLifetime
 {

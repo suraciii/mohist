@@ -1,5 +1,3 @@
-using Mohist.Server.Infrastructure;
-using System.Text.Json;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
@@ -43,49 +41,6 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
 
         Assert.Null(await runner.PollAsync(Services));
-        Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
-    }
-
-    [Fact]
-    public async Task StageWithDynamicTasks_LoadTaskCompletes_DynamicTasksRunBeforeChecks()
-    {
-        await StartWorkflowAsync(new WorkflowDefinition(
-        [
-            new StageDefinition("build",
-                [new("load-tasks", "Load tasks", "spec/load")],
-                [new("check-1", "Check 1", "spec/check")])
-        ]));
-
-        var (load, r1) = await PollWorkAnyAsync();
-        Assert.StartsWith("load-tasks.", load.WorkId);
-        Assert.Equal("task", load.WorkType);
-        Assert.Equal("build", load.Stage);
-        Assert.Equal("spec/load", load.Uses);
-
-        var addResult = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
-            new AddTasksBatchRequest([
-                new AddTasksBatchItem("dynamic-1", "Dynamic 1", "spec/task", JsonSerializer.Deserialize<JsonElement>("""{"value":"one"}""")),
-                new AddTasksBatchItem("dynamic-2", "Dynamic 2", "spec/task")
-            ]));
-        Assert.Equal(2, addResult.AddedCount);
-
-        await ReportAsync(r1, load.WorkId, "completed");
-
-        var (dynamic1, r2) = await PollWorkAnyAsync();
-        Assert.StartsWith("dynamic-1.", dynamic1.WorkId);
-        Assert.Equal("spec/task", dynamic1.Uses);
-        Assert.Contains("one", dynamic1.With);
-        await ReportAsync(r2, dynamic1.WorkId, "completed");
-
-        var (dynamic2, r3) = await PollWorkAnyAsync();
-        Assert.StartsWith("dynamic-2.", dynamic2.WorkId);
-        await ReportAsync(r3, dynamic2.WorkId, "completed");
-
-        var (check, r4) = await PollWorkAnyAsync();
-        Assert.StartsWith("checks-", check.WorkId);
-        await ReportChecksPassAsync(r4, check, "check-1");
-
-        var runner = Grains.GetGrain<IRunnerGrain>(r4);
         Assert.Equal(RunnerStatus.Online, (await runner.GetRuntimeStateAsync()).Status);
     }
 

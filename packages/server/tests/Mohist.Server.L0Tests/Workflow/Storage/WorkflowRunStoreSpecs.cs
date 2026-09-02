@@ -11,12 +11,12 @@ using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
-using Mohist.Server.L1Tests.Support;
+using Mohist.Server.L0Tests.Support;
 using Mohist.Server.TestSupport;
 using Orleans;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Workflow.Storage;
+namespace Mohist.Server.L0Tests.Workflow.Storage;
 
 /// Tests for transactional workflow-run persistence.
 public partial class WorkflowRunStoreSpecs

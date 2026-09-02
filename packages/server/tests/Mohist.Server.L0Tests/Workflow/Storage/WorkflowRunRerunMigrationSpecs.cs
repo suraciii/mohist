@@ -3,12 +3,12 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Workflow;
-using Mohist.Server.L1Tests.Support;
+using Mohist.Server.L0Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Workflow.Storage;
+namespace Mohist.Server.L0Tests.Workflow.Storage;
 
 public partial class WorkflowRunStoreSpecs
 {
