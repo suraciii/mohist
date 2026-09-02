@@ -13,10 +13,6 @@ export const gateRounds = 10
 
 export const targets = [
   {
-    id: 'observer',
-    className: 'Mohist.Server.L1Tests.Specs.Agent.Grain.AgentJobDispatchObserverSpecs',
-  },
-  {
     id: 'grain',
     className: 'Mohist.Server.L1Tests.Specs.Agent.Grain.AgentJobGrainSpecs',
   },

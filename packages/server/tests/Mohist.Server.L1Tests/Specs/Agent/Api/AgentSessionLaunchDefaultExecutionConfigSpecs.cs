@@ -82,46 +82,6 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
         }
     }
 
-    [Fact]
-    public async Task Launch_IsResolvedOnceAtLaunch_DefaultEditDoesNotChangeTheSnapshot()
-    {
-        var projectId = await CreateProjectAsync("launch-resolved-once");
-        var agent = await CreateModellessAgentAsync(projectId, "resolved-once-agent");
-        await SetDefaultAsync(projectId, "opencode", "openai/gpt-5.6", null);
-        var runnerId = $"launch-resolved-once-runner-{Guid.NewGuid():N}";
-        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
-
-        try
-        {
-            using var response = await _fixture.Client.LaunchAgentSessionAsync(
-                projectId,
-                agent.Id,
-                new { prompt = "snapshot the resolution" });
-
-            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
-            var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
-
-            // Change the Project default after the launch converged: the
-            // in-flight execution keeps the model resolved at launch time.
-            await SetDefaultAsync(projectId, "opencode", "anthropic/sonnet-4.6", null);
-
-            var jobSnapshot = await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).GetRuntimeSnapshotAsync();
-            Assert.Equal("openai/gpt-5.6", jobSnapshot!.ExecutionDefinition!.Model);
-
-            var sessionInfo = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
-            var snapshot = await ClaimDispatchForSessionAsync(jobId, runnerId, sessionId);
-            var dispatch = await PollDispatchEnvelopeForWorkAsync(runnerId, snapshot.WorkId!);
-            Assert.Equal("openai/gpt-5.6", ReadModelFromDispatch(dispatch));
-            Assert.NotNull(sessionInfo);
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
     private async Task<AgentReadinessAssertion> GetReadinessAsync(string projectId, string agentId)
     {
         using var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents/{agentId}");

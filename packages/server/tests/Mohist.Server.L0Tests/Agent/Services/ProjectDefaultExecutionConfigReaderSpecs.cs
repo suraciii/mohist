@@ -4,11 +4,11 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
-using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.L0Tests.Support;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Agent.Services;
+namespace Mohist.Server.L0Tests.Agent.Services;
 
 /// <summary>
 /// Cost contract for the Project default execution configuration reader

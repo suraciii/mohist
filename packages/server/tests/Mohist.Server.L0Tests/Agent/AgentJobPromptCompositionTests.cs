@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 using Xunit;
 
 namespace Mohist.Server.L0Tests.Agent;
@@ -95,24 +96,7 @@ public class AgentJobPromptCompositionTests
         Assert.Equal("be terse", with["instructions"].GetString());
     }
 
-    /// <summary>
-    /// Mirrors <c>AgentJobGrain.BuildDispatch</c>'s `with` projection:
-    /// a flat <c>{ prompt, instructions?, model?, reasoningEffort?, variant? }</c> shape.
-    /// Test-local copy so the assertion lives next to the contract; if
-    /// the grain projection diverges, the integration spec picks it up.
-    /// </summary>
-    private static Dictionary<string, JsonElement> ComposeDispatchWith(AgentJobInput input)
-    {
-        var with = new Dictionary<string, JsonElement>();
-        with["prompt"] = JsonDocument.Parse($"\"{input.Prompt}\"").RootElement.Clone();
-        if (!string.IsNullOrWhiteSpace(input.AgentInstructions))
-            with["instructions"] = JsonDocument.Parse($"\"{input.AgentInstructions}\"").RootElement.Clone();
-        if (!string.IsNullOrWhiteSpace(input.Model))
-            with["model"] = JsonDocument.Parse($"\"{input.Model}\"").RootElement.Clone();
-        if (!string.IsNullOrWhiteSpace(input.ReasoningEffort))
-            with["reasoningEffort"] = JsonDocument.Parse($"\"{input.ReasoningEffort}\"").RootElement.Clone();
-        if (!string.IsNullOrWhiteSpace(input.Variant))
-            with["variant"] = JsonDocument.Parse($"\"{input.Variant}\"").RootElement.Clone();
-        return with;
-    }
+    private static Dictionary<string, JsonElement> ComposeDispatchWith(AgentJobInput input) =>
+        AgentJobDispatchProjector.BuildWith(input, executionSource: null);
+
 }

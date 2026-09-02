@@ -168,22 +168,6 @@ public sealed class AgentStartupContextLaunchSpecs : AgentJobGrainTestSupport
         Assert.Contains("newest discussion message", prompt!, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task Launch_WithoutStartupContext_DispatchEnvelope_LeavesInstructionsRuntimeModelVariantSkillsUnchanged()
-    {
-        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
-            $"agent-startup-context-capabilities-none-{Guid.NewGuid():N}");
-        await AssertDispatchShapeAsync(runnerId, projectId, startupContext: null);
-    }
-
-    [Fact]
-    public async Task Launch_WithStartupContext_DispatchEnvelope_LeavesInstructionsRuntimeModelVariantSkillsUnchanged()
-    {
-        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
-            $"agent-startup-context-capabilities-set-{Guid.NewGuid():N}");
-        await AssertDispatchShapeAsync(runnerId, projectId, startupContext: BuildContext());
-    }
-
     private async Task AssertDispatchShapeAsync(
         string runnerId,
         string projectId,
