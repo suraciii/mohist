@@ -1,5 +1,6 @@
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
@@ -257,6 +258,7 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
     {
         const string runId = "wr-stop-legacy-failed";
         const string projectId = "proj-stop-legacy-failed";
+        const string profileId = "spec/workflow";
         await WorkflowGrainContractSupport.SeedTemplateAsync(
             _fixture,
             projectId,
@@ -271,7 +273,7 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
             Id = runId,
             Metadata = new WorkflowRunMetadata(null, FixedTime, ProjectId: projectId, IssueNumber: 1),
             Status = WorkflowRunStatus.Failed,
-            WorkflowProfileId = "spec/workflow",
+            WorkflowProfileId = profileId,
             CurrentStageId = "build",
             Stages =
             [
@@ -290,21 +292,36 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
         await grain.OnActivateAsync(CancellationToken.None);
         await grain.StopAsync("legacy-stop");
 
-        var reactivated = WorkflowGrainContractSupport.CreateGrain(scope.ServiceProvider, store, runId, TimeProvider);
-        await reactivated.OnActivateAsync(CancellationToken.None);
-
         var persisted = await RequireRunAsync(store, runId);
         Assert.Equal(WorkflowRunStatus.Stopped, persisted.Status);
-        Assert.Equal("spec/workflow", persisted.WorkflowProfileId);
+        Assert.Equal(profileId, persisted.WorkflowProfileId);
         Assert.Contains(
             await events.ListAsync(runId),
             e => e.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunStopped);
-        Assert.Equal(WorkflowRunStatus.Stopped, (await RequireRunAsync(store, runId)).Status);
 
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
         var row = await db.WorkflowRuns.SingleAsync(x => x.WorkflowRunId == runId);
         Assert.Null(row.WorkflowProfileIdKey);
+        using var serialized = JsonDocument.Parse(row.State);
+        Assert.Equal(profileId, serialized.RootElement.GetProperty("workflowProfileId").GetString());
+
+        var projectProfile = await db.ProjectWorkflowProfiles.SingleAsync(x => x.ProjectId == projectId);
+        projectProfile.DefaultWorkflowProfileId = WorkflowProfileCatalog.LocalId;
+        projectProfile.DefaultWorkflowProfileIdKey = null;
+        await db.SaveChangesAsync();
+
+        var blockerQuery = scope.ServiceProvider.GetRequiredService<WorkflowProfileDeletionBlockerQuery>();
+        var blockers = await blockerQuery.GetBlockersAsync(projectId, profileId);
+        Assert.False(blockers.HasAnyBlocker);
+        Assert.Empty(blockers.ActiveRuns);
+
+        var profileProvider = scope.ServiceProvider.GetRequiredService<WorkflowProfileProvider>();
+        Assert.True(await profileProvider.DeleteAsync(projectId, profileId));
+
+        var reactivated = WorkflowGrainContractSupport.CreateGrain(scope.ServiceProvider, store, runId, TimeProvider);
+        await reactivated.OnActivateAsync(CancellationToken.None);
+        Assert.Equal(WorkflowRunStatus.Stopped, (await RequireRunAsync(store, runId)).Status);
     }
 
     /// <summary>
