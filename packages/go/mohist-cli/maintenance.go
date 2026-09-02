@@ -481,48 +481,119 @@ func syncDirectory(ctx context.Context, deps Dependencies, source, target, requi
 		writeError(deps.Stderr, fmt.Errorf("source skill-data directory %q is missing", source))
 		return ExitOperation
 	}
-	parent := filepath.Dir(target)
-	if err := deps.MkdirAll(parent, 0o700); err != nil {
+	temp, err := stageDirectory(ctx, deps, source, target, required)
+	if err != nil {
 		writeError(deps.Stderr, err)
 		return ExitOperation
+	}
+	if err := commitStaged(ctx, deps, []stagedArtifact{{temp: temp, target: target}}); err != nil {
+		writeError(deps.Stderr, err)
+		return ExitOperation
+	}
+	fmt.Fprintf(deps.Stdout, "Synchronized managed skill assets to %s\n", target)
+	return ExitOK
+}
+
+type stagedArtifact struct {
+	temp   string
+	target string
+}
+
+func stageDirectory(ctx context.Context, deps Dependencies, source, target, _ string) (string, error) {
+	parent := filepath.Dir(target)
+	if err := deps.MkdirAll(parent, 0o700); err != nil {
+		return "", err
 	}
 	temp, err := os.MkdirTemp(parent, "skill-data.tmp-")
 	if err != nil {
-		writeError(deps.Stderr, err)
-		return ExitOperation
+		return "", err
 	}
-	keep := true
-	defer func() {
-		if keep {
-			_ = deps.RemoveAll(temp)
-		}
-	}()
 	if err := copyTree(ctx, source, temp, deps); err != nil {
-		writeError(deps.Stderr, err)
-		return ExitOperation
+		_ = deps.RemoveAll(temp)
+		return "", err
 	}
 	prepared, err := discoverSkills(temp)
 	if err != nil {
-		writeError(deps.Stderr, err)
-		return ExitOperation
+		_ = deps.RemoveAll(temp)
+		return "", err
 	}
 	if len(prepared) == 0 {
-		writeError(deps.Stderr, errors.New("prepared skill-data contains no skill assets"))
-		return ExitOperation
+		_ = deps.RemoveAll(temp)
+		return "", errors.New("prepared skill-data contains no skill assets")
 	}
-	if directoryExists(target) {
-		if err := deps.RemoveAll(target); err != nil {
-			writeError(deps.Stderr, err)
-			return ExitOperation
+	return temp, nil
+}
+
+func commitStaged(ctx context.Context, deps Dependencies, artifacts []stagedArtifact) error {
+	type backup struct {
+		artifact stagedArtifact
+		path     string
+		created  bool
+	}
+	backups := make([]backup, len(artifacts))
+	committed := make([]bool, len(artifacts))
+	cleanup := func() {
+		for _, artifact := range artifacts {
+			_ = deps.RemoveAll(artifact.temp)
+		}
+		for _, item := range backups {
+			if item.path != "" {
+				_ = deps.RemoveAll(item.path)
+			}
 		}
 	}
-	if err := deps.Rename(temp, target); err != nil {
-		writeError(deps.Stderr, err)
-		return ExitOperation
+	rollback := func() {
+		for i := len(artifacts) - 1; i >= 0; i-- {
+			if committed[i] {
+				_ = deps.RemoveAll(artifacts[i].target)
+			}
+		}
+		for i := len(backups) - 1; i >= 0; i-- {
+			if backups[i].created {
+				_ = deps.Rename(backups[i].path, backups[i].artifact.target)
+			}
+		}
+		cleanup()
 	}
-	keep = false
-	fmt.Fprintf(deps.Stdout, "Synchronized managed skill assets to %s\n", target)
-	return ExitOK
+	for i, artifact := range artifacts {
+		if _, err := os.Stat(artifact.target); err == nil {
+			backupPath, err := temporaryBackupPath(artifact.target)
+			if err != nil {
+				rollback()
+				return err
+			}
+			backups[i].path = backupPath
+			if err := deps.Rename(artifact.target, backupPath); err != nil {
+				rollback()
+				return err
+			}
+			backups[i].created = true
+		}
+	}
+	for i, artifact := range artifacts {
+		if err := deps.Rename(artifact.temp, artifact.target); err != nil {
+			rollback()
+			return err
+		}
+		committed[i] = true
+	}
+	if err := ctx.Err(); err != nil {
+		rollback()
+		return err
+	}
+	cleanup()
+	return nil
+}
+
+func temporaryBackupPath(target string) (string, error) {
+	directory, err := os.MkdirTemp(filepath.Dir(target), ".mohist-backup-")
+	if err != nil {
+		return "", err
+	}
+	if err := os.Remove(directory); err != nil {
+		return "", err
+	}
+	return directory, nil
 }
 
 func copyTree(ctx context.Context, source, target string, deps Dependencies) error {
@@ -691,12 +762,20 @@ func updateCLI(ctx context.Context, deps Dependencies, repoRoot, explicit string
 		writeError(deps.Stderr, err)
 		return ExitOperation
 	}
-	if code := syncSkills(ctx, deps, repoRoot, canonicalGoSkillDataPath(repoRoot), false); code != ExitOK {
+	managedHome, err := deps.HomeDir()
+	if err != nil {
 		_ = deps.RemoveAll(temp)
-		return code
+		writeError(deps.Stderr, err)
+		return ExitOperation
 	}
-	if err := deps.Rename(temp, target); err != nil {
+	managed := filepath.Join(managedHome, ".mohist", "cli", "skill-data")
+	skillTemp, err := stageDirectory(ctx, deps, canonicalGoSkillDataPath(repoRoot), managed, "SKILL.md")
+	if err != nil {
 		_ = deps.RemoveAll(temp)
+		writeError(deps.Stderr, err)
+		return ExitOperation
+	}
+	if err := commitStaged(ctx, deps, []stagedArtifact{{temp: skillTemp, target: managed}, {temp: temp, target: target}}); err != nil {
 		writeError(deps.Stderr, err)
 		return ExitOperation
 	}
