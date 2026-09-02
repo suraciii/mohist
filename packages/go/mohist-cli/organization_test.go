@@ -88,7 +88,7 @@ func TestIssueCancellationReturns130(t *testing.T) {
 
 func TestIssueViewRendersBoundedHumanOutput(t *testing.T) {
 	deps, out, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return response(http.StatusOK, `{"success":true,"data":{"number":42,"title":"Ship it","status":"Ready","workflowStatus":"Running","workflowStage":"verify","workflowRunId":"wr-42","priority":"high","repositoryName":"mohist","blocker":"waiting on review","body":"first line\nsecond line","comments":[{"body":"comment secret"}],"feedback":[{"text":"feedback secret"}],"children":[{"number":43}],"attachments":[{"url":"attachment secret"}],"labels":["bug"],"prereq":[{"number":41}],"watching":[{"agent":"agent secret"}]}}`), nil
+		return response(http.StatusOK, `{"success":true,"data":{"number":42,"title":"Ship it","status":"Ready","workflowStatus":"Running","workflowStage":"verify","workflowRunId":"wr-42","priority":"high","repositoryName":"mohist","blocker":"waiting on review","body":"first line\nsecond line","comments":[{"body":"comment secret"}],"feedback":[{"text":"feedback secret"}],"children":[{"number":43}],"attachments":[{"url":"attachment secret"}],"labels":{"bug":""},"prereq":[{"number":41}],"watching":[{"agent":"agent secret"}]}}`), nil
 	}))
 	if code := Run(context.Background(), []string{"issue", "view", "42", "--project", "proj"}, deps); code != ExitOK {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
@@ -126,7 +126,7 @@ func TestIssueViewOutputHasNoTerminalControlSequencesWithOrWithoutNoColor(t *tes
 		}
 		t.Run(name, func(t *testing.T) {
 			deps, out, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
-				return response(http.StatusOK, `{"success":true,"data":{"number":42,"title":"\u001b[32mShip it\u001b[0m","status":"Ready","body":"plain\u001b[2K"}}`), nil
+				return response(http.StatusOK, `{"success":true,"data":{"number":42,"title":"Ship\u007fit\u009b[32m","status":"Ready","body":"first\r\nsecond\rthird"}}`), nil
 			}))
 			if noColor {
 				baseLookup := deps.Lookup
@@ -141,9 +141,12 @@ func TestIssueViewOutputHasNoTerminalControlSequencesWithOrWithoutNoColor(t *tes
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 			}
 			for _, char := range out.String() {
-				if char < 0x20 && char != '\n' && char != '\r' && char != '\t' {
+				if char < 0x20 && char != '\n' && char != '\t' || char == 0x7f || char >= 0x80 && char <= 0x9f {
 					t.Fatalf("control sequence byte %q in output %q", char, out.String())
 				}
+			}
+			if !strings.Contains(out.String(), "Title: Shipit") || !strings.Contains(out.String(), "Body:\nfirst\nsecond\nthird") || strings.Contains(out.String(), "\r") {
+				t.Fatalf("unsafe line output=%q", out.String())
 			}
 			if errOut.Len() != 0 {
 				t.Fatalf("unexpected stderr=%q", errOut.String())
@@ -155,6 +158,15 @@ func TestIssueViewOutputHasNoTerminalControlSequencesWithOrWithoutNoColor(t *tes
 func TestIssueViewMalformedTopLevelResponseFails(t *testing.T) {
 	deps, out, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return response(http.StatusOK, `{"success":true,"data":[]}`), nil
+	}))
+	if code := Run(context.Background(), []string{"issue", "view", "42", "--project", "proj"}, deps); code != ExitOperation || out.Len() != 0 || !strings.Contains(errOut.String(), "invalid_response") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestIssueViewEmptyObjectFails(t *testing.T) {
+	deps, out, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"success":true,"data":{}}`), nil
 	}))
 	if code := Run(context.Background(), []string{"issue", "view", "42", "--project", "proj"}, deps); code != ExitOperation || out.Len() != 0 || !strings.Contains(errOut.String(), "invalid_response") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())

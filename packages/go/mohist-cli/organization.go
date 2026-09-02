@@ -471,15 +471,15 @@ func runOrganization(ctx context.Context, deps Dependencies, c *client, cmd comm
 			return ExitOK
 		}
 	}
-	if len(data) == 0 || string(data) == "null" || string(data) == "{}" {
-		fmt.Fprintln(deps.Stdout, "OK")
-		return ExitOK
-	}
 	if cmd.kind == "issue-view" {
 		if err := renderIssueView(deps.Stdout, data); err != nil {
 			writeError(deps.Stderr, err)
 			return ExitOperation
 		}
+		return ExitOK
+	}
+	if len(data) == 0 || string(data) == "null" || string(data) == "{}" {
+		fmt.Fprintln(deps.Stdout, "OK")
 		return ExitOK
 	}
 	var v any
@@ -493,6 +493,9 @@ func runOrganization(ctx context.Context, deps Dependencies, c *client, cmd comm
 func renderIssueView(out interface{ Write([]byte) (int, error) }, data json.RawMessage) error {
 	var issue map[string]json.RawMessage
 	if err := json.Unmarshal(data, &issue); err != nil || issue == nil {
+		return errors.New("error: response has an invalid shape [invalid_response]")
+	}
+	if value := rawText(issue["number"]); value == "" {
 		return errors.New("error: response has an invalid shape [invalid_response]")
 	}
 
@@ -601,8 +604,17 @@ func rawCollection(raw json.RawMessage) ([]any, bool) {
 }
 
 func collectionCount(raw json.RawMessage) (int, bool) {
-	values, ok := rawCollection(raw)
-	return len(values), ok
+	if values, ok := rawCollection(raw); ok {
+		return len(values), true
+	}
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0, false
+	}
+	var values map[string]json.RawMessage
+	if json.Unmarshal(raw, &values) != nil || values == nil {
+		return 0, false
+	}
+	return len(values), true
 }
 
 func issueFieldLabel(field string) string {
@@ -621,9 +633,11 @@ func issueFieldLabel(field string) string {
 
 func sanitizeIssueText(value string) string {
 	value = ansiEscapePattern.ReplaceAllString(value, "")
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
 	var clean strings.Builder
 	for _, char := range value {
-		if char == '\n' || char == '\t' || char == '\r' || char >= 0x20 {
+		if char == '\n' || char == '\t' || (char >= 0x20 && char != 0x7f && !(char >= 0x80 && char <= 0x9f)) {
 			clean.WriteRune(char)
 		}
 	}
