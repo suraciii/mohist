@@ -204,24 +204,21 @@ public class AttachmentApiSpecs
 
     private async Task<string> CreateProjectAsync(string prefix)
     {
-        var response = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<JsonElement>("/api/projects", $"{prefix}-{Guid.NewGuid():N}");
-        var projectId = response.GetProperty("id").GetString()!;
-        await _fixture.Client.PostOkAsync($"/api/projects/{projectId}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
-        return projectId;
+        var response = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<JsonElement>(
+            "/api/projects",
+            $"{prefix}-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
+        return response.GetProperty("id").GetString()!;
     }
 
     private async Task<int> CreateIssueAsync(string projectId, string title, string? body)
     {
-        var issue = await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues",
-            new { title, body });
-        return issue.GetProperty("number").GetInt32();
+        var counter = _fixture.Grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId));
+        var issueNumber = await counter.NextAsync();
+        await _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)))
+            .CreateAsync(projectId, issueNumber, title, body, null, null, isDraft: false);
+        return issueNumber;
     }
 
     private sealed record AttachmentUploadResponse(

@@ -193,15 +193,11 @@ public class EpicEventsApiSpecs
 
     private async Task<ProjectDto> CreateProjectAsync()
     {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-events-{Guid.NewGuid():N}");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
-        return project;
+        return await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"epic-events-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
     }
 
     private async Task<EpicRowDto> CreateEpicAsync(string projectId, string title, string priority = "p2")

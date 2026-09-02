@@ -43,26 +43,14 @@ public class TaskLogRouteSpecs
     {
         var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<JsonElement>(
             "/api/projects",
-            $"{prefix}-{Guid.NewGuid():N}");
+            $"{prefix}-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
         return project.GetProperty("id").GetString()!;
-    }
-
-    private async Task EnsureRepositoryAsync(string projectId)
-    {
-        await _fixture.Client.PostOkAsync(
-            $"/api/projects/{projectId}/repositories",
-            new
-            {
-                name = "main",
-                gitUrl = $"file://{Guid.NewGuid():N}",
-                baseBranch = "main",
-                setDefault = true,
-            });
     }
 
     private async Task<int> CreateIssueAsync(string projectId, string title)
     {
-        await EnsureRepositoryAsync(projectId);
         var issue = await _fixture.Client.PostDataAsync<JsonElement>(
             $"/api/projects/{projectId}/issues",
             new

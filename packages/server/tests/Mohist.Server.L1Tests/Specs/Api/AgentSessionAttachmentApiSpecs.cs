@@ -102,16 +102,11 @@ public class AgentSessionAttachmentApiSpecs
     private async Task<string> CreateProjectAsync(string prefix)
     {
         var response = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<JsonElement>(
-            "/api/projects", $"{prefix}-{Guid.NewGuid():N}");
-        var projectId = response.GetProperty("id").GetString()!;
-        await _fixture.Client.PostOkAsync($"/api/projects/{projectId}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
-        return projectId;
+            "/api/projects",
+            $"{prefix}-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
+        return response.GetProperty("id").GetString()!;
     }
 
     private sealed record AttachmentUploadResponse(

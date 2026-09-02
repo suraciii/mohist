@@ -249,14 +249,11 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
     {
         var projectName = $"generic-transcript-{Guid.NewGuid():N}";
         if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            projectName,
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
         return new ProjectRef(project.Id);
     }
 

@@ -22,16 +22,11 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
     {
         var name = $"{prefix}-{Guid.NewGuid():N}".ToLowerInvariant();
         var response = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<JsonElement>(
-            "/api/projects", name);
-        var projectId = response.GetProperty("id").GetString()!;
-        await _fixture.Client.PostOkAsync($"/api/projects/{projectId}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
-        return projectId;
+            "/api/projects",
+            name,
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
+        return response.GetProperty("id").GetString()!;
     }
 
     private async Task<AgentRef> CreateAgentAsync(string projectId, string name)

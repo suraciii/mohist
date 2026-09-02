@@ -149,16 +149,10 @@ public class EpicStateTransitionApiSpecs : EpicApiTestSupport
 
     private async Task<ProjectDto> CreateProjectAsync(string scenario)
     {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+        return await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
             "/api/projects",
-            $"epic-{scenario}-{Guid.NewGuid():N}");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
-        return project;
+            $"epic-{scenario}-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
     }
 }
