@@ -1,7 +1,9 @@
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Workflow.Services;
@@ -248,6 +250,61 @@ public sealed class WorkflowGrainClaimAssignmentSpecs
         Assert.Contains(
             await events.ListAsync(runId),
             e => e.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunStopped);
+    }
+
+    [Fact]
+    public async Task StopAsync_StopsFailedLegacyRunWithoutBoundDefinition()
+    {
+        const string runId = "wr-stop-legacy-failed";
+        const string projectId = "proj-stop-legacy-failed";
+        await WorkflowGrainContractSupport.SeedTemplateAsync(
+            _fixture,
+            projectId,
+            SingleStage(),
+            FixedTime);
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
+        var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
+        await store.SaveAsync(new WorkflowRun
+        {
+            Id = runId,
+            Metadata = new WorkflowRunMetadata(null, FixedTime, ProjectId: projectId, IssueNumber: 1),
+            Status = WorkflowRunStatus.Failed,
+            WorkflowProfileId = "spec/workflow",
+            CurrentStageId = "build",
+            Stages =
+            [
+                new StageRun
+                {
+                    Id = "build",
+                    Attempt = 1,
+                    RequiresApproval = false,
+                    Initialized = true,
+                    Status = StageRunStatus.Failed,
+                },
+            ],
+        });
+
+        var grain = WorkflowGrainContractSupport.CreateGrain(scope.ServiceProvider, store, runId, TimeProvider);
+        await grain.OnActivateAsync(CancellationToken.None);
+        await grain.StopAsync("legacy-stop");
+
+        var reactivated = WorkflowGrainContractSupport.CreateGrain(scope.ServiceProvider, store, runId, TimeProvider);
+        await reactivated.OnActivateAsync(CancellationToken.None);
+
+        var persisted = await RequireRunAsync(store, runId);
+        Assert.Equal(WorkflowRunStatus.Stopped, persisted.Status);
+        Assert.Equal("spec/workflow", persisted.WorkflowProfileId);
+        Assert.Contains(
+            await events.ListAsync(runId),
+            e => e.Envelope.Type == EventCatalog.ReverseDns.WorkflowRunStopped);
+        Assert.Equal(WorkflowRunStatus.Stopped, (await RequireRunAsync(store, runId)).Status);
+
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var row = await db.WorkflowRuns.SingleAsync(x => x.WorkflowRunId == runId);
+        Assert.Null(row.WorkflowProfileIdKey);
     }
 
     /// <summary>
