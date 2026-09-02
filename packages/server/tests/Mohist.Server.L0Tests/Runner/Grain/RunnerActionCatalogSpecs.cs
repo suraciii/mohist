@@ -1,18 +1,22 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.L0Tests.Support;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.L1Tests.Specs.Workflow;
 using Mohist.Server.TestSupport;
+using Orleans;
 using Orleans.Core.Internal;
 using Orleans.Storage;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Runner.Grain;
+namespace Mohist.Server.L0Tests.Runner.Grain;
 
-[Collection("RunnerGrain")]
-public class RunnerActionCatalogSpecs : WorkflowGrainSpecs
+[Collection("OrleansGrainL0")]
+public class RunnerActionCatalogSpecs
 {
-    public RunnerActionCatalogSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
+    private readonly OrleansL0WorkflowGrainFixture _fixture;
+    private IGrainFactory Grains => _fixture.Grains;
+
+    public RunnerActionCatalogSpecs(OrleansL0WorkflowGrainFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task Register_RetainsCatalogOnRunnerInfoAndRegistry()
