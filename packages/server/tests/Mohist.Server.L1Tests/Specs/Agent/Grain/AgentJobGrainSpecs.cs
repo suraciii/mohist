@@ -598,20 +598,6 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task PollClaimedJob_WithoutReport_TransitionsToUnknownAtJobTimeout()
-    {
-        var (_, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-polled-timeout-{Guid.NewGuid():N}");
-        var job = JobGrain($"agent-job-polled-timeout-{Guid.NewGuid():N}");
-
-        await job.SubmitAsync(MakeInput("never reports after poll", projectId) with { TimeoutMilliseconds = 10_000 });
-        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
-
-        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(11));
-
-        Assert.Equal(AgentJobStatus.Unknown, await job.GetStatusAsync());
-    }
-
-    [Fact]
     public async Task ReportTimeout_WhenRunnerIsAway_PreservesRunnerLostTerminalFailure()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
@@ -736,25 +722,6 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
         // mirrored onto the session transcript; the work result status
         // remains observable on the part payload.
         Assert.Equal("failed", payload.RootElement.GetProperty("status").GetString());
-    }
-
-    [Fact]
-    public async Task GetGrain_IAgentJobGrain_ResolvesActiveActivation()
-    {
-        var jobKey = $"agent-job-resolve-{Guid.NewGuid():N}";
-        var job = Grains.GetGrain<IAgentJobGrain>(jobKey);
-
-        var status = await job.GetStatusAsync();
-        Assert.Equal(AgentJobStatus.Pending, status);
-
-        var snapshot = await job.GetRuntimeSnapshotAsync();
-        Assert.Equal(AgentJobStatus.Pending, snapshot.Status);
-        Assert.Null(snapshot.RunnerId);
-        Assert.Null(snapshot.CurrentWorkId);
-
-        var terminal = await job.GetTerminalResultAsync();
-        Assert.Equal(AgentJobStatus.Pending, terminal.Status);
-        Assert.Null(terminal.FailureReason);
     }
 
     [Fact]

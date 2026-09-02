@@ -5,15 +5,15 @@ using Mohist.Server.AgentOps.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Sessions.Domain;
-using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Sessions.Services;
 using Xunit;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
-namespace Mohist.Server.L1Tests.Specs.AgentOps;
+namespace Mohist.Server.L0Tests.AgentOps;
 
 /// <summary>
 /// Reporter-level specs for <see cref="AgentUsageReporter"/> (issue-327 T-004
@@ -27,11 +27,11 @@ namespace Mohist.Server.L1Tests.Specs.AgentOps;
 /// these specs assert the reporter-level contract directly so reporting
 /// regressions are caught without spinning a full route.
 /// </summary>
-public class AgentUsageReporterSpecs
+public sealed class AgentUsageReporterSpecs : IClassFixture<MohistDbFixture>
 {
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly MohistDbFixture _fixture;
 
-    public AgentUsageReporterSpecs(MohistIntegrationFixture fixture)
+    public AgentUsageReporterSpecs(MohistDbFixture fixture)
     {
         _fixture = fixture;
     }
@@ -652,15 +652,16 @@ public class AgentUsageReporterSpecs
 
     private async Task<ProjectDto> CreateProjectAsync()
     {
-        var name = $"cost-querier-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", name);
-        await _fixture.Client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
+        var project = new ProjectDto($"project-{Guid.NewGuid():N}", $"cost-querier-{Guid.NewGuid():N}");
+        await using var db = await _fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        db.Projects.Add(new ProjectRow
         {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
+            Id = project.Id,
+            Name = project.Name,
+            RepositoriesJson = "[]",
         });
+        await db.SaveChangesAsync();
         return project;
     }
 

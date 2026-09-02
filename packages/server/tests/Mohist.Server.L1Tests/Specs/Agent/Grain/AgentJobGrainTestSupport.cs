@@ -17,6 +17,8 @@ namespace Mohist.Server.L1Tests.Specs.Agent.Grain;
 
 public abstract class AgentJobGrainTestSupport
 {
+    private static readonly TimeSpan DefaultWaitTimeout = TimeSpan.FromSeconds(5);
+
     protected readonly AgentJobGrainFixture _fixture;
 
     protected AgentJobGrainTestSupport(AgentJobGrainFixture fixture)
@@ -42,23 +44,22 @@ public abstract class AgentJobGrainTestSupport
     protected async Task WaitForStatusAsync(
         IAgentJobGrain job,
         AgentJobStatus expected,
-        TimeSpan timeout,
+        TimeSpan? timeout = null,
         RunnerPollRequest? request = null)
     {
+        var waitTimeout = timeout ?? DefaultWaitTimeout;
         if (expected == AgentJobStatus.Running)
         {
-            await WaitForRunningAsync(job, request);
+            await WaitForRunningAsync(job, request, waitTimeout);
             return;
         }
 
-        var convergenceTimeout = timeout < TimeSpan.FromSeconds(30)
-            ? TimeSpan.FromSeconds(30)
-            : timeout;
-
+        // The dispatch observer has no terminal-status callback; retain this bounded
+        // Orleans convergence wait for transitions that are not dispatch boundaries.
         await WaitForAsync(
             () => job.GetStatusAsync(),
             s => s == expected,
-            convergenceTimeout,
+            waitTimeout,
             TimeSpan.FromMilliseconds(25),
             $"status == {expected}",
             () => job.CheckTimeoutsAsync());
@@ -66,11 +67,15 @@ public abstract class AgentJobGrainTestSupport
 
     protected async Task WaitForRunningAsync(
         IAgentJobGrain job,
-        RunnerPollRequest? request = null)
+        RunnerPollRequest? request = null,
+        TimeSpan? timeout = null)
     {
-        var runnerId = await WaitForAssignedRunnerAsync(job);
+        var waitTimeout = timeout ?? DefaultWaitTimeout;
+        var runnerId = await WaitForAssignedRunnerAsync(job, waitTimeout);
         await PollRunnerAsync(runnerId, request);
-        await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
+        await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync(
+            job.GetPrimaryKeyString(),
+            waitTimeout);
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
     }
 
@@ -81,24 +86,14 @@ public abstract class AgentJobGrainTestSupport
         await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
     }
 
-    private async Task<string> WaitForAssignedRunnerAsync(IAgentJobGrain job)
+    private async Task<string> WaitForAssignedRunnerAsync(
+        IAgentJobGrain job,
+        TimeSpan timeout)
     {
-        await WaitForAsync(
-            () => job.GetRuntimeSnapshotAsync(),
-            snapshot => !string.IsNullOrWhiteSpace(snapshot.RunnerId)
-                || snapshot.Status is AgentJobStatus.Completed
-                    or AgentJobStatus.Failed
-                    or AgentJobStatus.Unknown,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            "AgentJob receives a runner assignment or terminates");
-        var snapshot = await job.GetRuntimeSnapshotAsync();
-        if (string.IsNullOrWhiteSpace(snapshot.RunnerId))
-        {
-            throw new InvalidOperationException(
-                $"AgentJob {job.GetPrimaryKeyString()} never received a runner assignment before running (status={snapshot.Status})");
-        }
-        return snapshot.RunnerId!;
+        var runnerId = await _fixture.DispatchObserver.WaitForAssignmentPreparedAsync(
+            job.GetPrimaryKeyString(),
+            timeout);
+        return runnerId;
     }
 
     private Task PollRunnerAsync(string runnerId, RunnerPollRequest? request = null)

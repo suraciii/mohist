@@ -41,60 +41,7 @@ public sealed partial class AgentJobGrain
 
         var variablesJson = payload.Count == 0 ? null : JSON.Serialize(payload);
 
-        var with = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
-        {
-            ["prompt"] = JSON.SerializeToElement(
-                AgentStartupContextComposer.ComposePrompt(input.Prompt, input.StartupContext)),
-        };
-        if (executionSource is not null)
-            with["executionSource"] = JSON.SerializeToElement(executionSource);
-        if (!string.IsNullOrWhiteSpace(input.AgentInstructions))
-            with["instructions"] = JSON.SerializeToElement(input.AgentInstructions);
-        if (!string.IsNullOrWhiteSpace(input.Model))
-            with["model"] = JSON.SerializeToElement(input.Model);
-        if (!string.IsNullOrWhiteSpace(input.Variant))
-            with["variant"] = JSON.SerializeToElement(input.Variant);
-        if (!string.IsNullOrWhiteSpace(input.ReasoningEffort))
-            with["reasoningEffort"] = JSON.SerializeToElement(input.ReasoningEffort);
-        if (!string.IsNullOrWhiteSpace(input.Runtime))
-            with["runtime"] = JSON.SerializeToElement(input.Runtime);
-        if (input.Skills is { Count: > 0 })
-            with["skills"] = JSON.SerializeToElement(input.Skills);
-        // Carry accepted attachment descriptors without embedding file bytes.
-        if (input.Attachments is { Count: > 0 })
-            with["attachments"] = JSON.SerializeToElement(input.Attachments
-                .Select(descriptor => new
-                {
-                    id = descriptor.Id,
-                    name = descriptor.OriginalFileName,
-                    contentType = descriptor.ContentType,
-                    size = descriptor.Size,
-                })
-                .ToArray());
-        if (string.Equals(executionSource, AgentExecutionSources.Slack, StringComparison.Ordinal))
-        {
-            if (input.SlackExecutionContext is null)
-                throw new InvalidOperationException("Slack AgentJob input requires a complete execution context.");
-            with["slackExecutionContext"] = JSON.SerializeToElement(input.SlackExecutionContext);
-        }
-        else if (executionSource is null)
-        {
-            // Preserve the old source-less envelope for legacy non-Slack
-            // inputs. A legacy input with trusted Slack context was
-            // reconciled to Slack above and cannot reach this branch.
-            if (input.SlackExecutionContext is not null)
-                throw new InvalidOperationException("Legacy AgentJob Slack context could not be reconciled.");
-        }
-        else if (string.Equals(executionSource, AgentExecutionSources.NonSlack, StringComparison.Ordinal))
-        {
-            if (input.SlackExecutionContext is not null)
-                throw new InvalidOperationException("Non-Slack AgentJob input cannot carry a Slack execution context.");
-        }
-        else
-        {
-            throw new InvalidOperationException($"Unknown AgentJob execution source '{executionSource}'.");
-        }
-
+        var with = AgentJobDispatchProjector.BuildWith(input, executionSource);
         return new WorkDispatch(
             WorkflowRunId: workflowOrigin?.WorkflowRunId ?? string.Empty,
             WorkId: workId,

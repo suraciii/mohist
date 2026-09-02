@@ -9,11 +9,10 @@ using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Auth;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
-using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Agent.Grain;
+namespace Mohist.Server.L0Tests.Agent.Services;
 
 public class AgentGrainSpecs
 {

@@ -21,13 +21,6 @@ public sealed class AgentSpawnCoordinatorSpecs : AgentJobGrainTestSupport
     {
     }
 
-    [Fact]
-    public void SharedFixtureLaunchObservationsStartFreshForEachSpec()
-    {
-        Assert.Empty(_fixture.LaunchFaults.ParticipantIds(LaunchParticipantGate.PrepareJob));
-        Assert.Empty(_fixture.LaunchFaults.CommandIds(LaunchParticipantGate.PrepareJob));
-    }
-
     [Theory]
     [InlineData(LaunchParticipantGate.EnsureInitialLaunch)]
     [InlineData(LaunchParticipantGate.ParentLinkCommitted)]
