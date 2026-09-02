@@ -321,7 +321,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             WorkspacePath: "/tmp/agent-job-timeout",
             ProjectId: projectId,
             AgentSessionId: sessionId,
-            AgentId: "agent-test"));
+            AgentId: "agent-test",
+            TimeoutMilliseconds: 10_000));
 
         await ClaimPreparedAgentJobAsync(runnerId);
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());

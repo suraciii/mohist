@@ -74,7 +74,6 @@ stages:
         uses: mohist/agent
         with:
           name: mohist/builder
-          timeout: 1800000
   - id: build-health
     title: Health
     uses: core/script
@@ -157,7 +156,6 @@ stages:
     with:
       name: mohist/reviewer
       session: check
-      timeout: 1800000
       prompt: ${{ prompts.review }}
     expect:
       files:

@@ -311,7 +311,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:AgentJob:DispatchBackoffInitial"] = "00:00:00.050",
                 ["Mohist:AgentJob:DispatchBackoffCap"] = "00:00:00.200",
                 ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",
-                ["Mohist:AgentJob:JobTimeout"] = "00:00:08",
                 ["Mohist:Notifications:Hermes:WebhookUrl"] = null,
                 ["Mohist:OperatorToken"] = MohistIntegrationFixture.OperatorToken,
                 ["Mohist:AdminToken"] = MohistIntegrationFixture.AdminToken,

@@ -11,6 +11,10 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void DefaultWorkflowDefinition_UsesWorkspacePlanArtifactsAndEvidenceReview()
     {
+        var source = WorkflowProfileCatalog.GetDefinitionSource(WorkflowProfileCatalog.LocalId)!;
+        Assert.DoesNotContain("timeout: 1800000", source, StringComparison.Ordinal);
+        Assert.Contains("timeout: 900000", source, StringComparison.Ordinal);
+
         var definition = WorkflowProfileCatalog.Definition;
         Assert.Equal(["plan", "build", "check", "integrate"], definition.Stages.Select(s => s.Stage).ToArray());
         var plan = definition.Stages[0];
@@ -141,8 +145,13 @@ public class MohistWorkflowDefinitionTests
     [Fact]
     public void GithubPrWorkflowDefinition_UsesOneProjectVerificationTask()
     {
+        var source = WorkflowProfileCatalog.GetDefinitionSource(WorkflowProfileCatalog.GithubPrId)!;
+        Assert.DoesNotContain("timeout: 1800000", source, StringComparison.Ordinal);
+        Assert.Contains("timeout: 900000", source, StringComparison.Ordinal);
+
         var build = WorkflowProfileCatalog.GithubPrWorkflowDefinition.Stages.Single(s => s.Stage == "build");
         var verify = build.Tasks.Single(t => t.Id == "verify");
+        Assert.Equal("900000", verify.With!["timeout"]!.Value.GetRawText());
         Assert.Equal("${{ workflow.verification.command }}", ReadString(build, "verify"));
         Assert.Equal(2, verify.Recovery!.Handlers.Count);
         Assert.All(verify.Recovery.Handlers, handler =>
@@ -154,6 +163,23 @@ public class MohistWorkflowDefinitionTests
             Assert.Equal("mohist/builder", fixCi.With!["name"]!.Value.GetString());
             Assert.Null(fixCi.Expect);
         });
+    }
+
+    [Theory]
+    [InlineData(WorkflowProfileCatalog.LocalId)]
+    [InlineData(WorkflowProfileCatalog.GithubPrId)]
+    public void BuiltInProfiles_AgentTasksDoNotDeclareTheDefaultTimeout(string profileId)
+    {
+        var definition = WorkflowProfileCatalog.GetDefinition(profileId)!;
+        var agentTasks = EnumerateTasks(definition)
+            .Where(task => task.Uses == "mohist/agent")
+            .ToArray();
+
+        Assert.NotEmpty(agentTasks);
+        Assert.All(agentTasks, task =>
+            Assert.False(
+                task.With?.ContainsKey("timeout") == true,
+                $"Built-in profile '{profileId}' Agent task '{task.Id}' must inherit AgentJobOptions.JobTimeout."));
     }
 
     private static string? ReadString(StageDefinition stage, string taskId)
@@ -189,5 +215,49 @@ public class MohistWorkflowDefinitionTests
         var oneOf = marker.GetProperty("oneOf").EnumerateArray().Select(v => v.GetString()).ToList();
         Assert.Contains("<promise>done</promise>", oneOf);
         Assert.Contains("<promise>unfinished</promise>", oneOf);
+    }
+
+    private static IEnumerable<TaskDefinition> EnumerateTasks(WorkflowDefinition definition)
+    {
+        foreach (var task in definition.Stages.SelectMany(stage => stage.Tasks))
+        {
+            foreach (var nested in EnumerateTask(task))
+                yield return nested;
+        }
+
+        if (definition.Approval?.Feedback?.Tasks is { } feedbackTasks)
+        {
+            foreach (var task in feedbackTasks)
+            {
+                foreach (var nested in EnumerateTask(task))
+                    yield return nested;
+            }
+        }
+
+        if (definition.Recoveries is { } recoveries)
+        {
+            foreach (var recovery in recoveries.Values)
+            {
+                foreach (var task in recovery.Handlers.SelectMany(handler => handler.Tasks))
+                {
+                    foreach (var nested in EnumerateTask(task))
+                        yield return nested;
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<TaskDefinition> EnumerateTask(TaskDefinition task)
+    {
+        yield return task;
+
+        if (task.Recovery is not null)
+        {
+            foreach (var recoveryTask in task.Recovery.Handlers.SelectMany(handler => handler.Tasks))
+            {
+                foreach (var nested in EnumerateTask(recoveryTask))
+                    yield return nested;
+            }
+        }
     }
 }

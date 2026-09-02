@@ -7,7 +7,7 @@ namespace Mohist.Server.Agent.Grains;
 /// </summary>
 /// <remarks>
 /// Documented defaults: availability bound 10 min,
-/// job timeout 10 min, and runner-loss recovery 15 min. Bind from
+/// job timeout 30 min, and runner-loss recovery 15 min. Bind from
 /// <c>Mohist:AgentJob</c> in <c>~/.mohist/config.jsonc</c>.
 /// </remarks>
 public sealed class AgentJobOptions
@@ -19,7 +19,7 @@ public sealed class AgentJobOptions
     public TimeSpan DispatchRetryBound { get; set; } = TimeSpan.FromMinutes(10);
     public double DispatchBackoffMultiplier { get; set; } = 2.0;
 
-    public TimeSpan JobTimeout { get; set; } = TimeSpan.FromMinutes(10);
+    public TimeSpan JobTimeout { get; set; } = TimeSpan.FromMinutes(30);
 
     /// <summary>
     /// How long an AgentJob may remain Unknown and recoverable after its
