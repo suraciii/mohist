@@ -7,9 +7,9 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.TestSupport;
 using Xunit;
-using static Mohist.Server.L1Tests.Specs.Epic.Grain.EpicEventPublishTestSupport;
+using static Mohist.Server.L0Tests.Epic.Grains.EpicEventPublishTestSupport;
 
-namespace Mohist.Server.L1Tests.Specs.Epic.Grain;
+namespace Mohist.Server.L0Tests.Epic.Grains;
 
 public class IssueOwnedEpicMembershipSpecs
 {

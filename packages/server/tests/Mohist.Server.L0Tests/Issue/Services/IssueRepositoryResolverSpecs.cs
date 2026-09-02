@@ -14,8 +14,8 @@ namespace Mohist.Server.L0Tests.Issue.Services;
 /// by <c>POST /api/projects/{ref}/issues</c> (default / explicit name)
 /// and <c>GET /api/projects/{ref}/issues/{n}</c> (re-resolve after
 /// project changes). The route contract (400 unknown repo, 400 create
-/// failed, 404) stays in <c>IssueRepositoryApiSpecs</c> and
-/// <c>IssueRepositoryBindingApiSpecs</c>.
+/// failed, 404) stays in <c>IssueRepositoryBindingApiSpecs</c> and
+/// <c>IssueArchivedDetailApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
 public class IssueRepositoryResolverSpecs

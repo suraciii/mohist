@@ -5,13 +5,13 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
-using Mohist.Server.L1Tests.Support;
+using TestSqliteDatabase = Mohist.Server.L0Tests.Support.TestSqliteDatabase;
 using Mohist.Server.TestSupport;
 using Mohist.Server.TestSupport.TestData;
 using Orleans;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Sessions;
+namespace Mohist.Server.L0Tests.Sessions;
 
 public class AgentSessionStoreSpecs : IAsyncLifetime
 {

@@ -10,12 +10,11 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
-using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
 using Orleans;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
-namespace Mohist.Server.L1Tests.Specs.Epic.Grain;
+namespace Mohist.Server.L0Tests.Epic.Grains;
 
 internal sealed record AffiliationCall(string IssueKey, int? EpicNumber, bool IsLink);
 

@@ -8,12 +8,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Domain;
-using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 using Mohist.Server.Infrastructure.Events;
 
-namespace Mohist.Server.L1Tests.Specs.Epic.Grain;
+namespace Mohist.Server.L0Tests.Epic.Grains;
 
 public class EpicAutoDoneSpecs
 {

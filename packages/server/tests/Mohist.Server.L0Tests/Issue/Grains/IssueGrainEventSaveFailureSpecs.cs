@@ -17,7 +17,6 @@ using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Services;
 using Mohist.Server.SystemInfo;
-using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
@@ -25,7 +24,7 @@ using Orleans;
 using Xunit;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
-namespace Mohist.Server.L1Tests.Specs.Issue.Grain;
+namespace Mohist.Server.L0Tests.Issue.Grains;
 
 /// <summary>
 /// Covers the fault-isolation contract for transactional event append:
