@@ -138,7 +138,7 @@ export async function runVerify(
     planIdentity: identity,
   }))
 
-  // Server and CLI share project-reference outputs. Build every application
+  // Application builds share project-reference outputs. Build every application
   // before admitting any test process, then let the isolated test scopes fan
   // out together. CI already gives each application its own runner; local
   // verify must provide the equivalent output isolation on one host.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 )
@@ -269,5 +270,86 @@ func TestRunWhyMapsNotFoundAndMalformedPayloads(t *testing.T) {
 				t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
 			}
 		})
+	}
+}
+
+func TestFoundationHelpAndInfoAreLocal(t *testing.T) {
+	calls := 0
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("network must not be used")
+	}), map[string]string{})
+	if code := Run(context.Background(), []string{"--help"}, deps); code != ExitOK {
+		t.Fatalf("help code=%d", code)
+	}
+	if !strings.Contains(out.String(), "auth") || !strings.Contains(out.String(), "project") {
+		t.Fatalf("root help=%q", out.String())
+	}
+	*out, *errOut = strings.Builder{}, strings.Builder{}
+	if code := Run(context.Background(), []string{"info", "--json"}, deps); code != ExitOK || calls != 0 {
+		t.Fatalf("info code=%d calls=%d stdout=%q stderr=%q", code, calls, out.String(), errOut.String())
+	}
+	if out.String() != strings.Join(infoFields, "\n")+"\n" {
+		t.Fatalf("info fields=%q", out.String())
+	}
+}
+
+func TestMachineLocalAdminCredentialIsNotSentToRemoteServer(t *testing.T) {
+	var got *http.Request
+	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r
+		return response(200, `{"success":true,"data":[{"name":"migrations","status":"ok","detail":"current","nextAction":null}]}`), nil
+	}), map[string]string{"MOHIST_SERVER_URL": "https://remote.example", "MOHIST_ADMIN_TOKEN": "machine-secret"})
+	if code := Run(context.Background(), []string{"doctor"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if got == nil || got.Header.Get("Authorization") != "" {
+		t.Fatalf("remote request leaked local credential: %#v", got)
+	}
+}
+
+func TestInvalidPATInputDoesNotCallHTTP(t *testing.T) {
+	calls := 0
+	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("must not call")
+	}), map[string]string{"MOHIST_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"auth", "token", "create", "--name", "ci", "--scope", "readonly", "--all-projects"}, deps); code != ExitUsage {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if calls != 0 {
+		t.Fatalf("invalid PAT input issued %d requests", calls)
+	}
+}
+
+func TestStoredSessionRefreshesOnceAfterUnauthorized(t *testing.T) {
+	requests := 0
+	var written string
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		switch r.URL.Path {
+		case "/api/doctor/checks":
+			if requests == 1 {
+				return response(401, `{"success":false,"error":"expired","code":"unauthorized"}`), nil
+			}
+			if r.Header.Get("Authorization") != "Bearer new-access" {
+				t.Fatalf("retry auth=%q", r.Header.Get("Authorization"))
+			}
+			return response(200, `{"success":true,"data":[]}`), nil
+		case "/api/auth/token":
+			return response(200, `{"success":true,"data":{"accessToken":"new-access","refreshToken":"new-refresh"}}`), nil
+		default:
+			return response(500, `{"success":false,"error":"unexpected","code":"service_error"}`), nil
+		}
+	}), map[string]string{})
+	deps.ReadFile = func(path string) (string, error) {
+		if strings.HasSuffix(path, "credentials.json") && written != "" {
+			return written, nil
+		}
+		return `{"servers":[{"server":"http://localhost:3456","accessToken":"old-access","refreshToken":"old-refresh"}]}`, nil
+	}
+	deps.WriteFile = func(_ string, value string, _ os.FileMode) error { written = value; return nil }
+	if code := Run(context.Background(), []string{"doctor"}, deps); code != ExitOK || requests != 3 || errOut.Len() != 0 {
+		t.Fatalf("code=%d requests=%d stdout=%q stderr=%q", code, requests, out.String(), errOut.String())
 	}
 }

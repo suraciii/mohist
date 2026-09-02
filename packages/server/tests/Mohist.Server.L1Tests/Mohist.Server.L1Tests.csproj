@@ -29,7 +29,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Mohist.Server\Mohist.Server.csproj" />
-    <ProjectReference Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj" />
     <ProjectReference Include="..\Mohist.Server.TestSupport\Mohist.Server.TestSupport.csproj" />
   </ItemGroup>
 
@@ -43,19 +42,6 @@
     <Copy
       SourceFiles="@(_TemplateFiles)"
       DestinationFolder="$(OutputPath)Issue\Services\IssueTemplates\templates\"
-      SkipUnchangedFiles="true" />
-  </Target>
-
-  <Target Name="CopyCliSkillData" AfterTargets="Build">
-    <PropertyGroup>
-      <_CliProjectDir>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..\cli\Mohist.Cli'))</_CliProjectDir>
-    </PropertyGroup>
-    <ItemGroup>
-      <_SkillDataFiles Include="$(_CliProjectDir)\skill-data\**\*" />
-    </ItemGroup>
-    <Copy
-      SourceFiles="@(_SkillDataFiles)"
-      DestinationFolder="$(OutputPath)skill-data\%(_SkillDataFiles.RecursiveDir)"
       SkipUnchangedFiles="true" />
   </Target>
 
