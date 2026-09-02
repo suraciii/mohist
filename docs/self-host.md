@@ -63,7 +63,9 @@ This mode supports daily laptop use and starts at boot.
 
 First complete the build and CLI installation in
 [Getting Started](getting-started.md), including `npm ci`, `npm run build`, and
-`npm run install:cli`.
+`bash scripts/install-mo.sh`. This installs `mo` as a static Go executable under
+`~/.local/bin` and synchronizes its packaged skills under
+`~/.mohist/cli/skill-data`.
 
 ```bash
 # Install, enable, restart, and enable user lingering.
@@ -133,7 +135,7 @@ Use an always-on NUC, NAS, mini PC, or older laptop for unattended operation.
    cd /opt/mohist
    npm ci
    npm run build
-   npm run install:cli
+   bash scripts/install-mo.sh
    ```
 
 3. Create a dedicated user, which is recommended:
