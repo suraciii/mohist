@@ -245,11 +245,17 @@ public sealed class WorkflowGrainFeedbackDispatchSpecs
         Assert.Equal(approvalRequestCount, (await arrangement.Events.ListAsync(arrangement.RunId))
             .Count(evt => evt.Envelope.Type == EventCatalog.ReverseDns.StageApprovalRequested));
 
+        var beforeFinalReport = (await arrangement.Events.ListAsync(arrangement.RunId)).Count;
         await arrangement.ReportCompletedAsync(publish);
 
         var resolved = await RequireRunAsync(arrangement);
         Assert.Equal(ApprovalFeedbackStatus.Resolved, resolved.Feedback.Single(f => f.Id == feedbackId).Status);
         Assert.Equal(2, resolved.CurrentStage().Attempt);
+        Assert.All(resolved.CurrentStage().Checks, check => Assert.Equal(StageCheckStatus.Pending, check.Status));
+        var finalBatch = (await arrangement.Events.ListAsync(arrangement.RunId)).Skip(beforeFinalReport).ToList();
+        Assert.Contains(finalBatch, evt => evt.Envelope.Type == EventCatalog.ReverseDns.TaskCompleted);
+        Assert.DoesNotContain(finalBatch, evt => evt.Envelope.Type == EventCatalog.ReverseDns.StageApprovalRequested);
+        Assert.Equal(EventCatalog.ReverseDns.StageStarted, finalBatch[^1].Envelope.Type);
         Assert.Equal("draft.s2.1", (await arrangement.AssignAndClaimAsync())!.Id);
         Assert.Equal(approvalRequestCount, (await arrangement.Events.ListAsync(arrangement.RunId))
             .Count(evt => evt.Envelope.Type == EventCatalog.ReverseDns.StageApprovalRequested));
