@@ -55,6 +55,8 @@ public abstract class AgentJobGrainTestSupport
             ? TimeSpan.FromSeconds(30)
             : timeout;
 
+        // The dispatch observer has no terminal-status callback; retain this bounded
+        // Orleans convergence wait for transitions that are not dispatch boundaries.
         await WaitForAsync(
             () => job.GetStatusAsync(),
             s => s == expected,
@@ -70,7 +72,9 @@ public abstract class AgentJobGrainTestSupport
     {
         var runnerId = await WaitForAssignedRunnerAsync(job);
         await PollRunnerAsync(runnerId, request);
-        await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
+        await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync(
+            job.GetPrimaryKeyString(),
+            TimeSpan.FromSeconds(5));
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
     }
 
@@ -83,22 +87,10 @@ public abstract class AgentJobGrainTestSupport
 
     private async Task<string> WaitForAssignedRunnerAsync(IAgentJobGrain job)
     {
-        await WaitForAsync(
-            () => job.GetRuntimeSnapshotAsync(),
-            snapshot => !string.IsNullOrWhiteSpace(snapshot.RunnerId)
-                || snapshot.Status is AgentJobStatus.Completed
-                    or AgentJobStatus.Failed
-                    or AgentJobStatus.Unknown,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            "AgentJob receives a runner assignment or terminates");
-        var snapshot = await job.GetRuntimeSnapshotAsync();
-        if (string.IsNullOrWhiteSpace(snapshot.RunnerId))
-        {
-            throw new InvalidOperationException(
-                $"AgentJob {job.GetPrimaryKeyString()} never received a runner assignment before running (status={snapshot.Status})");
-        }
-        return snapshot.RunnerId!;
+        var runnerId = await _fixture.DispatchObserver.WaitForAssignmentPreparedAsync(
+            job.GetPrimaryKeyString(),
+            TimeSpan.FromSeconds(5));
+        return runnerId;
     }
 
     private Task PollRunnerAsync(string runnerId, RunnerPollRequest? request = null)

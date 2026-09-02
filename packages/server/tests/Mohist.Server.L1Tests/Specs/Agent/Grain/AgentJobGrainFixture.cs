@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -283,6 +284,8 @@ internal sealed class FailingAgentSessionTranscriptStore : IAgentSessionTranscri
 
 public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObserver
 {
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<string>> _assignmentPreparedByJob = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, TaskCompletionSource> _runnerAcceptedByJob = new(StringComparer.Ordinal);
     private TaskCompletionSource _assignmentPrepared = NewSignal();
     private TaskCompletionSource _runnerAccepted = NewSignal();
     private TaskCompletionSource? _assignmentPreparedBlock;
@@ -295,6 +298,7 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
     public Task AssignmentPreparedAsync(string agentJobId, string runnerId, string workId)
     {
         _assignmentPrepared.TrySetResult();
+        _assignmentPreparedByJob.GetOrAdd(agentJobId, static _ => NewSignal<string>()).TrySetResult(runnerId);
         if (_assignmentPreparedBlock is not null)
             return _assignmentPreparedBlock.Task;
         return FailAssignmentPrepared
@@ -305,6 +309,7 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
     public Task RunnerAcceptedAsync(string agentJobId, string runnerId, string workId)
     {
         _runnerAccepted.TrySetResult();
+        _runnerAcceptedByJob.GetOrAdd(agentJobId, static _ => NewSignal()).TrySetResult();
         return FailRunnerAccepted
             ? Task.FromException(new InvalidOperationException("simulated activation loss after runner acceptance"))
             : Task.CompletedTask;
@@ -314,9 +319,29 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
         _runnerAccepted,
         "AgentJob dispatch observer runner accepted");
 
+    public Task WaitForRunnerAcceptedAsync(
+        string agentJobId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default) =>
+        WaitForSignalAsync(
+            _runnerAcceptedByJob.GetOrAdd(agentJobId, static _ => NewSignal()),
+            timeout,
+            cancellationToken,
+            $"AgentJob {agentJobId} dispatch observer runner accepted");
+
     public Task WaitForAssignmentPreparedAsync() => WaitForSignalAsync(
         _assignmentPrepared,
         "AgentJob dispatch observer assignment prepared");
+
+    public Task<string> WaitForAssignmentPreparedAsync(
+        string agentJobId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default) =>
+        WaitForSignalAsync(
+            _assignmentPreparedByJob.GetOrAdd(agentJobId, static _ => NewSignal<string>()),
+            timeout,
+            cancellationToken,
+            $"AgentJob {agentJobId} dispatch observer assignment prepared");
 
     public void BlockAssignmentPrepared() => _assignmentPreparedBlock ??= NewSignal();
 
@@ -328,6 +353,8 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
         FailRunnerAccepted = false;
         _assignmentPreparedBlock?.TrySetResult();
         _assignmentPreparedBlock = null;
+        _assignmentPreparedByJob.Clear();
+        _runnerAcceptedByJob.Clear();
         _assignmentPrepared = NewSignal();
         _runnerAccepted = NewSignal();
     }
@@ -335,16 +362,41 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
     private static TaskCompletionSource NewSignal() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    private static TaskCompletionSource<T> NewSignal<T>() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private static Task WaitForSignalAsync(TaskCompletionSource signal, string description) =>
-        TestWait.ForAsync(
-            async () =>
-            {
-                if (!signal.Task.IsCompleted)
-                    await Task.Run(static () => { });
-                return signal.Task.IsCompleted;
-            },
-            completed => completed,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            description);
+        WaitForSignalAsync(signal, TimeSpan.FromSeconds(5), CancellationToken.None, description);
+
+    private static async Task WaitForSignalAsync(
+        TaskCompletionSource signal,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        string description)
+    {
+        try
+        {
+            await signal.Task.WaitAsync(timeout, cancellationToken);
+        }
+        catch (TimeoutException ex)
+        {
+            throw new TimeoutException($"Timed out waiting for: {description}", ex);
+        }
+    }
+
+    private static async Task<T> WaitForSignalAsync<T>(
+        TaskCompletionSource<T> signal,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        string description)
+    {
+        try
+        {
+            return await signal.Task.WaitAsync(timeout, cancellationToken);
+        }
+        catch (TimeoutException ex)
+        {
+            throw new TimeoutException($"Timed out waiting for: {description}", ex);
+        }
+    }
 }

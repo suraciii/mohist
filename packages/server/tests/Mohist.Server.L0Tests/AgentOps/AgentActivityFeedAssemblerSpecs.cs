@@ -5,17 +5,17 @@ using Mohist.Server.AgentOps.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
-using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.AgentOps;
+namespace Mohist.Server.L0Tests.AgentOps;
 
 /// <summary>
 /// Issue-327 T-003: focused unit specs for
@@ -31,13 +31,13 @@ namespace Mohist.Server.L1Tests.Specs.AgentOps;
 /// passthrough, and reconciler-driven session filtering are caught without
 /// a full HTTP round-trip.
 /// </summary>
-public class AgentActivityFeedAssemblerSpecs
+public sealed class AgentActivityFeedAssemblerSpecs : IClassFixture<MohistDbFixture>
 {
     private static readonly DateTime PinnedNow = new(2026, 6, 30, 12, 0, 0, DateTimeKind.Utc);
 
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly MohistDbFixture _fixture;
 
-    public AgentActivityFeedAssemblerSpecs(MohistIntegrationFixture fixture)
+    public AgentActivityFeedAssemblerSpecs(MohistDbFixture fixture)
     {
         _fixture = fixture;
     }
@@ -319,15 +319,16 @@ public class AgentActivityFeedAssemblerSpecs
 
     private async Task<ProjectDto> CreateProjectAsync()
     {
-        var name = $"activity-spec-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", name);
-        await _fixture.Client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
+        var project = new ProjectDto($"project-{Guid.NewGuid():N}", $"activity-spec-{Guid.NewGuid():N}");
+        await using var db = await _fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        db.Projects.Add(new ProjectRow
         {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
+            Id = project.Id,
+            Name = project.Name,
+            RepositoriesJson = "[]",
         });
+        await db.SaveChangesAsync();
         return project;
     }
 
@@ -428,7 +429,7 @@ public class AgentActivityFeedAssemblerSpecs
 
     private async Task InsertTranscriptPartsAsync(string sessionId, int count)
     {
-        var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        var now = _fixture.Services.GetRequiredService<TimeProvider>().GetUtcNow().UtcDateTime;
         await using var db = await _fixture.Services
             .GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
 
