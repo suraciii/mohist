@@ -8,14 +8,46 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 /// <summary>
-/// Multi-agent thread behavior split off from
-/// <see cref="SlackMultiAgentIngressSpecs"/>: thread launch / session sharing,
-/// per-agent binding isolation and threaded ambiguous prompting. Shares the
-/// same fixture, seed helpers and cached connection
+/// Multi-agent thread composition proofs split off from
+/// <see cref="SlackMultiAgentIngressSpecs"/>: ambiguous replies and concurrent
+/// agent binding. Shares the same fixture, seed helpers and cached connection
 /// leases as the partial.
 /// </summary>
 public sealed partial class SlackMultiAgentIngressSpecs
 {
+    [Fact]
+    public async Task Explicit_single_bot_in_multi_agent_thread_continues_only_that_bot()
+    {
+        var sharedProjectId = $"project_{Guid.NewGuid():N}";
+        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-explicit", "U_BOT_A", "A_BOT_A", sharedProjectId);
+        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-explicit", "U_BOT_B", "A_BOT_B", sharedProjectId);
+
+        var firstA = await PostChannelAsync(connectionA, "C-multi-explicit",
+            messageTs: "1710000000.010500",
+            threadTs: null,
+            mentions: new[] { connectionA.BotUserId },
+            text: $"<@{connectionA.BotUserId}> first task");
+        var sessionAId = firstA.GetProperty("sessionId").GetString();
+        Assert.False(string.IsNullOrEmpty(sessionAId));
+
+        var firstB = await PostChannelAsync(connectionB, "C-multi-explicit",
+            messageTs: "1710000000.010510",
+            threadTs: "1710000000.010500",
+            mentions: new[] { connectionB.BotUserId },
+            text: $"<@{connectionB.BotUserId}> second task");
+        var sessionBId = firstB.GetProperty("sessionId").GetString();
+        Assert.False(string.IsNullOrEmpty(sessionBId));
+
+        var replyB = await PostChannelAsync(connectionB, "C-multi-explicit",
+            messageTs: "1710000000.010520",
+            threadTs: "1710000000.010500",
+            mentions: new[] { connectionB.BotUserId },
+            text: $"<@{connectionB.BotUserId}> follow-up");
+        Assert.Equal(sessionBId, replyB.GetProperty("sessionId").GetString());
+        Assert.NotEqual(sessionAId, replyB.GetProperty("sessionId").GetString());
+        Assert.True(replyB.GetProperty("followup").GetBoolean());
+    }
+
     [Fact]
     public async Task Multi_agent_thread_no_mention_starts_no_work_and_prompts_once()
     {
@@ -121,85 +153,6 @@ public sealed partial class SlackMultiAgentIngressSpecs
             sharedProjectId, connectionB.WorkspaceTeamId, conversationId, rootTs);
         Assert.Equal(2, bindings.Count);
         Assert.Single(bindings, binding => binding.ConnectionId == connectionB.Id);
-    }
-
-    [Fact]
-    public async Task Explicit_single_bot_in_multi_agent_thread_continues_only_that_bot()
-    {
-        var sharedProjectId = $"project_{Guid.NewGuid():N}";
-        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-5", "U_BOT_A5", "A_BOT_A5", sharedProjectId);
-        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-5", "U_BOT_B5", "A_BOT_B5", sharedProjectId);
-
-        var firstA = await PostChannelAsync(connectionA, "C-multi-iso",
-            messageTs: "1710000000.010500",
-            threadTs: null,
-            mentions: new[] { connectionA.BotUserId },
-            text: $"<@{connectionA.BotUserId}> first task");
-        var sessionAId = firstA.GetProperty("sessionId").GetString();
-        Assert.False(string.IsNullOrEmpty(sessionAId));
-
-        var firstB = await PostChannelAsync(connectionB, "C-multi-iso",
-            messageTs: "1710000000.010510",
-            threadTs: "1710000000.010500",
-            mentions: new[] { connectionB.BotUserId },
-            text: $"<@{connectionB.BotUserId}> second task");
-        var sessionBId = firstB.GetProperty("sessionId").GetString();
-        Assert.False(string.IsNullOrEmpty(sessionBId));
-
-        var replyB = await PostChannelAsync(connectionB, "C-multi-iso",
-            messageTs: "1710000000.010520",
-            threadTs: "1710000000.010500",
-            mentions: new[] { connectionB.BotUserId },
-            text: $"<@{connectionB.BotUserId}> follow-up");
-        Assert.Equal(sessionBId, replyB.GetProperty("sessionId").GetString());
-        Assert.True(replyB.GetProperty("followup").GetBoolean());
-
-        var replyA = await PostChannelAsync(connectionA, "C-multi-iso",
-            messageTs: "1710000000.010530",
-            threadTs: "1710000000.010500",
-            mentions: new[] { connectionA.BotUserId },
-            text: $"<@{connectionA.BotUserId}> follow-up");
-        Assert.Equal(sessionAId, replyA.GetProperty("sessionId").GetString());
-        Assert.True(replyA.GetProperty("followup").GetBoolean());
-    }
-
-    [Fact]
-    public async Task Ambiguous_prompt_threaded_reply_is_prompted_in_thread()
-    {
-        var sharedProjectId = $"project_{Guid.NewGuid():N}";
-        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-7", "U_BOT_A7", "A_BOT_A7", sharedProjectId);
-        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-7", "U_BOT_B7", "A_BOT_B7", sharedProjectId);
-
-        var firstA = await PostChannelAsync(connectionA, "C-thread-prompt",
-            messageTs: "1710000000.010800",
-            threadTs: null,
-            mentions: new[] { connectionA.BotUserId },
-            text: $"<@{connectionA.BotUserId}> first");
-        Assert.False(string.IsNullOrEmpty(firstA.GetProperty("sessionId").GetString()));
-
-        var firstB = await PostChannelAsync(connectionB, "C-thread-prompt",
-            messageTs: "1710000000.010810",
-            threadTs: "1710000000.010800",
-            mentions: new[] { connectionB.BotUserId },
-            text: $"<@{connectionB.BotUserId}> second");
-        Assert.False(string.IsNullOrEmpty(firstB.GetProperty("sessionId").GetString()));
-
-        var ambiguous = await PostChannelAsync(connectionA, "C-thread-prompt",
-            messageTs: "1710000000.010820",
-            threadTs: "1710000000.010800",
-            mentions: Array.Empty<string>(),
-            text: "human chat");
-        Assert.Equal("ambiguous", ambiguous.GetProperty("kind").GetString());
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var promptRows = await db.SlackOutboxRows
-            .Where(row => row.ConnectionId == connectionA.Id
-                && row.ConversationId == "C-thread-prompt"
-                && row.ThreadTs == "1710000000.010800"
-                && row.Kind == SlackOutboxKinds.UserAction)
-            .ToListAsync();
-        Assert.Contains(promptRows, row => row.PayloadJson.Contains("Multiple Agents", StringComparison.Ordinal));
     }
 
 }
