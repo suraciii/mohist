@@ -60,12 +60,13 @@ Go module proxy is unreachable, set a reachable `GOPROXY`, such as
 Install the CLI before its first use:
 
 ```bash
-npm run install:cli
+bash scripts/install-mo.sh
 mo --version
 ```
 
-The repository command packages the local CLI and installs the global .NET tool
-as `mo`.
+`bash scripts/install-mo.sh` builds and installs `mo` as a static Go executable
+under `~/.local/bin` and synchronizes its packaged skills under
+`~/.mohist/cli/skill-data`.
 
 ## 4. Start the Core Processes
 
