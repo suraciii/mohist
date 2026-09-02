@@ -1,18 +1,19 @@
 using Mohist.Server.Api;
+using Mohist.Server.Slack;
 using Xunit;
 
-namespace Mohist.Server.L0Tests.Slack;
+namespace Mohist.Server.L0Tests.Specs.Slack;
 
 /// <summary>
-/// Pure string-shape unit tests for the New task leading marker detector
-/// on <see cref="SlackConnectionRoutes"/>. Companion to the integration
-/// spec tests in <c>SlackDmNewTaskIngressSpecs</c>, which exercise the
+/// Component Specs for the New task leading marker detector
+/// on <see cref="SlackConnectionRoutes"/>. Companion to the route Specs in
+/// <c>SlackDmNewTaskIngressSpecs</c>, which exercise the
 /// full ingress path with a fake Slack ingress. This file pins down the
 /// case-insensitive + standalone-token rule in isolation so a future
 /// tweak to <see cref="SlackConnectionRoutes.TryStripNewTaskMarker"/>
 /// can't drift from the product spec without a red test.
 /// </summary>
-public class SlackConnectionRoutesNewTaskMarkerTests
+public sealed class SlackDmNewTaskSpecs
 {
     [Theory]
     [InlineData("new task do something", "do something")]
@@ -47,6 +48,24 @@ public class SlackConnectionRoutesNewTaskMarkerTests
 
         Assert.False(matched);
         Assert.Equal(string.Empty, remaining);
+    }
+
+    [Theory]
+    [InlineData("", false, "", 0, "Please send a task for the Agent to perform.")]
+    [InlineData("new task", true, "", 0, "Please send a task for the Agent to perform.")]
+    [InlineData("new task", true, "", 1, null)]
+    [InlineData("task", false, "", 0, null)]
+    [InlineData("new task work", true, "work", 0, null)]
+    public void Empty_task_rejection_requires_text_or_an_attachment(
+        string prompt,
+        bool isNewTask,
+        string newTaskPrompt,
+        int attachmentCount,
+        string? expectedReason)
+    {
+        Assert.Equal(expectedReason,
+            SlackDmIngressPolicy.EmptyTaskRejectionReason(
+                prompt, isNewTask, newTaskPrompt, attachmentCount));
     }
 
     [Fact]
