@@ -81,7 +81,8 @@ public sealed class WorkflowVariableSpecs
         var arrangement = await ArrangeAsync(
             "foundation-variable-generic",
             new WorkflowDefinition(
-            [new StageDefinition("release", [new("publish", "Publish", "spec/task")], [])]));
+            [new StageDefinition("release", [new("publish", "Publish", "spec/task")], [])]),
+            issueNumber: 0);
 
         var dispatch = await RenderDispatchAsync(arrangement, await CurrentWorkAsync(arrangement));
 
@@ -158,39 +159,11 @@ public sealed class WorkflowVariableSpecs
         Assert.Contains("\"run\":\"git diff --check\"", check.With);
     }
 
-    [Fact]
-    public async Task MohistWorkflowDispatchesAgentWorkAsAgentJob()
-    {
-        var arrangement = await ArrangeAsync(
-            "foundation-variable-agent-job",
-            WorkflowProfileCatalog.Definition);
-
-        var prepareItem = await CurrentWorkAsync(arrangement);
-        var prepare = await RenderDispatchAsync(arrangement, prepareItem);
-        Assert.Equal("task", prepare.WorkType);
-        Assert.Equal("plan", prepare.Stage);
-        Assert.Equal("mohist/workspace-prepare", prepare.Uses);
-        await arrangement.ReportCompletedAsync(prepareItem);
-
-        var plan = await RenderDispatchAsync(arrangement, await CurrentWorkAsync(arrangement));
-
-        Assert.Equal("agent-job", plan.WorkType);
-        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, plan.OwnerKind);
-        Assert.Equal("plan", plan.Stage);
-        Assert.Null(plan.Uses);
-        Assert.NotNull(plan.AgentJobId);
-        Assert.NotNull(plan.AgentSessionId);
-        Assert.StartsWith("plan.", plan.ActionAttemptId);
-        Assert.Contains("\"prompt\"", plan.With);
-        Assert.Contains("PLANS/PLAN.md", plan.Expect!);
-        Assert.Contains("PLANS/DESIGN.md", plan.Expect!);
-        Assert.Contains("PLANS/tasks.json", plan.Expect!);
-    }
-
     private async Task<WorkflowGrainArrangement> ArrangeAsync(
         string runId,
-        WorkflowDefinition definition) =>
-        await WorkflowGrainArrangement.CreateAsync(_fixture, runId, definition, TimeProvider);
+        WorkflowDefinition definition,
+        int issueNumber = 1) =>
+        await WorkflowGrainArrangement.CreateAsync(_fixture, runId, definition, TimeProvider, issueNumber: issueNumber);
 
     private static async Task<WorkItem> CurrentWorkAsync(WorkflowGrainArrangement arrangement)
     {

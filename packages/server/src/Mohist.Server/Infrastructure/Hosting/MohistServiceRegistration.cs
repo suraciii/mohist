@@ -472,6 +472,8 @@ public static class MohistServiceRegistration
     {
         target.DefaultIgnoreCondition = source.DefaultIgnoreCondition;
         target.PropertyNameCaseInsensitive = source.PropertyNameCaseInsensitive;
+        target.PropertyNamingPolicy = source.PropertyNamingPolicy;
+        target.DictionaryKeyPolicy = source.DictionaryKeyPolicy;
         target.Encoder = source.Encoder;
 
         target.Converters.Clear();
