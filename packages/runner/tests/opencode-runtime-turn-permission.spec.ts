@@ -128,6 +128,60 @@ describe('OpenCodeRuntime turn permissions', () => {
     expect((await resultPromise).ok).toBe(true)
   })
 
+  it('requires the parent Session ID for directory-less permission requests', async () => {
+    const turn = buildTurn()
+    let resolvePrompt: (value: unknown) => void = () => {}
+    turn.sessionPrompt.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePrompt = resolve
+        }),
+    )
+
+    const resultPromise = startTurn(turn)
+    await new Promise((resolve) => setImmediate(resolve))
+    turn.subscription.emit({
+      type: 'permission.asked',
+      sessionID: 'ses_foreign_event',
+      payload: { id: 'perm_foreign_event', sessionID: SESSION_ID },
+    })
+    turn.subscription.emit({
+      type: 'permission.asked',
+      payload: { id: 'perm_foreign_payload', sessionID: 'ses_foreign_payload' },
+    })
+    turn.subscription.emit({
+      type: 'permission.asked',
+      sessionID: SESSION_ID,
+      payload: { id: 'perm_parent_event', sessionID: SESSION_ID },
+    })
+    turn.subscription.emit({
+      type: 'permission.asked',
+      payload: { id: 'perm_parent_payload', sessionID: SESSION_ID },
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(turn.permissionReply).toHaveBeenCalledTimes(2)
+    expect(turn.permissionReply).toHaveBeenCalledWith(
+      {
+        requestID: 'perm_parent_event',
+        directory: DIRECTORY,
+        reply: 'once',
+      },
+      { throwOnError: true },
+    )
+    expect(turn.permissionReply).toHaveBeenCalledWith(
+      {
+        requestID: 'perm_parent_payload',
+        directory: DIRECTORY,
+        reply: 'once',
+      },
+      { throwOnError: true },
+    )
+
+    resolvePrompt({ data: { parts: [{ type: 'text', text: 'completed' }] } })
+    expect((await resultPromise).ok).toBe(true)
+  })
+
   it('fails immediately with permission-required when the once reply cannot be confirmed', async () => {
     const turn = buildTurn()
     turn.sessionPrompt.mockImplementationOnce(() => new Promise(() => {}))
