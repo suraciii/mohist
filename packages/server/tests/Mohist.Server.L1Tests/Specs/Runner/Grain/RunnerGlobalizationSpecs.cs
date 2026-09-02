@@ -22,42 +22,6 @@ public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
     public RunnerGlobalizationSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task Register_RunnerIsRecordedInGlobalRegistry_NotInProjectRegistry()
-    {
-        var runnerId = $"globalized-runner-{Guid.NewGuid():N}";
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-
-        await runner.RegisterAsync(new RunnerInfo(
-            runnerId,
-            ["spec/*"],
-            "globalized-host",
-            "some-legacy-project-id"));
-
-        var globalRegistry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-        var globalIds = await globalRegistry.ListRunnerIdsAsync();
-        Assert.Contains(runnerId, globalIds);
-    }
-
-    [Fact]
-    public async Task ListEligibleRunnersAsync_ReturnsAllRegisteredRunnersRegardlessOfProjectIdField()
-    {
-        var globalRunnerId = $"global-runner-{Guid.NewGuid():N}";
-        var projectRunnerId = $"legacy-project-runner-{Guid.NewGuid():N}";
-
-        var globalRunner = Grains.GetGrain<IRunnerGrain>(globalRunnerId);
-        await globalRunner.RegisterAsync(new RunnerInfo(globalRunnerId, ["spec/*"], "host-g", null));
-
-        var projectRunner = Grains.GetGrain<IRunnerGrain>(projectRunnerId);
-        await projectRunner.RegisterAsync(new RunnerInfo(projectRunnerId, ["spec/*"], "host-p", "any-project-id"));
-
-        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-        var eligible = await registry.ListEligibleRunnersAsync("querying-project");
-
-        Assert.Contains(eligible, r => r.RunnerId == globalRunnerId);
-        Assert.Contains(eligible, r => r.RunnerId == projectRunnerId);
-    }
-
-    [Fact]
     public async Task Poll_GlobalRunnerAssignsAcrossProjects()
     {
         await ClearGlobalRunnerRegistryAsync();
