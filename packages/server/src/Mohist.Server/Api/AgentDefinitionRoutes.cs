@@ -179,7 +179,7 @@ public static class AgentDefinitionRoutes
             || raw.TryGetProperty("createdAt", out _);
     }
 
-    private static string? ValidateMaxConcurrentRuns(JsonElement raw)
+    internal static string? ValidateMaxConcurrentRuns(JsonElement raw)
     {
         if (raw.ValueKind != JsonValueKind.Object || !raw.TryGetProperty("maxConcurrentRuns", out var value))
             return null;
