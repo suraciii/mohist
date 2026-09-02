@@ -1,15 +1,19 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
+using Mohist.Server.L0Tests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 
-namespace Mohist.Server.L0Tests.Slack;
+namespace Mohist.Server.L0Tests.Specs.Slack;
 
-public sealed class SlackConnectionAccessDeciderTests
+public sealed class SlackAccessPolicySpecs
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 6, 10, 0, 0, TimeSpan.Zero);
     private const string ProjectId = "proj_1";
@@ -21,6 +25,20 @@ public sealed class SlackConnectionAccessDeciderTests
     private const string BotToken = "xoxb-live";
     private const string AdapterId = "adapter-A";
     private const string OperatorId = "operator-1";
+
+    [Fact]
+    public async Task Empty_policy_defaults_to_owner_only_without_any_slack_api_call()
+    {
+        var context = await NewContextAsync(string.Empty);
+
+        var decision = await context.Decider.EvaluateAsync(
+            context.Connection, Other, TeamId, "C123", isDirectMessage: false, context.Lease);
+
+        Assert.False(decision.Allowed);
+        Assert.Contains("owner", decision.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(context.Members.MemberRequests);
+        Assert.Empty(context.Members.ConversationRequests);
+    }
 
     [Fact]
     public async Task Owner_only_policy_denies_non_owner_without_any_slack_api_call()
@@ -326,6 +344,32 @@ public sealed class SlackConnectionAccessDeciderTests
             SecretStoreAddress.ForAgentConnection(ProjectId, ConnectionId, SecretKind.AppToken),
             SecretStoreAddress.ForAgentConnection(ProjectId, ConnectionId, SecretKind.BotToken),
             CandidateAppLevelTokenAddress: null);
+
+    [Fact]
+    public async Task Allowed_member_cleanup_removes_rows_for_the_deleted_connection()
+    {
+        using var database = TestSqliteDatabase.CreateModelSchema();
+        var store = new SlackConnectionAllowedMemberStore(
+            new TestDbContextFactory(database.Options),
+            new FakeTimeProvider(Now));
+        await using (var db = database.CreateContext())
+        {
+            db.SlackConnectionAllowedMembers.Add(new SlackConnectionAllowedMemberRow
+            {
+                Id = "allowlist-row",
+                ProjectId = ProjectId,
+                ConnectionId = ConnectionId,
+                SlackUserId = Listed,
+                WorkspaceTeamId = TeamId,
+                CreatedAt = Now,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        Assert.True(await store.IsAllowedAsync(ProjectId, ConnectionId, Listed));
+        Assert.Equal(1, await store.DeleteForConnectionAsync(ProjectId, ConnectionId));
+        Assert.False(await store.IsAllowedAsync(ProjectId, ConnectionId, Listed));
+    }
 
     private sealed record DeciderContext(
         SlackConnectionAccessDecider Decider,

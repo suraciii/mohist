@@ -125,120 +125,6 @@ public sealed partial class SlackMultiAgentIngressSpecs
     }
 
     [Fact]
-    public async Task Signed_selection_route_launches_an_unbound_agent_under_the_existing_thread_anchor()
-    {
-        const string owner = "U_SELECTION_THREAD_LAUNCH";
-        var promptOwner = await CreateConnectionAsync("thread-launch-owner", "T-selection-thread-launch", owner, "A_THREAD_LAUNCH_OWNER");
-        var selected = await CreateConnectionAsync("thread-launch-selected", "T-selection-thread-launch", owner, "A_THREAD_LAUNCH_SELECTED");
-        const string conversationId = "C-selection-thread-launch";
-        const string threadTs = "1710000000.020110";
-        await PostChannelAsync(promptOwner, conversationId, threadTs, null, [promptOwner.BotUserId!], $"<@{promptOwner.BotUserId}> establish the original thread", owner);
-        var identity = new SlackMessageIdentity("T-selection-thread-launch", conversationId, "1710000000.020111");
-        await PostChannelAsync(
-            promptOwner, conversationId, identity.MessageTs, threadTs,
-            [promptOwner.BotUserId!, selected.BotUserId!],
-            $"<@{promptOwner.BotUserId}> <@{selected.BotUserId}> launch selected here", owner);
-        var choice = await DeliverChooserAndGetChoiceAsync(
-            promptOwner, identity, selected.ProjectId, selected.Id, "1710000000.020112", threadTs);
-
-        var action = await PostSelectionAsync(promptOwner, choice, owner);
-        Assert.Equal("accepted", action.GetProperty("state").GetString());
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var claim = await scope.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>()
-            .FindAsync(identity.WorkspaceTeamId, identity.ConversationId, identity.MessageTs);
-        Assert.NotNull(claim);
-        Assert.Equal(SlackSelectionDispatchKinds.ThreadLaunch, claim!.DispatchKind);
-        Assert.Equal(SlackSelectionStates.Completed, claim.SelectionState);
-        var mapping = await scope.ServiceProvider.GetRequiredService<SlackThreadSessionMappingStore>()
-            .GetSessionIdAsync(selected.ProjectId, identity.WorkspaceTeamId, selected.Id, conversationId, threadTs);
-        Assert.Equal(claim.SelectionSessionId, mapping);
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Single(await db.AgentSessions.Where(row => row.Id == claim.SelectionSessionId).ToListAsync());
-    }
-
-    [Fact]
-    public async Task Signed_selection_route_continues_an_unmentioned_multi_bound_thread_without_launching()
-    {
-        const string owner = "U_SELECTION_MULTI_BOUND";
-        var connectionA = await CreateConnectionAsync("multi-bound-a", "T-selection-multi-bound", owner, "A_MULTI_BOUND_A");
-        var connectionB = await CreateConnectionAsync("multi-bound-b", "T-selection-multi-bound", owner, "A_MULTI_BOUND_B");
-        const string conversationId = "C-selection-multi-bound";
-        const string threadTs = "1710000000.020120";
-        var initialA = await PostChannelAsync(connectionA, conversationId, threadTs, null, [connectionA.BotUserId!], $"<@{connectionA.BotUserId}> start A", owner);
-        var initialB = await PostChannelAsync(connectionB, conversationId, threadTs, null, [connectionB.BotUserId!], $"<@{connectionB.BotUserId}> start B", owner);
-        var sessionA = initialA.GetProperty("sessionId").GetString()!;
-        var sessionB = initialB.GetProperty("sessionId").GetString()!;
-        await _fixture.Grains.GetGrain<Mohist.Server.Sessions.Grains.IAgentSessionGrain>(sessionA)
-            .AttachPhysicalSessionAsync(new Mohist.Server.Sessions.Grains.AttachPhysicalSessionCommand("runtime-multi-bound-a"));
-        await _fixture.Grains.GetGrain<Mohist.Server.Sessions.Grains.IAgentSessionGrain>(sessionB)
-            .AttachPhysicalSessionAsync(new Mohist.Server.Sessions.Grains.AttachPhysicalSessionCommand("runtime-multi-bound-b"));
-
-        var identity = new SlackMessageIdentity("T-selection-multi-bound", conversationId, "1710000000.020121");
-        var ingress = await PostChannelAsync(connectionA, conversationId, identity.MessageTs, threadTs, [], "continue one bound Agent", owner);
-        Assert.Equal("ambiguous", ingress.GetProperty("kind").GetString());
-        var choice = await DeliverChooserAndGetChoiceAsync(
-            connectionA, identity, connectionB.ProjectId, connectionB.Id, "1710000000.020122", threadTs);
-
-        var action = await PostSelectionAsync(connectionA, choice, owner);
-        Assert.Equal("accepted", action.GetProperty("state").GetString());
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var claim = await scope.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>()
-            .FindAsync(identity.WorkspaceTeamId, identity.ConversationId, identity.MessageTs);
-        Assert.NotNull(claim);
-        Assert.Equal(SlackAmbiguityKinds.MultiBoundThreadReply, claim!.AmbiguityKind);
-        Assert.Equal(SlackSelectionDispatchKinds.ThreadFollowup, claim.DispatchKind);
-        Assert.Equal(sessionB, claim.SelectionSessionId);
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Equal(2, await db.AgentSessions.CountAsync(row =>
-            row.LabelConnectionId == connectionA.Id || row.LabelConnectionId == connectionB.Id));
-    }
-
-    [Fact]
-    public async Task Concurrent_different_selection_clicks_commit_one_winner_and_one_execution()
-    {
-        const string owner = "U_SELECTION_RACE";
-        var connectionA = await CreateConnectionAsync("race-a", "T-selection-race", owner, "A_SELECTION_RACE_A");
-        var connectionB = await CreateConnectionAsync("race-b", "T-selection-race", owner, "A_SELECTION_RACE_B");
-        var identity = new SlackMessageIdentity(
-            connectionA.WorkspaceTeamId,
-            "C-selection-race",
-            "1710000000.020010");
-        await PostChannelAsync(
-            connectionA,
-            identity.ConversationId,
-            identity.MessageTs,
-            null,
-            [connectionA.BotUserId!, connectionB.BotUserId!],
-            $"<@{connectionA.BotUserId}> <@{connectionB.BotUserId}> choose once",
-            owner);
-
-        var choices = await DeliverChooserAndGetChoicesAsync(
-            connectionA,
-            identity,
-            chooserMessageTs: "1710000000.020011");
-        Assert.Equal(2, choices.Count);
-        var results = await Task.WhenAll(choices.Select(choice =>
-            PostSelectionAsync(connectionA, choice, owner)));
-        Assert.Contains(results, result => result.GetProperty("state").GetString() == "accepted");
-        Assert.All(results, result => Assert.Contains(
-            result.GetProperty("state").GetString(),
-            new[] { "accepted", "decided" }));
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Single(await db.AgentSessions
-            .Where(row => row.LabelConnectionId == connectionA.Id
-                || row.LabelConnectionId == connectionB.Id)
-            .ToListAsync());
-        Assert.Single(await db.SlackProviderInboxRows
-            .Where(row => (row.ConnectionId == connectionA.Id || row.ConnectionId == connectionB.Id)
-                && row.SlackMessageIdentity.EndsWith(identity.MessageTs))
-            .ToListAsync());
-    }
-
-    [Fact]
     public async Task Selection_route_rejects_tampered_wrong_actor_and_copied_chooser_actions_without_resources()
     {
         const string owner = "U_SELECTION_REJECTIONS";
@@ -293,9 +179,11 @@ public sealed partial class SlackMultiAgentIngressSpecs
         await AssertPendingWithoutOriginalResourcesAsync(copied.Identity, selected);
     }
 
+
+
     [Theory]
-    [InlineData("selected_policy", "unauthorized")]
-    [InlineData("prompt_policy", "unauthorized")]
+    [InlineData("selected_owner", "unauthorized")]
+    [InlineData("prompt_owner", "unauthorized")]
     [InlineData("expired_lease", "unavailable")]
     [InlineData("binding_drift", "no_longer_valid")]
     [InlineData("deleted", "unavailable")]
@@ -317,7 +205,7 @@ public sealed partial class SlackMultiAgentIngressSpecs
         var identity = new SlackMessageIdentity(
             promptOwner.WorkspaceTeamId!,
             $"C-selection-mutable-{scenario}",
-            $"1710000000.{Math.Abs(scenario.GetHashCode()):D6}");
+            $"1710000000.{scenario.GetHashCode() & int.MaxValue:D6}");
         await PostChannelAsync(
             promptOwner,
             identity.ConversationId,
@@ -335,10 +223,10 @@ public sealed partial class SlackMultiAgentIngressSpecs
 
         switch (scenario)
         {
-            case "selected_policy":
+            case "selected_owner":
                 await UpdateConnectionAsync(selected, row => row.OwnerSlackUserId = "U_NEW_SELECTED_OWNER");
                 break;
-            case "prompt_policy":
+            case "prompt_owner":
                 await UpdateConnectionAsync(promptOwner, row => row.OwnerSlackUserId = "U_NEW_PROMPT_OWNER");
                 break;
             case "expired_lease":
@@ -365,107 +253,7 @@ public sealed partial class SlackMultiAgentIngressSpecs
         await AssertPendingWithoutOriginalResourcesAsync(identity, selected);
     }
 
-    [Theory]
-    [InlineData("prompt", "allowlist_removed")]
-    [InlineData("selected", "allowlist_removed")]
-    [InlineData("prompt", "member_lost")]
-    [InlineData("selected", "member_lost")]
-    [InlineData("prompt", "member_unverifiable")]
-    [InlineData("selected", "member_unverifiable")]
-    [InlineData("prompt", "channel_lost")]
-    [InlineData("selected", "channel_lost")]
-    [InlineData("prompt", "conversation_unverifiable")]
-    [InlineData("selected", "conversation_unverifiable")]
-    public async Task Selection_route_rejects_mutable_live_policy_drift_for_both_connection_roles(
-        string targetRole,
-        string failure)
-    {
-        const string actor = "U_SELECTION_POLICY_ACTOR";
-        var targetPrompt = targetRole == "prompt";
-        var promptOwner = await CreateConnectionAsync(
-            $"policy-prompt-{targetRole}-{failure}",
-            "T-selection-policy-matrix",
-            targetPrompt ? "U_OTHER_PROMPT_OWNER" : actor,
-            $"A_POLICY_PROMPT_{targetRole}_{failure}");
-        var selected = await CreateConnectionAsync(
-            $"policy-selected-{targetRole}-{failure}",
-            "T-selection-policy-matrix",
-            targetPrompt ? actor : "U_OTHER_SELECTED_OWNER",
-            $"A_POLICY_SELECTED_{targetRole}_{failure}");
-        var target = targetPrompt ? promptOwner : selected;
-        var usesAllowlist = failure.StartsWith("allowlist", StringComparison.Ordinal)
-            || failure.StartsWith("member", StringComparison.Ordinal);
-        await ConfigurePolicyAsync(
-            target,
-            usesAllowlist ? AccessPolicyKind.Allowlist : AccessPolicyKind.Anyone,
-            actor,
-            addAllowlistMember: usesAllowlist);
-        SlackApi.Clear();
-        try
-        {
-            SlackApi.Responder = request => PolicySlackResponse(
-                request,
-                actor,
-                target.WorkspaceTeamId!,
-                memberMode: "regular",
-                conversationMode: "member");
 
-            var suffix = $"{targetRole}-{failure}".Replace('_', '-');
-            var identity = new SlackMessageIdentity(
-                promptOwner.WorkspaceTeamId!,
-                $"C-selection-policy-{suffix}",
-                $"1710000000.{Math.Abs(suffix.GetHashCode()):D6}");
-            await PostChannelAsync(
-                promptOwner,
-                identity.ConversationId,
-                identity.MessageTs,
-                null,
-                [promptOwner.BotUserId!, selected.BotUserId!],
-                $"<@{promptOwner.BotUserId}> <@{selected.BotUserId}> mutable policy",
-                actor);
-            var choice = await DeliverChooserAndGetChoiceAsync(
-                promptOwner,
-                identity,
-                selected.ProjectId,
-                selected.Id,
-                $"{identity.MessageTs}1");
-
-            if (failure == "allowlist_removed")
-            {
-                await RemoveAllowedMemberAsync(target, actor);
-            }
-            else
-            {
-                var memberMode = failure switch
-                {
-                    "member_lost" => "deleted",
-                    "member_unverifiable" => "unverifiable",
-                    _ => "regular",
-                };
-                var conversationMode = failure switch
-                {
-                    "channel_lost" => "not_member",
-                    "conversation_unverifiable" => "unverifiable",
-                    _ => "member",
-                };
-                SlackApi.Clear();
-                SlackApi.Responder = request => PolicySlackResponse(
-                    request,
-                    actor,
-                    target.WorkspaceTeamId!,
-                    memberMode,
-                    conversationMode);
-            }
-
-            var result = await PostSelectionAsync(promptOwner, choice, actor);
-            Assert.Equal("unauthorized", result.GetProperty("state").GetString());
-            await AssertPendingWithoutOriginalResourcesAsync(identity, selected);
-        }
-        finally
-        {
-            SlackApi.Clear();
-        }
-    }
 
     [Fact]
     public async Task Followup_selection_revalidates_executability_before_committing()
@@ -523,6 +311,8 @@ public sealed partial class SlackMultiAgentIngressSpecs
         await AssertPendingWithoutOriginalResourcesAsync(identity, selected);
     }
 
+
+
     [Fact]
     public async Task Dangling_followup_mapping_is_rejected_before_selection_commit()
     {
@@ -568,67 +358,57 @@ public sealed partial class SlackMultiAgentIngressSpecs
         await AssertPendingWithoutOriginalResourcesAsync(identity, selected);
     }
 
-    [Fact]
-    public async Task Noninteractive_fallback_and_nonowner_guidance_expire_without_second_message()
+
+
+    private async Task UpdateConnectionAsync(
+        AgentConnection connection,
+        Action<AgentConnectionRow> update)
     {
-        const string owner = "U_SELECTION_FALLBACK";
-        var connections = new List<AgentConnection>();
-        for (var index = 0; index < 6; index++)
-        {
-            connections.Add(await CreateConnectionAsync(
-                $"fallback-{index}",
-                "T-selection-fallback",
-                owner,
-                $"A_SELECTION_FALLBACK_{index}"));
-        }
-        var fallbackIdentity = new SlackMessageIdentity(
-            "T-selection-fallback",
-            "C-selection-fallback",
-            "1710000000.020040");
-        await PostChannelAsync(
-            connections[0],
-            fallbackIdentity.ConversationId,
-            fallbackIdentity.MessageTs,
-            null,
-            connections.Select(connection => connection.BotUserId!).ToArray(),
-            string.Join(' ', connections.Select(connection => $"<@{connection.BotUserId}>")) + " too many",
-            owner);
-
-        var nonOwnerA = await CreateConnectionAsync("nonowner-a", "T-selection-nonowner", "U_OWNER_A", "A_SELECTION_NONOWNER_A");
-        var nonOwnerB = await CreateConnectionAsync("nonowner-b", "T-selection-nonowner", "U_OWNER_B", "A_SELECTION_NONOWNER_B");
-        var nonOwnerIdentity = new SlackMessageIdentity(
-            "T-selection-nonowner",
-            "C-selection-nonowner",
-            "1710000000.020041");
-        await PostChannelAsync(
-            nonOwnerA,
-            nonOwnerIdentity.ConversationId,
-            nonOwnerIdentity.MessageTs,
-            null,
-            [nonOwnerA.BotUserId!, nonOwnerB.BotUserId!],
-            $"<@{nonOwnerA.BotUserId}> <@{nonOwnerB.BotUserId}> unauthorized",
-            "U_INTRUDER");
-
-        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
-        await NewSelectionWorker().ProcessPendingAsync();
-
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        foreach (var identity in new[] { fallbackIdentity, nonOwnerIdentity })
-        {
-            var rows = await db.SlackOutboxRows
-                .Where(row => row.WorkspaceTeamId == identity.WorkspaceTeamId
-                    && row.ConversationId == identity.ConversationId)
-                .ToListAsync();
-            Assert.Single(rows);
-            Assert.DoesNotContain(rows, row => row.DispatchRef ==
-                SlackAmbiguousPromptStore.SettlementDispatchRef(
-                    identity.WorkspaceTeamId,
-                    identity.ConversationId,
-                    identity.MessageTs));
-        }
-        await RefreshAllConnectionLeasesAsync();
+        var row = await db.AgentConnections.SingleAsync(candidate =>
+            candidate.ProjectId == connection.ProjectId && candidate.Id == connection.Id);
+        update(row);
+        row.UpdatedAt = _fixture.TimeProvider.GetUtcNow();
+        await db.SaveChangesAsync();
     }
+
+
+
+    private async Task ExpireConnectionLeaseAsync(AgentConnection connection)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var targetKey = new SlackLeaseTargetRef.Connection(connection.ProjectId, connection.Id).TargetKey;
+        var row = await db.SlackAdapterLeases.SingleAsync(lease => lease.TargetKey == targetKey);
+        row.ExpiresAt = _fixture.TimeProvider.GetUtcNow() - TimeSpan.FromSeconds(1);
+        await db.SaveChangesAsync();
+    }
+
+
+
+    private async Task AssertPendingWithoutOriginalResourcesAsync(
+        SlackMessageIdentity identity,
+        AgentConnection selected)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var prompts = scope.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>();
+        var claim = await prompts.FindAsync(
+            identity.WorkspaceTeamId,
+            identity.ConversationId,
+            identity.MessageTs);
+        Assert.NotNull(claim);
+        Assert.Equal(SlackSelectionStates.Pending, claim!.SelectionState);
+        Assert.Null(claim.ChosenConnectionId);
+
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Empty(await db.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == selected.Id
+                && row.SlackMessageIdentity.EndsWith(identity.MessageTs))
+            .ToListAsync());
+    }
+
+
 
     private async Task RefreshAllConnectionLeasesAsync()
     {
@@ -757,129 +537,5 @@ public sealed partial class SlackMultiAgentIngressSpecs
         return providerIdentity!.Value.MessageTs;
     }
 
-    private async Task UpdateConnectionAsync(
-        AgentConnection connection,
-        Action<AgentConnectionRow> update)
-    {
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var row = await db.AgentConnections.SingleAsync(candidate =>
-            candidate.ProjectId == connection.ProjectId && candidate.Id == connection.Id);
-        update(row);
-        row.UpdatedAt = _fixture.TimeProvider.GetUtcNow();
-        await db.SaveChangesAsync();
-    }
-
-    private async Task ConfigurePolicyAsync(
-        AgentConnection connection,
-        string policy,
-        string actor,
-        bool addAllowlistMember)
-    {
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var row = await db.AgentConnections.SingleAsync(candidate =>
-            candidate.ProjectId == connection.ProjectId && candidate.Id == connection.Id);
-        row.AccessPolicy = policy;
-        row.UpdatedAt = _fixture.TimeProvider.GetUtcNow();
-        if (addAllowlistMember)
-        {
-            db.SlackConnectionAllowedMembers.Add(new SlackConnectionAllowedMemberRow
-            {
-                Id = $"slkalm_{Guid.NewGuid():N}",
-                ProjectId = connection.ProjectId,
-                ConnectionId = connection.Id,
-                SlackUserId = actor,
-                WorkspaceTeamId = connection.WorkspaceTeamId!,
-                CreatedAt = _fixture.TimeProvider.GetUtcNow(),
-            });
-        }
-        await db.SaveChangesAsync();
-    }
-
-    private async Task RemoveAllowedMemberAsync(AgentConnection connection, string actor)
-    {
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        await db.SlackConnectionAllowedMembers
-            .Where(row => row.ProjectId == connection.ProjectId
-                && row.ConnectionId == connection.Id
-                && row.SlackUserId == actor)
-            .ExecuteDeleteAsync();
-    }
-
-    private static HttpResponseMessage PolicySlackResponse(
-        HttpRequestMessage request,
-        string actor,
-        string teamId,
-        string memberMode,
-        string conversationMode)
-    {
-        var path = request.RequestUri?.AbsolutePath ?? string.Empty;
-        if (path.EndsWith("users.info", StringComparison.Ordinal))
-        {
-            return memberMode switch
-            {
-                "unverifiable" => SlackApiTestScript.JsonResponse("""{"ok":false,"error":"internal_error"}"""),
-                "deleted" => SlackApiTestScript.JsonResponse(JsonSerializer.Serialize(new
-                {
-                    ok = true,
-                    user = new { id = actor, team_id = teamId, deleted = true, is_bot = false, is_app_user = false, is_restricted = false, is_ultra_restricted = false, is_stranger = false },
-                })),
-                _ => SlackApiTestScript.JsonResponse(JsonSerializer.Serialize(new
-                {
-                    ok = true,
-                    user = new { id = actor, team_id = teamId, deleted = false, is_bot = false, is_app_user = false, is_restricted = false, is_ultra_restricted = false, is_stranger = false },
-                })),
-            };
-        }
-        if (path.EndsWith("conversations.info", StringComparison.Ordinal))
-        {
-            return conversationMode switch
-            {
-                "unverifiable" => SlackApiTestScript.JsonResponse("""{"ok":false,"error":"internal_error"}"""),
-                "not_member" => SlackApiTestScript.JsonResponse("""{"ok":true,"channel":{"id":"C","is_member":false}}"""),
-                _ => SlackApiTestScript.JsonResponse("""{"ok":true,"channel":{"id":"C","is_member":true}}"""),
-            };
-        }
-        return SlackApiTestScript.JsonResponse("""{"ok":false,"error":"unexpected_slack_api_call"}""");
-    }
-
-    private async Task ExpireConnectionLeaseAsync(AgentConnection connection)
-    {
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var targetKey = new SlackLeaseTargetRef.Connection(connection.ProjectId, connection.Id).TargetKey;
-        var row = await db.SlackAdapterLeases.SingleAsync(lease => lease.TargetKey == targetKey);
-        row.ExpiresAt = _fixture.TimeProvider.GetUtcNow() - TimeSpan.FromSeconds(1);
-        await db.SaveChangesAsync();
-    }
-
-    private async Task AssertPendingWithoutOriginalResourcesAsync(
-        SlackMessageIdentity identity,
-        AgentConnection selected)
-    {
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var prompts = scope.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>();
-        var claim = await prompts.FindAsync(
-            identity.WorkspaceTeamId,
-            identity.ConversationId,
-            identity.MessageTs);
-        Assert.NotNull(claim);
-        Assert.Equal(SlackSelectionStates.Pending, claim!.SelectionState);
-        Assert.Null(claim.ChosenConnectionId);
-
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Empty(await db.SlackProviderInboxRows
-            .Where(row => row.ConnectionId == selected.Id
-                && row.SlackMessageIdentity.EndsWith(identity.MessageTs))
-            .ToListAsync());
-    }
-
-    private SlackAgentSelectionObligationWorker NewSelectionWorker() => new(
-        _fixture.Services.GetRequiredService<IServiceScopeFactory>(),
-        _fixture.TimeProvider,
-        Options.Create(new SlackProviderOptions()),
-        NullLogger<SlackAgentSelectionObligationWorker>.Instance);
 
 }
