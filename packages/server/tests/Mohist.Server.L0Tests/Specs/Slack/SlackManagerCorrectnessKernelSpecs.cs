@@ -9,11 +9,11 @@ using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
-using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.L0Tests.Support;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Slack;
+namespace Mohist.Server.L0Tests.Specs.Slack;
 
 public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
 {

@@ -5,7 +5,7 @@ using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
 using Xunit;
 
-namespace Mohist.Server.L1Tests.Specs.Slack;
+namespace Mohist.Server.L0Tests.Specs.Slack;
 
 public sealed partial class SlackConnectionLeaseTargetSpecs
 {
