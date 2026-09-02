@@ -29,6 +29,47 @@ public sealed class AgentSessionLaunchBodyTests
     }
 
     [Fact]
+    public async Task BindAsync_ParsesSupportedContextValuesWithoutStartingAHost()
+    {
+        var body = await BindAsync("{\"prompt\":\"review\",\"context\":{\"issueNumber\":7,\"epicNumber\":8,\"repository\":\"repo\",\"workspace\":\"work\",\"workspacePath\":\"/virtual/work\",\"targetId\":\"target\"}}");
+
+        Assert.Null(body.BindingError);
+        Assert.NotNull(body.Context);
+        Assert.Equal(7, body.Context!.IssueNumber);
+        Assert.Equal(8, body.Context.EpicNumber);
+        Assert.Equal("repo", body.Context.Repository);
+        Assert.Equal("work", body.Context.Workspace);
+        Assert.Equal("/virtual/work", body.Context.WorkspacePath);
+        Assert.Equal("target", body.Context.TargetId);
+    }
+
+    [Fact]
+    public async Task BindAsync_RejectsOpaqueContextNumbersBeforeValidation()
+    {
+        var body = await BindAsync("{\"prompt\":\"review\",\"context\":{\"epicNumber\":\"epic-7\"}}");
+
+        Assert.Contains("context.epicNumber must be an integer", body.BindingError);
+    }
+
+    [Theory]
+    [InlineData(0, null)]
+    [InlineData(null, 0)]
+    public async Task ValidateContextAsync_RejectsNonPositiveReferencesWithoutQuerying(
+        int? epicNumber,
+        int? issueNumber)
+    {
+        var result = await AgentSessionLaunchRoutes.ValidateContextAsync(
+            new AgentSessionLaunchContextRef(IssueNumber: issueNumber, EpicNumber: epicNumber),
+            "project-1",
+            issueQuerier: null!,
+            epicQuerier: null!,
+            grains: null!);
+
+        var status = Assert.IsAssignableFrom<IStatusCodeHttpResult>(result);
+        Assert.Equal(StatusCodes.Status400BadRequest, status.StatusCode);
+    }
+
+    [Fact]
     public async Task BindAsync_RecordsUndeclaredExecutionOverrides()
     {
         var body = await BindAsync(
