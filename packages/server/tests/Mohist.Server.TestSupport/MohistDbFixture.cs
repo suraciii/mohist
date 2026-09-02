@@ -45,6 +45,7 @@ public sealed class MohistDbFixture : IAsyncLifetime
         new FakeTimeProvider(TestTime.UtcNow),
         NullLogger<InMemoryEventBus>.Instance);
     private readonly RecordingEventStore _eventStore = new();
+    public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     private SqliteConnection _keeper = null!;
     private SqliteConnection _otelKeeper = null!;
     private IServiceProvider? _services;
@@ -96,6 +97,8 @@ public sealed class MohistDbFixture : IAsyncLifetime
         services.AddSingleton<IConfiguration>(config);
         services.AddLogging();
         services.ConfigureMohistServices(config);
+        services.RemoveAll<TimeProvider>();
+        services.AddSingleton<TimeProvider>(TimeProvider);
 
         // Test-only overrides so the fixture doesn't touch the real
         // filesystem or the real env vars.

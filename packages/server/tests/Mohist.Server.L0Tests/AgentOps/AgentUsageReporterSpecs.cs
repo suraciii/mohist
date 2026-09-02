@@ -36,7 +36,7 @@ public sealed class AgentUsageReporterSpecs : IClassFixture<MohistDbFixture>
         _fixture = fixture;
     }
 
-    private DateTime Today => _fixture.Services.GetRequiredService<TimeProvider>().GetUtcNow().UtcDateTime.Date;
+    private DateTime Today => _fixture.TimeProvider.GetUtcNow().UtcDateTime.Date;
 
     private AgentUsageReporter ResolveReporter()
     {
