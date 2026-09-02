@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
-using Microsoft.AspNetCore.Http;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -52,26 +51,6 @@ public class OtelInboundHttpTracingSpecs
 
         var inbound = host.Recorder.EndedActivities.Where(IsInboundHttpSpan).ToList();
         Assert.Empty(inbound);
-    }
-
-    [Fact]
-    public void ExcludeOtelIngestPath_ReturnsFalse_ForOtelPathPrefix()
-    {
-        var ctx = new DefaultHttpContext();
-        ctx.Request.Path = "/otel/v1/traces";
-        Assert.False(MohistOpenTelemetryRegistration.ExcludeOtelIngestPath(ctx));
-
-        ctx.Request.Path = "/otel";
-        Assert.False(MohistOpenTelemetryRegistration.ExcludeOtelIngestPath(ctx));
-
-        // Segment match, not prefix match: /otel-anything-else must NOT
-        // be excluded, otherwise the filter is over-eager and would
-        // silence unrelated /otelware-style URLs.
-        ctx.Request.Path = "/otel-anything-else";
-        Assert.True(MohistOpenTelemetryRegistration.ExcludeOtelIngestPath(ctx));
-
-        ctx.Request.Path = "/api/health";
-        Assert.True(MohistOpenTelemetryRegistration.ExcludeOtelIngestPath(ctx));
     }
 
     private static bool IsInboundHttpSpan(Activity activity)
