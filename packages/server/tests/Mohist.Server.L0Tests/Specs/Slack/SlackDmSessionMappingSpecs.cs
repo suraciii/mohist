@@ -2,15 +2,19 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.L0Tests.Support;
+using Mohist.Server.Slack;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Services;
 using Xunit;
 
-namespace Mohist.Server.L0Tests.Slack;
+namespace Mohist.Server.L0Tests.Specs.Slack;
 
-public class SlackDmSessionMappingStoreTests
+public sealed class SlackDmSessionMappingSpecs
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 7, 31, 12, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset NextNow = new(2026, 7, 31, 12, 30, 0, TimeSpan.Zero);
@@ -205,6 +209,115 @@ public class SlackDmSessionMappingStoreTests
 
         Assert.Equal("session-new", await harness.Store.GetCurrentSessionIdAsync(
             harness.ProjectId, harness.ConnectionId, "D-order"));
+    }
+
+    [Fact]
+    public async Task Dm_route_draft_selects_new_task_launch_first_mapping_or_followup_without_http()
+    {
+        await using var harness = CreateHarness();
+        await harness.Store.SetCurrentSessionIdAsync(
+            harness.ProjectId,
+            harness.ConnectionId,
+            "T123",
+            "U_OWNER",
+            "D-route",
+            "session-current");
+
+        var first = await SlackConnectionRoutes.ResolveInboxRouteDraftAsync(
+            harness.ProjectId,
+            harness.ConnectionId,
+            "D-first",
+            isNewTask: false,
+            harness.Store,
+            CancellationToken.None);
+        var followup = await SlackConnectionRoutes.ResolveInboxRouteDraftAsync(
+            harness.ProjectId,
+            harness.ConnectionId,
+            "D-route",
+            isNewTask: false,
+            harness.Store,
+            CancellationToken.None);
+        var newTask = await SlackConnectionRoutes.ResolveInboxRouteDraftAsync(
+            harness.ProjectId,
+            harness.ConnectionId,
+            "D-route",
+            isNewTask: true,
+            harness.Store,
+            CancellationToken.None);
+
+        Assert.Equal(SlackProviderInboxRouteKinds.Launch, first.Kind);
+        Assert.Equal(SlackProviderInboxRouteKinds.Followup, followup.Kind);
+        Assert.Equal("session-current", followup.SessionId);
+        Assert.False(SlackDmIngressPolicy.RequiresNewWorkAdmission(false, followup.SessionId));
+        Assert.Equal(SlackProviderInboxRouteKinds.NewTaskLaunch, newTask.Kind);
+        Assert.Null(newTask.SessionId);
+        Assert.True(SlackDmIngressPolicy.RequiresNewWorkAdmission(true, followup.SessionId));
+        Assert.True(SlackDmIngressPolicy.RequiresNewWorkAdmission(false, null));
+    }
+
+    [Fact]
+    public void Recovery_reply_provenance_keeps_the_followup_message_and_bound_thread_root()
+    {
+        var provenance = new AgentSessionInputProvenance(
+            "slack",
+            "T123",
+            "D-recovery",
+            "legacy-thread-root",
+            "U_OWNER",
+            "1710000000.000200",
+            "connection-1",
+            "1710000000.000125");
+
+        var origin = AgentSessionRetryService.BuildConnectionLaunchOrigin(provenance);
+
+        Assert.Equal("1710000000.000200", origin.MessageTs);
+        Assert.Equal("1710000000.000125", origin.ThreadTs);
+    }
+
+    [Fact]
+    public async Task ReplaceCurrentSessionAndInboxRouteAsync_atomically_moves_retry_followup_to_replacement()
+    {
+        await using var harness = CreateHarness();
+        const string inboxId = "inbox-1";
+        await harness.Store.SetCurrentSessionIdAsync(
+            harness.ProjectId, harness.ConnectionId, "T123", "U_OWNER", "D-recovery", "failed-session", "1710000000.000100");
+
+        await using (var db = harness.Factory.CreateDbContext())
+        {
+            db.SlackProviderInboxRows.Add(new SlackProviderInboxRow
+            {
+                Id = inboxId,
+                ProjectId = harness.ProjectId,
+                ConnectionId = harness.ConnectionId,
+                SlackMessageIdentity = "T123/D-recovery/1710000000.000200",
+                WorkspaceTeamId = "T123",
+                ConversationId = "D-recovery",
+                SlackUserId = "U_OWNER",
+                RouteKind = SlackProviderInboxRouteKinds.Followup,
+                RouteSessionId = "failed-session",
+                AcceptedAt = FixedNow,
+                CreatedAt = FixedNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var replacement = await harness.Store.ReplaceCurrentSessionAndInboxRouteAsync(
+            harness.ProjectId,
+            harness.ConnectionId,
+            "T123",
+            "U_OWNER",
+            "D-recovery",
+            inboxId,
+            "failed-session",
+            "replacement-session",
+            "1710000000.000200");
+
+        Assert.Equal("replacement-session", replacement);
+        Assert.Equal("replacement-session", await harness.Store.GetCurrentSessionIdAsync(
+            harness.ProjectId, harness.ConnectionId, "D-recovery"));
+        await using var verify = harness.Factory.CreateDbContext();
+        var route = await verify.SlackProviderInboxRows.SingleAsync(row => row.Id == inboxId);
+        Assert.Equal("replacement-session", route.RouteSessionId);
     }
 
     private static Harness CreateHarness()
