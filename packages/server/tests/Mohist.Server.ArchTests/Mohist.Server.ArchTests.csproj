@@ -19,7 +19,6 @@
       <Private>true</Private>
     </Reference>
     <ProjectReference Include="..\..\src\Mohist.Server\Mohist.Server.csproj" />
-    <ProjectReference Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj" />
     <Reference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
       <HintPath>$(PkgMicrosoft_CodeAnalysis_BannedApiAnalyzers)/analyzers/dotnet/cs/Microsoft.CodeAnalysis.BannedApiAnalyzers.dll</HintPath>
       <Private>true</Private>
@@ -52,9 +51,6 @@
     </EmbeddedResource>
     <EmbeddedResource Include="..\..\src\Mohist.Server\Mohist.Server.csproj">
       <LogicalName>ProductionProjects/Mohist.Server.csproj</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj">
-      <LogicalName>ProductionProjects/Mohist.Cli.csproj</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="..\..\src\Mohist.Workflow.Definition\Mohist.Workflow.Definition.csproj">
       <LogicalName>ProductionProjects/Mohist.Workflow.Definition.csproj</LogicalName>

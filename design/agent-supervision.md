@@ -139,11 +139,11 @@ Preset wording is executable CLI configuration. This design does not duplicate
 it, because a prose copy can drift. Installation copies these resources
 verbatim:
 
-- [identity instructions](../packages/cli/Mohist.Cli/presets/supervisor/instructions.md);
-- [approval response prompt](../packages/cli/Mohist.Cli/presets/supervisor/approval.md);
-- [failure response prompt](../packages/cli/Mohist.Cli/presets/supervisor/failure.md).
+- [identity instructions](../packages/go/mohist-cli/presets/supervisor/instructions.md);
+- [approval response prompt](../packages/go/mohist-cli/presets/supervisor/approval.md);
+- [failure response prompt](../packages/go/mohist-cli/presets/supervisor/failure.md).
 
-The [preset manifest](../packages/cli/Mohist.Cli/presets/manifest.json) binds
+The [preset manifest](../packages/go/mohist-cli/presets/manifest.json) binds
 resources to the Agent and rules. `{{event.*}}` placeholders belong to
 RoutingRule runtime syntax; the CLI preserves them for response-time
 rendering.

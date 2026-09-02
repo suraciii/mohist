@@ -26,7 +26,7 @@ const manifest = discoverManifest({ listTests: () => discovery })
 const expectation: ExecutionLedgerExpectation = {
   runId: 'l0-run-1',
   manifest,
-  assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
+  assemblyPath: '/virtual/Mohist.Server.L0Tests.dll',
   assemblySha256: 'a'.repeat(64),
   sourceSha256: 'b'.repeat(64),
   parallelism: 'xunit-v3:parallel=collections;parallelAlgorithm=conservative;maxThreads=default',
@@ -107,7 +107,7 @@ test('current identity reads assembly source and discovery through injected seam
   const current = await readCurrentExecutionIdentity(
     {
       assemblyPath: expectation.assemblyPath,
-      sourceRoots: ['packages/cli'],
+      sourceRoots: ['packages/server'],
       parallelism: expectation.parallelism,
     },
     {
@@ -133,7 +133,7 @@ test('current identity reads assembly source and discovery through injected seam
     sourceSha256: expectation.sourceSha256,
     parallelism: expectation.parallelism,
   })
-  assert.deepEqual(calls.sort(), [`assembly:${expectation.assemblyPath}`, 'discovery', 'source:packages/cli'])
+  assert.deepEqual(calls.sort(), [`assembly:${expectation.assemblyPath}`, 'discovery', 'source:packages/server'])
   assert.deepEqual(validateCurrentExecutionIdentity(expectation, current), [])
 })
 

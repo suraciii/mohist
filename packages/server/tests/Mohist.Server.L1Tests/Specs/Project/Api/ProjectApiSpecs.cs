@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using EnvironmentAbstractions.TestHelpers;
-using Mohist.Cli;
 using Mohist.Server.Project.Services;
 using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
@@ -685,39 +684,6 @@ public class ProjectApiSpecs
     }
 
     [Fact]
-    public async Task RepoDelete_DefaultThroughCli_SurfacesServerConflictHint()
-    {
-        var created = await _client.PostDataAsync<ProjectInfo>(
-            "/api/projects",
-            new
-            {
-                name = $"repo-delete-cli-{Guid.NewGuid():N}",
-                verificationCommand = "true",
-                repository = new
-                {
-                    name = "server",
-                    gitUrl = "git@example.com:server.git",
-                    baseBranch = "main",
-                },
-            });
-        var output = new StringWriter();
-        var error = new StringWriter();
-        using var cliHttp = new HttpClient(new FixtureClientHandler(_client)) { BaseAddress = _client.BaseAddress };
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            cliHttp,
-            ["repo", "delete", "server", "--project", created.Id],
-            output,
-            error,
-            new FakeFileSystem(),
-            new NoopCommandExecutor());
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Contains("mo project repo set-default <other-name>", error.ToString());
-        Assert.Single(await _client.GetDataAsync<List<RepositoryInfoDto>>($"/api/projects/{created.Id}/repositories"));
-    }
-
-    [Fact]
     public async Task GetProject_QueryModel_ReturnsFlaggedDefaultRepository()
     {
         var created = await _client.PostDataAsync<ProjectInfo>(
@@ -768,25 +734,6 @@ public class ProjectApiSpecs
         Assert.Equal("git@example.com:backend.git", repository.GitUrl);
         Assert.Equal("main", repository.BaseBranch);
         Assert.True(repository.IsDefault);
-    }
-
-    private sealed class FixtureClientHandler(HttpClient client) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            var forwarded = new HttpRequestMessage(request.Method, request.RequestUri!.PathAndQuery);
-            return client.SendAsync(forwarded, cancellationToken);
-        }
-    }
-
-    private sealed class NoopCommandExecutor : ICommandExecutor
-    {
-        public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
-            string fileName,
-            string[] args,
-            string? workingDirectory = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult((0, string.Empty, string.Empty));
     }
 
     private sealed record RepositoryInfoDto(string Name, string GitUrl, string BaseBranch, bool IsDefault);

@@ -47,12 +47,12 @@ function captureStderr(): { calls: () => string; restore: () => void } {
 test('parseArgs: focused with both arguments resolves the request', () => {
   const args = parseArgs([
     'focused',
-    'packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj',
-    'Mohist.Cli.Tests.Skills.SkillsContentTests',
+    'packages/server/tests/Mohist.Server.L0Tests/Mohist.Server.L0Tests.csproj',
+    'Mohist.Server.L0Tests.Skills.SkillsContentTests',
   ])
   assert.equal(args.mode, 'focused')
-  assert.equal(args.focused?.csproj, 'packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj')
-  assert.equal(args.focused?.className, 'Mohist.Cli.Tests.Skills.SkillsContentTests')
+  assert.equal(args.focused?.csproj, 'packages/server/tests/Mohist.Server.L0Tests/Mohist.Server.L0Tests.csproj')
+  assert.equal(args.focused?.className, 'Mohist.Server.L0Tests.Skills.SkillsContentTests')
 })
 
 test('commandFor appends dotnet apphost arguments after the default report arguments', () => {
@@ -82,11 +82,11 @@ test('commandFor explicitly selects the execution-ledger reporter without enviro
   const track: TrackConfig = {
     id: 'cli',
     kind: 'dotnet-apphost',
-    csproj: 'packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj',
+    csproj: 'packages/server/tests/Mohist.Server.L0Tests/Mohist.Server.L0Tests.csproj',
     report: 'reports/cli.trx',
     executionLedger: 'reports/cli.execution-ledger.json',
     executionProvenance: 'reports/cli.execution-provenance.json',
-    executionSourceRoots: ['packages/cli'],
+    executionSourceRoots: ['packages/server'],
     reportFormat: 'trx',
     deadlineMs: 1000,
     enforce: true,
@@ -135,7 +135,7 @@ test('execution provenance writer uses the injected artifact store', () => {
     {
       runId: 'run-1',
       manifest: fastManifest(),
-      assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
+      assemblyPath: '/virtual/Mohist.Server.L0Tests.dll',
       assemblySha256: 'a'.repeat(64),
       sourceSha256: 'b'.repeat(64),
       parallelism: DEFAULT_XUNIT_PARALLELISM,
@@ -153,7 +153,7 @@ test('guard evaluates CLI duration from the execution ledger and fails closed wh
   const expected: ExecutionLedgerExpectation = {
     runId: 'run-1',
     manifest,
-    assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
+    assemblyPath: '/virtual/Mohist.Server.L0Tests.dll',
     assemblySha256: 'a'.repeat(64),
     sourceSha256: 'b'.repeat(64),
     parallelism: DEFAULT_XUNIT_PARALLELISM,
@@ -165,7 +165,7 @@ test('guard evaluates CLI duration from the execution ledger and fails closed wh
     report: 'reports/cli.trx',
     executionLedger: 'reports/cli.execution-ledger.json',
     executionProvenance: 'reports/cli.execution-provenance.json',
-    executionSourceRoots: ['packages/cli'],
+    executionSourceRoots: ['packages/server'],
     reportFormat: 'trx',
     deadlineMs: 60_000,
     enforce: true,
@@ -246,7 +246,7 @@ function savedExecutionFixture(): {
   const expected: ExecutionLedgerExpectation = {
     runId: 'saved-run',
     manifest,
-    assemblyPath: '/virtual/Mohist.Cli.Tests.dll',
+    assemblyPath: '/virtual/Mohist.Server.L0Tests.dll',
     assemblySha256: 'a'.repeat(64),
     sourceSha256: 'b'.repeat(64),
     parallelism: DEFAULT_XUNIT_PARALLELISM,
@@ -258,7 +258,7 @@ function savedExecutionFixture(): {
     report: 'reports/cli.trx',
     executionLedger: 'reports/cli.execution-ledger.json',
     executionProvenance: 'reports/cli.execution-provenance.json',
-    executionSourceRoots: ['packages/cli'],
+    executionSourceRoots: ['packages/server'],
     reportFormat: 'trx',
     deadlineMs: 60_000,
     enforce: true,
@@ -791,7 +791,7 @@ test('parseArgs: focused without any argument leaves the request unresolved', ()
 })
 
 test('parseArgs: focused with only the csproj leaves the request unresolved', () => {
-  const args = parseArgs(['focused', 'packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj'])
+  const args = parseArgs(['focused', 'packages/server/tests/Mohist.Server.L0Tests/Mohist.Server.L0Tests.csproj'])
   assert.equal(args.mode, 'focused')
   assert.equal(args.focused, undefined)
 })
@@ -810,7 +810,7 @@ test('main: missing focused arguments print usage and return 2 without throwing'
 test('main: partially provided focused arguments (csproj only) fail explicitly', async () => {
   const stderr = captureStderr()
   try {
-    const code = await main(['focused', 'packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj'])
+    const code = await main(['focused', 'packages/server/tests/Mohist.Server.L0Tests/Mohist.Server.L0Tests.csproj'])
     assert.equal(code, 2)
     assert.match(stderr.calls(), /usage: guard focused <csproj> <ClassName\.FQN>/)
   } finally {
@@ -821,7 +821,7 @@ test('main: partially provided focused arguments (csproj only) fail explicitly',
 test('main: unreadable csproj fails explicitly with exit 2 instead of an unhandled exception', async () => {
   const stderr = captureStderr()
   try {
-    const code = await main(['focused', 'no/such/project/Mohist.Cli.Tests.csproj', 'X.Y.Z'])
+    const code = await main(['focused', 'no/such/project/Mohist.Server.L0Tests.csproj', 'X.Y.Z'])
     assert.equal(code, 2)
     assert.match(stderr.calls(), /focused run failed/)
   } finally {

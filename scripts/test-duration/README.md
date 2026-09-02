@@ -51,7 +51,7 @@ Repository scope runs plan validation, cross-application and repository
 Architecture tracks, documentation, formatting, and repository-wide static
 checks. A scope may run independent lanes concurrently when the plan proves
 their output and Resource isolation. Local `verify` prepares all application
-builds first so shared Server/CLI project-reference outputs cannot be written
+builds first so shared application project-reference outputs cannot be written
 while another scope is executing; the prepared application test scopes then
 fan out together. CI jobs have separate runners and do not need this local
 build barrier.

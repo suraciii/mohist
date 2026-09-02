@@ -278,4 +278,4 @@ operation.
 ---
 
 Implementation source: `packages/server/src/Mohist.Server/Issue/`,
-`Api/IssueRoutes.*`, and the CLI under `packages/cli/`.
+`Api/IssueRoutes.*`, and the CLI under `packages/go/mohist-cli/`.

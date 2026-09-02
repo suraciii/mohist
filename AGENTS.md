@@ -7,7 +7,7 @@ Active development.
 - server: ASP.NET Core + Orleans, .NET 11 (`packages/server/`)
 - runner: TypeScript, Node (`packages/runner/`)
 - web: React 19 + Vite + TanStack Query (`packages/web/`)
-- cli: .NET, command `mo` (`packages/cli/`)
+- cli: static Go binary, command `mo` (`packages/go/mohist-cli/`)
 - `docs/` user docs · `design/` developer design · `eng/` repository engineering practices
 
 ## Engineering Principles

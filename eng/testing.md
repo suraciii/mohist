@@ -358,7 +358,7 @@ Each command owns all compilation required by its scope. `test:fast`,
 fresh build for each application scope. Every track in one application scope
 uses that application's exact build without a hidden rebuild. Local `verify`
 prepares those application builds before admitting any test process, because
-the Server and CLI projects share project-reference output paths on one host;
+application projects share project-reference output paths on one host;
 the prepared test scopes then run concurrently. CI application jobs use
 separate runners, so their builds and tests may run concurrently. `verify`
 requires a clean index and worktree and fails if the revision or source state
@@ -404,9 +404,9 @@ fresh deadline or be followed by another full test command.
 CI decomposes the same acceptance plan by ownership. It has one execution job
 for each independently built application, one `Repository` job, and one final
 `Gate` job. The canonical plan declares the application IDs `server`, `web`,
-`cli`, and `runner`. Their CI display names are `Server`, `Web`, `CLI`, and
-`Runner`. The Go Slack adapter is owned by the Repository scope because it has
-no report-producing duration track.
+and `runner`. Their CI display names are `Server`, `Web`, and `Runner`. The Go
+CLI and Slack adapters are owned by the Repository scope because they have no
+report-producing duration track.
 
 - An application job owns its application's fresh build, L0 and L1 behavior
   tracks, application-scoped Architecture tracks, owned static checks, reports,
@@ -594,8 +594,8 @@ complete Spec portfolio, and `npm run verify` adds repository checks and Gate
 evidence. Obsolete aliases and raw track selection are removed from the public
 surface.
 
-CI uses the same plan as six ownership jobs: Server, Web, CLI, Runner, Slack,
-and Repository, followed by Gate. Every configured Spec track is enforced
+CI uses the same plan as four ownership jobs: Server, Web, Runner, and
+Repository, followed by Gate. Every configured Spec track is enforced
 without slow-test exceptions, and each scope records source identity, reports,
 totals, duration, and process cleanup. New Specs only need to follow the model
 and declare their owning application, Kind, Level or Architecture scope, and

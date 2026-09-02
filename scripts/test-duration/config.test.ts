@@ -92,7 +92,7 @@ test('validateConfig keeps execution ledgers on dotnet apphost tracks', () => {
           csproj: 'cli.csproj',
           executionLedger: 'reports/cli-ledger.json',
           executionProvenance: 'reports/cli-provenance.json',
-          executionSourceRoots: ['packages/cli'],
+          executionSourceRoots: ['packages/server'],
           report: 'reports/cli.trx',
           reportFormat: 'trx',
           deadlineMs: 100,

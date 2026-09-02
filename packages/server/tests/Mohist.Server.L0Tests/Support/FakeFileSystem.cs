@@ -1,5 +1,5 @@
 using System.Text;
-using Mohist.Cli;
+using Mohist.Server.SystemInfo;
 
 namespace Mohist.Server.L0Tests.Support;
 
@@ -112,6 +112,14 @@ public class FakeFileSystem : IFileSystem
         lock (_gate)
         {
             return _files.ContainsKey(normalized) || _directories.Contains(normalized);
+        }
+    }
+
+    public long? GetFileLength(string path)
+    {
+        lock (_gate)
+        {
+            return _files.TryGetValue(Normalize(path), out var content) ? Encoding.UTF8.GetByteCount(content) : null;
         }
     }
 

@@ -24,35 +24,35 @@ echo "Managed skill asset root: $MANAGED_SKILL_DATA"
 # 确保安装目录存在
 mkdir -p "$INSTALL_DIR"
 
-# 检查 dotnet 是否可用
-if ! command -v dotnet &> /dev/null; then
-    echo "Error: dotnet is not installed or not in PATH"
+# 检查 Go 是否可用
+if ! command -v go &> /dev/null; then
+    echo "Error: go is not installed or not in PATH"
     exit 1
 fi
 
-# 发布 CLI 为单文件可执行程序
-echo "Publishing Mohist CLI as single-file executable..."
+# 构建静态 CLI
+echo "Building Mohist CLI as a static Go executable..."
 cd "$REPO_ROOT"
-dotnet publish packages/cli/Mohist.Cli/Mohist.Cli.csproj \
-    -c Release \
-    -r linux-x64 \
-    -o "$PUBLISH_DIR" \
-    --self-contained true \
-    -p:PublishSingleFile=true \
-    -p:IncludeNativeLibrariesForSelfExtract=true
+mkdir -p "$PUBLISH_DIR"
+CGO_ENABLED=0 go -C packages/go/mohist-cli build \
+    -tags netgo,osusergo -trimpath -buildvcs=false \
+    -o "$PUBLISH_DIR/mo" ./cmd/mo
+
+rm -rf "$SOURCE_SKILL_DATA"
+mkdir -p "$SOURCE_SKILL_DATA"
+cp -R "$REPO_ROOT/packages/go/mohist-cli/skill-data/." "$SOURCE_SKILL_DATA/"
 
 # 安装可执行文件
-if [ ! -f "$PUBLISH_DIR/Mohist.Cli" ]; then
-    echo "Error: Published executable not found at $PUBLISH_DIR/Mohist.Cli"
+if [ ! -f "$PUBLISH_DIR/mo" ]; then
+    echo "Error: Published executable not found at $PUBLISH_DIR/mo"
     exit 1
 fi
 
-# 备份旧版本
-[ -f "$MO_BIN" ] && mv "$MO_BIN" "${MO_BIN}.bak.$(date +%s)"
-
-# 复制可执行文件
-cp "$PUBLISH_DIR/Mohist.Cli" "$MO_BIN"
-chmod +x "$MO_BIN"
+# 原子替换可执行文件
+TEMP_BIN="${MO_BIN}.tmp.$$"
+cp "$PUBLISH_DIR/mo" "$TEMP_BIN"
+chmod 755 "$TEMP_BIN"
+mv -f "$TEMP_BIN" "$MO_BIN"
 
 echo "Successfully installed mo to $MO_BIN"
 

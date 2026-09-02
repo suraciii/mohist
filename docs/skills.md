@@ -242,6 +242,6 @@ Skill distribution remains manual.
 
 ---
 
-Implementation source: `packages/cli/Mohist.Cli/skill-data/`. See
+Implementation source: `packages/go/mohist-cli/skill-data/`. See
 [`design/architecture.md`](../design/architecture.md) for the Agent Skill
 boundary.

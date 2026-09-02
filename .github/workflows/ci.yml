@@ -23,9 +23,7 @@ env:
 
 jobs:
   # Path filtering keeps runner time proportional to what a PR actually
-  # touches. Non-PR events (push, dispatch) always run every scope; the
-  # dependency map below mirrors the real build graph, including the
-  # Server <-> CLI project-reference coupling.
+  # touches. Non-PR events (push, dispatch) always run every scope.
   changes:
     name: Changes
     runs-on: ubuntu-latest
@@ -33,7 +31,6 @@ jobs:
     outputs:
       global: ${{ steps.filter.outputs.global }}
       server: ${{ steps.filter.outputs.server }}
-      cli: ${{ steps.filter.outputs.cli }}
       web: ${{ steps.filter.outputs.web }}
       runner: ${{ steps.filter.outputs.runner }}
     steps:
@@ -58,10 +55,6 @@ jobs:
               - 'Mohist.Server.Tests.slnf'
             server:
               - 'packages/server/**'
-              - 'packages/cli/**'
-            cli:
-              - 'packages/cli/**'
-              - 'packages/server/src/Mohist.Workflow.Definition/**'
             web:
               - 'packages/web/**'
             runner:
@@ -171,65 +164,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  cli:
-    needs: [changes]
-    if: github.event_name != 'pull_request' || needs.changes.outputs.global == 'true' || needs.changes.outputs.cli == 'true'
-    name: CLI
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    env:
-      TMPDIR: /tmp/mohist-scope
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22.19.0
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5
-        with:
-          global-json-file: global.json
-
-      - name: Cache NuGet packages
-        uses: actions/cache@v6
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('Directory.Packages.props') }}
-          restore-keys: |
-            ${{ runner.os }}-nuget-
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Restore .NET
-        run: dotnet restore Mohist.sln
-
-      - name: Run CLI scope
-        run: |
-          mkdir -p "$TMPDIR" artifacts/cli
-          npm run test:app -- cli
-
-      - name: Capture CLI evidence
-        if: always()
-        shell: bash
-        run: |
-          scope_root="$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d -name 'mohist-canonical-gate-*' -print -quit 2>/dev/null || true)"
-          if [[ -n "$scope_root" ]]; then cp -a "$scope_root"/. artifacts/cli/; fi
-
-      - name: Upload CLI evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: scope-cli
-          path: artifacts
-          if-no-files-found: warn
-          retention-days: 7
-
   runner:
     needs: [changes]
     if: github.event_name != 'pull_request' || needs.changes.outputs.global == 'true' || needs.changes.outputs.runner == 'true'
@@ -328,7 +262,7 @@ jobs:
   gate:
     name: Gate
     if: always()
-    needs: [changes, server, web, cli, runner, repository]
+    needs: [changes, server, web, runner, repository]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -357,7 +291,6 @@ jobs:
           # separate bookkeeping to keep in sync.
           SKIPPED_SCOPES: >-
             ${{ needs.server.result == 'skipped' && 'server' || '' }}
-            ${{ needs.cli.result == 'skipped' && 'cli' || '' }}
             ${{ needs.web.result == 'skipped' && 'web' || '' }}
             ${{ needs.runner.result == 'skipped' && 'runner' || '' }}
         run: node --import tsx scripts/test-duration/gate.ts --evidence-root "$GITHUB_WORKSPACE/artifacts" --skipped-scopes "$SKIPPED_SCOPES"

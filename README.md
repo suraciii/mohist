@@ -133,7 +133,7 @@ Architecture and design documents are under [`design/`](design/README.md).
 - `packages/server/`: control plane (ASP.NET Core + Orleans)
 - `packages/runner/`: execution plane (TypeScript)
 - `packages/web/`: Web UI (React)
-- `packages/cli/`: `mo` CLI
+- `packages/go/mohist-cli/`: static `mo` CLI
 - `docs/`: user documentation
 - `design/`: architecture and design documentation
 - `eng/`: repository engineering practices

@@ -49,8 +49,7 @@ test('CI workflow needs reference existing canonical producer jobs', () => {
 
 // Path filtering policy: the changes job owns the scope map, application
 // jobs are conditioned on their lane, and shared build inputs force every
-// scope. The Server <-> CLI project-reference coupling means each of those
-// two lanes must list both package roots.
+// scope. Each application lane lists the package roots it owns.
 test('CI workflow path filters match the real dependency graph', () => {
   const workflow = readFileSync(resolve(repositoryRoot, '.github/workflows/ci.yml'), 'utf8')
   const jobs = parseJobs(workflow)
@@ -80,11 +79,7 @@ test('CI workflow path filters match the real dependency graph', () => {
     const match = changes.match(new RegExp(`^            ${lane}:\\n((?:              - .*\\n)+)`, 'm'))
     return match?.[1] ?? ''
   }
-  assert.ok(laneBlock('server').includes("'packages/cli/**'"), 'server lane must include packages/cli')
-  assert.ok(
-    laneBlock('cli').includes("'packages/server/src/Mohist.Workflow.Definition/**'"),
-    'cli lane must include Mohist.Workflow.Definition',
-  )
+  assert.ok(laneBlock('server').includes("'packages/server/**'"), 'server lane must include packages/server')
 
   const gate = jobs.get('gate') ?? ''
   assert.match(gate, /--skipped-scopes/, 'gate must receive the skipped-scope manifest')

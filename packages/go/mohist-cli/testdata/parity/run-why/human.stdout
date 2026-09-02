@@ -1,0 +1,8 @@
+run: wr-1
+status: Failed
+dispatch:
+  status: present
+events:
+  TaskStarted time=2026-09-02T00:00:00Z
+    id: 7
+    source: server
