@@ -364,9 +364,7 @@ public class IssueCreationSpecs
     public async Task CreateIssueApi_AllowsArchivedCompletedPrerequisite()
     {
         var project = await SetupProjectAsync();
-        var prereq = await _client.PostDataAsync<CreateIssueApiDto>(
-            $"/api/projects/{project.Id}/issues",
-            new { title = "Archived completed prereq", isDraft = false });
+        var prereq = await CreateIssueAsync(project.Id, "Archived completed prereq", isDraft: false);
         var prereqGrain = IssueGrain(project.Id, prereq.Number);
         var wrId = await prereqGrain.StartWorkAsync(new WorkflowProjectContext(
             project.Id,
