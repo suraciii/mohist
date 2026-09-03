@@ -328,6 +328,9 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if deps.Executable == nil {
 		deps.Executable = defaults.Executable
 	}
+	if deps.CurrentDirectory == nil {
+		deps.CurrentDirectory = defaults.CurrentDirectory
+	}
 	if deps.HealthProbe == nil {
 		deps.HealthProbe = func(ctx context.Context, address string) error {
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(address, "/")+"/health", nil)
