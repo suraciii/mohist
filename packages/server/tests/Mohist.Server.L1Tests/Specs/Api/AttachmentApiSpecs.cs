@@ -11,6 +11,8 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services.Attachments;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Storage;
@@ -108,9 +110,14 @@ public class AttachmentApiSpecs
         }
 
         var ids = new List<string>();
+        await using var uploadScope = _fixture.Services.CreateAsyncScope();
+        var attachments = uploadScope.ServiceProvider.GetRequiredService<AttachmentService>();
         for (var i = 0; i < AttachmentStorageOptions.DefaultMaxCountPerOwner + 1; i++)
         {
-            var upload = await UploadAsync(projectId, $"f{i}.txt", "text/plain", Encoding.UTF8.GetBytes(i.ToString()));
+            var payload = Encoding.UTF8.GetBytes(i.ToString());
+            var upload = await attachments.UploadAsync(
+                projectId,
+                new TestFormFile($"f{i}.txt", "text/plain", payload.LongLength, payload));
             ids.Add(upload.Id);
         }
 
@@ -204,24 +211,32 @@ public class AttachmentApiSpecs
 
     private async Task<string> CreateProjectAsync(string prefix)
     {
-        var response = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<JsonElement>("/api/projects", $"{prefix}-{Guid.NewGuid():N}");
-        var projectId = response.GetProperty("id").GetString()!;
-        await _fixture.Client.PostOkAsync($"/api/projects/{projectId}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            $"{prefix}-{Guid.NewGuid():N}",
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
         return projectId;
     }
 
     private async Task<int> CreateIssueAsync(string projectId, string title, string? body)
     {
-        var issue = await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues",
-            new { title, body });
-        return issue.GetProperty("number").GetInt32();
+        var number = await _fixture.Grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId)).NextAsync();
+        return await _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number))).CreateAsync(
+            projectId,
+            number,
+            title,
+            body,
+            labels: null,
+            priority: null,
+            repositoryRef: null,
+            isDraft: true);
     }
 
     private sealed record AttachmentUploadResponse(

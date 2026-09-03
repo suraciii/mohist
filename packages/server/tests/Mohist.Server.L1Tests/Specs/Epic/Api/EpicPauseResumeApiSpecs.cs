@@ -2,6 +2,8 @@ using Mohist.Server.Epic.Grains;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
 using Orleans;
@@ -19,9 +21,8 @@ public class EpicPauseResumeApiSpecs : EpicApiTestSupport
     [Fact]
     public async Task Pause_FromRunning_ReturnsPausedStatusAndPersistsReason()
     {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-pause-{Guid.NewGuid():N}");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "To pause", projectId = project.Id });
+        var project = await CreateProjectAsync($"epic-pause-{Guid.NewGuid():N}");
+        var created = await CreateEpicAsync(project.Id, "To pause");
         await AddOpenIssueAsync(project.Id, created);
         await StartEpicAsync(project.Id, created);
 
@@ -40,9 +41,8 @@ public class EpicPauseResumeApiSpecs : EpicApiTestSupport
     [Fact]
     public async Task Pause_FromRunning_DoesNotUnbindLinkedIssues()
     {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-pause-nounbind-{Guid.NewGuid():N}");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var epic = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Container", projectId = project.Id });
+        var project = await CreateProjectAsync($"epic-pause-nounbind-{Guid.NewGuid():N}");
+        var epic = await CreateEpicAsync(project.Id, "Container");
         var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Member", projectId = project.Id });
         await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Number}/issues", new { issueNumber = issue.Number });
         await StartEpicAsync(project.Id, epic);
@@ -58,9 +58,8 @@ public class EpicPauseResumeApiSpecs : EpicApiTestSupport
     [Fact]
     public async Task Resume_FromPaused_ReturnsRunningStatusAndClearsReason()
     {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-resume-{Guid.NewGuid():N}");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "To resume", projectId = project.Id });
+        var project = await CreateProjectAsync($"epic-resume-{Guid.NewGuid():N}");
+        var created = await CreateEpicAsync(project.Id, "To resume");
         var openIssue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Open work", projectId = project.Id });
         await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{created.Number}/issues", new { issueNumber = openIssue.Number });
         await StartEpicAsync(project.Id, created);
@@ -79,9 +78,8 @@ public class EpicPauseResumeApiSpecs : EpicApiTestSupport
     [Fact]
     public async Task MarkDone_OnPausedEpic_Returns409WithEpicPausedCannotMarkDone()
     {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-paused-done-reject-{Guid.NewGuid():N}");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var created = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Paused epic", projectId = project.Id });
+        var project = await CreateProjectAsync($"epic-paused-done-reject-{Guid.NewGuid():N}");
+        var created = await CreateEpicAsync(project.Id, "Paused epic");
         await AddOpenIssueAsync(project.Id, created);
         await StartEpicAsync(project.Id, created);
         await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{created.Number}/pause", new { reason = "hold" });
@@ -98,10 +96,9 @@ public class EpicPauseResumeApiSpecs : EpicApiTestSupport
     [Fact]
     public async Task EpicList_IncludesPauseReason()
     {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-list-reason-{Guid.NewGuid():N}");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Idle one", projectId = project.Id });
-        var paused = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Paused one", projectId = project.Id });
+        var project = await CreateProjectAsync($"epic-list-reason-{Guid.NewGuid():N}");
+        await CreateEpicAsync(project.Id, "Idle one");
+        var paused = await CreateEpicAsync(project.Id, "Paused one");
         await AddOpenIssueAsync(project.Id, paused);
         await StartEpicAsync(project.Id, paused);
         await _client.PostDataAsync<EpicFullDto>($"/api/projects/{project.Id}/epics/{paused.Number}/pause", new { reason = "hold" });
@@ -113,6 +110,23 @@ public class EpicPauseResumeApiSpecs : EpicApiTestSupport
         Assert.Null(idleEpic.PauseReason);
         var pausedEpic = list.First(e => e.Status == "paused");
         Assert.Equal("hold", pausedEpic.PauseReason);
+    }
+
+    private async Task<ProjectDto> CreateProjectAsync(string name)
+    {
+        var projectId = $"project-{Guid.NewGuid():N}";
+        var projectName = name.Length > 63 ? name[..63] : name;
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            projectName,
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return new ProjectDto(projectId);
     }
 
 }

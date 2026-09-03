@@ -8,7 +8,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Workspace;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.L1Tests.Support;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Workspace.Domain;
 using Xunit;
 
@@ -78,34 +82,33 @@ public sealed class WebConversationWorkspaceSpecs
     {
         var raw = $"wcs-{Guid.NewGuid():N}".ToLowerInvariant();
         var name = raw.Length > 63 ? raw[..63] : raw;
-        using var create = await _fixture.Client.PostAsJsonAsync("/api/projects", new
-        {
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
             name,
-            verificationCommand = "true",
-            repository = new { name = "server", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
-        });
-        create.EnsureSuccessStatusCode();
-        var body = await create.Content.ReadFromJsonAsync<JsonElement>();
-        return body.GetProperty("data").GetProperty("id").GetString()
-            ?? throw new InvalidOperationException("CreateProject returned no id");
+            new RepositoryInfo
+            {
+                Name = "server",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return projectId;
     }
 
     private async Task<string> CreateAgentAsync(string projectId, int maxConcurrentRuns = 1)
     {
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents",
-            new
-            {
-                name = $"web-agent-{Guid.NewGuid():N}",
-                description = "web interaction agent",
-                instructions = "Work inside the conversation workspace.",
-                agentConfig = new { model = "openai/gpt-5.6" },
-                skills = new[] { "coding" },
-                maxConcurrentRuns,
-            });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return body.GetProperty("data").GetProperty("id").GetString()!;
+        var agentId = $"agent_{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agentId)).CreateAsync(
+            new AgentCreateData(
+                projectId,
+                $"web-agent-{Guid.NewGuid():N}",
+                "web interaction agent",
+                "Work inside the conversation workspace.",
+                JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.6" }),
+                new[] { "coding" },
+                maxConcurrentRuns));
+        return agentId;
     }
 
     private async Task<JsonElement> LaunchWebSessionAsync(string projectId, string agentId, string prompt, string? key = null)

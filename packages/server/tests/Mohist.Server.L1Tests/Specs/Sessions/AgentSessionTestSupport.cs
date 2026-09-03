@@ -1,15 +1,16 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
-using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -39,11 +40,33 @@ public abstract class AgentSessionTestSupport
     protected async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null, bool workflow = false)
     {
         var projectName = $"asg-{Guid.NewGuid():N}";
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            projectName,
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        var project = new ProjectDto(projectId, projectName);
         var issueTitle = title ?? $"Session grain {name}";
-var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = issueTitle, body = "track sessions", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
+        var issueNumber = await _fixture.Grains
+            .GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(project.Id))
+            .NextAsync();
+        await _fixture.Grains
+            .GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issueNumber)))
+            .CreateAsync(
+                project.Id,
+                issueNumber,
+                issueTitle,
+                "track sessions",
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                "p1",
+                isDraft: false);
+        var issue = new IssueDto(GrainKey.Issue(new IssueKey(project.Id, issueNumber)), issueNumber, issueTitle);
 
         var work = new WorkDispatch(
             WorkflowRunId: $"wf-{Guid.NewGuid():N}",
@@ -65,8 +88,12 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         var session = new CreatedSession(project.Id, issue.Number, work.WorkflowRunId, sessionName, info);
         if (start)
         {
-            var attachPath = workflow ? RunnerAgentSessionAttachPath(session) : RunnerGenericAgentSessionAttachPath(session);
-            await _client.PostOkAsync(attachPath, new { runtimeSessionId = session.Id, runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = (string?)null, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+            await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+                session.Id,
+                WorkDir: $"/workspaces/{project.Id}",
+                ProcessPid: 1234,
+                Runtime: "opencode",
+                ExpectedRuntime: "opencode"));
         }
         return (project, issue, work, session);
     }
@@ -111,56 +138,6 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
             .Select(s => s.Id)
             .SingleAsync();
     }
-
-    protected async Task<string> AcceptSessionRuntimeEventTurnAsync(CreatedSession session)
-    {
-        var receipt = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).AcceptFollowupAsync(
-            new AcceptFollowupCommand("record runtime events", "test", $"runtime-events-{session.SessionName}"));
-        return receipt.TurnId;
-    }
-
-    protected Task PostSessionTurnRuntimeEventsAsync(
-        CreatedSession session,
-        string turnId,
-        params (string Type, object Payload)[] runtimeEvents) =>
-        _client.PostOkAsync(RunnerSessionRuntimeEventsPath(session), new
-        {
-            runtimeSessionId = session.Id,
-            agentSessionId = session.Id,
-            agentTurnId = turnId,
-            runtimeEvents = runtimeEvents.Select(runtimeEvent => new
-            {
-                type = runtimeEvent.Type,
-                payload = WithTurnId(runtimeEvent.Payload, turnId)
-            }).ToArray()
-        });
-
-    protected Task PostEventEntriesAsync(CreatedSession session, string turnId, string text) =>
-        PostSessionTurnRuntimeEventsAsync(session, turnId, ("message.delta", new { text }));
-
-    private static JsonElement WithTurnId(object payload, string turnId)
-    {
-        var properties = JsonSerializer.SerializeToElement(payload)
-            .EnumerateObject()
-            .ToDictionary(property => property.Name, property => property.Value.Clone(), StringComparer.Ordinal);
-        properties["turnId"] = JsonSerializer.SerializeToElement(turnId);
-        return JsonSerializer.SerializeToElement(properties);
-    }
-
-    protected static async Task<AgentSessionTranscriptPartRow[]> LoadTranscriptPartsAsync(MohistDbContext db, string sessionId)
-    {
-        var turnIds = await db.AgentSessionTranscriptTurns.AsNoTracking()
-            .Where(e => e.SessionId == sessionId)
-            .Select(e => e.Id)
-            .ToArrayAsync();
-
-        return await db.AgentSessionTranscriptParts.AsNoTracking()
-            .Where(e => turnIds.Contains(e.TurnId))
-            .OrderBy(e => e.Sequence)
-            .ThenBy(e => e.Id)
-            .ToArrayAsync();
-    }
-
 
     protected static AgentSessionMetadata WorkflowSessionMetadata(
         string projectId,

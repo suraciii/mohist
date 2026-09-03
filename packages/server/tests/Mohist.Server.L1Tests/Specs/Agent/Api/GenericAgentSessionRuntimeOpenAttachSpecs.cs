@@ -2,6 +2,9 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -32,9 +35,7 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
     [Fact]
     public async Task GenericOpen_PersistedPiRuntime_OpensSessionWithPi()
     {
-        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
-            "/api/projects",
-            $"generic-open-pi-{Guid.NewGuid():N}");
+        var project = await CreateProjectAsync($"generic-open-pi-{Guid.NewGuid():N}");
         var agent = await CreateAgentAsync(project.Id, "open-pi-agent", runtime: "pi");
 
         using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = "open on pi" });
@@ -81,9 +82,7 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
     [Fact]
     public async Task GenericAttach_PersistedPiRuntime_BindsSessionWithPi()
     {
-        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
-            "/api/projects",
-            $"generic-attach-pi-{Guid.NewGuid():N}");
+        var project = await CreateProjectAsync($"generic-attach-pi-{Guid.NewGuid():N}");
         var agent = await CreateAgentAsync(project.Id, "attach-pi-agent", runtime: "pi");
 
         using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = "attach on pi" });
@@ -128,9 +127,7 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
     [Fact]
     public async Task GenericAttach_AgentConnectionSource_BindsSession()
     {
-        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
-            "/api/projects",
-            $"generic-attach-connection-{Guid.NewGuid():N}");
+        var project = await CreateProjectAsync($"generic-attach-connection-{Guid.NewGuid():N}");
         var sessionId = $"agent-connection-session-{Guid.NewGuid():N}";
         var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
@@ -180,9 +177,7 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
     [Fact]
     public async Task AgentJobOpenAndAttach_WorkflowSource_BindsSession()
     {
-        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
-            "/api/projects",
-            $"workflow-agent-open-{Guid.NewGuid():N}");
+        var project = await CreateProjectAsync($"workflow-agent-open-{Guid.NewGuid():N}");
         var sessionId = $"agent-session-workflow-{Guid.NewGuid():N}";
         var workflowRunId = $"workflow-{Guid.NewGuid():N}";
         var turnId = $"turn-{Guid.NewGuid():N}";
@@ -260,9 +255,7 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
         // Sanity: the default (no AgentConfig.runtime, no request
         // override) still resolves to opencode and is observed on the
         // open call.
-        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
-            "/api/projects",
-            $"generic-open-default-{Guid.NewGuid():N}");
+        var project = await CreateProjectAsync($"generic-open-default-{Guid.NewGuid():N}");
         var agent = await CreateAgentAsync(project.Id, "open-default-agent");
 
         using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = "open on default" });
@@ -294,26 +287,38 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
         }
     }
 
+    private async Task<ProjectDto> CreateProjectAsync(string name)
+    {
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            name,
+            new RepositoryInfo
+            {
+                Name = "test-repo",
+                GitUrl = "git@example.com:test-repo.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return new ProjectDto(projectId);
+    }
+
     private async Task<AgentRef> CreateAgentAsync(string projectId, string name, string? runtime = null)
     {
-        object agentConfig = runtime is null
-            ? new { model = "openai/gpt-5.6" }
-            : new { model = "openai/gpt-5.6", runtime };
-
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents",
-            new
-            {
+        var agentId = $"agent_{Guid.NewGuid():N}";
+        var agentConfig = runtime is null
+            ? JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.6" })
+            : JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.6", runtime });
+        await _fixture.Grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agentId)).CreateAsync(
+            new AgentCreateData(
+                projectId,
                 name,
-                description = $"description for {name}",
-                instructions = $"instructions for {name}",
+                $"description for {name}",
+                $"instructions for {name}",
                 agentConfig,
-                skills = new[] { "coding" },
-                maxConcurrentRuns = 1,
-            });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, name);
+                new[] { "coding" },
+                1));
+        return new AgentRef(agentId, name);
     }
 
     private sealed record ProjectDto(string Id);

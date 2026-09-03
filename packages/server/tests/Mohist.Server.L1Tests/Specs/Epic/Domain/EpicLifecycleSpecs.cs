@@ -166,15 +166,11 @@ public class EpicLifecycleSpecs
 
     private async Task<ProjectDto> CreateProjectAsync()
     {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-life-{Guid.NewGuid():N}");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
-        return project;
+        return await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"epic-life-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
     }
 
     private async Task<IssueDto> CreateIssueAsync(string projectId, string title)

@@ -424,10 +424,20 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         await db.SaveChangesAsync();
 
         var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
-        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp-old"));
-        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb-old"));
-        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
-        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
+        await secrets.StoreAtomicallyAsync([
+            new SecretStoreWrite(
+                new SecretStoreAddress(projectId, id, SecretKind.AppToken),
+                Encoding.UTF8.GetBytes("xapp-old")),
+            new SecretStoreWrite(
+                new SecretStoreAddress(projectId, id, SecretKind.BotToken),
+                Encoding.UTF8.GetBytes("xoxb-old")),
+            new SecretStoreWrite(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken),
+                Encoding.UTF8.GetBytes("xapp")),
+            new SecretStoreWrite(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken),
+                Encoding.UTF8.GetBytes("xoxb")),
+        ]);
         var leaseId = await SlackRuntimeLeaseTestSupport.AcquireConnectionLeaseAsync(_fixture, projectId, id);
         _connectionLeases[id] = leaseId;
         return new AgentConnection { Id = id, ProjectId = projectId, WorkspaceTeamId = "T123" };

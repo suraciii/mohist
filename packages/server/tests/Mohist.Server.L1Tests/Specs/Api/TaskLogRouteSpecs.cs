@@ -8,6 +8,10 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Issue.Grains;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.L1Tests.Support;
@@ -41,39 +45,32 @@ public class TaskLogRouteSpecs
 
     private async Task<string> CreateProjectAsync(string prefix)
     {
-        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<JsonElement>(
-            "/api/projects",
-            $"{prefix}-{Guid.NewGuid():N}");
-        return project.GetProperty("id").GetString()!;
-    }
-
-    private async Task EnsureRepositoryAsync(string projectId)
-    {
-        await _fixture.Client.PostOkAsync(
-            $"/api/projects/{projectId}/repositories",
-            new
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            $"{prefix}-{Guid.NewGuid():N}",
+            new RepositoryInfo
             {
-                name = "main",
-                gitUrl = $"file://{Guid.NewGuid():N}",
-                baseBranch = "main",
-                setDefault = true,
-            });
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return projectId;
     }
 
     private async Task<int> CreateIssueAsync(string projectId, string title)
     {
-        await EnsureRepositoryAsync(projectId);
-        var issue = await _fixture.Client.PostDataAsync<JsonElement>(
-            $"/api/projects/{projectId}/issues",
-            new
-            {
-                title,
-                body = "task log test",
-                labels = new Dictionary<string, string>(StringComparer.Ordinal),
-                priority = "p3",
-                isDraft = false,
-            });
-        return issue.GetProperty("number").GetInt32();
+        var number = await _fixture.Grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId)).NextAsync();
+        return await _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number))).CreateAsync(
+            projectId,
+            number,
+            title,
+            "task log test",
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            "p3",
+            repositoryRef: null,
+            isDraft: false);
     }
 
     private async Task SeedActiveWorkflowRunAsync(

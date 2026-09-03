@@ -42,6 +42,9 @@ public sealed class OtlpRoutesHostFixture : IAsyncLifetime
         // Force the server to materialize so middleware and routes are
         // registered (MohistWebApplicationFactory is lazy by default).
         _ = Factory.Services;
+        using var warmupClient = Factory.CreateMainApiClient();
+        using var health = await warmupClient.GetAsync("/api/health");
+        health.EnsureSuccessStatusCode();
     }
 
     /// <summary>

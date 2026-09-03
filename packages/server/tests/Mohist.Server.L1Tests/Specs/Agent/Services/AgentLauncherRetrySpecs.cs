@@ -1,7 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Net;
-using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,6 +13,9 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -33,7 +32,7 @@ namespace Mohist.Server.L1Tests.Specs.Agent.Services;
 /// Retry-path launcher specs split from <see cref="AgentLauncherSpecs"/> to
 /// keep both files within the file-size ratchet.
 /// </summary>
-[Collection("LaunchIntegrationB")]
+[Collection("LaunchIntegration")]
 public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
 {
     protected MohistIntegrationFixture _fixture => Fixture;
@@ -47,8 +46,8 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
     [Fact]
     public async Task RetryService_ThreadRetryCreatesTargetedFollowupWithOriginalSlackProvenance()
     {
-        var projectId = await CreateProjectAsync("agent-retry-thread");
-        var agent = await CreateAgentAsync(projectId, "agent-retry-thread-agent", maxConcurrentRuns: 2);
+        var projectId = await CreateProjectGrainAsync("agent-retry-thread");
+        var agent = await CreateAgentGrainAsync(projectId, "agent-retry-thread-agent", maxConcurrentRuns: 2);
         var origin = new ConnectionLaunchOrigin(
             "connection-thread-retry",
             "T-thread-retry",
@@ -148,8 +147,8 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
     [Fact]
     public async Task RetryService_ThreadRetryPendingRecoveryIsIdempotent()
     {
-        var projectId = await CreateProjectAsync("agent-retry-thread-recovery");
-        var agent = await CreateAgentAsync(projectId, "agent-retry-thread-recovery-agent");
+        var projectId = await CreateProjectGrainAsync("agent-retry-thread-recovery");
+        var agent = await CreateAgentGrainAsync(projectId, "agent-retry-thread-recovery-agent");
         var origin = new ConnectionLaunchOrigin(
             "connection-thread-recovery",
             "T-thread-recovery",
@@ -249,8 +248,8 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
     [Fact]
     public async Task RetryObligationWorker_ResumesPendingRootRetryWithRecordedIdentitiesExactlyOnce()
     {
-        var projectId = await CreateProjectAsync("agent-retry-worker-recovery");
-        var agent = await CreateAgentAsync(projectId, "agent-retry-worker-recovery-agent");
+        var projectId = await CreateProjectGrainAsync("agent-retry-worker-recovery");
+        var agent = await CreateAgentGrainAsync(projectId, "agent-retry-worker-recovery-agent");
         var origin = new ConnectionLaunchOrigin(
             "connection-worker-recovery",
             "T-worker-recovery",
@@ -338,7 +337,7 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
     [Fact]
     public async Task RetryObligationWorker_ContinuesAfterFailureAndRetriesPendingOnNextPass()
     {
-        var projectId = await CreateProjectAsync("agent-retry-worker-failure");
+        var projectId = await CreateProjectGrainAsync("agent-retry-worker-failure");
         AgentRetryOperation missingOperation;
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
@@ -354,7 +353,7 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
                     "missing-new-turn")).Operation;
         }
 
-        var agent = await CreateAgentAsync(projectId, "agent-retry-worker-other-agent");
+        var agent = await CreateAgentGrainAsync(projectId, "agent-retry-worker-other-agent");
         AgentLaunchResult failedLaunch;
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
@@ -420,7 +419,7 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
     [Fact]
     public async Task RetryObligationWorker_CleansExpiredFinishedRowsButNeverPendingRows()
     {
-        var projectId = await CreateProjectAsync("agent-retry-worker-cleanup");
+        var projectId = await CreateProjectGrainAsync("agent-retry-worker-cleanup");
         AgentRetryOperation finished;
         AgentRetryOperation pending;
         await using (var scope = _fixture.Services.CreateAsyncScope())
@@ -473,8 +472,8 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
     [Fact]
     public async Task RetryService_RootRetryCommitsReceiptAndCreatesDistinctSession()
     {
-        var projectId = await CreateProjectAsync("agent-retry-root");
-        var agent = await CreateAgentAsync(projectId, "agent-retry-root-agent");
+        var projectId = await CreateProjectGrainAsync("agent-retry-root");
+        var agent = await CreateAgentGrainAsync(projectId, "agent-retry-root-agent");
         var sourceOrigin = new ConnectionLaunchOrigin(
             "connection-retry",
             "T-retry",
@@ -546,8 +545,8 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
     [Fact]
     public async Task RetryService_RootRetryPreservesRecordedExecutionFactsAfterAgentChanges()
     {
-        var projectId = await CreateProjectAsync("agent-retry-root-snapshot");
-        var agent = await CreateAgentAsync(projectId, "agent-retry-root-snapshot-agent", runtime: "opencode");
+        var projectId = await CreateProjectGrainAsync("agent-retry-root-snapshot");
+        var agent = await CreateAgentGrainAsync(projectId, "agent-retry-root-snapshot-agent", runtime: "opencode");
         var sourceOrigin = new ConnectionLaunchOrigin(
             "connection-retry-snapshot",
             "T-retry-snapshot",
@@ -597,17 +596,26 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
                 FailureReason: "runner unavailable",
                 FailureCategory: AgentJobFailureReasons.RunnerUnavailable));
 
-        using (var update = await _fixture.Client.PatchAsJsonAsync(
-            $"/api/projects/{projectId}/agents/{agent.Id}",
-            new
-            {
-                instructions = "changed after the failed launch",
-                agentConfig = new { model = "openai/changed-model", runtime = "pi", variant = "fast" },
-                skills = new[] { "changed-skill" },
-            }))
-        {
-            update.EnsureSuccessStatusCode();
-        }
+        var updatedAgent = await _fixture.Grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agent.Id)).UpdateAsync(
+            new AgentUpdateData(
+                Name: null,
+                Description: null,
+                Instructions: "changed after the failed launch",
+                AgentConfig: JsonSerializer.SerializeToElement(new
+                {
+                    model = "openai/changed-model",
+                    runtime = "pi",
+                    variant = "fast",
+                }),
+                Skills: new[] { "changed-skill" },
+                MaxConcurrentRuns: null,
+                Fields: new HashSet<string>
+                {
+                    nameof(AgentUpdateData.Instructions),
+                    nameof(AgentUpdateData.AgentConfig),
+                    nameof(AgentUpdateData.Skills),
+                }));
+        Assert.NotNull(updatedAgent);
 
         AgentSessionRetryResult retry;
         await using (var scope = _fixture.Services.CreateAsyncScope())
@@ -637,6 +645,45 @@ public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
         Assert.Equal(sourceInitial.Input.StartupContext, retried.Input.StartupContext);
         Assert.Equal(sourceInitial.Input.Text, retried.Input.Text);
         Assert.Equal(sourceOrigin.ConnectionId, retried.Input.Provenance!.ConnectionId);
+    }
+
+    private async Task<string> CreateProjectGrainAsync(string prefix)
+    {
+        var projectId = $"project-{Guid.NewGuid():N}";
+        var raw = $"{prefix}-{Guid.NewGuid():N}".ToLowerInvariant();
+        var name = raw.Length > 63 ? raw[..63] : raw;
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            name,
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return projectId;
+    }
+
+    private Task<AgentInfo> CreateAgentGrainAsync(
+        string projectId,
+        string name,
+        string? runtime = null,
+        int maxConcurrentRuns = 1)
+    {
+        var agentId = $"agent_{Guid.NewGuid():N}";
+        var agentConfig = runtime is null
+            ? JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.6" })
+            : JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.6", runtime });
+        return _fixture.Grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agentId)).CreateAsync(
+            new AgentCreateData(
+                projectId,
+                name,
+                $"description for {name}",
+                $"instructions for {name}",
+                agentConfig,
+                new[] { "coding" },
+                maxConcurrentRuns));
     }
 
 }

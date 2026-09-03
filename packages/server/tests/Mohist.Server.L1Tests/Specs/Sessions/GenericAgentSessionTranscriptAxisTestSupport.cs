@@ -8,6 +8,8 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.L1Tests.Support;
@@ -247,35 +249,35 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
 
     protected async Task<ProjectRef> CreateProjectAsync(string name)
     {
-        var projectName = $"generic-transcript-{Guid.NewGuid():N}";
+        var projectId = $"project-{Guid.NewGuid():N}";
+        var projectName = $"generic-transcript-{name}-{Guid.NewGuid():N}";
         if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
-        return new ProjectRef(project.Id);
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            projectName,
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return new ProjectRef(projectId);
     }
 
     protected async Task<AgentRef> CreateAgentAsync(string projectId, string agentName)
     {
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents",
-            new
-            {
-                name = agentName,
-                description = $"description for {agentName}",
-                instructions = $"instructions for {agentName}",
-                agentConfig = new { model = "openai/gpt-5.6" },
-                skills = new[] { "coding" },
-                maxConcurrentRuns = 1,
-            });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, agentName);
+        var agentId = $"agent_{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agentId)).CreateAsync(
+            new AgentCreateData(
+                projectId,
+                agentName,
+                $"description for {agentName}",
+                $"instructions for {agentName}",
+                JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.6" }),
+                new[] { "coding" },
+                1));
+        return new AgentRef(agentId, agentName);
     }
 
     protected sealed record ClaimedDispatch(

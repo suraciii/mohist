@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -191,9 +193,13 @@ public sealed class AgentSessionScheduleApiSpecs
     public async Task ListSchedules_ReturnsAllOrderedByDueAt()
     {
         var (projectId, sessionId) = await CreateIdleSessionAsync("list");
-        await PostScheduleAsync(projectId, sessionId, new { text = "third", dueAt = "2099-06-01T00:00:00Z" }, "list-key-3");
-        await PostScheduleAsync(projectId, sessionId, new { text = "first", dueAt = "2099-01-01T00:00:00Z" }, "list-key-1");
-        await PostScheduleAsync(projectId, sessionId, new { text = "second", dueAt = "2099-03-01T00:00:00Z" }, "list-key-2");
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.CreateScheduleAsync(new CreateSessionScheduleCommand(
+            "third", DateTimeOffset.Parse("2099-06-01T00:00:00Z"), "list-key-3"));
+        await session.CreateScheduleAsync(new CreateSessionScheduleCommand(
+            "first", DateTimeOffset.Parse("2099-01-01T00:00:00Z"), "list-key-1"));
+        await session.CreateScheduleAsync(new CreateSessionScheduleCommand(
+            "second", DateTimeOffset.Parse("2099-03-01T00:00:00Z"), "list-key-2"));
 
         using var response = await _client.GetAsync($"/api/projects/{projectId}/agent-sessions/{sessionId}/schedules");
 
@@ -266,10 +272,19 @@ public sealed class AgentSessionScheduleApiSpecs
 
     private async Task<string> CreateProjectAsync(string name)
     {
-        var projectName = $"schedule-api-{name}-{Guid.NewGuid():N}";
-        if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
-        return project.Id;
+        var projectId = $"schedule-api-{name}-{Guid.NewGuid():N}";
+        var projectName = projectId.Length > 63 ? projectId[..63] : projectId;
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            projectName,
+            new RepositoryInfo
+            {
+                Name = "test-repo",
+                GitUrl = "git@example.com:test-repo.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return projectId;
     }
 
     private Task<HttpResponseMessage> PostScheduleAsync(

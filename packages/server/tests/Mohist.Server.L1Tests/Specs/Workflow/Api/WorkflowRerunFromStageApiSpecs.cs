@@ -288,7 +288,6 @@ public class WorkflowRerunFromStageApiSpecs : IAsyncLifetime
         await SeedWorkflowTemplateAsync(projectId);
         var grain = _grains.GetGrain<IIssueGrain>(issueKey);
         var wrId = await grain.StartWorkAsync();
-        await DispatchEventsAsync();
         return (projectId, issueNumber, issueKey, wrId);
     }
 
@@ -324,13 +323,9 @@ public class WorkflowRerunFromStageApiSpecs : IAsyncLifetime
     private async Task<(WorkDispatch Work, string RunnerId)> PollWorkAsync(string runnerId)
     {
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
-        var work = await TestWait.ForAsync(
-            () => runner.PollAsync(_fixture.Services),
-            value => value is not null,
-            TimeSpan.FromSeconds(3),
-            TimeSpan.FromMilliseconds(20),
-            $"Runner '{runnerId}' to receive work");
-        return (work!, runnerId);
+        var work = await runner.PollAsync(_fixture.Services);
+        Assert.NotNull(work);
+        return (work, runnerId);
     }
 
     private async Task ReportAsync(string runnerId, string wrId, string workId, string status)

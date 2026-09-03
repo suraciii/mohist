@@ -55,7 +55,7 @@ namespace Mohist.Server.L1Tests.Specs.Agent.Services;
 ///   </item>
 /// </list>
 /// </summary>
-[Collection("LaunchIntegrationB")]
+[Collection("LaunchIntegration")]
 public class AgentLauncherSpecs : AgentLauncherSupportSpecs
 {
     protected MohistIntegrationFixture _fixture => Fixture;

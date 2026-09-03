@@ -10,6 +10,7 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Agent.Grains;
+using Microsoft.Extensions.Options;
 using Orleans;
 
 namespace Mohist.Server.Sessions.Grains;
@@ -17,7 +18,6 @@ namespace Mohist.Server.Sessions.Grains;
 public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
 {
     private static readonly TimeSpan FollowupLeaseWindow = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan PersistTimerDueTime = TimeSpan.FromMilliseconds(200);
     internal const string ScheduleReminderPrefix = "schedule:";
     internal const string ScheduleRecoveryReminderName = "schedule-recovery";
     internal const string StopRecoveryReminderName = "stop-recovery";
@@ -58,6 +58,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         IDbContextFactory<MohistDbContext> dbFactory,
         ITranscriptEventPublisher transcriptPublisher,
         IAgentSessionPersistenceObserver persistenceObserver,
+        IOptions<AgentSessionPersistenceTimerOptions> persistenceTimerOptions,
         TimeProvider timeProvider,
         IAgentSessionConnectionRegistry connections,
         IGrainFactory grains,
@@ -72,6 +73,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         _dbFactory = dbFactory;
         _transcriptPublisher = transcriptPublisher;
         _persistenceObserver = persistenceObserver;
+        _persistTimerDueTime = persistenceTimerOptions.Value.DueTime;
         _timeProvider = timeProvider;
         _connections = connections;
         _grains = grains;
@@ -2179,14 +2181,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             now);
 
         return new ContextHealthDecision(envelope, domainEvents, newStatus, percent);
-    }
-
-    private void EnsurePersistenceTimer()
-    {
-        _persistTimer ??= this.RegisterGrainTimer(
-            _ => PersistCallback(),
-            PersistTimerDueTime,
-            PersistTimerDueTime);
     }
 
     private async Task PersistCallback()

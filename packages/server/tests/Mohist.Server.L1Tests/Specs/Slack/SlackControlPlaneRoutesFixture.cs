@@ -88,6 +88,9 @@ public sealed class SlackControlPlaneRoutesFixture : IAsyncLifetime
             TimeProvider);
         await Factory.EnsureSchemaAsync();
         _ = Factory.Services;
+        using var warmupClient = CreateOperatorClient();
+        using var health = await warmupClient.GetAsync("/api/health");
+        health.EnsureSuccessStatusCode();
     }
 
     public async ValueTask DisposeAsync()

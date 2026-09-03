@@ -5,7 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
@@ -193,52 +195,45 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 
     private async Task<string> CreateProjectAsync(string name)
     {
-        using var response = await _client.PostAsJsonAsync("/api/projects", new
-        {
+        var projectId = $"proj-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
             name,
-            verificationCommand = "true",
-            repository = new { name = "main", gitUrl = "git@main.example:repo.git", baseBranch = "main" },
-        });
-        response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return json.GetProperty("data").GetProperty("id").GetString()!;
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = "git@main.example:repo.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return projectId;
     }
 
     private async Task<IssueDto> CreateIssueAsync(string projectId, string title, string? repositoryName = null, bool isDraft = false)
     {
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/issues",
-            new { title, repositoryName, isDraft });
-        response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return new IssueDto(json.GetProperty("data").GetProperty("number").GetInt32());
+        var number = await _fixture.Grains
+            .GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId))
+            .NextAsync();
+        await _fixture.Grains
+            .GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)))
+            .CreateAsync(projectId, number, title, null, null, null, repositoryRef: repositoryName, isDraft: isDraft);
+        return new IssueDto(number);
     }
 
     private async Task StartIssueAndAssignmentRunnerAsync(string projectId, int number)
     {
-        await _client.PostOkAsync($"/api/projects/{projectId}/issues/{number}/start");
-        await DispatchEventsAsync();
+        var issue = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
+        var workflowRunId = await issue.StartWorkAsync();
 
         var runnerId = $"repo-resolution-runner-{Guid.NewGuid():N}";
-        await _client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-            capabilities = new[] { "mohist/rebase", "spec/task", "spec/check" },
-            hostname = "test-host",
-            projectId,
-        });
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(
+            new RunnerInfo(runnerId, ["mohist/rebase", "spec/task", "spec/check"], "test-host", projectId),
+            TestRunnerGenerationExtensions.ProcessGeneration);
         _runnerIds.Add(runnerId);
 
-        var issue = await _client.GetDataAsync<IssueDto>($"/api/projects/{projectId}/issues/{number}");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issue.Number)));
-        var issueStatus = await issueGrain.GetWorkflowStatusAsync();
-        var wrId = issueStatus!.WorkflowRunId!;
-
-        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(wrId);
+        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
         await workflow.AssignWorkerAsync(runnerId);
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.PollAsync(_fixture.Services);
-
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Services);
     }
 
     private async Task DispatchEventsAsync()
@@ -248,8 +243,11 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 
     private async Task DriveIssueToTerminalAsync(string projectId, IssueDto issue)
     {
-        await _client.PostOkAsync($"/api/projects/{projectId}/issues/{issue.Number}/stop");
-        await _client.PostOkAsync($"/api/projects/{projectId}/issues/{issue.Number}/close");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issue.Number)));
+        var workflowRunId = (await issueGrain.GetWorkflowStatusAsync())?.WorkflowRunId
+            ?? throw new InvalidOperationException("Issue has no workflow run");
+        await _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId).StopAsync("test-stop");
+        await issueGrain.CancelAsync();
     }
 
     private sealed record IssueDto(int Number);

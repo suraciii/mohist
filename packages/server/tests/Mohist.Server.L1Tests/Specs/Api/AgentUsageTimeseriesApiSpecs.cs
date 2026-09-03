@@ -25,15 +25,11 @@ public class AgentUsageTimeseriesApiSpecs
     private async Task<ProjectDto> CreateProjectAsync()
     {
         var name = $"usage-{Guid.NewGuid():N}";
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", name);
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
-        return project;
+        return await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            name,
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
     }
 
     [Fact]

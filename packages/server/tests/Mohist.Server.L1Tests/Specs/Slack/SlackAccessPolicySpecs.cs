@@ -214,10 +214,20 @@ public sealed partial class SlackAccessPolicySpecs : IAsyncLifetime
         // core and the access decider resolve the AgentApp addresses only.
         // Distinct values prove the live identity gate uses the verified
         // Agent App Bot token, never the old project/connection secret.
-        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp-legacy"));
-        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb-legacy"));
-        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
-        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb-verified"));
+        await secrets.StoreAtomicallyAsync([
+            new SecretStoreWrite(
+                new SecretStoreAddress(projectId, id, SecretKind.AppToken),
+                Encoding.UTF8.GetBytes("xapp-legacy")),
+            new SecretStoreWrite(
+                new SecretStoreAddress(projectId, id, SecretKind.BotToken),
+                Encoding.UTF8.GetBytes("xoxb-legacy")),
+            new SecretStoreWrite(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken),
+                Encoding.UTF8.GetBytes("xapp")),
+            new SecretStoreWrite(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken),
+                Encoding.UTF8.GetBytes("xoxb-verified")),
+        ]);
         var leaseId = await SlackRuntimeLeaseTestSupport.AcquireConnectionLeaseAsync(_fixture, projectId, id);
         _connectionLeases[id] = leaseId;
         return new AgentConnection

@@ -28,6 +28,7 @@ using Mohist.Server.GitHub.Ports;
 using Mohist.Server.Logging;
 using Mohist.Server.Otel;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.SystemInfo;
@@ -103,6 +104,8 @@ public class MohistIntegrationFixture : IAsyncLifetime
             Mohist.Server.Slack.Services.SlackAdapterOperatorAuthenticator.OperatorIdHeaderName,
             "spec-operator");
         await _factory.EnsureSchemaAsync();
+        using var health = await Client.GetAsync("/api/health");
+        health.EnsureSuccessStatusCode();
         await EnsureWorkspaceCodegenWarmAsync();
     }
 
@@ -260,8 +263,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         _timeProvider = timeProvider ?? new FakeTimeProvider(TestTime.UtcNow);
         _otelEnabled = otelEnabled;
         _manualPublicProjection = manualPublicProjection;
-        Persistence = new AgentSessionPersistenceTestProbe(
-            () => _timeProvider.Advance(TimeSpan.FromSeconds(1)));
+        Persistence = new AgentSessionPersistenceTestProbe();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -289,6 +291,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
+            services.Configure<AgentSessionPersistenceTimerOptions>(options =>
+                options.DueTime = TimeSpan.Zero);
             services.RemoveAll<IAgentSessionPersistenceObserver>();
             services.AddSingleton<IAgentSessionPersistenceObserver>(Persistence);
         });

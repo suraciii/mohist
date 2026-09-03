@@ -328,7 +328,7 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         _runnerIds.Add(runnerId);
         try
         {
-            await RegisterRunnerViaApiAsync(runnerId, projectId);
+            await RegisterRunnerAsync(runnerId, projectId);
             return runnerId;
         }
         catch
@@ -340,19 +340,17 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         }
     }
 
-    private async Task RegisterRunnerViaApiAsync(string runnerId, string projectId)
+    private async Task RegisterRunnerAsync(string runnerId, string projectId)
     {
-        using var register = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
-        {
-            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-            capabilities = new[] { "spec/*" },
-            hostname = $"{runnerId}-host",
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            $"{runnerId}-host",
             projectId,
-            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
-        });
-        register.EnsureSuccessStatusCode();
-        using var slots = await _fixture.Client.PatchAsJsonAsync($"/api/runner/{runnerId}", new { slots = 1 });
-        slots.EnsureSuccessStatusCode();
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()),
+            TestRunnerGenerationExtensions.ProcessGeneration);
+        await runner.UpdateAsync(1);
     }
 
     private async Task<JsonElement> PollInitialDispatchAsync(string runnerId, string jobKey)
