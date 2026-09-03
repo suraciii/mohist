@@ -147,12 +147,12 @@ describe('core/script failure diagnostics', () => {
     const message = scriptFailureMessage(
       'set -e\nnpm ci\ndotnet test',
       1,
-      'failed Mohist.Server.L1Tests.SubmitAsync\nTimed out waiting for: status == Running',
+      'failed Mohist.Server.Tests.SubmitAsync\nTimed out waiting for: status == Running',
       'npm warn deprecated node-domexception@1.0.0',
     )
 
     expect(message).toBe(
-      'Script failed with exit code 1: set -e\nstdout:\nfailed Mohist.Server.L1Tests.SubmitAsync\nTimed out waiting for: status == Running\nstderr:\nnpm warn deprecated node-domexception@1.0.0',
+      'Script failed with exit code 1: set -e\nstdout:\nfailed Mohist.Server.Tests.SubmitAsync\nTimed out waiting for: status == Running\nstderr:\nnpm warn deprecated node-domexception@1.0.0',
     )
   })
 

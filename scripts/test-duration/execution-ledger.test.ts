@@ -26,7 +26,7 @@ const manifest = discoverManifest({ listTests: () => discovery })
 const expectation: ExecutionLedgerExpectation = {
   runId: 'l0-run-1',
   manifest,
-  assemblyPath: '/virtual/Mohist.Server.L0Tests.dll',
+  assemblyPath: '/virtual/Mohist.Server.Tests.dll',
   assemblySha256: 'a'.repeat(64),
   sourceSha256: 'b'.repeat(64),
   parallelism: 'xunit-v3:parallel=collections;parallelAlgorithm=conservative;maxThreads=default',

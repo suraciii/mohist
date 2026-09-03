@@ -1,0 +1,333 @@
+using Mohist.Server.Tests.Support;
+using Mohist.Server.TestSupport;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.GitHub;
+using Xunit;
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+
+namespace Mohist.Server.Tests.Issue.Api;
+
+[Trait("level", "L1")]
+public class IssueApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
+{
+    private readonly HttpClient _client;
+    private readonly MohistIntegrationFixture _fixture;
+
+    public IssueApiSpecs(DefaultMohistIntegrationFixture fixture)
+    {
+        _fixture = fixture;
+        _client = fixture.Client;
+    }
+
+    [Fact]
+    public async Task GitHubMirror_RoundTripsThroughDetailAndListShapes()
+    {
+        var owner = $"owner-{Guid.NewGuid():N}";
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"github-shape-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"https://github.com/{owner}/mohist.git");
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Linked issue" });
+
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            db.GitHubConnections.Add(new GitHubConnectionRow
+            {
+                Id = $"connection-{project.Id}",
+                ProjectId = project.Id,
+                Owner = owner,
+                Repo = "mohist",
+                RepositoryName = "main",
+                ApproversJson = "[]",
+                Status = "active",
+                InstallationId = "installation-1",
+                RepositoryNodeId = "repository-node-" + project.Id,
+                NeedsAttention = false,
+                CreatedAt = TestTime.UtcNow,
+                UpdatedAt = TestTime.UtcNow,
+            });
+            db.GitHubIssueLinks.Add(new GitHubIssueLinkRow
+            {
+                Id = $"link-{project.Id}",
+                ProjectId = project.Id,
+                RepositoryName = "main",
+                GithubIssueNumber = 771,
+                IssueNumber = issue.Number,
+                CreatedAt = TestTime.UtcNow,
+                UpdatedAt = TestTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var detail = await _client.GetDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues/{issue.Number}");
+        var list = await _client.GetDataAsync<IssueDto[]>(
+            $"/api/projects/{project.Id}/issues");
+
+        Assert.Equal(new GitHubIssueDto(
+            $"{owner}/mohist",
+            771,
+            $"https://github.com/{owner}/mohist/issues/771",
+            "healthy"), detail.Github);
+        Assert.Equal(detail.Github, Assert.Single(list).Github);
+    }
+
+    [Fact]
+    public async Task GitHubMirror_UnlinkedDetailAndListUseNull()
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects", $"github-unlinked-{Guid.NewGuid():N}");
+        var issue = await _client.PostDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues",
+            new { title = "Unlinked issue" });
+
+        var detail = await _client.GetDataAsync<IssueDto>(
+            $"/api/projects/{project.Id}/issues/{issue.Number}");
+        var list = await _client.GetDataAsync<IssueDto[]>(
+            $"/api/projects/{project.Id}/issues");
+
+        Assert.Null(detail.Github);
+        Assert.Null(Assert.Single(list).Github);
+    }
+
+    [Fact]
+    public async Task Comments_RoundTripThroughIssueDetailShape()
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"web-compat-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Commented issue", projectId = project.Id });
+
+        var comment = await _client.PostDataAsync<CommentDto>($"/api/projects/{project.Id}/issues/{issue.Number}/comments", new { displayName = "  Ada Lovelace  ", body = "Looks good" });
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+
+        Assert.False(string.IsNullOrWhiteSpace(comment.Id));
+        Assert.Equal(project.Id, comment.ProjectId);
+        Assert.Equal(issue.Number, comment.IssueNumber);
+        Assert.Equal("Looks good", comment.Body);
+        // The author is the authenticated principal (the spec fixture's
+        // operator credential resolves to the service principal); the
+        // display alias is kept for display only.
+        Assert.Equal("service", comment.Author);
+        Assert.Equal("Ada Lovelace", comment.DisplayName);
+        Assert.False(string.IsNullOrWhiteSpace(comment.CreatedAt));
+        var persisted = Assert.Single(detail.Comments, c => c.Id == comment.Id);
+        Assert.Equal(comment.ProjectId, persisted.ProjectId);
+        Assert.Equal(comment.IssueNumber, persisted.IssueNumber);
+        Assert.Equal(comment.CreatedAt, persisted.CreatedAt);
+        Assert.Equal("Looks good", persisted.Body);
+        Assert.Equal("service", persisted.Author);
+        Assert.Equal("Ada Lovelace", persisted.DisplayName);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task AddComment_WithBlankDisplayName_AttributesToAuthenticatedPrincipal(string displayName)
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"comment-author-{Guid.NewGuid():N}");
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Comment attribution" });
+
+        var comment = await _client.PostDataAsync<CommentDto>(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/comments",
+            new { displayName, body = "Not persisted" });
+
+        Assert.Equal("service", comment.Author);
+        Assert.Null(comment.DisplayName);
+    }
+
+    [Fact]
+    public async Task AddComment_OverlongDisplayName_ReturnsActionableValidationWithoutCreatingRow()
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"comment-author-{Guid.NewGuid():N}");
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Comment validation" });
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/comments",
+            new { displayName = new string('x', 101), body = "Not persisted" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains("100", error.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+        Assert.Empty(detail.Comments);
+    }
+
+    [Fact]
+    public async Task CreateIssue_OnLegacyCollectionRoute_ReturnsNotFound()
+    {
+        var projectA = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"web-multi-a-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
+        var projectB = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"web-multi-b-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
+
+        using var response = await _client.PostAsJsonAsync("/api/issues", new { title = "Ambiguous issue" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateIssue_OnProjectRoute_UsesRouteProjectContext()
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"web-header-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
+
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Project scoped issue" });
+
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+
+        Assert.Equal(issue.Number, detail.Number);
+    }
+
+    [Fact]
+    public async Task CreateEpic_OnProjectRoute_UsesRouteProjectContext()
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"epic-header-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
+
+        var epic = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Project scoped epic", description = "Runtime model", priority = "p2" });
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
+
+        Assert.NotNull(detail);
+    }
+
+    [Fact]
+    public async Task ListIssues_ReturnsOnlyIssuesInRouteProject()
+    {
+        var firstProject = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"web-list-all-a-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
+        var secondProject = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"web-list-all-b-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
+        var firstIssue = await _client.PostDataAsync<IssueDto>($"/api/projects/{firstProject.Id}/issues", new { title = "First listed issue" });
+        var secondIssue = await _client.PostDataAsync<IssueDto>($"/api/projects/{secondProject.Id}/issues", new { title = "Second listed issue" });
+
+        var issues = await _client.GetDataAsync<IssueDto[]>($"/api/projects/{firstProject.Id}/issues?all=true");
+
+        var listed = Assert.Single(issues);
+        Assert.Equal(firstIssue.Number, listed.Number);
+    }
+
+    [Fact]
+    public async Task CreateIssue_WithWorkflowProfileId_RoundTripsProfileId()
+    {
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"web-profile-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
+
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Profile issue", projectId = project.Id, workflowProfileId = "mohist/local" });
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
+
+        Assert.Equal("mohist/local", detail.WorkflowProfileId);
+    }
+
+    [Fact]
+    public async Task StartIssue_WithIncompletePrerequisite_IsRejectedByWorkflowGate()
+    {
+        // Route contract for POST /api/projects/{ref}/issues/{n}/start
+        // when the issue carries an undelivered prerequisite: the
+        // route returns 400 Bad Request. The underlying blocker
+        // projection (IssueQuerier.GetAsync.Blocker = waiting-for)
+        // and start-readiness domain logic are sunk into
+        // IssueStartReadinessProjectionSpecs + IssueStartReadinessDomainTests
+        // (batch A); the route just propagates the rejection.
+        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"web-prereq-gate-{Guid.NewGuid():N}",
+            repoName: "main",
+            gitUrl: $"file://{Guid.NewGuid():N}");
+        var prereq = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Gate prereq", projectId = project.Id, isDraft = false });
+        var dependent = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Gate dependent", projectId = project.Id, isDraft = false });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{dependent.Number}/prerequisites", new { prerequisiteNumber = prereq.Number });
+
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{dependent.Number}/start", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task SystemInfo_ReturnsTypedRuntimePayload()
+    {
+        var system = await _client.GetDataAsync<SystemInfoDto>("/api/system/info");
+
+        Assert.NotNull(system.Running);
+        Assert.NotNull(system.Source);
+        Assert.NotNull(system.Install);
+        Assert.NotNull(system.Update);
+        Assert.NotNull(system.Services);
+        Assert.NotNull(system.Paths);
+        Assert.False(string.IsNullOrWhiteSpace(system.Running.StartedAt));
+        Assert.False(string.IsNullOrWhiteSpace(system.Install.Mode));
+    }
+
+    [Fact]
+    public async Task SystemUpdateStatus_WhenNoJobExists_ReturnsIdleEnvelope()
+    {
+        var status = await _client.GetDataAsync<SystemUpdateStatusEnvelopeDto>("/api/system/update/status");
+
+        Assert.False(status.HasJob);
+        Assert.Null(status.Job);
+    }
+
+    private sealed record IssueDto(
+        int Number,
+        CommentDto[] Comments,
+        string WorkflowProfileId,
+        GitHubIssueDto? Github = null);
+    private sealed record GitHubIssueDto(string Repository, int Number, string Url, string SyncStatus);
+    private sealed record ProjectDto(string Id);
+    private sealed record CommentDto(
+        string Id,
+        string ProjectId,
+        int IssueNumber,
+        string Body,
+        string CreatedAt,
+        string? Author,
+        string? DisplayName = null);
+    private sealed record SystemInfoDto(
+        RunningInfoDto Running,
+        SourceInfoDto Source,
+        InstallInfoDto Install,
+        UpdateInfoDto Update,
+        ServicesInfoDto Services,
+        PathsInfoDto Paths);
+    private sealed record RunningInfoDto(string? Version, string? GitHash, string StartedAt);
+    private sealed record SourceInfoDto(string? Path, string? Branch, string? Head, bool Dirty);
+    private sealed record InstallInfoDto(string Mode, string? ServiceManager, string? ServerUnit, string? RunnerUnit, string? Reason);
+    private sealed record UpdateInfoDto(string Status, bool Available, string? Reason);
+    private sealed record ServicesInfoDto(string? Server, string? Runner);
+    private sealed record PathsInfoDto(string? Db, string? Config, string? Logs, string? Opencode);
+    private sealed record SystemUpdateStatusEnvelopeDto(bool HasJob, SystemUpdateStatusDto? Job);
+    private sealed record SystemUpdateStatusDto(string JobId, string Status, string Stage);
+    private sealed record EpicDto(int Number);
+    private sealed record EpicDetailDto(LinkedIssueDto[] LinkedIssues);
+    private sealed record LinkedIssueDto(int Number);
+}

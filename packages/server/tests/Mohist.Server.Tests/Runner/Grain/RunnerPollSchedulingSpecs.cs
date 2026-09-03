@@ -1,0 +1,277 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.TestSupport;
+using Mohist.Workflow.Definition;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
+using Xunit;
+
+namespace Mohist.Server.Tests.Runner.Grain;
+
+/// <summary>
+/// Issue-318 T-002 specs for the runner-grain poll path. Per design D4:
+/// <list type="bullet">
+/// <item><c>PollAssignedOrAssignableWorkflowAsync</c> calls <c>PollWorkAsync</c>
+/// directly on each <c>FindAssignedToAsync</c> row. The previous
+/// <c>GetCurrentWorkIdAsync</c> busy pre-check (~104 grain calls/s) is
+/// gone, because the new state machine's <c>Ready</c> status already
+/// excludes in-flight work.</item>
+/// <item><c>ActiveWorkflowCountAsync</c> counts <c>status == Running</c>
+/// rows for the runner via a new <c>CountRunningAssignedToAsync</c> query.
+/// The previous implementation reused <c>FindAssignedToAsync</c> +
+/// <c>GetCurrentWorkIdAsync</c> and would have collapsed to 0 once
+/// <c>Ready</c> excluded in-flight work — so the slot-budget gate in
+/// <c>PollAsync</c> would have let the runner exceed its
+/// <c>MaxWorkflowSlots</c>.</item>
+/// </list>
+/// </summary>
+[Collection("RunnerGrain")]
+[Trait("level", "L1")]
+public class RunnerPollSchedulingSpecs : Mohist.Server.Tests.Workflow.WorkflowGrainSpecs
+{
+    public RunnerPollSchedulingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
+
+    [Fact]
+    public async Task DrainFence_BlocksNewPollAndClaims_AndCancelRestoresAdmission()
+    {
+        await ClearBacklogAsync();
+        var projectId = $"runner-drain-project-{Guid.NewGuid():N}";
+        var runnerId = await RegisterRunnerForProjectAsync(
+            projectId,
+            $"runner-drain-{Guid.NewGuid():N}",
+            maxWorkflowSlots: 2);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var workflowId = $"runner-drain-workflow-{Guid.NewGuid():N}";
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), projectId);
+        await workflow.StartAsync(TestInput(projectId));
+
+        var jobId = $"runner-drain-job-{Guid.NewGuid():N}";
+        var job = Grains.GetGrain<IAgentJobGrain>(jobId);
+        await job.SubmitAsync(new AgentJobInput(
+            "drain admission",
+            WorkspacePath: "/tmp/runner-drain",
+            ProjectId: projectId,
+            AgentId: "agent-test"));
+        var pendingJob = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Pending, pendingJob.Status);
+        Assert.Equal(runnerId, pendingJob.RunnerId);
+
+        await runner.BeginDrainAsync();
+
+        var draining = await runner.GetRuntimeStateAsync();
+        Assert.True(draining.Draining);
+        Assert.False((await runner.TryBeginPollAsync()).Admitted);
+        Assert.Null(await runner.TryClaimWorkflowAsync(workflowId, projectId, assignWorker: true));
+        Assert.Null(await runner.TryClaimAgentJobAsync(jobId, projectId));
+        Assert.Null(await workflow.GetCurrentWorkIdAsync());
+        Assert.Equal(AgentJobStatus.Pending, await job.GetStatusAsync());
+
+        await runner.CancelDrainAsync();
+
+        var resumed = await runner.GetRuntimeStateAsync();
+        Assert.False(resumed.Draining);
+        var poll = await runner.TryBeginPollAsync();
+        Assert.True(poll.Admitted);
+        Assert.Equal(2, poll.Slots);
+        await runner.EndPollAsync(poll.AdmissionToken);
+        Assert.NotNull(await runner.TryClaimWorkflowAsync(workflowId, projectId, assignWorker: true));
+        Assert.NotNull(await runner.TryClaimAgentJobAsync(jobId, projectId));
+        Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+    }
+
+    [Fact]
+    public async Task RegisterAsync_ReleasesStaleAdmission_AndOldTokenCannotReleaseNewerPoll()
+    {
+        await ClearBacklogAsync();
+        var projectId = $"runner-poll-token-project-{Guid.NewGuid():N}";
+        var runnerId = await RegisterRunnerForProjectAsync(
+            projectId,
+            $"runner-poll-token-{Guid.NewGuid():N}");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var first = await runner.TryBeginPollAsync();
+        Assert.True(first.Admitted);
+        Assert.NotEqual(Guid.Empty, first.AdmissionToken);
+
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "test-host",
+            projectId));
+
+        var second = await runner.TryBeginPollAsync();
+        Assert.True(second.Admitted);
+        Assert.NotEqual(first.AdmissionToken, second.AdmissionToken);
+
+        await runner.EndPollAsync(first.AdmissionToken);
+
+        Assert.False((await runner.TryBeginPollAsync()).Admitted);
+
+        await runner.EndPollAsync(second.AdmissionToken);
+        var third = await runner.TryBeginPollAsync();
+        Assert.True(third.Admitted);
+        await runner.EndPollAsync(third.AdmissionToken);
+    }
+
+    [Fact]
+    public async Task BeginDrain_PreservesExistingActiveWork()
+    {
+        await ClearBacklogAsync();
+        var projectId = $"runner-drain-active-project-{Guid.NewGuid():N}";
+        var runnerId = await RegisterRunnerForProjectAsync(
+            projectId,
+            $"runner-drain-active-{Guid.NewGuid():N}");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var workflowId = $"runner-drain-active-workflow-{Guid.NewGuid():N}";
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await SeedWorkflowTemplateAsync(workflowId, SingleStage(checks: []), projectId);
+        await workflow.StartAsync(TestInput(projectId));
+
+        var work = await runner.TryClaimWorkflowAsync(workflowId, projectId, assignWorker: true);
+        Assert.NotNull(work);
+
+        await runner.BeginDrainAsync();
+
+        var state = await runner.GetRuntimeStateAsync();
+        Assert.True(state.Draining);
+        var active = Assert.Single(state.ActiveWorks);
+        Assert.Equal(workflowId, active.OwnerId);
+        Assert.Equal(work!.Id, active.WorkId);
+
+        await runner.CancelDrainAsync();
+    }
+
+    [Fact]
+    public async Task PollAsync_ReadyWorkflowIsDispatchedDirectly()
+    {
+        // Set up a Pending workflow, assign it to a fresh runner, then
+        // poll. The new code path surfaces the workflow through
+        // FindAssignedToAsync (status=Ready AND runner=<this>) and
+        // calls PollWorkAsync directly — there is no GetCurrentWorkIdAsync
+        // pre-check that could short-circuit pickup. The runner should
+        // get back a WorkDispatch for the only ready task.
+        await StartWorkflowAsync(SingleStage(checks: []));
+        var runnerId = _runnerId!;
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var work = await runner.PollAsync(Services);
+
+        Assert.NotNull(work);
+        Assert.Equal(_workflowId, work!.WorkflowRunId);
+    }
+
+    [Fact]
+    public async Task PollAsync_RespectsSlotBudget_WhenRunningWorkflowIsAlreadyAssigned()
+    {
+        var projectId = "runner-slot-budget";
+        var runnerId = await RegisterRunnerForProjectAsync(projectId, maxWorkflowSlots: 1);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var workflowAId = $"wf-running-{Guid.NewGuid():N}";
+        var workflowBId = $"wf-pending-{Guid.NewGuid():N}";
+        var workflowA = Grains.GetGrain<IWorkflowGrain>(workflowAId);
+        var workflowB = Grains.GetGrain<IWorkflowGrain>(workflowBId);
+        await SeedWorkflowTemplateAsync(workflowAId, SingleStage(checks: []), projectId);
+        await SeedWorkflowTemplateAsync(workflowBId, SingleStage(checks: []), projectId);
+        await workflowA.StartAsync(TestInput(projectId));
+        await workflowA.AssignWorkerAsync(runnerId);
+        await workflowB.StartAsync(TestInput(projectId));
+
+        var firstDispatch = await runner.PollAsync(Services);
+        Assert.NotNull(firstDispatch);
+        Assert.Equal(workflowAId, firstDispatch!.WorkflowRunId);
+
+        for (var i = 0; i < 3; i++)
+        {
+            var subsequent = await runner.PollAsync(Services);
+            if (subsequent is null) continue;
+            Assert.NotEqual(workflowBId, subsequent.WorkflowRunId);
+        }
+    }
+
+    [Fact]
+    public async Task CountRunningAssignedToAsync_ReturnsRunningRowsForTheRunner()
+    {
+        var prefix = $"count-{Guid.NewGuid():N}";
+        var runnerA = $"{prefix}-runner-A";
+        var runnerB = $"{prefix}-runner-B";
+
+        await InsertStatusRowAsync($"{prefix}-run-1", "Running", runnerA, activeWork: true);
+        await InsertStatusRowAsync($"{prefix}-run-2", "Running", runnerA, activeWork: true);
+        await InsertStatusRowAsync($"{prefix}-run-3", "Running", runnerA, activeWork: true);
+        await InsertStatusRowAsync($"{prefix}-ready-A", "Ready", runnerA);
+        await InsertStatusRowAsync($"{prefix}-completed-A", "Completed", runnerA);
+        await InsertStatusRowAsync($"{prefix}-run-B", "Running", runnerB, activeWork: true);
+
+        using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope();
+        var querier = scope.ServiceProvider.GetRequiredService<WorkflowRunQuerier>();
+
+        Assert.Equal(3, await querier.CountRunningAssignedToAsync(runnerA));
+        Assert.Equal(1, await querier.CountRunningAssignedToAsync(runnerB));
+    }
+
+    private async Task InsertStatusRowAsync(
+        string workflowRunId,
+        string status,
+        string runnerId,
+        bool activeWork = false,
+        string? activeWorkerId = null)
+    {
+        using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+
+        var run = WorkflowRun.Create(
+            workflowRunId,
+            new WorkflowDefinition(
+                [new StageDefinition("build",
+                    [new TaskDefinition("task-1", "Task 1", "spec/task")],
+                    [])]),
+            DateTimeOffset.UnixEpoch);
+        run.Stages.Clear();
+        run.Stages.Add(new StageRun
+        {
+            Id = "build",
+            Attempt = 1,
+            Initialized = true,
+            RequiresApproval = false,
+            Status = StageRunStatus.Running,
+            Tasks =
+            {
+                new WorkflowActionAttempt
+                {
+                    Id = "task-1",
+                    DefinitionId = "task-1",
+                    Attempt = 1,
+                    Title = "Task 1",
+                    Status = status == "Running"
+                        ? WorkflowActionAttemptStatus.Running
+                        : WorkflowActionAttemptStatus.Pending,
+                    WorkerId = runnerId,
+                },
+            },
+        });
+        run.CurrentStageId = "build";
+        run.Status = Enum.Parse<WorkflowRunStatus>(status);
+        run.Assignment = new WorkflowAssignment(runnerId, TestTime.UtcNow);
+
+        // The capacity queries filter the materialized active-work projection
+        // plus indexed attention, so raw inserts must mirror the store layout.
+        var projection = WorkflowRunWorkProjectionBuilder.Build(run);
+        db.WorkflowRuns.Add(new WorkflowRunRow
+        {
+            WorkflowRunId = workflowRunId,
+            State = JSON.Serialize(run),
+            ActiveWorkId = activeWork ? projection.ActiveWorkId : null,
+            ActiveWorkerId = activeWork ? activeWorkerId ?? projection.ActiveWorkerId : null,
+            AttentionStatus = null,
+        });
+        await db.SaveChangesAsync();
+    }
+}

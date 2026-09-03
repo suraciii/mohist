@@ -137,6 +137,8 @@ test('repository Server behavior tracks use their matching positive level select
 
   const serverL0 = config.tracks.find((track) => track.id === 'server-l0')
   const serverL1 = config.tracks.find((track) => track.id === 'server-l1')
+  assert.equal(serverL0?.csproj, 'packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj')
+  assert.equal(serverL1?.csproj, serverL0?.csproj)
   assert.deepEqual(serverL0?.apphostArgs?.slice(0, 2), ['-trait', 'level=L0'])
   assert.deepEqual(serverL1?.apphostArgs?.slice(0, 2), ['-trait', 'level=L1'])
 })

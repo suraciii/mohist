@@ -13,7 +13,7 @@ from datetime import datetime
 
 
 NS = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
-DEFAULT_SOURCE_ROOT = "packages/server/tests/Mohist.Server.L1Tests"
+DEFAULT_SOURCE_ROOT = "packages/server/tests/Mohist.Server.Tests"
 
 
 def duration_seconds(value: str) -> float:

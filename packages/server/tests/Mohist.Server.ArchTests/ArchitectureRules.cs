@@ -1,6 +1,8 @@
 using ArchUnitNET.Domain;
 using ArchUnitNET.Fluent;
 using ArchUnitNET.xUnitV3;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Mohist.Server.Infrastructure.Data.Db;
 using Xunit;
 using static ArchUnitNET.Fluent.ArchRuleDefinition;
@@ -584,48 +586,48 @@ public class ArchitectureRules
 
 
     /// <summary>
-    /// Spec files in <c>Specs/</c> must end with <c>Specs</c> or
-    /// <c>Collection</c> (or be <c>Index.md</c>). Prevents accidental
-    /// mis-naming that breaks the "find the spec for SUT X" intuition.
+    /// Behavior files keep their established <c>*Tests</c> or <c>*Specs</c>
+    /// names after the projects are combined. Partial-class support files may
+    /// use the explicit <c>*Support</c> suffix.
     /// </summary>
     [Fact]
-    public void SpecFiles_MustHaveSpecOrCollectionSuffix()
+    public void BehaviorTestFiles_MustHaveTestOrSupportSuffix()
     {
-        var violations = EmbeddedSources("TestSources/Mohist.Server.L1Tests/Specs/")
-            .Select(source => Path.GetFileNameWithoutExtension(source.Path)!)
-            .Where(name => !name.EndsWith("Specs")
-                        && !name.EndsWith("Collection")
-                        && !name.EndsWith("Fixture")
-                        && !name.EndsWith("Factory")
-                        && !name.EndsWith("Hub")
-                        && !name.EndsWith("Probe")
-                        && !name.EndsWith("TestHost")
-                        && !name.EndsWith("TestSupport")
-                        && !name.Equals("Index", StringComparison.Ordinal))
-            .OrderBy(name => name)
+        var testAttribute = new System.Text.RegularExpressions.Regex(
+            @"\[(?:Fact|Theory|Trait)(?:Attribute)?(?:\s|\(|\])",
+            System.Text.RegularExpressions.RegexOptions.None);
+        var violations = UnifiedTestSources()
+            .Where(source => testAttribute.IsMatch(source.Content))
+            .Where(source =>
+            {
+                var name = Path.GetFileNameWithoutExtension(source.Path)!;
+                return !name.EndsWith("Tests", StringComparison.Ordinal)
+                    && !name.EndsWith("Specs", StringComparison.Ordinal)
+                    && !name.EndsWith("Support", StringComparison.Ordinal);
+            })
+            .Select(source => source.Path)
+            .OrderBy(path => path, StringComparer.Ordinal)
             .ToList();
 
         Assert.True(
             violations.Count == 0,
-            "Spec files must end with 'Specs' or 'Collection'. Violations: " +
+            "Behavior test files must end with 'Tests', 'Specs', or 'Support'. Violations: " +
             string.Join(", ", violations));
     }
 
     /// <summary>
-    /// Spec classes must be declared as <c>public</c> so xUnit can
-    /// instantiate them. The rule parses each <c>*.cs</c> file for
-    /// top-level class declarations named <c>*Specs</c> and verifies
-    /// the <c>public</c> modifier is present.
+    /// Test classes must be declared as <c>public</c> so xUnit can
+    /// instantiate them.
     /// </summary>
     [Fact]
-    public void SpecClasses_MustBePublic()
+    public void TestClasses_MustBePublic()
     {
         var classRegex = new System.Text.RegularExpressions.Regex(
-            @"^\s*(?:(public|internal|private|protected)\s+)?(?:static\s+|sealed\s+|abstract\s+|partial\s+)*class\s+(\w+Specs)\b",
+            @"^\s*(?:(public|internal|private|protected)\s+)?(?:static\s+|sealed\s+|abstract\s+|partial\s+)*class\s+(\w+(?:Tests|Specs))\b",
             System.Text.RegularExpressions.RegexOptions.Multiline);
 
         var violations = new List<string>();
-        foreach (var source in EmbeddedSources("TestSources/Mohist.Server.L1Tests/Specs/"))
+        foreach (var source in UnifiedTestSources())
         {
             foreach (System.Text.RegularExpressions.Match m in classRegex.Matches(source.Content))
             {
@@ -639,47 +641,65 @@ public class ArchitectureRules
 
         Assert.True(
             violations.Count == 0,
-            "Spec classes must be public. Violations: " + string.Join(", ", violations));
+            "Test classes must be public. Violations: " + string.Join(", ", violations));
     }
 
     /// <summary>
-    /// Spec files in <c>Specs/</c> must declare a namespace under
-    /// <c>Mohist.Server.L1Tests.Specs</c>. Prevents accidentally placing
-    /// test code outside the Specs sub-namespace, which would break
-    /// test discovery and namespace-based filtering.
+    /// Physical layout describes behavior domains only. Test execution level
+    /// is selected exclusively by the <c>level</c> trait.
     /// </summary>
     [Fact]
-    public void SpecNamespaces_MustBeUnderSpecs()
+    public void TestDirectories_MustDescribeDomains()
+    {
+        var violations = UnifiedTestSources()
+            .Where(source => source.Path.Split('/').Any(segment =>
+                segment is "L0" or "L1" or "L0Tests" or "L1Tests" or "Specs" or "SystemSpecs"))
+            .Select(source => source.Path)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "Test paths must describe domains, not execution levels. Violations: " +
+            string.Join(", ", violations));
+    }
+
+    /// <summary>
+    /// Namespaces describe behavior domains only. Test execution level is
+    /// selected exclusively by the <c>level</c> trait.
+    /// </summary>
+    [Fact]
+    public void TestNamespaces_MustNotEncodeExecutionLevel()
     {
         var namespaceRegex = new System.Text.RegularExpressions.Regex(
             @"^\s*namespace\s+([\w\.]+)\s*;",
             System.Text.RegularExpressions.RegexOptions.Multiline);
 
         var violations = new List<string>();
-        foreach (var source in EmbeddedSources("TestSources/Mohist.Server.L1Tests/Specs/"))
+        foreach (var source in UnifiedTestSources())
         {
             var m = namespaceRegex.Match(source.Content);
             if (!m.Success)
-            {
-                // No namespace declaration; skip (the existing test in
-                // SkillsCliCollection.cs is such a file).
                 continue;
-            }
-            var ns = m.Groups[1].Value;
-            if (!ns.StartsWith("Mohist.Server.L1Tests.Specs", StringComparison.Ordinal))
-            {
-                violations.Add($"{source.Path}: {ns}");
-            }
+
+            var segments = m.Groups[1].Value.Split('.');
+            if (segments.Contains("L0", StringComparer.Ordinal)
+                || segments.Contains("L1", StringComparer.Ordinal)
+                || segments.Contains("L0Tests", StringComparer.Ordinal)
+                || segments.Contains("L1Tests", StringComparer.Ordinal)
+                || segments.Contains("Specs", StringComparer.Ordinal)
+                || segments.Contains("SystemSpecs", StringComparer.Ordinal))
+                violations.Add($"{source.Path}: {m.Groups[1].Value}");
         }
 
         Assert.True(
             violations.Count == 0,
-            "Spec namespaces must be under 'Mohist.Server.L1Tests.Specs'. Violations: " +
+            "Test namespaces must describe domains, not execution levels. Violations: " +
             string.Join(", ", violations));
     }
 
     [Fact]
-    public void ServerL0Tests_MustNotStartApplicationHosts()
+    public void HostFreeTests_MustNotDependOnApplicationHosts()
     {
         var forbiddenMarkers = new[]
         {
@@ -688,98 +708,31 @@ public class ArchitectureRules
             "TestServer",
             "MohistIntegrationFixture",
             "IsolatedMohistIntegrationFixture",
-            "InProcessTestCluster",
-            "AssemblyFixture",
+            "DefaultApplicationHostOwner",
         };
 
-        var violations = EmbeddedSources("TestSources/Mohist.Server.L0Tests/")
-            .Where(source => forbiddenMarkers.Any(source.Content.Contains))
-            .Select(source => source.Path)
-            .OrderBy(path => path)
+        var violations = UnifiedTestSources()
+            .SelectMany(source => CSharpSyntaxTree.ParseText(source.Content)
+                .GetRoot()
+                .DescendantNodes()
+                .OfType<ClassDeclarationSyntax>()
+                .Select(declaration => (Source: source, Declaration: declaration)))
+            .GroupBy(item => TestClassName(item.Declaration), StringComparer.Ordinal)
+            .Where(group => group.Any(item => HasLevel(item.Declaration, "L0")))
+            // The guard must name the forbidden host fixtures so it can police
+            // fixture requests without starting them itself.
+            .Where(group => !group.Key.EndsWith(".HostFreeTestLevelContractTests", StringComparison.Ordinal))
+            .SelectMany(group => group
+                .Where(item => forbiddenMarkers.Any(marker =>
+                    item.Declaration.ToFullString().Contains(marker, StringComparison.Ordinal)))
+                .Select(item => $"{item.Source.Path}: {group.Key}"))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(violation => violation, StringComparer.Ordinal)
             .ToList();
 
         Assert.True(
             violations.Count == 0,
-            "Server L0 tests must not start application hosts or integration fixtures. " +
-            "Violations: " + string.Join(", ", violations));
-    }
-
-    [Fact]
-    public void ServerOrleansL0Boundary_MustStayInTheUnitAssemblyAndHostFree()
-    {
-        var forbiddenMarkers = new[]
-        {
-            "WebApplicationFactory",
-            "Microsoft.AspNetCore.Mvc.Testing",
-            "TestServer",
-            "MohistIntegrationFixture",
-            "IsolatedMohistIntegrationFixture",
-        };
-
-        const string l0TraitMarker = "[Trait(\"tier\", \"L0\")]";
-        var misplacedSpecs = EmbeddedSources("TestSources/Mohist.Server.L1Tests/Specs/")
-            .Where(source => source.Content.Contains(l0TraitMarker, StringComparison.Ordinal))
-            .Select(source => source.Path)
-            .OrderBy(path => path)
-            .ToList();
-
-        var expectedPaths = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "Mohist.Server.TestSupport/GrainTestConfig.cs",
-            "Mohist.Server.TestSupport/FakePromptLoader.cs",
-            "Mohist.Server.TestSupport/LogicalTestClusterPortAllocator.cs",
-            "Mohist.Server.TestSupport/MigratedSqliteTemplate.cs",
-            "Mohist.Server.TestSupport/AgentSessionGrainFixture.cs",
-            "Mohist.Server.TestSupport/AgentSessionFollowupConcurrencyFixture.cs",
-            "Mohist.Server.TestSupport/WorkflowGrainFixture.cs",
-            "Mohist.Server.TestSupport/WorkflowGrainTestContext.cs",
-            "Mohist.Server.L0Tests/Runner/RunnerBuildIdentitySpecs.cs",
-            "Mohist.Server.L0Tests/Support/AgentSessionGrainL0Collection.cs",
-            "Mohist.Server.L0Tests/Support/AgentSessionFollowupConcurrencyCollection.cs",
-            "Mohist.Server.L0Tests/Support/OrleansL0Collection.cs",
-            "Mohist.Server.L0Tests/Support/OrleansL0WorkflowGrainFixture.cs",
-            "Mohist.Server.L0Tests/Specs/Sessions/AgentSessionRuntimeEventStateSpecs.cs",
-            "Mohist.Server.L0Tests/Specs/Sessions/AgentSessionRuntimeEventPersistenceSpecs.cs",
-            "Mohist.Server.L0Tests/Issue/Grains/IssueCompositeAdvancementGrainSpecs.cs",
-            "Mohist.Server.L0Tests/Issue/Grains/IssueCompositeLifecycleGrainSpecs.cs",
-            "Mohist.Server.L0Tests/Workflow/Grain/WorkflowRecoveryContinuationSpecs.cs",
-            "Mohist.Server.L0Tests/Specs/Workflow/Grain/WorkflowGrainConcurrencySpecs.cs",
-            "Mohist.Server.L0Tests/Specs/Issue/Grain/IssueCreationGrainSpecs.cs",
-            "Mohist.Server.L0Tests/Specs/Project/Grain/IssueRepositoryCoordinatorSupport.cs",
-            "Mohist.Server.L0Tests/Specs/Project/Grain/IssueRepositoryCoordinatorRaceSpecs.cs",
-            "Mohist.Server.L0Tests/Specs/Project/Grain/IssueRepositoryCoordinatorRecoverySpecs.cs",
-            "Mohist.Server.L0Tests/Specs/Runner/Grain/DispatchServiceReconciliationSupport.cs",
-            "Mohist.Server.L0Tests/Specs/Runner/Grain/DispatchServiceChecksSpecs.cs",
-            "Mohist.Server.L0Tests/Specs/Runner/Grain/DispatchServiceRedeliverySpecs.cs",
-            "Mohist.Server.L0Tests/Specs/Runner/Grain/DispatchServicePollingSpecs.cs",
-        };
-        var boundarySources = EmbeddedSources("TestSources/Mohist.Server.TestSupport/")
-            .Select(source => source with { Path = "Mohist.Server.TestSupport/" + source.Path })
-            .Concat(EmbeddedSources("TestSources/Mohist.Server.L0Tests/")
-                .Select(source => source with { Path = "Mohist.Server.L0Tests/" + source.Path }))
-            .Where(source => expectedPaths.Contains(source.Path))
-            .ToList();
-        var missingSources = expectedPaths
-            .Except(boundarySources.Select(source => source.Path), StringComparer.Ordinal)
-            .OrderBy(path => path)
-            .ToList();
-        var violations = boundarySources
-            .Where(source => forbiddenMarkers.Any(source.Content.Contains))
-            .Select(source => source.Path)
-            .OrderBy(path => path)
-            .ToList();
-
-        Assert.True(
-            misplacedSpecs.Count == 0,
-            "Server Orleans L0 specs must live in the L0Tests assembly. Violations: " +
-            string.Join(", ", misplacedSpecs));
-        Assert.True(
-            missingSources.Count == 0,
-            "Server Orleans L0 architecture coverage is missing fixture sources: " +
-            string.Join(", ", missingSources));
-        Assert.True(
-            violations.Count == 0,
-            "Server Orleans L0 tests and fixtures must not start application hosts or HTTP fixtures. " +
+            "level=L0 tests must not depend on application hosts or integration fixtures. " +
             "Violations: " + string.Join(", ", violations));
     }
 
@@ -809,12 +762,10 @@ public class ArchitectureRules
             "Fixture", "Factory", "TestHost", "TestSupport", "WebApplicationFactory",
         };
         var scopedSources = EmbeddedSources("TestSources/Mohist.Server.TestSupport/")
-            .Concat(EmbeddedSources("TestSources/Mohist.Server.L1Tests.Support/"))
-            .Concat(EmbeddedSources("TestSources/Mohist.Server.L0Tests/Support/"))
-            .Concat(EmbeddedSources("TestSources/Mohist.Server.L1Tests/Specs/")
-                .Concat(EmbeddedSources("TestSources/Mohist.Server.L0Tests/"))
-                .Where(source => suffixes.Any(s =>
-                    Path.GetFileNameWithoutExtension(source.Path)!.EndsWith(s, StringComparison.Ordinal))));
+            .Concat(UnifiedTestSources().Where(source =>
+                source.Path.StartsWith("Support/", StringComparison.Ordinal)
+                || suffixes.Any(s => Path.GetFileNameWithoutExtension(source.Path)!
+                    .EndsWith(s, StringComparison.Ordinal))));
 
         var violations = scopedSources
             .SelectMany(source => new[] { parameterless, inlineEpoch, targetTypedEpoch, returnEpoch }
@@ -832,6 +783,38 @@ public class ArchitectureRules
 
     private static IReadOnlyList<EmbeddedSource> EmbeddedSources(string prefix)
         => ArchitectureRulesSupport.EmbeddedSources(prefix);
+
+    private static IReadOnlyList<EmbeddedSource> UnifiedTestSources() =>
+        EmbeddedSources("TestSources/Mohist.Server.Tests/");
+
+    private static bool HasLevel(ClassDeclarationSyntax declaration, string level) =>
+        declaration.AttributeLists
+            .SelectMany(list => list.Attributes)
+            .Any(attribute =>
+            {
+                var name = attribute.Name.ToString();
+                var arguments = attribute.ArgumentList?.Arguments;
+                return (name == "Trait" || name == "TraitAttribute")
+                    && arguments is { Count: 2 }
+                    && arguments.Value[0].Expression is LiteralExpressionSyntax key
+                    && arguments.Value[1].Expression is LiteralExpressionSyntax value
+                    && key.Token.ValueText == "level"
+                    && value.Token.ValueText == level;
+            });
+
+    private static string TestClassName(ClassDeclarationSyntax declaration)
+    {
+        var parts = declaration.Ancestors()
+            .OfType<BaseNamespaceDeclarationSyntax>()
+            .Reverse()
+            .Select(item => item.Name.ToString())
+            .Concat(declaration.Ancestors()
+                .OfType<TypeDeclarationSyntax>()
+                .Reverse()
+                .Select(item => item.Identifier.ValueText))
+            .Append(declaration.Identifier.ValueText);
+        return string.Join(".", parts);
+    }
 
     internal sealed record EmbeddedSource(string Path, string Content, int ByteLength);
 }

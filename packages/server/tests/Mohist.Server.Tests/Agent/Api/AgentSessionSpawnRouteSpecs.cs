@@ -1,0 +1,157 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
+using Mohist.Server.Tests.Support;
+using Mohist.Server.TestSupport;
+using Xunit;
+
+namespace Mohist.Server.Tests.Agent.Api;
+
+[Trait("level", "L1")]
+public sealed class AgentSessionSpawnRouteSpecs : IClassFixture<DefaultMohistIntegrationFixture>
+{
+    private readonly MohistIntegrationFixture _fixture;
+
+    public AgentSessionSpawnRouteSpecs(DefaultMohistIntegrationFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    [Fact]
+    public async Task SpawnRoute_PreservesPromptWhitespaceInExactIdempotencyFingerprint()
+    {
+        var projectId = await CreateProjectAsync();
+        var path = $"/api/projects/{projectId}/agent-sessions/missing-parent/spawns";
+        const string idempotencyKey = "spawn-whitespace-contract";
+
+        using var first = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            Content = JsonContent("{\"targetAgentRef\":\"agent-target\",\"prompt\":\"foo \"}")
+        };
+        first.Headers.Add("Idempotency-Key", idempotencyKey);
+        using var firstResponse = await _fixture.Client.SendAsync(first);
+        Assert.Equal(HttpStatusCode.Conflict, firstResponse.StatusCode);
+        Assert.Equal("spawn_rejected", await ReadCodeAsync(firstResponse));
+
+        using var replay = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            Content = JsonContent("{\"targetAgentRef\":\"agent-target\",\"prompt\":\"foo\"}")
+        };
+        replay.Headers.Add("Idempotency-Key", idempotencyKey);
+        using var replayResponse = await _fixture.Client.SendAsync(replay);
+        Assert.Equal(HttpStatusCode.Conflict, replayResponse.StatusCode);
+        Assert.Equal("spawn_idempotency_conflict", await ReadCodeAsync(replayResponse));
+    }
+
+    [Fact]
+    public async Task SpawnRoute_WorkspaceModeRetired_RejectsWithRetiredCode()
+    {
+        var projectId = await CreateProjectAsync();
+        var path = $"/api/projects/{projectId}/agent-sessions/missing-parent/spawns";
+
+        foreach (var value in new[] { "worktree", "inherit" })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, path)
+            {
+                Content = JsonContent($"{{\"targetAgentRef\":\"agent-target\",\"prompt\":\"foo\",\"workspace\":\"{value}\"}}")
+            };
+            request.Headers.Add("Idempotency-Key", $"spawn-retired-{value}");
+            using var response = await _fixture.Client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal("workspace_mode_retired", await ReadCodeAsync(response));
+        }
+    }
+
+    [Fact]
+    public async Task TreeRoute_ReturnsApiEnvelopeWithLockedTreePageShape()
+    {
+        var projectId = await CreateProjectAsync();
+        var rootSessionId = $"tree-route-root-{Guid.NewGuid():N}";
+        const string workspaceName = "tree-workspace";
+        using var workspaceCreate = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/workspaces",
+            new { name = workspaceName, repos = Array.Empty<string>() });
+        Assert.Equal(HttpStatusCode.OK, workspaceCreate.StatusCode);
+
+        using var workspaceList = await _fixture.Client.GetAsync($"/api/projects/{projectId}/workspaces");
+        Assert.Equal(HttpStatusCode.OK, workspaceList.StatusCode);
+        using var workspaceListDocument = JsonDocument.Parse(await workspaceList.Content.ReadAsStringAsync());
+        var listedWorkspace = workspaceListDocument.RootElement.GetProperty("data")
+            .EnumerateArray()
+            .Single(item => item.GetProperty("name").GetString() == workspaceName);
+
+        using var workspaceDetail = await _fixture.Client.GetAsync(
+            $"/api/projects/{projectId}/workspaces/{workspaceName}");
+        Assert.Equal(HttpStatusCode.OK, workspaceDetail.StatusCode);
+        using var workspaceDetailDocument = JsonDocument.Parse(await workspaceDetail.Content.ReadAsStringAsync());
+        Assert.Equal(
+            listedWorkspace.GetProperty("name").GetString(),
+            workspaceDetailDocument.RootElement.GetProperty("data").GetProperty("name").GetString());
+
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(rootSessionId).OpenAsync(
+            new OpenAgentSessionCommand(
+                RunnerId: string.Empty,
+                AgentRuntime: "opencode",
+                WorkDir: "/workspace",
+                Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                    [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                    [GenericAgentSessionMetadata.AgentId] = "agent-tree-root",
+                    [GenericAgentSessionMetadata.AgentName] = "agent-tree-root",
+                    [GenericAgentSessionMetadata.WorkspaceName] = workspaceName,
+                })));
+
+        using var response = await _fixture.Client.GetAsync(
+            $"/api/projects/{projectId}/agent-sessions/{rootSessionId}/tree?limit=10");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var envelope = document.RootElement;
+        Assert.True(envelope.GetProperty("success").GetBoolean());
+        var data = envelope.GetProperty("data");
+        Assert.Equal(
+            ["root", "revision", "nodes", "edges", "continuation"],
+            data.EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal(rootSessionId, data.GetProperty("root").GetProperty("sessionId").GetString());
+        Assert.Equal(0, data.GetProperty("revision").GetInt64());
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("nodes").ValueKind);
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("edges").ValueKind);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("continuation").ValueKind);
+        Assert.Equal(workspaceName, data.GetProperty("nodes")[0].GetProperty("workspaceName").GetString());
+    }
+
+    private async Task<string> CreateProjectAsync()
+    {
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            "/api/projects",
+            new
+            {
+                name = $"spawn-route-{Guid.NewGuid():N}",
+                verificationCommand = "true",
+                repository = new
+                {
+                    name = "primary",
+                    gitUrl = "git@example.com:primary.git",
+                    baseBranch = "main",
+                },
+            });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.GetProperty("data").GetProperty("id").GetString()!;
+    }
+
+    private static StringContent JsonContent(string json) =>
+        new(json, Encoding.UTF8, "application/json");
+
+    private static async Task<string?> ReadCodeAsync(HttpResponseMessage response)
+    {
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.TryGetProperty("code", out var code)
+            ? code.GetString()
+            : null;
+    }
+}
