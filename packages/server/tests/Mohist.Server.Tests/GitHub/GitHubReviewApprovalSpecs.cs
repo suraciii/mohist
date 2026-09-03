@@ -64,6 +64,7 @@ public sealed class GitHubReviewApprovalSpecs
         Assert.Equal("approved", check.ApprovalStatus!.Result);
         Assert.Equal("github:alice", check.ApprovalStatus.DecidedBy);
         Assert.Equal("integrate", status.Workflow.CurrentStage);
+        Assert.Equal("pending", status.Workflow.Status);
         await AssertReviewSettledAsync(projectId, connectionId, "review-dup-a");
         await AssertReviewSettledAsync(projectId, connectionId, "review-dup-b");
     }
