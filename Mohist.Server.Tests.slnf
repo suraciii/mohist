@@ -3,8 +3,7 @@
     "path": "Mohist.sln",
     "projects": [
       "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj",
-      "packages/server/tests/Mohist.Server.L1Tests/Mohist.Server.L1Tests.csproj",
-      "packages/server/tests/Mohist.Server.L0Tests/Mohist.Server.L0Tests.csproj"
+      "packages/server/tests/Mohist.Server.Tests/Mohist.Server.Tests.csproj"
     ]
   }
 }

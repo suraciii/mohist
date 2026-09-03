@@ -493,9 +493,14 @@ L0 Spec files should remain below 300 lines. L1 Spec files should remain below
 800 lines. Browser-backed Specs run in a separate Resource lane. These are
 review guidelines. The source-file ratchet is the automated size gate.
 
+Server behavior Specs live in the single `Mohist.Server.Tests` project. Each
+concrete test class declares exactly one direct `level=L0` or `level=L1` trait;
+the two tracks launch the same compiled apphost in separate processes with
+positive trait selectors.
+
 ## Server L0 Resource Ownership
 
-Server L0 has two Resource boundaries inside `Mohist.Server.L0Tests`.
+Server L0 has two Resource boundaries inside `Mohist.Server.Tests`.
 Component and module Specs that do not need Orleans use ordinary class or
 collection fixtures. Specs whose claim includes activation, serialization,
 reminder, reentrancy, or real grain dispatch use the `OrleansGrainL0`
