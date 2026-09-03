@@ -133,16 +133,34 @@ func TestRunMapsTransportAndCancellation(t *testing.T) {
 func TestRunMaintenanceDefaultsCurrentDirectory(t *testing.T) {
 	var stdout, stderr strings.Builder
 	deps := Dependencies{
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Lookup: func(string) (string, bool) { return "", false },
-		HomeDir: func() (string, error) { return "/home/test", nil },
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		Lookup:    func(string) (string, bool) { return "", false },
+		HomeDir:   func() (string, error) { return "/home/test", nil },
 		WriteFile: func(string, string, os.FileMode) error { return nil },
 		Execute:   func(context.Context, string, []string) error { return nil },
 		MkdirAll:  func(string, os.FileMode) error { return nil },
 	}
 
 	if code := Run(context.Background(), []string{"install", "server", "--unit-dir", "/tmp/mohist-test"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestRunUpdateCLIDefaultsCurrentDirectory(t *testing.T) {
+	var stdout, stderr strings.Builder
+	deps := Dependencies{
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		Lookup:  func(string) (string, bool) { return "", false },
+		HomeDir: func() (string, error) { return "/home/test", nil },
+		Execute: func(context.Context, string, []string) error {
+			return errors.New("build stopped")
+		},
+		MkdirAll: func(string, os.FileMode) error { return nil },
+	}
+
+	if code := Run(context.Background(), []string{"update", "cli", "--cli-path", "/tmp/mohist-test/mo"}, deps); code != ExitOperation {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
