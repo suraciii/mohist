@@ -11,6 +11,9 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
+using Mohist.Server.Infrastructure.Orleans;
 using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Runner.Api;
@@ -129,14 +132,13 @@ public class RunnerStatusApiSpecs
         var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");
 
         var runnerId = $"runner-terms-{Guid.NewGuid():N}";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-            capabilities = new[] { "spec/*" },
-            hostname = "terms-host",
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "terms-host",
             projectId,
-            coderModels = new[] { "openai/gpt-4" },
-        });
+            CoderModels: new[] { "openai/gpt-4" }),
+            TestRunnerGenerationExtensions.ProcessGeneration);
 
         try
         {
@@ -161,7 +163,7 @@ public class RunnerStatusApiSpecs
         }
         finally
         {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+            await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
         }
     }
 
@@ -172,15 +174,14 @@ public class RunnerStatusApiSpecs
 
         var runnerId = $"runner-detail-{Guid.NewGuid():N}";
         var hash = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-            capabilities = new[] { "spec/*" },
-            hostname = "detail-host",
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "detail-host",
             projectId,
-            coderModels = new[] { "openai/gpt-4" },
-            buildGitHash = hash,
-        });
+            CoderModels: new[] { "openai/gpt-4" },
+            BuildGitHash: hash),
+            TestRunnerGenerationExtensions.ProcessGeneration);
 
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         var workflowId = $"wf-detail-{Guid.NewGuid():N}";
@@ -219,7 +220,7 @@ public class RunnerStatusApiSpecs
         }
         finally
         {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+            await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
         }
     }
 
@@ -241,11 +242,17 @@ public class RunnerStatusApiSpecs
 
     private async Task<string> CreateProjectIdAsync(string name)
     {
-        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<global::System.Text.Json.JsonElement>(
-            "/api/projects",
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
             name,
-            gitUrl: $"file://{Guid.NewGuid():N}");
-        return project.GetProperty("id").GetString()
-            ?? throw new InvalidOperationException("Project response did not include an id");
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return projectId;
     }
 }

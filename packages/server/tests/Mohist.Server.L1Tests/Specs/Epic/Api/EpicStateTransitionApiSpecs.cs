@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.L1Tests.Support;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.TestSupport;
 using Xunit;
 
@@ -16,9 +19,7 @@ public class EpicStateTransitionApiSpecs : EpicApiTestSupport
     public async Task Start_FromIdle_ReturnsRunningStatus()
     {
         var project = await CreateProjectAsync("start");
-        var created = await _client.PostDataAsync<EpicDto>(
-            $"/api/projects/{project.Id}/epics",
-            new { title = "To start", projectId = project.Id });
+        var created = await CreateEpicAsync(project.Id, "To start");
         Assert.Equal("idle", created.Status);
         await AddOpenIssueAsync(project.Id, created);
 
@@ -38,9 +39,7 @@ public class EpicStateTransitionApiSpecs : EpicApiTestSupport
     public async Task Start_OnPausedEpic_Returns409EpicStartRequiresIdle()
     {
         var project = await CreateProjectAsync("start-paused");
-        var created = await _client.PostDataAsync<EpicDto>(
-            $"/api/projects/{project.Id}/epics",
-            new { title = "Paused then start", projectId = project.Id });
+        var created = await CreateEpicAsync(project.Id, "Paused then start");
         await AddOpenIssueAsync(project.Id, created);
         await StartEpicAsync(project.Id, created);
         await _client.PostOkAsync(
@@ -71,9 +70,7 @@ public class EpicStateTransitionApiSpecs : EpicApiTestSupport
         var issue = await _client.PostDataAsync<IssueDto>(
             $"/api/projects/{project.Id}/issues",
             new { title = "Member", projectId = project.Id, isDraft = false });
-        var created = await _client.PostDataAsync<EpicDto>(
-            $"/api/projects/{project.Id}/epics",
-            new { title = "Done epic", projectId = project.Id });
+        var created = await CreateEpicAsync(project.Id, "Done epic");
         await _client.PostOkAsync(
             $"/api/projects/{project.Id}/epics/{created.Number}/issues",
             new { issueNumber = issue.Number });
@@ -97,9 +94,7 @@ public class EpicStateTransitionApiSpecs : EpicApiTestSupport
     public async Task Pause_OnIdleEpic_Returns409EpicNotRunning()
     {
         var project = await CreateProjectAsync("pause-idle");
-        var created = await _client.PostDataAsync<EpicDto>(
-            $"/api/projects/{project.Id}/epics",
-            new { title = "Idle pause reject", projectId = project.Id });
+        var created = await CreateEpicAsync(project.Id, "Idle pause reject");
 
         using var response = await _client.PostAsync(
             $"/api/projects/{project.Id}/epics/{created.Number}/pause",
@@ -118,9 +113,7 @@ public class EpicStateTransitionApiSpecs : EpicApiTestSupport
     public async Task Resume_OnIdleEpic_Returns409EpicResumeRequiresPaused()
     {
         var project = await CreateProjectAsync("resume-idle");
-        var created = await _client.PostDataAsync<EpicDto>(
-            $"/api/projects/{project.Id}/epics",
-            new { title = "Idle resume reject", projectId = project.Id });
+        var created = await CreateEpicAsync(project.Id, "Idle resume reject");
 
         using var response = await _client.PostAsync(
             $"/api/projects/{project.Id}/epics/{created.Number}/resume",
@@ -149,10 +142,17 @@ public class EpicStateTransitionApiSpecs : EpicApiTestSupport
 
     private async Task<ProjectDto> CreateProjectAsync(string scenario)
     {
-        return await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
-            "/api/projects",
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
             $"epic-{scenario}-{Guid.NewGuid():N}",
-            repoName: "main",
-            gitUrl: $"file://{Guid.NewGuid():N}");
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return new ProjectDto(projectId);
     }
 }

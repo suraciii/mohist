@@ -43,13 +43,13 @@ public class WorkspaceEntityApiSpecs
         return projectId;
     }
 
-    private async Task<JsonElement> CreateWorkspaceAsync(string name)
+    private async Task CreateWorkspaceAsync(string name)
     {
-        using var create = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{_projectId}/workspaces",
-            new { name, repos = new[] { "server" } });
-        create.EnsureSuccessStatusCode();
-        return (await create.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        await _fixture.Grains.GetGrain<IWorkspaceGrain>(
+            GrainKey.Workspace(_projectId, name)).CreateManualAsync(
+                name,
+                new[] { "server" },
+                _fixture.TimeProvider.GetUtcNow());
     }
 
     private async Task SeedBoundSessionAsync(string workspaceName, bool active)

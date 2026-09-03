@@ -20,16 +20,14 @@ public class RunnerSlotsApiSpecs
         _fixture = fixture;
     }
 
-    private async Task<HttpResponseMessage> RegisterRunnerAsync(string runnerId)
+    private async Task RegisterRunnerAsync(string runnerId)
     {
-        var response = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
-        {
-            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-            capabilities = new[] { "spec/*" },
-            hostname = "slots-api-host",
-        });
-        response.EnsureSuccessStatusCode();
-        return response;
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "slots-api-host",
+            null),
+            TestRunnerGenerationExtensions.ProcessGeneration);
     }
 
     private async Task<int> ReadPersistedSlotsAsync(string runnerId)
@@ -70,7 +68,7 @@ public class RunnerSlotsApiSpecs
         }
         finally
         {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+            await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
         }
     }
 
@@ -98,7 +96,7 @@ public class RunnerSlotsApiSpecs
         }
         finally
         {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+            await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
         }
     }
 }

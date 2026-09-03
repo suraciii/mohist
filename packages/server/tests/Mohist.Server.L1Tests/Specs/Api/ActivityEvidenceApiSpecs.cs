@@ -6,6 +6,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
@@ -48,7 +49,7 @@ public class ActivityEvidenceApiSpecs : ProjectEventsApiTestSupport
         await AppendWorkflowEventAsync(workflowRunId, project.Id, 1, "com.mohist.workflow.stage.started", FixedTime.AddMinutes(2));
         await AppendAgentSessionEventAsync(sessionId, project.Id, "com.mohist.agent-session.runtime-bound", FixedTime.AddMinutes(3));
         await SeedWaitingIssueAsync(project.Id, 2, FixedTime.AddMinutes(4));
-        await RegisterRunnerAsync(runnerId, project.Id, "activity-host", FixedTime.AddMinutes(5));
+        await RegisterRunnerAsync(runnerId, project.Id, "activity-host");
 
         var first = await GetActivityAsync(project.Id, 200);
         var second = await GetActivityAsync(project.Id, 200);
@@ -118,16 +119,14 @@ public class ActivityEvidenceApiSpecs : ProjectEventsApiTestSupport
         await db.SaveChangesAsync();
     }
 
-    private async Task RegisterRunnerAsync(string runnerId, string projectId, string hostname, DateTimeOffset registeredAt)
+    private async Task RegisterRunnerAsync(string runnerId, string projectId, string hostname)
     {
-        await _client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-            capabilities = new[] { "spec/*" },
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
             hostname,
             projectId,
-            registeredAt,
-        });
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
     }
 
     private Task<List<ActivityEntryResponse>> GetActivityAsync(string projectId, int? limit = null) =>

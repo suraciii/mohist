@@ -1,4 +1,8 @@
+using Mohist.Server.Epic.Grains;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.L1Tests.Support;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.TestSupport;
 using System.Net;
 using System.Text.Json;
@@ -96,17 +100,30 @@ public class EpicListQueryApiSpecs
 
     private async Task<ProjectDto> CreateProjectAsync()
     {
-        return await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
-            "/api/projects",
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
             $"epic-list-query-{Guid.NewGuid():N}",
-            repoName: "main",
-            gitUrl: $"file://{Guid.NewGuid():N}");
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return new ProjectDto(projectId);
     }
 
     private async Task<EpicRowDto> CreateEpicAsync(string projectId, string title, string priority)
     {
-        var epic = await _client.PostDataAsync<EpicRowDto>($"/api/projects/{projectId}/epics", new { title, description = string.Empty, priority });
-        return epic;
+        var number = await _fixture.Grains.GetGrain<IEpicCounterGrain>(GrainKey.EpicCounter(projectId)).NextAsync();
+        var epic = await _fixture.Grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(projectId, number))).CreateAsync(
+            projectId,
+            number,
+            title,
+            string.Empty,
+            priority);
+        return new EpicRowDto(epic.Number, epic.Title, epic.Description ?? string.Empty, epic.Priority, epic.Status, string.Empty, string.Empty);
     }
 
     private sealed record ProjectDto(string Id);

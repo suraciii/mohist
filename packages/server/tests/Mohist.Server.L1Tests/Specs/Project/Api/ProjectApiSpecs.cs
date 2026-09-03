@@ -3,6 +3,9 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using EnvironmentAbstractions.TestHelpers;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Services;
 using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
@@ -311,25 +314,22 @@ public class ProjectApiSpecs
     [Fact]
     public async Task PatchRepository_AliasRemote_ReturnsAliasConflict()
     {
-        var created = await _client.PostDataAsync<ProjectInfo>(
-            "/api/projects",
-            new
+        var projectId = $"project-{Guid.NewGuid():N}";
+        var project = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
+        await project.CreateAsync(
+            "alias-repo-patch",
+            new RepositoryInfo
             {
-                name = "alias-repo-patch",
-                verificationCommand = "true",
-                repository = new
-                {
-                    name = "server",
-                    gitUrl = "git@example.com:owner/server.git",
-                    baseBranch = "main",
-                },
-            });
-        await _client.PostAsJsonAsync(
-            $"/api/projects/{created.Id}/repositories",
-            new { name = "web", gitUrl = "git@example.com:owner/web.git", baseBranch = "main" });
+                Name = "server",
+                GitUrl = "git@example.com:owner/server.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        await project.AddRepositoryAsync("web", "git@example.com:owner/web.git", "main");
 
         using var response = await _client.PatchAsJsonAsync(
-            $"/api/projects/{created.Id}/repositories/web",
+            $"/api/projects/{projectId}/repositories/web",
             new { gitUrl = "git@example.com:owner/server.git" });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
@@ -337,7 +337,7 @@ public class ProjectApiSpecs
         Assert.False(json.GetProperty("success").GetBoolean());
         Assert.Equal("repository_alias_conflict", json.GetProperty("code").GetString());
 
-        var repos = await _client.GetDataAsync<List<RepositoryInfoDto>>($"/api/projects/{created.Id}/repositories");
+        var repos = await _client.GetDataAsync<List<RepositoryInfoDto>>($"/api/projects/{projectId}/repositories");
         var web = repos.Single(r => r.Name == "web");
         Assert.Equal("git@example.com:owner/web.git", web.GitUrl);
     }

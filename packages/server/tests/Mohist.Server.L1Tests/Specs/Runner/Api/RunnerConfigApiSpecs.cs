@@ -10,6 +10,9 @@ using Mohist.Server.Api;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
@@ -425,20 +428,16 @@ public class RunnerConfigFixture : IAsyncLifetime
     public async Task<string> RegisterRunnerAsync(string? projectId = null, int? maxWorkflowSlots = null)
     {
         var runnerId = $"runner-config-{Guid.NewGuid():N}";
-        using var response = await Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
-        {
-            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-            capabilities = new[] { "spec/*" },
-            hostname = "config-host",
-            projectId,
-            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
-        });
-        response.EnsureSuccessStatusCode();
-        if (maxWorkflowSlots is not null)
-        {
-            await Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = maxWorkflowSlots.Value });
-        }
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "config-host",
+            projectId,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()),
+            TestRunnerGenerationExtensions.ProcessGeneration);
+        if (maxWorkflowSlots is not null)
+            await runner.UpdateAsync(maxWorkflowSlots.Value);
         await TestWait.ForAsync(
             () => runner.GetRuntimeStateAsync(),
             s => s.Status == RunnerStatus.Online,
@@ -453,31 +452,28 @@ public class RunnerConfigFixture : IAsyncLifetime
     {
         var rawProjectName = $"{prefix}-{Guid.NewGuid():N}";
         var projectName = rawProjectName.Length > 63 ? rawProjectName[..63] : rawProjectName;
-        using var projectResponse = await Client.PostAsJsonAsync("/api/projects", new
-        {
-            name = projectName,
-            verificationCommand = "true",
-            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
-        });
-        projectResponse.EnsureSuccessStatusCode();
-        var projectPayload = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var projectId = projectPayload.GetProperty("data").GetProperty("id").GetString()
-            ?? throw new InvalidOperationException("Project creation returned no id");
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            projectName,
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
 
-        using var agentResponse = await Client.PostAsJsonAsync($"/api/projects/{projectId}/agents", new
-        {
-            name = "validation-agent",
-            description = "runner config route test agent",
-            instructions = "complete the requested validation task",
-            agentConfig = new { model = "openai/gpt-5.6" },
-            skills = new[] { "coding" },
-            maxConcurrentRuns = 1,
-        });
-        agentResponse.EnsureSuccessStatusCode();
-        var agentPayload = await agentResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var agentId = agentPayload.GetProperty("data").GetProperty("id").GetString()
-            ?? throw new InvalidOperationException("Agent creation returned no id");
-
+        var agentId = $"agent_{Guid.NewGuid():N}";
+        await Grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agentId)).CreateAsync(
+            new AgentCreateData(
+                projectId,
+                "validation-agent",
+                "runner config route test agent",
+                "complete the requested validation task",
+                JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.6" }),
+                new[] { "coding" },
+                1));
         return (projectId, agentId);
     }
 
@@ -498,7 +494,7 @@ public class RunnerConfigFixture : IAsyncLifetime
     {
         foreach (var runnerId in _registeredRunnerIds)
         {
-            try { using var _ = await Client.PostAsync($"/api/runner/{runnerId}/unregister", null); }
+            try { await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync(); }
             catch { /* best-effort cleanup between tests */ }
         }
         _registeredRunnerIds.Clear();
