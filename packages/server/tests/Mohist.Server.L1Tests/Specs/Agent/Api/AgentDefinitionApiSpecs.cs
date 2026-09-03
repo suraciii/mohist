@@ -1,4 +1,7 @@
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.L1Tests.Support;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.TestSupport;
 using System.Net;
 using System.Net.Http.Json;
@@ -153,8 +156,21 @@ public class AgentDefinitionApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
     }
 
-    private async Task<ProjectDto> CreateProjectAsync(string prefix) =>
-        await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"{prefix}-{Guid.NewGuid():N}");
+    private async Task<ProjectDto> CreateProjectAsync(string prefix)
+    {
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            $"{prefix}-{Guid.NewGuid():N}",
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return new ProjectDto(projectId);
+    }
 
     private static object NewAgent(string name) => new
     {

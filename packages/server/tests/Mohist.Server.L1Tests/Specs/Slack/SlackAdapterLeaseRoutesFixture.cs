@@ -99,6 +99,9 @@ public sealed class SlackAdapterLeaseRoutesFixture : IAsyncLifetime
             TimeProvider);
         await Factory.EnsureSchemaAsync();
         _ = Factory.Services;
+        using var warmupClient = CreateOperatorClient("spec-operator");
+        using var health = await warmupClient.GetAsync("/api/health");
+        health.EnsureSuccessStatusCode();
     }
 
     public async ValueTask DisposeAsync()

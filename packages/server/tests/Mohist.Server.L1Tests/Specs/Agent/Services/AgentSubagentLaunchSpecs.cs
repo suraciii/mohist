@@ -6,6 +6,9 @@ using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -16,7 +19,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Agent.Services;
 
-[Collection("LaunchIntegrationB")]
+[Collection("LaunchIntegration")]
 public sealed class AgentSubagentLaunchSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -32,12 +35,7 @@ public sealed class AgentSubagentLaunchSpecs
         var projectId = await CreateProjectAsync("launcher-subagent-snapshot");
         var allowed = await CreateAgentAsync(projectId, "allowed-child");
         var target = await CreateAgentAsync(projectId, "target-child");
-        using (var update = await _fixture.Client.PatchAsJsonAsync(
-                   $"/api/projects/{projectId}/agents/{target.Id}",
-                   new { allowedSubagentAgentIds = new[] { allowed.Id } }))
-        {
-            update.EnsureSuccessStatusCode();
-        }
+        await AllowSubagentAsync(projectId, target.Id, allowed.Id);
         await SeedCompletedTargetExecutionAsync(projectId, target);
 
         var runnerId = $"launcher-subagent-runner-{Guid.NewGuid():N}";
@@ -127,12 +125,7 @@ public sealed class AgentSubagentLaunchSpecs
         var projectId = await CreateProjectAsync("launcher-subagent-workspace");
         var allowed = await CreateAgentAsync(projectId, "allowed-ws-child");
         var target = await CreateAgentAsync(projectId, "target-ws-child");
-        using (var update = await _fixture.Client.PatchAsJsonAsync(
-                   $"/api/projects/{projectId}/agents/{target.Id}",
-                   new { allowedSubagentAgentIds = new[] { allowed.Id } }))
-        {
-            update.EnsureSuccessStatusCode();
-        }
+        await AllowSubagentAsync(projectId, target.Id, allowed.Id);
         await SeedCompletedTargetExecutionAsync(projectId, target);
 
         var runnerId = $"launcher-subagent-ws-runner-{Guid.NewGuid():N}";
@@ -197,41 +190,54 @@ public sealed class AgentSubagentLaunchSpecs
 
     private async Task<string> CreateProjectAsync(string prefix)
     {
-        var raw = $"{prefix}-{Guid.NewGuid():N}".ToLowerInvariant();
-        var name = raw.Length > 63 ? raw[..63] : raw;
-        using var response = await _fixture.Client.PostAsJsonAsync("/api/projects", new
-        {
+        var projectId = $"project-{Guid.NewGuid():N}";
+        var name = $"{prefix}-{Guid.NewGuid():N}"[..Math.Min(63, prefix.Length + 33)];
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
             name,
-            verificationCommand = "true",
-            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return body.GetProperty("data").GetProperty("id").GetString()
-            ?? throw new InvalidOperationException($"CreateProject '{name}' returned no id");
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return projectId;
     }
 
     private async Task<AgentInfo> CreateAgentAsync(string projectId, string name)
     {
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents",
-            new
-            {
+        var agentId = $"agent_{Guid.NewGuid():N}";
+        return await _fixture.Grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agentId)).CreateAsync(
+            new AgentCreateData(
+                projectId,
                 name,
-                description = $"description for {name}",
-                instructions = $"instructions for {name}",
-                agentConfig = new { model = "openai/gpt-5.6" },
-                skills = new[] { "coding" },
-                maxConcurrentRuns = 1,
-            });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var agentId = body.GetProperty("data").GetProperty("id").GetString()!;
+                $"description for {name}",
+                $"instructions for {name}",
+                JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.6" }),
+                new[] { "coding" },
+                1));
+    }
 
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var querier = scope.ServiceProvider.GetRequiredService<AgentQuerier>();
-        return await querier.GetByIdAsync(projectId, agentId)
-            ?? throw new InvalidOperationException($"Agent '{agentId}' was not found after creation");
+    private async Task AllowSubagentAsync(string projectId, string targetId, string allowedId)
+    {
+        var updated = await _fixture.Grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, targetId)).UpdateAsync(
+            new AgentUpdateData(
+                Name: null,
+                Description: null,
+                Instructions: null,
+                AgentConfig: null,
+                Skills: null,
+                MaxConcurrentRuns: null,
+                Fields: new HashSet<string>(StringComparer.Ordinal)
+                {
+                    nameof(AgentUpdateData.AllowedSubagentAgentIds),
+                },
+                AllowedSubagentAgentIds: new[] { allowedId }));
+        if (updated is null)
+        {
+            throw new InvalidOperationException($"Agent '{targetId}' was not found while allowing subagent '{allowedId}'");
+        }
     }
 
     private async Task SeedCompletedTargetExecutionAsync(string projectId, AgentInfo agent)

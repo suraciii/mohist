@@ -8,11 +8,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
+using Mohist.Server.GitHub.Ports;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Services;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -43,14 +46,34 @@ public sealed class GitHubIssueCommandSpecs
     private async Task<(string ProjectId, string ConnectionId, string Secret, string Owner)> ConnectNewAsync()
     {
         var owner = $"octocat-{Guid.NewGuid():N}";
-        var project = await Client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
-            "/api/projects", $"github-command-{Guid.NewGuid():N}", repoName: RepoName, gitUrl: $"https://github.com/{owner}/{RepoName}.git");
-        var created = await Client.PostDataAsync<JsonElement>($"/api/projects/{project.Id}/github-connections", new
+        var projectId = $"project-{Guid.NewGuid():N}";
+        var project = await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            $"github-command-{Guid.NewGuid():N}",
+            new RepositoryInfo
+            {
+                Name = RepoName,
+                GitUrl = $"https://github.com/{owner}/{RepoName}.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        var connection = new GitHubConnection
         {
-            owner,
-            repo = RepoName,
-        });
-        return (project.Id, created.GetProperty("id").GetString()!, created.GetProperty("webhookSecret").GetString()!, owner);
+            Id = $"ghconn_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Owner = owner,
+            Repo = RepoName,
+        };
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<GitHubConnectionStore>();
+        var secret = await store.CreateAsync(
+            connection,
+            new GitHubRepositoryInstallation(
+                $"installation-{owner}",
+                owner,
+                RepoName,
+                $"node-{owner}"));
+        return (project.Id, connection.Id, secret, owner);
     }
 
     private async Task DeliverCommentAsync(
@@ -396,23 +419,40 @@ public sealed class GitHubIssueCommandSpecs
     public async Task StartWithUnavailableRepository_ReceivesRefusalAndLeavesBacklog()
     {
         var owner = $"octocat-{Guid.NewGuid():N}";
-        var project = await Client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
-            "/api/projects", $"github-command-{Guid.NewGuid():N}", repoName: "primary", gitUrl: "git@example.com:primary.git");
-        await Client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
+        var projectId = $"project-{Guid.NewGuid():N}";
+        var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(projectId);
+        var project = await projectGrain.CreateAsync(
+            $"github-command-{Guid.NewGuid():N}",
+            new RepositoryInfo
+            {
+                Name = "primary",
+                GitUrl = "git@example.com:primary.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        await projectGrain.AddRepositoryAsync(
+            RepoName,
+            $"https://github.com/{owner}/{RepoName}.git",
+            "main");
+        var connection = new GitHubConnection
         {
-            name = RepoName,
-            gitUrl = $"https://github.com/{owner}/{RepoName}.git",
-            baseBranch = "main",
-        });
-        var created = await Client.PostDataAsync<JsonElement>($"/api/projects/{project.Id}/github-connections", new
-        {
-            owner,
-            repo = RepoName,
-        });
-        var connectionId = created.GetProperty("id").GetString()!;
-        var secret = created.GetProperty("webhookSecret").GetString()!;
-        using var remove = await Client.DeleteAsync($"/api/projects/{project.Id}/repositories/{RepoName}");
-        Assert.Equal(HttpStatusCode.OK, remove.StatusCode);
+            Id = $"ghconn_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Owner = owner,
+            Repo = RepoName,
+        };
+        await using var connectionScope = _fixture.Services.CreateAsyncScope();
+        var store = connectionScope.ServiceProvider.GetRequiredService<GitHubConnectionStore>();
+        var secret = await store.CreateAsync(
+            connection,
+            new GitHubRepositoryInstallation(
+                $"installation-{owner}",
+                owner,
+                RepoName,
+                $"node-{owner}"));
+        var connectionId = connection.Id;
+        Assert.NotNull(await projectGrain.RemoveRepositoryAsync(RepoName));
 
         await DeliverCommentAsync(connectionId, secret, "command-no-repository", "/mohist start", commentId: 1006);
         await PumpAsync();
@@ -425,12 +465,10 @@ public sealed class GitHubIssueCommandSpecs
                 && comment.Body.Contains("已创建，但无法启动", StringComparison.Ordinal));
         Assert.Contains("not found", reply.Body, StringComparison.OrdinalIgnoreCase);
 
-        await Client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
-        {
-            name = RepoName,
-            gitUrl = $"https://github.com/{owner}/{RepoName}.git",
-            baseBranch = "main",
-        });
+        await projectGrain.AddRepositoryAsync(
+            RepoName,
+            $"https://github.com/{owner}/{RepoName}.git",
+            "main");
         await DeliverCommentAsync(connectionId, secret, "command-no-repository-retry", "/mohist start", commentId: 1006);
         await PumpAsync();
 
@@ -471,8 +509,17 @@ public sealed class GitHubIssueCommandSpecs
     public async Task RemovedConnectionOption_IsRejectedByApi()
     {
         var owner = $"octocat-{Guid.NewGuid():N}";
-        var project = await Client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
-            "/api/projects", $"github-command-{Guid.NewGuid():N}", repoName: RepoName, gitUrl: $"https://github.com/{owner}/{RepoName}.git");
+        var projectId = $"project-{Guid.NewGuid():N}";
+        var project = await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            $"github-command-{Guid.NewGuid():N}",
+            new RepositoryInfo
+            {
+                Name = RepoName,
+                GitUrl = $"https://github.com/{owner}/{RepoName}.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
 
         using var response = await Client.PostAsJsonAsync($"/api/projects/{project.Id}/github-connections", new
         {

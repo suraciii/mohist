@@ -1,7 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Issue.Grains;
 using Mohist.Server.L1Tests.Support;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.TestSupport;
 using Xunit;
 
@@ -23,8 +28,11 @@ public class IssueWatchApiSpecs
 {
     private readonly HttpClient _client;
 
+    private readonly MohistIntegrationFixture _fixture;
+
     public IssueWatchApiSpecs(MohistIntegrationFixture fixture)
     {
+        _fixture = fixture;
         _client = fixture.Client;
     }
 
@@ -119,45 +127,49 @@ public class IssueWatchApiSpecs
     {
         var raw = $"watch-{purpose}-{Guid.NewGuid():N}".ToLowerInvariant();
         var name = raw.Length > ProjectDomainMaxLength ? raw[..ProjectDomainMaxLength] : raw;
-        using var response = await _client.PostAsJsonAsync("/api/projects", new
-        {
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
             name,
-            verificationCommand = "true",
-            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return body.GetProperty("data").GetProperty("id").GetString()!;
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return projectId;
     }
 
     private const int ProjectDomainMaxLength = 63;
 
     private async Task<AgentRef> CreateAgentAsync(string projectId, string name)
     {
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents",
-            new
-            {
+        var agentId = $"agent_{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agentId)).CreateAsync(
+            new AgentCreateData(
+                projectId,
                 name,
-                description = $"description for {name}",
-                instructions = $"instructions for {name}",
-                agentConfig = new { model = "openai/gpt-5.6" },
-                skills = new[] { "coding" },
-                maxConcurrentRuns = 1,
-            });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, name);
+                $"description for {name}",
+                $"instructions for {name}",
+                JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.6" }),
+                new[] { "coding" },
+                1));
+        return new AgentRef(agentId, name);
     }
 
     private async Task<int> CreateIssueAsync(string projectId, string title)
     {
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/issues",
-            new { title, isDraft = true });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return body.GetProperty("data").GetProperty("number").GetInt32();
+        var number = await _fixture.Grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId)).NextAsync();
+        return await _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number))).CreateAsync(
+            projectId,
+            number,
+            title,
+            null,
+            null,
+            null,
+            repositoryRef: "main",
+            isDraft: true);
     }
 
     private sealed record AgentRef(string Id, string Name);

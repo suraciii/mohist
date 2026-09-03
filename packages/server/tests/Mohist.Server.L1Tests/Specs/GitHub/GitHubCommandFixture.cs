@@ -250,6 +250,8 @@ public sealed class GitHubCommandFixture : IAsyncLifetime
         Client = _factory.CreateClient();
         Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         await _factory.EnsureSchemaAsync();
+        using var health = await Client.GetAsync("/api/health");
+        health.EnsureSuccessStatusCode();
     }
 
     public async ValueTask DisposeAsync()

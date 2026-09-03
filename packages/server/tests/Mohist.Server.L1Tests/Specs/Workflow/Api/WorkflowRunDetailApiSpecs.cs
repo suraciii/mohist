@@ -181,7 +181,6 @@ public class WorkflowRunDetailApiSpecs
         await SeedWorkflowTemplateAsync(projectId);
         var grain = _grains.GetGrain<IIssueGrain>(issueKey);
         var wrId = await grain.StartWorkAsync();
-        await DispatchEventsAsync();
         return (projectId, projectName, issueKey, issueNumber, wrId);
     }
 
@@ -202,9 +201,6 @@ public class WorkflowRunDetailApiSpecs
 
     private Task<(string issueKey, int number)> CreateIssueInBacklogAsync(string projectId) =>
         WorkflowApiTestSupport.CreateIssueInBacklogAsync(_grains, projectId);
-
-    private Task DispatchEventsAsync() =>
-        WorkflowApiTestSupport.DispatchEventsAsync(_services);
 
     private Task SeedWorkflowTemplateAsync(string projectId) =>
         WorkflowApiTestSupport.SeedWorkflowTemplateAsync(_connectionString, projectId);

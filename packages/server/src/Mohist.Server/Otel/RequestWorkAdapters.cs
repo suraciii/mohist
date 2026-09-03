@@ -67,16 +67,23 @@ public sealed class RequestWorkDbCommandInterceptor : DbCommandInterceptor
 
 public sealed class RequestWorkOutgoingGrainCallFilter : IOutgoingGrainCallFilter
 {
-    public async Task Invoke(IOutgoingGrainCallContext context)
+    public Task Invoke(IOutgoingGrainCallContext context)
     {
         RequestWorkScope.Current?.AddDownstreamCalls();
-        await context.Invoke();
+        return context.Invoke();
     }
 }
 
 public sealed class RequestWorkIncomingGrainCallFilter : IIncomingGrainCallFilter
 {
-    public async Task Invoke(IIncomingGrainCallContext context)
+    public Task Invoke(IIncomingGrainCallContext context)
+    {
+        return RequestWorkScope.Current is null
+            ? context.Invoke()
+            : InvokeWithoutAmbientScopeAsync(context);
+    }
+
+    private static async Task InvokeWithoutAmbientScopeAsync(IIncomingGrainCallContext context)
     {
         using var ambient = RequestWorkScope.Push(null);
         await context.Invoke();

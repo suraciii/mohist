@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
@@ -28,21 +29,19 @@ public class RunnerCleanupPolicyAndStatusApiSpecs : IAsyncLifetime
     {
         foreach (var runnerId in _registeredRunnerIds)
         {
-            using var _ = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+            await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
         }
     }
 
     private async Task<string> RegisterRunnerAsync(string? projectId = null)
     {
         var runnerId = $"runner-cleanup-policy-{Guid.NewGuid():N}";
-        using var response = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
-        {
-            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-            capabilities = new[] { "spec/*" },
-            hostname = "cleanup-policy-host",
-            projectId,
-        });
-        response.EnsureSuccessStatusCode();
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "cleanup-policy-host",
+            projectId),
+            TestRunnerGenerationExtensions.ProcessGeneration);
         _registeredRunnerIds.Add(runnerId);
         return runnerId;
     }

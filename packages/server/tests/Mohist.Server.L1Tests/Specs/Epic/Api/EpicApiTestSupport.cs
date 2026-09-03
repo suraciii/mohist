@@ -3,6 +3,8 @@ using Mohist.Server.Infrastructure.Events;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
@@ -25,6 +27,25 @@ public abstract class EpicApiTestSupport
         _grains = fixture.Grains;
     }
 
+    protected async Task<EpicDto> CreateEpicAsync(string projectId, string title)
+    {
+        var number = await _grains.GetGrain<IEpicCounterGrain>(GrainKey.EpicCounter(projectId)).NextAsync();
+        var epic = await _grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(projectId, number))).CreateAsync(
+            projectId,
+            number,
+            title,
+            null,
+            null);
+        return new EpicDto(
+            epic.Number,
+            epic.Title,
+            epic.Description,
+            epic.Priority,
+            epic.Status,
+            epic.CreatedAt,
+            epic.UpdatedAt);
+    }
+
     protected async Task StartEpicAsync(string projectId, EpicDto epic)
     {
         var grain = _grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(projectId, epic.Number)));
@@ -33,12 +54,17 @@ public abstract class EpicApiTestSupport
 
     protected async Task AddOpenIssueAsync(string projectId, EpicDto epic)
     {
-        var issue = await _client.PostDataAsync<IssueDto>(
-            $"/api/projects/{projectId}/issues",
-            new { title = "Open work", projectId, isDraft = false });
-        await _client.PostOkAsync(
-            $"/api/projects/{projectId}/epics/{epic.Number}/issues",
-            new { issueNumber = issue.Number });
+        var number = await _grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId)).NextAsync();
+        await _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number))).CreateAsync(
+            projectId,
+            number,
+            "Open work",
+            body: null,
+            labels: null,
+            priority: null,
+            repositoryRef: null,
+            isDraft: false);
+        await _grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(projectId, epic.Number))).LinkIssueAsync(number, projectId);
     }
 
     protected async Task CompleteIssueAsync(string projectId, IssueDto issueInfo)

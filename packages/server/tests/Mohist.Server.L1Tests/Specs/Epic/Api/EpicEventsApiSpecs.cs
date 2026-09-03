@@ -1,6 +1,10 @@
 using System.Net;
 using System.Text.Json;
+using Mohist.Server.Epic.Grains;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.L1Tests.Support;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.TestSupport;
 using Xunit;
 
@@ -193,23 +197,37 @@ public class EpicEventsApiSpecs
 
     private async Task<ProjectDto> CreateProjectAsync()
     {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"epic-events-{Guid.NewGuid():N}");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
-        return project;
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            $"epic-events-{Guid.NewGuid():N}",
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return new ProjectDto(projectId);
     }
 
     private async Task<EpicRowDto> CreateEpicAsync(string projectId, string title, string priority = "p2")
     {
-        var epic = await _client.PostDataAsync<EpicRowDto>(
-            $"/api/projects/{projectId}/epics",
-            new { title, description = "events spec", priority });
-        return epic;
+        var number = await _fixture.Grains.GetGrain<IEpicCounterGrain>(GrainKey.EpicCounter(projectId)).NextAsync();
+        var epic = await _fixture.Grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(projectId, number))).CreateAsync(
+            projectId,
+            number,
+            title,
+            "events spec",
+            priority);
+        return new EpicRowDto(
+            epic.Number,
+            epic.Title,
+            epic.Description,
+            epic.Priority,
+            epic.Status,
+            epic.CreatedAt,
+            epic.UpdatedAt);
     }
 
     private sealed record ProjectDto(string Id);

@@ -351,6 +351,7 @@ public static class MohistServiceRegistration
         services.AddScoped<Mohist.Server.Workflow.Services.IWorkflowProfileProvider, Mohist.Server.Workflow.Services.WorkflowProfileProvider>();
         services.AddScoped<Mohist.Server.Workflow.Services.WorkflowProfileDeletionBlockerQuery>();
         services.Configure<AgentJobOptions>(configuration.GetSection(AgentJobOptions.SectionName));
+        services.AddOptions<AgentSessionPersistenceTimerOptions>();
         services.TryAddSingleton<IAgentJobDispatchObserver>(NoopAgentJobDispatchObserver.Instance);
         services.TryAddSingleton<IAgentSessionPersistenceObserver>(NoopAgentSessionPersistenceObserver.Instance);
         services.TryAddSingleton<IAgentLaunchParticipantProbe>(NoopAgentLaunchParticipantProbe.Instance);

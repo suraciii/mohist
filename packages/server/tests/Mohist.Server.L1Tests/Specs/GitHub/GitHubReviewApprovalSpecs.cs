@@ -5,7 +5,9 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
+using Mohist.Server.GitHub.Ports;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -16,6 +18,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.L1Tests.Specs.GitHub;
@@ -341,15 +344,7 @@ public sealed class GitHubReviewApprovalSpecs
         var status = await LoadWorkflowStatusAsync(projectId, issueNumber);
         Assert.Equal("awaiting-approval", status!.Workflow!.Status);
         Assert.Equal("check", status.Workflow.CurrentStage);
-        await Client.PatchDataAsync<JsonElement>(
-            $"/api/workflow-runs/{status.WorkflowRunId}/variables",
-            new
-            {
-                vars = new
-                {
-                    github = new { pr = new { number = PullRequestNumber } },
-                },
-            });
+        await PatchPullRequestVariableAsync(status.WorkflowRunId!);
         return issueNumber;
     }
 
@@ -358,17 +353,36 @@ public sealed class GitHubReviewApprovalSpecs
         bool includeFeedbackTasks = true)
     {
         var owner = $"octocat-{Guid.NewGuid():N}";
-        var project = await Client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
-            "/api/projects", $"github-approval-{Guid.NewGuid():N}", repoName: RepoName, gitUrl: $"https://github.com/{owner}/{RepoName}.git");
+        var projectId = $"project-{Guid.NewGuid():N}";
+        var project = await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            $"github-approval-{Guid.NewGuid():N}",
+            new RepositoryInfo
+            {
+                Name = RepoName,
+                GitUrl = $"https://github.com/{owner}/{RepoName}.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
         await SeedCheckGateProfileAsync(project.Id, includeFeedbackTasks);
-        var created = await Client.PostDataAsync<JsonElement>($"/api/projects/{project.Id}/github-connections", new
+        var connection = new GitHubConnection
         {
-            owner,
-            repo = RepoName,
-            approvers,
-        });
-        var connectionId = created.GetProperty("id").GetString()!;
-        var secret = created.GetProperty("webhookSecret").GetString()!;
+            Id = $"ghconn_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Owner = owner,
+            Repo = RepoName,
+            Approvers = approvers,
+        };
+        await using var connectionScope = _fixture.Services.CreateAsyncScope();
+        var store = connectionScope.ServiceProvider.GetRequiredService<GitHubConnectionStore>();
+        var secret = await store.CreateAsync(
+            connection,
+            new GitHubRepositoryInstallation(
+                $"installation-{owner}",
+                owner,
+                RepoName,
+                $"node-{owner}"));
+        var connectionId = connection.Id;
 
         var issueNumber = await _fixture.Grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(project.Id)).NextAsync();
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issueNumber)));
@@ -378,15 +392,7 @@ public sealed class GitHubReviewApprovalSpecs
         Assert.Equal("awaiting-approval", status!.Workflow!.Status);
         Assert.Equal("check", status.Workflow.CurrentStage);
 
-        var variables = new
-        {
-            vars = new
-            {
-                github = new { pr = new { number = PullRequestNumber } },
-            },
-        };
-        await Client.PatchDataAsync<JsonElement>(
-            $"/api/workflow-runs/{status.WorkflowRunId}/variables", variables);
+        await PatchPullRequestVariableAsync(status.WorkflowRunId!);
 
         await using (var variableScope = _fixture.Services.CreateAsyncScope())
         {
@@ -469,6 +475,14 @@ public sealed class GitHubReviewApprovalSpecs
         var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
         return await grain.GetWorkflowStatusAsync();
     }
+
+    private Task PatchPullRequestVariableAsync(string workflowRunId) =>
+        _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId).PatchVariablesAsync(
+            new VariableBundle(
+                Vars: JsonSerializer.SerializeToElement(new
+                {
+                    github = new { pr = new { number = PullRequestNumber } },
+                })));
 
     private static string ReviewPayload(string state, string login, int pullRequestNumber, string? body = null, string? branch = null)
     {

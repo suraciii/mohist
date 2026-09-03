@@ -4,10 +4,13 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Services.Attachments;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.TestSupport;
@@ -21,56 +24,48 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
     private async Task<string> CreateProjectAsync(string prefix)
     {
         var name = $"{prefix}-{Guid.NewGuid():N}".ToLowerInvariant();
-        var response = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<JsonElement>(
-            "/api/projects", name);
-        var projectId = response.GetProperty("id").GetString()!;
-        await _fixture.Client.PostOkAsync($"/api/projects/{projectId}/repositories", new
-        {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
-        });
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            name,
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
         return projectId;
     }
 
     private async Task<AgentRef> CreateAgentAsync(string projectId, string name)
     {
-        var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents",
-            new
-            {
+        var agentId = $"agent_{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agentId)).CreateAsync(
+            new AgentCreateData(
+                projectId,
                 name,
-                description = $"description for {name}",
-                instructions = $"instructions for {name}",
-                agentConfig = new { model = "openai/gpt-5.6" },
-                skills = new[] { "coding" },
-                maxConcurrentRuns = 1,
-            });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, name);
+                $"description for {name}",
+                $"instructions for {name}",
+                JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.6" }),
+                new[] { "coding" },
+                1));
+        return new AgentRef(agentId, name);
     }
 
     private async Task RegisterRunnerAndAwaitOnlineAsync(string runnerId, string projectId)
     {
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-            capabilities = new[] { "spec/*" },
-            hostname = $"{runnerId}-host",
-            projectId,
-            runtimeCatalogs = CapabilityCatalogTestHelpers.Create(),
-        });
-        await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 2 });
-
         var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        await TestWait.ForAsync(
-            () => runnerGrain.GetRuntimeStateAsync(),
-            s => s.Status == RunnerStatus.Online,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            $"Runner '{runnerId}' to reach Online");
+        await runnerGrain.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            $"{runnerId}-host",
+            projectId,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()),
+            TestRunnerGenerationExtensions.ProcessGeneration);
+        await runnerGrain.UpdateAsync(2);
+        var state = await runnerGrain.GetRuntimeStateAsync();
+        Assert.Equal(RunnerStatus.Online, state.Status);
     }
 
     private Task<HttpResponseMessage> LaunchAsync(
