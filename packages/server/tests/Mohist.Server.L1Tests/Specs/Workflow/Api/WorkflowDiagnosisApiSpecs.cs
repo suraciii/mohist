@@ -71,7 +71,6 @@ public sealed class WorkflowDiagnosisApiSpecs(MohistIntegrationFixture fixture)
         var (issueKey, _) = await WorkflowApiTestSupport.CreateIssueInBacklogAsync(fixture.Grains, projectId);
         await WorkflowApiTestSupport.SeedWorkflowTemplateAsync(fixture.ConnectionString, projectId);
         var runId = await fixture.Grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(issueKey).StartWorkAsync();
-        await WorkflowApiTestSupport.DispatchEventsAsync(fixture.Services);
         return runId;
     }
 

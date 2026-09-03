@@ -193,9 +193,13 @@ public sealed class AgentSessionScheduleApiSpecs
     public async Task ListSchedules_ReturnsAllOrderedByDueAt()
     {
         var (projectId, sessionId) = await CreateIdleSessionAsync("list");
-        await PostScheduleAsync(projectId, sessionId, new { text = "third", dueAt = "2099-06-01T00:00:00Z" }, "list-key-3");
-        await PostScheduleAsync(projectId, sessionId, new { text = "first", dueAt = "2099-01-01T00:00:00Z" }, "list-key-1");
-        await PostScheduleAsync(projectId, sessionId, new { text = "second", dueAt = "2099-03-01T00:00:00Z" }, "list-key-2");
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.CreateScheduleAsync(new CreateSessionScheduleCommand(
+            "third", DateTimeOffset.Parse("2099-06-01T00:00:00Z"), "list-key-3"));
+        await session.CreateScheduleAsync(new CreateSessionScheduleCommand(
+            "first", DateTimeOffset.Parse("2099-01-01T00:00:00Z"), "list-key-1"));
+        await session.CreateScheduleAsync(new CreateSessionScheduleCommand(
+            "second", DateTimeOffset.Parse("2099-03-01T00:00:00Z"), "list-key-2"));
 
         using var response = await _client.GetAsync($"/api/projects/{projectId}/agent-sessions/{sessionId}/schedules");
 
