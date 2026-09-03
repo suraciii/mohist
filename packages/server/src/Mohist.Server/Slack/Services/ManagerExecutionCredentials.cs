@@ -125,7 +125,7 @@ public interface IManagerDeploymentEpoch
 /// missing or invalid epoch is deliberately unavailable rather than a
 /// permissive fallback.
 /// </summary>
-public sealed class ManagerDeploymentEpoch : IManagerDeploymentEpoch, IHostedService
+public sealed class ManagerDeploymentEpoch : IManagerDeploymentEpoch, IHostedLifecycleService
 {
     private readonly object _gate = new();
     private readonly IManagerExecutionLeaseStore? _store;
@@ -208,6 +208,8 @@ public sealed class ManagerDeploymentEpoch : IManagerDeploymentEpoch, IHostedSer
         }
     }
 
+    public Task StartingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -215,11 +217,17 @@ public sealed class ManagerDeploymentEpoch : IManagerDeploymentEpoch, IHostedSer
         return Task.CompletedTask;
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppingAsync(CancellationToken cancellationToken)
     {
         Invalidate();
         return Task.CompletedTask;
     }
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     private void RefreshSharedEpoch()
     {
