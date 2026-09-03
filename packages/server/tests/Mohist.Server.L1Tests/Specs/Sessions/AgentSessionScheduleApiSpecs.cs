@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -266,10 +268,19 @@ public sealed class AgentSessionScheduleApiSpecs
 
     private async Task<string> CreateProjectAsync(string name)
     {
-        var projectName = $"schedule-api-{name}-{Guid.NewGuid():N}";
-        if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
-        return project.Id;
+        var projectId = $"schedule-api-{name}-{Guid.NewGuid():N}";
+        var projectName = projectId.Length > 63 ? projectId[..63] : projectId;
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            projectName,
+            new RepositoryInfo
+            {
+                Name = "test-repo",
+                GitUrl = "git@example.com:test-repo.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return projectId;
     }
 
     private Task<HttpResponseMessage> PostScheduleAsync(

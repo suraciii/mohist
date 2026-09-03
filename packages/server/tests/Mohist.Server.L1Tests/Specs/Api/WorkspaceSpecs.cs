@@ -2,6 +2,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Issue.Domain;
@@ -30,7 +32,7 @@ public class WorkspaceSpecs
     public async Task GivenIssueHasNotStarted_WhenUserOpensReviewViews_ThenMohistExplainsThatWorkHasNotStarted()
     {
         var project = await CreateProjectWithRepositoryAsync();
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workspace issue", projectId = project.Id, isDraft = false });
+        var issue = await CreateIssueAsync(project, "Workspace issue");
 
         var diff = await _client.GetDataAsync<UnavailableDto>($"/api/projects/{project.Id}/issues/{issue.Number}/diff");
         var commits = await _client.GetDataAsync<UnavailableDto>($"/api/projects/{project.Id}/issues/{issue.Number}/commits");
@@ -49,7 +51,7 @@ public class WorkspaceSpecs
     public async Task GivenIssueWorkspaceIsRemoved_WhenUserOpensReviewViews_ThenMohistReportsWorkspaceRemoved()
     {
         var project = await CreateProjectWithRepositoryAsync();
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workspace issue", projectId = project.Id, isDraft = false });
+        var issue = await CreateIssueAsync(project, "Workspace issue");
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
         await DispatchEventsAsync();
 
@@ -73,7 +75,7 @@ public class WorkspaceSpecs
     public async Task GivenRunnerIsUnavailable_WhenUserOpensReviewViews_ThenMohistReportsRunnerUnavailable()
     {
         var project = await CreateProjectWithRepositoryAsync();
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Runner unavailable issue", projectId = project.Id, isDraft = false });
+        var issue = await CreateIssueAsync(project, "Runner unavailable issue");
         await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
         _fixture.RunnerWorkspace.WorkspaceStatus = new WorkspaceStatus { Exists = false, Reason = "runner_unavailable" };
 
@@ -91,7 +93,7 @@ public class WorkspaceSpecs
     public async Task GivenIssueWorkspaceExistsButBranchMissing_WhenUserRequestsDiff_ThenMohistReportsBranchMissing()
     {
         var project = await CreateProjectWithRepositoryAsync();
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workspace issue", projectId = project.Id, isDraft = false });
+        var issue = await CreateIssueAsync(project, "Workspace issue");
         await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
         _fixture.RunnerWorkspace.WorkspaceStatus = new WorkspaceStatus { Exists = false, Reason = "branch_missing" };
 
@@ -105,7 +107,7 @@ public class WorkspaceSpecs
     public async Task GivenIssueWorkspaceExists_WhenGitFails_ThenMohistReportsGitError()
     {
         var project = await CreateProjectWithRepositoryAsync();
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workspace issue", projectId = project.Id, isDraft = false });
+        var issue = await CreateIssueAsync(project, "Workspace issue");
         await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
         _fixture.RunnerWorkspace.Throw = new InvalidOperationException("git exploded");
 
@@ -120,7 +122,7 @@ public class WorkspaceSpecs
     public async Task GivenIssueWorkspaceExists_WhenUserRequestsDiff_ThenReturnsMergeBaseComparisonData()
     {
         var project = await CreateProjectWithRepositoryAsync("main");
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workspace issue", projectId = project.Id, isDraft = false });
+        var issue = await CreateIssueAsync(project, "Workspace issue");
         var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
         _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(runId, "main", ahead: 2, behind: 1);
         _fixture.RunnerWorkspace.Diff = new RunnerWorkspaceDiffResult(
@@ -159,7 +161,7 @@ public class WorkspaceSpecs
     public async Task GivenIssueBranchIsBehindBase_WhenUserRequestsDiff_ThenComparisonIsMergeBaseAndExcludesBaseOnlyChanges()
     {
         var project = await CreateProjectWithRepositoryAsync("main");
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Behind base issue", projectId = project.Id, isDraft = false });
+        var issue = await CreateIssueAsync(project, "Behind base issue");
         var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
         _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(runId, "main", ahead: 0, behind: 3);
         _fixture.RunnerWorkspace.Diff = new RunnerWorkspaceDiffResult(
@@ -188,7 +190,7 @@ public class WorkspaceSpecs
     public async Task GivenIssueWorkspaceExists_WhenUserRequestsCommits_ThenReturnsComparisonMetadataAndCommitRange()
     {
         var project = await CreateProjectWithRepositoryAsync("main");
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Commits issue", projectId = project.Id, isDraft = false });
+        var issue = await CreateIssueAsync(project, "Commits issue");
         var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
         _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(runId, "main", ahead: 2, behind: 0);
         _fixture.RunnerWorkspace.Commits = new RunnerWorkspaceCommitsResult(
@@ -227,7 +229,7 @@ public class WorkspaceSpecs
     public async Task GivenIssueWorkspaceExists_WhenUserRequestsSingleCommitDiff_ThenReturnsSingleCommitDiff()
     {
         var project = await CreateProjectWithRepositoryAsync("main");
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Commit diff issue", projectId = project.Id, isDraft = false });
+        var issue = await CreateIssueAsync(project, "Commit diff issue");
         var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
         _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(runId, "main");
         _fixture.RunnerWorkspace.CommitDiffs["deadbeef"] = new RunnerWorkspaceCommitDiffResult("@@ -1 +1 @@\n-x\n+y\n");
@@ -244,7 +246,7 @@ public class WorkspaceSpecs
     public async Task GivenIssueWorkspaceExists_WhenUserRequestsStatus_ThenStatusHeadMatchesPerRunBranch()
     {
         var project = await CreateProjectWithRepositoryAsync("main");
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Status issue", projectId = project.Id, isDraft = false });
+        var issue = await CreateIssueAsync(project, "Status issue");
         var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
         _fixture.RunnerWorkspace.WorkspaceStatus = new WorkspaceStatus
         {
@@ -269,7 +271,7 @@ public class WorkspaceSpecs
     public async Task GivenIssueWorkspaceExists_WhenUserRequestsFileContent_ThenReturnsBaseAndHeadContent()
     {
         var project = await CreateProjectWithRepositoryAsync("main");
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "File content issue", projectId = project.Id, isDraft = false });
+        var issue = await CreateIssueAsync(project, "File content issue");
         var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
         _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(runId, "main");
         _fixture.RunnerWorkspace.FileContent = new RunnerWorkspaceFileContentResult("base content", "head content");
@@ -284,7 +286,7 @@ public class WorkspaceSpecs
     public async Task GivenIssueWorkspaceExists_WhenUserCleansUpWorkspace_ThenWorkspaceIsRemoved()
     {
         var project = await CreateProjectWithRepositoryAsync("main");
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Cleanup issue", projectId = project.Id, isDraft = false });
+        var issue = await CreateIssueAsync(project, "Cleanup issue");
         var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
         var expectedPath = MohistWorkspaceLayout.WorkflowRunWorkspacePath(_fixture.RunnerRoot, runId);
         _fixture.RunnerWorkspace.WorkspaceRemoval = new WorkspaceRemovalResultDto(true, "removed", expectedPath, null, "Workspace removed").ToDomain();
@@ -303,7 +305,7 @@ public class WorkspaceSpecs
     public async Task GivenIssueWorkspaceIsAlreadyClean_WhenUserRunsCleanupAgain_ThenCleanupSucceedsAsNoOp()
     {
         var project = await CreateProjectWithRepositoryAsync("main");
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Missing cleanup issue", projectId = project.Id, isDraft = false });
+        var issue = await CreateIssueAsync(project, "Missing cleanup issue");
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
         await DispatchEventsAsync();
         _fixture.RunnerWorkspace.WorkspaceRemoval = new WorkspaceRemovalResultDto(false, "missing", "/fake/workspace", "workspace_missing", "Workspace already removed").ToDomain();
@@ -318,12 +320,33 @@ public class WorkspaceSpecs
 
     private async Task<ProjectDto> CreateProjectWithRepositoryAsync(string baseBranch = "main")
     {
-        return await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
-            "/api/projects",
-            $"workspace-{Guid.NewGuid():N}",
-            repoName: "main",
-            gitUrl: "git@example.com:repo.git",
-            baseBranch: baseBranch);
+        var projectId = $"workspace-{Guid.NewGuid():N}";
+        var project = await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            projectId,
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = "git@example.com:repo.git",
+                BaseBranch = baseBranch,
+                IsDefault = true,
+            },
+            "true");
+        var repository = Assert.Single(project.Repositories);
+        return new ProjectDto(
+            project.Id,
+            project.Name,
+            new[] { new RepositoryDto(repository.Name, repository.GitUrl, repository.BaseBranch, repository.IsDefault) });
+    }
+
+    private async Task<IssueDto> CreateIssueAsync(ProjectDto project, string title)
+    {
+        var number = await _fixture.Grains
+            .GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(project.Id))
+            .NextAsync();
+        await _fixture.Grains
+            .GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, number)))
+            .CreateAsync(project.Id, number, title, null, null, null, isDraft: false);
+        return new IssueDto(number);
     }
 
     private async Task<string> StartIssueAndCreateWorkspaceDirectoryAsync(ProjectDto project, int issueNumber)

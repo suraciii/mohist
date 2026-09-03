@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -26,18 +28,19 @@ public class WorkspaceEntityApiSpecs
 
     private async Task<string> CreateProjectAsync()
     {
-        var raw = $"weapi-{Guid.NewGuid():N}".ToLowerInvariant();
-        var name = raw.Length > 63 ? raw[..63] : raw;
-        using var create = await _fixture.Client.PostAsJsonAsync("/api/projects", new
-        {
+        var projectId = $"weapi-{Guid.NewGuid():N}".ToLowerInvariant();
+        var name = projectId.Length > 63 ? projectId[..63] : projectId;
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
             name,
-            verificationCommand = "true",
-            repository = new { name = "server", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
-        });
-        create.EnsureSuccessStatusCode();
-        var body = await create.Content.ReadFromJsonAsync<JsonElement>();
-        return body.GetProperty("data").GetProperty("id").GetString()
-            ?? throw new InvalidOperationException("CreateProject returned no id");
+            new RepositoryInfo
+            {
+                Name = "server",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return projectId;
     }
 
     private async Task<JsonElement> CreateWorkspaceAsync(string name)

@@ -7,6 +7,9 @@ using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -158,36 +161,33 @@ public sealed partial class AgentSpawnAdmissionLifecycleSpecs
 
     private async Task<string> CreateProjectAsync(string prefix)
     {
+        var projectId = $"project-{Guid.NewGuid():N}";
         var name = $"{prefix}-{Guid.NewGuid():N}"[..Math.Min(63, prefix.Length + 33)];
-        using var response = await _fixture.Client.PostAsJsonAsync("/api/projects", new
-        {
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
             name,
-            verificationCommand = "true",
-            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return body.GetProperty("data").GetProperty("id").GetString()!;
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return projectId;
     }
 
     private async Task<AgentInfo> CreateAgentAsync(string projectId, string name)
     {
-        using var response = await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/agents", new
-        {
-            name,
-            description = $"description for {name}",
-            instructions = $"instructions for {name}",
-            agentConfig = new { model = "openai/gpt-5.6" },
-            skills = new[] { "coding" },
-            maxConcurrentRuns = 1,
-        });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var agentId = body.GetProperty("data").GetProperty("id").GetString()!;
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var agent = await scope.ServiceProvider.GetRequiredService<AgentQuerier>()
-            .GetByIdAsync(projectId, agentId);
-        return agent!;
+        var agentId = $"agent_{Guid.NewGuid():N}";
+        return await _fixture.Grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agentId)).CreateAsync(
+            new AgentCreateData(
+                projectId,
+                name,
+                $"description for {name}",
+                $"instructions for {name}",
+                JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.6" }),
+                new[] { "coding" },
+                1));
     }
 
     private async Task SeedCompletedTargetExecutionAsync(string projectId, AgentInfo agent)

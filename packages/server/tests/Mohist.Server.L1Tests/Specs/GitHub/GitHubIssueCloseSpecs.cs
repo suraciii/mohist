@@ -13,6 +13,8 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Services;
 using Mohist.Server.TestSupport;
@@ -48,8 +50,17 @@ public sealed class GitHubIssueCloseSpecs
     private async Task<(string ProjectId, string ConnectionId, string Secret)> ConnectNewAsync()
     {
         var owner = $"octocat-{Guid.NewGuid():N}";
-        var project = await Client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
-            "/api/projects", $"github-close-{Guid.NewGuid():N}", repoName: RepoName, gitUrl: $"https://github.com/{owner}/{RepoName}.git");
+        var projectId = $"github-close-{Guid.NewGuid():N}";
+        var project = await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            projectId,
+            new RepositoryInfo
+            {
+                Name = RepoName,
+                GitUrl = $"https://github.com/{owner}/{RepoName}.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
         var body = new Dictionary<string, object?>
         {
             ["owner"] = owner,
@@ -148,8 +159,17 @@ public sealed class GitHubIssueCloseSpecs
     private async Task<(string ProjectId, string ConnectionId, string Secret, int IssueNumber)> CreateIssueAtIntegrateAsync()
     {
         var owner = $"octocat-{Guid.NewGuid():N}";
-        var project = await Client.CreateProjectWithDefaultRepositoryAsync<ProjectInfo>(
-            "/api/projects", $"github-integrate-{Guid.NewGuid():N}", repoName: RepoName, gitUrl: $"https://github.com/{owner}/{RepoName}.git");
+        var projectId = $"github-integrate-{Guid.NewGuid():N}";
+        var project = await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            projectId,
+            new RepositoryInfo
+            {
+                Name = RepoName,
+                GitUrl = $"https://github.com/{owner}/{RepoName}.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
         await SeedIntegrateProfileAsync(project.Id);
         var created = await Client.PostDataAsync<JsonElement>($"/api/projects/{project.Id}/github-connections", new
         {
