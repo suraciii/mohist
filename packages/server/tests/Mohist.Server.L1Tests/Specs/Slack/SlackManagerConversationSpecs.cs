@@ -18,12 +18,12 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Trait("level", "L1")]
-public sealed class SlackManagerConversationSpecs
+public sealed class SlackManagerConversationSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly Dictionary<string, string> _managerLeases = new(StringComparer.Ordinal);
 
-    public SlackManagerConversationSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackManagerConversationSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task Manager_messages_use_one_ordinary_session_and_replays_are_idempotent()

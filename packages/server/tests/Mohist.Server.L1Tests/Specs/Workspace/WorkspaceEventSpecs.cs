@@ -12,13 +12,13 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Workspace;
 
 [Trait("level", "L1")]
-public class WorkspaceEventSpecs
+public class WorkspaceEventSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
     private readonly string _projectId;
 
-    public WorkspaceEventSpecs(MohistIntegrationFixture fixture)
+    public WorkspaceEventSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

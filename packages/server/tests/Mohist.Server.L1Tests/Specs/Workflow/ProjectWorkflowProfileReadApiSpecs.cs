@@ -7,11 +7,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Workflow;
 
 [Trait("level", "L1")]
-public sealed class ProjectWorkflowProfileReadApiSpecs
+public sealed class ProjectWorkflowProfileReadApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly HttpClient _client;
 
-    public ProjectWorkflowProfileReadApiSpecs(MohistIntegrationFixture fixture)
+    public ProjectWorkflowProfileReadApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
     }

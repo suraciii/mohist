@@ -14,7 +14,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 
 [Trait("level", "L1")]
-public class IssueStartReadinessApiSpecs
+public class IssueStartReadinessApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -24,7 +24,7 @@ public class IssueStartReadinessApiSpecs
     private readonly HttpClient _client;
     private readonly IGrainFactory _grains;
 
-    public IssueStartReadinessApiSpecs(MohistIntegrationFixture fixture)
+    public IssueStartReadinessApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
         _grains = fixture.Grains;

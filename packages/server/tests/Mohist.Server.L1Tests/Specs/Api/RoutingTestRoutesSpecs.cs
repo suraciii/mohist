@@ -12,9 +12,9 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Api;
 
 [Trait("level", "L1")]
-public sealed class RoutingTestRoutesSpecs : ProjectEventsApiTestSupport
+public sealed class RoutingTestRoutesSpecs : ProjectEventsApiTestSupport, IClassFixture<DefaultMohistIntegrationFixture>
 {
-    public RoutingTestRoutesSpecs(MohistIntegrationFixture fixture) : base(fixture) { }
+    public RoutingTestRoutesSpecs(DefaultMohistIntegrationFixture fixture) : base(fixture) { }
 
     [Fact]
     public async Task Test_ReturnsExplicitEmptyStateWhenNoRulesOrEvents()

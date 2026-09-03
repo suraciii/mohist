@@ -17,11 +17,11 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 /// <see cref="Mohist.Server.Logging.LogTailReader"/> directly.
 /// </summary>
 [Trait("level", "L1")]
-public class LogsRouteSpecs
+public class LogsRouteSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public LogsRouteSpecs(MohistIntegrationFixture fixture)
+    public LogsRouteSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }

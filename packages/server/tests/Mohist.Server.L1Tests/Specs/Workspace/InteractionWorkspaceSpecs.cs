@@ -25,12 +25,12 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Workspace;
 
 [Trait("level", "L1")]
-public sealed class InteractionWorkspaceSpecs
+public sealed class InteractionWorkspaceSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
 
-    public InteractionWorkspaceSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public InteractionWorkspaceSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     // --- Slack channel: acceptance 1 / 2 ---
 

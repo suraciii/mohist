@@ -14,11 +14,11 @@ namespace Mohist.Server.L1Tests.Specs.Issue.IssueTemplate;
 /// calculation matrix lives in <c>IssueTemplateRegistrySpecs</c>.
 /// </summary>
 [Trait("level", "L1")]
-public class IssueTemplateApiSpecs
+public class IssueTemplateApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly HttpClient _client;
 
-    public IssueTemplateApiSpecs(MohistIntegrationFixture fixture)
+    public IssueTemplateApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
     }

@@ -18,14 +18,14 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 
 [Trait("level", "L1")]
-public class IssueFeedbackApiSpecs
+public class IssueFeedbackApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly HttpClient _client;
     private readonly MohistIntegrationFixture _fixture;
     private readonly string _connectionString;
     private readonly IGrainFactory _grains;
 
-    public IssueFeedbackApiSpecs(MohistIntegrationFixture fixture)
+    public IssueFeedbackApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

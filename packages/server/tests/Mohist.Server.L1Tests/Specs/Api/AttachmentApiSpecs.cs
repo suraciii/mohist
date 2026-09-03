@@ -21,11 +21,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Api;
 
 [Trait("level", "L1")]
-public class AttachmentApiSpecs
+public class AttachmentApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public AttachmentApiSpecs(MohistIntegrationFixture fixture)
+    public AttachmentApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }

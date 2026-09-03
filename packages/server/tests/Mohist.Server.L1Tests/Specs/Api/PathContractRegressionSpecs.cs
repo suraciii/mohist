@@ -11,12 +11,12 @@ using static Mohist.Server.TestSupport.PathContractAssertions;
 namespace Mohist.Server.L1Tests.Specs.Api;
 
 [Trait("level", "L1")]
-public class PathContractRegressionSpecs
+public class PathContractRegressionSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    public PathContractRegressionSpecs(MohistIntegrationFixture fixture)
+    public PathContractRegressionSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

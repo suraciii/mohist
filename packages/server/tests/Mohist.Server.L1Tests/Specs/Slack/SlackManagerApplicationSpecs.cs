@@ -19,11 +19,11 @@ using DomainAgent = Mohist.Server.Agent.Domain.Agent;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Trait("level", "L1")]
-public sealed class SlackManagerApplicationSpecs
+public sealed class SlackManagerApplicationSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public SlackManagerApplicationSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackManagerApplicationSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task Create_selects_active_agent_persists_manager_records_and_is_idempotent()

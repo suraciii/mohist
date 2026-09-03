@@ -8,14 +8,14 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 
 [Trait("level", "L1")]
-public class IssueMetricsApiSpecs
+public class IssueMetricsApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _client;
     private readonly MohistIntegrationFixture _fixture;
 
-    public IssueMetricsApiSpecs(MohistIntegrationFixture fixture)
+    public IssueMetricsApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
         _fixture = fixture;

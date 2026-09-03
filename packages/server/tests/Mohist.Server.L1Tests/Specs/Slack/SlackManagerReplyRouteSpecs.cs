@@ -14,11 +14,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Trait("level", "L1")]
-public sealed class SlackManagerReplyRouteSpecs
+public sealed class SlackManagerReplyRouteSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public SlackManagerReplyRouteSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackManagerReplyRouteSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task Manager_reply_validates_full_anchor_promotes_progress_and_deduplicates_retries()

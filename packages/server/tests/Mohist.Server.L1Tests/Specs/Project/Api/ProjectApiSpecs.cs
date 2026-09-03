@@ -14,12 +14,12 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Project.Api;
 
 [Trait("level", "L1")]
-public class ProjectApiSpecs
+public class ProjectApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    public ProjectApiSpecs(MohistIntegrationFixture fixture)
+    public ProjectApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

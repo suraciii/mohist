@@ -19,7 +19,7 @@ namespace Mohist.Server.L1Tests.Specs.Runner.Api;
 
 [Collection("IntegrationRunner")]
 [Trait("level", "L1")]
-public sealed class RunnerControlWebSocketApiSpecs(MohistIntegrationFixture fixture)
+public sealed class RunnerControlWebSocketApiSpecs(DefaultMohistIntegrationFixture fixture)
 {
     [Fact]
     public async Task ControlRouteRejectsNonWebSocketRequest()

@@ -22,12 +22,12 @@ using Mohist.Server.Workflow.Grains;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Trait("level", "L1")]
-public sealed class SlackDeliveryOutcomesSpecs
+public sealed class SlackDeliveryOutcomesSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly Dictionary<string, ReplyAnchor> _replyAnchors = new(StringComparer.Ordinal);
 
-    public SlackDeliveryOutcomesSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackDeliveryOutcomesSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task List_deliveries_returns_all_rows_with_state_and_reason()
