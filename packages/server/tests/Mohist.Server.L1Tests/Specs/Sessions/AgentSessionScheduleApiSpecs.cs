@@ -20,12 +20,12 @@ namespace Mohist.Server.L1Tests.Specs.Sessions;
 // real HTTP surface rejects/accepts exactly the documented contract and
 // never requires a binding or activity at creation time.
 [Trait("level", "L1")]
-public sealed class AgentSessionScheduleApiSpecs
+public sealed class AgentSessionScheduleApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    public AgentSessionScheduleApiSpecs(MohistIntegrationFixture fixture)
+    public AgentSessionScheduleApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

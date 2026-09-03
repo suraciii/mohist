@@ -15,11 +15,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Sessions;
 
 [Trait("level", "L1")]
-public sealed class SessionTreeStopApiSpecs
+public sealed class SessionTreeStopApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public SessionTreeStopApiSpecs(MohistIntegrationFixture fixture)
+    public SessionTreeStopApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }

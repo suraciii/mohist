@@ -15,12 +15,12 @@ namespace Mohist.Server.L1Tests.Specs.Sessions;
 /// <c>IssueSessionAssociationQuerierSpecs</c>.
 /// </summary>
 [Trait("level", "L1")]
-public class AgentSessionContextAssociationApiSpecs
+public class AgentSessionContextAssociationApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    public AgentSessionContextAssociationApiSpecs(MohistIntegrationFixture fixture)
+    public AgentSessionContextAssociationApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

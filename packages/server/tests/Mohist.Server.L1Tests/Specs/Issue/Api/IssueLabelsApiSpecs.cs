@@ -8,11 +8,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 
 [Trait("level", "L1")]
-public class IssueLabelsApiSpecs
+public class IssueLabelsApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly HttpClient _client;
 
-    public IssueLabelsApiSpecs(MohistIntegrationFixture fixture)
+    public IssueLabelsApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
     }

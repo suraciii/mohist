@@ -21,7 +21,7 @@ namespace Mohist.Server.L1Tests.Specs.Auth;
 /// AuthResolutionMiddlewareTests).
 /// </summary>
 [Trait("level", "L1")]
-public sealed class IntegrationTokenSpecs(MohistIntegrationFixture fixture)
+public sealed class IntegrationTokenSpecs(DefaultMohistIntegrationFixture fixture) : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private const string CreatePath = "/api/integration-tokens";
 

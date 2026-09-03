@@ -15,11 +15,11 @@ namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 /// <c>HttpClient</c>.
 /// </summary>
 [Trait("level", "L1")]
-public class IssueArchivedDetailApiSpecs
+public class IssueArchivedDetailApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly HttpClient _client;
 
-    public IssueArchivedDetailApiSpecs(MohistIntegrationFixture fixture)
+    public IssueArchivedDetailApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
     }

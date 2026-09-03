@@ -14,11 +14,11 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 namespace Mohist.Server.L1Tests.Specs.Api;
 
 [Trait("level", "L1")]
-public sealed class IssueLowBandwidthApiSpecs
+public sealed class IssueLowBandwidthApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public IssueLowBandwidthApiSpecs(MohistIntegrationFixture fixture)
+    public IssueLowBandwidthApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }

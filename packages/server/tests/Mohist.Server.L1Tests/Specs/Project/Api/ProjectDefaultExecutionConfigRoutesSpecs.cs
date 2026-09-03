@@ -14,9 +14,9 @@ namespace Mohist.Server.L1Tests.Specs.Project.Api;
 /// read so Web and CLI can branch without a second endpoint.
 /// </summary>
 [Trait("level", "L1")]
-public sealed class ProjectDefaultExecutionConfigRoutesSpecs : AgentSessionLaunchRoutesTestSupport
+public sealed class ProjectDefaultExecutionConfigRoutesSpecs : AgentSessionLaunchRoutesTestSupport, IClassFixture<DefaultMohistIntegrationFixture>
 {
-    public ProjectDefaultExecutionConfigRoutesSpecs(MohistIntegrationFixture fixture) : base(fixture)
+    public ProjectDefaultExecutionConfigRoutesSpecs(DefaultMohistIntegrationFixture fixture) : base(fixture)
     {
     }
 

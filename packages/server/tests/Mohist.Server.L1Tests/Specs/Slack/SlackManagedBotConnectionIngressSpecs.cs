@@ -20,11 +20,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Trait("level", "L1")]
-public sealed class SlackManagedBotConnectionIngressSpecs
+public sealed class SlackManagedBotConnectionIngressSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public SlackManagedBotConnectionIngressSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackManagedBotConnectionIngressSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task Connection_ignores_manager_and_cross_target_agent_bots_without_work_side_effects()

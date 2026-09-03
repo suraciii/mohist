@@ -8,11 +8,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Trait("level", "L1")]
-public sealed class SlackManagerIngressSpecs
+public sealed class SlackManagerIngressSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public SlackManagerIngressSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackManagerIngressSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task Setup_identity_conflict_is_a_conflict_response()

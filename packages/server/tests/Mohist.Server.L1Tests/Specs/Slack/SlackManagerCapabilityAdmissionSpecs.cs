@@ -7,11 +7,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Trait("level", "L1")]
-public sealed class SlackManagerCapabilityAdmissionSpecs
+public sealed class SlackManagerCapabilityAdmissionSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public SlackManagerCapabilityAdmissionSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackManagerCapabilityAdmissionSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Theory]
     [InlineData("/api/projects/project-that-does-not-exist/slack-manager/connections/connection/remove-binding")]

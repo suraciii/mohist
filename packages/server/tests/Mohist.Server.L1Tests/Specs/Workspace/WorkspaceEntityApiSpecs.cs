@@ -16,12 +16,12 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Workspace;
 
 [Trait("level", "L1")]
-public class WorkspaceEntityApiSpecs
+public class WorkspaceEntityApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly string _projectId;
 
-    public WorkspaceEntityApiSpecs(MohistIntegrationFixture fixture)
+    public WorkspaceEntityApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _projectId = CreateProjectAsync().GetAwaiter().GetResult();

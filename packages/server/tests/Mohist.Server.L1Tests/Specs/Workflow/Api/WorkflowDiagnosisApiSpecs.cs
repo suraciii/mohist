@@ -7,7 +7,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Workflow.Api;
 
 [Trait("level", "L1")]
-public sealed class WorkflowDiagnosisApiSpecs(MohistIntegrationFixture fixture)
+public sealed class WorkflowDiagnosisApiSpecs(DefaultMohistIntegrationFixture fixture) : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 

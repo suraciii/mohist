@@ -11,12 +11,12 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Agent.Api;
 
 [Trait("level", "L1")]
-public class AgentDefinitionApiSpecs
+public class AgentDefinitionApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    public AgentDefinitionApiSpecs(MohistIntegrationFixture fixture)
+    public AgentDefinitionApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

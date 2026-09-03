@@ -37,7 +37,7 @@ namespace Mohist.Server.L1Tests.Specs.Workflow.Api;
 /// </list>
 /// </summary>
 [Trait("level", "L1")]
-public class WorkflowRunDetailApiSpecs
+public class WorkflowRunDetailApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private static readonly JsonSerializerOptions ReadJsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -47,7 +47,7 @@ public class WorkflowRunDetailApiSpecs
     private readonly IServiceProvider _services;
     private readonly string _connectionString;
 
-    public WorkflowRunDetailApiSpecs(MohistIntegrationFixture fixture)
+    public WorkflowRunDetailApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

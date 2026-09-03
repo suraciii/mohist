@@ -32,7 +32,7 @@ namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 /// </list>
 /// </summary>
 [Trait("level", "L1")]
-public class IssueCompositeAdvancementApiSpecs
+public class IssueCompositeAdvancementApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly HttpClient _client;
     private readonly IGrainFactory _grains;
@@ -40,7 +40,7 @@ public class IssueCompositeAdvancementApiSpecs
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public IssueCompositeAdvancementApiSpecs(MohistIntegrationFixture fixture)
+    public IssueCompositeAdvancementApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
         _grains = fixture.Grains;

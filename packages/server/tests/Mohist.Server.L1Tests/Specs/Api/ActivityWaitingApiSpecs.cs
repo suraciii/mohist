@@ -21,12 +21,12 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 /// <see cref="Mohist.Server.L1Tests.Specs.AgentOps.ActivityEvidenceAssemblerSpecs"/>.
 /// </summary>
 [Trait("level", "L1")]
-public class ActivityWaitingApiSpecs
+public class ActivityWaitingApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    public ActivityWaitingApiSpecs(MohistIntegrationFixture fixture)
+    public ActivityWaitingApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

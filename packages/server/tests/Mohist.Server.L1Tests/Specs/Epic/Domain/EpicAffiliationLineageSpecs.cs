@@ -7,12 +7,12 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Epic.Domain;
 
 [Trait("level", "L1")]
-public class EpicAffiliationLineageSpecs
+public class EpicAffiliationLineageSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly HttpClient _client;
     private readonly IServiceProvider _services;
 
-    public EpicAffiliationLineageSpecs(MohistIntegrationFixture fixture)
+    public EpicAffiliationLineageSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
         _services = fixture.Services;

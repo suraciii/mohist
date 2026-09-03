@@ -30,14 +30,14 @@ namespace Mohist.Server.L1Tests.Specs.Slack;
 /// and the fixed fake clock — no real network, process or wall-clock.
 /// </summary>
 [Trait("level", "L1")]
-public sealed class SlackRuntimeLeaseGateSpecs
+public sealed class SlackRuntimeLeaseGateSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private const string TeamId = "T_LEASE_GATE";
     private const string AdapterId = "adapter-gate";
 
     private readonly MohistIntegrationFixture _fixture;
 
-    public SlackRuntimeLeaseGateSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackRuntimeLeaseGateSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task Connection_ingress_claim_and_ack_require_the_current_runtime_lease()

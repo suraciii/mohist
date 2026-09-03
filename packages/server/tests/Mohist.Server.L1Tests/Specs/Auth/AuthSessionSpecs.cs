@@ -20,7 +20,7 @@ namespace Mohist.Server.L1Tests.Specs.Auth;
 /// same cookie answers 401 afterwards.
 /// </summary>
 [Trait("level", "L1")]
-public sealed class AuthSessionSpecs(MohistIntegrationFixture fixture)
+public sealed class AuthSessionSpecs(DefaultMohistIntegrationFixture fixture) : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private const string SessionCookieName = "mohist_session";
 

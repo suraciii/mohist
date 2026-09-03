@@ -23,7 +23,7 @@ namespace Mohist.Server.L1Tests.Specs.Auth;
 /// header self-declaring another runner is rejected at the auth layer.
 /// </summary>
 [Trait("level", "L1")]
-public sealed class ScopeAuthorizationSpecs(MohistIntegrationFixture fixture)
+public sealed class ScopeAuthorizationSpecs(DefaultMohistIntegrationFixture fixture) : IClassFixture<DefaultMohistIntegrationFixture>
 {
     [Fact]
     public async Task ReadonlyPat_OnBusinessGet_Passes_AndOnWrite_Answers403()

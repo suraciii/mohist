@@ -10,12 +10,12 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Workspace;
 
 [Trait("level", "L1")]
-public class IssueWorkspaceLifecycleSpecs
+public class IssueWorkspaceLifecycleSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly string _projectId;
 
-    public IssueWorkspaceLifecycleSpecs(MohistIntegrationFixture fixture)
+    public IssueWorkspaceLifecycleSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _projectId = CreateProjectAsync().GetAwaiter().GetResult();

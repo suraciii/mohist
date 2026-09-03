@@ -25,9 +25,9 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Sessions;
 
 [Trait("level", "L1")]
-public class AgentSessionBindingSpecs : AgentSessionTestSupport
+public class AgentSessionBindingSpecs : AgentSessionTestSupport, IClassFixture<DefaultMohistIntegrationFixture>
 {
-    public AgentSessionBindingSpecs(MohistIntegrationFixture fixture) : base(fixture)
+    public AgentSessionBindingSpecs(DefaultMohistIntegrationFixture fixture) : base(fixture)
     {
     }
 

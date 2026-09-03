@@ -6,11 +6,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.SystemSpecs;
 
 [Trait("level", "L1")]
-public class RuntimeSettingsSpecs
+public class RuntimeSettingsSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly HttpClient _client;
 
-    public RuntimeSettingsSpecs(MohistIntegrationFixture fixture)
+    public RuntimeSettingsSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
     }

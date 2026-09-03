@@ -25,13 +25,13 @@ namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 /// </list>
 /// </summary>
 [Trait("level", "L1")]
-public class IssueWatchApiSpecs
+public class IssueWatchApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly HttpClient _client;
 
     private readonly MohistIntegrationFixture _fixture;
 
-    public IssueWatchApiSpecs(MohistIntegrationFixture fixture)
+    public IssueWatchApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

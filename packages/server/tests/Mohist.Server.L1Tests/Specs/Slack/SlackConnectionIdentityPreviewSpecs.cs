@@ -15,12 +15,12 @@ using DomainAgent = Mohist.Server.Agent.Domain.Agent;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Trait("level", "L1")]
-public sealed class SlackConnectionIdentityPreviewSpecs
+public sealed class SlackConnectionIdentityPreviewSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private const string SlackAppCreationReference = "https://api.slack.com/apps?new_app=1";
     private readonly MohistIntegrationFixture _fixture;
 
-    public SlackConnectionIdentityPreviewSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackConnectionIdentityPreviewSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task Create_without_BotName_persists_and_returns_the_Agent_identity_preview()

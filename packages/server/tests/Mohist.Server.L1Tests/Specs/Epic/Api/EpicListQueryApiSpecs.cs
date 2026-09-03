@@ -28,12 +28,12 @@ namespace Mohist.Server.L1Tests.Specs.Epic.Api;
 /// </list>
 /// </summary>
 [Trait("level", "L1")]
-public class EpicListQueryApiSpecs
+public class EpicListQueryApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    public EpicListQueryApiSpecs(MohistIntegrationFixture fixture)
+    public EpicListQueryApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

@@ -16,9 +16,9 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 /// <c>ProjectEventFeedAssemblerTests</c>.
 /// </summary>
 [Trait("level", "L1")]
-public class ProjectEventsApiSpecs : ProjectEventsApiTestSupport
+public class ProjectEventsApiSpecs : ProjectEventsApiTestSupport, IClassFixture<DefaultMohistIntegrationFixture>
 {
-    public ProjectEventsApiSpecs(MohistIntegrationFixture fixture) : base(fixture)
+    public ProjectEventsApiSpecs(DefaultMohistIntegrationFixture fixture) : base(fixture)
     {
     }
 

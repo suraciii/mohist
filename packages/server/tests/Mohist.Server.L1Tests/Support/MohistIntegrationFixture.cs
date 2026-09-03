@@ -55,21 +55,21 @@ public class MohistIntegrationFixture : IAsyncLifetime
     private MohistWebApplicationFactory _factory = null!;
     private readonly bool _otelEnabled;
     private readonly bool _manualPublicProjection;
-    public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
-    public HttpClient Client { get; private set; } = null!;
-    public IServiceProvider Services => _factory.Services;
-    public HttpClient CreateClient() => _factory.CreateClient();
-    public WebSocketClient CreateWebSocketClient() => _factory.Server.CreateWebSocketClient();
-    public FakeRunnerWorkspaceClient RunnerWorkspace => _factory.Services.GetRequiredService<FakeRunnerWorkspaceClient>();
-    public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
-    public AgentLaunchParticipantProbe LaunchFaults => _factory.Services.GetRequiredService<AgentLaunchParticipantProbe>();
-    public ReportPersistenceFailureProbe ReportPersistenceFailures =>
+    public virtual IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
+    public virtual HttpClient Client { get; protected set; } = null!;
+    public virtual IServiceProvider Services => _factory.Services;
+    public virtual HttpClient CreateClient() => _factory.CreateClient();
+    public virtual WebSocketClient CreateWebSocketClient() => _factory.Server.CreateWebSocketClient();
+    public virtual FakeRunnerWorkspaceClient RunnerWorkspace => _factory.Services.GetRequiredService<FakeRunnerWorkspaceClient>();
+    public virtual AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
+    public virtual AgentLaunchParticipantProbe LaunchFaults => _factory.Services.GetRequiredService<AgentLaunchParticipantProbe>();
+    public virtual ReportPersistenceFailureProbe ReportPersistenceFailures =>
         _factory.Services.GetRequiredService<ReportPersistenceFailureProbe>();
-    public AgentSessionPersistenceTestProbe Persistence => _factory.Persistence;
-    public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
+    public virtual AgentSessionPersistenceTestProbe Persistence => _factory.Persistence;
+    public virtual FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
 
-    public string ConnectionString { get; private set; } = null!;
-    public string RunnerRoot => VirtualRunnerRoot;
+    public virtual string ConnectionString { get; protected set; } = null!;
+    public virtual string RunnerRoot => VirtualRunnerRoot;
 
     public MohistIntegrationFixture()
         : this(otelEnabled: false)
@@ -82,7 +82,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
         _manualPublicProjection = manualPublicProjection;
     }
 
-    public async ValueTask InitializeAsync()
+    public virtual async ValueTask InitializeAsync()
     {
         var dbName = $"mohist-{Guid.NewGuid():N}";
         ConnectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
@@ -162,7 +162,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public virtual async ValueTask DisposeAsync()
     {
         Client?.Dispose();
         _factory?.Dispose();

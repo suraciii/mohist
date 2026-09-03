@@ -7,11 +7,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Api;
 
 [Trait("level", "L1")]
-public class TemplateRoutesSpecs
+public class TemplateRoutesSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public TemplateRoutesSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public TemplateRoutesSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task ListSystemTemplates_ReturnsSimplifiedBuiltInsSortedByKey()

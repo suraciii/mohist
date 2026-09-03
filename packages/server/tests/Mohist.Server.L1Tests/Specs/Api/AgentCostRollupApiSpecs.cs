@@ -14,12 +14,12 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 /// round-trip; see <see cref="Mohist.Server.L1Tests.Specs.AgentOps.AgentCostRollupQuerierSpecs"/>.
 /// </summary>
 [Trait("level", "L1")]
-public class AgentCostRollupApiSpecs
+public class AgentCostRollupApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    public AgentCostRollupApiSpecs(MohistIntegrationFixture fixture)
+    public AgentCostRollupApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

@@ -13,14 +13,14 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Workflow.Api;
 
 [Trait("level", "L1")]
-public partial class WorkflowRunControlApiSpecs
+public partial class WorkflowRunControlApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly HttpClient _client;
     private readonly IGrainFactory _grains;
     private readonly IServiceProvider _services;
     private readonly string _connectionString;
 
-    public WorkflowRunControlApiSpecs(MohistIntegrationFixture fixture)
+    public WorkflowRunControlApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
         _grains = fixture.Grains;

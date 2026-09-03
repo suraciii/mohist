@@ -16,11 +16,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Trait("level", "L1")]
-public sealed class SlackManagerAdapterSpecs
+public sealed class SlackManagerAdapterSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public SlackManagerAdapterSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackManagerAdapterSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task Manager_adapter_target_uses_its_own_discovery_lease_and_delivery_routes()

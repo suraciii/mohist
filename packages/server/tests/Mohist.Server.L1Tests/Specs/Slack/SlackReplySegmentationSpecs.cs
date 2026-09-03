@@ -20,12 +20,12 @@ using Mohist.Server.Workflow.Grains;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Trait("level", "L1")]
-public sealed class SlackReplySegmentationSpecs
+public sealed class SlackReplySegmentationSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly Dictionary<string, ReplyAnchor> _replyAnchors = new(StringComparer.Ordinal);
 
-    public SlackReplySegmentationSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackReplySegmentationSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task Overlong_agent_reply_is_split_into_ordered_segments_with_no_content_loss()

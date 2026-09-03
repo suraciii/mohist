@@ -15,9 +15,9 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Api;
 
 [Trait("level", "L1")]
-public sealed class RoutingRulePatchRoutesSpecs : ProjectEventsApiTestSupport
+public sealed class RoutingRulePatchRoutesSpecs : ProjectEventsApiTestSupport, IClassFixture<DefaultMohistIntegrationFixture>
 {
-    public RoutingRulePatchRoutesSpecs(MohistIntegrationFixture fixture) : base(fixture) { }
+    public RoutingRulePatchRoutesSpecs(DefaultMohistIntegrationFixture fixture) : base(fixture) { }
 
     [Fact]
     public async Task Patch_WithEveryFieldPresent_AppliesTheCanonicalVocabulary()

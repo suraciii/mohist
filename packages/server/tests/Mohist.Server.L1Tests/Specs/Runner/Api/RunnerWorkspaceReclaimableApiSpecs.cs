@@ -16,11 +16,11 @@ namespace Mohist.Server.L1Tests.Specs.Runner.Api;
 /// materialized may be reclaimed (archived, or no active bound session).
 /// </summary>
 [Trait("level", "L1")]
-public sealed class RunnerWorkspaceReclaimableApiSpecs
+public sealed class RunnerWorkspaceReclaimableApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public RunnerWorkspaceReclaimableApiSpecs(MohistIntegrationFixture fixture)
+    public RunnerWorkspaceReclaimableApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }

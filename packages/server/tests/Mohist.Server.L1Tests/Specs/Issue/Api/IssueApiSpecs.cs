@@ -11,12 +11,12 @@ using System.Text.Json;
 namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 
 [Trait("level", "L1")]
-public class IssueApiSpecs
+public class IssueApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly HttpClient _client;
     private readonly MohistIntegrationFixture _fixture;
 
-    public IssueApiSpecs(MohistIntegrationFixture fixture)
+    public IssueApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

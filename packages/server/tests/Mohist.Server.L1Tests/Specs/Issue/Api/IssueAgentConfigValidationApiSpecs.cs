@@ -15,12 +15,12 @@ namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 /// cannot persist ACP/liveness keys.
 /// </summary>
 [Trait("level", "L1")]
-public class IssueAgentConfigValidationApiSpecs
+public class IssueAgentConfigValidationApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    public IssueAgentConfigValidationApiSpecs(MohistIntegrationFixture fixture)
+    public IssueAgentConfigValidationApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

@@ -11,11 +11,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Runner.Api;
 
 [Trait("level", "L1")]
-public sealed class RunnerAgentSessionReconciliationApiSpecs
+public sealed class RunnerAgentSessionReconciliationApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public RunnerAgentSessionReconciliationApiSpecs(MohistIntegrationFixture fixture)
+    public RunnerAgentSessionReconciliationApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }

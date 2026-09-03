@@ -25,11 +25,11 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 /// live in <c>WorkflowArtifactQuerySpecs</c>.
 /// </summary>
 [Trait("level", "L1")]
-public class WorkflowArtifactQueryRouteSpecs
+public class WorkflowArtifactQueryRouteSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public WorkflowArtifactQueryRouteSpecs(MohistIntegrationFixture fixture)
+    public WorkflowArtifactQueryRouteSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }

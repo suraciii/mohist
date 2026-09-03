@@ -14,11 +14,11 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 /// <c>AgentUsageTimeseriesQuerierSpecs</c>.
 /// </summary>
 [Trait("level", "L1")]
-public class AgentUsageTimeseriesApiSpecs
+public class AgentUsageTimeseriesApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly HttpClient _client;
 
-    public AgentUsageTimeseriesApiSpecs(MohistIntegrationFixture fixture)
+    public AgentUsageTimeseriesApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
     }

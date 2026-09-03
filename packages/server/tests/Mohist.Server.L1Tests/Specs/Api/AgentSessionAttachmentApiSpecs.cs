@@ -15,11 +15,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Api;
 
 [Trait("level", "L1")]
-public class AgentSessionAttachmentApiSpecs
+public class AgentSessionAttachmentApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public AgentSessionAttachmentApiSpecs(MohistIntegrationFixture fixture)
+    public AgentSessionAttachmentApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }

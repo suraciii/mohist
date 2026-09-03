@@ -20,7 +20,7 @@ namespace Mohist.Server.L1Tests.Specs.Auth;
 /// revocation is immediate and list never echoes full values.
 /// </summary>
 [Trait("level", "L1")]
-public sealed class PatTokenSpecs(MohistIntegrationFixture fixture)
+public sealed class PatTokenSpecs(DefaultMohistIntegrationFixture fixture) : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private const string CreatePath = "/api/auth/tokens";
 

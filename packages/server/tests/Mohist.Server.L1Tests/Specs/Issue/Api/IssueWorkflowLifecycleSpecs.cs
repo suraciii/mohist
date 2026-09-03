@@ -23,7 +23,7 @@ using HttpClient = System.Net.Http.HttpClient;
 namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 
 [Trait("level", "L1")]
-public class IssueWorkflowLifecycleSpecs
+public class IssueWorkflowLifecycleSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly IGrainFactory _grains;
@@ -31,7 +31,7 @@ public class IssueWorkflowLifecycleSpecs
     private readonly HttpClient _client;
     private readonly string _connectionString;
 
-    public IssueWorkflowLifecycleSpecs(MohistIntegrationFixture fixture)
+    public IssueWorkflowLifecycleSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _grains = fixture.Grains;

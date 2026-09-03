@@ -17,11 +17,11 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 /// <c>InboxSubscriptionStoreSpecs</c>.
 /// </summary>
 [Trait("level", "L1")]
-public class InboxSubscriptionApiSpecs
+public class InboxSubscriptionApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly HttpClient _client;
 
-    public InboxSubscriptionApiSpecs(MohistIntegrationFixture fixture)
+    public InboxSubscriptionApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
     }

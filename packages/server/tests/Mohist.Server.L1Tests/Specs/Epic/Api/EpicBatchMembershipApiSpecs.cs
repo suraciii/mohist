@@ -25,13 +25,13 @@ namespace Mohist.Server.L1Tests.Specs.Epic.Api;
 /// </list>
 /// </summary>
 [Trait("level", "L1")]
-public partial class EpicBatchMembershipApiSpecs
+public partial class EpicBatchMembershipApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
     private readonly IGrainFactory _grains;
 
-    public EpicBatchMembershipApiSpecs(MohistIntegrationFixture fixture)
+    public EpicBatchMembershipApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

@@ -34,12 +34,12 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 /// owner) lives in <c>TaskLogStoreSpecs</c>.
 /// </summary>
 [Trait("level", "L1")]
-public class TaskLogRouteSpecs
+public class TaskLogRouteSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private const string RunnerId = "runner-tasklog-spec";
 
-    public TaskLogRouteSpecs(MohistIntegrationFixture fixture)
+    public TaskLogRouteSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }
