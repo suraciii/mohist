@@ -8,7 +8,7 @@ using Mohist.Server.L1Tests.Specs.GitHub;
 using Mohist.Server.L1Tests.Specs.Runner.Api;
 using Xunit;
 
-[assembly: AssemblyFixture(typeof(Mohist.Server.L1Tests.Support.MohistIntegrationFixture))]
+[assembly: AssemblyFixture(typeof(Mohist.Server.L1Tests.Support.DefaultApplicationHostOwner))]
 
 namespace Mohist.Server.L1Tests.Support;
 
@@ -35,8 +35,11 @@ public class SlackApiSurfaceCollection
     : ICollectionFixture<IsolatedMohistIntegrationFixture>,
       ICollectionFixture<MohistIntegrationFixture>;
 
-// Full-stack HTTP/Orleans specs receive the assembly fixture directly. Their
-// default per-class collections remain available for parallel scheduling.
+// Default consumers request a class adapter so host-free selections leave the
+// assembly owner cold without collapsing independently scheduled classes.
+
+[CollectionDefinition("IntegrationRunner")]
+public class IntegrationRunnerCollection : ICollectionFixture<DefaultMohistIntegrationFixture>;
 
 [CollectionDefinition("PublicProjectionIntegration")]
 public class PublicProjectionIntegrationCollection

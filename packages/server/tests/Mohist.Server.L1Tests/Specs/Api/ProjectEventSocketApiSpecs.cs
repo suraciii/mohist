@@ -14,7 +14,7 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 
 [Collection("IntegrationRunner")]
 [Trait("level", "L1")]
-public sealed class ProjectEventSocketApiSpecs(MohistIntegrationFixture fixture)
+public sealed class ProjectEventSocketApiSpecs(DefaultMohistIntegrationFixture fixture)
 {
     [Fact]
     public async Task BearerUpgradeAcceptsSubscriptionWithoutOrigin()

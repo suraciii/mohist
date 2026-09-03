@@ -19,11 +19,11 @@ using DomainAgent = Mohist.Server.Agent.Domain.Agent;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Trait("level", "L1")]
-public sealed class SlackManagerManagementBridgeSpecs
+public sealed class SlackManagerManagementBridgeSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public SlackManagerManagementBridgeSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackManagerManagementBridgeSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task Approved_operations_use_exact_envelopes_and_return_authoritative_results()

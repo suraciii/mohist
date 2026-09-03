@@ -19,11 +19,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Workspace;
 
 [Trait("level", "L1")]
-public sealed class WebConversationWorkspaceSpecs
+public sealed class WebConversationWorkspaceSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public WebConversationWorkspaceSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public WebConversationWorkspaceSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public async Task WebConversation_Followup_ReusesSameSessionAndWorkspace()

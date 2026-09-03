@@ -25,9 +25,9 @@ namespace Mohist.Server.L1Tests.Specs.Auth;
 /// without any new reporting protocol.
 /// </summary>
 [Trait("level", "L1")]
-public class AgentPrincipalAttributionSpecs : AgentSessionLaunchRoutesTestSupport
+public class AgentPrincipalAttributionSpecs : AgentSessionLaunchRoutesTestSupport, IClassFixture<DefaultMohistIntegrationFixture>
 {
-    public AgentPrincipalAttributionSpecs(MohistIntegrationFixture fixture) : base(fixture)
+    public AgentPrincipalAttributionSpecs(DefaultMohistIntegrationFixture fixture) : base(fixture)
     {
     }
 

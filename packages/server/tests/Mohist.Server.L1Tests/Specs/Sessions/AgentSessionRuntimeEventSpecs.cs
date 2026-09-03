@@ -32,9 +32,9 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Sessions;
 
 [Trait("level", "L1")]
-public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
+public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport, IClassFixture<DefaultMohistIntegrationFixture>
 {
-    public AgentSessionRuntimeEventSpecs(MohistIntegrationFixture fixture) : base(fixture)
+    public AgentSessionRuntimeEventSpecs(DefaultMohistIntegrationFixture fixture) : base(fixture)
     {
     }
 

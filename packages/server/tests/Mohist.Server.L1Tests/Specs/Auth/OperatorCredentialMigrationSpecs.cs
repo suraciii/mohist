@@ -13,7 +13,7 @@ namespace Mohist.Server.L1Tests.Specs.Auth;
 /// makes the legacy header irrelevant.
 /// </summary>
 [Trait("level", "L1")]
-public sealed class OperatorCredentialMigrationSpecs(MohistIntegrationFixture fixture)
+public sealed class OperatorCredentialMigrationSpecs(DefaultMohistIntegrationFixture fixture) : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private const string LegacyHeaderName = "X-Mohist-Operator-Token";
 

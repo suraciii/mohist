@@ -24,12 +24,12 @@ namespace Mohist.Server.L1Tests.Specs.Epic.Api;
 /// </list>
 /// </summary>
 [Trait("level", "L1")]
-public class EpicEventsApiSpecs
+public class EpicEventsApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    public EpicEventsApiSpecs(MohistIntegrationFixture fixture)
+    public EpicEventsApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

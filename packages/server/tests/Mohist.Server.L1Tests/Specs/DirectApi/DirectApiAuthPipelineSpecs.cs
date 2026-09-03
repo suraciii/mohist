@@ -24,7 +24,7 @@ namespace Mohist.Server.L1Tests.Specs.DirectApi;
 /// path is terminal and leaves no side effects.
 /// </summary>
 [Trait("level", "L1")]
-public sealed class DirectApiAuthPipelineSpecs(MohistIntegrationFixture fixture)
+public sealed class DirectApiAuthPipelineSpecs(DefaultMohistIntegrationFixture fixture) : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private const string CreatePatPath = "/api/auth/tokens";
 

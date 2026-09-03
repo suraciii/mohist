@@ -13,9 +13,9 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Epic.Api;
 
 [Trait("level", "L1")]
-public class EpicPauseResumeApiSpecs : EpicApiTestSupport
+public class EpicPauseResumeApiSpecs : EpicApiTestSupport, IClassFixture<DefaultMohistIntegrationFixture>
 {
-    public EpicPauseResumeApiSpecs(MohistIntegrationFixture fixture) : base(fixture)
+    public EpicPauseResumeApiSpecs(DefaultMohistIntegrationFixture fixture) : base(fixture)
     {
     }
 

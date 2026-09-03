@@ -9,7 +9,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Trait("level", "L1")]
-public sealed class SlackLegacyRouteRetirementSpecs
+public sealed class SlackLegacyRouteRetirementSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private static readonly string[] RetiredRoutes =
     [
@@ -41,7 +41,7 @@ public sealed class SlackLegacyRouteRetirementSpecs
 
     private readonly MohistIntegrationFixture _fixture;
 
-    public SlackLegacyRouteRetirementSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public SlackLegacyRouteRetirementSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
     public void Retired_slack_routes_are_not_mapped()

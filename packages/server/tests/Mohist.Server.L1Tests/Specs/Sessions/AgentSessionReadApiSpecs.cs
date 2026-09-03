@@ -14,12 +14,12 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Sessions;
 
 [Trait("level", "L1")]
-public class AgentSessionReadApiSpecs
+public class AgentSessionReadApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    public AgentSessionReadApiSpecs(MohistIntegrationFixture fixture)
+    public AgentSessionReadApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

@@ -24,14 +24,14 @@ namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 /// </list>
 /// </summary>
 [Trait("level", "L1")]
-public class IssueCompositeChildProjectionApiSpecs
+public class IssueCompositeChildProjectionApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
 
-    public IssueCompositeChildProjectionApiSpecs(MohistIntegrationFixture fixture)
+    public IssueCompositeChildProjectionApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
         _client = fixture.Client;

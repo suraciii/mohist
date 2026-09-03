@@ -24,11 +24,11 @@ namespace Mohist.Server.L1Tests.Specs.Sessions;
 /// append any startup context from the launch-time input.
 /// </summary>
 [Trait("level", "L1")]
-public sealed class AgentStartupContextAuditSpecs : IAsyncLifetime
+public sealed class AgentStartupContextAuditSpecs : IAsyncLifetime, IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public AgentStartupContextAuditSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public AgentStartupContextAuditSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
 

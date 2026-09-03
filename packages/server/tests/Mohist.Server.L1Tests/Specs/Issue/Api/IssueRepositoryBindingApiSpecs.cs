@@ -17,14 +17,14 @@ namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 /// error-code assertions that must be driven through <c>HttpClient</c>.
 /// </summary>
 [Trait("level", "L1")]
-public class IssueRepositoryBindingApiSpecs
+public class IssueRepositoryBindingApiSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _client;
     private readonly MohistIntegrationFixture _fixture;
 
-    public IssueRepositoryBindingApiSpecs(MohistIntegrationFixture fixture)
+    public IssueRepositoryBindingApiSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
         _fixture = fixture;

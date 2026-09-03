@@ -20,11 +20,11 @@ using Mohist.Server.Workflow.Grains;
 namespace Mohist.Server.L1Tests.Specs.Agent.Api;
 
 [Trait("level", "L1")]
-public class AgentJobRoutesSpecs
+public class AgentJobRoutesSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public AgentJobRoutesSpecs(MohistIntegrationFixture fixture)
+    public AgentJobRoutesSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }

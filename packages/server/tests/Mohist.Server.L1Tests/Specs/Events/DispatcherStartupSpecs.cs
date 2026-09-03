@@ -8,11 +8,11 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Events;
 
 [Trait("level", "L1")]
-public sealed class DispatcherStartupSpecs
+public sealed class DispatcherStartupSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public DispatcherStartupSpecs(MohistIntegrationFixture fixture)
+    public DispatcherStartupSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }

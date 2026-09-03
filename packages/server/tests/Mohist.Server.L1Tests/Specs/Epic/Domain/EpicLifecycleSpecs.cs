@@ -14,13 +14,13 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Epic.Domain;
 
 [Trait("level", "L1")]
-public class EpicLifecycleSpecs
+public class EpicLifecycleSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
     private readonly HttpClient _client;
     private readonly IGrainFactory _grains;
     private readonly IServiceProvider _services;
 
-    public EpicLifecycleSpecs(MohistIntegrationFixture fixture)
+    public EpicLifecycleSpecs(DefaultMohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
         _grains = fixture.Grains;
