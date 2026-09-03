@@ -139,7 +139,7 @@ public class AgentSessionContextEventPublishingSpecs
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(OpenCommand());
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-context"));
-        var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
+        var usagePersistence = grain.PersistenceCheckpoint(_fixture.Persistence);
 
         // Bring usage to 96%.
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
@@ -147,18 +147,20 @@ public class AgentSessionContextEventPublishingSpecs
             {
                 new AgentSessionRuntimeEventInput("usage.updated", """{"contextWindowUsed":960,"contextWindowSize":1000}"""),
             }, RuntimeSessionId: "runtime-context"));
+        await usagePersistence.WaitAsync();
 
         // Trigger the exhaustion classification. Under the activity model the
         // terminal-close event (`session.closed`) is a no-op; context-exhaustion
         // classification is now driven by the `turn.failed` runtime event, so
         // emit one against the same near-full context window.
+        var exhaustionPersistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             RuntimeEvents: new[]
             {
                 new AgentSessionRuntimeEventInput("turn.failed", """{"status":"failed","exitCode":1,"producedArtifacts":false}"""),
             }, RuntimeSessionId: "runtime-context"));
 
-        await persistence.WaitAsync();
+        await exhaustionPersistence.WaitAsync();
 
         var eventStore = _fixture.Services.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
         var stored = await eventStore.ListAgentSessionEventsAsync(sessionId);
