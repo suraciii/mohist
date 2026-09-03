@@ -148,9 +148,9 @@ public sealed partial class AgentSessionGrain
 
         // Channel-thread replies inherit the session's durable bound root so
         // every delivery lands in the bound thread. DM inputs carry no channel
-        // binding: anchor each follow-up to its own triggering message so the
-        // terminal delivery replaces the progress projection in place instead
-        // of drifting into the session's original message thread.
+        // binding: anchor each follow-up to its own triggering message so its
+        // Session card and independent Agent reply do not drift into the
+        // session's original message thread.
         if (string.IsNullOrWhiteSpace(representative.ThreadId))
             return representative with { BoundThreadRootMessageId = representative.MessageId };
 

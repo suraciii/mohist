@@ -21,7 +21,7 @@ public sealed class SlackManagerReplyRouteSpecs : IClassFixture<DefaultMohistInt
     public SlackManagerReplyRouteSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
-    public async Task Manager_reply_validates_full_anchor_promotes_progress_and_deduplicates_retries()
+    public async Task Manager_reply_validates_full_anchor_and_deduplicates_independent_delivery()
     {
         var suffix = Guid.NewGuid().ToString("N");
         var enrollmentId = $"manager-reply-route-{suffix}";

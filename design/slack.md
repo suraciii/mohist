@@ -517,8 +517,8 @@ claim end-to-end exactly-once.
   lost request result accepts neither twice.
 - Accepted input cannot be deleted through drop-oldest or similar policy;
   reject new input when capacity is exhausted.
-- The outbound outbox is bounded; replaceable progress may coalesce; final
-  results, explicit failures, and user actions never disappear silently.
+- The outbound outbox is bounded; the replaceable Session card may coalesce;
+  final results, explicit failures, and user actions never disappear silently.
 - Slack delivery failure never changes AgentJob or AgentTurn results.
 - Messages authored by a Mohist Bot are rejected at admission before any
   durable record: an Agent can never trigger itself or another Agent through
@@ -540,14 +540,15 @@ An accepted input uses stable message identity as input identity and derives
 one dispatch reference for the work item. Per dispatch reference, Server
 allows:
 
-- At most one replaceable progress projection, persisted with its provider
-  message identity so later updates target the same message.
-- At most one terminal result projection, deduplicated by a stable terminal
-  delivery key. If a progress message exists, the terminal projection replaces
-  it in place; otherwise one final answer is sent in the same thread.
-- Fast work may omit progress and project only the Received reaction plus one
-  final answer. If the platform cannot react on the user's message, the
-  Received reaction goes on the progress message instead.
+- At most one replaceable Session-card projection, persisted with its provider
+  message identity. Its text is a stable Session reference; its blocks carry
+  navigation and state-bound controls. It never carries Agent-authored text.
+- At most one terminal Agent reply, deduplicated by a stable Turn delivery key.
+  It is a separate message in the same thread and never depends on the Session
+  card's Pending, Claimed, Delivered, or Delivery uncertain state.
+- Fast work may omit the Session card and project only the Received reaction
+  plus one final answer. If the platform cannot react on the user's message,
+  the Received fallback remains a Server-authored receipt.
 
 Default reactions: `Received=👀`, `Working=⏳`, `Completed=✅`, exception `⚠️`.
 Reactions are liveness signals, not Session/Turn facts; a missing, late, or
@@ -555,24 +556,29 @@ successful reaction mutation never changes Server state.
 
 ### Reply Body Belongs to the Agent; Liveness Belongs to Server
 
-- **Server owns liveness projection** — reaction mutations and one replaceable
-  progress message — independently of the Agent, starting at acceptance.
-  Reaction mutation is best-effort: a bounded, logged failure never blocks or
-  fails a Turn.
+- **Server owns liveness and the Session card.** Reaction mutation is
+  best-effort: a bounded, logged failure never blocks or fails a Turn. The
+  Session card contains only a stable Session reference, navigation, and
+  state-bound controls; it is not a textual execution status. Once queued, it
+  is never promoted into or overwritten by a terminal reply or failure notice.
 - **The Agent owns the reply body.** During a Turn it sends what it wants to
   say through the **reply action**: an intent API to Server carrying body and
   reply anchor. The reply action enters the same outbox and reuses redaction,
   duplicate protection, anchor validation, and uncertain-result
   reconciliation. The Agent never connects directly to Slack. The final answer
-  preferably replaces the progress message in place.
+  is independent from the Server-authored Session card.
 
 Server never extracts assistant text from Runner Turn output; the reply action
-is the only reply source. Terminal handling owns liveness closeout for every
-session kind: every accepted input's liveness reaches a terminal projection
-(Completed reaction, attention reaction, or one explicit failure notice) on
-every outcome — completion, failure, cancellation, Agent crash, or Server
-restart. The outbox persists the closeout intent, so no exit path leaves
-liveness open.
+is the only reply source. Terminal handling owns reaction closeout for every
+session kind: every accepted input reaches Completed or attention on every
+outcome — completion, failure, cancellation, Agent crash, or Server restart.
+The outbox persists the closeout intent, while the neutral Session card remains
+a valid observation entry instead of a stale `Working...` claim.
+
+A system-authored fallback for Agent crash or complete non-response is a
+separate outbox message with its own stable dispatch reference. A retry action
+may be attached to that fallback, but the fallback never reuses the Session
+card's provider message identity and never replaces its navigation surface.
 
 - **Silence is valid.** A Turn that ends with no reply action closes liveness
   normally; Server invents no status summary.
@@ -655,9 +661,9 @@ routing them into Slack requires a notification routing policy.
 Server persists one delivery intent per logical projection, carrying the
 Connection, dispatch reference, target conversation/thread, projection kind, a
 stable deduplication key, the current provider message identity if known, and
-a replayable content reference. Projection kinds: replaceable progress,
-terminal result / explicit failure, user action, reaction mutation. Tool calls
-and Runner logs are not user messages.
+a replayable content reference. Projection kinds: replaceable Session card,
+terminal Agent reply / explicit failure, user action, reaction mutation. Tool
+calls and Runner logs are not user messages.
 
 ```text diagram
                          +---+

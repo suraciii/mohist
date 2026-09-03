@@ -85,14 +85,13 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
             }
             if (retry is not null)
             {
-                await projection.EnqueueTerminalAsync(
+                await projection.EnqueueFailureAsync(
                     projectId,
                     delivery.ConnectionId,
                     source,
                     delivery.ThreadTs ?? delivery.MessageTs,
-                    delivery.Status,
                     FailureNoticeText(delivery),
-                    terminalDispatchRef: delivery.JobKey,
+                    failureDispatchRef: delivery.JobKey,
                     progressDispatchRef: progressDispatchRef,
                     blocks: retry.Blocks,
                     ct: ct);
@@ -157,10 +156,7 @@ public sealed record SlackTerminalDelivery(
     string? MessageTs = null,
     string? SessionId = null,
     string? TurnId = null,
-    string? SlackUserId = null,
-    // Retained only as an additive wire field for ordinary Slack history;
-    // Manager terminal delivery never populates or consumes it.
-    string? AssistantText = null)
+    string? SlackUserId = null)
 {
     public void Validate()
     {

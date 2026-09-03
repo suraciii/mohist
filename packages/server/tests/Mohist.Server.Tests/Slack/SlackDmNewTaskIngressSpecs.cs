@@ -83,8 +83,10 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
                 new SlackMessageIdentity("T123", "D-DM-NEW", "1710000000.000200"), "progress"));
         var firstPayload = SlackDeliveryPayload.Parse(firstProgress.PayloadJson);
         var secondPayload = SlackDeliveryPayload.Parse(secondProgress.PayloadJson);
-        Assert.Equal("Working...", firstPayload.Text);
-        Assert.Equal("Working...", secondPayload.Text);
+        Assert.Contains($"Session: {firstSessionId}", firstPayload.Text, StringComparison.Ordinal);
+        Assert.Contains($"Session: {secondSessionId}", secondPayload.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Working", firstPayload.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Working", secondPayload.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(SlackTurnControlService.StopActionId, firstPayload.Blocks?.GetRawText(), StringComparison.Ordinal);
         Assert.Contains(SlackTurnControlService.StopActionId, secondPayload.Blocks?.GetRawText(), StringComparison.Ordinal);
         Assert.DoesNotContain("xoxb-", firstProgress.PayloadJson, StringComparison.Ordinal);
@@ -193,7 +195,11 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
             && row.Kind == SlackOutboxKinds.ReplaceableProgress
             && row.DispatchRef == SlackStatusProjection.DispatchRef(
                 new SlackMessageIdentity("T123", "C-THREAD", "1710000000.000450"), "progress"));
-        Assert.Equal("Working...", SlackDeliveryPayload.Parse(progress.PayloadJson).Text);
+        var payload = SlackDeliveryPayload.Parse(progress.PayloadJson);
+        var sessionId = result.GetProperty("sessionId").GetString();
+        Assert.Contains($"Session: {sessionId}", payload.Text, StringComparison.Ordinal);
+        Assert.Contains(sessionId!, payload.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Working", payload.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

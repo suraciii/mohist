@@ -34,8 +34,7 @@ internal sealed class SlackChannelLaunchService : IScopedService
     private readonly IGrainFactory _grains;
     private readonly SlackStatusProjection _status;
     private readonly SlackTurnControlService _turnControl;
-    private readonly SlackWebLinkBuilder _webLinks;
-    private readonly ProjectQuerier _projects;
+    private readonly SlackSessionCardBlocksBuilder _sessionCardBlocks;
     private readonly TimeProvider _time;
     private readonly SlackOutboxStore _outbox;
 
@@ -51,8 +50,7 @@ internal sealed class SlackChannelLaunchService : IScopedService
         IGrainFactory grains,
         SlackStatusProjection status,
         SlackTurnControlService turnControl,
-        SlackWebLinkBuilder webLinks,
-        ProjectQuerier projects,
+        SlackSessionCardBlocksBuilder sessionCardBlocks,
         TimeProvider time,
         SlackOutboxStore outbox)
     {
@@ -67,8 +65,7 @@ internal sealed class SlackChannelLaunchService : IScopedService
         _grains = grains;
         _status = status;
         _turnControl = turnControl;
-        _webLinks = webLinks;
-        _projects = projects;
+        _sessionCardBlocks = sessionCardBlocks;
         _time = time;
         _outbox = outbox;
     }
@@ -339,7 +336,7 @@ internal sealed class SlackChannelLaunchService : IScopedService
             source,
             threadTs,
             ct);
-        var blocks = await BuildSessionStatusBlocksAsync(projectId, launch.SessionId, stopAction?.Blocks);
+        var blocks = await _sessionCardBlocks.BuildAsync(projectId, launch.SessionId, stopAction?.Blocks);
         await _status.EnqueueWorkingAsync(
             projectId,
             connection.Id,
@@ -347,7 +344,8 @@ internal sealed class SlackChannelLaunchService : IScopedService
             threadTs,
             SlackStatusProjection.DispatchRef(source, "progress"),
             blocks,
-            ct);
+            sessionId: launch.SessionId,
+            ct: ct);
     }
 
     internal static (string SessionId, string InputId, string TurnId) PreMintSlackLaunchIds(
@@ -384,36 +382,6 @@ internal sealed class SlackChannelLaunchService : IScopedService
         if (rejected.Length > 0)
             parts.Add($"Files not used: {string.Join("; ", rejected)}.");
         return string.Join(' ', parts);
-    }
-
-    private async Task<JsonElement?> BuildSessionStatusBlocksAsync(
-        string projectId,
-        string sessionId,
-        JsonElement? controlBlocks)
-    {
-        if (!_webLinks.HasUsableExternalWebUrl)
-            return controlBlocks;
-
-        var project = await _projects.GetByIdAsync(projectId);
-        var link = project is null
-            ? null
-            : _webLinks.BuildOpenSession(project.Name, sessionId);
-        return CombineBlocks(controlBlocks, link?.Blocks);
-    }
-
-    private static JsonElement? CombineBlocks(JsonElement? first, JsonElement? second)
-    {
-        var blocks = new List<JsonElement>();
-        AddBlockArray(blocks, first);
-        AddBlockArray(blocks, second);
-        return blocks.Count == 0 ? null : JsonSerializer.SerializeToElement(blocks);
-    }
-
-    private static void AddBlockArray(List<JsonElement> target, JsonElement? source)
-    {
-        if (source is not { ValueKind: JsonValueKind.Array })
-            return;
-        target.AddRange(source.Value.EnumerateArray().Select(block => block.Clone()));
     }
 
     private static bool IsBackpressured(AgentConnection connection) =>
