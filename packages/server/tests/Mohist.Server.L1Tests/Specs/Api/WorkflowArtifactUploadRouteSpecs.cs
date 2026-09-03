@@ -10,6 +10,8 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
@@ -179,13 +181,9 @@ public class WorkflowArtifactUploadRouteSpecs
         var jobId = $"agent-job-upload-{Guid.NewGuid():N}";
         var runnerId = $"agent-upload-runner-{Guid.NewGuid():N}";
         var projectId = $"agent-upload-project-{Guid.NewGuid():N}";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-            capabilities = new[] { "spec/task" },
-            hostname = "test-host",
-            projectId,
-        });
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(
+            new RunnerInfo(runnerId, ["spec/task"], "test-host", projectId),
+            TestRunnerGenerationExtensions.ProcessGeneration);
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
         await job.SubmitAsync(new AgentJobInput(
             "upload agent artifact",
@@ -233,23 +231,24 @@ public class WorkflowArtifactUploadRouteSpecs
     /// </summary>
     private async Task<(string workflowRunId, string workId, string runnerId)> SetupActiveWorkAsync()
     {
-        var projectName = UniqueProjectName("art");
-        var projectResponse = await _fixture.Client.PostAsJsonAsync(
-            "/api/projects",
-            new
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            UniqueProjectName("art"),
+            new RepositoryInfo
             {
-                name = projectName,
-                verificationCommand = "true",
-                repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
-            });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
 
-        var issueResponse = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/issues",
-            new { title = "needs upload", isDraft = false });
-        var issueJson = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var issueNumber = issueJson.GetProperty("data").GetProperty("number").GetInt32();
+        var issueNumber = await _fixture.Grains
+            .GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId))
+            .NextAsync();
+        await _fixture.Grains
+            .GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)))
+            .CreateAsync(projectId, issueNumber, "needs upload", null, null, null, isDraft: false);
 
         var workflowRunId = await _fixture.Grains
             .GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)))
@@ -257,13 +256,9 @@ public class WorkflowArtifactUploadRouteSpecs
         await DispatchEventsAsync();
 
         var runnerId = $"upload-test-{Guid.NewGuid():N}";
-        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
-        {
-            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-            capabilities = new[] { "spec/task", "spec/check" },
-            hostname = "test-host",
-            projectId,
-        });
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(
+            new RunnerInfo(runnerId, ["spec/task", "spec/check"], "test-host", projectId),
+            TestRunnerGenerationExtensions.ProcessGeneration);
 
         var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
         await workflow.AssignWorkerAsync(runnerId);

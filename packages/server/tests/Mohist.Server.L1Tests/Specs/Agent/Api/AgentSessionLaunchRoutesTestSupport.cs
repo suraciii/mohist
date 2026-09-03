@@ -8,6 +8,8 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.L1Tests.Support;
@@ -234,20 +236,18 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         var name = raw.Length > ProjectDomainMaxLength
             ? raw[..ProjectDomainMaxLength]
             : raw;
-        using var response = await _fixture.Client.PostAsJsonAsync("/api/projects", new
-        {
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
             name,
-            verificationCommand = "true",
-            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
-        });
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync();
-            throw new InvalidOperationException($"CreateProject '{name}' failed: {(int)response.StatusCode} {body}");
-        }
-        var bodyElement = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return bodyElement.GetProperty("data").GetProperty("id").GetString()
-            ?? throw new InvalidOperationException($"CreateProject '{name}' returned no id");
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return projectId;
     }
 
     protected const int ProjectDomainMaxLength = 63;
@@ -266,20 +266,17 @@ public abstract class AgentSessionLaunchRoutesTestSupport
 
     protected async Task<AgentRef> CreateAgentAsync(string projectId, string name)
     {
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents",
-            new
-            {
+        var agentId = $"agent_{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agentId)).CreateAsync(
+            new AgentCreateData(
+                projectId,
                 name,
-                description = $"description for {name}",
-                instructions = $"instructions for {name}",
-                agentConfig = new { model = "openai/gpt-5.6" },
-                skills = new[] { "coding" },
-                maxConcurrentRuns = 1,
-            });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, name);
+                $"description for {name}",
+                $"instructions for {name}",
+                JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.6" }),
+                new[] { "coding" },
+                1));
+        return new AgentRef(agentId, name);
     }
 
     /// <summary>

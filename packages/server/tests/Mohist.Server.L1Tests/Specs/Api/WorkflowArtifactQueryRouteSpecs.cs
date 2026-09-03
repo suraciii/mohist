@@ -7,6 +7,8 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
@@ -36,23 +38,24 @@ public class WorkflowArtifactQueryRouteSpecs
 
     private async Task<(string projectId, int issueNumber, string workflowRunId)> SetupWithArtifactsAsync()
     {
-        var projectName = UniqueProjectName("artq");
-        var projectResponse = await _fixture.Client.PostAsJsonAsync(
-            "/api/projects",
-            new
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            UniqueProjectName("artq"),
+            new RepositoryInfo
             {
-                name = projectName,
-                verificationCommand = "true",
-                repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
-            });
-        var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
 
-        var issueResponse = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/issues",
-            new { title = "artifact query test", isDraft = false });
-        var issueJson = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var issueNumber = issueJson.GetProperty("data").GetProperty("number").GetInt32();
+        var issueNumber = await _fixture.Grains
+            .GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId))
+            .NextAsync();
+        await _fixture.Grains.GetGrain<IIssueGrain>(
+            GrainKey.Issue(new IssueKey(projectId, issueNumber)))
+            .CreateAsync(projectId, issueNumber, "artifact query test", null, null, null, isDraft: false);
 
         var workflowRunId = await _fixture.Grains.GetGrain<IIssueGrain>(
             GrainKey.Issue(new IssueKey(projectId, issueNumber)))
