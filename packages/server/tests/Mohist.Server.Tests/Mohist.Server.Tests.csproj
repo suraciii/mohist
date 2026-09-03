@@ -9,7 +9,6 @@
     <PackageReference Include="Microsoft.Orleans.TestingHost" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="xunit.v3" />
-    <PackageReference Include="TngTech.ArchUnitNET.xUnitV3" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="EnvironmentAbstractions" />
     <PackageReference Include="EnvironmentAbstractions.TestHelpers" />
