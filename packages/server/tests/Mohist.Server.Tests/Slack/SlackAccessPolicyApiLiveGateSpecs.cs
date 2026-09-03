@@ -52,7 +52,7 @@ public sealed partial class SlackAccessPolicyApiSpecs
         var connection = await CreateConnectionAsync(AccessPolicyKind.Anyone);
         SlackApi.Clear();
         SlackApi.Responder = request => ScriptedMember(request, RegularMemberJson("U_OTHER"), conversation: """
-            {"ok":true,"channel":{"id":"C123","is_channel":true,"is_member":true}}
+            {"ok":true,"channel":{"id":"C-live-anyone-ok","is_channel":true,"is_member":true}}
             """);
 
         var data = await PostChannelAsync(

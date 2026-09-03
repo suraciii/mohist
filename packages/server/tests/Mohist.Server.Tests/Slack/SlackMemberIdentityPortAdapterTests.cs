@@ -191,6 +191,20 @@ public sealed class SlackMemberIdentityPortAdapterTests
     }
 
     [Fact]
+    public async Task LookupConversation_mismatched_channel_id_is_unconfirmed()
+    {
+        var adapter = NewAdapter(_ => JsonResponse("""
+            {"ok":true,"channel":{"id":"C_OTHER","is_member":true}}
+            """));
+
+        var result = await adapter.LookupConversationAsync(new SlackConversationMembershipRequest("xoxb-bot", "C123"));
+
+        Assert.False(result.Confirmed);
+        Assert.False(result.IsMember);
+        Assert.Equal("invalid_conversation_response", result.ErrorClass);
+    }
+
+    [Fact]
     public async Task LookupConversation_posts_channel_form_with_the_bot_token()
     {
         var handler = new StubHttpMessageHandler(_ => JsonResponse("""

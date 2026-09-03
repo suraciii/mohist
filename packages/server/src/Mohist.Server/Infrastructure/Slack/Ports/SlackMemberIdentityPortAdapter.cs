@@ -55,7 +55,7 @@ public sealed class SlackMemberIdentityPortAdapter(SlackApiTransport transport) 
 
         return response.Outcome switch
         {
-            SlackApiCallOutcome.Ok => ParseConversation(response.Body),
+            SlackApiCallOutcome.Ok => ParseConversation(response.Body, request.ConversationId),
             SlackApiCallOutcome.Rejected => new(false, ErrorClass: response.Error ?? "conversations_info_rejected"),
             SlackApiCallOutcome.Unparseable => new(false, ErrorClass: "unparseable_response"),
             _ => new(false, ErrorClass: "transport_error"),
@@ -106,7 +106,9 @@ public sealed class SlackMemberIdentityPortAdapter(SlackApiTransport transport) 
         }
     }
 
-    private static SlackConversationMembershipResult ParseConversation(JsonDocument? body)
+    private static SlackConversationMembershipResult ParseConversation(
+        JsonDocument? body,
+        string expectedConversationId)
     {
         if (body is null)
             return new(false, ErrorClass: "unparseable_response");
@@ -116,6 +118,7 @@ public sealed class SlackMemberIdentityPortAdapter(SlackApiTransport transport) 
             if (root.ValueKind != JsonValueKind.Object
                 || !root.TryGetProperty("channel", out var channel)
                 || channel.ValueKind != JsonValueKind.Object
+                || !string.Equals(ReadString(channel, "id"), expectedConversationId, StringComparison.Ordinal)
                 || !TryReadBool(channel, "is_member", out var isMember))
             {
                 return new(false, ErrorClass: "invalid_conversation_response");
