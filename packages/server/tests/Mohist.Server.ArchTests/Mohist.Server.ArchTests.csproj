@@ -30,20 +30,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="..\..\src\Mohist.Server\**\*.cs">
+    <EmbeddedResource Include="..\..\src\Mohist.Server\**\*.cs"
+                      Exclude="..\..\src\Mohist.Server\bin\**\*;..\..\src\Mohist.Server\obj\**\*">
       <LogicalName>ServerSources/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="..\Mohist.Server.L1Tests\Specs\**\*.cs"
-                      Exclude="..\Mohist.Server.L1Tests\Specs\Workflow\WorkflowGrainFixture.cs;..\Mohist.Server.L1Tests\Specs\Workflow\WorkflowGrainSpecs.cs">
-      <LogicalName>TestSources/Mohist.Server.L1Tests/Specs/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    <EmbeddedResource Include="..\Mohist.Server.Tests\**\*.cs"
+                      Exclude="..\Mohist.Server.Tests\bin\**\*;..\Mohist.Server.Tests\obj\**\*">
+      <LogicalName>TestSources/Mohist.Server.Tests/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="..\Mohist.Server.L1Tests\Support\**\*.cs">
-      <LogicalName>TestSources/Mohist.Server.L1Tests.Support/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="..\Mohist.Server.L0Tests\**\*.cs">
-      <LogicalName>TestSources/Mohist.Server.L0Tests/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="..\Mohist.Server.TestSupport\**\*.cs">
+    <EmbeddedResource Include="..\Mohist.Server.TestSupport\**\*.cs"
+                      Exclude="..\Mohist.Server.TestSupport\bin\**\*;..\Mohist.Server.TestSupport\obj\**\*">
       <LogicalName>TestSources/Mohist.Server.TestSupport/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="comment-reference-baseline.json">

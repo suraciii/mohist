@@ -8,10 +8,8 @@ public static class TestLevelContract
 {
     private const string LevelTrait = "level";
 
-    public static void AssertAssembly(Assembly assembly, string expectedLevel)
+    public static void AssertAssembly(Assembly assembly)
     {
-        Assert.Contains(expectedLevel, new[] { "L0", "L1" });
-
         var types = assembly.GetTypes();
         var testTypes = types
             .Where(IsConcreteTestType)
@@ -23,12 +21,13 @@ public static class TestLevelContract
         foreach (var type in testTypes)
         {
             var traits = LevelTraits(type.GetCustomAttributesData()).ToArray();
-            if (traits.Length != 1 || traits[0].Name != LevelTrait || traits[0].Value != expectedLevel)
+            if (traits.Length != 1 || traits[0].Name != LevelTrait ||
+                traits[0].Value is not ("L0" or "L1"))
             {
                 var actual = traits.Length == 0
                     ? "none"
                     : string.Join(", ", traits.Select(trait => $"{trait.Name}={trait.Value}"));
-                violations.Add($"{type.FullName}: expected exactly one direct {LevelTrait}={expectedLevel} trait; found {actual}");
+                violations.Add($"{type.FullName}: expected exactly one direct level=L0 or level=L1 trait; found {actual}");
             }
         }
 
