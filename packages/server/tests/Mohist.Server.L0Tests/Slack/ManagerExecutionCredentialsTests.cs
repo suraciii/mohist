@@ -123,6 +123,20 @@ public sealed class ManagerExecutionCredentialsTests
     }
 
     [Fact]
+    public async Task Host_stopping_revokes_once_before_stop()
+    {
+        var store = new SharedEpochStore();
+        var epoch = new ManagerDeploymentEpoch(store);
+
+        await epoch.StoppingAsync(default);
+        Assert.False(epoch.Available);
+        Assert.Equal(1, store.RevokeAllCount);
+
+        await epoch.StopAsync(default);
+        Assert.Equal(1, store.RevokeAllCount);
+    }
+
+    [Fact]
     public void Runtime_capability_gate_rejects_mixed_version_runners()
     {
         var old = new RunnerInfo("runner-1", ["execution-source-v1"], "host", null);
@@ -141,6 +155,7 @@ file sealed class SharedEpochStore : IManagerExecutionLeaseStore
     public bool Available => true;
     public bool IsShared => true;
     public int Count => _leases.Count;
+    public int RevokeAllCount { get; private set; }
 
     public string? ReadDeploymentEpoch() => _epoch ??= "mepoch_initial";
 
@@ -164,7 +179,11 @@ file sealed class SharedEpochStore : IManagerExecutionLeaseStore
     public int RevokeExecutionPrefix(string executionPrefix) =>
         Revoke(lease => lease.ExecutionId.StartsWith(executionPrefix, StringComparison.Ordinal));
 
-    public int RevokeAll() => Revoke(_ => true);
+    public int RevokeAll()
+    {
+        RevokeAllCount++;
+        return Revoke(_ => true);
+    }
 
     public int RemoveExpired(DateTimeOffset now) => Remove(lease => lease.ExpiresAt <= now);
 

@@ -155,11 +155,15 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        try
         {
-            _otelKeeper.Dispose();
+            base.Dispose(disposing);
         }
-        base.Dispose(disposing);
+        finally
+        {
+            if (disposing)
+                _otelKeeper.Dispose();
+        }
     }
 
     public new HttpClient CreateClient()
