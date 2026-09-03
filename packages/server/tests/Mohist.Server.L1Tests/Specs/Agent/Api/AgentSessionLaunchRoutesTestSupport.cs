@@ -4,10 +4,12 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Epic.Grains;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Sessions.Grains;
@@ -254,14 +256,11 @@ public abstract class AgentSessionLaunchRoutesTestSupport
 
     protected async Task CreateWorkspaceAsync(string projectId, string name)
     {
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/workspaces",
-            new { name, repositories = new[] { "main" } });
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync();
-            throw new InvalidOperationException($"CreateWorkspace '{name}' failed: {(int)response.StatusCode} {body}");
-        }
+        await _fixture.Grains.GetGrain<IWorkspaceGrain>(
+            GrainKey.Workspace(projectId, name)).CreateManualAsync(
+                name,
+                new[] { "main" },
+                _fixture.TimeProvider.GetUtcNow());
     }
 
     protected async Task<AgentRef> CreateAgentAsync(string projectId, string name)
@@ -349,20 +348,17 @@ public abstract class AgentSessionLaunchRoutesTestSupport
 
     protected async Task<AgentRef> CreateAgentAsync(string projectId, string name, string runtime)
     {
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents",
-            new
-            {
+        var agentId = $"agent_{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agentId)).CreateAsync(
+            new AgentCreateData(
+                projectId,
                 name,
-                description = $"description for {name}",
-                instructions = $"instructions for {name}",
-                agentConfig = new { model = "openai/gpt-5.6", runtime },
-                skills = new[] { "coding" },
-                maxConcurrentRuns = 1,
-            });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, name);
+                $"description for {name}",
+                $"instructions for {name}",
+                JsonSerializer.SerializeToElement(new { model = "openai/gpt-5.6", runtime }),
+                new[] { "coding" },
+                1));
+        return new AgentRef(agentId, name);
     }
 
     protected async Task PatchAgentRuntimeAsync(string projectId, string agentId, string runtime)
@@ -378,22 +374,28 @@ public abstract class AgentSessionLaunchRoutesTestSupport
 
     protected async Task<int> CreateIssueAsync(string projectId, string title)
     {
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/issues",
-            new { title, isDraft = true });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return body.GetProperty("data").GetProperty("number").GetInt32();
+        var number = await _fixture.Grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId)).NextAsync();
+        return await _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number))).CreateAsync(
+            projectId,
+            number,
+            title,
+            body: null,
+            labels: null,
+            priority: null,
+            repositoryRef: "main",
+            isDraft: true);
     }
 
     protected async Task<int> CreateEpicAsync(string projectId, string title)
     {
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/epics",
-            new { title, description = "context epic", priority = "p2" });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return body.GetProperty("data").GetProperty("number").GetInt32();
+        var number = await _fixture.Grains.GetGrain<IEpicCounterGrain>(GrainKey.EpicCounter(projectId)).NextAsync();
+        await _fixture.Grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(projectId, number))).CreateAsync(
+            projectId,
+            number,
+            title,
+            "context epic",
+            "p2");
+        return number;
     }
 
     protected async Task RegisterRunnerAndAwaitOnlineAsync(string runnerId, string projectId)

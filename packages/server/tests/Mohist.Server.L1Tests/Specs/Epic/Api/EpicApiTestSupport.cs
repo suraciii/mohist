@@ -54,12 +54,17 @@ public abstract class EpicApiTestSupport
 
     protected async Task AddOpenIssueAsync(string projectId, EpicDto epic)
     {
-        var issue = await _client.PostDataAsync<IssueDto>(
-            $"/api/projects/{projectId}/issues",
-            new { title = "Open work", projectId, isDraft = false });
-        await _client.PostOkAsync(
-            $"/api/projects/{projectId}/epics/{epic.Number}/issues",
-            new { issueNumber = issue.Number });
+        var number = await _grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId)).NextAsync();
+        await _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number))).CreateAsync(
+            projectId,
+            number,
+            "Open work",
+            body: null,
+            labels: null,
+            priority: null,
+            repositoryRef: null,
+            isDraft: false);
+        await _grains.GetGrain<IEpicGrain>(GrainKey.Epic(new EpicKey(projectId, epic.Number))).LinkIssueAsync(number, projectId);
     }
 
     protected async Task CompleteIssueAsync(string projectId, IssueDto issueInfo)

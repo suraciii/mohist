@@ -4,7 +4,10 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Services.Attachments;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -101,12 +104,18 @@ public class AgentSessionAttachmentApiSpecs
 
     private async Task<string> CreateProjectAsync(string prefix)
     {
-        var response = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<JsonElement>(
-            "/api/projects",
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
             $"{prefix}-{Guid.NewGuid():N}",
-            repoName: "main",
-            gitUrl: $"file://{Guid.NewGuid():N}");
-        return response.GetProperty("id").GetString()!;
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return projectId;
     }
 
     private sealed record AttachmentUploadResponse(
