@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workspace;
 
+[Trait("level", "L0")]
 public sealed class InteractionWorkspaceProvisionerTests
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 5, 14, 0, 0, TimeSpan.Zero);

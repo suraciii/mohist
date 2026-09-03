@@ -10,6 +10,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Collection("SlackLeaseRoutes")]
+[Trait("level", "L1")]
 public sealed class SlackAdapterLeaseRoutesSpecs
 {
     private const string OperatorId = "operator-lease-routes";

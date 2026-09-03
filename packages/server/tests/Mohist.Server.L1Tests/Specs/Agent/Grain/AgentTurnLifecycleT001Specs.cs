@@ -14,6 +14,7 @@ using Mohist.Server.Workflow.Grains;
 namespace Mohist.Server.L1Tests.Specs.Agent.Grain;
 
 [Collection("AgentJobGrain")]
+[Trait("level", "L1")]
 public class AgentTurnLifecycleT001Specs : AgentJobGrainTestSupport
 {
     public AgentTurnLifecycleT001Specs(AgentJobGrainFixture fixture) : base(fixture)

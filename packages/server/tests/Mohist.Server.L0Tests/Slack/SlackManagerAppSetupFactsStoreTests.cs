@@ -8,6 +8,7 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.L0Tests.Slack;
 
+[Trait("level", "L0")]
 public sealed class SlackManagerAppSetupFactsStoreTests
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 8, 6, 0, 0, 0, TimeSpan.Zero);

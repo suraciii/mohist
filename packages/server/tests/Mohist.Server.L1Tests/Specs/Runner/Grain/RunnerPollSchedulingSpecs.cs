@@ -31,6 +31,7 @@ namespace Mohist.Server.L1Tests.Specs.Runner.Grain;
 /// </list>
 /// </summary>
 [Collection("RunnerGrain")]
+[Trait("level", "L1")]
 public class RunnerPollSchedulingSpecs : Mohist.Server.L1Tests.Specs.Workflow.WorkflowGrainSpecs
 {
     public RunnerPollSchedulingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

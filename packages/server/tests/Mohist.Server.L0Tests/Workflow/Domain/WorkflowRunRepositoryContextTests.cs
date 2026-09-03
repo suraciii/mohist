@@ -25,6 +25,7 @@ namespace Mohist.Server.L0Tests.Workflow.Domain;
 ///     preserving the immutable repository context.</item>
 /// </list>
 /// </summary>
+[Trait("level", "L0")]
 public class WorkflowRunRepositoryContextTests
 {
     private static readonly DateTimeOffset FixedNow =

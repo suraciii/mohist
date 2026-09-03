@@ -24,6 +24,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// lives in <c>Mohist.Server.ArchTests.WorkflowGrainContractRules</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainProductionContractSpecs
 {
     private static readonly DateTimeOffset FixedTime = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);

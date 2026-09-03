@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Auth;
 
+[Trait("level", "L0")]
 public sealed class CredentialStoreTests
 {
     private const string TokenHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";

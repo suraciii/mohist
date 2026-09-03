@@ -20,6 +20,7 @@ namespace Mohist.Server.L0Tests.Sessions;
 /// Round-trips both wrapper call sites to prove the public DTOs retain named
 /// context while excluding internal materialization paths.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class AgentSessionContextRefsTests
 {
     [Fact]

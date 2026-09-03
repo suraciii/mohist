@@ -25,6 +25,7 @@ namespace Mohist.Server.L0Tests.AgentOps;
 /// <c>AgentCostRollupApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class AgentCostRollupQuerierSpecs
 {
     private readonly MohistDbFixture _fixture;

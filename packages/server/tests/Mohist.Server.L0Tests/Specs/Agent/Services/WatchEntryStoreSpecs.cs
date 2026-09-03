@@ -12,6 +12,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Agent.Services;
 
+[Trait("level", "L0")]
 public sealed class WatchEntryStoreSpecs : IClassFixture<MohistDbFixture>
 {
     private readonly MohistDbFixture _fixture;

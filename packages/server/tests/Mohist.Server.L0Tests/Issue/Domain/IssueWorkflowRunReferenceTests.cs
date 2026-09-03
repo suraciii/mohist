@@ -11,6 +11,7 @@ namespace Mohist.Server.L0Tests.Issue.Domain;
 /// neutral <c>WorkflowRunId</c> and the rule that the reference
 /// survives <c>Archive</c>/<c>Close</c> because it is an execution fact.
 /// </summary>
+[Trait("level", "L0")]
 public class IssueWorkflowRunReferenceTests
 {
     [Fact]

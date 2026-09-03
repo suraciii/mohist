@@ -16,6 +16,7 @@ namespace Mohist.Server.L0Tests.Sessions;
 /// sequence-order read path shared by the summary projector. Observed against
 /// real in-memory SQLite with the model schema; no application host.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class AgentSessionTranscriptStoreTests : IDisposable
 {
     private static readonly DateTime FixedTime = new(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc);

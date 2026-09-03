@@ -29,6 +29,7 @@ namespace Mohist.Server.L1Tests.Specs.Slack;
 /// the production EF lease store, the enrollment-backed target provider
 /// and the fixed fake clock — no real network, process or wall-clock.
 /// </summary>
+[Trait("level", "L1")]
 public sealed class SlackRuntimeLeaseGateSpecs
 {
     private const string TeamId = "T_LEASE_GATE";

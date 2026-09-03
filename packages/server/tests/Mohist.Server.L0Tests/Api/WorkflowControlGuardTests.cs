@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Api;
 
+[Trait("level", "L0")]
 public class WorkflowControlGuardTests
 {
     public static TheoryData<string?, WorkflowControlAction, bool> Decisions => new()

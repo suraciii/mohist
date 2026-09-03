@@ -23,6 +23,7 @@ namespace Mohist.Server.L0Tests.Issue.Querier;
 /// <c>IssueArchivedDetailApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueArchivedDetailProjectionSpecs
 {
     private readonly MohistDbFixture _fixture;

@@ -23,6 +23,7 @@ namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 ///   array and no <c>childIssuesSummary</c>.</item>
 /// </list>
 /// </summary>
+[Trait("level", "L1")]
 public class IssueCompositeChildProjectionApiSpecs
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);

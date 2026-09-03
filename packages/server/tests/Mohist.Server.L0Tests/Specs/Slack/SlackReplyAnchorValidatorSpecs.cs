@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Slack;
 
+[Trait("level", "L0")]
 public sealed class SlackReplyAnchorValidatorSpecs
 {
     private static readonly DateTime FixedNow = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);

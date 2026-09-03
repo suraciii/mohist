@@ -32,6 +32,7 @@ namespace Mohist.Server.L1Tests.Specs.Runner.Api;
 /// failure mode (issue #359).
 /// </summary>
 [Collection("RunnerConfig")]
+[Trait("level", "L1")]
 public class RunnerConfigApiSpecs : IAsyncLifetime
 {
     private readonly RunnerConfigFixture _fixture;

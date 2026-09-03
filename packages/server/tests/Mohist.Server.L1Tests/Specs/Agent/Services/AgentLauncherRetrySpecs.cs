@@ -33,6 +33,7 @@ namespace Mohist.Server.L1Tests.Specs.Agent.Services;
 /// keep both files within the file-size ratchet.
 /// </summary>
 [Collection("LaunchIntegration")]
+[Trait("level", "L1")]
 public class AgentLauncherRetrySpecs : AgentLauncherSupportSpecs
 {
     protected MohistIntegrationFixture _fixture => Fixture;

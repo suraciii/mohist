@@ -20,6 +20,7 @@ namespace Mohist.Server.L0Tests.Specs.Events.Inbox;
 /// the resulting inbox row. Shared DB / scope / event-builder helpers
 /// live in <see cref="InboxProjectionTestSupport"/>.
 /// </summary>
+[Trait("level", "L0")]
 public class InboxProjectionHandlerSpecs
 {
     [Fact]

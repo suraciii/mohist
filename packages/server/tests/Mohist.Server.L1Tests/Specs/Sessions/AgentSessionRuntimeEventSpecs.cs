@@ -31,6 +31,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Sessions;
 
+[Trait("level", "L1")]
 public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport
 {
     public AgentSessionRuntimeEventSpecs(MohistIntegrationFixture fixture) : base(fixture)

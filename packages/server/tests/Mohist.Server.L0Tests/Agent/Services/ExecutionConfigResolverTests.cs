@@ -10,6 +10,7 @@ namespace Mohist.Server.L0Tests.Agent.Services;
 /// runtime defaulting to opencode, explicit malformed values never masked
 /// by a lower-precedence source.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class ExecutionConfigResolverTests
 {
     private static readonly ExecutionConfigHint Hint = new("pi", "c/three", "turbo");
@@ -162,6 +163,7 @@ public sealed class ExecutionConfigResolverTests
 /// Project default column): round-trips the supplied fields, reads absent
 /// or malformed storage as unset.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class ExecutionConfigJsonTests
 {
     [Fact]

@@ -8,6 +8,7 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.L0Tests.Runner.Contracts;
 
+[Trait("level", "L0")]
 public sealed class RunnerControlContractTests
 {
     private static readonly IReadOnlyDictionary<int, string> StandardErrors = new Dictionary<int, string>

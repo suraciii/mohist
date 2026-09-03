@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
+[Trait("level", "L1")]
 public sealed class SlackManagerCapabilityAdmissionSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

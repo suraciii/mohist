@@ -20,6 +20,7 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 /// exercised without an HTTP round-trip; see
 /// <see cref="Mohist.Server.L1Tests.Specs.AgentOps.ActivityEvidenceAssemblerSpecs"/>.
 /// </summary>
+[Trait("level", "L1")]
 public class ActivityWaitingApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

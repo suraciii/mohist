@@ -44,6 +44,7 @@ public abstract class AgentSessionGrainPersistenceSpecsBase
 }
 
 [Collection("AgentSessionGrainL0")]
+[Trait("level", "L0")]
 public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistenceSpecsBase
 {
     public AgentSessionGrainPersistSuccessSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
@@ -106,6 +107,7 @@ public class AgentSessionGrainPersistSuccessSpecs : AgentSessionGrainPersistence
 }
 
 [Collection("AgentSessionGrainL0")]
+[Trait("level", "L0")]
 public class AgentSessionGrainPersistSummarySpecs : AgentSessionGrainPersistenceSpecsBase
 {
     public AgentSessionGrainPersistSummarySpecs(AgentSessionGrainFixture fixture) : base(fixture) { }

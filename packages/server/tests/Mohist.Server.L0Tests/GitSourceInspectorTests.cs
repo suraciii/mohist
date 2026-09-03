@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests;
 
+[Trait("level", "L0")]
 public class GitSourceInspectorTests
 {
     [Fact]

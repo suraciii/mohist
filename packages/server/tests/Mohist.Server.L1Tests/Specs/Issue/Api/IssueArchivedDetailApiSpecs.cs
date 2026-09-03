@@ -14,6 +14,7 @@ namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 /// and error-code assertions that must be driven through
 /// <c>HttpClient</c>.
 /// </summary>
+[Trait("level", "L1")]
 public class IssueArchivedDetailApiSpecs
 {
     private readonly HttpClient _client;

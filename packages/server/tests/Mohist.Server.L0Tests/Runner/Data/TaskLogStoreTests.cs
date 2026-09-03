@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Runner.Data;
 
+[Trait("level", "L0")]
 public partial class TaskLogStoreSpecs : IAsyncLifetime
 {
     private readonly TestSqliteDatabase _database;

@@ -16,6 +16,7 @@ namespace Mohist.Server.L0Tests.SystemSpecs;
 /// budget; the next pass retries delivery and settlement (handlers are
 /// idempotent by EventId — re-invocation is accepted).
 /// </summary>
+[Trait("level", "L0")]
 public class EventDispatcherSettlementRetentionSpecs
 {
     private static readonly DateTimeOffset StartTime = new(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);

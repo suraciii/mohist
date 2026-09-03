@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Project.Domain;
 
+[Trait("level", "L0")]
 public class RepositoryPolicyTests
 {
     [Fact]

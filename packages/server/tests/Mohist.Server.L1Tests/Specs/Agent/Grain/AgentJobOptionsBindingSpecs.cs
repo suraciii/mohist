@@ -15,6 +15,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Agent.Grain;
 
 [Collection("RunnerGrain")]
+[Trait("level", "L1")]
 public class AgentJobOptionsBindingSpecs
 {
     private readonly WorkflowGrainFixture _fixture;

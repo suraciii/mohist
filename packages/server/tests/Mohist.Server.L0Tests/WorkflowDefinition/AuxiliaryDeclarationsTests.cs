@@ -2,6 +2,7 @@ using Xunit;
 
 namespace Mohist.Workflow.Definition.Tests;
 
+[Trait("level", "L0")]
 public class AuxiliaryDeclarationsTests
 {
     [Fact]

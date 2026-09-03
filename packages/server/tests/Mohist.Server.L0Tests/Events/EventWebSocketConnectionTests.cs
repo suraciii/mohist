@@ -15,6 +15,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Events;
 
+[Trait("level", "L0")]
 public sealed class EventWebSocketConnectionTests
 {
     [Theory]

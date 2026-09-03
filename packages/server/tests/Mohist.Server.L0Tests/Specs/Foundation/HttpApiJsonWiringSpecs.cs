@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Foundation;
 
+[Trait("level", "L0")]
 public class HttpApiJsonWiringSpecs
 {
     [Fact]

@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Agent.Services;
 
+[Trait("level", "L0")]
 public sealed class AgentTaskDefinitionFactoryTests
 {
     private static readonly ExecutionConfigHint Default = new("pi", "provider/default", "balanced");
@@ -139,6 +140,7 @@ public sealed class AgentTaskDefinitionFactoryTests
         occupiedNames: []);
 }
 
+[Trait("level", "L0")]
 public sealed class AgentTaskLaunchFingerprintTests
 {
     [Fact]

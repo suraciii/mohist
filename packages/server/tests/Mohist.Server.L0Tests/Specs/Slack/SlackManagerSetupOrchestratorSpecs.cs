@@ -18,6 +18,7 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.L0Tests.Specs.Slack;
 
+[Trait("level", "L0")]
 public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 {
     private static readonly DateTimeOffset T0 = new(2026, 8, 6, 9, 0, 0, TimeSpan.Zero);

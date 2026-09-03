@@ -22,6 +22,7 @@ namespace Mohist.Server.L1Tests.Specs.Auth;
 /// credentials stay bound to their RunnerId: any path, hub query or
 /// header self-declaring another runner is rejected at the auth layer.
 /// </summary>
+[Trait("level", "L1")]
 public sealed class ScopeAuthorizationSpecs(MohistIntegrationFixture fixture)
 {
     [Fact]

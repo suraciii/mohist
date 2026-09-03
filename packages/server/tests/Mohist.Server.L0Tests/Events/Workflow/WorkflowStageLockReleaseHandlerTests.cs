@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Events.Workflow;
 
+[Trait("level", "L0")]
 public class WorkflowStageLockReleaseHandlerTests
 {
     [Fact]

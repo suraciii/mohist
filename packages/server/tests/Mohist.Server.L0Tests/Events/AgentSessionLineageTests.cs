@@ -15,6 +15,7 @@ namespace Mohist.Server.L0Tests.Events;
 /// ONLY from the session's own labels — no DB context, no grain call, no
 /// cross-aggregate query (D6).
 /// </summary>
+[Trait("level", "L0")]
 public class AgentSessionLineageTests
 {
     private const string ProjectId = "proj_agent_lineage";

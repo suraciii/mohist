@@ -22,6 +22,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Workflow.Api;
 
 [Collection("WorkflowRuntimeIntegration")]
+[Trait("level", "L1")]
 public class WorkflowRerunFromStageApiSpecs : IAsyncLifetime
 {
     private static readonly JsonSerializerOptions ReadJsonOptions = new()

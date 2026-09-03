@@ -10,6 +10,7 @@ namespace Mohist.Server.L0Tests.DirectApi;
 /// canonical anchor from a missing resource while its snapshot is still
 /// waiting for the projector.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class PublicExecutionReadQuerierTests
 {
     [Fact]

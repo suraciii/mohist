@@ -18,6 +18,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Runner.Api;
 
 [Collection("RunnerPollRecoveryStateApi")]
+[Trait("level", "L1")]
 public sealed class RunnerPollRecoveryStateApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

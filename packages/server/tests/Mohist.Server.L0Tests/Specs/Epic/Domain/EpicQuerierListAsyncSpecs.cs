@@ -15,6 +15,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Epic.Domain;
 
+[Trait("level", "L0")]
 public class EpicQuerierListAsyncSpecs
 {
     [Fact]

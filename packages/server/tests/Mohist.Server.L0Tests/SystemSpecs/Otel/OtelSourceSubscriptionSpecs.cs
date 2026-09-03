@@ -15,6 +15,7 @@ namespace Mohist.Server.L0Tests.SystemSpecs.Otel;
 /// Pins the production tracing registration's Entity Framework source
 /// subscription without standing up the application host or a collector.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class OtelSourceSubscriptionSpecs
 {
     [Fact]

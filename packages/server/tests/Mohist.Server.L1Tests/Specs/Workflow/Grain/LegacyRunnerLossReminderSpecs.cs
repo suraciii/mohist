@@ -8,6 +8,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Workflow.Grain;
 
 [Collection("WorkflowGrain")]
+[Trait("level", "L1")]
 public sealed class LegacyRunnerLossReminderSpecs : WorkflowGrainSpecs
 {
     public LegacyRunnerLossReminderSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

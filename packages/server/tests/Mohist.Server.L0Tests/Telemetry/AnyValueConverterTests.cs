@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Telemetry;
 
+[Trait("level", "L0")]
 public class AnyValueConverterTests
 {
     private static readonly JsonSerializerOptions Options = OtlpJsonSerializer.Options();

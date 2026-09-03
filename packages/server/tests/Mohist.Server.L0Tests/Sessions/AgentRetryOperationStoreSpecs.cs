@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Sessions;
 
+[Trait("level", "L0")]
 public sealed class AgentRetryOperationStoreSpecs : IAsyncLifetime
 {
     private readonly TestSqliteDatabase _database = TestSqliteDatabase.CreateMigrated();

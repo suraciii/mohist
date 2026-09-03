@@ -11,6 +11,7 @@ namespace Mohist.Server.L0Tests.Agent.Services;
 /// <c>variant</c>. The resolver is the single launch-side read; a null
 /// result means unset (never synthesized into a default).
 /// </summary>
+[Trait("level", "L0")]
 public sealed class AgentLauncherResolveReasoningEffortTests
 {
     [Fact]

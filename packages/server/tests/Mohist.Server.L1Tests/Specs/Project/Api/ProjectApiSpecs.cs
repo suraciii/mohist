@@ -13,6 +13,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Project.Api;
 
+[Trait("level", "L1")]
 public class ProjectApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

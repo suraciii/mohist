@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.SystemSpecs.Api;
 
+[Trait("level", "L1")]
 public sealed class DoctorApiSpecs(MohistIntegrationFixture fixture)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);

@@ -10,6 +10,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Telemetry;
 
 [Collection("IntegrationTelemetry")]
+[Trait("level", "L1")]
 public class OtlpRoutesBoundedIngressSpecs : IAsyncLifetime
 {
     private const string OtlpPath = "/otel/v1/traces";

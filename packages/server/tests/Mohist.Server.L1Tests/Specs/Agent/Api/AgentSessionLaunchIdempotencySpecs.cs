@@ -12,6 +12,7 @@ using Mohist.Server.Workflow.Grains;
 namespace Mohist.Server.L1Tests.Specs.Agent.Api;
 
 [Collection("LaunchIntegration")]
+[Trait("level", "L1")]
 public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentSessionLaunchIdempotencySpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)

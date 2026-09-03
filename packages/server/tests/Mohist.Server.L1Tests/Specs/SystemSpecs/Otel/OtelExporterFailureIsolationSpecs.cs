@@ -10,6 +10,7 @@ namespace Mohist.Server.L1Tests.Specs.SystemSpecs.Otel;
 /// connect to an external collector.
 /// </summary>
 [Collection("OtelTracing")]
+[Trait("level", "L1")]
 public class OtelExporterFailureIsolationSpecs
 {
     [Fact]

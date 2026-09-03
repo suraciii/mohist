@@ -13,6 +13,7 @@ namespace Mohist.Server.L0Tests.Events.Subscriptions;
 /// <c>agent-subscription-dispatch#Response prompt is rendered from
 /// envelope-carried variables</c> drives the assertions.
 /// </summary>
+[Trait("level", "L0")]
 public class ResponsePromptRendererTests
 {
     [Fact]

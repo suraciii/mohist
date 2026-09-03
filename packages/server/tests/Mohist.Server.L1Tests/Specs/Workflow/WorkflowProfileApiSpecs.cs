@@ -14,6 +14,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Workflow;
 
 [Collection("RunnerMutationIntegration")]
+[Trait("level", "L1")]
 public class WorkflowProfileApiSpecs
 {
     private readonly HttpClient _client;

@@ -15,6 +15,7 @@ namespace Mohist.Server.L0Tests.Auth;
 /// 15-minute expiry for enrollment tokens; runner credentials bound to
 /// their RunnerId with at most one live credential per runner.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class RunnerEnrollmentStoreTests
 {
     private static readonly DateTimeOffset Now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);

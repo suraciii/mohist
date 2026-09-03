@@ -18,6 +18,7 @@ namespace Mohist.Server.L0Tests.Specs.Sessions;
 /// agent-connection is now a first-class source for follow-up / cancel /
 /// stop routing, and its Slack identity labels are queryable.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class AgentSessionQuerierAgentConnectionSpecs
 {
     private const string ProjectId = "proj-dm-1";

@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Grains;
 
+[Trait("level", "L0")]
 public sealed class WorkflowRunBindingSnapshotTests
 {
     private static readonly DateTimeOffset CreatedAt = new(2026, 8, 14, 0, 0, 0, TimeSpan.Zero);

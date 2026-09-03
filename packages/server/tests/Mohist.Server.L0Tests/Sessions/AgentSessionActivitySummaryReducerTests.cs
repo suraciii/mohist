@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Sessions;
 
+[Trait("level", "L0")]
 public sealed class AgentSessionActivitySummaryReducerTests
 {
     private static readonly DateTime ObservedAt = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);

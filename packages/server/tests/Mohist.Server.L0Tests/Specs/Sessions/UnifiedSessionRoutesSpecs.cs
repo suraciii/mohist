@@ -32,6 +32,7 @@ namespace Mohist.Server.L0Tests.Specs.Sessions;
 /// agent-launch and vice-versa). Handlers are tested directly — no HTTP,
 /// no real process — via injected fakes + in-memory SQLite.
 /// </summary>
+[Trait("level", "L0")]
 public class UnifiedSessionRoutesSpecs
 {
     private const string ProjectA = "proj-unified-A";

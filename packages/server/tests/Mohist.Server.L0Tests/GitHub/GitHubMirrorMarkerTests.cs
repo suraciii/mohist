@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.GitHub;
 
+[Trait("level", "L0")]
 public sealed class GitHubMirrorMarkerTests
 {
     [Fact]

@@ -24,6 +24,7 @@ namespace Mohist.Server.L1Tests.Specs.Issue.Grain;
 /// fixture swap with no behavioural change. Test logic is unchanged.
 /// </summary>
 [Collection("WorkflowGrain")]
+[Trait("level", "L1")]
 public class IssueCommentGrainSpecs
 {
     private readonly WorkflowGrainFixture _fixture;

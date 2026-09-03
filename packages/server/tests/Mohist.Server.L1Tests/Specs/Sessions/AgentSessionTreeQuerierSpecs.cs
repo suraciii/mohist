@@ -14,6 +14,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Sessions;
 
 [Collection("AgentJobGrain")]
+[Trait("level", "L1")]
 public sealed class AgentSessionTreeQuerierSpecs
 {
     private readonly AgentJobGrainFixture _fixture;

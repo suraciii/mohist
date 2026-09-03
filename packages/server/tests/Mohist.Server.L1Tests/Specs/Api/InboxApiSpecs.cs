@@ -13,6 +13,7 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 /// mark-read / mark-all-read / archive mutations live in
 /// <c>InboxQuerierSpecs</c>.
 /// </summary>
+[Trait("level", "L1")]
 public class InboxApiSpecs
 {
     private readonly HttpClient _client;

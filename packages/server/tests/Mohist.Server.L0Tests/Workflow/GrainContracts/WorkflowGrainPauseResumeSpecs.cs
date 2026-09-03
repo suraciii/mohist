@@ -21,6 +21,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// ClaimNextAsync refusing to hand out new work.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainPauseResumeSpecs
 {
     private static readonly DateTimeOffset FixedTime = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);

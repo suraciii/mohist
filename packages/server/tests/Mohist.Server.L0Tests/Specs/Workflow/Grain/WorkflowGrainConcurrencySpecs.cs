@@ -18,6 +18,7 @@ namespace Mohist.Server.L0Tests.Specs.Workflow.Grain;
 /// scheduler order or interleaving timing.
 /// </summary>
 [Collection("OrleansGrainL0")]
+[Trait("level", "L0")]
 public class WorkflowGrainConcurrencySpecs : WorkflowGrainTestContext
 {
     public WorkflowGrainConcurrencySpecs(OrleansL0WorkflowGrainFixture fixture) : base(fixture) { }

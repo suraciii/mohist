@@ -44,6 +44,7 @@ namespace Mohist.Server.L0Tests.Issue.Querier;
 /// system info / system update) stays in <c>IssueApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueQuerierProjectionSpecs
 {
     private readonly MohistDbFixture _fixture;

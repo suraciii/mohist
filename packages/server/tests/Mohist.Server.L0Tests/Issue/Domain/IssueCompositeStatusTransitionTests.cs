@@ -6,6 +6,7 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.L0Tests.Issue.Domain;
 
+[Trait("level", "L0")]
 public class IssueCompositeStatusTransitionTests
 {
     private static readonly DateTime Now = new(2026, 7, 18, 12, 0, 0, DateTimeKind.Utc);

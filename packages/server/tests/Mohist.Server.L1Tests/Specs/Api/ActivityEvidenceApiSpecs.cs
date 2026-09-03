@@ -27,6 +27,7 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 /// round-trip; see <see cref="Mohist.Server.L1Tests.Specs.AgentOps.ActivityEvidenceAssemblerSpecs"/>.
 /// </summary>
 [Collection("RunnerMutationIntegration")]
+[Trait("level", "L1")]
 public class ActivityEvidenceApiSpecs : ProjectEventsApiTestSupport
 {
     public ActivityEvidenceApiSpecs(MohistIntegrationFixture fixture) : base(fixture)

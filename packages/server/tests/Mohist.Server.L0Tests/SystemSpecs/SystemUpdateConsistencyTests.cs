@@ -5,6 +5,7 @@ using static Mohist.Server.L0Tests.SystemSpecs.SystemUpdateTestFactory;
 
 namespace Mohist.Server.L0Tests.SystemSpecs;
 
+[Trait("level", "L0")]
 public class SystemUpdateConsistencyTests
 {
     [Fact]

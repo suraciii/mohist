@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Domain;
 
+[Trait("level", "L0")]
 public class WorkflowRunInvariantTests
 {
     private static WorkflowRun BuildRun(bool requiresApproval = false, bool assign = true)

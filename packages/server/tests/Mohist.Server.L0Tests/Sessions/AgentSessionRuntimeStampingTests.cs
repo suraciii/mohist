@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Sessions;
 
+[Trait("level", "L0")]
 public sealed class AgentSessionRuntimeStampingTests
 {
     private static readonly DateTime CreatedAt = new(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc);

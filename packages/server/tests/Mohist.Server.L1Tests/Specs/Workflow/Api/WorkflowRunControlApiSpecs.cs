@@ -12,6 +12,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Workflow.Api;
 
+[Trait("level", "L1")]
 public partial class WorkflowRunControlApiSpecs
 {
     private readonly HttpClient _client;

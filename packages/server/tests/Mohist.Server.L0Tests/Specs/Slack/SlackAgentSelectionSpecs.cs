@@ -14,6 +14,7 @@ namespace Mohist.Server.L0Tests.Specs.Slack;
 /// remains covered by the two retained L1 chooser route Specs; this matrix
 /// owns the immutable candidate and lineage decisions used by that route.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class SlackAgentSelectionSpecs
 {
     [Fact]

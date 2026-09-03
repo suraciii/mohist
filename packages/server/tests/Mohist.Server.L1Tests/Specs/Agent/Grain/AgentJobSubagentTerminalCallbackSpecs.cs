@@ -10,6 +10,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Agent.Grain;
 
 [Collection("AgentJobGrain")]
+[Trait("level", "L1")]
 public sealed class AgentJobSubagentTerminalCallbackSpecs : AgentJobGrainTestSupport
 {
     private const string ChildTerminalEventType = "com.mohist.agent.job.subagent-terminal";

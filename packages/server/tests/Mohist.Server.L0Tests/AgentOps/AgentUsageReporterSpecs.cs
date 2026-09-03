@@ -27,6 +27,7 @@ namespace Mohist.Server.L0Tests.AgentOps;
 /// these specs assert the reporter-level contract directly so reporting
 /// regressions are caught without spinning a full route.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class AgentUsageReporterSpecs : IClassFixture<MohistDbFixture>
 {
     private readonly MohistDbFixture _fixture;

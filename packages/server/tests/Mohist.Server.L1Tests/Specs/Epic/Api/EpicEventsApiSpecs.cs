@@ -23,6 +23,7 @@ namespace Mohist.Server.L1Tests.Specs.Epic.Api;
 /// <item>honours the <c>?limit=</c> query parameter.</item>
 /// </list>
 /// </summary>
+[Trait("level", "L1")]
 public class EpicEventsApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Webhooks;
 
+[Trait("level", "L1")]
 public sealed class WebhookSubscriptionApiSpecs(MohistIntegrationFixture fixture)
 {
     private HttpClient Client => fixture.Client;

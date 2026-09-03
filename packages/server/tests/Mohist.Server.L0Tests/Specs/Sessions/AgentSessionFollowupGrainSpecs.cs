@@ -10,6 +10,7 @@ using Mohist.Server.Workflow.Grains;
 namespace Mohist.Server.L0Tests.Specs.Sessions;
 
 [Collection("AgentSessionGrainL0")]
+[Trait("level", "L0")]
 public sealed partial class AgentSessionFollowupGrainSpecs
 {
     private readonly AgentSessionGrainFixture _fixture;

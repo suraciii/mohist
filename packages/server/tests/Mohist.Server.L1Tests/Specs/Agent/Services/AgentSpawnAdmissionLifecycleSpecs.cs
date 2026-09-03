@@ -21,6 +21,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Agent.Services;
 
 [Collection("RunnerMutationIntegration")]
+[Trait("level", "L1")]
 public sealed partial class AgentSpawnAdmissionLifecycleSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

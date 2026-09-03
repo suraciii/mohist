@@ -16,6 +16,7 @@ namespace Mohist.Server.L0Tests.Specs.Issue.Querier;
 using static IssueMetricsTestSupport;
 
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class IssueMetricsQualityStageOrderSpecs
 {
     private readonly MohistDbFixture _fixture;

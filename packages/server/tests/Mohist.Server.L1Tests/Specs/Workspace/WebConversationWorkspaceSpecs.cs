@@ -18,6 +18,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Workspace;
 
+[Trait("level", "L1")]
 public sealed class WebConversationWorkspaceSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

@@ -16,6 +16,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Agent.Storage;
 
+[Trait("level", "L0")]
 public class AgentJobStoreSpecs : IAsyncLifetime
 {
     private readonly TestSqliteDatabase _database;

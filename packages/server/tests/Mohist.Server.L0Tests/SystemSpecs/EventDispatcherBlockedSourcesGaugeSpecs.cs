@@ -18,6 +18,7 @@ namespace Mohist.Server.L0Tests.SystemSpecs;
 /// failed and whose next attempt time has not elapsed; other streams keep
 /// draining.
 /// </summary>
+[Trait("level", "L0")]
 public class EventDispatcherBlockedSourcesGaugeSpecs
 {
     private static readonly DateTimeOffset StartTime = new(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);

@@ -10,6 +10,7 @@ using System.Text.Json;
 
 namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 
+[Trait("level", "L1")]
 public class IssueApiSpecs
 {
     private readonly HttpClient _client;

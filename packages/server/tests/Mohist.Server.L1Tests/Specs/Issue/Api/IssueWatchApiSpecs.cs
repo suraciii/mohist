@@ -24,6 +24,7 @@ namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 ///   <item>200 + re-enriched detail JSON shape for the basic success path</item>
 /// </list>
 /// </summary>
+[Trait("level", "L1")]
 public class IssueWatchApiSpecs
 {
     private readonly HttpClient _client;

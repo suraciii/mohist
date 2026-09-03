@@ -29,6 +29,7 @@ namespace Mohist.Server.L1Tests.Specs.DirectApi;
 /// retry hint — never a stale snapshot and never the five-state unknown.
 /// </summary>
 [Collection("PublicProjectionIntegration")]
+[Trait("level", "L1")]
 public sealed class PublicExecutionReadRouteSpecs(PublicProjectionIntegrationFixture fixture)
 {
     private const string Prompt = "Investigate the failed deployment";

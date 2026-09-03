@@ -12,6 +12,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Auth;
 
+[Trait("level", "L0")]
 public sealed class RunnerEnrollmentRouteTests
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 19, 0, 0, 0, TimeSpan.Zero);

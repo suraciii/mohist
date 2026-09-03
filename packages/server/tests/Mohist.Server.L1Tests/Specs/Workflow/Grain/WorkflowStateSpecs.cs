@@ -15,6 +15,7 @@ using Mohist.Server.L1Tests.Specs.Workflow;
 namespace Mohist.Server.L1Tests.Specs.Workflow.Grain;
 
 [Collection("WorkflowRecovery")]
+[Trait("level", "L1")]
 public class WorkflowStateSpecs : WorkflowGrainSpecs
 {
     public WorkflowStateSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

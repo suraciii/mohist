@@ -17,6 +17,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 
+[Trait("level", "L1")]
 public class IssueFeedbackApiSpecs
 {
     private readonly HttpClient _client;

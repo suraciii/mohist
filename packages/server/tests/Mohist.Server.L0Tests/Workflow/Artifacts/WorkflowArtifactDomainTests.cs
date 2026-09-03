@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Artifacts;
 
+[Trait("level", "L0")]
 public class WorkflowArtifactDomainTests
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 6, 11, 9, 30, 0, TimeSpan.Zero);

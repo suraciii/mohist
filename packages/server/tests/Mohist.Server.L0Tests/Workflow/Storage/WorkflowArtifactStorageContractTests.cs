@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Storage;
 
+[Trait("level", "L0")]
 public class WorkflowArtifactStorageContractTests
 {
     private readonly InMemoryWorkflowArtifactStorage _storage = new();

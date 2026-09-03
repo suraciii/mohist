@@ -15,6 +15,7 @@ namespace Mohist.Server.L0Tests.Specs.Events;
 /// non-generic + wildcard) observe the published event.
 /// </summary>
 [Collection("Dispatcher")]
+[Trait("level", "L0")]
 public class DispatcherEngineSpecs
 {
     private static readonly DateTimeOffset EventTime = new(2026, 7, 11, 0, 0, 0, TimeSpan.Zero);

@@ -8,6 +8,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Agent.Grain;
 
 [Collection("AgentJobGrain")]
+[Trait("level", "L1")]
 public class AgentTurnActivityLifecycleSpecs : AgentJobGrainTestSupport
 {
     public AgentTurnActivityLifecycleSpecs(AgentJobGrainFixture fixture) : base(fixture)

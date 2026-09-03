@@ -20,6 +20,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Api;
 
+[Trait("level", "L1")]
 public class AttachmentApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

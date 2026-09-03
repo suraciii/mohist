@@ -7,6 +7,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.SystemSpecs;
 
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class EventStoreSpecs
 {
     private readonly MohistDbFixture _fixture;

@@ -16,6 +16,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Agent.Grain;
 
 [Collection("AgentJobGrain")]
+[Trait("level", "L1")]
 public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
 {
     public AgentJobDispatchEnvelopeSpecs(AgentJobGrainFixture fixture) : base(fixture)

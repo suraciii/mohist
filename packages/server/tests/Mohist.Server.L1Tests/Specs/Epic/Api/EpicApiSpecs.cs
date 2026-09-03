@@ -11,6 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Epic.Api;
 
+[Trait("level", "L1")]
 public class EpicApiSpecs : EpicApiTestSupport
 {
     public EpicApiSpecs(MohistIntegrationFixture fixture) : base(fixture)

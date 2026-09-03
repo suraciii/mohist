@@ -7,6 +7,7 @@ using Mohist.Server.L1Tests.Specs.Workflow;
 namespace Mohist.Server.L1Tests.Specs.Runner.Grain;
 
 [Collection("RunnerGrain")]
+[Trait("level", "L1")]
 public class RunnerBindingSpecs : WorkflowGrainSpecs
 {
     public RunnerBindingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

@@ -74,7 +74,7 @@
         { "id": "spec", "percentile": 95, "percentileMs": 500 }
       ]
     },
-    { "id": "server-l0", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKinds": ["Design", "Product"], "level": "L0", "resources": ["orleans", "sqlite", "server-runtime", "duration-measurement"], "csproj": "packages/server/tests/Mohist.Server.L0Tests/Mohist.Server.L0Tests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "1"], "report": "reports/server-l0.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
+    { "id": "server-l0", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKinds": ["Design", "Product"], "level": "L0", "resources": ["orleans", "sqlite", "server-runtime", "duration-measurement"], "csproj": "packages/server/tests/Mohist.Server.L0Tests/Mohist.Server.L0Tests.csproj", "apphostArgs": ["-trait", "level=L0", "-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "1"], "report": "reports/server-l0.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
         { "id": "spec", "namePattern": "(OtelOrleansSourceNameSpecs|RunnerBuildIdentitySpecs|WorkflowRecoveryContinuationSpecs)\\.", "expectedTotal": 4, "percentile": 95, "percentileMs": 50 },
         { "id": "unit", "percentile": 95, "percentileMs": 50 }
       ]
@@ -86,7 +86,7 @@
     // A single collection worker keeps the application host and in-process Orleans silo within
     // the shared CI runner's CPU budget. More workers inflate per-Spec wall time into the p95
     // budget; this resource cap is a stability control, not a throughput target.
-    { "id": "server-l1", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKinds": ["Product"], "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.L1Tests/Mohist.Server.L1Tests.csproj", "apphostArgs": ["-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "1"], "report": "reports/server-l1.trx", "reportFormat": "trx", "deadlineMs": 300000, "enforce": true, "rules": [
+    { "id": "server-l1", "kind": "dotnet-apphost", "trackType": "behavior", "application": "server", "specKinds": ["Product"], "level": "L1", "resources": ["orleans", "sqlite", "server-runtime"], "csproj": "packages/server/tests/Mohist.Server.L1Tests/Mohist.Server.L1Tests.csproj", "apphostArgs": ["-trait", "level=L1", "-parallel", "collections", "-parallelAlgorithm", "conservative", "-maxThreads", "1"], "report": "reports/server-l1.trx", "reportFormat": "trx", "deadlineMs": 300000, "enforce": true, "rules": [
         { "id": "spec", "percentile": 95, "percentileMs": 500 }
       ]
     },

@@ -21,6 +21,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Sessions;
 
+[Trait("level", "L1")]
 public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupApiTestSupport
 {
     public GenericAgentSessionFollowupApiSpecs(MohistIntegrationFixture fixture) : base(fixture)

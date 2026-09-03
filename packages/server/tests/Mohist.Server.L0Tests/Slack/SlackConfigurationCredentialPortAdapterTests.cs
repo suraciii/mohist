@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Slack;
 
+[Trait("level", "L0")]
 public sealed class SlackConfigurationCredentialPortAdapterTests
 {
     // Slack tooling.tokens.rotate returns token/exp (epoch seconds), not

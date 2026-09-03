@@ -24,6 +24,7 @@ namespace Mohist.Server.L0Tests.Specs.Issue.Querier;
 using static Mohist.Server.L0Tests.Specs.Issue.Querier.IssueMetricsTestSupport;
 
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueMetricsDeliveryTimesSpecs
 {
     private readonly MohistDbFixture _fixture;

@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Telemetry;
 
+[Trait("level", "L0")]
 public sealed class TraceIngesterBoundedWriteSpecs : IDisposable
 {
     private const string TraceId = "00000000000000000000000000000001";

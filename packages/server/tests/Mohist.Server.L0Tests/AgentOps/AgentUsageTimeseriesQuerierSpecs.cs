@@ -16,6 +16,7 @@ namespace Mohist.Server.L0Tests.AgentOps;
 /// ranges 200) stays in <c>AgentUsageTimeseriesApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class AgentUsageTimeseriesQuerierSpecs
 {
     private readonly MohistDbFixture _fixture;

@@ -20,6 +20,7 @@ namespace Mohist.Server.L0Tests.Agent.Storage;
 /// empty-page shape) stays in <c>TaskLogRouteSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class TaskLogStoreSpecs
 {
     private readonly MohistDbFixture _fixture;

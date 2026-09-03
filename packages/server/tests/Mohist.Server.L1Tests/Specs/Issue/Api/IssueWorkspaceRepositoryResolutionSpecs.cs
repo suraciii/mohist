@@ -20,6 +20,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 
 [Collection("RunnerMutationIntegration")]
+[Trait("level", "L1")]
 public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;

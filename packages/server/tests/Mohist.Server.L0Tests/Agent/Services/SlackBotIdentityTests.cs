@@ -4,6 +4,7 @@ using DomainAgent = Mohist.Server.Agent.Domain.Agent;
 
 namespace Mohist.Server.L0Tests.Agent.Services;
 
+[Trait("level", "L0")]
 public sealed class SlackBotIdentityTests
 {
     [Fact]

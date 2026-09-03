@@ -15,6 +15,7 @@ namespace Mohist.Server.L0Tests.Auth;
 /// any path or header self-declaring another runner is
 /// rejected before the route runs.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class AuthResolutionScopeTests
 {
     private const string AdminToken = AuthResolutionTestSupport.AdminToken;

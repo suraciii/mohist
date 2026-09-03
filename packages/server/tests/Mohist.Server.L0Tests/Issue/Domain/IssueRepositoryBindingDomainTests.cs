@@ -13,6 +13,7 @@ namespace Mohist.Server.L0Tests.Issue.Domain;
 /// (400 unknown repository + 404 unknown issue + 200 success +
 /// status code leakage) stays in <c>IssueRepositoryBindingApiSpecs</c>.
 /// </summary>
+[Trait("level", "L0")]
 public class IssueRepositoryBindingDomainTests
 {
     [Fact]

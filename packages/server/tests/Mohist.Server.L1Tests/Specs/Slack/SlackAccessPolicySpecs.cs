@@ -28,6 +28,7 @@ namespace Mohist.Server.L1Tests.Specs.Slack;
 /// (allowlist, anyone) cannot silently regress the Owner path.
 /// </summary>
 [Collection("SlackApiSurface")]
+[Trait("level", "L1")]
 public sealed partial class SlackAccessPolicySpecs : IAsyncLifetime
 {
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);

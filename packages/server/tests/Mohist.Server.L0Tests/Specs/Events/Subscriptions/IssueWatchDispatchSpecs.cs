@@ -19,6 +19,7 @@ namespace Mohist.Server.L0Tests.Specs.Events.Subscriptions;
 /// <see cref="RecordingAgentLauncher"/> log. No real network / grain /
 /// Orleans is touched (design/testing.md "No External Environment").
 /// </summary>
+[Trait("level", "L0")]
 public sealed class IssueWatchDispatchSpecs
 {
     private const string WatchRuleIdPrefix = "watch:";

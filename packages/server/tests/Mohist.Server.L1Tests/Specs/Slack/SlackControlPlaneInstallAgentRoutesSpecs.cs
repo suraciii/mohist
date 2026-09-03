@@ -17,6 +17,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Collection("SlackControlPlaneRoutes")]
+[Trait("level", "L1")]
 public sealed class SlackControlPlaneInstallAgentRoutesSpecs
 {
     private readonly SlackControlPlaneRoutesFixture _fixture;

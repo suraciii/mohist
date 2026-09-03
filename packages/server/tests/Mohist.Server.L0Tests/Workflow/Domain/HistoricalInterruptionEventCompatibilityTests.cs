@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Domain;
 
+[Trait("level", "L0")]
 public sealed class HistoricalInterruptionEventCompatibilityTests
 {
     [Fact]

@@ -14,6 +14,7 @@ using Mohist.Server.Infrastructure.Events;
 
 namespace Mohist.Server.L0Tests.Epic.Grains;
 
+[Trait("level", "L0")]
 public class EpicAutoDoneSpecs
 {
     [Fact]

@@ -13,6 +13,7 @@ namespace Mohist.Server.L0Tests.Sessions;
 /// records are built with <c>session.Metadata.Labels</c>, so the two
 /// dictionaries coincide and the fallback is a defensive no-op.
 /// </summary>
+[Trait("level", "L0")]
 public class AgentSessionRecordAccessorTests
 {
     [Fact]

@@ -13,6 +13,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Sessions;
 
 [Collection("SessionControlIntegration")]
+[Trait("level", "L1")]
 public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscriptAxisTestSupport
 {
     public GenericAgentSessionTranscriptAxisSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)

@@ -26,6 +26,7 @@ namespace Mohist.Server.L0Tests.Runner.Services;
 /// (<c>WorkResult → TaskReport | CheckReport</c>). Acceptance gate for T-003
 /// design decisions D1/D2/D4/D7 (work item protocol + translation externalization).
 /// </summary>
+[Trait("level", "L0")]
 public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
 {
     private readonly TestSqliteDatabase _database;

@@ -9,6 +9,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Telemetry;
 
 [Collection("IntegrationTelemetry")]
+[Trait("level", "L1")]
 public class OtlpRoutesIntegrationSpecs : IAsyncLifetime
 {
     private const int OtlpPort = OtlpRoutesHostFixture.OtlpPort;

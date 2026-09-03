@@ -28,6 +28,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// attempts. Drives the real grain without a cluster (#681).
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainArtifactBindingSpecs
 {
     private static readonly FakeTimeProvider TimeProvider =

@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Workflow;
 
+[Trait("level", "L1")]
 public sealed class IssueWorkspaceConvergenceSpecs : WorkflowGrainSpecs
 {
     public IssueWorkspaceConvergenceSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

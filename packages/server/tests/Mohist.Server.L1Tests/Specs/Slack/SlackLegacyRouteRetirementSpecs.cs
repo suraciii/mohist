@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
+[Trait("level", "L1")]
 public sealed class SlackLegacyRouteRetirementSpecs
 {
     private static readonly string[] RetiredRoutes =

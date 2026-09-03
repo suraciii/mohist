@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Infrastructure.PublicApi;
 
+[Trait("level", "L0")]
 public sealed class PublicProjectionNudgeTests
 {
     [Fact]

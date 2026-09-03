@@ -16,6 +16,7 @@ namespace Mohist.Server.L0Tests.Agent.Services;
 /// Readiness for an N-agent list costs one read — not one read per Agent
 /// and no Agent-domain grain call.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class ProjectDefaultExecutionConfigReaderSpecs : IAsyncLifetime
 {
     private TestSqliteDatabase _database = null!;

@@ -15,6 +15,7 @@ using DomainAgent = Mohist.Server.Agent.Domain.Agent;
 
 namespace Mohist.Server.L0Tests.Specs.Agent.Services;
 
+[Trait("level", "L0")]
 public sealed class AgentQuerierListDefinitionsSpecs : IAsyncLifetime
 {
     private TestSqliteDatabase _database = null!;

@@ -19,6 +19,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// of legacy failure reasons (#681).
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainStatusProjectionSpecs
 {
     private static readonly FakeTimeProvider TimeProvider =

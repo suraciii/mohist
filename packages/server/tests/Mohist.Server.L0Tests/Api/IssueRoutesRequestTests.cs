@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Api;
 
+[Trait("level", "L0")]
 public sealed class IssueRoutesRequestTests
 {
     [Fact]

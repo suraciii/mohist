@@ -8,6 +8,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Api;
 
 [Collection("RunnerMutationIntegration")]
+[Trait("level", "L1")]
 public class IssueModelVariantApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

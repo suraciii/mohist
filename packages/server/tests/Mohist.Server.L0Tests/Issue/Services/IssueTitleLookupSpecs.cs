@@ -35,6 +35,7 @@ namespace Mohist.Server.L0Tests.Issue.Services;
 /// </list>
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueTitleLookupSpecs
 {
     private readonly MohistDbFixture _fixture;

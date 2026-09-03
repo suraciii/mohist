@@ -16,6 +16,7 @@ namespace Mohist.Server.L0Tests.Issue.Domain;
 /// (200/400/404 + JSON envelope + multipart binding + attachment
 /// upload lifecycle) stay in <c>IssuePatchRawPresenceMergeSpecs</c>.
 /// </summary>
+[Trait("level", "L0")]
 public class IssuePatchRawMergeDomainTests
 {
     [Fact]

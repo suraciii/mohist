@@ -18,6 +18,7 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.L0Tests.Specs.Slack;
 
+[Trait("level", "L0")]
 public sealed class SlackInstallAgentSpecs
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 8, 7, 0, 0, 0, TimeSpan.Zero);

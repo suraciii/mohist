@@ -19,6 +19,7 @@ namespace Mohist.Server.L0Tests.Specs.Events;
 /// drain delivers it.
 /// </summary>
 [Collection("Dispatcher")]
+[Trait("level", "L0")]
 public class EventDispatcherImmediateTriggerSpecs
 {
     private static readonly DateTimeOffset EventTime = new(2026, 7, 12, 0, 0, 0, TimeSpan.Zero);

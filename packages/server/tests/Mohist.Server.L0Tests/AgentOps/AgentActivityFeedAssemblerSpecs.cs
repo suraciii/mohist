@@ -31,6 +31,7 @@ namespace Mohist.Server.L0Tests.AgentOps;
 /// passthrough, and reconciler-driven session filtering are caught without
 /// a full HTTP round-trip.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class AgentActivityFeedAssemblerSpecs : IClassFixture<MohistDbFixture>
 {
     private static readonly DateTime PinnedNow = new(2026, 6, 30, 12, 0, 0, DateTimeKind.Utc);

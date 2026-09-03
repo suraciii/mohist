@@ -22,6 +22,7 @@ namespace Mohist.Server.L1Tests.Specs.Agent.Api;
 /// AgentJob grain specs.
 /// </summary>
 [Collection("LaunchIntegration")]
+[Trait("level", "L1")]
 public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentLaunchObservationRoutesSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)

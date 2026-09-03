@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Slack;
 
+[Trait("level", "L0")]
 public sealed class SlackChannelAdmissionNudgeSpecs
 {
     [Fact]

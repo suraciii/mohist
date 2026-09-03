@@ -25,6 +25,7 @@ namespace Mohist.Server.L1Tests.Specs.DirectApi;
 /// cursor lifecycle without using the live event bus or UI timeline.
 /// </summary>
 [Collection("PublicProjectionIntegration")]
+[Trait("level", "L1")]
 public sealed class PublicSessionEventStreamRouteSpecs(PublicProjectionIntegrationFixture fixture)
 {
     private static readonly string[] ExecutionKeys =

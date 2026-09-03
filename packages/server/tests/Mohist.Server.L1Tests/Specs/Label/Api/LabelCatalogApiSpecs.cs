@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Label.Api;
 
+[Trait("level", "L1")]
 public class LabelCatalogApiSpecs
 {
     private readonly HttpClient _client;

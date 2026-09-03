@@ -6,6 +6,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Telemetry;
 
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class OtlpIngestGateSpecs
 {
     private readonly MohistDbFixture _fixture;

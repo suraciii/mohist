@@ -12,6 +12,7 @@ using System.Net.Http.Json;
 using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Epic.Api;
 
+[Trait("level", "L1")]
 public class EpicPauseResumeApiSpecs : EpicApiTestSupport
 {
     public EpicPauseResumeApiSpecs(MohistIntegrationFixture fixture) : base(fixture)

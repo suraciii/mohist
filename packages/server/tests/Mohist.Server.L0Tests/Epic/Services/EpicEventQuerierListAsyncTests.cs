@@ -17,6 +17,7 @@ namespace Mohist.Server.L0Tests.Epic.Services;
 /// returns them in chronological order, isolates per-epic, and yields an
 /// empty list for an epic with no events.
 /// </summary>
+[Trait("level", "L0")]
 public class EpicEventQuerierListAsyncTests
 {
     private const string ProjectId = "project_1";

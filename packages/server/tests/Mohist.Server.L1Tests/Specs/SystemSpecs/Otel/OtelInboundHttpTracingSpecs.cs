@@ -18,6 +18,7 @@ namespace Mohist.Server.L1Tests.Specs.SystemSpecs.Otel;
 /// which spans were (and were not) produced.
 /// </summary>
 [Collection("OtelTracing")]
+[Trait("level", "L1")]
 public class OtelInboundHttpTracingSpecs
 {
     [Fact]

@@ -20,6 +20,7 @@ namespace Mohist.Server.L1Tests.Specs.Agent.Api;
 /// the identity + exactly-once invariants.
 /// </summary>
 [Collection("RunnerMutationIntegration")]
+[Trait("level", "L1")]
 public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentSessionLaunchJobIdentitySpecs(MohistIntegrationFixture fixture) : base(fixture)

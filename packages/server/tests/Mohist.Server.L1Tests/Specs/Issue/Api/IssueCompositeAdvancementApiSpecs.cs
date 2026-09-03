@@ -31,6 +31,7 @@ namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 ///   parent cascades to its terminal children (Done + Cancelled).</item>
 /// </list>
 /// </summary>
+[Trait("level", "L1")]
 public class IssueCompositeAdvancementApiSpecs
 {
     private readonly HttpClient _client;

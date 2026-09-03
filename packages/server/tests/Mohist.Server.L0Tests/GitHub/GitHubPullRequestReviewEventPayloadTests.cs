@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.GitHub;
 
+[Trait("level", "L0")]
 public sealed class GitHubPullRequestReviewEventPayloadTests
 {
     private static JsonElement Payload(string json) => JsonDocument.Parse(json).RootElement.Clone();

@@ -12,6 +12,7 @@ namespace Mohist.Server.L0Tests.Events;
 /// bus type is the literal <c>com.mohist.issue.comment-added</c> string from
 /// the catalog, not a member of the IssueEvent serializer's switch.
 /// </summary>
+[Trait("level", "L0")]
 public class IssueCommentAddedTests
 {
     [Fact]

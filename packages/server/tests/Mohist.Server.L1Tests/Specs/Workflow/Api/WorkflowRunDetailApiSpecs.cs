@@ -36,6 +36,7 @@ namespace Mohist.Server.L1Tests.Specs.Workflow.Api;
 ///   <item><description>Read-only semantics: a GET does not invoke any grain mutator and does not transition the run.</description></item>
 /// </list>
 /// </summary>
+[Trait("level", "L1")]
 public class WorkflowRunDetailApiSpecs
 {
     private static readonly JsonSerializerOptions ReadJsonOptions = new(JsonSerializerDefaults.Web);

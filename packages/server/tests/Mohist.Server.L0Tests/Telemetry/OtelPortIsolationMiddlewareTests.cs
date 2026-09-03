@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Telemetry;
 
+[Trait("level", "L0")]
 public class OtelPortIsolationMiddlewareTests
 {
     private const int OtlpPort = 14318;

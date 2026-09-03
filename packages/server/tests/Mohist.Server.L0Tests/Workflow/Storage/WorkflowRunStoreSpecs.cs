@@ -19,6 +19,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Workflow.Storage;
 
 /// Tests for transactional workflow-run persistence.
+[Trait("level", "L0")]
 public partial class WorkflowRunStoreSpecs
 {
     private const string ProjectId = "proj_workflow_store";

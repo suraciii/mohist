@@ -15,6 +15,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Slack;
 
+[Trait("level", "L0")]
 public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
 {
     private readonly FakeTimeProvider _time = new(TestTime.UtcNow);

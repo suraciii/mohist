@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Infrastructure.Data;
 
+[Trait("level", "L0")]
 public class MohistDbContextModelSnapshotSpecs
 {
     [Fact]

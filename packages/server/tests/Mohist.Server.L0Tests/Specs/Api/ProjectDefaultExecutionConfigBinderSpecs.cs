@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Api;
 
+[Trait("level", "L0")]
 public sealed class ProjectDefaultExecutionConfigBinderSpecs
 {
     [Fact]

@@ -24,6 +24,7 @@ namespace Mohist.Server.L1Tests.Specs.Auth;
 /// id, which is the principal id, so records resolve to the anchor
 /// without any new reporting protocol.
 /// </summary>
+[Trait("level", "L1")]
 public class AgentPrincipalAttributionSpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentPrincipalAttributionSpecs(MohistIntegrationFixture fixture) : base(fixture)

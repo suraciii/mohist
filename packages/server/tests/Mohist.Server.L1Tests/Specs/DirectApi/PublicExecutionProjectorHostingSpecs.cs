@@ -19,6 +19,7 @@ namespace Mohist.Server.L1Tests.Specs.DirectApi;
 /// to catch up from the checkpoint — without any caller involvement.
 /// </summary>
 [Collection("WorkflowRuntimeIntegration")]
+[Trait("level", "L1")]
 public sealed class PublicExecutionProjectorHostingSpecs(IsolatedMohistIntegrationFixture fixture)
 {
     [Fact]

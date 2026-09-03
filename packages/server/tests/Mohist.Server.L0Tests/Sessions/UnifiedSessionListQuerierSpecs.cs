@@ -22,6 +22,7 @@ namespace Mohist.Server.L0Tests.Sessions;
 /// workflow fields) stays in <c>AgentSessionReadApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class UnifiedSessionListQuerierSpecs
 {
     private readonly MohistDbFixture _fixture;

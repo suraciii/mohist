@@ -22,6 +22,7 @@ namespace Mohist.Server.L0Tests.Issue.Querier;
 /// stays in <c>IssueLabelsApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueLabelFilterQuerierSpecs
 {
     private readonly MohistDbFixture _fixture;

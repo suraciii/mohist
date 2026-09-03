@@ -23,6 +23,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Collection("SlackTurnControlInteraction")]
+[Trait("level", "L1")]
 public sealed class SlackTerminalDeliveryPresentationSpecs
 {
     private readonly IsolatedMohistIntegrationFixture _fixture;

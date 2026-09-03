@@ -11,6 +11,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Agent.Api;
 
 [Collection("LaunchIntegration")]
+[Trait("level", "L1")]
 public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentSessionLaunchRuntimeResolutionSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)

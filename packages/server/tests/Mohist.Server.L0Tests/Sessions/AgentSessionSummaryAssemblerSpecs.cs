@@ -22,6 +22,7 @@ namespace Mohist.Server.L0Tests.Sessions;
 /// projections here assert the calculation, not the wire shape.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class AgentSessionSummaryAssemblerSpecs
 {
     private const string AgentId = "agent_s1";

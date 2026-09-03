@@ -23,6 +23,7 @@ namespace Mohist.Server.L0Tests.Sessions;
 /// array) stays in <c>AgentSessionContextAssociationApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueSessionAssociationQuerierSpecs
 {
     private readonly MohistDbFixture _fixture;

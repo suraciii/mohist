@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Orleans;
 
+[Trait("level", "L0")]
 public class ScopedGrainKeyCodecTests
 {
     [Fact]
@@ -135,6 +136,7 @@ public class ScopedGrainKeyCodecTests
     }
 }
 
+[Trait("level", "L0")]
 public class IssueKeyTests
 {
     [Fact]
@@ -207,6 +209,7 @@ public class IssueKeyTests
     }
 }
 
+[Trait("level", "L0")]
 public class EpicKeyTests
 {
     [Fact]
@@ -255,6 +258,7 @@ public class EpicKeyTests
     }
 }
 
+[Trait("level", "L0")]
 public class GrainKeyTypedEntryPointTests
 {
     [Fact]

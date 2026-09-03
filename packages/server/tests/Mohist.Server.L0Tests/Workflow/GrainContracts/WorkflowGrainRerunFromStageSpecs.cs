@@ -25,6 +25,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
  /// observe a second grain (the stage lock) across the rerun boundary.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainRerunFromStageSpecs
 {
     private static readonly FakeTimeProvider TimeProvider =

@@ -14,6 +14,7 @@ namespace Mohist.Server.L0Tests.Events;
 /// covered by <c>CommentMentionDispatchSpecs</c>; these unit tests pin the
 /// key-derivation contract and helper edge cases without a database.
 /// </summary>
+[Trait("level", "L0")]
 public class MentionDispatchHandlerUnitTests
 {
     [Fact]

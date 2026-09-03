@@ -14,6 +14,7 @@ namespace Mohist.Server.L0Tests.Issue.Profile;
 /// members. These specs anchor both guarantees in one place so future
 /// regressions are caught.
 /// </summary>
+[Trait("level", "L0")]
 public class MohistDefaultWorkflowProjectionTests
 {
     private static WorkflowStatusView BuildRunningView(string workflowRunId, string? assignedTo = null) =>

@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Sessions;
 
+[Trait("level", "L0")]
 public sealed class AgentSessionStopDomainTests
 {
     private static readonly DateTime Now = new(2026, 8, 21, 0, 0, 0, DateTimeKind.Utc);

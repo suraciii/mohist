@@ -15,6 +15,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// StageInitEagerSpecs scenarios to direct grain construction (#681).
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainStageInitSpecs
 {
     private static readonly FakeTimeProvider TimeProvider =

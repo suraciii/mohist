@@ -21,6 +21,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// fresh grain over the same persistent storage (#681).
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowAgentHandoffSpecs
 {
     private static readonly FakeTimeProvider TimeProvider =

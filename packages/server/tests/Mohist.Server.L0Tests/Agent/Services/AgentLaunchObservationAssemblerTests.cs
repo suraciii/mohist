@@ -7,6 +7,7 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.L0Tests.Agent.Services;
 
+[Trait("level", "L0")]
 public sealed class AgentLaunchObservationAssemblerTests
 {
     private static readonly DateTimeOffset RecoveryDeadline =

@@ -25,6 +25,7 @@ namespace Mohist.Server.L1Tests.Specs.Agent.Services;
 /// launch-time effort after the Agent is edited or deleted.
 /// </summary>
 [Collection("RunnerMutationIntegration")]
+[Trait("level", "L1")]
 public class AgentEffortSnapshotFreezeSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

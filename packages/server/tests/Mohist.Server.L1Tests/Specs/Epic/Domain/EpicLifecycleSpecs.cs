@@ -13,6 +13,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Epic.Domain;
 
+[Trait("level", "L1")]
 public class EpicLifecycleSpecs
 {
     private readonly HttpClient _client;

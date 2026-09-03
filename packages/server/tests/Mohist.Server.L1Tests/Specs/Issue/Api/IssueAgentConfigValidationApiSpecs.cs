@@ -14,6 +14,7 @@ namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 /// on the raw request body so the open-shape <c>agentConfig</c> field
 /// cannot persist ACP/liveness keys.
 /// </summary>
+[Trait("level", "L1")]
 public class IssueAgentConfigValidationApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

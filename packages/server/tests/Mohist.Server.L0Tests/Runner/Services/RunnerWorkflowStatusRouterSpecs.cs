@@ -15,6 +15,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Runner.Services;
 
+[Trait("level", "L0")]
 public class RunnerWorkflowStatusRouterSpecs
 {
     private const string WorkflowRunId = "wf-router-1";

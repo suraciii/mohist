@@ -24,6 +24,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Issue.Grain;
 
 [Collection("WorkflowGrain")]
+[Trait("level", "L1")]
 public sealed class IssueWorkflowLifecycleGrainSpecs
 {
     private readonly WorkflowGrainFixture _fixture;

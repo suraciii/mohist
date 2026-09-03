@@ -20,6 +20,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Agent.Services;
 
 [Collection("LaunchIntegration")]
+[Trait("level", "L1")]
 public sealed class AgentSubagentLaunchSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

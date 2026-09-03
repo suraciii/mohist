@@ -25,6 +25,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Collection("SlackApiSurface")]
+[Trait("level", "L1")]
 public sealed partial class SlackChannelThreadIngressSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

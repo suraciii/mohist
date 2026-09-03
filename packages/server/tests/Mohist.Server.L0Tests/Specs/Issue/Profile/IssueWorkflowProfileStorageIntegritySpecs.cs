@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Issue.Profile;
 
+[Trait("level", "L0")]
 public class IssueWorkflowProfileStorageIntegritySpecs : IAsyncLifetime
 {
     private readonly TestSqliteDatabase _database;

@@ -41,6 +41,7 @@ namespace Mohist.Server.L0Tests.Issue.Querier;
 /// <c>AgentSessionReadApiSpecs</c> and related session route Specs.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueSessionProjectionSpecs
 {
     private readonly MohistDbFixture _fixture;

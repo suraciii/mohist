@@ -18,6 +18,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Runner.Services;
 
+[Trait("level", "L0")]
 public sealed class WorkflowItemTranslatorLivePromptSpecs : IAsyncLifetime
 {
     private readonly TestSqliteDatabase _database = TestSqliteDatabase.CreateModelSchema();

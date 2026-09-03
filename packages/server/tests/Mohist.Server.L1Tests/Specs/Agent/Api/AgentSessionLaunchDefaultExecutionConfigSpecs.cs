@@ -17,6 +17,7 @@ namespace Mohist.Server.L1Tests.Specs.Agent.Api;
 /// a default the existing Needs-setup gating is unchanged.
 /// </summary>
 [Collection("LaunchIntegration")]
+[Trait("level", "L1")]
 public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentSessionLaunchDefaultExecutionConfigSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)

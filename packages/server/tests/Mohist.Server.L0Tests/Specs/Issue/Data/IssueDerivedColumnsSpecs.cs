@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Issue.Data;
 
+[Trait("level", "L0")]
 public class IssueDerivedColumnsSpecs
 {
     [Fact]

@@ -8,6 +8,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Specs.Sessions;
 
 [Collection("AgentSessionGrainL0")]
+[Trait("level", "L0")]
 public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersistenceSpecsBase
 {
     public AgentSessionGrainPersistStateFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
@@ -52,6 +53,7 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
 }
 
 [Collection("AgentSessionGrainL0")]
+[Trait("level", "L0")]
 public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainPersistenceSpecsBase
 {
     public AgentSessionGrainPersistTranscriptFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
@@ -101,6 +103,7 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
 }
 
 [Collection("AgentSessionGrainL0")]
+[Trait("level", "L0")]
 public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrainPersistenceSpecsBase
 {
     public AgentSessionGrainRecoveryTranscriptFailureSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }
@@ -190,6 +193,7 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
 }
 
 [Collection("AgentSessionGrainL0")]
+[Trait("level", "L0")]
 public class AgentSessionGrainDeactivationSpecs : AgentSessionGrainPersistenceSpecsBase
 {
     public AgentSessionGrainDeactivationSpecs(AgentSessionGrainFixture fixture) : base(fixture) { }

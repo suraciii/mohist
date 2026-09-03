@@ -22,6 +22,7 @@ namespace Mohist.Server.L0Tests.Sessions;
 /// intentional current-list/activity-feed usage-history difference.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
 {
     private static readonly DateTime CreatedAt = new(2026, 6, 10, 5, 0, 0, DateTimeKind.Utc);

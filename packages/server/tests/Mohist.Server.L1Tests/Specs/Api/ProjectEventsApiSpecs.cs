@@ -15,6 +15,7 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 /// projection/attention filters) lives in
 /// <c>ProjectEventFeedAssemblerTests</c>.
 /// </summary>
+[Trait("level", "L1")]
 public class ProjectEventsApiSpecs : ProjectEventsApiTestSupport
 {
     public ProjectEventsApiSpecs(MohistIntegrationFixture fixture) : base(fixture)

@@ -27,6 +27,7 @@ namespace Mohist.Server.L1Tests.Specs.DirectApi;
 /// effects.
 /// </summary>
 [Collection("PublicProjectionIntegration")]
+[Trait("level", "L1")]
 public sealed class DirectApiIdempotencySpecs(PublicProjectionIntegrationFixture fixture)
 {
     [Fact]

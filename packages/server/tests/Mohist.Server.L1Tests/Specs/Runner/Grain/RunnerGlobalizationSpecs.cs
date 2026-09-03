@@ -17,6 +17,7 @@ namespace Mohist.Server.L1Tests.Specs.Runner.Grain;
 /// through the global path.
 /// </summary>
 [Collection("RunnerGrain")]
+[Trait("level", "L1")]
 public class RunnerGlobalizationSpecs : WorkflowGrainSpecs
 {
     public RunnerGlobalizationSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

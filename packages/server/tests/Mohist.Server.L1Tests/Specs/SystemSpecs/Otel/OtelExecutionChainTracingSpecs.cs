@@ -27,6 +27,7 @@ namespace Mohist.Server.L1Tests.Specs.SystemSpecs.Otel;
 /// across all segments" requirement.
 /// </summary>
 [Collection("OtelFullStackIntegration")]
+[Trait("level", "L1")]
 public class OtelExecutionChainTracingSpecs
 {
     private readonly OtelIntegrationFixture _fixture;

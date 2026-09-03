@@ -13,6 +13,7 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.L1Tests.Specs.Api;
 
+[Trait("level", "L1")]
 public sealed class IssueLowBandwidthApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

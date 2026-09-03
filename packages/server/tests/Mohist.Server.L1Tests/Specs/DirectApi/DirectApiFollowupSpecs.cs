@@ -27,6 +27,7 @@ namespace Mohist.Server.L1Tests.Specs.DirectApi;
 /// the write-scope pipeline for the follow-up route.
 /// </summary>
 [Collection("PublicProjectionIntegration")]
+[Trait("level", "L1")]
 public sealed class DirectApiFollowupSpecs(PublicProjectionIntegrationFixture fixture)
 {
     [Fact]

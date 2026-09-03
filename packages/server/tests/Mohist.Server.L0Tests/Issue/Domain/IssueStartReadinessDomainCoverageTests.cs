@@ -13,6 +13,7 @@ namespace Mohist.Server.L0Tests.Issue.Domain;
 /// (201/200/404/400 + JSON shape + 409 composite + prereq declaration)
 /// stays in <c>IssueStartReadinessApiSpecs</c>.
 /// </summary>
+[Trait("level", "L0")]
 public class IssueStartReadinessDomainCoverageTests
 {
     [Fact]
