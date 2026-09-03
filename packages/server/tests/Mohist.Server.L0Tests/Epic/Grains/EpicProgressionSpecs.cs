@@ -15,6 +15,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Epic.Grains;
 
+[Trait("level", "L0")]
 public class EpicProgressionSpecs : EpicProgressionTestSupport
 {
     [Fact]

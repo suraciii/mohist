@@ -19,6 +19,7 @@ namespace Mohist.Server.L1Tests.Specs.Auth;
 /// while the session lives, and logout revokes it server-side so the
 /// same cookie answers 401 afterwards.
 /// </summary>
+[Trait("level", "L1")]
 public sealed class AuthSessionSpecs(MohistIntegrationFixture fixture)
 {
     private const string SessionCookieName = "mohist_session";

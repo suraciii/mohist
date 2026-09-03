@@ -7,6 +7,7 @@ using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.L0Tests.SystemSpecs;
 
+[Trait("level", "L0")]
 public class SystemUpdateRecoveryTests
 {
     private static readonly DateTimeOffset ProcessStart = new(2026, 7, 1, 12, 0, 0, TimeSpan.Zero);

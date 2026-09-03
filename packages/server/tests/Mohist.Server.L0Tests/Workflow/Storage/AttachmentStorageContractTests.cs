@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Storage;
 
+[Trait("level", "L0")]
 public class AttachmentStorageContractTests
 {
     private readonly InMemoryAttachmentStorage _storage = new();

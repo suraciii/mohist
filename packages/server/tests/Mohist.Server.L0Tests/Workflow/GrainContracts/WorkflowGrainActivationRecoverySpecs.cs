@@ -20,6 +20,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// running-task lease survives a fresh activation (#681).
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainActivationRecoverySpecs
 {
     private static readonly FakeTimeProvider TimeProvider =

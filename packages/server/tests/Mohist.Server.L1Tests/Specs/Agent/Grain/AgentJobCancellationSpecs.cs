@@ -9,6 +9,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Agent.Grain;
 
 [Collection("AgentJobGrain")]
+[Trait("level", "L1")]
 public sealed class AgentJobCancellationSpecs : AgentJobGrainTestSupport
 {
     public AgentJobCancellationSpecs(AgentJobGrainFixture fixture) : base(fixture)

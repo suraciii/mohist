@@ -19,6 +19,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// and FailureSpecs scenarios from the L1 cluster population (#681).
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainStageAdvanceSpecs
 {
     private static readonly DateTimeOffset FixedTime = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);

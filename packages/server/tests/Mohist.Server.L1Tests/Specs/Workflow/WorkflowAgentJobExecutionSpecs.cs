@@ -13,6 +13,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Workflow;
 
 [Collection("WorkflowExecution")]
+[Trait("level", "L1")]
 public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
 {
     public WorkflowAgentJobExecutionSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

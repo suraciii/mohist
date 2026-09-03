@@ -11,6 +11,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Specs.Project.Grain;
 
 [Collection("OrleansGrainL0")]
+[Trait("level", "L0")]
 public class ProjectGrainSpecs
 {
     private readonly OrleansL0WorkflowGrainFixture _fixture;

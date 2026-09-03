@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Workflow;
 
+[Trait("level", "L0")]
 public class WorkflowProfileMigrationSpecs : IAsyncLifetime
 {
     private readonly TestSqliteDatabase _database;

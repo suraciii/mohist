@@ -18,6 +18,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Specs.Issue.Grain;
 
 [Collection("OrleansGrainL0")]
+[Trait("level", "L0")]
 public class IssueCreationGrainSpecs
 {
     private readonly IGrainFactory _grains;

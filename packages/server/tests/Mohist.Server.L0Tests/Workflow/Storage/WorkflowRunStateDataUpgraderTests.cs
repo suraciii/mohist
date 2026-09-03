@@ -11,6 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Storage;
 
+[Trait("level", "L0")]
 public sealed class WorkflowRunStateDataUpgraderSpecs
 {
     [Fact]

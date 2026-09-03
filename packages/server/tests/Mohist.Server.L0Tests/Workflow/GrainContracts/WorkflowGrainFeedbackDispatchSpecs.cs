@@ -21,6 +21,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// representative activation proof (#681).
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainFeedbackDispatchSpecs
 {
     private static readonly DateTimeOffset FixedTime =

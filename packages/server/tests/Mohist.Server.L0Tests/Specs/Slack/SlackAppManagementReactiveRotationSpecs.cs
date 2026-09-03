@@ -24,6 +24,7 @@ namespace Mohist.Server.L0Tests.Specs.Slack;
 /// the original call once, transparently. Only when rotation also fails does
 /// the call degrade with the unique next action instead of a bare Slack error.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class SlackAppManagementReactiveRotationSpecs : IAsyncLifetime
 {
     private const string EnrollmentId = "enrollment-reactive";

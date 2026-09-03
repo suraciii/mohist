@@ -9,6 +9,7 @@ namespace Mohist.Server.L0Tests.Project.Domain;
 /// <see cref="GitRemoteUrlNormalizer.NormalizationVersion"/> requires
 /// extending the expected fingerprints here.
 /// </summary>
+[Trait("level", "L0")]
 public class GitRemoteUrlNormalizerTests
 {
     [Theory]

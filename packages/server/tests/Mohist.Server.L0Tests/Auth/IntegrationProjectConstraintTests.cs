@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Auth;
 
+[Trait("level", "L0")]
 public sealed class IntegrationProjectConstraintTests
 {
     [Fact]

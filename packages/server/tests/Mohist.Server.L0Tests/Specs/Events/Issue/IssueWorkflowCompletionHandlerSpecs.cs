@@ -24,6 +24,7 @@ namespace Mohist.Server.L0Tests.Specs.Events.Issue;
 /// transitions the owning in-progress issue to <c>Done</c> via
 /// <see cref="IIssueGrain.CompleteWorkAsync"/>.
 /// </summary>
+[Trait("level", "L0")]
 public class IssueWorkflowCompletionHandlerSpecs : IssueWorkflowCompletionHandlerTestSupport
 {
 

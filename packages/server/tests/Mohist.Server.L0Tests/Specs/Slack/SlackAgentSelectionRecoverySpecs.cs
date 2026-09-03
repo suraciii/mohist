@@ -10,6 +10,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Specs.Slack;
 
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class SlackAgentSelectionRecoverySpecs
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 21, 12, 0, 0, TimeSpan.Zero);

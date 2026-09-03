@@ -25,6 +25,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Collection("SlackApiSurface")]
+[Trait("level", "L1")]
 public sealed class SlackRetryInteractionSpecs : IAsyncLifetime
 {
     private readonly IsolatedMohistIntegrationFixture _fixture;

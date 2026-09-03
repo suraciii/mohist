@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Issue.Querier;
 
+[Trait("level", "L0")]
 public class IssueRepositoryResolverTests
 {
     private readonly IssueRepositoryResolver _resolver = new();

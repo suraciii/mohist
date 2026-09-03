@@ -32,6 +32,7 @@ namespace Mohist.Server.L0Tests.Issue.Grains;
 /// when the body contains an <c>@</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueCommentEventSpecs
 {
     private readonly MohistDbFixture _fixture;

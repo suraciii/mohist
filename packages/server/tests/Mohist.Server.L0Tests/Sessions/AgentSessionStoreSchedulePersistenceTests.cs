@@ -23,6 +23,7 @@ namespace Mohist.Server.L0Tests.Sessions;
 /// (session grains) serialize saves per key, so isolation is asserted as
 /// key scoping plus last-committed-wins.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class AgentSessionStoreSchedulePersistenceTests
 {
     private static readonly DateTime FixedTime = new(2026, 6, 30, 0, 0, 0, DateTimeKind.Utc);

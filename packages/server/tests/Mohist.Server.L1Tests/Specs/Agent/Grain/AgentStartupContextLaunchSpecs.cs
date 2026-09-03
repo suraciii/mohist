@@ -23,6 +23,7 @@ namespace Mohist.Server.L1Tests.Specs.Agent.Grain;
 /// attestation), and does not leak into follow-up inputs.
 /// </summary>
 [Collection("AgentJobGrain")]
+[Trait("level", "L1")]
 public sealed class AgentStartupContextLaunchSpecs : AgentJobGrainTestSupport
 {
     public AgentStartupContextLaunchSpecs(AgentJobGrainFixture fixture) : base(fixture)

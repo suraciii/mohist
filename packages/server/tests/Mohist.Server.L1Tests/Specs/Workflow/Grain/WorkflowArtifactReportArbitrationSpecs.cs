@@ -14,6 +14,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Workflow.Grain;
 
 [Collection("WorkflowGrain")]
+[Trait("level", "L1")]
 public sealed class WorkflowArtifactReportArbitrationSpecs : WorkflowGrainSpecs
 {
     public WorkflowArtifactReportArbitrationSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

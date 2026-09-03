@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Agent.Api;
 
+[Trait("level", "L1")]
 public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
 {
     private HttpClient Client => fixture.Client;

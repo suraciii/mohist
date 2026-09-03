@@ -4,6 +4,7 @@ using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.L0Tests.SystemSpecs;
 
+[Trait("level", "L0")]
 public class SystemdUnitParserTests
 {
     [Fact]
@@ -74,6 +75,7 @@ ExecStart=dotnet run --project Mohist.Server.csproj
     }
 }
 
+[Trait("level", "L0")]
 public class SystemdInstallDetectorTests
 {
     [Fact]

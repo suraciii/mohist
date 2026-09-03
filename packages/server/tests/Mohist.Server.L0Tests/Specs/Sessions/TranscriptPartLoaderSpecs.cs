@@ -20,6 +20,7 @@ namespace Mohist.Server.L0Tests.Specs.Sessions;
 /// observable projections across the read side remain byte-identical to
 /// the pre-consolidation results.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class TranscriptPartLoaderSpecs
 {
     private static readonly DateTime FixedTime = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);

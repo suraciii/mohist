@@ -21,6 +21,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Sessions;
 
+[Trait("level", "L0")]
 public sealed class UnifiedAgentConnectionSessionRoutesSpecs
 {
     private const string ProjectA = "proj-unified-connection-A";

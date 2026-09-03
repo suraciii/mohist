@@ -11,6 +11,7 @@ namespace Mohist.Server.L0Tests.Auth;
 /// readonly-declared GET routes, runner and webhook satisfy their own
 /// declarations regardless of method.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class ScopeSatisfactionTests
 {
     [Theory]

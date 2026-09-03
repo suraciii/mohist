@@ -25,6 +25,7 @@ public sealed class FakeDbContextFactory : IDbContextFactory<MohistDbContext>
     public void Dispose() => _database.Dispose();
 }
 
+[Trait("level", "L0")]
 public class IssueTemplateRegistrySpecs
 {
     private const string FeatureSections = "## Section A\n\n<!-- guidance-a -->\n\n<placeholder-a>\n\n## Section B\n\nBody text";

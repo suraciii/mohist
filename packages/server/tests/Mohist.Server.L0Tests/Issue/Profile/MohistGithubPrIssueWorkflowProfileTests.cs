@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Issue.Profile;
 
+[Trait("level", "L0")]
 public class MohistGithubPrIssueWorkflowProfileTests
 {
     private static WorkflowDefinition GithubPrDefinition => WorkflowProfileCatalog.GithubPrWorkflowDefinition;

@@ -8,6 +8,7 @@ namespace Mohist.Server.L0Tests.Sessions;
 /// Unit tests for <see cref="ContextExhaustionClassifier"/> covering the
 /// exhaustion classification rules.
 /// </summary>
+[Trait("level", "L0")]
 public class ContextExhaustionClassifierTests
 {
     [Fact]

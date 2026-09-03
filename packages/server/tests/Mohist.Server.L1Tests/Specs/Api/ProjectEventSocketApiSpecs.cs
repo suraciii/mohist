@@ -13,6 +13,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Api;
 
 [Collection("IntegrationRunner")]
+[Trait("level", "L1")]
 public sealed class ProjectEventSocketApiSpecs(MohistIntegrationFixture fixture)
 {
     [Fact]

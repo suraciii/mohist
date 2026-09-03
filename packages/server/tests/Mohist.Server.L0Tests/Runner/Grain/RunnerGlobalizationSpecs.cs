@@ -5,6 +5,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Runner.Grain;
 
 [Collection("OrleansGrainL0")]
+[Trait("level", "L0")]
 public sealed class RunnerGlobalizationSpecs
 {
     private readonly OrleansL0WorkflowGrainFixture _fixture;

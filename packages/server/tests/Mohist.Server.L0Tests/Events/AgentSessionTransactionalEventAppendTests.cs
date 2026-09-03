@@ -32,6 +32,7 @@ namespace Mohist.Server.L0Tests.Events;
 /// value (D6); and every emitted envelope satisfies the AgentSession
 /// producer-family rule.
 /// </summary>
+[Trait("level", "L0")]
 public class AgentSessionTransactionalEventAppendTests : IAsyncLifetime
 {
     private static readonly DateTime FixedTime = new(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc);

@@ -13,6 +13,7 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 /// the <c>AgentUsageReporter</c> calculation matrix and lives in
 /// <c>AgentUsageTimeseriesQuerierSpecs</c>.
 /// </summary>
+[Trait("level", "L1")]
 public class AgentUsageTimeseriesApiSpecs
 {
     private readonly HttpClient _client;

@@ -22,6 +22,7 @@ namespace Mohist.Server.L0Tests.Workflow.Querier;
 /// assertions live under <c>Specs/Runner/Grain</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class WorkflowRunQuerierSchedulingSpecs
 {
     private readonly MohistDbFixture _fixture;

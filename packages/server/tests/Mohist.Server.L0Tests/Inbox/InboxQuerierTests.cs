@@ -14,6 +14,7 @@ namespace Mohist.Server.L0Tests.Inbox;
 /// project scoping and read/archived exclusion live here; the HTTP layer
 /// keeps only its JSON shape contract.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class InboxQuerierTests
 {
     private static readonly DateTimeOffset FixedTime = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);

@@ -15,6 +15,7 @@ using Mohist.Server.Workflow.Grains;
 namespace Mohist.Server.L1Tests.Specs.Agent.Grain;
 
 [Collection("AgentJobGrain")]
+[Trait("level", "L1")]
 public class AgentJobTerminalTranscriptPersistenceSpecs : AgentJobGrainTestSupport
 {
     public AgentJobTerminalTranscriptPersistenceSpecs(AgentJobGrainFixture fixture) : base(fixture)

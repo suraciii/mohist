@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Events;
 
+[Trait("level", "L0")]
 public class EventDeliveryIndexSpecs
 {
     private const string UndeliveredFilter = "\"DispatchedAt\" IS NULL";

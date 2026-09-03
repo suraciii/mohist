@@ -11,6 +11,7 @@ namespace Mohist.Server.L0Tests.Issue.Services;
 /// <c>workflow-stage-duration-metrics</c> surface and the
 /// stage-population snapshot job.
 /// </summary>
+[Trait("level", "L0")]
 public class IssueStageAttributionTests
 {
     private static readonly string[] DefaultStageOrder = ["plan", "build", "check", "integrate"];

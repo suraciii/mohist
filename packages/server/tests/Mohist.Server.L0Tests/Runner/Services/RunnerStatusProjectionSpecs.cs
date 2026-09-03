@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Runner.Services;
 
+[Trait("level", "L0")]
 public sealed class RunnerStatusProjectionSpecs
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);

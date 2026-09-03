@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Events.Inbox;
 
+[Trait("level", "L0")]
 public class InboxProjectionHandlerBlockedSpecs
 {
     [Fact]

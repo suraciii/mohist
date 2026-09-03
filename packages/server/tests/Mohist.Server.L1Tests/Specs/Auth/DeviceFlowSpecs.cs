@@ -21,6 +21,7 @@ namespace Mohist.Server.L1Tests.Specs.Auth;
 /// session; polling and code guessing are rate-limited per source.
 /// </summary>
 [Collection("DeviceFlowIntegration")]
+[Trait("level", "L1")]
 public sealed class DeviceFlowSpecs(IsolatedMohistIntegrationFixture fixture)
 {
     private const string SessionCookieName = "mohist_session";

@@ -21,6 +21,7 @@ namespace Mohist.Server.L0Tests.Issue.Querier;
 /// but exercised through the read-model instead of the aggregate.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueStartReadinessProjectionSpecs
 {
     private readonly MohistDbFixture _fixture;

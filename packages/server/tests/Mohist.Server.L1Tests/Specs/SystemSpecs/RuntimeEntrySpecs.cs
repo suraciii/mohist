@@ -23,6 +23,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.SystemSpecs;
 
 [Collection("WorkflowRuntimeIntegration")]
+[Trait("level", "L1")]
 public class RuntimeEntrySpecs
 {
     private readonly MohistIntegrationFixture _fixture;

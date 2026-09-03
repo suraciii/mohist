@@ -26,6 +26,7 @@ using Mohist.Server.Workflow.Grains;
 namespace Mohist.Server.L1Tests.Specs.DirectApi;
 
 [Collection("PublicProjectionIntegration")]
+[Trait("level", "L1")]
 public sealed class DirectApiStopSpecs(PublicProjectionIntegrationFixture fixture)
 {
     [Fact]

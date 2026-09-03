@@ -15,6 +15,7 @@ namespace Mohist.Server.L0Tests.SystemSpecs;
 /// event is dispatched exactly once. Correctness comes from the lease
 /// store's claim semantics, not from a single-threaded actor.
 /// </summary>
+[Trait("level", "L0")]
 public class EventDispatcherConcurrencyTests
 {
     [Fact]

@@ -14,6 +14,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Workflow.Grain;
 
+[Trait("level", "L1")]
 public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
 {
     public DispatchSnapshotPersistenceSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

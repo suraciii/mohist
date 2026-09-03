@@ -9,6 +9,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Specs.Sessions;
 
 [Collection("AgentSessionGrainL0")]
+[Trait("level", "L0")]
 public sealed class AgentSessionRuntimeEventStateSpecs
 {
     private readonly AgentSessionGrainFixture _fixture;

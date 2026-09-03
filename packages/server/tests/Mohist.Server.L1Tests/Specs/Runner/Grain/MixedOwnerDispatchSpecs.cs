@@ -13,6 +13,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Runner.Grain;
 
 [Collection("RunnerGrain")]
+[Trait("level", "L1")]
 public sealed class MixedOwnerDispatchSpecs : Mohist.Server.L1Tests.Specs.Workflow.WorkflowGrainSpecs
 {
     public MixedOwnerDispatchSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

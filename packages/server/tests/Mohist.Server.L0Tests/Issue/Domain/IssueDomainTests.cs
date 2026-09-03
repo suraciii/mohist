@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Issue.Domain;
 
+[Trait("level", "L0")]
 public class IssueDomainTests
 {
     [Fact]

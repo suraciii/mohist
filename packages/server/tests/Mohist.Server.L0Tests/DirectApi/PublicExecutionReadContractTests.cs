@@ -12,6 +12,7 @@ namespace Mohist.Server.L0Tests.DirectApi;
 /// and the guarantee that no internal read shape or prompt content is
 /// ever serialized into it.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class PublicExecutionReadContractTests
 {
     private static readonly string[] AllowlistedKeys =

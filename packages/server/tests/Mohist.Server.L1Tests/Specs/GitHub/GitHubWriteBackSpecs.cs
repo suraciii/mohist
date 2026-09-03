@@ -19,6 +19,7 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 namespace Mohist.Server.L1Tests.Specs.GitHub;
 
 [Collection("GitHubCommand")]
+[Trait("level", "L1")]
 public sealed class GitHubWriteBackSpecs
 {
     private const string RepoName = "hello-world";

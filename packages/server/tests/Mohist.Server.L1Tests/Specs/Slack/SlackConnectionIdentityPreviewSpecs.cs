@@ -14,6 +14,7 @@ using DomainAgent = Mohist.Server.Agent.Domain.Agent;
 
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
+[Trait("level", "L1")]
 public sealed class SlackConnectionIdentityPreviewSpecs
 {
     private const string SlackAppCreationReference = "https://api.slack.com/apps?new_app=1";

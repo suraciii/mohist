@@ -96,6 +96,9 @@ function validateTrack(track: TrackConfig): string[] {
   } else if (track.apphostArgs?.some((arg) => typeof arg !== 'string')) {
     errors.push(`${prefix}: apphostArgs must contain only strings`)
   }
+  if (track.kind === 'dotnet-apphost' && track.trackType === 'behavior' && track.level !== undefined) {
+    errors.push(...validateLevelSelector(track, prefix))
+  }
   if (track.deadlineMs <= 0) errors.push(`${prefix}: deadlineMs must be positive`)
   if (track.kind !== 'report-only' && !track.run && !track.csproj && !track.apphost) {
     errors.push(`${prefix}: needs a run command, csproj, or apphost`)
@@ -128,6 +131,30 @@ function validateTrack(track: TrackConfig): string[] {
     if ((track.rules?.length ?? 0) > 0) {
       errors.push(`${prefix}: enforce=false must not carry unenforced rules`)
     }
+  }
+  return errors
+}
+
+function validateLevelSelector(track: TrackConfig, prefix: string): string[] {
+  const args =
+    Array.isArray(track.apphostArgs) && track.apphostArgs.every((arg) => typeof arg === 'string')
+      ? track.apphostArgs
+      : []
+  const selectors = args.flatMap((option, index) => {
+    if (option !== '-trait' && option !== '-trait-') return []
+    const value = args[index + 1]
+    if (typeof value !== 'string' || !/^level=/i.test(value)) return []
+    return [{ option, value }]
+  })
+  const errors: string[] = []
+  const negative = selectors.filter((selector) => selector.option === '-trait-')
+  if (negative.length > 0) {
+    errors.push(`${prefix}: test level selection must not use a negative -trait- selector`)
+  }
+  const positive = selectors.filter((selector) => selector.option === '-trait')
+  const expected = `level=${track.level}`
+  if (positive.length !== 1 || positive[0]?.value !== expected) {
+    errors.push(`${prefix}: dotnet behavior track must declare exactly one positive "-trait", "${expected}" selector`)
   }
   return errors
 }

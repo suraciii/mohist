@@ -11,6 +11,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
 [Collection("SlackControlPlaneRoutes")]
+[Trait("level", "L1")]
 public sealed class SlackControlPlaneSetupRoutesSpecs
 {
     private const string OperatorToken = MohistIntegrationFixture.OperatorToken;

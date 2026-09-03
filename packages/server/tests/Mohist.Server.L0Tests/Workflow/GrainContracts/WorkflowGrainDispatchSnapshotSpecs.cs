@@ -22,6 +22,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// deletion cascades (#681).
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainDispatchSnapshotSpecs
 {
     private static readonly FakeTimeProvider TimeProvider =

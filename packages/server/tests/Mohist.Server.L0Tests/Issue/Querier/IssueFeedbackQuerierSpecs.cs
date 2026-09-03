@@ -27,6 +27,7 @@ namespace Mohist.Server.L0Tests.Issue.Querier;
 /// object) stays in <c>IssueFeedbackApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueFeedbackQuerierSpecs
 {
     private static readonly JsonSerializerOptions ReadJsonOptions = new()

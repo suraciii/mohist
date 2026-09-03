@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Storage;
 
+[Trait("level", "L0")]
 public class DispatchSnapshotStoreTests
 {
     private static WorkDispatch BuildDispatch(string workflowRunId, string workId, string uses = "spec/task") =>

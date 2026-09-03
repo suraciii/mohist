@@ -15,6 +15,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Workspace;
 
+[Trait("level", "L1")]
 public class WorkspaceEntityApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

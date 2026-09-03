@@ -17,6 +17,7 @@ namespace Mohist.Server.L0Tests.Agent.Services;
 /// and the pending-jobs table respectively, while runner capacity is
 /// fetched exactly once across the whole list.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class AgentAvailabilityListSummaryServiceTests
 {
     private static readonly DateTimeOffset ObservedAt = new(2026, 7, 30, 12, 0, 0, TimeSpan.Zero);

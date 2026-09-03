@@ -19,6 +19,7 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
+[Trait("level", "L1")]
 public sealed class SlackReplySegmentationSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

@@ -21,6 +21,7 @@ namespace Mohist.Server.L1Tests.Specs.Sessions;
 /// session stream log when the underlying events fire.
 /// </summary>
 [Collection("EventPublishing")]
+[Trait("level", "L1")]
 public class AgentSessionContextEventPublishingSpecs
 {
     private readonly EventPublishingIntegrationFixture _fixture;

@@ -24,6 +24,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// details owned by the retained representative proofs.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainRetrySpecs
 {
     private static readonly DateTimeOffset FixedTime =

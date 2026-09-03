@@ -14,6 +14,7 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.L0Tests.Events;
 
+[Trait("level", "L0")]
 public class IssueTransactionalEventAppendTests : IAsyncLifetime
 {
     private const string ProjectId = "proj_issue_txn";

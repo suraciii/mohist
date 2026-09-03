@@ -11,6 +11,7 @@ namespace Mohist.Server.L0Tests.Issue.Domain;
 /// permanent start lock, repository reassignment, and reopen-target
 /// behaviors. These tests cover those scenarios.
 /// </summary>
+[Trait("level", "L0")]
 public class IssueRepositoryBindingTests
 {
     private const string ProjectId = "project-1";

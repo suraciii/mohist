@@ -25,6 +25,7 @@ namespace Mohist.Server.L1Tests.Specs.Sessions;
 /// wire-level response parity.
 /// </summary>
 [Collection("OtelFullStackIntegration")]
+[Trait("level", "L1")]
 public sealed class AgentPathAmplificationOtelEnabledSpecs
 {
     private static readonly string[] AmplificationFields =

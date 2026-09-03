@@ -12,6 +12,7 @@ namespace Mohist.Server.L0Tests.Issue.Domain;
 /// The HTTP-level update+round-trip shape lives in
 /// <c>IssueApiSpecs.UpdateIssue_RiskOnly_PersistsAndReturnsRisk</c>.
 /// </summary>
+[Trait("level", "L0")]
 public class IssueRiskPersistingDomainTests
 {
     [Fact]

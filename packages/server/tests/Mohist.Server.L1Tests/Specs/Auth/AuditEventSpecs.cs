@@ -21,6 +21,7 @@ namespace Mohist.Server.L1Tests.Specs.Auth;
 /// subject, time and target, and never a token plaintext value.
 /// </summary>
 [Collection("WorkflowRuntimeIntegration")]
+[Trait("level", "L1")]
 public sealed class AuditEventSpecs(IsolatedMohistIntegrationFixture fixture)
 {
     private const string AuditPath = "/api/audit/events";

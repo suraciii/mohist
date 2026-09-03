@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.SystemSpecs;
 
+[Trait("level", "L0")]
 public class EventBusTests
 {
     private static readonly FakeTimeProvider TestTime = new(new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero));

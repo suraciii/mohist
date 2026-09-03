@@ -6,6 +6,7 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.L0Tests.Sessions;
 
+[Trait("level", "L0")]
 public sealed class SessionTranscriptBuilderTests
 {
     private static AgentSession CreateSession(DateTime at, string workDir = "/workspace") => AgentSession.Create(

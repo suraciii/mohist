@@ -22,6 +22,7 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.L0Tests.Agent.Api;
 
+[Trait("level", "L0")]
 public class AgentJobReadRoutesTests
 {
     private static readonly ProjectInfo Project = new()

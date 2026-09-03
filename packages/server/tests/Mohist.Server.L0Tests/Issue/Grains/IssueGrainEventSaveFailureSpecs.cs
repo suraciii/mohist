@@ -34,6 +34,7 @@ namespace Mohist.Server.L0Tests.Issue.Grains;
 /// state through the no-events path.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueGrainEventSaveFailureSpecs
 {
     private readonly MohistDbFixture _fixture;

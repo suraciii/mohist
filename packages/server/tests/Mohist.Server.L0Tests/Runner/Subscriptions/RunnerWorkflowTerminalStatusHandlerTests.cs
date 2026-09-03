@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Runner.Subscriptions;
 
+[Trait("level", "L0")]
 public class RunnerWorkflowTerminalStatusHandlerTests
 {
     [Fact]

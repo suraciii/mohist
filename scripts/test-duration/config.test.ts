@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { test } from 'node:test'
+import { fileURLToPath } from 'node:url'
 
 import { parseSuiteConfig, stripJsonc, validateConfig } from './config.js'
+
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 
 const SAMPLE = `{
   // top-level suite deadline
@@ -79,6 +84,61 @@ test('validateConfig rejects non-string apphostArgs items', () => {
     }),
   )
   assert.ok(validateConfig(config).some((e) => e.includes('apphostArgs must contain only strings')))
+})
+
+function dotnetBehaviorTrack(apphostArgs: readonly string[], level: 'L0' | 'L1' = 'L0') {
+  return parseSuiteConfig(
+    JSON.stringify({
+      suiteDeadlineMs: 1000,
+      tracks: [
+        {
+          id: `server-${level.toLowerCase()}`,
+          kind: 'dotnet-apphost',
+          trackType: 'behavior',
+          level,
+          csproj: `server-${level.toLowerCase()}.csproj`,
+          apphostArgs,
+          report: `reports/server-${level.toLowerCase()}.trx`,
+          reportFormat: 'trx',
+          deadlineMs: 100,
+          enforce: true,
+          rules: [{ id: 'tests' }],
+        },
+      ],
+    }),
+  )
+}
+
+test('validateConfig accepts one positive trait selector matching a dotnet behavior track level', () => {
+  assert.deepEqual(validateConfig(dotnetBehaviorTrack(['-trait', 'level=L0'])), [])
+  assert.deepEqual(validateConfig(dotnetBehaviorTrack(['-trait', 'level=L1'], 'L1')), [])
+})
+
+test('validateConfig rejects missing, mismatched, duplicate, and negative test level selectors', () => {
+  for (const args of [
+    [],
+    ['-trait', 'level=L1'],
+    ['-trait', 'level=L0', '-trait', 'level=L0'],
+    ['-trait-', 'level=L1'],
+  ]) {
+    assert.ok(
+      validateConfig(dotnetBehaviorTrack(args)).some((error) => error.includes('positive "-trait", "level=L0"')),
+      `expected an invalid positive selector diagnosis for ${JSON.stringify(args)}`,
+    )
+  }
+  assert.ok(
+    validateConfig(dotnetBehaviorTrack(['-trait-', 'level=L0'])).some((error) => error.includes('negative -trait-')),
+  )
+})
+
+test('repository Server behavior tracks use their matching positive level selectors', () => {
+  const config = parseSuiteConfig(readFileSync(resolve(repositoryRoot, 'test-duration.config.jsonc'), 'utf8'))
+  assert.deepEqual(validateConfig(config), [])
+
+  const serverL0 = config.tracks.find((track) => track.id === 'server-l0')
+  const serverL1 = config.tracks.find((track) => track.id === 'server-l1')
+  assert.deepEqual(serverL0?.apphostArgs?.slice(0, 2), ['-trait', 'level=L0'])
+  assert.deepEqual(serverL1?.apphostArgs?.slice(0, 2), ['-trait', 'level=L1'])
 })
 
 test('validateConfig keeps execution ledgers on dotnet apphost tracks', () => {

@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 
+[Trait("level", "L1")]
 public class IssueMetricsApiSpecs
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);

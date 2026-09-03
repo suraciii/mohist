@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Runner;
 
+[Trait("level", "L0")]
 public sealed class RunnerSessionStopDeliveryTests
 {
     [Fact]

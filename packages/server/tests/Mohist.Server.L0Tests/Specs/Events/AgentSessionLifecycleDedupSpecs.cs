@@ -12,6 +12,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Specs.Events;
 
 [Collection("OrleansGrainL0")]
+[Trait("level", "L0")]
 public sealed class AgentSessionLifecycleDedupSpecs
 {
     private const string RunnerId = "event-dedup-runner";

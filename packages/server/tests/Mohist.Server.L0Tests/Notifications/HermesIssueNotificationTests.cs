@@ -19,6 +19,7 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.L0Tests.Notifications;
 
+[Trait("level", "L0")]
 public sealed class HermesIssueNotificationTests : HermesIssueNotificationTestSupport
 {
     [Fact]

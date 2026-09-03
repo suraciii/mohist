@@ -11,6 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Querier;
 
+[Trait("level", "L0")]
 public class WorkflowVariableResolutionSpecs : WorkflowDefinitionResolverTestFactory
 {
     [Fact]

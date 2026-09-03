@@ -10,6 +10,7 @@ namespace Mohist.Server.L0Tests.Events;
 /// <c>epic</c> is stamped. Absent affiliation omits the key entirely;
 /// existing keys (projectid, issue, epic) are unchanged.
 /// </summary>
+[Trait("level", "L0")]
 public class IssueLineageTests
 {
     [Fact]

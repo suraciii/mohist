@@ -28,6 +28,7 @@ namespace Mohist.Server.L0Tests.Issue.Grains;
 /// </list>
 /// </summary>
 [Collection("OrleansGrainL0")]
+[Trait("level", "L0")]
 public class IssueCompositeAdvancementGrainSpecs
 {
     private readonly OrleansL0WorkflowGrainFixture _fixture;

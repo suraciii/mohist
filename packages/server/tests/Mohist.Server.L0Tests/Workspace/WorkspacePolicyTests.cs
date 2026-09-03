@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workspace;
 
+[Trait("level", "L0")]
 public class WorkspacePolicyTests
 {
     private static readonly WorkspaceOrigin Manual = new WorkspaceOrigin.Manual();

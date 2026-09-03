@@ -22,6 +22,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// reports change nothing (#681).
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainReportArbitrationSpecs
 {
     private static readonly FakeTimeProvider TimeProvider =

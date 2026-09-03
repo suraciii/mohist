@@ -15,6 +15,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Agent.Grain;
 
 [Collection("AgentSpawnCoordinator")]
+[Trait("level", "L1")]
 public sealed class AgentSpawnCoordinatorSpecs : AgentJobGrainTestSupport
 {
     public AgentSpawnCoordinatorSpecs(AgentJobGrainFixture fixture) : base(fixture)

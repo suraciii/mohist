@@ -29,6 +29,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// With payload a cluster poll would deliver (#681).
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainDispatchVariablesSpecs
 {
     private static readonly DateTimeOffset FixedTime =

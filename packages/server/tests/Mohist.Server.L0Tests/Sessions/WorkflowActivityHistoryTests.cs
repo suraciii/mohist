@@ -38,6 +38,7 @@ namespace Mohist.Server.L0Tests.Sessions;
 /// the test seam exposed on <see cref="AgentSessionQuery"/> + a
 /// counting <see cref="IWorkflowStatusReader"/> fake), never wall-clock.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class WorkflowActivityHistoryTests : WorkflowActivityHistoryTestSupport
 {
     [Fact]

@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.GitHub;
 
+[Trait("level", "L0")]
 public sealed class GitHubIssueLinkStoreTests
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 10, 8, 0, 0, TimeSpan.Zero);

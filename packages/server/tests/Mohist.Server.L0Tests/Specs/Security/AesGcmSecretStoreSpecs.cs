@@ -13,6 +13,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Security;
 
+[Trait("level", "L0")]
 public class AesGcmSecretStoreSpecs
 {
     [Fact]

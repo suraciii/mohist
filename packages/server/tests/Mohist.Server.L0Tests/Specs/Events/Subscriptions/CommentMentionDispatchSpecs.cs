@@ -24,6 +24,7 @@ namespace Mohist.Server.L0Tests.Specs.Events.Subscriptions;
 /// </para>
 
 /// </summary>
+[Trait("level", "L0")]
 public sealed class CommentMentionDispatchSpecs
 {
     [Fact]

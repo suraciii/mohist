@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.SystemSpecs;
 
+[Trait("level", "L0")]
 public class RuntimeBuildInfoTests
 {
     [Fact]

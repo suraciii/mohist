@@ -9,6 +9,7 @@ using Mohist.Server.TestSupport;
 
 namespace Mohist.Server.L0Tests.SystemSpecs;
 
+[Trait("level", "L0")]
 public class DatabaseInitializationTests
 {
     [Fact]

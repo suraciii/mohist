@@ -18,6 +18,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Runner.Api;
 
 [Collection("IntegrationRunner")]
+[Trait("level", "L1")]
 public sealed class RunnerControlWebSocketApiSpecs(MohistIntegrationFixture fixture)
 {
     [Fact]

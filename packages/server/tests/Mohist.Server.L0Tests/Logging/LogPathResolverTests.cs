@@ -5,6 +5,7 @@ using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.L0Tests.Logging;
 
+[Trait("level", "L0")]
 public class LogPathResolverTests
 {
     [Fact]

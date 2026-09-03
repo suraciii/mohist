@@ -6,6 +6,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Runner.Grain;
 
 [Collection("RunnerGrain")]
+[Trait("level", "L1")]
 public class RunnerOutstandingWorkSpecs : WorkflowGrainSpecs
 {
     public RunnerOutstandingWorkSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

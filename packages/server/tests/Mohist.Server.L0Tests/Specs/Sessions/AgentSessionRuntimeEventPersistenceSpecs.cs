@@ -9,6 +9,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Specs.Sessions;
 
 [Collection("OrleansGrainL0")]
+[Trait("level", "L0")]
 public sealed class AgentSessionRuntimeEventPersistenceSpecs
 {
     private readonly OrleansL0WorkflowGrainFixture _fixture;

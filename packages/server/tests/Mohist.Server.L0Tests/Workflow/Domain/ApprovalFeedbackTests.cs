@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Domain;
 
+[Trait("level", "L0")]
 public partial class ApprovalFeedbackTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

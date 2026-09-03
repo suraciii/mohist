@@ -20,6 +20,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Specs.Runner.Grain;
 
 [Collection("OrleansGrainL0")]
+[Trait("level", "L0")]
 public partial class DispatchServiceReconciliationSpecs : WorkflowGrainTestContext
 {
     public DispatchServiceReconciliationSpecs(OrleansL0WorkflowGrainFixture fixture) : base(fixture) { }

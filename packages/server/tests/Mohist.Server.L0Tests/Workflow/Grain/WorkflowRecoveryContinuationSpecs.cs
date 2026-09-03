@@ -7,6 +7,7 @@ using Mohist.Server.Runner.Grains;
 namespace Mohist.Server.L0Tests.Workflow.Grain;
 
 [Collection("OrleansGrainL0")]
+[Trait("level", "L0")]
 public sealed class WorkflowRecoveryContinuationSpecs
 {
     private readonly OrleansL0WorkflowGrainFixture _orleansFixture;

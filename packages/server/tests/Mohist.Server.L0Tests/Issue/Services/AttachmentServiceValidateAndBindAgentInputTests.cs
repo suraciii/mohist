@@ -15,6 +15,7 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.L0Tests.Issue.Services;
 
+[Trait("level", "L0")]
 public sealed class AttachmentServiceValidateAndBindAgentInputTests
 {
     private static readonly DateTimeOffset _frozenNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);

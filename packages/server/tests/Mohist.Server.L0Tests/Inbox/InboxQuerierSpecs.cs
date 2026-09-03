@@ -15,6 +15,7 @@ namespace Mohist.Server.L0Tests.Inbox;
 /// <c>InboxApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class InboxQuerierSpecs
 {
     private readonly MohistDbFixture _fixture;

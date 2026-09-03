@@ -22,6 +22,7 @@ namespace Mohist.Server.L0Tests.Workflow.Storage;
 /// in <c>WorkflowArtifactQueryRouteSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class WorkflowArtifactQuerySpecs
 {
     private readonly MohistDbFixture _fixture;

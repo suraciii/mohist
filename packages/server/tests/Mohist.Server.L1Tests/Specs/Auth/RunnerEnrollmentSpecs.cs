@@ -16,6 +16,7 @@ namespace Mohist.Server.L1Tests.Specs.Auth;
 /// re-running the install flow restores a revoked runner.
 /// </summary>
 [Collection("WorkflowRuntimeIntegration")]
+[Trait("level", "L1")]
 public sealed class RunnerEnrollmentSpecs(IsolatedMohistIntegrationFixture fixture)
 {
     private const string EnrollmentTokensPath = "/api/runners/enrollment-tokens";

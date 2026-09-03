@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Telemetry;
 
+[Trait("level", "L0")]
 public class TraceQuerierSpecs : IDisposable
 {
     private readonly OtelDb _db;

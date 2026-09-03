@@ -32,6 +32,7 @@ namespace Mohist.Server.L0Tests.Specs.Events.Issue;
 /// <item><see cref="IssueCompositeParentChangedHandler"/> on <c>parent-changed</c></item>
 /// </list>
 /// </summary>
+[Trait("level", "L0")]
 public class IssueCompositeHandlersSpecs
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 7, 18, 12, 0, 0, TimeSpan.Zero);

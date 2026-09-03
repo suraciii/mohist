@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Logging;
 
+[Trait("level", "L0")]
 public class FileLoggerTests
 {
     private static readonly DateTimeOffset FixedNow =
@@ -104,6 +105,7 @@ public class FileLoggerTests
 
 // Banned for tests of other components; this is the provider's own test and writes only to the in-memory file system.
 #pragma warning disable RS0030
+[Trait("level", "L0")]
 public class FileLoggerProviderRotationTests
 {
     private const string LogPath = "/logs/server.log";

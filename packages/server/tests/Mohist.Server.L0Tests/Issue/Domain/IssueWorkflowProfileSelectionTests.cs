@@ -10,6 +10,7 @@ namespace Mohist.Server.L0Tests.Issue.Domain;
 /// <see cref="Issue"/> aggregate introduced for issue-workflow-profile
 /// consistency (single source of truth).
 /// </summary>
+[Trait("level", "L0")]
 public class IssueWorkflowProfileSelectionTests
 {
     private static IssueWorkflowProfileChanged UnwrapChanged(IssueEvent payload) => payload switch

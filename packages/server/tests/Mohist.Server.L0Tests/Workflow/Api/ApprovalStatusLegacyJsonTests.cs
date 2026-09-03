@@ -10,6 +10,7 @@ namespace Mohist.Server.L0Tests.Workflow.Api;
 /// <c>decidedBy</c> existed carry no <c>decidedBy</c> field in the stored
 /// JSON. Reading them back must surface the field as null, not fail.
 /// </summary>
+[Trait("level", "L0")]
 public class ApprovalStatusLegacyJsonTests
 {
     [Theory]

@@ -22,6 +22,7 @@ using HttpClient = System.Net.Http.HttpClient;
 
 namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 
+[Trait("level", "L1")]
 public class IssueWorkflowLifecycleSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
