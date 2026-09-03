@@ -23,7 +23,7 @@ public sealed class InboxQuerierTests
     {
         var keeper = new SqliteConnection($"Data Source=inbox-querier-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
         await keeper.OpenAsync();
-        SqliteSchemaTemplate.CopyModelSchemaTo(keeper);
+        MigratedSqliteTemplate.CopyModelSchemaTo(keeper);
         return keeper;
     }
 

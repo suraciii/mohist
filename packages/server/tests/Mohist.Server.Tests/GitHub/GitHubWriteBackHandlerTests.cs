@@ -122,7 +122,7 @@ public sealed class GitHubWriteBackHandlerTests
             Options = new DbContextOptionsBuilder<MohistDbContext>()
                 .UseSqlite(Keeper)
                 .Options;
-            SqliteSchemaTemplate.CopyModelSchemaTo(Keeper);
+            MigratedSqliteTemplate.CopyModelSchemaTo(Keeper);
             using (var db = new MohistDbContext(Options))
             {
                 db.GitHubConnections.Add(new GitHubConnectionRow

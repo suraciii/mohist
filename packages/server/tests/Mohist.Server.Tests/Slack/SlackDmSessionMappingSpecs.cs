@@ -329,7 +329,7 @@ public sealed class SlackDmSessionMappingSpecs
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(keeper)
             .Options;
-        SqliteSchemaTemplate.CopyModelSchemaTo(keeper);
+        MigratedSqliteTemplate.CopyModelSchemaTo(keeper);
         var factory = new TestDbContextFactory(options);
         var time = new FakeTimeProvider(FixedNow);
         var store = new SlackDmSessionMappingStore(factory, time);

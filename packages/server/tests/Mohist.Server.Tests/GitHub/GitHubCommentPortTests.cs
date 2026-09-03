@@ -194,7 +194,7 @@ public sealed class GitHubCommentPortTests
             _keeper = new SqliteConnection("Data Source=:memory:");
             _keeper.Open();
             var options = new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(_keeper).Options;
-            SqliteSchemaTemplate.CopyModelSchemaTo(_keeper);
+            MigratedSqliteTemplate.CopyModelSchemaTo(_keeper);
             using (var db = new MohistDbContext(options))
             {
                 db.GitHubConnections.Add(new GitHubConnectionRow

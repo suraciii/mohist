@@ -239,7 +239,7 @@ public sealed class AgentSessionStoreSchedulePersistenceTests
     {
         var keeper = new SqliteConnection($"Data Source=schedule-persist-{name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
         await keeper.OpenAsync();
-        SqliteSchemaTemplate.CopyModelSchemaTo(keeper);
+        MigratedSqliteTemplate.CopyModelSchemaTo(keeper);
         return keeper;
     }
 

@@ -60,7 +60,7 @@ public sealed class GitHubConnectionStoreTests
         var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
         var options = new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(connection).Options;
-        SqliteSchemaTemplate.CopyModelSchemaTo(connection);
+        MigratedSqliteTemplate.CopyModelSchemaTo(connection);
         using var db = new MohistDbContext(options);
         db.Projects.Add(new ProjectRow { Id = "proj_1", Name = "demo", RepositoriesJson = repositoriesJson });
         db.SaveChanges();

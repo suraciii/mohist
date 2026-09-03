@@ -28,7 +28,7 @@ public sealed class AttachmentServiceLimitsTests
     {
         var keeper = new SqliteConnection($"Data Source=attachment-limits-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
         await keeper.OpenAsync();
-        SqliteSchemaTemplate.CopyModelSchemaTo(keeper);
+        MigratedSqliteTemplate.CopyModelSchemaTo(keeper);
         return new TestDbContextFactory(
             new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(keeper).Options);
     }

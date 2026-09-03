@@ -62,7 +62,7 @@ public sealed class SlackThreadLaunchReservationStoreTests
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(keeper)
             .Options;
-        SqliteSchemaTemplate.CopyModelSchemaTo(keeper);
+        MigratedSqliteTemplate.CopyModelSchemaTo(keeper);
 
         return new Harness(
             new SlackThreadLaunchReservationStore(new TestDbContextFactory(options), new FakeTimeProvider(FixedNow)),

@@ -43,7 +43,7 @@ public class DispatchSnapshotStoreTests
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(keeper)
             .Options;
-        SqliteSchemaTemplate.CopyModelSchemaTo(keeper);
+        MigratedSqliteTemplate.CopyModelSchemaTo(keeper);
         var factory = new TestDbContextFactory(options);
         var store = new DispatchSnapshotStore(factory, NullLogger<DispatchSnapshotStore>.Instance);
         return new Harness(store, factory, keeper);
