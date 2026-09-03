@@ -22,8 +22,9 @@ public interface ISlackMemberIdentityPort
     /// <summary>
     /// <c>conversations.info</c>: whether the authenticated Bot is a member
     /// of the conversation. <see cref="SlackConversationMembershipResult.Confirmed"/>
-    /// is true only when Slack returned a parseable channel object with the
-    /// <c>is_member</c> flag.
+    /// is true only when Slack returned a parseable channel object whose
+    /// <c>id</c> exactly matches the requested conversation and which includes
+    /// the <c>is_member</c> flag.
     /// </summary>
     Task<SlackConversationMembershipResult> LookupConversationAsync(
         SlackConversationMembershipRequest request,
