@@ -130,6 +130,77 @@ func TestRunMapsTransportAndCancellation(t *testing.T) {
 	}
 }
 
+func TestRunMaintenanceDefaultsCurrentDirectory(t *testing.T) {
+	var stdout, stderr strings.Builder
+	deps := Dependencies{
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		Lookup:    func(string) (string, bool) { return "", false },
+		HomeDir:   func() (string, error) { return "/home/test", nil },
+		WriteFile: func(string, string, os.FileMode) error { return nil },
+		Execute:   func(context.Context, string, []string) error { return nil },
+		MkdirAll:  func(string, os.FileMode) error { return nil },
+	}
+
+	if code := Run(context.Background(), []string{"install", "server", "--unit-dir", "/tmp/mohist-test"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestRunUpdateCLIDefaultsCurrentDirectory(t *testing.T) {
+	var stdout, stderr strings.Builder
+	deps := Dependencies{
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		Lookup:  func(string) (string, bool) { return "", false },
+		HomeDir: func() (string, error) { return "/home/test", nil },
+		Execute: func(context.Context, string, []string) error {
+			return errors.New("build stopped")
+		},
+		MkdirAll: func(string, os.FileMode) error { return nil },
+	}
+
+	if code := Run(context.Background(), []string{"update", "cli", "--cli-path", "/tmp/mohist-test/mo"}, deps); code != ExitOperation {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestRunProjectResolutionDefaultsCurrentDirectory(t *testing.T) {
+	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusInternalServerError, `{"success":false}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"runner", "list"}, deps); code != ExitOperation {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if got := errOut.String(); got != "project is required; pass --project\n" {
+		t.Fatalf("stderr=%q", got)
+	}
+}
+
+func TestRunPreservesExplicitCurrentDirectoryForProjectResolution(t *testing.T) {
+	var gotPath string
+	files := map[string]string{"/injected/.mohist/cli-state.json": `{"activeProjectId":"injected"}`}
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		gotPath = r.URL.Path
+		return response(http.StatusOK, `{"success":true,"data":[]}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "token"})
+	deps.CurrentDirectory = func() string { return "/injected" }
+	deps.ReadFile = func(path string) (string, error) {
+		value, ok := files[path]
+		if !ok {
+			return "", os.ErrNotExist
+		}
+		return value, nil
+	}
+
+	if code := Run(context.Background(), []string{"runner", "list"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if gotPath != "/api/projects/injected/runners" {
+		t.Fatalf("request path=%q", gotPath)
+	}
+}
+
 func TestDoctorFailureReturnsOperationExit(t *testing.T) {
 	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return response(200, `{"success":true,"data":[{"name":"migrations","status":"fail","detail":"pending","nextAction":"migrate"}]}`), nil
