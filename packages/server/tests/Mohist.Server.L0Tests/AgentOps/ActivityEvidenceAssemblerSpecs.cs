@@ -29,6 +29,7 @@ namespace Mohist.Server.L0Tests.AgentOps;
 /// (empty waiting shape) stays in <c>ActivityWaitingApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class ActivityEvidenceAssemblerSpecs
 {
     private static readonly DateTimeOffset FixedTime = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);

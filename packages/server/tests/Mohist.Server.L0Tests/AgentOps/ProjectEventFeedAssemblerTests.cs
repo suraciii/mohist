@@ -22,6 +22,7 @@ namespace Mohist.Server.L0Tests.AgentOps;
 /// <c>ProjectEventsApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class ProjectEventFeedAssemblerTests
 {
     private readonly MohistDbFixture _fixture;

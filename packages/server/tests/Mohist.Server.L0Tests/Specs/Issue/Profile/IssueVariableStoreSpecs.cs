@@ -11,6 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Issue.Profile;
 
+[Trait("level", "L0")]
 public sealed class IssueVariableStoreSpecs : IAsyncLifetime
 {
     private const string ProjectId = "proj_issue_variables";

@@ -8,6 +8,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Label;
 
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class LabelCatalogServiceSpecs
 {
     private readonly IServiceProvider _services;

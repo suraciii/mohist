@@ -28,6 +28,7 @@ namespace Mohist.Server.L0Tests.Sessions;
 /// 404) stays in <c>IssueWorkflowSessionHistorySpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueWorkflowSessionHistoryQuerierSpecs
 {
     private readonly MohistDbFixture _fixture;

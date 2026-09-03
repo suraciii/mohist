@@ -8,6 +8,7 @@ using Mohist.Server.L1Tests.Specs.Workflow;
 
 namespace Mohist.Server.L1Tests.Specs.Workflow.Grain;
 
+[Trait("level", "L1")]
 public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
 {
     public DispatchAndLoadingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

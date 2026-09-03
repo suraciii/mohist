@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Telemetry;
 
+[Trait("level", "L0")]
 public class OtelStorageRecoveryMaintenanceSpecs : IDisposable
 {
     private static readonly DateTimeOffset Now = new(2026, 7, 21, 0, 0, 0, TimeSpan.Zero);

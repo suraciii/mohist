@@ -25,6 +25,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// task run, path history, latest query, and status summaries (#681).
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainRecoveryArtifactLoopSpecs
 {
     private static readonly FakeTimeProvider TimeProvider =

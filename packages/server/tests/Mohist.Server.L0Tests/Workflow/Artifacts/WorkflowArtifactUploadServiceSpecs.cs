@@ -15,6 +15,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Workflow.Artifacts;
 
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class WorkflowArtifactUploadServiceSpecs
 {
     private readonly MohistDbFixture _fixture;

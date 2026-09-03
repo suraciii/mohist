@@ -12,6 +12,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Workflow.Services;
 
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowAgentHandoffPreflightSpecs
 {
     private readonly MohistDbFixture _fixture;

@@ -31,6 +31,7 @@ namespace Mohist.Server.L0Tests.Specs.SystemSpecs.Otel;
 /// </para>
 /// </summary>
 [Collection("OrleansGrainL0")]
+[Trait("level", "L0")]
 public class OtelOrleansSourceNameSpecs
 {
     private readonly OrleansL0WorkflowGrainFixture _fixture;

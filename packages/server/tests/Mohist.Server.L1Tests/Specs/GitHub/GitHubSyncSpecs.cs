@@ -21,6 +21,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.GitHub;
 
 [Collection("GitHubCommand")]
+[Trait("level", "L1")]
 public sealed partial class GitHubSyncSpecs
 {
     private const string RepositoryName = "hello-world";

@@ -19,6 +19,7 @@ namespace Mohist.Server.L0Tests.Issue.Services;
 /// specs: these never exercised the HTTP surface, and the API layer
 /// keeps only its wire contract.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class AttachmentServiceLimitsTests
 {
     private static readonly DateTimeOffset FixedTime = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);

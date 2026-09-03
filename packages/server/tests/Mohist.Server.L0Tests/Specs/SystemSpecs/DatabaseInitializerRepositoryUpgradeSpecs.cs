@@ -13,6 +13,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.SystemSpecs;
 
+[Trait("level", "L0")]
 public class DatabaseInitializerRepositoryUpgradeSpecs
 {
     [Fact]

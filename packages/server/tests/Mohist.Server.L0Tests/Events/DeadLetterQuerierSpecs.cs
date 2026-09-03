@@ -17,6 +17,7 @@ namespace Mohist.Server.L0Tests.Events;
 /// success-path shape) stays in <c>DeadLetterRoutesSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class DeadLetterQuerierSpecs
 {
     private readonly MohistDbFixture _fixture;

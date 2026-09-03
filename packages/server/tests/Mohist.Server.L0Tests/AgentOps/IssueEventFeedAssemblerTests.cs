@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.AgentOps;
 
+[Trait("level", "L0")]
 public sealed class IssueEventFeedAssemblerTests
 {
     [Fact]

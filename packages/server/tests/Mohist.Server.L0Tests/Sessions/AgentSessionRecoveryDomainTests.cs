@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Sessions;
 
+[Trait("level", "L0")]
 public sealed class AgentSessionRecoveryDomainTests
 {
     [Fact]

@@ -37,6 +37,7 @@ namespace Mohist.Server.L0Tests.Specs.Project.Grain;
 /// </para>
 /// </summary>
 [Collection("OrleansGrainL0")]
+[Trait("level", "L0")]
 public class RepositoryDeletionProtectionSpecs
 {
     private readonly OrleansL0WorkflowGrainFixture _fixture;

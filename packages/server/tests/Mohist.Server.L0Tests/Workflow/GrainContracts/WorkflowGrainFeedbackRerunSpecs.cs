@@ -20,6 +20,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// point for the rejected attempt between feedback resolution and rerun.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainFeedbackRerunSpecs
 {
     private static readonly FakeTimeProvider TimeProvider =

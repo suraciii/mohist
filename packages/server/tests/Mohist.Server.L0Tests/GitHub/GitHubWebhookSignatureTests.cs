@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.GitHub;
 
+[Trait("level", "L0")]
 public sealed class GitHubWebhookSignatureTests
 {
     private static readonly byte[] Payload = Encoding.UTF8.GetBytes("{\"action\":\"labeled\"}");

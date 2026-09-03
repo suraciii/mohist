@@ -24,6 +24,7 @@ namespace Mohist.Server.L1Tests.Specs.Api;
 /// task-run filtering and the directory listing / entry-bytes calculation
 /// live in <c>WorkflowArtifactQuerySpecs</c>.
 /// </summary>
+[Trait("level", "L1")]
 public class WorkflowArtifactQueryRouteSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

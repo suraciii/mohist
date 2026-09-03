@@ -23,6 +23,7 @@ namespace Mohist.Server.L0Tests.Specs.Sessions;
 /// the full HTTP integration stack.
 /// </summary>
 [Collection("AgentSessionFollowupConcurrency")]
+[Trait("level", "L0")]
 public partial class AgentSessionFollowupConcurrencySpecs
 {
     private readonly AgentSessionFollowupConcurrencyFixture _fixture;

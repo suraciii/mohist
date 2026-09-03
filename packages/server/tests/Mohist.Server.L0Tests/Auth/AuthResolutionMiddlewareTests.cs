@@ -16,6 +16,7 @@ using static Mohist.Server.L0Tests.Auth.AuthResolutionTestSupport;
 
 namespace Mohist.Server.L0Tests.Auth;
 
+[Trait("level", "L0")]
 public sealed class AuthResolutionMiddlewareTests
 {
     private const string AdminToken = AuthResolutionTestSupport.AdminToken;

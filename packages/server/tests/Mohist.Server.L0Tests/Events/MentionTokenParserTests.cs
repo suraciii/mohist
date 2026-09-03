@@ -9,6 +9,7 @@ namespace Mohist.Server.L0Tests.Events;
 /// body; the handler's behavior on top of it (loop prevention, resolution,
 /// launch) is covered by <c>CommentMentionDispatchSpecs</c>.
 /// </summary>
+[Trait("level", "L0")]
 public class MentionTokenParserTests
 {
     [Theory]

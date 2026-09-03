@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Services;
 
+[Trait("level", "L0")]
 public partial class ActionContractValidatorTests
 {
     private static ActionCatalogEntry CreateAction(

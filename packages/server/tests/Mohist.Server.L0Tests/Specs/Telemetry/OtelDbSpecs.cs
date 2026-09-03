@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Telemetry;
 
+[Trait("level", "L0")]
 public class OtelDbSpecs : IDisposable
 {
     private readonly OtelDb _db;

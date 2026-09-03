@@ -21,6 +21,7 @@ namespace Mohist.Server.L1Tests.Specs.Agent.Api;
 /// HTTP call — the route fetches runner capacity exactly once regardless
 /// of Agent count and serves one entry per active Agent.
 /// </summary>
+[Trait("level", "L1")]
 public sealed class AgentAvailabilityListRoutesSpecs : IClassFixture<AgentAvailabilityListFixture>
 {
     private readonly AgentAvailabilityListFixture _fixture;

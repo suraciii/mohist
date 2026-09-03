@@ -14,6 +14,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.SystemSpecs.Otel;
 
 [Collection("OtelTracing")]
+[Trait("level", "L0")]
 public class MohistOpenTelemetryRegistrationSpecs
 {
     [Fact]

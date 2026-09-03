@@ -17,6 +17,7 @@ using IssueEntity = Mohist.Server.Issue.Domain.Issue;
 namespace Mohist.Server.L0Tests.Issue.Querier;
 
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueModelVariantRoundTripSpecs
 {
     private readonly MohistDbFixture _fixture;

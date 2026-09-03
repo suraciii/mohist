@@ -11,6 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Slack;
 
+[Trait("level", "L0")]
 public sealed class SlackAdapterLeaseServiceSpecs
 {
     private static readonly DateTimeOffset T0 = new(2026, 8, 5, 14, 0, 0, TimeSpan.Zero);

@@ -23,6 +23,7 @@ namespace Mohist.Server.L0Tests.Specs.Slack;
 /// network, process or wall-clock. Manager targets are covered by the setup
 /// orchestrator specs; here the Agent App lease lifecycle is the subject.
 /// </summary>
+[Trait("level", "L0")]
 public sealed partial class SlackConnectionLeaseTargetSpecs : IAsyncLifetime
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 8, 12, 0, 0, TimeSpan.Zero);

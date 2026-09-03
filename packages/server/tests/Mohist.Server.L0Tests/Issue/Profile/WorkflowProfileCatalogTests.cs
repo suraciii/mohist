@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Issue.Profile;
 
+[Trait("level", "L0")]
 public class WorkflowProfileCatalogTests
 {
     [Fact]

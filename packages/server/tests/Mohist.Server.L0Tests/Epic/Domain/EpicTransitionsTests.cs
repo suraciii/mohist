@@ -5,6 +5,7 @@ using EpicAggregate = Mohist.Server.Epic.Domain.Epic;
 
 namespace Mohist.Server.L0Tests.Epic.Domain;
 
+[Trait("level", "L0")]
 public class EpicTransitionsTests
 {
     private static readonly DateTime UtcNow =

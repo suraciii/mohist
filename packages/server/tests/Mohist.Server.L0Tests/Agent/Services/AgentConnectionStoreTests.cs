@@ -15,6 +15,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Agent.Services;
 
+[Trait("level", "L0")]
 public sealed partial class AgentConnectionStoreSpecs : IAsyncLifetime
 {
     private readonly FakeTimeProvider _timeProvider;

@@ -13,6 +13,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Sessions;
 
+[Trait("level", "L1")]
 public class AgentSessionReadApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

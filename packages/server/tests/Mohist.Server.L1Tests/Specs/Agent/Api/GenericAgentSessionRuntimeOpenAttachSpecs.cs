@@ -23,6 +23,7 @@ namespace Mohist.Server.L1Tests.Specs.Agent.Api;
 /// every subsequent runner call.
 /// </summary>
 [Collection("RunnerMutationIntegration")]
+[Trait("level", "L1")]
 public class GenericAgentSessionRuntimeOpenAttachSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

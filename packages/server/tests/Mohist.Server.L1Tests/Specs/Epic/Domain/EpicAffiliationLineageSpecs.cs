@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Epic.Domain;
 
+[Trait("level", "L1")]
 public class EpicAffiliationLineageSpecs
 {
     private readonly HttpClient _client;

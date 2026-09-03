@@ -24,6 +24,7 @@ namespace Mohist.Server.L1Tests.Specs.Epic.Api;
 /// <item>Single-issue link/unlink routes remain unchanged.</item>
 /// </list>
 /// </summary>
+[Trait("level", "L1")]
 public partial class EpicBatchMembershipApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

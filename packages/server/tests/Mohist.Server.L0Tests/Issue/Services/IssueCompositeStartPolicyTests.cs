@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Issue.Services;
 
+[Trait("level", "L0")]
 public class IssueCompositeStartPolicyTests
 {
     [Fact]

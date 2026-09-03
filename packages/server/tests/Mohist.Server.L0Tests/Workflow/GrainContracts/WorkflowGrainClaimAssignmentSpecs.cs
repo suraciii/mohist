@@ -25,6 +25,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// proofs (#681).
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainClaimAssignmentSpecs
 {
     private static readonly DateTimeOffset FixedTime = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);

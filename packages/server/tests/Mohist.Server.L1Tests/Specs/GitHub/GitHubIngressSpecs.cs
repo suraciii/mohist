@@ -15,6 +15,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.GitHub;
 
+[Trait("level", "L1")]
 public sealed class GitHubIngressSpecs(MohistIntegrationFixture fixture)
 {
     private HttpClient Client => fixture.Client;

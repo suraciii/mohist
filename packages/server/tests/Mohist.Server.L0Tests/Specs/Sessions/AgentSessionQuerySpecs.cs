@@ -17,6 +17,7 @@ namespace Mohist.Server.L0Tests.Specs.Sessions;
 /// exercise the newly queryable agent-launch label keys (and the workflow
 /// regression), over a migrated <see cref="TestSqliteDatabase"/>.
 /// </summary>
+[Trait("level", "L0")]
 public class AgentSessionQuerySpecs
 {
     private const string ProjectA = "proj-A";

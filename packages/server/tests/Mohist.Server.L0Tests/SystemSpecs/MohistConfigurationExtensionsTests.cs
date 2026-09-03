@@ -12,6 +12,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.SystemSpecs;
 
 [Collection("ConsoleCapture")]
+[Trait("level", "L0")]
 public class MohistConfigurationExtensionsTests
 {
     private const string ConfigPath = "/mohist-tests/config.jsonc";

@@ -16,6 +16,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Api;
 
 [Collection("WorkspaceIntegration")]
+[Trait("level", "L1")]
 public class WorkspaceSpecs
 {
     private readonly HttpClient _client;

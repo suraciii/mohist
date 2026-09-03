@@ -17,6 +17,7 @@ namespace Mohist.Server.L0Tests.SystemSpecs;
 /// ACP/liveness keys never reach persistence; the same gate now also
 /// accepts <c>runtime</c> as a backend dimension (issue-452 D1).
 /// </summary>
+[Trait("level", "L0")]
 public class AgentConfigValidationApiBoundaryTests
 {
     [Theory]

@@ -10,6 +10,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Agent.Grain;
 
 [Collection("AgentJobGrain")]
+[Trait("level", "L1")]
 public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
 {
     public AgentJobWriteThroughMirrorSpecs(AgentJobGrainFixture fixture) : base(fixture)

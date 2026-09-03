@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Runner.Services;
 
+[Trait("level", "L0")]
 public class RunnerRegistryCatalogSourceTests
 {
     [Fact]

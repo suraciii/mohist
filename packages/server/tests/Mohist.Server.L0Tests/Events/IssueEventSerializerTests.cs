@@ -11,6 +11,7 @@ namespace Mohist.Server.L0Tests.Events;
 /// be the catalog-registered reverse-DNS string and the payload must
 /// preserve every field after JSON round-trip.
 /// </summary>
+[Trait("level", "L0")]
 public class IssueEventSerializerTests
 {
     [Fact]

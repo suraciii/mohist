@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Foundation;
 
+[Trait("level", "L0")]
 public class PromptReferenceScannerTests
 {
     private static WorkflowDefinition Parse(string yaml) => WorkflowYamlSerializer.FromYaml(yaml);

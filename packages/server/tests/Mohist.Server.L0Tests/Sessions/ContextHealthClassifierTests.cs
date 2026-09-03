@@ -7,6 +7,7 @@ namespace Mohist.Server.L0Tests.Sessions;
 /// Unit tests for <see cref="ContextHealthClassifier"/> covering the
 /// traffic-light classification rules.
 /// </summary>
+[Trait("level", "L0")]
 public class ContextHealthClassifierTests
 {
     [Theory]

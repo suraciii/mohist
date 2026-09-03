@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.SystemSpecs;
 
+[Trait("level", "L0")]
 public sealed class EventPushDispatcherSpecs
 {
     private static readonly DateTimeOffset StartTime = new(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);

@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Slack;
 
+[Trait("level", "L0")]
 public sealed class SlackMultiAgentRoutingPolicySpecs
 {
     private const string CurrentConnection = "connection-a";

@@ -11,6 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Agent.Services;
 
+[Trait("level", "L0")]
 public sealed class RoutingRuleStoreSpecs : IClassFixture<MohistDbFixture>
 {
     private readonly MohistDbFixture _fixture;

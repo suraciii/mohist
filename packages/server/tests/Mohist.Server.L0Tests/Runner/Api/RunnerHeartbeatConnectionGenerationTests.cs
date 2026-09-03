@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Runner.Api;
 
+[Trait("level", "L0")]
 public sealed class RunnerHeartbeatConnectionGenerationTests
 {
     [Fact]

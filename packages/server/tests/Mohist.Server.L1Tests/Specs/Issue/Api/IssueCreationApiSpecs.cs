@@ -28,6 +28,7 @@ namespace Mohist.Server.L1Tests.Specs.Issue.Api;
 /// by Mohist.Server.L0Tests IssueGrainCreationSpecs.
 /// </summary>
 [Collection("RunnerMutationIntegration")]
+[Trait("level", "L1")]
 public class IssueCreationSpecs
 {
     private readonly IGrainFactory _grains;

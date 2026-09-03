@@ -13,6 +13,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Workflow.Services;
 
+[Trait("level", "L0")]
 public sealed class WorkflowPromptResolverSpecs : IAsyncLifetime
 {
     private const string ProjectId = "proj-prompt-resolver";

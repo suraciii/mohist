@@ -11,6 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Runner.WebSocket;
 
+[Trait("level", "L0")]
 public sealed class RunnerControlWebSocketConnectionTests
 {
     [Fact]

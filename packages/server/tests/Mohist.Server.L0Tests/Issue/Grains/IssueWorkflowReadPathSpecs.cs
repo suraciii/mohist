@@ -40,6 +40,7 @@ namespace Mohist.Server.L0Tests.Issue.Grains;
 
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueWorkflowReadPathSpecs
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);

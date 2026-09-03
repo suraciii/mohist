@@ -38,6 +38,7 @@ namespace Mohist.Server.L0Tests.Issue.Grains;
 /// grains; workflow-bound behaviors stay in the application-level specs.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class IssueGrainCreationSpecs
 {
     private readonly MohistDbFixture _fixture;

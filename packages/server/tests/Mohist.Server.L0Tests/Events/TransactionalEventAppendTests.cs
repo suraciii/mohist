@@ -27,6 +27,7 @@ namespace Mohist.Server.L0Tests.Events;
 /// <c>stage</c> from structural inspection of the union variant (D2);
 /// every emitted envelope satisfies the WorkflowRun producer-family rule.
 /// </summary>
+[Trait("level", "L0")]
 public class TransactionalEventAppendTests : IAsyncLifetime
 {
     private const string ProjectId = "proj_txn";

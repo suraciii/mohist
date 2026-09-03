@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Sessions;
 
+[Trait("level", "L1")]
 public sealed class SessionTreeDetachApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

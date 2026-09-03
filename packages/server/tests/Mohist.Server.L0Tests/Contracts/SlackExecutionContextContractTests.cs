@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Contracts;
 
+[Trait("level", "L0")]
 public sealed class SlackExecutionContextContractTests
 {
     private const string CanonicalInstructions = """

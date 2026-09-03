@@ -20,6 +20,7 @@ namespace Mohist.Server.L1Tests.Specs.Auth;
 /// hook (see IntegrationProjectConstraint and
 /// AuthResolutionMiddlewareTests).
 /// </summary>
+[Trait("level", "L1")]
 public sealed class IntegrationTokenSpecs(MohistIntegrationFixture fixture)
 {
     private const string CreatePath = "/api/integration-tokens";

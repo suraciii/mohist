@@ -19,7 +19,7 @@ namespace Mohist.Server.L0Tests.SystemSpecs;
 /// real silo, no real time, no real database — lease semantics use the
 /// in-memory fake; the SQL lease store is covered by L1 application tests).
 /// </summary>
-public class EventDispatcherSpecs
+[Trait("level", "L0")] public class EventDispatcherSpecs
 {
     private static readonly DateTimeOffset StartTime = new(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
     private const string IssueCompleted = EventCatalog.ReverseDns.IssueCompleted;

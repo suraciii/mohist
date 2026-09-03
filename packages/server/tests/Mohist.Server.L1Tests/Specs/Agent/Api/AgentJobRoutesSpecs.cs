@@ -19,6 +19,7 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.L1Tests.Specs.Agent.Api;
 
+[Trait("level", "L1")]
 public class AgentJobRoutesSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
@@ -309,6 +310,7 @@ internal sealed class SingleAgentJobGrainFactory : IGrainFactory
 }
 
 [Collection("LaunchIntegration")]
+[Trait("level", "L1")]
 public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentJobDispatchRouteSpecs(IsolatedMohistIntegrationFixture fixture)

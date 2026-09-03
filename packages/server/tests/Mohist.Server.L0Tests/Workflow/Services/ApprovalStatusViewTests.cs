@@ -10,6 +10,7 @@ namespace Mohist.Server.L0Tests.Workflow.Services;
 /// inside <c>WorkflowRun.State</c>) recorded before <c>decidedBy</c> existed
 /// reads back with the field omitted — surface it as empty, do not error.
 /// </summary>
+[Trait("level", "L0")]
 public class ApprovalStatusViewTests
 {
     [Fact]

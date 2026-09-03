@@ -19,6 +19,7 @@ namespace Mohist.Server.L0Tests.Issue.StartVariableScope;
 /// creation, so subsequent edits to project or global <c>Variables</c> do
 /// not retroactively change this issue's effective variables.
 /// </summary>
+[Trait("level", "L0")]
 public class IssueVariableBuilderTests
 {
     private static readonly WorkflowProjectContext Project = new(

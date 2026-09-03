@@ -8,6 +8,7 @@ using Xunit;
 namespace Mohist.Server.L1Tests.Specs.Telemetry;
 
 [Collection("IntegrationTelemetry")]
+[Trait("level", "L1")]
 public class OtelQueryRoutesIntegrationSpecs : IAsyncLifetime
 {
     private const string ListPath = "/otel/api/traces";

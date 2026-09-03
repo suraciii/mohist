@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Inbox;
 
+[Trait("level", "L0")]
 public class InboxStoreSpecs
 {
     [Fact]

@@ -12,6 +12,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Sessions;
 
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class GenericAgentSessionFollowupServiceSpecs
 {
     private readonly MohistDbFixture _fixture;

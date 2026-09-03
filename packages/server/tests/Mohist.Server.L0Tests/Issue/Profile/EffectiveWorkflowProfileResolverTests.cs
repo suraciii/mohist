@@ -12,6 +12,7 @@ namespace Mohist.Server.L0Tests.Issue.Profile;
 /// every read surface (issue detail, list, workflow-profile endpoint,
 /// <c>mo issue show</c>).
 /// </summary>
+[Trait("level", "L0")]
 public class EffectiveWorkflowProfileResolverTests
 {
     private static EffectiveWorkflowProfileResolver BuildResolver() =>

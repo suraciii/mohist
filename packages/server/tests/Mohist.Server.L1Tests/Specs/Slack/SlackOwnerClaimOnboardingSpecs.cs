@@ -25,6 +25,7 @@ namespace Mohist.Server.L1Tests.Specs.Slack;
 /// an owner transfer.
 /// </summary>
 [Collection("SlackApiSurface")]
+[Trait("level", "L1")]
 public sealed class SlackOwnerClaimOnboardingSpecs
 {
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);

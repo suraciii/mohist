@@ -27,6 +27,7 @@ namespace Mohist.Server.L1Tests.Specs.Epic.Api;
 ///   result in error codes.</item>
 /// </list>
 /// </summary>
+[Trait("level", "L1")]
 public class EpicListQueryApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

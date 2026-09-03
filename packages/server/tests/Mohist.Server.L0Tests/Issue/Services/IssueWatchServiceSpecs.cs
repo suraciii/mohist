@@ -21,6 +21,7 @@ namespace Mohist.Server.L0Tests.Issue.Services;
 /// in <c>IssueWatchApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueWatchServiceSpecs
 {
     private readonly MohistDbFixture _fixture;

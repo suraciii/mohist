@@ -10,6 +10,7 @@ using static Mohist.Server.TestSupport.PathContractAssertions;
 
 namespace Mohist.Server.L1Tests.Specs.Api;
 
+[Trait("level", "L1")]
 public class PathContractRegressionSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

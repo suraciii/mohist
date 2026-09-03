@@ -15,6 +15,7 @@ namespace Mohist.Server.L0Tests.Telemetry;
 /// <c>LogsRouteSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class LogTailReaderSpecs
 {
     private readonly MohistDbFixture _fixture;

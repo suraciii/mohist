@@ -18,6 +18,7 @@ namespace Mohist.Server.L0Tests.SystemSpecs;
 /// during operator-triggered redelivery, while the default identity
 /// (runtime full type name) keeps working for handlers that never move.
 /// </summary>
+[Trait("level", "L0")]
 public class EventDispatcherIdentitySpecs
 {
     private static readonly DateTimeOffset StartTime = new(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);

@@ -17,6 +17,7 @@ namespace Mohist.Server.L0Tests.Inbox;
 /// body, 404 unknown project) stays in <c>InboxSubscriptionApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class InboxSubscriptionStoreSpecs
 {
     private readonly MohistDbFixture _fixture;

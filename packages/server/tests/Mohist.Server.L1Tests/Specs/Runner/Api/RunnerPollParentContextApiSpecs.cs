@@ -20,6 +20,7 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 namespace Mohist.Server.L1Tests.Specs.Runner.Api;
 
 [Collection("LaunchIntegration")]
+[Trait("level", "L1")]
 public sealed class RunnerPollParentContextApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

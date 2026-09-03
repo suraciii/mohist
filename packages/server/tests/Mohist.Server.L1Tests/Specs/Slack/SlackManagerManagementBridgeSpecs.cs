@@ -18,6 +18,7 @@ using DomainAgent = Mohist.Server.Agent.Domain.Agent;
 
 namespace Mohist.Server.L1Tests.Specs.Slack;
 
+[Trait("level", "L1")]
 public sealed class SlackManagerManagementBridgeSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

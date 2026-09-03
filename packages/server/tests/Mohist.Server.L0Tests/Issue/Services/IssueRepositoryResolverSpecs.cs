@@ -18,6 +18,7 @@ namespace Mohist.Server.L0Tests.Issue.Services;
 /// <c>IssueArchivedDetailApiSpecs</c>.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public class IssueRepositoryResolverSpecs
 {
     private readonly MohistDbFixture _fixture;

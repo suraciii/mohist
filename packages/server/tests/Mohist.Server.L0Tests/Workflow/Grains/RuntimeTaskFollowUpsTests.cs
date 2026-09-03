@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Grains;
 
+[Trait("level", "L0")]
 public sealed class RuntimeTaskFollowUpsTests
 {
     private static readonly RecoveryDefinition Recovery = new(

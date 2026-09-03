@@ -14,6 +14,7 @@ namespace Mohist.Server.L1Tests.Specs.Sessions;
 /// scoping, agent-launch source filter) live in
 /// <c>IssueSessionAssociationQuerierSpecs</c>.
 /// </summary>
+[Trait("level", "L1")]
 public class AgentSessionContextAssociationApiSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

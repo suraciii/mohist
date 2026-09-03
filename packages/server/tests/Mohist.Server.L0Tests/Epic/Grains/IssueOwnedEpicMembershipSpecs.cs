@@ -11,6 +11,7 @@ using static Mohist.Server.L0Tests.Epic.Grains.EpicEventPublishTestSupport;
 
 namespace Mohist.Server.L0Tests.Epic.Grains;
 
+[Trait("level", "L0")]
 public class IssueOwnedEpicMembershipSpecs
 {
     private const string ProjectId = "project_1";

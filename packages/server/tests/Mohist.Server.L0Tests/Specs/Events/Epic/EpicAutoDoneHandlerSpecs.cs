@@ -24,6 +24,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Events;
 
+[Trait("level", "L0")]
 public class EpicAutoDoneHandlerSpecs : EpicAutoDoneHandlerTestSupport
 {
 

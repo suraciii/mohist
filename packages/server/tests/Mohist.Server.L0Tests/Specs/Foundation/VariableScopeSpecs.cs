@@ -15,6 +15,7 @@ using Xunit;
 namespace Mohist.Server.L0Tests.Specs.Foundation;
 
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowVariableSpecs
 {
     private static readonly FakeTimeProvider TimeProvider = new(

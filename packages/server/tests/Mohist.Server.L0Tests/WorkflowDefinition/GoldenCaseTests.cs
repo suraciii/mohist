@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Mohist.Workflow.Definition.Tests;
 
+[Trait("level", "L0")]
 public sealed class GoldenCaseTests
 {
     private static readonly Assembly TestAssembly = typeof(GoldenCaseTests).Assembly;

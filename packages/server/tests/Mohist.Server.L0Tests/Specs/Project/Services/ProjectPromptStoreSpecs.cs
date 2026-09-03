@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Specs.Project.Services;
 
+[Trait("level", "L0")]
 public sealed class ProjectPromptStoreSpecs : IAsyncLifetime
 {
     private readonly TestSqliteDatabase _database = TestSqliteDatabase.CreateModelSchema();

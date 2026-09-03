@@ -10,6 +10,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Querier;
 
+[Trait("level", "L0")]
 public sealed class WorkflowRunStatusCacheSpecs : WorkflowDefinitionResolverTestFactory
 {
     [Fact]

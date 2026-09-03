@@ -20,6 +20,7 @@ namespace Mohist.Server.L0Tests.SystemSpecs.Otel;
 /// </para>
 /// </summary>
 [Collection("OtelTracing")]
+[Trait("level", "L0")]
 public class OtelSelfFeedbackTests
 {
     [Theory]

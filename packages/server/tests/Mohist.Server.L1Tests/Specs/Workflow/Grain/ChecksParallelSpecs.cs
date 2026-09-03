@@ -8,6 +8,7 @@ using Mohist.Server.L1Tests.Specs.Workflow;
 
 namespace Mohist.Server.L1Tests.Specs.Workflow.Grain;
 
+[Trait("level", "L1")]
 public class ChecksParallelSpecs : WorkflowGrainSpecs
 {
     public ChecksParallelSpecs(WorkflowGrainFixture fixture) : base(fixture) { }

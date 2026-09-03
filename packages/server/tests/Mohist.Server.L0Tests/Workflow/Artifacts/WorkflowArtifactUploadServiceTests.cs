@@ -22,6 +22,7 @@ namespace Mohist.Server.L0Tests.Workflow.Artifacts;
 /// hash state matrix lives here against the production
 /// <see cref="WorkflowArtifactUploadService"/>.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class WorkflowArtifactUploadServiceTests
 {
     private static readonly DateTimeOffset FixedTime = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);

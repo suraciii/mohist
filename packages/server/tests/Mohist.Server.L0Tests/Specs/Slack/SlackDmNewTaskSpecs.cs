@@ -13,6 +13,7 @@ namespace Mohist.Server.L0Tests.Specs.Slack;
 /// tweak to <see cref="SlackConnectionRoutes.TryStripNewTaskMarker"/>
 /// can't drift from the product spec without a red test.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class SlackDmNewTaskSpecs
 {
     [Theory]

@@ -15,6 +15,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// and per-stage fan-out remain cluster representative proofs.
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainChecksParallelSpecs
 {
     private static readonly DateTimeOffset FixedTime =

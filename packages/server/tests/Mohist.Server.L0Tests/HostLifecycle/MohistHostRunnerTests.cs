@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.HostLifecycle;
 
+[Trait("level", "L0")]
 public class MohistHostRunnerTests
 {
     private static readonly DateTimeOffset Start = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);

@@ -23,6 +23,7 @@ namespace Mohist.Server.L0Tests.DirectApi;
 /// all driven from durable canonical facts seeded through the real
 /// stores.
 /// </summary>
+[Trait("level", "L0")]
 public sealed class PublicExecutionProjectionTests : IAsyncDisposable
 {
     private static readonly DateTime T0 = new(2026, 8, 9, 10, 15, 0, DateTimeKind.Utc);

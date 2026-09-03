@@ -7,6 +7,7 @@ using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.L0Tests.SystemSpecs;
 
+[Trait("level", "L0")]
 public class ConfigServiceTests
 {
     private readonly InMemoryConfigDocumentStore _documents = new();

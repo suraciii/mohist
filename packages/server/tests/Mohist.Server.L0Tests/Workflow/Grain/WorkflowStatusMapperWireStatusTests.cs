@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Grain;
 
+[Trait("level", "L0")]
 public class WorkflowStatusMapperWireStatusTests
 {
     public static IEnumerable<object[]> WorkflowRunStatusCases() =>
@@ -267,6 +268,7 @@ public class WorkflowStatusMapperWireStatusTests
         };
 }
 
+[Trait("level", "L0")]
 public class WorkflowStatusMapperBuildPendingWorkTests
 {
     [Fact]

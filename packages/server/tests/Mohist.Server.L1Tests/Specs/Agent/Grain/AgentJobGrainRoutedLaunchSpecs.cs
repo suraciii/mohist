@@ -23,6 +23,7 @@ namespace Mohist.Server.L1Tests.Specs.Agent.Grain;
 /// behaviour, and the preflight-failed terminal-delivery path.
 /// </summary>
 [Collection("AgentJobGrain")]
+[Trait("level", "L1")]
 public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
 {
     public AgentJobGrainRoutedLaunchSpecs(AgentJobGrainFixture fixture) : base(fixture)

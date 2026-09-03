@@ -21,6 +21,7 @@ namespace Mohist.Server.L1Tests.Specs.Agent.Grain;
 /// the uncertain Manager prompt.
 /// </summary>
 [Collection("AgentJobGrain")]
+[Trait("level", "L1")]
 public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSupport
 {
     public AgentJobManagerRunnerLossRecoverySpecs(AgentJobGrainFixture fixture) : base(fixture) { }

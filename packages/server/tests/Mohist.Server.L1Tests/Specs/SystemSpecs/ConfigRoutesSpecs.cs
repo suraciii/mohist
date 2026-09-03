@@ -15,6 +15,7 @@ using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.L1Tests.Specs.SystemSpecs;
 
+[Trait("level", "L1")]
 public class ConfigRoutesSpecs : IAsyncLifetime
 {
     private readonly InMemoryConfigDocumentStore _documents = new();

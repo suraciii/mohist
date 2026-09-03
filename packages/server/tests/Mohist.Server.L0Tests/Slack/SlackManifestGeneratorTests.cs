@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Slack;
 
+[Trait("level", "L0")]
 public sealed class SlackManifestGeneratorTests
 {
     private static readonly SlackManifestIdentitySnapshot Identity = new("connection-1", "agent-1", "T123");

@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.SystemSpecs;
 
+[Trait("level", "L1")]
 public class RuntimeSettingsSpecs
 {
     private readonly HttpClient _client;

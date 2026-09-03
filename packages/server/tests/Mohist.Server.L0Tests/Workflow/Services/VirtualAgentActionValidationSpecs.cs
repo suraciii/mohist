@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Services;
 
+[Trait("level", "L0")]
 public class VirtualAgentActionValidationSpecs : IAsyncLifetime
 {
     private readonly TestSqliteDatabase _database = TestSqliteDatabase.CreateModelSchema();

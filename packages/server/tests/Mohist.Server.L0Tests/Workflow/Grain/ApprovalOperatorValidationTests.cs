@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Mohist.Server.L0Tests.Workflow.Grain;
 
+[Trait("level", "L0")]
 public class ApprovalOperatorValidationTests
 {
     [Fact]

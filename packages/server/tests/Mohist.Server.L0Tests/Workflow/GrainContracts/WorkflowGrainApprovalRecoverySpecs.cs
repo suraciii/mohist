@@ -22,6 +22,7 @@ namespace Mohist.Server.L0Tests.Workflow.GrainContracts;
 /// and CheckRetrySpecs scenarios from the L1 cluster population (#681).
 /// </summary>
 [Collection("MohistDb")]
+[Trait("level", "L0")]
 public sealed class WorkflowGrainApprovalRecoverySpecs
 {
     private static readonly FakeTimeProvider TimeProvider =
