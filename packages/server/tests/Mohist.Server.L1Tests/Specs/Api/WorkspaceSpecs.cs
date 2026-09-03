@@ -354,7 +354,6 @@ public class WorkspaceSpecs
         var workflowRunId = await _fixture.Grains
             .GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issueNumber)))
             .StartWorkAsync();
-        await DispatchEventsAsync();
         var expectedRepository = Assert.Single(project.Repositories);
         Assert.True(expectedRepository.IsDefault);
 

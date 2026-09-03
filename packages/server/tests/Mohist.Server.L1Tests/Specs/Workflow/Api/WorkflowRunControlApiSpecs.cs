@@ -184,7 +184,6 @@ public partial class WorkflowRunControlApiSpecs
         await SeedWorkflowTemplateAsync(projectId);
         var grain = _grains.GetGrain<IIssueGrain>(issueKey);
         var wrId = await grain.StartWorkAsync();
-        await DispatchEventsAsync();
         return (projectId, issueNumber, issueKey, wrId);
     }
 

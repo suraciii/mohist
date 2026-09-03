@@ -224,7 +224,6 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
     {
         var issue = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
         var workflowRunId = await issue.StartWorkAsync();
-        await DispatchEventsAsync();
 
         var runnerId = $"repo-resolution-runner-{Guid.NewGuid():N}";
         await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(

@@ -178,7 +178,6 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
 
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
-        await DispatchEventsAsync();
         var status = await issueGrain.GetWorkflowStatusAsync();
         var workflowRunId = status!.WorkflowRunId!;
         const string sessionName = "plan";

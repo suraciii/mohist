@@ -253,7 +253,6 @@ public class WorkflowArtifactUploadRouteSpecs
         var workflowRunId = await _fixture.Grains
             .GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)))
             .StartWorkAsync();
-        await DispatchEventsAsync();
 
         var runnerId = $"upload-test-{Guid.NewGuid():N}";
         await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(
