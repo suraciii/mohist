@@ -18,7 +18,7 @@ public sealed class ProjectRecentEventReaderTests
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
         var options = new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(connection).Options;
-        SqliteSchemaTemplate.CopyModelSchemaTo(connection);
+        MigratedSqliteTemplate.CopyModelSchemaTo(connection);
         await using (var db = new MohistDbContext(options))
         {
             db.IssueEvents.AddRange(

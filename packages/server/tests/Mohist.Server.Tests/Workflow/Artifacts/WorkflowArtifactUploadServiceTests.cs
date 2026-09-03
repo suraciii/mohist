@@ -106,7 +106,7 @@ public sealed class WorkflowArtifactUploadServiceTests
     {
         var keeper = new SqliteConnection($"Data Source=artifact-upload-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
         await keeper.OpenAsync();
-        SqliteSchemaTemplate.CopyModelSchemaTo(keeper);
+        MigratedSqliteTemplate.CopyModelSchemaTo(keeper);
         var factory = new TestDbContextFactory(
             new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(keeper).Options);
         var time = new FakeTimeProvider(FixedTime);
