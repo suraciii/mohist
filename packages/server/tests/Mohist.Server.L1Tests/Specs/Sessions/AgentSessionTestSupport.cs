@@ -9,7 +9,10 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -39,13 +42,33 @@ public abstract class AgentSessionTestSupport
     protected async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null, bool workflow = false)
     {
         var projectName = $"asg-{Guid.NewGuid():N}";
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
-            "/api/projects",
+        var projectId = $"project-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
             projectName,
-            repoName: "main",
-            gitUrl: $"file://{Guid.NewGuid():N}");
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        var project = new ProjectDto(projectId, projectName);
         var issueTitle = title ?? $"Session grain {name}";
-var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = issueTitle, body = "track sessions", labels = new Dictionary<string, string>(StringComparer.Ordinal), priority = "p1", projectId = project.Id, isDraft = false });
+        var issueNumber = await _fixture.Grains
+            .GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(project.Id))
+            .NextAsync();
+        await _fixture.Grains
+            .GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issueNumber)))
+            .CreateAsync(
+                project.Id,
+                issueNumber,
+                issueTitle,
+                "track sessions",
+                new Dictionary<string, string>(StringComparer.Ordinal),
+                "p1",
+                isDraft: false);
+        var issue = new IssueDto(GrainKey.Issue(new IssueKey(project.Id, issueNumber)), issueNumber, issueTitle);
 
         var work = new WorkDispatch(
             WorkflowRunId: $"wf-{Guid.NewGuid():N}",
@@ -67,8 +90,12 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
         var session = new CreatedSession(project.Id, issue.Number, work.WorkflowRunId, sessionName, info);
         if (start)
         {
-            var attachPath = workflow ? RunnerAgentSessionAttachPath(session) : RunnerGenericAgentSessionAttachPath(session);
-            await _client.PostOkAsync(attachPath, new { runtimeSessionId = session.Id, runtime = "opencode", expectedRuntime = "opencode", expectedRuntimeSessionId = (string?)null, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
+            await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+                session.Id,
+                WorkDir: $"/workspaces/{project.Id}",
+                ProcessPid: 1234,
+                Runtime: "opencode",
+                ExpectedRuntime: "opencode"));
         }
         return (project, issue, work, session);
     }

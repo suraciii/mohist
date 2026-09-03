@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.L1Tests.Support;
 using Mohist.Server.TestSupport;
 
@@ -20,12 +22,19 @@ public abstract class ProjectEventsApiTestSupport
 
     protected async Task<ProjectDto> CreateProjectAsync(string nameSuffix = "events")
     {
+        var projectId = $"project-{Guid.NewGuid():N}";
         var name = $"{nameSuffix}-{Guid.NewGuid():N}";
-        return await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
-            "/api/projects",
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
             name,
-            repoName: "main",
-            gitUrl: $"file://{Guid.NewGuid():N}");
+            new RepositoryInfo
+            {
+                Name = "main",
+                GitUrl = $"file://{Guid.NewGuid():N}",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return new ProjectDto(projectId, name);
     }
 
     protected Task SeedIssueAsync(string projectId, int number) => _seeds.SeedIssueAsync(projectId, number);

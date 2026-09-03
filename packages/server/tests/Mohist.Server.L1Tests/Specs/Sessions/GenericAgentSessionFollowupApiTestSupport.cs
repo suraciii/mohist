@@ -9,6 +9,8 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
@@ -218,10 +220,20 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
 
     protected async Task<ProjectRef> CreateProjectAsync(string name)
     {
-        var projectName = $"gen-followup-{Guid.NewGuid():N}";
+        var projectId = $"project-{Guid.NewGuid():N}";
+        var projectName = $"gen-followup-{name}-{Guid.NewGuid():N}";
         if (projectName.Length > 63) projectName = projectName[..63];
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
-        return new ProjectRef(project.Id);
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            projectName,
+            new RepositoryInfo
+            {
+                Name = "test-repo",
+                GitUrl = "git@example.com:test-repo.git",
+                BaseBranch = "main",
+                IsDefault = true,
+            },
+            "true");
+        return new ProjectRef(projectId);
     }
 
     protected static string WorkDirFor(string projectId) => $"/workspaces/{projectId}";
