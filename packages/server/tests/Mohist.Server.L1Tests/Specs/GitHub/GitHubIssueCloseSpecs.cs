@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
+using Mohist.Server.GitHub.Ports;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Data.Issue;
@@ -61,14 +62,23 @@ public sealed class GitHubIssueCloseSpecs
                 IsDefault = true,
             },
             "true");
-        var body = new Dictionary<string, object?>
+        var connection = new GitHubConnection
         {
-            ["owner"] = owner,
-            ["repo"] = RepoName,
-
+            Id = $"ghconn_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Owner = owner,
+            Repo = RepoName,
         };
-        var created = await Client.PostDataAsync<JsonElement>($"/api/projects/{project.Id}/github-connections", body);
-        return (project.Id, created.GetProperty("id").GetString()!, created.GetProperty("webhookSecret").GetString()!);
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<GitHubConnectionStore>();
+        var secret = await store.CreateAsync(
+            connection,
+            new GitHubRepositoryInstallation(
+                $"installation-{owner}",
+                owner,
+                RepoName,
+                $"node-{owner}"));
+        return (project.Id, connection.Id, secret);
     }
 
     private async Task DeliverClosedAsync(string connectionId, string secret, string deliveryId, string? stateReason = "not_planned")
@@ -171,14 +181,23 @@ public sealed class GitHubIssueCloseSpecs
             },
             "true");
         await SeedIntegrateProfileAsync(project.Id);
-        var created = await Client.PostDataAsync<JsonElement>($"/api/projects/{project.Id}/github-connections", new
+        var connection = new GitHubConnection
         {
-            owner,
-            repo = RepoName,
-
-        });
-        var connectionId = created.GetProperty("id").GetString()!;
-        var secret = created.GetProperty("webhookSecret").GetString()!;
+            Id = $"ghconn_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Owner = owner,
+            Repo = RepoName,
+        };
+        await using var connectionScope = _fixture.Services.CreateAsyncScope();
+        var store = connectionScope.ServiceProvider.GetRequiredService<GitHubConnectionStore>();
+        var secret = await store.CreateAsync(
+            connection,
+            new GitHubRepositoryInstallation(
+                $"installation-{owner}",
+                owner,
+                RepoName,
+                $"node-{owner}"));
+        var connectionId = connection.Id;
         var issueNumber = await _fixture.Grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(project.Id)).NextAsync();
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issueNumber)));
         await issueGrain.CreateAsync(project.Id, issueNumber, "Close me", null, null, "p2", RepoName, isDraft: false);

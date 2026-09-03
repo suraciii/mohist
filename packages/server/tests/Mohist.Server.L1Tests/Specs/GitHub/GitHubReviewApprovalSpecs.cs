@@ -5,7 +5,9 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
+using Mohist.Server.GitHub.Ports;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -363,14 +365,24 @@ public sealed class GitHubReviewApprovalSpecs
             },
             "true");
         await SeedCheckGateProfileAsync(project.Id, includeFeedbackTasks);
-        var created = await Client.PostDataAsync<JsonElement>($"/api/projects/{project.Id}/github-connections", new
+        var connection = new GitHubConnection
         {
-            owner,
-            repo = RepoName,
-            approvers,
-        });
-        var connectionId = created.GetProperty("id").GetString()!;
-        var secret = created.GetProperty("webhookSecret").GetString()!;
+            Id = $"ghconn_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Owner = owner,
+            Repo = RepoName,
+            Approvers = approvers,
+        };
+        await using var connectionScope = _fixture.Services.CreateAsyncScope();
+        var store = connectionScope.ServiceProvider.GetRequiredService<GitHubConnectionStore>();
+        var secret = await store.CreateAsync(
+            connection,
+            new GitHubRepositoryInstallation(
+                $"installation-{owner}",
+                owner,
+                RepoName,
+                $"node-{owner}"));
+        var connectionId = connection.Id;
 
         var issueNumber = await _fixture.Grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(project.Id)).NextAsync();
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issueNumber)));

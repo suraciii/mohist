@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
+using Mohist.Server.GitHub.Ports;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Events;
@@ -56,12 +57,23 @@ public sealed class GitHubIssueCommandSpecs
                 IsDefault = true,
             },
             "true");
-        var created = await Client.PostDataAsync<JsonElement>($"/api/projects/{project.Id}/github-connections", new
+        var connection = new GitHubConnection
         {
-            owner,
-            repo = RepoName,
-        });
-        return (project.Id, created.GetProperty("id").GetString()!, created.GetProperty("webhookSecret").GetString()!, owner);
+            Id = $"ghconn_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Owner = owner,
+            Repo = RepoName,
+        };
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<GitHubConnectionStore>();
+        var secret = await store.CreateAsync(
+            connection,
+            new GitHubRepositoryInstallation(
+                $"installation-{owner}",
+                owner,
+                RepoName,
+                $"node-{owner}"));
+        return (project.Id, connection.Id, secret, owner);
     }
 
     private async Task DeliverCommentAsync(
