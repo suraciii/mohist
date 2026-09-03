@@ -451,7 +451,7 @@ public sealed class AttachmentServiceValidateAndBindAgentInputTests
         if (interceptor is not null)
             optionsBuilder.AddInterceptors(interceptor);
         var options = optionsBuilder.Options;
-        SqliteSchemaTemplate.CopyModelSchemaTo(connection);
+        MigratedSqliteTemplate.CopyModelSchemaTo(connection);
         return new TestDatabase(connection, options, new TestDbContextFactory(options));
     }
 

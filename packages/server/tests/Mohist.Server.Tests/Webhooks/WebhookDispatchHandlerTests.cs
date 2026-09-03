@@ -228,7 +228,7 @@ public sealed class WebhookDispatchHandlerTests
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
             var options = new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(connection).Options;
-            SqliteSchemaTemplate.CopyModelSchemaTo(connection);
+            MigratedSqliteTemplate.CopyModelSchemaTo(connection);
             return new TestDatabase(connection, options);
         }
 

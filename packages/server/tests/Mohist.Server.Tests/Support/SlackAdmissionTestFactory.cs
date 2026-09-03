@@ -26,7 +26,7 @@ public static class SlackAdmissionTestFactory
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(keeper)
             .Options;
-        SqliteSchemaTemplate.CopyModelSchemaTo(keeper);
+        MigratedSqliteTemplate.CopyModelSchemaTo(keeper);
         var factory = new AdmissionDbContextFactory(options);
         var time = new FakeTimeProvider(TestTime.UtcNow);
         var projectId = $"project_{Guid.NewGuid():N}";

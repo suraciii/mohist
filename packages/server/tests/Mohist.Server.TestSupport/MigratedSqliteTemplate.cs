@@ -38,9 +38,13 @@ public static class MigratedSqliteTemplate
     // lock never becomes a bottleneck.
     private static readonly object BackupLock = new();
 
-    // Build the expensive migration template before xUnit starts timing test
+    // Build both expensive schema templates before xUnit starts timing test
     // cases; each case should pay only for cloning and its own seed data.
-    internal static void Warm() => _ = Template.Value;
+    internal static void Warm()
+    {
+        _ = Template.Value;
+        _ = ModelSchemaTemplate.Value;
+    }
 
     /// <summary>
     /// Copies the fully migrated schema (including
