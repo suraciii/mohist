@@ -35,7 +35,7 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
     [InlineData(AgentJobFailureReasons.RunnerLost)]
     [InlineData(AgentJobFailureReasons.ReportTimeout)]
     [InlineData("generation-drain-timeout")]
-    public async Task HandleAsync_retryable_failure_promotes_a_signed_retry_notice_with_durable_target_facts(
+    public async Task HandleAsync_retryable_failure_posts_a_separate_signed_retry_notice_with_durable_target_facts(
         string failureCategory)
     {
         var connection = await CreateConnectionAsync();
@@ -47,12 +47,30 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
 
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
+            var sessionBlocks = JsonSerializer.SerializeToElement(new[]
+            {
+                new
+                {
+                    type = "actions",
+                    elements = new[]
+                    {
+                        new
+                        {
+                            type = "button",
+                            text = new { type = "plain_text", text = "Open in Mohist" },
+                            url = $"https://mohist.example/{connection.ProjectId}/sessions/{failed.SessionId}",
+                        },
+                    },
+                },
+            });
             await scope.ServiceProvider.GetRequiredService<SlackStatusProjection>()
                 .EnqueueWorkingAsync(
                     connection.ProjectId,
                     connection.Id,
                     source,
-                    failed.ThreadTs);
+                    failed.ThreadTs,
+                    blocks: sessionBlocks,
+                    sessionId: failed.SessionId);
         }
 
         await HandleAsync(new SlackTerminalDelivery(
@@ -77,13 +95,21 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
         var rows = (await readScope.ServiceProvider
             .GetRequiredService<SlackOutboxStore>()
             .ListAsync(connection.ProjectId, connection.Id)).Entries;
+        var card = Assert.Single(rows, row => row.Kind == SlackOutboxKinds.ReplaceableProgress);
+        var cardPayload = SlackDeliveryPayload.Parse(card.PayloadJson);
+        Assert.Equal($"Agent session.\nSession: {failed.SessionId}", cardPayload.Text);
+        Assert.Contains("Open in Mohist", cardPayload.Blocks?.GetRawText(), StringComparison.Ordinal);
+        Assert.Contains($"/sessions/{failed.SessionId}", cardPayload.Blocks?.GetRawText(), StringComparison.Ordinal);
         var failure = Assert.Single(rows, row => row.Kind == SlackOutboxKinds.ExplicitFailure);
+        Assert.NotEqual(card.Id, failure.Id);
         Assert.Equal(SlackOutboxStates.Pending, failure.State);
         Assert.Equal(failed.ConversationId, failure.ConversationId);
         Assert.Equal(failed.ThreadTs, failure.ThreadTs);
 
         var payload = SlackDeliveryPayload.Parse(failure.PayloadJson);
         Assert.Equal(SlackDeliveryOperations.PostMessage, payload.Operation);
+        Assert.Null(payload.ProviderMessageIdentity);
+        Assert.Null(payload.StatusDispatchRef);
         Assert.Equal(
             "The Agent run failed: runner unavailable: [REDACTED] [REDACTED] [REDACTED] [REDACTED]",
             payload.Text);
@@ -124,7 +150,8 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
             await scope.ServiceProvider.GetRequiredService<SlackStatusProjection>()
-                .EnqueueWorkingAsync(connection.ProjectId, connection.Id, source, threadTs);
+                .EnqueueWorkingAsync(
+                    connection.ProjectId, connection.Id, source, threadTs, sessionId: "missing-session");
         }
 
         await HandleAsync(new SlackTerminalDelivery(
@@ -157,7 +184,8 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
             await scope.ServiceProvider.GetRequiredService<SlackStatusProjection>()
-                .EnqueueWorkingAsync(connection.ProjectId, connection.Id, source, failed.ThreadTs);
+                .EnqueueWorkingAsync(
+                    connection.ProjectId, connection.Id, source, failed.ThreadTs, sessionId: failed.SessionId);
             await scope.ServiceProvider.GetRequiredService<ISecretStore>().DeleteAsync(
                 new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.BotToken));
         }

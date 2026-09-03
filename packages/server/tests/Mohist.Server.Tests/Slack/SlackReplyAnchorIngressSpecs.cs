@@ -290,8 +290,8 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
             var operationId = payload.GetProperty("operationId").GetString()!;
             Assert.Equal("slack", payload.GetProperty("executionSource").GetString());
 
-            // The DM follow-up anchors to its own triggering message so the
-            // terminal reply replaces the progress projection in place.
+            // The DM follow-up anchors its independent Agent reply and Session
+            // card to the same triggering-message thread.
             AssertReplyAnchor(
                 payload.GetProperty("slackExecutionContext"),
                 connection,

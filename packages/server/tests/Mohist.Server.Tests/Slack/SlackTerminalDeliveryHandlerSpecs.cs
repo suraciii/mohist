@@ -339,7 +339,7 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         Assert.Equal(prompt[..80], workLabel);
         Assert.Equal("C1", envelope.Data.Value.GetProperty("conversationId").GetString());
         Assert.Equal("1710000000.000000", envelope.Data.Value.GetProperty("threadTs").GetString());
-        Assert.Equal("Manager response with ***", envelope.Data.Value.GetProperty("assistantText").GetString());
+        Assert.False(envelope.Data.Value.TryGetProperty("assistantText", out _));
     }
 
     private sealed class NoopHealthBackpressurer : ISlackConnectionHealthBackpressurer

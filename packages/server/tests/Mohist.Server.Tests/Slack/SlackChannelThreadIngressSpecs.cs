@@ -94,7 +94,9 @@ public sealed partial class SlackChannelThreadIngressSpecs
                 new SlackMessageIdentity("T123", "C-channel-A", "1710000000.000100"), "progress"));
         var initialProgressPayload = SlackDeliveryPayload.Parse(initialProgress.PayloadJson);
         Assert.Equal(SlackDeliveryOperations.PostMessage, initialProgressPayload.Operation);
-        Assert.Equal("Working...", initialProgressPayload.Text);
+        Assert.Contains($"Session: {sessionId}", initialProgressPayload.Text, StringComparison.Ordinal);
+        Assert.Contains(sessionId!, initialProgressPayload.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Working", initialProgressPayload.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("xoxb-", initialProgress.PayloadJson, StringComparison.Ordinal);
         Assert.NotNull(data.GetProperty("jobKey").GetString());
     }
@@ -235,6 +237,9 @@ public sealed partial class SlackChannelThreadIngressSpecs
         Assert.Equal(
             SlackDeliveryOperations.PostMessage,
             SlackDeliveryPayload.Parse(progressRow.PayloadJson).Operation);
+        var progressPayload = SlackDeliveryPayload.Parse(progressRow.PayloadJson);
+        Assert.Contains($"Session: {executionSessionId}", progressPayload.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Working", progressPayload.Text, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

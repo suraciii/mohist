@@ -17,7 +17,7 @@ using Xunit;
 namespace Mohist.Server.Tests.Slack;
 
 [Trait("level", "L0")]
-public sealed class SlackDeliveryHandlerSpecs
+public sealed partial class SlackDeliveryHandlerSpecs
 {
     private static readonly DateTimeOffset Start = new(2026, 7, 29, 12, 0, 0, TimeSpan.Zero);
 
@@ -88,26 +88,37 @@ public sealed class SlackDeliveryHandlerSpecs
         Assert.Equal(SlackOutboxStates.Pending, untouched.State);
     }
     [Fact]
-    public async Task Agent_reply_promotes_the_liveness_progress_message_in_place()
+    public async Task Agent_reply_is_independent_from_the_liveness_session_card()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(Start);
         var connection = await CreateConnectionAsync(database, time);
+        await CreateDmMappingAsync(database, time, connection, "C-reply-inplace");
         var outbox = CreateStore(database, time);
         var projection = new SlackStatusProjection(outbox);
         var source = new SlackMessageIdentity(connection.WorkspaceTeamId, "C-reply-inplace", "1710000000.000010");
-        var working = await projection.EnqueueWorkingAsync(connection.ProjectId, connection.Id, source, threadTs: null);
+        var working = await projection.EnqueueWorkingAsync(
+            connection.ProjectId, connection.Id, source, threadTs: null, sessionId: "session-reply-inplace");
 
         var reply = await outbox.EnqueueAgentReplyAsync(
-            connection.ProjectId, "C-reply-inplace", null, "All green — the task is complete.");
+            connection.ProjectId,
+            "C-reply-inplace",
+            source.MessageTs,
+            "All green — the task is complete.",
+            connection.Id,
+            "agent-session-followup:session-reply-inplace:turn-1");
 
         Assert.True(reply.Accepted);
         Assert.Equal(connection.Id, reply.ConnectionId);
-        Assert.Equal(working.Id, reply.DeliveryId);
+        Assert.NotEqual(working.Id, reply.DeliveryId);
+        Assert.False(reply.MergedIntoExisting);
         var rows = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries;
+        var card = Assert.Single(rows, r => r.Id == working.Id);
+        Assert.Equal(SlackOutboxKinds.ReplaceableProgress, card.Kind);
         var terminal = Assert.Single(rows, r => r.Kind == SlackOutboxKinds.TerminalResult);
-        Assert.Equal(working.Id, terminal.Id);
+        Assert.Equal(reply.DeliveryId, terminal.Id);
         var payload = SlackDeliveryPayload.Parse(terminal.PayloadJson);
+        Assert.Equal(SlackDeliveryOperations.PostMessage, payload.Operation);
         Assert.Contains("the task is complete", payload.Text, StringComparison.Ordinal);
     }
     [Fact]
@@ -119,15 +130,24 @@ public sealed class SlackDeliveryHandlerSpecs
         var outbox = CreateStore(database, time);
         var projection = new SlackStatusProjection(outbox);
         var source = new SlackMessageIdentity(connection.WorkspaceTeamId, "C-reply-merge", "1710000000.000020");
-        await projection.EnqueueWorkingAsync(connection.ProjectId, connection.Id, source, threadTs: null);
+        await CreateDmMappingAsync(database, time, connection, "C-reply-merge");
+        var working = await projection.EnqueueWorkingAsync(
+            connection.ProjectId, connection.Id, source, threadTs: null, sessionId: "session-reply-merge");
 
-        var first = await outbox.EnqueueAgentReplyAsync(connection.ProjectId, "C-reply-merge", null, "part one");
-        var second = await outbox.EnqueueAgentReplyAsync(connection.ProjectId, "C-reply-merge", null, "part two");
+        var first = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId, "C-reply-merge", source.MessageTs, "part one",
+            connection.Id, "agent-session-followup:session-reply-merge:turn-1");
+        var second = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId, "C-reply-merge", source.MessageTs, "part two",
+            connection.Id, "agent-session-followup:session-reply-merge:turn-1");
 
         Assert.True(first.Accepted);
         Assert.Equal(first.DeliveryId, second.DeliveryId);
         var rows = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries;
+        Assert.Contains(rows, row => row.Id == working.Id
+            && row.Kind == SlackOutboxKinds.ReplaceableProgress);
         var terminal = Assert.Single(rows, r => r.Kind == SlackOutboxKinds.TerminalResult);
+        Assert.NotEqual(working.Id, terminal.Id);
         var payload = SlackDeliveryPayload.Parse(terminal.PayloadJson);
         Assert.Contains("part one", payload.Text, StringComparison.Ordinal);
         Assert.Contains("part two", payload.Text, StringComparison.Ordinal);
@@ -144,40 +164,46 @@ public sealed class SlackDeliveryHandlerSpecs
         var first = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "D-reply-turns",
-            null,
+            "1710000000.000499",
             "ACK",
+            connectionId: connection.Id,
             replyDispatchRef: "agent-session-followup:session-1:turn-1");
         var retry = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "D-reply-turns",
-            null,
+            "1710000000.000499",
             "ACK",
+            connectionId: connection.Id,
             replyDispatchRef: "agent-session-followup:session-1:turn-1");
         var providerIdentity = new SlackProviderMessageIdentity("D-reply-turns", "1710000000.000500");
         await outbox.MarkDeliveredAsync(connection.ProjectId, first.DeliveryId!, providerIdentity);
         var deliveredRetry = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "D-reply-turns",
-            null,
+            "1710000000.000499",
             "ACK",
+            connectionId: connection.Id,
             replyDispatchRef: "agent-session-followup:session-1:turn-1");
         var deliveredDistinct = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "D-reply-turns",
-            null,
+            "1710000000.000499",
             "more detail",
+            connectionId: connection.Id,
             replyDispatchRef: "agent-session-followup:session-1:turn-1");
         var latestRetry = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "D-reply-turns",
-            null,
+            "1710000000.000499",
             "more detail",
+            connectionId: connection.Id,
             replyDispatchRef: "agent-session-followup:session-1:turn-1");
         var secondTurn = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "D-reply-turns",
-            null,
+            "1710000000.000499",
             "531",
+            connectionId: connection.Id,
             replyDispatchRef: "agent-session-followup:session-1:turn-2");
 
         Assert.Equal(first.DeliveryId, retry.DeliveryId);
@@ -207,34 +233,6 @@ public sealed class SlackDeliveryHandlerSpecs
         Assert.Equal("531", SlackDeliveryPayload.Parse(secondReply.PayloadJson).Text);
     }
     [Fact]
-    public async Task Anchored_retry_recognizes_the_latest_part_of_a_pre_reply_parts_payload()
-    {
-        await using var database = TestSqliteDatabase.CreateMigrated();
-        var time = new FakeTimeProvider(Start);
-        var connection = await CreateConnectionAsync(database, time);
-        await CreateDmMappingAsync(database, time, connection, "D-reply-legacy-parts");
-        var outbox = CreateStore(database, time);
-        const string dispatchRef = "agent-session-followup:legacy-parts:turn-1";
-
-        await outbox.EnqueueAgentReplyAsync(
-            connection.ProjectId, "D-reply-legacy-parts", null, "part one", replyDispatchRef: dispatchRef);
-        await outbox.EnqueueAgentReplyAsync(
-            connection.ProjectId, "D-reply-legacy-parts", null, "part two", replyDispatchRef: dispatchRef);
-
-        await using var db = database.CreateContext();
-        var row = await db.SlackOutboxRows.SingleAsync(candidate =>
-            candidate.ProjectId == connection.ProjectId && candidate.ConversationId == "D-reply-legacy-parts");
-        row.PayloadJson = JsonSerializer.Serialize(SlackDeliveryPayload.Parse(row.PayloadJson) with { ReplyParts = null });
-        await db.SaveChangesAsync();
-
-        var retry = await outbox.EnqueueAgentReplyAsync(
-            connection.ProjectId, "D-reply-legacy-parts", null, "part two", replyDispatchRef: dispatchRef);
-
-        Assert.True(retry.Accepted);
-        var persisted = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries.Single();
-        Assert.Equal("part one\n\npart two", SlackDeliveryPayload.Parse(persisted.PayloadJson).Text);
-    }
-    [Fact]
     public async Task Authoritative_reply_parts_do_not_treat_a_paragraph_suffix_as_a_retry()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
@@ -247,14 +245,16 @@ public sealed class SlackDeliveryHandlerSpecs
         await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "D-reply-authoritative-parts",
-            null,
+            "1710000000.000510",
             "summary\n\nnext",
+            connectionId: connection.Id,
             replyDispatchRef: dispatchRef);
         await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "D-reply-authoritative-parts",
-            null,
+            "1710000000.000510",
             "next",
+            connectionId: connection.Id,
             replyDispatchRef: dispatchRef);
 
         var row = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries.Single();
@@ -275,8 +275,9 @@ public sealed class SlackDeliveryHandlerSpecs
         var first = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "D-reply-in-flight",
-            null,
+            "1710000000.000520",
             "original",
+            connectionId: connection.Id,
             replyDispatchRef: replyDispatchRef);
         var claimed = await outbox.ClaimAsync(connection.ProjectId, connection.Id, "adapter-in-flight");
         Assert.Equal(first.DeliveryId, claimed?.Id);
@@ -284,14 +285,16 @@ public sealed class SlackDeliveryHandlerSpecs
         var claimedRetry = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "D-reply-in-flight",
-            null,
+            "1710000000.000520",
             "original",
+            connectionId: connection.Id,
             replyDispatchRef: replyDispatchRef);
         var claimedAddition = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "D-reply-in-flight",
-            null,
+            "1710000000.000520",
             "claimed addition",
+            connectionId: connection.Id,
             replyDispatchRef: replyDispatchRef);
         Assert.True(claimedRetry.Accepted);
         Assert.False(claimedAddition.Accepted);
@@ -305,14 +308,16 @@ public sealed class SlackDeliveryHandlerSpecs
         var uncertainRetry = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "D-reply-in-flight",
-            null,
+            "1710000000.000520",
             "original",
+            connectionId: connection.Id,
             replyDispatchRef: replyDispatchRef);
         var uncertainAddition = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
             "D-reply-in-flight",
-            null,
+            "1710000000.000520",
             "uncertain addition",
+            connectionId: connection.Id,
             replyDispatchRef: replyDispatchRef);
         Assert.True(uncertainRetry.Accepted);
         Assert.False(uncertainAddition.Accepted);
@@ -322,7 +327,7 @@ public sealed class SlackDeliveryHandlerSpecs
         Assert.Equal("original", SlackDeliveryPayload.Parse(uncertainRow.PayloadJson).Text);
     }
     [Fact]
-    public async Task Anchored_agent_reply_promotes_only_the_requested_connection_progress()
+    public async Task Anchored_agent_reply_does_not_mutate_another_connection_session_card()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(Start);
@@ -334,9 +339,9 @@ public sealed class SlackDeliveryHandlerSpecs
         var projection = new SlackStatusProjection(outbox);
         var source = new SlackMessageIdentity(first.WorkspaceTeamId, "C-shared-progress", "1710000000.000026");
         var firstProgress = await projection.EnqueueWorkingAsync(
-            first.ProjectId, first.Id, source, "1710000000.000025", "first:progress");
+            first.ProjectId, first.Id, source, "1710000000.000025", "first:progress", sessionId: "session-first");
         var secondProgress = await projection.EnqueueWorkingAsync(
-            second.ProjectId, second.Id, source, "1710000000.000025", "second:progress");
+            second.ProjectId, second.Id, source, "1710000000.000025", "second:progress", sessionId: "session-second");
 
         var reply = await outbox.EnqueueAgentReplyAsync(
             first.ProjectId,
@@ -348,16 +353,18 @@ public sealed class SlackDeliveryHandlerSpecs
 
         Assert.True(reply.Accepted);
         Assert.Equal(second.Id, reply.ConnectionId);
-        Assert.Equal(secondProgress.Id, reply.DeliveryId);
+        Assert.NotEqual(secondProgress.Id, reply.DeliveryId);
         var firstRows = (await outbox.ListAsync(first.ProjectId, first.Id)).Entries;
         Assert.Contains(firstRows, row => row.Id == firstProgress.Id
             && row.Kind == SlackOutboxKinds.ReplaceableProgress);
         var secondRows = (await outbox.ListAsync(second.ProjectId, second.Id)).Entries;
         Assert.Contains(secondRows, row => row.Id == secondProgress.Id
+            && row.Kind == SlackOutboxKinds.ReplaceableProgress);
+        Assert.Contains(secondRows, row => row.Id == reply.DeliveryId
             && row.Kind == SlackOutboxKinds.TerminalResult);
     }
     [Fact]
-    public async Task Anchored_agent_reply_promotes_only_the_triggering_turn_progress()
+    public async Task Anchored_agent_reply_does_not_mutate_other_turn_session_cards()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(Start);
@@ -370,9 +377,9 @@ public sealed class SlackDeliveryHandlerSpecs
         var secondSource = new SlackMessageIdentity(
             connection.WorkspaceTeamId, "D-shared-turns", "1710000000.000032");
         var firstProgress = await projection.EnqueueWorkingAsync(
-            connection.ProjectId, connection.Id, firstSource, null, "first-turn:progress");
+            connection.ProjectId, connection.Id, firstSource, null, "first-turn:progress", sessionId: "session-first-turn");
         var secondProgress = await projection.EnqueueWorkingAsync(
-            connection.ProjectId, connection.Id, secondSource, null, "second-turn:progress");
+            connection.ProjectId, connection.Id, secondSource, null, "second-turn:progress", sessionId: "session-second-turn");
 
         var reply = await outbox.EnqueueAgentReplyAsync(
             connection.ProjectId,
@@ -380,15 +387,16 @@ public sealed class SlackDeliveryHandlerSpecs
             firstSource.MessageTs,
             "second turn answer",
             connectionId: connection.Id,
-            triggeringMessageId: secondSource.MessageTs,
             replyDispatchRef: "second-turn:reply");
 
         Assert.True(reply.Accepted);
-        Assert.Equal(secondProgress.Id, reply.DeliveryId);
+        Assert.NotEqual(secondProgress.Id, reply.DeliveryId);
         var rows = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries;
         Assert.Contains(rows, row => row.Id == firstProgress.Id
             && row.Kind == SlackOutboxKinds.ReplaceableProgress);
         Assert.Contains(rows, row => row.Id == secondProgress.Id
+            && row.Kind == SlackOutboxKinds.ReplaceableProgress);
+        Assert.Contains(rows, row => row.Id == reply.DeliveryId
             && row.Kind == SlackOutboxKinds.TerminalResult);
     }
     [Fact]
@@ -434,7 +442,7 @@ public sealed class SlackDeliveryHandlerSpecs
             row => Assert.Equal(second.Id, row.ConnectionId));
     }
     [Fact]
-    public async Task Anchored_agent_reply_rejects_a_connection_without_the_conversation_mapping()
+    public async Task Anchored_agent_reply_store_uses_the_route_validated_connection()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(Start);
@@ -451,34 +459,47 @@ public sealed class SlackDeliveryHandlerSpecs
             connectionId: unmapped.Id,
             replyDispatchRef: "unmapped:turn");
 
-        Assert.False(reply.Accepted);
-        Assert.Empty((await outbox.ListAsync(unmapped.ProjectId, unmapped.Id)).Entries);
+        Assert.True(reply.Accepted);
+        Assert.Equal(unmapped.Id, reply.ConnectionId);
+        Assert.Single((await outbox.ListAsync(unmapped.ProjectId, unmapped.Id)).Entries);
         Assert.Empty((await outbox.ListAsync(mapped.ProjectId, mapped.Id)).Entries);
     }
     [Fact]
-    public async Task Agent_reply_promotion_carries_liveness_status_ref_so_finalization_locates_the_reaction_target()
+    public async Task Agent_reply_leaves_the_session_card_status_ref_for_liveness_finalization()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(Start);
         var connection = await CreateConnectionAsync(database, time);
+        await CreateDmMappingAsync(database, time, connection, "C-reply-statusref");
         var outbox = CreateStore(database, time);
         var projection = new SlackStatusProjection(outbox);
         var source = new SlackMessageIdentity(connection.WorkspaceTeamId, "C-reply-statusref", "1710000000.000030");
         var progressDispatchRef = "agent-session-followup:session-statusref:turn-1:progress";
-        await projection.EnqueueWorkingAsync(connection.ProjectId, connection.Id, source, threadTs: null, progressDispatchRef);
+        await projection.EnqueueWorkingAsync(
+            connection.ProjectId,
+            connection.Id,
+            source,
+            threadTs: null,
+            progressDispatchRef,
+            sessionId: "session-statusref");
 
-        var reply = await outbox.EnqueueAgentReplyAsync(connection.ProjectId, "C-reply-statusref", null, "the answer");
+        var reply = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "C-reply-statusref",
+            source.MessageTs,
+            "the answer",
+            connection.Id,
+            "agent-session-followup:session-statusref:turn-1");
 
         Assert.True(reply.Accepted);
-        var promoted = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries
-            .Single(row => row.Kind == SlackOutboxKinds.TerminalResult);
-        // The in-place promotion must carry the liveness StatusDispatchRef so the
-        // post-reply liveness finalization can derive the reaction target from the
-        // authoritative progress-row metadata, not from a potentially-wrong delivery source.
+        var rows = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries;
+        var card = Assert.Single(rows, row => row.Kind == SlackOutboxKinds.ReplaceableProgress);
         Assert.Equal(SlackStatusProjection.DispatchRef(source, "status"),
-            SlackDeliveryPayload.Parse(promoted.PayloadJson).StatusDispatchRef);
-        Assert.Equal(progressDispatchRef,
-            SlackDeliveryPayload.Parse(promoted.PayloadJson).ProgressDispatchRef);
+            SlackDeliveryPayload.Parse(card.PayloadJson).StatusDispatchRef);
+        var replyRow = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries
+            .Single(row => row.Kind == SlackOutboxKinds.TerminalResult);
+        Assert.Null(SlackDeliveryPayload.Parse(replyRow.PayloadJson).StatusDispatchRef);
+        Assert.Null(SlackDeliveryPayload.Parse(replyRow.PayloadJson).ProgressDispatchRef);
 
         // Simulate the terminal handler's source differing from the ingress source
         // (e.g. delivery.MessageTs null -> synthetic ts). FinalizeLivenessAsync must
@@ -495,14 +516,20 @@ public sealed class SlackDeliveryHandlerSpecs
             && row.DispatchRef == SlackStatusProjection.DispatchRef(deliverySource, "terminal-add"));
     }
     [Fact]
-    public async Task Agent_reply_without_an_active_conversation_is_not_accepted()
+    public async Task Agent_reply_for_an_unknown_connection_is_not_accepted()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(Start);
         var connection = await CreateConnectionAsync(database, time);
         var outbox = CreateStore(database, time);
 
-        var reply = await outbox.EnqueueAgentReplyAsync(connection.ProjectId, "C-reply-unknown", null, "hello");
+        var reply = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId,
+            "C-reply-unknown",
+            "1710000000.000040",
+            "hello",
+            "missing-connection",
+            "agent-session-followup:missing:turn-1");
 
         Assert.False(reply.Accepted);
     }
@@ -515,8 +542,9 @@ public sealed class SlackDeliveryHandlerSpecs
         await CreateDmMappingAsync(database, time, connection, "C-render-image");
         var outbox = CreateStore(database, time);
         var reply = await outbox.EnqueueAgentReplyAsync(
-            connection.ProjectId, "C-render-image", null, "看图",
-            connectionId: connection.Id, imageUrl: "https://example.com/chart.png");
+            connection.ProjectId, "C-render-image", "1710000000.000050", "看图",
+            connection.Id, "agent-session-followup:render-image:turn-1",
+            imageUrl: "https://example.com/chart.png");
 
         Assert.True(reply.Accepted);
         var row = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries.Single();
@@ -541,8 +569,9 @@ public sealed class SlackDeliveryHandlerSpecs
         await CreateDmMappingAsync(database, time, connection, "C-render-image-only");
         var outbox = CreateStore(database, time);
         var reply = await outbox.EnqueueAgentReplyAsync(
-            connection.ProjectId, "C-render-image-only", null, string.Empty,
-            connectionId: connection.Id, imageUrl: "https://example.com/p.png");
+            connection.ProjectId, "C-render-image-only", "1710000000.000051", string.Empty,
+            connection.Id, "agent-session-followup:render-image-only:turn-1",
+            imageUrl: "https://example.com/p.png");
 
         Assert.True(reply.Accepted);
         var row = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries.Single();
@@ -562,8 +591,9 @@ public sealed class SlackDeliveryHandlerSpecs
         var outbox = CreateStore(database, time);
         var base64 = Convert.ToBase64String("png-bytes"u8);
         var file = await outbox.EnqueueAgentReplyAsync(
-            connection.ProjectId, "D-render-file", null, string.Empty,
-            connectionId: connection.Id, fileName: "shot.png", fileContentBase64: base64);
+            connection.ProjectId, "D-render-file", "1710000000.000052", string.Empty,
+            connection.Id, "agent-session-followup:render-file:turn-1",
+            fileName: "shot.png", fileContentBase64: base64);
 
         Assert.True(file.Accepted);
         var rows = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries;
@@ -576,8 +606,8 @@ public sealed class SlackDeliveryHandlerSpecs
         Assert.True(string.IsNullOrEmpty(payload.Text));
 
         var text = await outbox.EnqueueAgentReplyAsync(
-            connection.ProjectId, "D-render-file", null, "screenshot attached",
-            connectionId: connection.Id);
+            connection.ProjectId, "D-render-file", "1710000000.000052", "screenshot attached",
+            connection.Id, "agent-session-followup:render-file:turn-1");
         Assert.True(text.Accepted);
         rows = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries;
         Assert.Contains(rows, row => row.DispatchRef!.EndsWith(":file", StringComparison.Ordinal));
