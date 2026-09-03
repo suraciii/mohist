@@ -64,12 +64,8 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
             RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()),
             TestRunnerGenerationExtensions.ProcessGeneration);
         await runnerGrain.UpdateAsync(2);
-        await TestWait.ForAsync(
-            () => runnerGrain.GetRuntimeStateAsync(),
-            s => s.Status == RunnerStatus.Online,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            $"Runner '{runnerId}' to reach Online");
+        var state = await runnerGrain.GetRuntimeStateAsync();
+        Assert.Equal(RunnerStatus.Online, state.Status);
     }
 
     private Task<HttpResponseMessage> LaunchAsync(

@@ -263,17 +263,13 @@ public class WorkflowArtifactUploadRouteSpecs
         await workflow.AssignWorkerAsync(runnerId);
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        var work = await TestWait.ForAsync(
-            () => runner.PollAsync(_fixture.Services),
-            value => value is not null,
-            TimeSpan.FromSeconds(3),
-            TimeSpan.FromMilliseconds(20),
-            $"Runner '{runnerId}' to receive active work");
-// Note: the runner is intentionally left registered here. Unregistering
+        var work = await runner.PollAsync(_fixture.Services);
+        Assert.NotNull(work);
+        // Note: the runner is intentionally left registered here. Unregistering
         // would fail the in-flight task via the runner-lost notification, which
         // would break the subsequent upload assertions that require an active
         // task. The runner is short-lived and torn down with the silo.
-        return (workflowRunId, work!.WorkId, runnerId);
+        return (workflowRunId, work.WorkId, runnerId);
     }
 
     private async Task DispatchEventsAsync()

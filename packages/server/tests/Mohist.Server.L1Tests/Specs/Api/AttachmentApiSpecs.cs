@@ -110,9 +110,14 @@ public class AttachmentApiSpecs
         }
 
         var ids = new List<string>();
+        await using var uploadScope = _fixture.Services.CreateAsyncScope();
+        var attachments = uploadScope.ServiceProvider.GetRequiredService<AttachmentService>();
         for (var i = 0; i < AttachmentStorageOptions.DefaultMaxCountPerOwner + 1; i++)
         {
-            var upload = await UploadAsync(projectId, $"f{i}.txt", "text/plain", Encoding.UTF8.GetBytes(i.ToString()));
+            var payload = Encoding.UTF8.GetBytes(i.ToString());
+            var upload = await attachments.UploadAsync(
+                projectId,
+                new TestFormFile($"f{i}.txt", "text/plain", payload.LongLength, payload));
             ids.Add(upload.Id);
         }
 

@@ -412,6 +412,8 @@ public class RunnerConfigFixture : IAsyncLifetime
         Client = _factory.CreateClient();
         Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         await _factory.EnsureSchemaAsync();
+        using var health = await Client.GetAsync("/api/health");
+        health.EnsureSuccessStatusCode();
     }
 
     /// <summary>
@@ -438,12 +440,8 @@ public class RunnerConfigFixture : IAsyncLifetime
             TestRunnerGenerationExtensions.ProcessGeneration);
         if (maxWorkflowSlots is not null)
             await runner.UpdateAsync(maxWorkflowSlots.Value);
-        await TestWait.ForAsync(
-            () => runner.GetRuntimeStateAsync(),
-            s => s.Status == RunnerStatus.Online,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            $"Runner '{runnerId}' to reach Online");
+        var state = await runner.GetRuntimeStateAsync();
+        Assert.Equal(RunnerStatus.Online, state.Status);
         _registeredRunnerIds.Add(runnerId);
         return runnerId;
     }

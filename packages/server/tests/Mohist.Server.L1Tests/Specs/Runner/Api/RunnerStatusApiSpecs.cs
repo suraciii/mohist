@@ -18,7 +18,7 @@ using Xunit;
 
 namespace Mohist.Server.L1Tests.Specs.Runner.Api;
 
-[Collection("RunnerMutationIntegrationB")]
+[Collection("RunnerMutationIntegration")]
 public class RunnerStatusApiSpecs
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);

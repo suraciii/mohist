@@ -392,15 +392,7 @@ public sealed class GitHubReviewApprovalSpecs
         Assert.Equal("awaiting-approval", status!.Workflow!.Status);
         Assert.Equal("check", status.Workflow.CurrentStage);
 
-        var variables = new
-        {
-            vars = new
-            {
-                github = new { pr = new { number = PullRequestNumber } },
-            },
-        };
-        await Client.PatchDataAsync<JsonElement>(
-            $"/api/workflow-runs/{status.WorkflowRunId}/variables", variables);
+        await PatchPullRequestVariableAsync(status.WorkflowRunId!);
 
         await using (var variableScope = _fixture.Services.CreateAsyncScope())
         {

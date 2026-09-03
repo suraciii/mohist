@@ -45,21 +45,12 @@ public class PublicProjectionIntegrationCollection
 [CollectionDefinition("RunnerMutationIntegration")]
 public class RunnerMutationIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
-// B-lane of the runner-mutation domain: a second dedicated host so half the
-// classes can schedule in parallel with the first lane. Hosts are independent
-// by construction; every class seeds its own projects, agents, and runners.
-[CollectionDefinition("RunnerMutationIntegrationB")]
-public class RunnerMutationIntegrationBCollection : ICollectionFixture<MohistIntegrationFixture>;
-
 // Runner report arbitration advances durable AgentJob state while a shared
 // assembly fixture can advance the same fake clock from unrelated specs.
 // Keep this contract on its own host so another collection cannot time out or
 // mutate the job between its explicit report steps.
 [CollectionDefinition("RunnerPollRecoveryStateApi")]
 public class RunnerPollRecoveryStateApiCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
-
-[CollectionDefinition("AgentPathAmplificationIntegration")]
-public class AgentPathAmplificationIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
 [CollectionDefinition("DeviceFlowIntegration")]
 public class DeviceFlowIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
@@ -72,12 +63,6 @@ public class WorkspaceIntegrationCollection : ICollectionFixture<IsolatedMohistI
 // domains and ordinary project-scoped specs continue to run in parallel.
 [CollectionDefinition("LaunchIntegration")]
 public class LaunchIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
-
-// B-lane of the launch domain: a second dedicated host so half the classes
-// can schedule in parallel with the first lane. Hosts are independent by
-// construction; every class seeds its own projects, agents, and runners.
-[CollectionDefinition("LaunchIntegrationB")]
-public class LaunchIntegrationBCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
 
 [CollectionDefinition("SessionControlIntegration")]
 public class SessionControlIntegrationCollection : ICollectionFixture<IsolatedMohistIntegrationFixture>;
