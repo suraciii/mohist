@@ -12,11 +12,12 @@ namespace Mohist.Server.Tests.GitHub;
 [Trait("level", "L0")]
 public sealed class GitHubAppClientTests
 {
+    private static readonly string TestPrivateKeyPem = CreateTestPrivateKeyPem();
+
     [Fact]
     public async Task DiscoverInstallation_AcceptsNumericInstallationId()
     {
-        using var rsa = RSA.Create(2048);
-        var files = KeyFile(rsa.ExportRSAPrivateKeyPem());
+        var files = KeyFile();
         var handler = new ResponseHandler(
             (HttpStatusCode.OK, "{\"id\":123456789012345678}"),
             (HttpStatusCode.OK, "{\"token\":\"installation-token\",\"expires_at\":\"2030-01-01T00:00:00Z\"}"),
@@ -32,9 +33,8 @@ public sealed class GitHubAppClientTests
     [Fact]
     public async Task DiscoverInstallation_MapsNotFoundToInstallGuidance()
     {
-        using var rsa = RSA.Create(2048);
         var error = await Assert.ThrowsAsync<GitHubAppInstallationException>(() =>
-            CreateClient(new ResponseHandler((HttpStatusCode.NotFound, "{}")), KeyFile(rsa.ExportRSAPrivateKeyPem()))
+            CreateClient(new ResponseHandler((HttpStatusCode.NotFound, "{}")), KeyFile())
                 .DiscoverInstallationAsync("octocat", "hello-world"));
 
         Assert.Equal("github_app_installation_required", error.Code);
@@ -44,11 +44,10 @@ public sealed class GitHubAppClientTests
     [Fact]
     public async Task DiscoverInstallation_RejectsCredentialWithoutInstallUrl()
     {
-        using var rsa = RSA.Create(2048);
         var handler = new ResponseHandler((HttpStatusCode.Unauthorized, "{}"));
 
         var error = await Assert.ThrowsAsync<GitHubAppInstallationException>(() =>
-            CreateClient(handler, KeyFile(rsa.ExportRSAPrivateKeyPem())).DiscoverInstallationAsync("octocat", "hello-world"));
+            CreateClient(handler, KeyFile()).DiscoverInstallationAsync("octocat", "hello-world"));
 
         Assert.Equal("github_app_credential_rejected", error.Code);
         Assert.Null(error.Details?.GetType().GetProperty("installationUrl"));
@@ -57,9 +56,8 @@ public sealed class GitHubAppClientTests
     [Fact]
     public async Task CreateInstallationToken_MapsRemovedInstallationToInstallGuidance()
     {
-        using var rsa = RSA.Create(2048);
         var error = await Assert.ThrowsAsync<GitHubAppInstallationException>(() =>
-            CreateClient(new ResponseHandler((HttpStatusCode.NotFound, "{}")), KeyFile(rsa.ExportRSAPrivateKeyPem()))
+            CreateClient(new ResponseHandler((HttpStatusCode.NotFound, "{}")), KeyFile())
                 .CreateInstallationTokenAsync("123"));
 
         Assert.Equal("github_app_installation_required", error.Code);
@@ -71,13 +69,12 @@ public sealed class GitHubAppClientTests
     [Fact]
     public async Task DiscoverInstallation_PropagatesRemovedInstallationFromTokenExchange()
     {
-        using var rsa = RSA.Create(2048);
         var handler = new ResponseHandler(
             (HttpStatusCode.OK, "{\"id\":123}"),
             (HttpStatusCode.NotFound, "{}"));
 
         var error = await Assert.ThrowsAsync<GitHubAppInstallationException>(() =>
-            CreateClient(handler, KeyFile(rsa.ExportRSAPrivateKeyPem())).DiscoverInstallationAsync("octocat", "hello-world"));
+            CreateClient(handler, KeyFile()).DiscoverInstallationAsync("octocat", "hello-world"));
 
         Assert.Equal("github_app_installation_required", error.Code);
         Assert.Equal(2, handler.Requests.Count);
@@ -86,30 +83,28 @@ public sealed class GitHubAppClientTests
     [Fact]
     public async Task DiscoverInstallation_DistinguishesPermissionFromRateLimit()
     {
-        using var rsa = RSA.Create(2048);
         var permissionHandler = new ResponseHandler((HttpStatusCode.Forbidden, "{}"));
         var permission = await Assert.ThrowsAsync<GitHubAppInstallationException>(() =>
-            CreateClient(permissionHandler, KeyFile(rsa.ExportRSAPrivateKeyPem())).DiscoverInstallationAsync("octocat", "hello-world"));
+            CreateClient(permissionHandler, KeyFile()).DiscoverInstallationAsync("octocat", "hello-world"));
         Assert.Equal("github_app_permission_denied", permission.Code);
 
         var rateHandler = new ResponseHandler((HttpStatusCode.Forbidden, "{}"));
         rateHandler.Headers.Add(("X-RateLimit-Remaining", "0"));
         var rate = await Assert.ThrowsAsync<GitHubAppInstallationException>(() =>
-            CreateClient(rateHandler, KeyFile(rsa.ExportRSAPrivateKeyPem())).DiscoverInstallationAsync("octocat", "hello-world"));
+            CreateClient(rateHandler, KeyFile()).DiscoverInstallationAsync("octocat", "hello-world"));
         Assert.Equal("github_app_rate_limited", rate.Code);
 
         var remainingHandler = new ResponseHandler((HttpStatusCode.Forbidden, "{}"));
         remainingHandler.Headers.Add(("X-RateLimit-Remaining", "4999"));
         var remaining = await Assert.ThrowsAsync<GitHubAppInstallationException>(() =>
-            CreateClient(remainingHandler, KeyFile(rsa.ExportRSAPrivateKeyPem())).DiscoverInstallationAsync("octocat", "hello-world"));
+            CreateClient(remainingHandler, KeyFile()).DiscoverInstallationAsync("octocat", "hello-world"));
         Assert.Equal("github_app_permission_denied", remaining.Code);
     }
 
     [Fact]
     public async Task PrivateKeyMissingReturnsActionableError()
     {
-        using var rsa = RSA.Create(2048);
-        var files = KeyFile(rsa.ExportRSAPrivateKeyPem());
+        var files = KeyFile();
         files.FileAvailable = false;
 
         var error = await Assert.ThrowsAsync<GitHubAppInstallationException>(() =>
@@ -122,8 +117,7 @@ public sealed class GitHubAppClientTests
     [Fact]
     public async Task PrivateKeyRejectsSymlinkAndPermissiveMode()
     {
-        using var rsa = RSA.Create(2048);
-        var files = KeyFile(rsa.ExportRSAPrivateKeyPem());
+        var files = KeyFile();
         files.IsSymlink = true;
         var symlink = await Assert.ThrowsAsync<GitHubAppInstallationException>(() =>
             CreateClient(new ResponseHandler((HttpStatusCode.OK, "{}")), files).DiscoverInstallationAsync("octocat", "hello-world"));
@@ -136,9 +130,15 @@ public sealed class GitHubAppClientTests
         Assert.Equal("github_app_private_key_permissions", mode.Code);
     }
 
-    private static FakeProtectedFile KeyFile(string pem) => new()
+    private static string CreateTestPrivateKeyPem()
     {
-        Contents = Encoding.UTF8.GetBytes(pem),
+        using var rsa = RSA.Create(2048);
+        return rsa.ExportRSAPrivateKeyPem();
+    }
+
+    private static FakeProtectedFile KeyFile() => new()
+    {
+        Contents = Encoding.UTF8.GetBytes(TestPrivateKeyPem),
         Mode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
     };
 
