@@ -887,7 +887,7 @@ func runInstallUpdateLocked(ctx context.Context, deps Dependencies, c command, c
 	}
 	if ownsOutcome {
 		code := runInstallUpdateLockedWithOutcome(ctx, deps, c, component, enrollmentToken, runnerServerURL, root)
-		c.outcome.finish(ctx, code)
+		c.outcome.finish(ctx, deps, code)
 		return code
 	}
 	return runInstallUpdateLockedWithOutcome(ctx, deps, c, component, enrollmentToken, runnerServerURL, root)
@@ -1091,12 +1091,12 @@ type managedUpdateFence struct {
 }
 
 type updateOutcomeReporter struct {
-	client    *client
-	jobID     string
+	client     *client
+	jobID      string
 	sourcePath string
-	now       func() time.Time
-	stageLogs []cliOutcomeLog
-	finished  bool
+	now        func() time.Time
+	stageLogs  []cliOutcomeLog
+	finished   bool
 }
 
 type cliOutcomeLog struct {
@@ -1159,18 +1159,18 @@ func (r *updateOutcomeReporter) post(ctx context.Context, deps Dependencies, sta
 		return
 	}
 	body := map[string]any{
-		"jobId": r.jobID,
-		"status": status,
-		"stage": "Ready",
-		"outcome": nil,
+		"jobId":      r.jobID,
+		"status":     status,
+		"stage":      "Ready",
+		"outcome":    nil,
 		"sourcePath": r.sourcePath,
 	}
 	if len(r.stageLogs) > 0 {
 		entry := r.stageLogs[len(r.stageLogs)-1]
 		body["stage"] = entry.Stage
 		body["logs"] = []map[string]string{{
-			"at": r.now().UTC().Format("2006-01-02T15:04:05.9999999Z07:00"),
-			"stage": entry.Stage,
+			"at":      r.now().UTC().Format("2006-01-02T15:04:05.9999999Z07:00"),
+			"stage":   entry.Stage,
 			"message": entry.Message,
 		}}
 	}
@@ -1433,7 +1433,9 @@ func verifyManagedIdentity(ctx context.Context, deps Dependencies, component str
 	}
 	var actual managedIdentity
 	if component == "server" {
-		var response struct{ Running managedIdentity `json:"running"` }
+		var response struct {
+			Running managedIdentity `json:"running"`
+		}
 		if err := json.Unmarshal(data, &response); err != nil {
 			return fmt.Errorf("runtime identity verification returned malformed Server identity: %w", err)
 		}
@@ -1509,7 +1511,7 @@ func beginRunnerUpdateFence(ctx context.Context, deps Dependencies, c command) (
 		return nil, fmt.Errorf("Runner update fence could not be acquired: %w", err)
 	}
 	var response struct {
-		Status          string `json:"status"`
+		Status            string `json:"status"`
 		UpdateInterruptID string `json:"updateInterruptId"`
 	}
 	if json.Unmarshal(data, &response) != nil || response.UpdateInterruptID != id || response.Status != "draining" {
@@ -1523,7 +1525,9 @@ func cancelRunnerUpdateFence(ctx context.Context, fence *managedUpdateFence) err
 	if err != nil {
 		return err
 	}
-	var response struct{ Status string `json:"status"` }
+	var response struct {
+		Status string `json:"status"`
+	}
 	if json.Unmarshal(data, &response) != nil || (response.Status != "cancelled" && response.Status != "already-cancelled") {
 		return fmt.Errorf("Runner update fence was not released because ownership was superseded")
 	}

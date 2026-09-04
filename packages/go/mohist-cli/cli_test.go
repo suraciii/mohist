@@ -132,11 +132,12 @@ func TestRunMapsTransportAndCancellation(t *testing.T) {
 
 func TestRunMaintenanceDefaultsCurrentDirectory(t *testing.T) {
 	var stdout, stderr strings.Builder
+	home := t.TempDir()
 	deps := Dependencies{
 		Stdout:    &stdout,
 		Stderr:    &stderr,
 		Lookup:    func(string) (string, bool) { return "", false },
-		HomeDir:   func() (string, error) { return "/home/test", nil },
+		HomeDir:   func() (string, error) { return home, nil },
 		WriteFile: func(string, string, os.FileMode) error { return nil },
 		Execute:   func(context.Context, string, []string) error { return nil },
 		MkdirAll:  func(string, os.FileMode) error { return nil },
@@ -149,11 +150,12 @@ func TestRunMaintenanceDefaultsCurrentDirectory(t *testing.T) {
 
 func TestRunUpdateCLIDefaultsCurrentDirectory(t *testing.T) {
 	var stdout, stderr strings.Builder
+	home := t.TempDir()
 	deps := Dependencies{
 		Stdout:  &stdout,
 		Stderr:  &stderr,
 		Lookup:  func(string) (string, bool) { return "", false },
-		HomeDir: func() (string, error) { return "/home/test", nil },
+		HomeDir: func() (string, error) { return home, nil },
 		Execute: func(context.Context, string, []string) error {
 			return errors.New("build stopped")
 		},

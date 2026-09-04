@@ -35,7 +35,9 @@ func TestManagedRunnerUpdateVerifiesBeforeReleasingFence(t *testing.T) {
 	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		calls = append(calls, request.Method+" "+request.URL.Path)
 		if request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/update-interrupt") {
-			var body struct{ UpdateInterruptID string `json:"updateInterruptId"` }
+			var body struct {
+				UpdateInterruptID string `json:"updateInterruptId"`
+			}
 			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
@@ -47,7 +49,16 @@ func TestManagedRunnerUpdateVerifiesBeforeReleasingFence(t *testing.T) {
 		return response(http.StatusOK, `{"success":true,"data":{"status":"cancelled"}}`), nil
 	}), map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_TOKEN": "operator"})
 	deps.HomeDir = func() (string, error) { return home, nil }
-	deps.ReadFile = os.ReadFile
+	deps.ReadFile = func(path string) (string, error) {
+		data, err := os.ReadFile(path)
+		return string(data), err
+	}
+	deps.WriteFile = func(path, value string, mode os.FileMode) error {
+		return os.WriteFile(path, []byte(value), mode)
+	}
+	deps.RemoveAll = os.RemoveAll
+	deps.Rename = os.Rename
+	deps.Chmod = os.Chmod
 	deps.Execute = func(_ context.Context, name string, args []string) error {
 		calls = append(calls, name+" "+strings.Join(args, " "))
 		return nil
@@ -129,7 +140,16 @@ func TestManagedUpdateMismatchRestoresPreviousUnitAndReportsIdentities(t *testin
 		return response(http.StatusOK, `{"success":true,"data":{"running":{"component":"server","version":"actual","sourceRevision":"actual","gitHash":"actual","treeHash":"tree","artifactDigest":"digest","releaseId":"actual","generation":1}}}`), nil
 	}), map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_TOKEN": "operator"})
 	deps.HomeDir = func() (string, error) { return home, nil }
-	deps.ReadFile = os.ReadFile
+	deps.ReadFile = func(path string) (string, error) {
+		data, err := os.ReadFile(path)
+		return string(data), err
+	}
+	deps.WriteFile = func(path, value string, mode os.FileMode) error {
+		return os.WriteFile(path, []byte(value), mode)
+	}
+	deps.RemoveAll = os.RemoveAll
+	deps.Rename = os.Rename
+	deps.Chmod = os.Chmod
 	deps.Execute = func(context.Context, string, []string) error { return nil }
 	if code := activateManagedRelease(context.Background(), deps, "server", command{kind: "update-server"}, managedRelease{Root: candidateRoot, Entrypoint: entrypoint, ManifestPath: manifestPath}, home, unitDir, "mohist.service"); code != ExitOperation {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
@@ -380,7 +400,7 @@ func TestInstallComponentRunnerRejectsEmptyEnrollmentTokenBeforeSideEffects(t *t
 	writes := 0
 	executes := 0
 	deps, _, errOut := testDeps(nil, map[string]string{})
-	deps.CurrentDirectory = func() string { return "/repo" }
+	deps.CurrentDirectory = func() string { return t.TempDir() }
 	deps.WriteFile = func(string, string, os.FileMode) error {
 		writes++
 		return nil
@@ -390,7 +410,7 @@ func TestInstallComponentRunnerRejectsEmptyEnrollmentTokenBeforeSideEffects(t *t
 		return nil
 	}
 
-	code := installComponent(context.Background(), deps, "runner", command{}, "", "")
+	code := installComponent(context.Background(), deps, "runner", command{kind: "install-component"}, "", "")
 
 	if code != ExitOperation {
 		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())

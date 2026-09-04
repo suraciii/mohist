@@ -43,29 +43,29 @@ type ManagerCredentialBroker func(context.Context, *http.Request) (*http.Respons
 
 // Dependencies makes process boundaries explicit and keeps command tests local.
 type Dependencies struct {
-	HTTPClient              *http.Client
-	Stdout                  io.Writer
-	Stderr                  io.Writer
-	Lookup                  EnvLookup
-	ReadFile                ReadFile
-	WriteFile               WriteFile
-	HomeDir                 func() (string, error)
-	Execute                 Execute
-	ExecuteOutput           ExecuteOutput
+	HTTPClient                 *http.Client
+	Stdout                     io.Writer
+	Stderr                     io.Writer
+	Lookup                     EnvLookup
+	ReadFile                   ReadFile
+	WriteFile                  WriteFile
+	HomeDir                    func() (string, error)
+	Execute                    Execute
+	ExecuteOutput              ExecuteOutput
 	AcquireUserTransactionLock AcquireUserTransactionLock
-	OpenBrowser             Execute
-	Input                   io.Reader
-	Now                     func() time.Time
-	Wait                    Wait
-	Executable              func() string
-	CurrentDirectory        func() string
-	EventTail               EventTail
-	HealthProbe             HealthProbe
-	ManagerCredentialBroker ManagerCredentialBroker
-	MkdirAll                func(string, os.FileMode) error
-	RemoveAll               func(string) error
-	Rename                  func(string, string) error
-	Chmod                   func(string, os.FileMode) error
+	OpenBrowser                Execute
+	Input                      io.Reader
+	Now                        func() time.Time
+	Wait                       Wait
+	Executable                 func() string
+	CurrentDirectory           func() string
+	EventTail                  EventTail
+	HealthProbe                HealthProbe
+	ManagerCredentialBroker    ManagerCredentialBroker
+	MkdirAll                   func(string, os.FileMode) error
+	RemoveAll                  func(string) error
+	Rename                     func(string, string) error
+	Chmod                      func(string, os.FileMode) error
 }
 
 type Config struct {
