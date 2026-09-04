@@ -458,7 +458,9 @@ Job completion as a closed conversation or a delivered user goal.
   `edit` clears fields with `--clear-runtime`, `--clear-model`,
   `--clear-variant`, `--clear-reasoning-effort`, `--clear-avatar`,
   `--clear-skills`, and `--clear-max-concurrent-runs`. Set and clear options are
-  mutually exclusive.
+  mutually exclusive. Execution-config edits preserve typed fields that were
+  not set or cleared; clearing the final typed field restores the implicit
+  `agentConfig: null` state.
   `mo agent view` shows unified Readiness, configuration gaps, and current
   execution availability. The concurrency limit constrains launch and
   follow-up immediately but does not stop an execution that is already running.

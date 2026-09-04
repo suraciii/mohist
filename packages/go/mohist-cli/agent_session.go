@@ -167,6 +167,9 @@ func parseAgentFlags(c command, action string, args []string) (command, error) {
 			}
 			continue
 		}
+		if strings.HasPrefix(arg, "--clear-") && !isKnownAgentClearFlag(arg) {
+			return command{}, usage("unknown option " + arg)
+		}
 		if arg == "--all" || arg == "--continue" || strings.HasPrefix(arg, "--clear-") || arg == "--yes" {
 			if arg == "--continue" && action == "edit" && i+1 < len(args) && (args[i+1] == "true" || args[i+1] == "false") {
 				c.args = append(c.args, "continue", args[i+1])
@@ -193,6 +196,13 @@ func parseAgentFlags(c command, action string, args []string) (command, error) {
 	}
 	if action == "create" && c.kind == "agent-create" && strings.TrimSpace(argValue(c.args, "name", "")) == "" {
 		return command{}, usage("--name or agent name is required")
+	}
+	if action == "edit" {
+		for _, key := range []string{"runtime", "model", "variant", "reasoning-effort"} {
+			if hasArg(c.args, key) && hasArg(c.args, "clear-"+key) {
+				return command{}, usage("--" + key + " cannot be used with --clear-" + key)
+			}
+		}
 	}
 	if action == "start" && !hasArg(c.args, "prompt") && !hasArg(c.args, "prompt-file") {
 		return command{}, usage("--prompt or --prompt-file is required")
@@ -221,6 +231,17 @@ func parseAgentFlags(c command, action string, args []string) (command, error) {
 		return command{}, usage("at least one editable option is required")
 	}
 	return c, nil
+}
+
+func isKnownAgentClearFlag(flag string) bool {
+	switch flag {
+	case "--clear-description", "--clear-purpose", "--clear-runtime", "--clear-model",
+		"--clear-variant", "--clear-reasoning-effort", "--clear-avatar", "--clear-skills",
+		"--clear-permissions", "--clear-allowed-subagents", "--clear-max-concurrent-runs":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseSession(args []string) (command, error) {
@@ -466,14 +487,15 @@ func runAgent(ctx context.Context, deps Dependencies, c *client, cmd command) in
 		return resourceRequest(ctx, deps, c, http.MethodGet, path, nil, cmd, true)
 	}
 	if action == "create" {
-		body := agentBody(cmd.args)
+		body := agentBody(cmd.args, nil)
 		return resourceRequest(ctx, deps, c, http.MethodPost, agentPath(project, ""), body, cmd, false)
 	}
 	if action == "view" || action == "edit" || action == "archive" || action == "restore" {
-		id, code := resolveAgent(ctx, deps, c, project, argValue(cmd.args, "agent", ""))
+		agent, code := resolveAgentRecord(ctx, deps, c, project, argValue(cmd.args, "agent", ""))
 		if code != ExitOK {
 			return code
 		}
+		id, _ := agent["id"].(string)
 		path := agentPath(project, "/"+url.PathEscape(id))
 		if action == "view" {
 			return resourceRequest(ctx, deps, c, http.MethodGet, path, nil, cmd, false)
@@ -484,9 +506,12 @@ func runAgent(ctx context.Context, deps Dependencies, c *client, cmd command) in
 		if action == "restore" {
 			return resourceRequest(ctx, deps, c, http.MethodPost, path+"/restore", nil, cmd, false)
 		}
-		body := agentBody(cmd.args)
+		body := agentBody(cmd.args, agentConfig(agent))
 		for _, key := range []string{"description", "purpose", "runtime", "model", "variant", "reasoning-effort", "skills", "permissions", "max-concurrent-runs"} {
 			if hasArg(cmd.args, "clear-"+key) {
+				if key == "runtime" || key == "model" || key == "variant" || key == "reasoning-effort" {
+					continue
+				}
 				delete(body, agentJSONNameOrSelf(key))
 				body[agentJSONNameOrSelf(key)] = nil
 			}
@@ -519,7 +544,7 @@ func agentJSONName(name string) string {
 	}[name]
 }
 
-func agentBody(args []string) map[string]any {
+func agentBody(args []string, currentConfig map[string]any) map[string]any {
 	body := map[string]any{}
 	for _, key := range []string{"name", "description", "purpose", "instructions", "skills", "permissions", "max-concurrent-runs"} {
 		if hasArg(args, key) {
@@ -535,15 +560,36 @@ func agentBody(args []string) map[string]any {
 		}
 	}
 	config := map[string]any{}
-	for _, key := range []string{"runtime", "model", "variant", "reasoning-effort"} {
-		if hasArg(args, key) {
-			config[agentJSONNameOrSelf(key)] = argValue(args, key, "")
+	for _, key := range []string{"runtime", "model", "variant", "reasoningEffort"} {
+		if value, exists := currentConfig[key]; exists {
+			config[key] = value
 		}
 	}
-	if len(config) > 0 {
-		body["agentConfig"] = config
+	configChanged := false
+	for _, key := range []string{"runtime", "model", "variant", "reasoning-effort"} {
+		jsonKey := agentJSONNameOrSelf(key)
+		if hasArg(args, "clear-"+key) {
+			delete(config, jsonKey)
+			configChanged = true
+		}
+		if hasArg(args, key) {
+			config[jsonKey] = argValue(args, key, "")
+			configChanged = true
+		}
+	}
+	if configChanged {
+		if len(config) == 0 {
+			body["agentConfig"] = nil
+		} else {
+			body["agentConfig"] = config
+		}
 	}
 	return body
+}
+
+func agentConfig(agent map[string]any) map[string]any {
+	config, _ := agent["agentConfig"].(map[string]any)
+	return config
 }
 
 func agentJSONNameOrSelf(name string) string {
@@ -554,31 +600,51 @@ func agentJSONNameOrSelf(name string) string {
 }
 
 func resolveAgent(ctx context.Context, deps Dependencies, c *client, project, ref string) (string, int) {
+	agent, code := resolveAgentRecord(ctx, deps, c, project, ref)
+	if code != ExitOK {
+		return "", code
+	}
+	id, _ := agent["id"].(string)
+	return id, ExitOK
+}
+
+func resolveAgentRecord(ctx context.Context, deps Dependencies, c *client, project, ref string) (map[string]any, int) {
 	if strings.HasPrefix(ref, "agent_") {
-		if _, err := c.request(ctx, http.MethodGet, agentPath(project, "/"+url.PathEscape(ref)), nil); err != nil {
+		data, err := c.request(ctx, http.MethodGet, agentPath(project, "/"+url.PathEscape(ref)), nil)
+		if err != nil {
 			writeError(deps.Stderr, err)
-			return "", ExitOperation
+			return nil, ExitOperation
 		}
-		return ref, ExitOK
+		var agent map[string]any
+		if json.Unmarshal(data, &agent) != nil {
+			writeError(deps.Stderr, errors.New("error: invalid agent response [invalid_response]"))
+			return nil, ExitOperation
+		}
+		if id, ok := agent["id"].(string); !ok || id != ref {
+			writeError(deps.Stderr, errors.New("error: invalid agent response [invalid_response]"))
+			return nil, ExitOperation
+		}
+		return agent, ExitOK
 	}
 	data, err := c.request(ctx, http.MethodGet, agentPath(project, "?all=true"), nil)
 	if err != nil {
-		return "", operationExit(deps, ctx, err)
+		return nil, operationExit(deps, ctx, err)
 	}
 	var list []map[string]any
 	if json.Unmarshal(data, &list) != nil {
 		writeError(deps.Stderr, errors.New("error: invalid agent response [invalid_response]"))
-		return "", ExitOperation
+		return nil, ExitOperation
 	}
 	for _, item := range list {
 		if item["name"] == ref {
 			if id, ok := item["id"].(string); ok {
-				return id, ExitOK
+				item["id"] = id
+				return item, ExitOK
 			}
 		}
 	}
 	writeError(deps.Stderr, fmt.Errorf("Agent %q not found", ref))
-	return "", ExitOperation
+	return nil, ExitOperation
 }
 func runAgentJob(ctx context.Context, deps Dependencies, c *client, project string, cmd command) int {
 	action := strings.TrimPrefix(cmd.kind, "agent-job-")
