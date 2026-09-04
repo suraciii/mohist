@@ -98,3 +98,14 @@ func TestProjectVariableSetRejectsAmbiguousValueLocally(t *testing.T) {
 		t.Fatalf("validation issued %d requests", calls)
 	}
 }
+
+func TestWorkspaceCreateHelpPrecedesRequiredName(t *testing.T) {
+	for _, token := range []string{"--help", "-h"} {
+		deps, out, errOut := projectSpaceDeps(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, io.ErrUnexpectedEOF
+		}), map[string]string{})
+		if code := Run(context.Background(), []string{"workspace", "create", token}, deps); code != ExitOK || !strings.Contains(out.String(), "USAGE") || errOut.Len() != 0 {
+			t.Fatalf("token=%q code=%d stdout=%q stderr=%q", token, code, out.String(), errOut.String())
+		}
+	}
+}
