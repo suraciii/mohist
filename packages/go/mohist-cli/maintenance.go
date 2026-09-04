@@ -682,9 +682,28 @@ func runInstallUpdate(ctx context.Context, deps Dependencies, c command) int {
 		fmt.Fprintf(deps.Stdout, "Dry run: would %s %s from source.\n", action, component)
 		return ExitOK
 	}
+	home, err := deps.HomeDir()
+	if err != nil {
+		writeError(deps.Stderr, err)
+		return ExitOperation
+	}
+	release, acquired, err := deps.AcquireUserTransactionLock(home)
+	if err != nil {
+		writeError(deps.Stderr, err)
+		return ExitOperation
+	}
+	if !acquired {
+		writeError(deps.Stderr, errors.New("update_in_progress"))
+		return ExitOperation
+	}
+	defer release()
+	return runInstallUpdateLocked(ctx, deps, c, component, enrollmentToken, runnerServerURL)
+}
+
+func runInstallUpdateLocked(ctx context.Context, deps Dependencies, c command, component, enrollmentToken, runnerServerURL string) int {
 	if strings.HasPrefix(c.kind, "update-") {
 		if component == "" {
-			return updateAll(ctx, deps, c)
+			return updateAllLocked(ctx, deps, c)
 		}
 		switch component {
 		case "cli":
@@ -730,11 +749,15 @@ func runInstallUpdate(ctx context.Context, deps Dependencies, c command) int {
 }
 
 func updateAll(ctx context.Context, deps Dependencies, c command) int {
+	return runInstallUpdate(ctx, deps, c)
+}
+
+func updateAllLocked(ctx context.Context, deps Dependencies, c command) int {
 	if code := updateCLI(ctx, deps, argValue(c.args, "repo-root", ""), argValue(c.args, "cli-path", "")); code != ExitOK {
 		return code
 	}
 	for _, component := range []string{"server", "runner", "slack"} {
-		if code := runInstallUpdate(ctx, deps, command{kind: "update-" + component, args: []string{"component", component}}); code != ExitOK {
+		if code := runInstallUpdateLocked(ctx, deps, command{kind: "update-" + component, args: []string{"component", component}}, component, "", ""); code != ExitOK {
 			return code
 		}
 	}

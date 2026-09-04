@@ -11,6 +11,106 @@ import (
 	"testing"
 )
 
+func TestServiceCommandsUseUserSystemdAndJournalctl(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		output     string
+		wantOutput string
+		wantName   string
+		wantArgs   []string
+	}{
+		{name: "start", args: []string{"service", "start", "runner"}, wantName: "systemctl", wantArgs: []string{"--user", "start", "mohist-runner.service"}},
+		{name: "stop", args: []string{"service", "stop", "server"}, wantName: "systemctl", wantArgs: []string{"--user", "stop", "mohist.service"}},
+		{name: "restart", args: []string{"service", "restart", "slack"}, wantName: "systemctl", wantArgs: []string{"--user", "restart", "mohist-slack.service"}},
+		{name: "status", args: []string{"service", "status", "runner"}, output: "ActiveState=active\n", wantOutput: "ActiveState=active\n", wantName: "systemctl", wantArgs: []string{"--user", "show", "--no-pager", "--property=Id,ActiveState,SubState,Result,ExecMainStatus", "mohist-runner.service"}},
+		{name: "logs", args: []string{"service", "logs", "server", "--lines", "25", "--follow"}, output: "server log\n", wantOutput: "server log\n", wantName: "journalctl", wantArgs: []string{"--user", "-u", "mohist.service", "--no-pager", "-n", "25", "-f"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			deps, out, errOut := testDeps(nil, map[string]string{})
+			var gotName string
+			var gotArgs []string
+			deps.Execute = func(_ context.Context, name string, args []string) error {
+				gotName, gotArgs = name, args
+				return nil
+			}
+			deps.ExecuteOutput = func(_ context.Context, name string, args []string) (string, error) {
+				gotName, gotArgs = name, args
+				return test.output, nil
+			}
+			if code := Run(context.Background(), test.args, deps); code != ExitOK {
+				t.Fatalf("code=%d stderr=%q", code, errOut.String())
+			}
+			if gotName != test.wantName || strings.Join(gotArgs, "\x00") != strings.Join(test.wantArgs, "\x00") {
+				t.Fatalf("command=%s %#v, want %s %#v", gotName, gotArgs, test.wantName, test.wantArgs)
+			}
+			wantOutput := "OK\n"
+			if test.wantOutput != "" {
+				wantOutput = test.wantOutput
+			}
+			if out.String() != wantOutput {
+				t.Fatalf("stdout=%q", out.String())
+			}
+		})
+	}
+}
+
+func TestServiceDryRunDoesNotInvokeServiceManager(t *testing.T) {
+	deps, out, errOut := testDeps(nil, map[string]string{})
+	called := false
+	deps.Execute = func(context.Context, string, []string) error { called = true; return nil }
+	deps.ExecuteOutput = func(context.Context, string, []string) (string, error) { called = true; return "", nil }
+	if code := Run(context.Background(), []string{"service", "restart", "runner", "--dry-run"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if called || out.String() != "Dry run: restart runner\n" {
+		t.Fatalf("called=%v stdout=%q", called, out.String())
+	}
+}
+
+func TestServiceUninstallReportsCleanupFailure(t *testing.T) {
+	home := t.TempDir()
+	deps, _, errOut := testDeps(nil, map[string]string{})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	var commands [][]string
+	deps.Execute = func(_ context.Context, name string, args []string) error {
+		commands = append(commands, append([]string{name}, args...))
+		return nil
+	}
+	deps.RemoveAll = func(path string) error { return errors.New("cleanup failed: " + path) }
+	if code := Run(context.Background(), []string{"service", "uninstall", "runner"}, deps); code != ExitOperation {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "remove managed service file") || !strings.Contains(errOut.String(), "cleanup failed") {
+		t.Fatalf("stderr=%q", errOut.String())
+	}
+	if len(commands) != 2 || strings.Join(commands[0], " ") != "systemctl --user stop mohist-runner.service" || strings.Join(commands[1], " ") != "systemctl --user disable mohist-runner.service" {
+		t.Fatalf("commands=%#v", commands)
+	}
+}
+
+func TestInstallUpdateLockContentionReturnsStableResultBeforeSideEffects(t *testing.T) {
+	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("unexpected enrollment request")
+		return nil, nil
+	}), map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_TOKEN": "operator-token"})
+	deps.HomeDir = func() (string, error) { return t.TempDir(), nil }
+	deps.AcquireUserTransactionLock = func(string) (func(), bool, error) { return nil, false, nil }
+	writes, executes := 0, 0
+	deps.WriteFile = func(string, string, os.FileMode) error { writes++; return nil }
+	deps.Execute = func(context.Context, string, []string) error { executes++; return nil }
+	if code := Run(context.Background(), []string{"install", "runner"}, deps); code != ExitOperation {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if errOut.String() != "update_in_progress\n" {
+		t.Fatalf("stderr=%q", errOut.String())
+	}
+	if writes != 0 || executes != 0 {
+		t.Fatalf("side effects on contention: writes=%d executes=%d", writes, executes)
+	}
+}
+
 func TestInstallRunnerPersistsEnabledAgentRuntimes(t *testing.T) {
 	home := t.TempDir()
 	repoRoot := t.TempDir()
