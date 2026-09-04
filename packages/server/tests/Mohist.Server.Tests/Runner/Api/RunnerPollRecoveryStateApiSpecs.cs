@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Services;
@@ -172,6 +173,9 @@ public sealed class RunnerPollRecoveryStateApiSpecs
         var jobId = $"agent-job-outstanding-{Guid.NewGuid():N}";
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+        var connectionId = $"{runnerId}-connection";
+        var connectionTracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var connectionGeneration = connectionTracker.Register(runnerId, connectionId);
 
         try
         {
@@ -179,7 +183,15 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             var agentTurnId = $"turn-{Guid.NewGuid():N}";
             const string runtime = "opencode";
             var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
-            await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+            await runner.RegisterAsync(
+                new RunnerInfo(
+                    runnerId,
+                    ["spec/*"],
+                    "test-host",
+                    projectId,
+                    RuntimeCatalogs: CapabilityCatalogTestHelpers.Create(),
+                    ConnectionGeneration: connectionGeneration),
+                TestRunnerGenerationExtensions.ProcessGeneration);
             await job.SubmitAsync(new AgentJobInput(
                 "persist terminal report",
                 WorkspacePath: "/tmp/agent-job-outstanding",
@@ -189,7 +201,15 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                 AgentSessionId: agentSessionId,
                 InitialTurnId: agentTurnId,
                 PinnedRunnerId: runnerId));
-            var dispatch = await PollAsync(runnerId);
+            var dispatch = await PollAsync(
+                runnerId,
+                new RunnerPollRequest(
+                    [],
+                    [],
+                    RuntimeReadiness: [new RuntimeReadinessWitness(runtime, Ready: true, Generation: 1)],
+                    ConnectionId: connectionId,
+                    ConnectionGeneration: connectionGeneration,
+                    ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
             var workId = dispatch.GetProperty("workId").GetString()!;
             var bindingRecorded = await job.RecordRuntimeSessionBindingAsync(
                 runnerId, workId, agentSessionId, runtimeSessionId);
@@ -220,6 +240,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
         }
         finally
         {
+            connectionTracker.Unregister(runnerId, connectionId);
             await runner.UnregisterAsync();
         }
     }
@@ -470,9 +491,9 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             VerificationCommand: "true"));
     }
 
-    private async Task<JsonElement> PollAsync(string runnerId)
+    private async Task<JsonElement> PollAsync(string runnerId, RunnerPollRequest? request = null)
     {
-        using var response = await _fixture.Client.PostRunnerPollAsync(runnerId);
+        using var response = await _fixture.Client.PostRunnerPollAsync(runnerId, request);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.ReadFirstDispatchElementAsync()
             ?? throw new InvalidOperationException("Expected a dispatch from /poll");

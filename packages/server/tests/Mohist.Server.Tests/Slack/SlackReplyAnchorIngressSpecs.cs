@@ -32,6 +32,8 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
     private readonly List<string> _runnerIds = [];
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
 
+    private static string ConnectionId(string runnerId) => $"{runnerId}-connection";
+
     public SlackReplyAnchorIngressSpecs(IsolatedMohistIntegrationFixture fixture) => _fixture = fixture;
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
@@ -343,12 +345,15 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
 
     private async Task RegisterRunnerAsync(string runnerId, string projectId)
     {
+        var connectionGeneration = _fixture.Services.GetRequiredService<RunnerConnectionTracker>()
+            .Register(runnerId, ConnectionId(runnerId));
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
-            ["spec/*"],
+            ["spec/*", AgentExecutionSources.Version1Capability],
             $"{runnerId}-host",
             projectId,
+            ConnectionGeneration: connectionGeneration,
             RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()),
             TestRunnerGenerationExtensions.ProcessGeneration);
         await runner.UpdateAsync(1);
@@ -360,7 +365,16 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
         await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
             jobKey,
             TimeSpan.FromSeconds(5));
-        using var poll = await _fixture.Client.PostRunnerPollAsync(runnerId);
+        using var poll = await _fixture.Client.PostRunnerPollAsync(
+            runnerId,
+            new RunnerPollRequest(
+                [],
+                [],
+                RuntimeReadiness: [new RuntimeReadinessWitness("opencode", Ready: true, Generation: 1)],
+                ConnectionId: ConnectionId(runnerId),
+                ConnectionGeneration: _fixture.Services.GetRequiredService<RunnerConnectionTracker>()
+                    .GetConnectionGeneration(runnerId),
+                ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
         var dispatch = Assert.Single(await poll.ReadDispatchElementsAsync());
         var assignment = await job.GetRuntimeSnapshotAsync();
         Assert.True(assignment.RunnerAccepted);

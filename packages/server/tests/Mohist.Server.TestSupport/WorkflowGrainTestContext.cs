@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Runner.Grains;
@@ -90,7 +91,7 @@ public abstract class WorkflowGrainTestContext
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
-            ["spec/*"],
+            ["spec/*", AgentExecutionSources.Version1Capability],
             "test-host",
             projectId,
             ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration,
@@ -254,7 +255,7 @@ public abstract class WorkflowGrainTestContext
                 await ActivatePendingWorkflowAgentAsync();
                 var resp = await dispatch.PollAsync(
                     runnerId,
-                    new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
+                    DispatchTestExtensions.ReadyPollRequest());
                 work = resp.Dispatches.FirstOrDefault();
                 return work;
             },
@@ -288,7 +289,7 @@ public abstract class WorkflowGrainTestContext
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
-            ["spec/*"],
+            ["spec/*", AgentExecutionSources.Version1Capability],
             "test-host",
             TestProjectId(_workflowId),
             ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration,

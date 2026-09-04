@@ -8,12 +8,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Api;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Orleans;
@@ -276,7 +278,9 @@ public class RunnerConfigApiSpecs : IAsyncLifetime
         var runnerId = await _fixture.RegisterRunnerAsync();
 
         // Idle path: /poll returns 204 with no body.
-        using (var poll = await _fixture.Client.PostRunnerPollAsync(runnerId))
+        using (var poll = await _fixture.Client.PostRunnerPollAsync(
+            runnerId,
+            _fixture.ReadyPollRequest(runnerId, "pi")))
         {
             Assert.Equal(HttpStatusCode.NoContent, poll.StatusCode);
         }
@@ -319,7 +323,9 @@ public class RunnerConfigApiSpecs : IAsyncLifetime
             });
         await _fixture.WaitForAgentJobAssignmentPreparedAsync(jobKey);
 
-        using var response = await _fixture.Client.PostRunnerPollAsync(runnerId);
+        using var response = await _fixture.Client.PostRunnerPollAsync(
+            runnerId,
+            _fixture.ReadyPollRequest(runnerId, "pi"));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.ReadFirstDispatchElementAsync()
             ?? throw new InvalidOperationException("Expected a dispatch from /poll");
@@ -431,12 +437,15 @@ public class RunnerConfigFixture : IAsyncLifetime
     public async Task<string> RegisterRunnerAsync(string? projectId = null, int? maxWorkflowSlots = null)
     {
         var runnerId = $"runner-config-{Guid.NewGuid():N}";
+        var connectionGeneration = Services.GetRequiredService<RunnerConnectionTracker>()
+            .Register(runnerId, ConnectionId(runnerId));
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
-            ["spec/*"],
+            ["spec/*", AgentExecutionSources.Version1Capability],
             "config-host",
             projectId,
+            ConnectionGeneration: connectionGeneration,
             RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()),
             TestRunnerGenerationExtensions.ProcessGeneration);
         if (maxWorkflowSlots is not null)
@@ -445,6 +454,20 @@ public class RunnerConfigFixture : IAsyncLifetime
         Assert.Equal(RunnerStatus.Online, state.Status);
         _registeredRunnerIds.Add(runnerId);
         return runnerId;
+    }
+
+    public RunnerPollRequest ReadyPollRequest(string runnerId, string runtime)
+    {
+        var connectionGeneration = Services.GetRequiredService<RunnerConnectionTracker>()
+            .GetConnectionGeneration(runnerId)
+            ?? throw new InvalidOperationException($"Runner '{runnerId}' has no test connection generation");
+        return new(
+            [],
+            [],
+            RuntimeReadiness: [new RuntimeReadinessWitness(runtime, Ready: true, Generation: 1)],
+            ConnectionId: ConnectionId(runnerId),
+            ConnectionGeneration: connectionGeneration,
+            ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration);
     }
 
     public async Task<(string ProjectId, string AgentId)> CreateProjectAndAgentAsync(string prefix)
@@ -493,11 +516,14 @@ public class RunnerConfigFixture : IAsyncLifetime
     {
         foreach (var runnerId in _registeredRunnerIds)
         {
+            Services.GetRequiredService<RunnerConnectionTracker>().Unregister(runnerId, ConnectionId(runnerId));
             try { await Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync(); }
             catch { /* best-effort cleanup between tests */ }
         }
         _registeredRunnerIds.Clear();
     }
+
+    private static string ConnectionId(string runnerId) => $"{runnerId}-connection";
 
     public async ValueTask DisposeAsync()
     {
