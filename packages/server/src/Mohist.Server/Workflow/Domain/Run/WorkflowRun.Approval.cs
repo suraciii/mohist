@@ -206,6 +206,60 @@ public static partial class WorkflowRunExtensions
             }
             return resolved;
         }
+
+        /// <summary>
+        /// Feedback completion suppresses normal stage advancement. An
+        /// intermediate task still has to re-enter scheduling without resolving
+        /// feedback or revisiting the approval boundary.
+        /// </summary>
+        public bool PrepareNextDispatchForOpenFeedback(DateTimeOffset now)
+        {
+            if (run.Status != WorkflowRunStatus.Running || run.HasInFlightWork())
+                return false;
+
+            if (run.NextOpenFeedbackWork() is null)
+                return false;
+
+            ApplyWaitingForDispatchStatus(run, now);
+            return true;
+        }
+
+        /// <summary>
+        /// Restricts repair of historical Running gaps to the exact state the
+        /// feedback lifecycle now prevents.
+        /// </summary>
+        public WorkflowWork? NextAssignedFeedbackReconciliationWork(string workerId)
+        {
+            if (run.Status != WorkflowRunStatus.Running
+                || !run.IsAssignedTo(workerId)
+                || run.HasInFlightWork())
+            {
+                return null;
+            }
+
+            return run.NextOpenFeedbackWork();
+        }
+
+        private WorkflowWork? NextOpenFeedbackWork()
+        {
+            var next = run.NextWork();
+            if (next is not WorkflowTaskWork task)
+                return null;
+
+            var attempt = run.CurrentStage().Tasks.SingleOrDefault(candidate =>
+                string.Equals(candidate.Id, task.Id, StringComparison.Ordinal));
+            if (attempt?.Status != WorkflowActionAttemptStatus.Pending
+                || attempt.CausedByFeedbackId is not { } feedbackId)
+            {
+                return null;
+            }
+
+            return run.Feedback.Any(feedback =>
+                string.Equals(feedback.Id, feedbackId, StringComparison.Ordinal)
+                && feedback.Status == ApprovalFeedbackStatus.Open)
+                ? next
+                : null;
+        }
     }
 
     /// <summary>
