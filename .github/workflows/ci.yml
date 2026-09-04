@@ -95,7 +95,7 @@ jobs:
             ${{ runner.os }}-nuget-
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --workspaces=false
 
       - name: Restore .NET
         run: dotnet restore Mohist.sln
