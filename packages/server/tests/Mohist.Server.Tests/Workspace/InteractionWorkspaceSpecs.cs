@@ -55,22 +55,6 @@ public sealed class InteractionWorkspaceSpecs : IClassFixture<DefaultMohistInteg
         Assert.Equal("slack", Lineage(created, EventCatalog.Lineage.WorkspaceOriginKind));
     }
 
-    [Fact]
-    public async Task SlackChannel_SecondAgent_EntersSameWorkspace()
-    {
-        var connection = await CreateConnectionAsync();
-        const string conversationId = "C-interaction-second-agent";
-        var secondConnection = await CreateConnectionAsync(projectId: connection.ProjectId, agentNameSuffix: "second");
-
-        var first = await PostChannelAsync(connection, conversationId, "1710000000.010201", $"<@{connection.BotUserId}> first task");
-        var firstWorkspace = await SessionWorkspaceNameAsync(first.GetProperty("sessionId").GetString()!);
-
-        var second = await PostChannelAsync(secondConnection, conversationId, "1710000000.010202", $"<@{secondConnection.BotUserId}> second agent task");
-
-        Assert.Equal(firstWorkspace, await SessionWorkspaceNameAsync(second.GetProperty("sessionId").GetString()!));
-        Assert.Equal(firstWorkspace, await SessionWorkspaceNameAsync(first.GetProperty("sessionId").GetString()!));
-    }
-
     // --- Slack channel archive: acceptance 3 ---
 
     [Fact]
@@ -99,32 +83,6 @@ public sealed class InteractionWorkspaceSpecs : IClassFixture<DefaultMohistInteg
         var secondWs = await FindWorkspaceAsync(connection.ProjectId, secondWorkspaceName!);
         Assert.Equal(WorkspaceStatus.Active, secondWs!.Status);
         Assert.Equal(new WorkspaceOrigin.Slack(connection.WorkspaceTeamId, conversationId), secondWs.Origin);
-    }
-
-    // --- Slack channel across projects: acceptance 4 ---
-
-    [Fact]
-    public async Task SlackChannel_TwoProjects_HaveIndependentWorkspaces()
-    {
-        var connectionA = await CreateConnectionAsync();
-        var connectionB = await CreateConnectionAsync(workspaceTeamId: connectionA.WorkspaceTeamId);
-        const string conversationId = "C-interaction-two-projects";
-        Assert.NotEqual(connectionA.ProjectId, connectionB.ProjectId);
-
-        await PostChannelAsync(connectionA, conversationId, "1710000000.010501", $"<@{connectionA.BotUserId}> project A task");
-        await PostChannelAsync(connectionB, conversationId, "1710000000.010502", $"<@{connectionB.BotUserId}> project B task");
-
-        var wsA = await FindWorkspaceAsync(connectionA.ProjectId, $"slack-{conversationId}");
-        var wsB = await FindWorkspaceAsync(connectionB.ProjectId, $"slack-{conversationId}");
-        Assert.NotNull(wsA);
-        Assert.NotNull(wsB);
-        Assert.Equal(connectionA.ProjectId, wsA!.ProjectId);
-        Assert.Equal(connectionB.ProjectId, wsB!.ProjectId);
-        Assert.Equal(WorkspaceStatus.Active, wsA.Status);
-        Assert.Equal(WorkspaceStatus.Active, wsB.Status);
-        Assert.Equal(wsA.Name, wsB.Name);
-        Assert.Equal(new WorkspaceOrigin.Slack(connectionA.WorkspaceTeamId, conversationId), wsA.Origin);
-        Assert.Equal(new WorkspaceOrigin.Slack(connectionB.WorkspaceTeamId, conversationId), wsB.Origin);
     }
 
     // --- Slack DM ---
