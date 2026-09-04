@@ -1205,7 +1205,7 @@ public static partial class AgentSessionExtensions
                     AlreadyAccepted: true,
                     ShouldRedeliver: turnStillQueued,
                     InputAcceptance: existing.Acceptance,
-                    TurnStatus: existingTurn.Status);
+                    TurnStatus: existingTurn.Status, FailureCategory: existingTurn.Result?.FailureCategory);
             }
 
             var executionSource = ExecutionSourceFor(provenance);

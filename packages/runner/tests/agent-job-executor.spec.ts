@@ -343,6 +343,28 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
     })
   })
 
+  vitestIt.each([
+    ['disabled', null],
+    [
+      'not ready',
+      {
+        ...makeFakeRuntime().runtime,
+        ready: () => false,
+      } as OpenCodeRuntime,
+    ],
+  ])('does not create an isolated Manager OpenCode runtime when the shared runtime is %s', async (_case, shared) => {
+    const connection = makeFakeConnection()
+    const isolatedOpenCodeRuntime = vi.fn(async () => makeFakeRuntime().runtime)
+    const executor = new AgentJobExecutor(connection.connection, makeAccessors(shared))
+
+    const result = await executor.execute(buildAgentJobWork(), new AbortController().signal, {
+      openCodeRuntime: isolatedOpenCodeRuntime,
+    } as never)
+
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'runtime-unavailable' } })
+    expect(isolatedOpenCodeRuntime).not.toHaveBeenCalled()
+  })
+
   it('calls OpenCodeRuntime.runTurn with a flat Agent-owned request', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()

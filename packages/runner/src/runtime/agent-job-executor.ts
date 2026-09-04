@@ -10,7 +10,7 @@ import { isObject } from '../core/json.js'
 import { stringAt } from '../core/json-path.js'
 import { parseModelIdentifier, type OpenCodeRuntime } from './opencode/index.js'
 import type { PiRuntime } from './pi/index.js'
-import type { RuntimeAccessor } from '../server/command-runtime.js'
+import { resolveAccessor, type CommandRuntimeHandle, type RuntimeAccessor } from '../server/command-runtime.js'
 import type { ServerConnection } from '../server/connection.js'
 import { SkillResolver } from './skill-resolver.js'
 import { buildExecutionEnvelope } from './execution-envelope.js'
@@ -42,12 +42,21 @@ export { projectTurnToWorkItemResult } from './agent-job-turn.js'
 
 export type ModelRetryWaiter = (delayMs: number, signal: AbortSignal) => Promise<boolean>
 
+export interface ManagerRuntimeSessionBinding {
+  readonly boundary: ManagerExecutionBoundary
+  readonly handle: CommandRuntimeHandle
+  readonly sessionId: string
+  readonly runtimeSessionId: string
+  readonly workDir: string
+}
+
 export interface AgentJobExecutorOptions {
   /** Source-less dispatches are accepted only during the bounded rollout window. */
   readonly strictExecutionSourceValidation?: boolean
   readonly modelRetryInitialDelayMs?: number
   readonly modelRetryMaxDelayMs?: number
   readonly waitForModelRetry?: ModelRetryWaiter
+  readonly onManagerRuntimeSessionReady?: (binding: ManagerRuntimeSessionBinding) => void | Promise<void>
 }
 
 /**
@@ -224,6 +233,17 @@ export class AgentJobExecutor {
     }
     let turnDeps = this.turnDeps(managerExecution)
     if (managerExecution) {
+      const sharedOpenCode = resolveAccessor(this.runtimes.openCode)
+      if (!sharedOpenCode?.ready()) {
+        return withKnownBinding(
+          failureResult(
+            'runtime-unavailable',
+            'Manager OpenCode execution is disabled or not ready on this Runner',
+            'opencode',
+          ),
+          knownBinding(work, binding, 'opencode'),
+        )
+      }
       try {
         const isolated = await managerExecution.openCodeRuntime(workDir, signal)
         if (!isolated) {

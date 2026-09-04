@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { RunnerOptions, RunnerRegistration } from '../core/types.js'
+import type { AgentRuntime, RunnerOptions, RunnerRegistration } from '../core/types.js'
 import { ServerConnection } from '../server/connection.js'
 import { RunnerControlWebSocketClient } from '../server/runner-control-websocket.js'
 import { createRunnerControlHandlers } from '../server/runner-control-handlers.js'
@@ -86,6 +86,7 @@ import {
   retryDueReports,
   type HostExecutionContext,
 } from './host-execution.js'
+import { actionCatalogForEnabledRuntimes, normalizeEnabledAgentRuntimes } from './enabled-agent-runtimes.js'
 
 export { startTaskLogFlushTrigger } from './host-task-log.js'
 
@@ -142,6 +143,7 @@ export class RunnerHost {
   private readonly waitForConnectionRetry: (delayMs: number, signal: AbortSignal) => Promise<void>
   private readonly skillResolver = new SkillResolver()
   private readonly processGeneration = randomUUID()
+  private readonly enabledAgentRuntimes: ReadonlySet<AgentRuntime>
 
   // Lets an out-of-loop reconnect callback bound its immediate heartbeat.
   private activeSignal: AbortSignal | null = null
@@ -161,6 +163,7 @@ export class RunnerHost {
     private readonly actions: ActionRegistry = createDefaultRegistry(),
     dependencies: RunnerHostDependencies = {},
   ) {
+    this.enabledAgentRuntimes = normalizeEnabledAgentRuntimes(options.enabledAgentRuntimes)
     this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
     this.cleanupLoopIntervalMs = Math.max(1000, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
     this.modelRediscoveryIntervalMs = Math.max(60_000, Math.floor(options.modelRediscoveryIntervalMs ?? 30 * 60_000))
@@ -334,7 +337,7 @@ export class RunnerHost {
       await this.loadAgentSessionRuntimeEventQueue(signal)
       await this.initializeSharedConnection(signal)
       await this.connectRunner(signal)
-      void this.recoverEmptyModelCatalog(signal)
+      if (this.enabledAgentRuntimes.has('opencode')) void this.recoverEmptyModelCatalog(signal)
       // Kick a non-blocking drain: an unavailable server does not gate
       // startup; queued evidence retries while this process remains alive.
       if (this.agentSessionRuntimeEventQueue.ready()) {
@@ -355,10 +358,9 @@ export class RunnerHost {
         this.cleanupConvergenceIntervalMs,
       )
       const cleanupTimer = setInterval(() => void this.cleanup.runCleanupOnce(signal), this.cleanupLoopIntervalMs)
-      const modelRediscoveryTimer = setInterval(
-        () => void this.runModelRediscoveryOnce(signal),
-        this.modelRediscoveryIntervalMs,
-      )
+      const modelRediscoveryTimer = this.enabledAgentRuntimes.has('opencode')
+        ? setInterval(() => void this.runModelRediscoveryOnce(signal), this.modelRediscoveryIntervalMs)
+        : null
       try {
         await this.runWorkerPool(signal)
       } finally {
@@ -366,13 +368,16 @@ export class RunnerHost {
         clearInterval(selfCheck)
         clearInterval(convergenceTimer)
         clearInterval(cleanupTimer)
-        clearInterval(modelRediscoveryTimer)
+        if (modelRediscoveryTimer) clearInterval(modelRediscoveryTimer)
+      }
+    } finally {
+      try {
         await this.shutdownSharedConnection()
         await this.taskLogDeliveryQueue.stop()
         await this.shutdownConnection()
+      } finally {
+        this.activeSignal = null
       }
-    } finally {
-      this.activeSignal = null
     }
   }
 
@@ -453,36 +458,42 @@ export class RunnerHost {
     } else {
       this.providerPolicyDiagnostic = null
     }
-    const factory = getOpenCodeRuntimeFactory()
-    this.openCodeRuntime = factory({
-      directory: process.cwd(),
-      ...(this.options.runtimeIdleGraceMs !== undefined ? { idleGraceMs: this.options.runtimeIdleGraceMs } : {}),
-      ...(this.options.quarantineDrainTimeoutMs !== undefined
-        ? { quarantineDrainTimeoutMs: this.options.quarantineDrainTimeoutMs }
-        : {}),
-      ...(this.options.runtimeShutdownTimeoutMs !== undefined
-        ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs }
-        : {}),
-      ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
-    })
-    const startResult = await this.openCodeRuntime.start(signal)
-    if (!startResult.ok) {
-      log.error('opencode runtime not ready at startup; claiming gated until it recovers', {
-        reason: startResult.error.message,
+    if (this.enabledAgentRuntimes.has('opencode')) {
+      const factory = getOpenCodeRuntimeFactory()
+      this.openCodeRuntime = factory({
+        directory: process.cwd(),
+        ...(this.options.runtimeIdleGraceMs !== undefined ? { idleGraceMs: this.options.runtimeIdleGraceMs } : {}),
+        ...(this.options.quarantineDrainTimeoutMs !== undefined
+          ? { quarantineDrainTimeoutMs: this.options.quarantineDrainTimeoutMs }
+          : {}),
+        ...(this.options.runtimeShutdownTimeoutMs !== undefined
+          ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs }
+          : {}),
+        ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
       })
+      const startResult = await this.openCodeRuntime.start(signal)
+      if (!startResult.ok) {
+        log.error('opencode runtime not ready at startup; claiming gated until it recovers', {
+          reason: startResult.error.message,
+        })
+      }
+      this.syncOpenCodeWorkOwners()
     }
-    this.syncOpenCodeWorkOwners()
-    this.piRuntime = getPiRuntimeFactory()({
-      agentDir: this.options.runnerRoot,
-      ...(this.options.runtimeShutdownTimeoutMs !== undefined
-        ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs }
-        : {}),
-      ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
-    })
-    const piStart = await this.piRuntime.start()
-    if (this.piRuntime.ready()) this.piRuntimeGeneration += 1
-    if (!piStart.ok) {
-      log.error('pi runtime not ready at startup; claiming gated until it recovers', { reason: piStart.error.message })
+    if (this.enabledAgentRuntimes.has('pi')) {
+      this.piRuntime = getPiRuntimeFactory()({
+        agentDir: this.options.runnerRoot,
+        ...(this.options.runtimeShutdownTimeoutMs !== undefined
+          ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs }
+          : {}),
+        ...(policy.ok ? { providerErrorPolicy: policy.value } : {}),
+      })
+      const piStart = await this.piRuntime.start()
+      if (this.piRuntime.ready()) this.piRuntimeGeneration += 1
+      if (!piStart.ok) {
+        log.error('pi runtime not ready at startup; claiming gated until it recovers', {
+          reason: piStart.error.message,
+        })
+      }
     }
     this.workExecutor = new WorkExecutor(
       this.actions,
@@ -502,6 +513,11 @@ export class RunnerHost {
         this.namedWorkspaceManager,
         {
           strictExecutionSourceValidation: this.options.strictExecutionSourceValidation === true,
+          onManagerRuntimeSessionReady: ({ boundary, ...binding }) => {
+            if (!this.managerExecutionRegistry.bindRuntime(boundary, binding)) {
+              throw new Error('Manager runtime became ready after its execution boundary was released')
+            }
+          },
         },
       ),
       this.agentSessionRuntimeEventQueue,
@@ -626,7 +642,7 @@ export class RunnerHost {
           this.managerExecutionRegistry.register({
             executionId: polled.managerExecutionGrant!.executionId,
             boundary: managerBoundary,
-            sessionId: '',
+            sessionId: work.agentSessionId ?? '',
             runtimeSessionId: '',
             workDir: this.options.runnerRoot,
           })
@@ -716,9 +732,8 @@ export class RunnerHost {
   }
 
   private async invalidateManagerExecutions(): Promise<void> {
-    const boundaries = [...this.managerExecutions.values()]
     this.managerExecutions.clear()
-    await invalidateManagerExecutions(this.inFlight.values(), boundaries, this.managerExecutionRegistry)
+    await invalidateManagerExecutions(this.inFlight.values(), this.managerExecutionRegistry)
   }
 
   private pollReport(): ReturnType<typeof buildRunnerPollReport> {
@@ -762,12 +777,16 @@ export class RunnerHost {
       buildRegistrationState(
         this.options,
         this.piRuntime,
-        this.actions.catalog(),
+        actionCatalogForEnabledRuntimes(this.actions.catalog(), this.enabledAgentRuntimes),
         () => this.control.getConnectionId(),
         this.processGeneration,
         this.opencodeModelCatalog,
+        this.enabledAgentRuntimes,
       ),
-      this.openCodeRuntime?.ready() === true,
+      {
+        pi: this.piRuntime?.ready() === true,
+        opencode: this.openCodeRuntime?.ready() === true,
+      },
     )
   }
 

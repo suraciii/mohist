@@ -201,6 +201,7 @@ export interface CancelAgentSessionPayload {
 export interface CancelAgentSessionReply {
   state: string
   interruptUnconfirmed?: boolean
+  error?: 'runtime-unavailable'
 }
 
 // Derives a discriminated `SessionTarget` from the

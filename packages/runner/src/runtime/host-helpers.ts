@@ -18,14 +18,15 @@ import { workKey } from './work-key.js'
 
 export type RuntimeKind = 'opencode' | 'pi'
 
-export const MANAGER_RUNTIME_CAPABILITIES = [
+export const MANAGER_PI_CAPABILITIES = [
   'manager-execution-grant-v1',
   'manager-deployment-epoch-v1',
   'manager-private-broker-v1',
   'manager-pi-scoped-executor-v1',
-  'manager-opencode-isolated-v1',
   'manager-redaction-v1',
 ] as const
+export const MANAGER_OPENCODE_CAPABILITY = 'manager-opencode-isolated-v1' as const
+export const MANAGER_RUNTIME_CAPABILITIES = [...MANAGER_PI_CAPABILITIES, MANAGER_OPENCODE_CAPABILITY] as const
 
 export function isManagerExecutionWork(work: Pick<DispatchWorkItem, 'projectId'>): boolean {
   return work.projectId === '__mohist_slack_manager__'
@@ -34,7 +35,7 @@ export function isManagerExecutionWork(work: Pick<DispatchWorkItem, 'projectId'>
 export function supportsManagerExecution(registration: RunnerRegistration): boolean {
   return (
     process.platform === 'linux' &&
-    MANAGER_RUNTIME_CAPABILITIES.every((capability) => registration.capabilities.includes(capability))
+    MANAGER_PI_CAPABILITIES.every((capability) => registration.capabilities.includes(capability))
   )
 }
 
@@ -50,12 +51,16 @@ export async function createManagerExecutionBoundary(
   }
 }
 
-export function gateManagerCapabilities(state: RunnerRegistration, openCodeReady: boolean): RunnerRegistration {
-  if (openCodeReady) return state
+export function gateManagerCapabilities(
+  state: RunnerRegistration,
+  readiness: { pi: boolean; opencode: boolean },
+): RunnerRegistration {
   return {
     ...state,
     capabilities: state.capabilities.filter(
-      (capability) => !MANAGER_RUNTIME_CAPABILITIES.includes(capability as never),
+      (capability) =>
+        (readiness.pi || !MANAGER_PI_CAPABILITIES.includes(capability as never)) &&
+        (readiness.pi && readiness.opencode ? true : capability !== MANAGER_OPENCODE_CAPABILITY),
     ),
   }
 }
@@ -96,16 +101,24 @@ export function runtimeReadinessWitnesses(
   piRuntimeGeneration: number,
 ): RuntimeReadinessWitness[] {
   return [
-    {
-      runtime: 'opencode',
-      ready: openCodeRuntime?.ready() === true,
-      generation: openCodeRuntime?.ownership().generation ?? null,
-    },
-    {
-      runtime: 'pi',
-      ready: piRuntime?.ready() === true,
-      generation: piRuntime?.ready() === true ? piRuntimeGeneration : null,
-    },
+    ...(openCodeRuntime
+      ? [
+          {
+            runtime: 'opencode',
+            ready: openCodeRuntime.ready(),
+            generation: openCodeRuntime.ownership().generation ?? null,
+          },
+        ]
+      : []),
+    ...(piRuntime
+      ? [
+          {
+            runtime: 'pi',
+            ready: piRuntime.ready(),
+            generation: piRuntimeGeneration > 0 ? piRuntimeGeneration : null,
+          },
+        ]
+      : []),
   ]
 }
 

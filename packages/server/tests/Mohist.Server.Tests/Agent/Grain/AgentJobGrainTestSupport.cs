@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Runner.Grains;
@@ -106,7 +107,7 @@ public abstract class AgentJobGrainTestSupport
             .GetRequiredService<DispatchService>();
         return dispatch.PollAsync(
             runnerId,
-            request ?? new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
+            request ?? CapabilityFencePollRequest("pi", "opencode"));
     }
 
     protected static async Task<T> WaitForAsync<T>(
@@ -121,7 +122,8 @@ public abstract class AgentJobGrainTestSupport
     protected async Task<(string RunnerId, string ProjectId)> RegisterAgentJobRunnerAsync(
         string runnerId,
         string? projectId = null,
-        int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
+        int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots,
+        IReadOnlyCollection<string>? additionalCapabilities = null)
     {
         // Every agent-job spec shares the in-memory backlog directory and
         // global runner registry with the rest of the [Collection("RunnerGrain")]
@@ -133,11 +135,16 @@ public abstract class AgentJobGrainTestSupport
 
         var pid = projectId ?? $"agent-job-project-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var capabilities = new[] { "spec/*", AgentExecutionSources.Version1Capability }
+            .Concat(additionalCapabilities ?? [])
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
-            ["spec/*"],
+            capabilities,
             "agent-job-host",
             pid,
+            ConnectionGeneration: CapabilityFenceConnection,
             RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
         if (maxWorkflowSlots != RunnerCapacity.DefaultMaxWorkflowSlots)
         {
@@ -179,13 +186,11 @@ public abstract class AgentJobGrainTestSupport
         new(Prompt: prompt, WorkspacePath: workspacePath, ProjectId: projectId, AgentId: "agent-test");
 
     /// <summary>
-    /// Connection generation shared by the capability-fence helpers.
-    /// Re-registering the test runner with this identity and seeding
-    /// the readiness witness is what lets an explicit reasoning-effort
-    /// dispatch clear the stage-1 capability claim fence (issue-557
-    /// T-006) instead of being left pending forever.
+    /// Connection generation shared by AgentJob registration and poll helpers.
+    /// Every claim carries a runtime-readiness witness so the Runner grain can
+    /// recheck the same generation at the atomic claim boundary.
     /// </summary>
-    protected const string CapabilityFenceConnection = "test-connection";
+    protected const string CapabilityFenceConnection = DispatchTestExtensions.ConnectionGeneration;
 
     /// <summary>
     /// Re-register the runner with a connection-generation identity and
@@ -202,7 +207,7 @@ public abstract class AgentJobGrainTestSupport
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
-            ["spec/*"],
+            ["spec/*", AgentExecutionSources.Version1Capability],
             "agent-job-host",
             projectId,
             ConnectionGeneration: CapabilityFenceConnection,

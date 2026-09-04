@@ -4,6 +4,7 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 export type JsonObject = { [key: string]: JsonValue }
 
 export type WorkType = 'task' | 'checks'
+export type AgentRuntime = 'opencode' | 'pi'
 
 /** Internal Action error used when the runtime has exhausted a provider quota or usage limit. */
 export const NON_RECOVERABLE_PROVIDER_ERROR_CODE = 'provider-quota-exhausted'
@@ -391,6 +392,8 @@ export interface RunnerOptions {
   pollIntervalMs: number
   heartbeatIntervalMs: number
   dispatchLivenessProbeIntervalMs: number
+  /** Agent Runtime processes this Runner is allowed to create. Defaults to Pi only. */
+  enabledAgentRuntimes?: readonly AgentRuntime[]
   /**
    * The runner's machine credential (Bearer token) issued by the server
    * during install registration. Resolved by the CLI bootstrap from

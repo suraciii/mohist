@@ -20,6 +20,8 @@ env:
   DOTNET_NOLOGO: "true"
   DOTNET_CLI_TELEMETRY_OPTOUT: "true"
   DOTNET_GENERATE_ASPNET_CERTIFICATE: "false"
+  NPM_CONFIG_AUDIT: "false"
+  NPM_CONFIG_PREFER_OFFLINE: "true"
 
 jobs:
   # Path filtering keeps runner time proportional to what a PR actually
