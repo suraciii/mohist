@@ -50,6 +50,17 @@ test('CI workflow needs reference existing canonical producer jobs', () => {
   assert.match(jobs.get('repository') ?? '', /npm run test:slack:race/)
 })
 
+test('CI Server scope uses fixed Bun without npm bootstrap', () => {
+  const workflow = readFileSync(resolve(repositoryRoot, '.github/workflows/ci.yml'), 'utf8')
+  const server = parseJobs(workflow).get('server') ?? ''
+
+  assert.match(server, /^        uses: oven-sh\/setup-bun@v2$/m)
+  assert.match(server, /^          bun-version: 1\.4\.0$/m)
+  assert.match(server, /^          bun --no-install scripts\/test-duration\/application\.ts server$/m)
+  assert.doesNotMatch(server, /^\s+uses: actions\/setup-node@/m)
+  assert.doesNotMatch(server, /^\s+(?:run:\s+)?npm ci(?:\s|$)/m)
+})
+
 test('CI evidence Gate consumes a standalone bundle without reinstalling the monorepo', () => {
   const workflow = readFileSync(resolve(repositoryRoot, '.github/workflows/ci.yml'), 'utf8')
   const jobs = parseJobs(workflow)
