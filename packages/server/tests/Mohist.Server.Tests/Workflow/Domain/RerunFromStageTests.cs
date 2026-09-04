@@ -150,11 +150,20 @@ public class RerunFromStageTests
         var run = BuildCompletedRun();
         run.Status = WorkflowRunStatus.Failed;
         run.Failure = new FailureDetails(FailureReason.TaskFailed, "integrate", "merge.1");
+        const string unknownStage = "nope|still-safe";
 
         var ex = Assert.Throws<WorkflowControlRejectionException>(() =>
-            run.RerunFromStage("nonexistent", DateTimeOffset.UnixEpoch));
+            run.RerunFromStage(unknownStage, DateTimeOffset.UnixEpoch));
 
         Assert.Equal("unknown_stage", ex.Code);
+        Assert.Contains(unknownStage, ex.Message);
+        Assert.NotNull(ex.Details);
+        using var details = JsonDocument.Parse(ex.Details);
+        var eligibleStages = details.RootElement.GetProperty("eligibleStages")
+            .EnumerateArray()
+            .Select(stage => stage.GetString())
+            .ToList();
+        Assert.Contains("plan", eligibleStages);
         Assert.NotNull(run.Failure);
         Assert.Equal(WorkflowRunStatus.Failed, run.Status);
         Assert.Equal("integrate", run.CurrentStageId);
@@ -171,17 +180,13 @@ public class RerunFromStageTests
             run.RerunFromStage("integrate", DateTimeOffset.UnixEpoch));
 
         Assert.Equal("stage_not_reached", ex.Code);
-
-        if (ex.Details is not null)
-        {
-            var detailsJson = ex.Details;
-            using var doc = JsonDocument.Parse(detailsJson);
-            Assert.True(doc.RootElement.TryGetProperty("eligibleStages", out var eligible));
-            var stageIds = eligible.EnumerateArray().Select(e => e.GetString()).ToList();
-            Assert.Contains("plan", stageIds);
-            Assert.Contains("build", stageIds);
-            Assert.DoesNotContain("integrate", stageIds);
-        }
+        Assert.NotNull(ex.Details);
+        using var doc = JsonDocument.Parse(ex.Details);
+        Assert.True(doc.RootElement.TryGetProperty("eligibleStages", out var eligible));
+        var stageIds = eligible.EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains("plan", stageIds);
+        Assert.Contains("build", stageIds);
+        Assert.DoesNotContain("integrate", stageIds);
 
         Assert.Equal("build", run.CurrentStageId);
     }
