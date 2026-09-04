@@ -64,6 +64,9 @@ func parseOperations(area string, args []string) (command, error) {
 		return command{help: true, helpText: opsLeafHelp("ops-"+area+"-"+action, fieldsFor(area))}, nil
 	}
 	c := command{kind: "ops-" + area + "-" + action, catalog: fieldsFor(area)}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, opsLeafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
+	}
 	if action == "list" || action == "status" || action == "logs" || action == "health" || action == "info" || action == "setup" {
 		c.args = append(c.args, "collection", "false")
 	}
@@ -72,20 +75,20 @@ func parseOperations(area string, args []string) (command, error) {
 		start = 2
 	}
 	if area == "runner" && (action == "view" || action == "revoke") || area == "github" && contains([]string{"view", "update", "enable", "disable"}, action) || area == "slack" && contains([]string{"view", "diagnostics", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete"}, action) {
-		if len(args) <= 1 {
+		if len(args) <= 1 || isControlToken(args[1]) {
 			return command{}, usage("resource id is required")
 		}
 		c.args = append(c.args, "id", args[1])
 		start = 2
 	}
 	if area == "github" && action == "connect" {
-		if len(args) <= 1 {
+		if len(args) <= 1 || isControlToken(args[1]) {
 			return command{}, usage("owner/repo is required")
 		}
 		c.args = append(c.args, "repository", args[1])
 		start = 2
 	}
-	if area == "slack" && contains([]string{"list", "install-agent", "create"}, action) && len(args) > 1 && !strings.HasPrefix(args[1], "--") {
+	if area == "slack" && contains([]string{"list", "install-agent", "create"}, action) && len(args) > 1 && !isControlToken(args[1]) {
 		c.args = append(c.args, "agent", args[1])
 		start = 2
 	}
@@ -229,14 +232,20 @@ func parseEvent(args []string) (command, error) {
 		return command{help: true, helpText: "USAGE\n    mo event tail [--project REF] [--event TYPE] [--match EXPR]\n    mo event dead-letter <list|redeliver> [flags]\n\nTail events as NDJSON or recover dead-letter deliveries."}, nil
 	}
 	if args[0] == "dead-letter" {
+		if len(args) >= 2 && (args[1] == "--help" || args[1] == "-h") {
+			return command{help: true, helpText: "USAGE\n    mo event dead-letter <list|redeliver> [flags]"}, nil
+		}
 		if len(args) < 2 {
 			return command{}, usage("dead-letter action is required")
 		}
 		c := command{kind: "ops-event-dead-letter-" + args[1], catalog: []string{"id", "type", "handler", "status", "attempts", "deadLetteredAt", "error"}}
+		if discovered, ok, err := discoverLeaf(args[2:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+			return discovered, err
+		}
 		if args[1] == "list" {
 			c.args = append(c.args, "collection", "true")
 		} else if args[1] == "redeliver" {
-			if len(args) < 3 {
+			if len(args) < 3 || isControlToken(args[2]) {
 				return command{}, usage("dead-letter id is required")
 			}
 			c.args = append(c.args, "id", args[2])
@@ -302,6 +311,9 @@ func parseOtel(args []string) (command, error) {
 		catalog = otelQueryFields
 	}
 	c := command{kind: "ops-otel-" + action, catalog: catalog}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, opsLeafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
+	}
 	start := 1
 	if action == "query" && len(args) > 1 && !strings.HasPrefix(args[1], "-") {
 		c.args = append(c.args, "sql", args[1])

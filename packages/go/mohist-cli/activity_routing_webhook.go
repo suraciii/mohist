@@ -24,6 +24,9 @@ func parseActivity(args []string) (command, error) {
 		return command{}, usage("unknown activity command")
 	}
 	c := command{kind: "activity-list", catalog: activityFields, args: []string{"project-required", "true", "collection", "true"}}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
+	}
 	for i := 1; i < len(args); i++ {
 		switch args[i] {
 		case "--project", "--limit":
@@ -70,12 +73,15 @@ func parseRouting(args []string) (command, error) {
 		return command{}, usage("unknown routing rule command")
 	}
 	c := command{kind: "routing-rule-" + action, catalog: routingRuleFields, args: []string{"project-required", "true"}}
+	if discovered, ok, err := discoverLeaf(args[2:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
+	}
 	if action == "list" {
 		c.args = append(c.args, "collection", "true")
 	}
 	start := 2
 	if action == "view" || action == "edit" || action == "archive" || action == "move" {
-		if len(args) <= start {
+		if len(args) <= start || isControlToken(args[start]) {
 			return command{}, usage("rule id or name is required")
 		}
 		c.args = append(c.args, "rule", args[start])
@@ -123,6 +129,9 @@ func parseRouting(args []string) (command, error) {
 
 func parseRoutingTest(args []string) (command, error) {
 	c := command{kind: "routing-test", catalog: routingRuleFields, args: []string{"project-required", "true"}}
+	if discovered, ok, err := discoverLeaf(args, c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
+	}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--project", "--limit":
@@ -173,16 +182,19 @@ func parseWebhook(args []string) (command, error) {
 		catalog = webhookFailureFields
 	}
 	c := command{kind: "webhook-subscription-" + action, catalog: catalog, args: []string{"project-required", "true"}}
+	if discovered, ok, err := discoverLeaf(args[2:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
+	}
 	start := 2
 	if action == "view" || action == "edit" || action == "enable" || action == "disable" || action == "delete" || action == "rotate-secret" {
-		if len(args) <= start {
+		if len(args) <= start || isControlToken(args[start]) {
 			return command{}, usage("subscription id is required")
 		}
 		c.args = append(c.args, "subscription", args[start])
 		start++
 	}
 	if action == "create" {
-		if len(args) <= start {
+		if len(args) <= start || isControlToken(args[start]) {
 			return command{}, usage("subscription name is required")
 		}
 		c.args = append(c.args, "name", args[start])

@@ -79,9 +79,12 @@ func parseIssue(args []string) (command, error) {
 	if action == "rebase" || action == "diff" || action == "commits" || action == "logs" || action == "events" {
 		c.catalog = nil
 	}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
+	}
 	start := 1
 	if action != "list" && !(action == "archive" && c.kind == "issue-archive-all") {
-		if len(args) <= 1 {
+		if len(args) <= 1 || isControlToken(args[1]) {
 			return command{}, usage("issue number is required")
 		}
 		c.args = append(c.args, "number", args[1])
@@ -93,7 +96,7 @@ func parseIssue(args []string) (command, error) {
 	if action == "create" {
 		c = command{kind: "issue-create", catalog: issueResultFields}
 		start = 1
-		if len(args) == 1 {
+		if len(args) == 1 || isControlToken(args[1]) {
 			return command{}, usage("issue title is required")
 		}
 		c.args = append(c.args, "title", args[1])
@@ -178,6 +181,26 @@ func parseIssueNested(area string, args []string) (command, error) {
 	}
 	action := args[0]
 	c := command{kind: "issue-" + area + "-" + action}
+	discoveryCatalog := []string(nil)
+	if area == "template" {
+		discoveryCatalog = templateListFields
+		if action == "view" {
+			discoveryCatalog = templateFields
+		}
+	} else if area == "comment" && action == "create" {
+		discoveryCatalog = commentFields
+	} else if area == "prereq" && (action == "add" || action == "remove") {
+		discoveryCatalog = issueResultFields
+	} else if area == "watch" && action == "list" {
+		discoveryCatalog = watchFields
+	} else if area == "github" && (action == "link" || action == "view") {
+		discoveryCatalog = issueFields
+	} else if area == "variable" && contains([]string{"list", "get", "set", "unset"}, action) {
+		discoveryCatalog = variableFields
+	}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, discoveryCatalog, leafHelp(c.kind, discoveryCatalog)); ok {
+		return discovered, err
+	}
 	start := 1
 	switch area {
 	case "template":
@@ -187,28 +210,28 @@ func parseIssueNested(area string, args []string) (command, error) {
 		c.catalog = templateListFields
 		if action == "view" {
 			c.catalog = templateFields
-			if len(args) < 2 {
+			if len(args) < 2 || isControlToken(args[1]) {
 				return command{}, usage("template name is required")
 			}
 			c.args = append(c.args, "name", args[1])
 			start = 2
 		}
 	case "comment":
-		if action != "create" || len(args) < 2 {
+		if action != "create" || len(args) < 2 || isControlToken(args[1]) {
 			return command{}, usage("issue number is required")
 		}
 		c.catalog = commentFields
 		c.args = append(c.args, "number", args[1])
 		start = 2
 	case "prereq":
-		if (action != "add" && action != "remove") || len(args) < 3 {
+		if (action != "add" && action != "remove") || len(args) < 3 || isControlToken(args[1]) || isControlToken(args[2]) {
 			return command{}, usage("issue and prerequisite numbers are required")
 		}
 		c.catalog = issueResultFields
 		c.args = append(c.args, "number", args[1], "prereq-number", args[2])
 		start = 3
 	case "watch":
-		if len(args) < 2 {
+		if len(args) < 2 || isControlToken(args[1]) {
 			return command{}, usage("issue number is required")
 		}
 		c.args = append(c.args, "number", args[1])
@@ -219,13 +242,13 @@ func parseIssueNested(area string, args []string) (command, error) {
 			return command{}, usage("unknown issue watch command")
 		}
 	case "github":
-		if len(args) < 2 {
+		if len(args) < 2 || isControlToken(args[1]) {
 			return command{}, usage("issue number is required")
 		}
 		c.args = append(c.args, "number", args[1])
 		start = 2
 		if action == "link" {
-			if len(args) < 3 {
+			if len(args) < 3 || isControlToken(args[2]) {
 				return command{}, usage("GitHub issue reference is required")
 			}
 			c.args = append(c.args, "github-ref", args[2])
@@ -233,14 +256,14 @@ func parseIssueNested(area string, args []string) (command, error) {
 		}
 		c.catalog = issueFields
 	case "variable":
-		if len(args) < 2 || (action != "list" && action != "get" && action != "set" && action != "unset") {
+		if len(args) < 2 || isControlToken(args[1]) || (action != "list" && action != "get" && action != "set" && action != "unset") {
 			return command{}, usage("issue number and valid variable action are required")
 		}
 		c.args = append(c.args, "number", args[1])
 		start = 2
 		c.catalog = variableFields
 		if action != "list" {
-			if len(args) <= start {
+			if len(args) <= start || isControlToken(args[start]) {
 				return command{}, usage("variable key is required")
 			}
 			c.args = append(c.args, "key", args[start])
@@ -308,26 +331,31 @@ func parseEpic(args []string) (command, error) {
 	}
 	if action == "list" {
 		c.catalog = epicListFields
-	} else if action == "create" {
-		if len(args) < 2 {
+	} else if action == "add" || action == "remove" {
+		c.catalog = membershipFields
+	}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
+	}
+	if action == "create" {
+		if len(args) < 2 || isControlToken(args[1]) {
 			return command{}, usage("epic title is required")
 		}
 		c.args = append(c.args, "title", args[1])
 		start = 2
 	} else {
-		if len(args) < 2 {
+		if len(args) < 2 || isControlToken(args[1]) {
 			return command{}, usage("epic number is required")
 		}
 		c.args = append(c.args, "number", args[1])
 		start = 2
 	}
 	if action == "add" || action == "remove" {
-		if len(args) < 3 {
+		if len(args) < 3 || isControlToken(args[2]) {
 			return command{}, usage("epic and issue numbers are required")
 		}
 		c.args = append(c.args, "issue", args[2])
 		start = 3
-		c.catalog = membershipFields
 	}
 	for i := start; i < len(args); i++ {
 		switch args[i] {
@@ -366,8 +394,12 @@ func parseLabel(args []string) (command, error) {
 	c := command{kind: "label-" + action, catalog: nil}
 	if action == "list" {
 		c.catalog = labelFields
-	} else {
-		if len(args) < 2 {
+	}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
+	}
+	if action != "list" {
+		if len(args) < 2 || isControlToken(args[1]) {
 			return command{}, usage("label key is required")
 		}
 		c.args = append(c.args, "key", args[1])
