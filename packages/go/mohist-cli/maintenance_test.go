@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestManagedRunnerUpdateVerifiesBeforeReleasingFence(t *testing.T) {
@@ -60,6 +61,44 @@ func TestManagedRunnerUpdateVerifiesBeforeReleasingFence(t *testing.T) {
 	}
 	if len(calls) == 0 || !strings.Contains(calls[len(calls)-1], "/cancel") {
 		t.Fatalf("fence was not released last: %#v", calls)
+	}
+}
+
+func TestUpdateOutcomeReporterPostsStagesAndTerminalOutcome(t *testing.T) {
+	var requests []struct {
+		path string
+		body map[string]any
+	}
+	deps, _, _ := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		requests = append(requests, struct {
+			path string
+			body map[string]any
+		}{request.URL.Path, body})
+		return response(http.StatusOK, `{"success":true,"data":{}}`), nil
+	}), map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_TOKEN": "operator"})
+	deps.Now = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
+	reporter := newUpdateOutcomeReporter(context.Background(), deps, command{kind: "update-server"}, "/repo")
+	reporter.stage(context.Background(), deps, "Building server", "candidate staged")
+	reporter.stage(context.Background(), deps, "Verifying runtime", "identity checked")
+	reporter.finish(context.Background(), deps, ExitOK)
+
+	if len(requests) != 3 {
+		t.Fatalf("requests = %d, want 3", len(requests))
+	}
+	for _, request := range requests {
+		if request.path != "/api/system/update/outcome" {
+			t.Fatalf("unexpected path %q", request.path)
+		}
+	}
+	if requests[0].body["status"] != "running" || requests[1].body["status"] != "running" || requests[2].body["status"] != "succeeded" {
+		t.Fatalf("statuses = %#v", requests)
+	}
+	if requests[2].body["outcome"] != "succeeded" {
+		t.Fatalf("terminal outcome = %#v", requests[2].body["outcome"])
 	}
 }
 

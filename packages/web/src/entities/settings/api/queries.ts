@@ -8,7 +8,6 @@ import type {
   GeneralConfig,
   RuntimeConsistencyResponse,
   SystemInfo,
-  SystemUpdateStartResponse,
   SystemUpdateStatusEnvelope,
   WorkflowProfileDetail,
   WorkflowProfileInfo,
@@ -42,7 +41,6 @@ import {
   setOpencodeModel,
   setProjectDefaultWorkflowProfile,
   setStageModel,
-  startSystemUpdate,
   updateAgentRuntime,
   updateConfig,
   updateOpencodeModel,
@@ -173,20 +171,6 @@ export function useOpencodeRuntime() {
   return useQuery<{ mode: string; command: string; model: string | null; note: string }, Error>({
     queryKey: ['opencode-runtime'],
     queryFn: () => getOpencodeRuntime(),
-  })
-}
-
-export function useSystemUpdate() {
-  const queryClient = useQueryClient()
-  return useMutation<SystemUpdateStartResponse, Error, void>({
-    mutationFn: async () => startSystemUpdate(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['system-update-status'] })
-      toast.success('Update started')
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Request failed')
-    },
   })
 }
 

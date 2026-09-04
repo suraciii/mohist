@@ -472,6 +472,7 @@ type command struct {
 	fieldsOnly, help bool
 	helpText         string
 	args             []string
+	outcome          *updateOutcomeReporter
 }
 
 var diagnosisFields = []string{"workflowRunId", "status", "failure", "tasks", "dispatch", "events"}

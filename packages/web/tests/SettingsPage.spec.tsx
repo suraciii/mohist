@@ -90,9 +90,6 @@ useMswServer(
     }
     return HttpResponse.json({ success: true, data: _systemInfoData })
   }),
-  http.post('*/api/system/update', () =>
-    HttpResponse.json({ success: true, data: { job: { jobId: 'job-1', status: 'waiting-for-reconnect' } } }),
-  ),
   http.get('*/api/system/update/status', () =>
     HttpResponse.json({ success: true, data: _systemUpdateStatusData }),
   ),
@@ -389,7 +386,8 @@ describe('SettingsPage', () => {
       expect(screen.getAllByText(/fedcba09 \(fedcba0987654321\)/i).length).toBeGreaterThan(0)
       expect(screen.getAllByText('Mode').length).toBeGreaterThan(0)
       expect(screen.getAllByText('local-source').length).toBeGreaterThan(0)
-      expect(screen.getAllByRole('button', { name: /Update & Restart/i }).length).toBeGreaterThan(0)
+      expect(screen.getAllByTestId('system-update-command').length).toBeGreaterThan(0)
+      expect(screen.getAllByTestId('system-update-command')[0]).toHaveTextContent('mo update --repo-root /repo')
       expect(screen.queryByText(/Rebuild & Restart/i)).not.toBeInTheDocument()
     })
 
@@ -406,7 +404,7 @@ describe('SettingsPage', () => {
       await waitFor(() => {
         expect(screen.getAllByText(/Web update is unsupported/i).length).toBeGreaterThan(0)
       })
-      expect(screen.queryByRole('button', { name: /Update & Restart/i })).not.toBeInTheDocument()
+      expect(screen.queryByTestId('system-update-command')).not.toBeInTheDocument()
     })
 
     it('renders system info error state without placeholder runtime facts', async () => {
@@ -458,7 +456,7 @@ describe('SettingsPage', () => {
       await waitFor(() => {
         expect(screen.getAllByText(/Local source has uncommitted changes/i).length).toBeGreaterThan(0)
       })
-      expect(screen.queryByRole('button', { name: /Update & Restart/i })).not.toBeInTheDocument()
+      expect(screen.getByTestId('system-update-command')).toBeInTheDocument()
     })
 
     it('renders recovered persisted failure message from update status', async () => {
@@ -497,7 +495,7 @@ describe('SettingsPage', () => {
       await waitFor(() => {
         expect(screen.getAllByText(/Building/i).length).toBeGreaterThan(0)
       })
-      expect(screen.queryByRole('button', { name: /Update & Restart/i })).not.toBeInTheDocument()
+      expect(screen.getByTestId('system-update-command')).toBeInTheDocument()
     })
 
     it('renders explicit ready state after reconnect hash match', async () => {
@@ -545,7 +543,7 @@ describe('SettingsPage', () => {
       expect(screen.getByTestId('system-update-superseded-runtime')).toHaveTextContent('newsha98')
       expect(screen.queryByTestId('system-update-progress-stages')).not.toBeInTheDocument()
       expect(screen.queryByTestId('system-update-stage-Building')).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /Update & Restart/i })).toBeInTheDocument()
+      expect(screen.getByTestId('system-update-command')).toBeInTheDocument()
     })
 
     it('renders Succeeded outcome label for completed updates', async () => {

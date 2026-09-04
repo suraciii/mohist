@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 var skillFields = []string{"name", "description"}
@@ -879,6 +880,20 @@ func runInstallUpdateLocked(ctx context.Context, deps Dependencies, c command, c
 		writeError(deps.Stderr, err)
 		return ExitOperation
 	}
+	ownsOutcome := c.outcome == nil && strings.HasPrefix(c.kind, "update-")
+	if ownsOutcome {
+		c.outcome = newUpdateOutcomeReporter(ctx, deps, c, root)
+		c.outcome.stage(ctx, deps, "Preparing update", "CLI update started")
+	}
+	if ownsOutcome {
+		code := runInstallUpdateLockedWithOutcome(ctx, deps, c, component, enrollmentToken, runnerServerURL, root)
+		c.outcome.finish(ctx, code)
+		return code
+	}
+	return runInstallUpdateLockedWithOutcome(ctx, deps, c, component, enrollmentToken, runnerServerURL, root)
+}
+
+func runInstallUpdateLockedWithOutcome(ctx context.Context, deps Dependencies, c command, component, enrollmentToken, runnerServerURL, root string) int {
 	if strings.HasPrefix(c.kind, "update-") {
 		if component == "" {
 			return updateAllLocked(ctx, deps, c, root)
@@ -887,9 +902,9 @@ func runInstallUpdateLocked(ctx context.Context, deps Dependencies, c command, c
 		case "cli":
 			return updateCLI(ctx, deps, root, argValue(c.args, "cli-path", ""))
 		case "server":
-			return installComponent(ctx, deps, component, command{kind: c.kind, args: append(c.args, "repo-root", root)}, "", "")
+			return installComponent(ctx, deps, component, command{kind: c.kind, args: append(c.args, "repo-root", root), outcome: c.outcome}, "", "")
 		case "runner":
-			return installComponent(ctx, deps, component, command{kind: c.kind, args: append(c.args, "repo-root", root)}, "", "")
+			return installComponent(ctx, deps, component, command{kind: c.kind, args: append(c.args, "repo-root", root), outcome: c.outcome}, "", "")
 		case "slack":
 			return executeMaintenance(ctx, deps, "go", "-C", filepath.Join(root, "packages/go/mohist-slack"), "build", "-o", filepath.Join(root, "packages/go/mohist-slack/bin/build/mohist-slack"))
 		}
@@ -931,13 +946,19 @@ func updateAll(ctx context.Context, deps Dependencies, c command) int {
 }
 
 func updateAllLocked(ctx context.Context, deps Dependencies, c command, root string) int {
+	if c.outcome != nil {
+		c.outcome.stage(ctx, deps, "Updating CLI", "Updating the Mohist CLI")
+	}
 	if code := updateCLI(ctx, deps, root, argValue(c.args, "cli-path", "")); code != ExitOK {
 		return code
 	}
 	for _, component := range []string{"server", "runner", "slack"} {
+		if c.outcome != nil {
+			c.outcome.stage(ctx, deps, "Updating "+component, "Updating "+component)
+		}
 		args := append([]string(nil), c.args...)
 		args = append(args, "component", component, "repo-root", root)
-		if code := runInstallUpdateLocked(ctx, deps, command{kind: "update-" + component, args: args}, component, "", ""); code != ExitOK {
+		if code := runInstallUpdateLocked(ctx, deps, command{kind: "update-" + component, args: args, outcome: c.outcome}, component, "", ""); code != ExitOK {
 			return code
 		}
 	}
@@ -974,14 +995,20 @@ func installComponent(
 	}
 	release := managedRelease{}
 	if strings.HasPrefix(c.kind, "update-") && (component == "server" || component == "runner") {
+		if c.outcome != nil {
+			c.outcome.stage(ctx, deps, "Building "+component, "Building the "+component+" candidate")
+		}
 		release, err = buildManagedRelease(ctx, deps, component, root, home)
 		if err != nil {
+			if c.outcome != nil {
+				c.outcome.stage(ctx, deps, "Failed", err.Error())
+			}
 			fmt.Fprintf(deps.Stderr, "%v; recover with 'mo service start %s'\n", err, component)
 			return ExitOperation
 		}
 	}
 	if release.Root != "" {
-		return activateManagedRelease(ctx, deps, component, c, release, home, unitDir, unit)
+		return activateManagedReleaseWithReporter(ctx, deps, component, c, release, home, unitDir, unit, c.outcome)
 	}
 	environmentFileLine := ""
 	if component == "runner" && c.kind == "install-component" {
@@ -1063,6 +1090,96 @@ type managedUpdateFence struct {
 	runner string
 }
 
+type updateOutcomeReporter struct {
+	client    *client
+	jobID     string
+	sourcePath string
+	now       func() time.Time
+	stageLogs []cliOutcomeLog
+	finished  bool
+}
+
+type cliOutcomeLog struct {
+	Stage   string
+	Message string
+}
+
+func newUpdateOutcomeReporter(ctx context.Context, deps Dependencies, c command, sourcePath string) *updateOutcomeReporter {
+	_ = ctx
+	now := deps.Now
+	if now == nil {
+		now = time.Now
+	}
+	reporter := &updateOutcomeReporter{jobID: newLocalJobID(), sourcePath: sourcePath, now: now}
+	cfg, err := ResolveConfig(deps)
+	if err != nil {
+		return reporter
+	}
+	if explicit := strings.TrimSpace(argValue(c.args, "server-url", "")); explicit != "" {
+		cfg.ServerURL = explicit
+	}
+	reporter.client, _ = newClient(cfg, deps.HTTPClient)
+	return reporter
+}
+
+func newLocalJobID() string {
+	id, err := newUpdateInterruptID()
+	if err != nil {
+		return "cli-update"
+	}
+	return id
+}
+
+func (r *updateOutcomeReporter) stage(ctx context.Context, deps Dependencies, stage, message string) {
+	if r == nil || r.finished {
+		return
+	}
+	r.stageLogs = append(r.stageLogs, cliOutcomeLog{Stage: stage, Message: message})
+	r.post(ctx, deps, "running", "")
+}
+
+func (r *updateOutcomeReporter) finish(ctx context.Context, deps Dependencies, code int) {
+	if code == ExitOK {
+		r.finishStatus(ctx, deps, "succeeded", "succeeded")
+		return
+	}
+	r.finishStatus(ctx, deps, "failed", "failed")
+}
+
+func (r *updateOutcomeReporter) finishStatus(ctx context.Context, deps Dependencies, status, outcome string) {
+	if r == nil || r.finished {
+		return
+	}
+	r.finished = true
+	r.post(ctx, deps, status, outcome)
+}
+
+func (r *updateOutcomeReporter) post(ctx context.Context, deps Dependencies, status, outcome string) {
+	if r.client == nil {
+		return
+	}
+	body := map[string]any{
+		"jobId": r.jobID,
+		"status": status,
+		"stage": "Ready",
+		"outcome": nil,
+		"sourcePath": r.sourcePath,
+	}
+	if len(r.stageLogs) > 0 {
+		entry := r.stageLogs[len(r.stageLogs)-1]
+		body["stage"] = entry.Stage
+		body["logs"] = []map[string]string{{
+			"at": r.now().UTC().Format("2006-01-02T15:04:05.9999999Z07:00"),
+			"stage": entry.Stage,
+			"message": entry.Message,
+		}}
+	}
+	if outcome != "" {
+		body["outcome"] = outcome
+	}
+	_, _, _ = postJSON(ctx, deps, r.client, "/api/system/update/outcome", body)
+}
+
 type managedIdentity struct {
 	Component      string `json:"component"`
 	Version        string `json:"version"`
@@ -1075,6 +1192,10 @@ type managedIdentity struct {
 }
 
 func activateManagedRelease(ctx context.Context, deps Dependencies, component string, c command, candidate managedRelease, home, unitDir, unit string) int {
+	return activateManagedReleaseWithReporter(ctx, deps, component, c, candidate, home, unitDir, unit, nil)
+}
+
+func activateManagedReleaseWithReporter(ctx context.Context, deps Dependencies, component string, c command, candidate managedRelease, home, unitDir, unit string, reporter *updateOutcomeReporter) int {
 	if deps.RemoveAll == nil {
 		deps.RemoveAll = os.RemoveAll
 	}
@@ -1100,6 +1221,9 @@ func activateManagedRelease(ctx context.Context, deps Dependencies, component st
 	var fence *managedUpdateFence
 	var err error
 	if component == "runner" {
+		if reporter != nil {
+			reporter.stage(ctx, deps, "Preparing runner", "Acquiring the Runner update fence")
+		}
 		fence, err = beginRunnerUpdateFence(ctx, deps, c)
 		if err != nil {
 			writeError(deps.Stderr, err)
@@ -1107,6 +1231,9 @@ func activateManagedRelease(ctx context.Context, deps Dependencies, component st
 		}
 	}
 	recover := func(cause error) int {
+		if reporter != nil {
+			reporter.stage(ctx, deps, "Recovering", "Restoring the previous verified release")
+		}
 		recoveryErr := restoreManagedUpdate(ctx, deps, unitPath, unit, oldUnit, hadUnit, currentPath, verifiedPath, oldCurrent, oldVerified)
 		if recoveryErr != nil {
 			cause = fmt.Errorf("%w; recovery also failed: %v", cause, recoveryErr)
@@ -1117,25 +1244,44 @@ func activateManagedRelease(ctx context.Context, deps Dependencies, component st
 			}
 		}
 		fmt.Fprintf(deps.Stderr, "%v; recover with 'mo service start %s'\n", cause, component)
+		if reporter != nil {
+			if recoveryErr == nil {
+				reporter.finishStatus(ctx, deps, "recovered", "recovered")
+			} else {
+				reporter.finishStatus(ctx, deps, "failed", "failed")
+			}
+		}
 		return ExitOperation
 	}
 
 	if hadUnit {
+		if reporter != nil {
+			reporter.stage(ctx, deps, "Stopping "+component, "Stopping the current "+component+" service")
+		}
 		if err := deps.Execute(ctx, "systemctl", []string{"--user", "stop", unit}); err != nil {
 			return recover(fmt.Errorf("stop %s: %w", component, err))
 		}
 	}
 	unitText := managedUnitText(component, candidate, c, home)
+	if reporter != nil {
+		reporter.stage(ctx, deps, "Activating "+component, "Switching to the candidate release")
+	}
 	if err := replaceManagedUnit(deps, unitPath, unitText); err != nil {
 		return recover(fmt.Errorf("activate %s: %w", component, err))
 	}
 	for _, args := range [][]string{{"--user", "daemon-reload"}, {"--user", "enable", unit}, {"--user", "restart", unit}} {
+		if reporter != nil && args[len(args)-2] == "restart" {
+			reporter.stage(ctx, deps, "Restarting "+component, "Restarting the managed service")
+		}
 		if err := deps.Execute(ctx, "systemctl", args); err != nil {
 			return recover(fmt.Errorf("%s %s: %w", args[len(args)-1], component, err))
 		}
 	}
 
 	if shouldVerifyManagedIdentity(deps, component, c) {
+		if reporter != nil {
+			reporter.stage(ctx, deps, "Verifying runtime", "Verifying the running runtime identity")
+		}
 		if err := verifyManagedIdentity(ctx, deps, component, c, candidate); err != nil {
 			return recover(err)
 		}
@@ -1152,6 +1298,9 @@ func activateManagedRelease(ctx context.Context, deps Dependencies, component st
 		}
 	}
 	fmt.Fprintf(deps.Stdout, "Installed and started %s\n", unit)
+	if reporter != nil {
+		reporter.finishStatus(ctx, deps, "succeeded", "succeeded")
+	}
 	return ExitOK
 }
 

@@ -55,10 +55,6 @@ export interface SystemInfo {
   }
 }
 
-export interface SystemUpdateStartResponse {
-  job: SystemUpdateStatus
-}
-
 export type SystemUpdateOutcome = 'succeeded' | 'recovered' | 'failed' | 'cancelled'
 
 export const SYSTEM_UPDATE_OUTCOMES: readonly SystemUpdateOutcome[] = [

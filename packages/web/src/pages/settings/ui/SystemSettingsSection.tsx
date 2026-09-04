@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Loader2Icon, RefreshCwIcon } from 'lucide-react'
+import { CheckIcon, ClipboardIcon, Loader2Icon } from 'lucide-react'
 import {
   isSupersededStatus,
   isTerminalUpdateStatus,
@@ -8,7 +8,6 @@ import {
   useLogLevel,
   useSetLogLevel,
   useSystemInfo,
-  useSystemUpdate,
   useSystemUpdateStatus,
 } from '../../../entities/settings'
 import type { SystemInfo, SystemUpdateStatusEnvelope } from '../../../entities/settings'
@@ -102,8 +101,6 @@ export interface SystemSettingsData {
   infoError: boolean
   infoErrorValue: Error | null
   refetchInfo: () => Promise<unknown>
-  startSystemUpdate: () => Promise<unknown>
-  systemUpdatePending: boolean
   updateStatusEnvelope: SystemUpdateStatusEnvelope | undefined
   refetchUpdateStatus: () => Promise<unknown>
 }
@@ -114,7 +111,6 @@ const useDefaultData: SystemSettingsDataHook = () => {
   const { data: logLevelData, isLoading: logLevelLoading, isError: logLevelError, error: logLevelErrorValue } = useLogLevel()
   const setLogLevelMutation = useSetLogLevel()
   const { data: systemInfo, isLoading: infoLoading, isError: infoError, error: infoErrorValue, refetch: refetchInfo } = useSystemInfo()
-  const systemUpdate = useSystemUpdate()
   const { data: updateStatusEnvelope, refetch: refetchUpdateStatus } = useSystemUpdateStatus(true)
   return {
     logLevelData,
@@ -127,8 +123,6 @@ const useDefaultData: SystemSettingsDataHook = () => {
     infoError,
     infoErrorValue,
     refetchInfo,
-    startSystemUpdate: () => systemUpdate.mutateAsync(),
-    systemUpdatePending: systemUpdate.isPending,
     updateStatusEnvelope,
     refetchUpdateStatus,
   }
@@ -150,12 +144,9 @@ export function SystemSettingsSection({
     infoError,
     infoErrorValue,
     refetchInfo,
-    startSystemUpdate,
-    systemUpdatePending,
     updateStatusEnvelope,
     refetchUpdateStatus,
   } = dataHook()
-  const [trackingUpdate, setTrackingUpdate] = useState(false)
   const [reconnectState, setReconnectState] = useState<string | null>(null)
   const updateStatus = updateStatusEnvelope?.job ?? null
   const { label: sectionLabel, description: sectionDescription } = getSectionMeta('system')
@@ -166,6 +157,7 @@ export function SystemSettingsSection({
   )
   const [saving, setSaving] = useState(false)
   const [logError, setLogError] = useState<string | null>(null)
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
 
   useEffect(() => {
     if (persistedLevel && isLogLevel(persistedLevel)) {
@@ -192,7 +184,6 @@ export function SystemSettingsSection({
 
   useEffect(() => {
     if (updateStatus && isTerminalUpdateStatus(updateStatus.status)) {
-      setTrackingUpdate(false)
       setReconnectState(null)
       refetchInfo()
       return
@@ -250,24 +241,28 @@ export function SystemSettingsSection({
   const updateReady = updateStatus?.status === 'succeeded'
     || (updateStatus?.status === 'waiting-for-reconnect' && !!gitHash && gitHash === updateStatus.sourceHead)
   const persistedUpdateActive = updateStatus?.status === 'running' || updateStatus?.status === 'waiting-for-reconnect'
-  const showUpdateButton = systemInfo?.install.mode === 'local-source'
-    && systemInfo.update.available
-    && systemInfo.update.status === 'update-available'
-    && !persistedUpdateActive
-    && !trackingUpdate
-  const showProgress = !superseded && (trackingUpdate || persistedUpdateActive || updateReady || reconnectState === 'Ready')
+  const showProgress = !superseded && (persistedUpdateActive || updateReady || reconnectState === 'Ready')
   const showOutcome = updateStatus
     && (isTerminalUpdateStatus(updateStatus.status) || updateStatus.outcome != null)
   const progressLabel = updateReady ? 'Ready' : reconnectState ?? updateStatus?.stage ?? null
   const updateMessage = updateStatus?.reason ?? systemInfo?.update.reason ?? null
   const recentUpdateLogs = updateStatus?.logs?.slice(-5).reverse() ?? []
 
-  const handleUpdate = async () => {
-    if (!systemInfo) return
-    if (systemInfo.source.dirty) return
-    setReconnectState(null)
-    await startSystemUpdate()
-    setTrackingUpdate(true)
+  const updateCommand = systemInfo?.source.path
+    ? `mo update --repo-root ${systemInfo.source.path}`
+    : null
+
+  const handleCopyCommand = async () => {
+    if (!updateCommand || !navigator.clipboard?.writeText) {
+      setCopyState('failed')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(updateCommand)
+      setCopyState('copied')
+    } catch {
+      setCopyState('failed')
+    }
   }
 
   if (isLoading) {
@@ -417,10 +412,24 @@ export function SystemSettingsSection({
                 </div>
               )}
 
-              {(showUpdateButton || showProgress) && (
+              {(updateCommand || showProgress) && (
                 <div className="mt-3">
-                  {showProgress ? (
-                    <div className="space-y-3">
+                  <div className="space-y-3">
+                    {updateCommand && (
+                      <div className="space-y-2">
+                        <div className="text-xs text-muted-foreground">Run this command from a terminal to start the update.</div>
+                        <div className="flex items-center gap-2">
+                          <code data-testid="system-update-command" className="min-w-0 flex-1 break-all rounded-md border bg-muted/30 px-3 py-2 text-xs text-foreground">
+                            {updateCommand}
+                          </code>
+                          <Button type="button" variant="outline" size="icon" onClick={handleCopyCommand} aria-label="Copy update command" title="Copy update command">
+                            {copyState === 'copied' ? <CheckIcon className="h-4 w-4" /> : <ClipboardIcon className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                        {copyState !== 'idle' && <p className="text-xs text-muted-foreground">{copyState === 'copied' ? 'Copied' : 'Unable to copy'}</p>}
+                      </div>
+                    )}
+                    {showProgress && <div className="space-y-3">
                       <span className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-600 bg-amber-50 rounded-md">
                         {!updateReady && <Loader2Icon className="h-4 w-4 animate-spin" />}
                         {progressLabel ?? 'Waiting for reconnect'}
@@ -449,17 +458,8 @@ export function SystemSettingsSection({
                           </div>
                         </div>
                       )}
-                    </div>
-                  ) : (
-                    <Button
-                      onClick={handleUpdate}
-                      disabled={systemUpdatePending || systemInfo.source.dirty}
-                      className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-                    >
-                      <RefreshCwIcon className="h-4 w-4" />
-                      Update &amp; Restart
-                    </Button>
-                  )}
+                    </div>}
+                  </div>
                 </div>
               )}
             </CardSection>

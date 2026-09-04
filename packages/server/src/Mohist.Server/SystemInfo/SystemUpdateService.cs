@@ -220,7 +220,7 @@ public sealed class SystemUpdateService : ISingletonService
         var jobId = string.IsNullOrWhiteSpace(request.JobId) ? Guid.NewGuid().ToString("N") : request.JobId!;
         var stage = string.IsNullOrWhiteSpace(request.Stage) ? "Ready" : request.Stage!;
         var status = NormalizeOutcomeStatus(request.Status);
-        var outcome = NormalizeOutcomeLabel(request.Outcome) ?? status;
+        var outcome = NormalizeOutcomeLabel(request.Outcome);
         var unavailableCapability = string.IsNullOrWhiteSpace(request.UnavailableCapability) ? null : request.UnavailableCapability;
         var sourceHead = request.SourceHead ?? info.Source.Head;
         var sourcePath = request.SourcePath ?? info.Source.Path;
@@ -248,8 +248,8 @@ public sealed class SystemUpdateService : ISingletonService
                 [],
                 now,
                 now,
-                now,
-                outcome,
+                status is "running" or "waiting-for-reconnect" ? null : (DateTimeOffset?)now,
+                outcome ?? (SystemUpdateJobState.TerminalStatuses.Contains(status) ? status : null),
                 unavailableCapability);
 
         IReadOnlyList<SystemUpdateLogEntry> logs = baseState.Logs;
@@ -261,7 +261,8 @@ public sealed class SystemUpdateService : ISingletonService
             }
         }
 
-        var completedAt = SystemUpdateJobState.TerminalStatuses.Contains(status) ? now : baseState.CompletedAt;
+        var terminal = SystemUpdateJobState.TerminalStatuses.Contains(status);
+        DateTimeOffset? completedAt = terminal ? now : null;
 
         var next = baseState with
         {
@@ -274,7 +275,7 @@ public sealed class SystemUpdateService : ISingletonService
             ServerUnit = serverUnit,
             RunnerUnit = runnerUnit,
             Reason = unavailableCapability ?? baseState.Reason,
-            Outcome = outcome,
+            Outcome = outcome ?? (terminal ? status : null),
             UnavailableCapability = unavailableCapability,
             CompletedAt = completedAt,
             Logs = logs,
@@ -286,7 +287,7 @@ public sealed class SystemUpdateService : ISingletonService
         var current = await _store.GetLatestAsync(cancellationToken);
         var expected = current is not null && string.Equals(current.JobId, baseState.JobId, StringComparison.Ordinal) ? current : null;
         var outcomeEntry = new SystemUpdateLogEntry(now, stage, $"CLI reported outcome '{outcome}' with status '{status}'.");
-        next = await PersistTransitionAsync(next, cancellationToken, outcomeEntry, releaseLock: true, expected: expected);
+        next = await PersistTransitionAsync(next, cancellationToken, outcomeEntry, releaseLock: terminal, expected: expected);
         return ToResponse(next);
     }
 
@@ -427,6 +428,8 @@ public sealed class SystemUpdateService : ISingletonService
         {
             "succeeded" => "succeeded",
             "success" => "succeeded",
+            "running" => "running",
+            "waiting-for-reconnect" => "waiting-for-reconnect",
             "recovered" => "recovered",
             "failed" => "failed",
             "superseded" => "superseded",
