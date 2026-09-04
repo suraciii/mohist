@@ -30,7 +30,11 @@ func parseWorkflow(args []string) (command, error) {
 		return command{}, usage("unknown workflow command")
 	}
 	if action == "validate" {
-		return parseWorkflowInput(command{kind: "workflow-validate"}, args[1:], false, false)
+		c := command{kind: "workflow-validate"}
+		if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+			return discovered, err
+		}
+		return parseWorkflowInput(c, args[1:], false, false)
 	}
 	c := command{kind: "workflow-" + action, catalog: workflowFields}
 	if action == "list" {
@@ -107,6 +111,9 @@ func parseRun(args []string) (command, error) {
 	}
 	if action == "watch" {
 		c.catalog = nil
+	}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
 	}
 	start := 1
 	if action != "list" {
