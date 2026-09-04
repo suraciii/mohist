@@ -33,13 +33,19 @@ public sealed class AgentLaunchCoordinatorReplayTests
         Assert.Equal(plan.Origin, replay.Origin);
         Assert.Equal(plan.TargetId, replay.TargetId);
         Assert.True(replay.AlreadyPersisted);
+        Assert.Same(plan, state.State.Plan);
+        Assert.True(state.RecordExists);
+        Assert.Equal(0, state.WriteCount);
+        Assert.Equal(0, state.ClearCount);
 
         var conflict = await Assert.ThrowsAsync<LaunchIdempotencyConflictException>(
             () => coordinator.ResumeAsync(request with { Model = "provider/changed" }));
         Assert.Equal(plan.IdempotencyKey, conflict.IdempotencyKey);
         Assert.Equal(plan.RequestFingerprint, conflict.ExistingFingerprint);
         Assert.Same(plan, state.State.Plan);
+        Assert.True(state.RecordExists);
         Assert.Equal(0, state.WriteCount);
+        Assert.Equal(0, state.ClearCount);
     }
 
     [Fact]
@@ -58,13 +64,19 @@ public sealed class AgentLaunchCoordinatorReplayTests
         var replay = await Assert.ThrowsAsync<AgentSpawnPreplanRejectedException>(
             () => coordinator.ResumeAsync(request));
         Assert.Equal(rejectionReason, replay.Reason);
+        Assert.Same(plan, state.State.Plan);
+        Assert.True(state.RecordExists);
+        Assert.Equal(0, state.WriteCount);
+        Assert.Equal(0, state.ClearCount);
 
         var conflict = await Assert.ThrowsAsync<LaunchIdempotencyConflictException>(
             () => coordinator.ResumeAsync(request with { Variant = "high" }));
         Assert.Equal(plan.IdempotencyKey, conflict.IdempotencyKey);
         Assert.Equal(plan.RequestFingerprint, conflict.ExistingFingerprint);
         Assert.Same(plan, state.State.Plan);
+        Assert.True(state.RecordExists);
         Assert.Equal(0, state.WriteCount);
+        Assert.Equal(0, state.ClearCount);
     }
 
     private static AgentLaunchCoordinatorGrain CreateCoordinator(
@@ -124,9 +136,11 @@ public sealed class AgentLaunchCoordinatorReplayTests
         public string StateName => "agent-launch-coordinator";
         public string StorageName => "test";
         public int WriteCount { get; private set; }
+        public int ClearCount { get; private set; }
 
         public Task ClearStateAsync()
         {
+            ClearCount++;
             RecordExists = false;
             return Task.CompletedTask;
         }

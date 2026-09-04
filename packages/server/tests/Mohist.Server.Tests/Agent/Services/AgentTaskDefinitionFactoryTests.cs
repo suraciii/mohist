@@ -1,8 +1,14 @@
 using System.Text.Json;
+using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Agent;
+using Mohist.Server.Infrastructure.Data.Project;
+using Mohist.Server.Tests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
+using DomainAgent = Mohist.Server.Agent.Domain.Agent;
 
 namespace Mohist.Server.Tests.Agent.Services;
 
@@ -72,17 +78,45 @@ public sealed class AgentTaskDefinitionFactoryTests
     }
 
     [Fact]
-    public void ArchivedName_RemainsOccupied_ForDerivedName()
+    public async Task CreateAsync_TerminalRejectionArchivedName_RemainsOccupiedForNewIdentity()
     {
+        await using var database = TestSqliteDatabase.CreateModelSchema();
+        const string projectId = "project-terminal-rejection";
         const string archivedName = "Terminal rejection task";
-        var derived = AgentTaskDefinitionFactory.Build(
-            archivedName,
+        await using (var db = database.CreateContext())
+        {
+            db.Agents.Add(new AgentRow
+            {
+                Id = "agent-terminal-rejection",
+                ProjectId = projectId,
+                Name = archivedName,
+                Status = AgentStatus.Archived,
+                State = AgentStore.Serialize(new DomainAgent
+                {
+                    Id = "agent-terminal-rejection",
+                    ProjectId = projectId,
+                    Name = archivedName,
+                    Status = AgentStatus.Archived,
+                }),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var dbFactory = new TestDbContextFactory(database.Options);
+        var agents = new AgentQuerier(dbFactory);
+        var archived = Assert.Single(await agents.ListAsync(projectId, all: true));
+        Assert.Equal(AgentStatus.Archived, archived.Status);
+
+        var factory = new AgentTaskDefinitionFactory(
+            agents,
+            new ProjectDefaultExecutionConfigReader(dbFactory));
+        var derived = await factory.CreateAsync(
+            projectId,
+            prompt: archivedName,
             hasAcceptedAttachment: false,
             nameHint: null,
             callerHint: new ExecutionConfigHint(Model: "provider/task"),
-            projectDefault: null,
-            identity: "task-terminal-rejection-derived-retry",
-            occupiedNames: [archivedName]);
+            identity: "task-terminal-rejection-derived-retry");
 
         Assert.Equal("Terminal rejection task 2", derived.Name);
     }

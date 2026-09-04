@@ -79,6 +79,22 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
         Assert.Equal("launch_idempotency_conflict", conflict.GetProperty("code").GetString());
         Assert.Equal(key, conflict.GetProperty("details").GetProperty("idempotencyKey").GetString());
 
+        using var changedVariant = await PostTaskAsync(
+            projectId,
+            new
+            {
+                prompt = "Implement the task-first route",
+                name = "task-route-agent",
+                runtime = "pi",
+                model = "provider/task",
+                variant = "high",
+            },
+            key);
+        Assert.Equal(HttpStatusCode.Conflict, changedVariant.StatusCode);
+        var variantConflict = await changedVariant.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("launch_idempotency_conflict", variantConflict.GetProperty("code").GetString());
+        Assert.Equal(key, variantConflict.GetProperty("details").GetProperty("idempotencyKey").GetString());
+
         using var agents = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents?all=true");
         agents.EnsureSuccessStatusCode();
         var agentEntries = (await agents.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
