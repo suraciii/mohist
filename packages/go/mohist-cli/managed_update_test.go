@@ -75,13 +75,15 @@ func TestManagedUpdateCommitsVerifiedServerRelease(t *testing.T) {
 	fixture.assertEventOrder("command:dotnet publish", "write-unit", "command:systemctl --user restart")
 }
 
-func TestManagedUpdateSystemdFakeRejectsInvalidWorkingDirectory(t *testing.T) {
+func TestManagedUpdateSystemdFakeValidatesRawWorkingDirectory(t *testing.T) {
 	tests := []struct {
 		name             string
 		workingDirectory string
+		wantExitCode     int
 	}{
-		{name: "quoted", workingDirectory: `"/runtime/server"`},
-		{name: "relative", workingDirectory: "runtime/server"},
+		{name: "quoted", workingDirectory: `"/runtime/server"`, wantExitCode: 1},
+		{name: "relative", workingDirectory: "runtime/server", wantExitCode: 1},
+		{name: "escaped percent", workingDirectory: "/runtime/release root/100%%/server"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -94,8 +96,8 @@ func TestManagedUpdateSystemdFakeRejectsInvalidWorkingDirectory(t *testing.T) {
 				Args: []string{"--user", "restart", "mohist.service"},
 			})
 
-			if result.ExitCode == 0 {
-				t.Fatal("fake systemd accepted an invalid WorkingDirectory")
+			if result.ExitCode != test.wantExitCode {
+				t.Fatalf("restart exit code = %d, want %d", result.ExitCode, test.wantExitCode)
 			}
 		})
 	}
@@ -1001,8 +1003,11 @@ func (commands *managedUpdateFakeCommands) Run(_ context.Context, command manage
 			}
 			unitPath := commands.unitPaths[command.Args[2]]
 			unit := commands.files.text(unitPath)
-			workingDirectory := strings.TrimSuffix(managedTestSystemdProperty(unit, "WorkingDirectory"), "\n")
-			if _, err := parseManagedSystemdWorkingDirectory(workingDirectory); err != nil {
+			workingDirectories := managedTestSystemdDirectiveValues(unit, "WorkingDirectory")
+			if len(workingDirectories) != 1 {
+				return managedCommandResult{ExitCode: 1}
+			}
+			if _, err := parseManagedSystemdWorkingDirectory(workingDirectories[0]); err != nil {
 				return managedCommandResult{ExitCode: 1}
 			}
 			return managedCommandResult{}
@@ -1046,18 +1051,30 @@ func (commands *managedUpdateFakeCommands) hasSystemctlMutation() bool {
 }
 
 func managedTestSystemdProperty(unit, property string) string {
+	values := managedTestSystemdDirectiveValues(unit, property)
+	switch property {
+	case "WorkingDirectory":
+		if len(values) == 1 {
+			if decoded, err := parseManagedSystemdWorkingDirectory(values[0]); err == nil {
+				values[0] = decoded
+			}
+		}
+	case "ExecStart", "Environment":
+		for index := range values {
+			values[index] = strings.ReplaceAll(values[index], "%%", "%")
+		}
+	}
+	return strings.Join(values, " ") + "\n"
+}
+
+func managedTestSystemdDirectiveValues(unit, property string) []string {
 	values := []string{}
 	for _, line := range strings.Split(unit, "\n") {
 		if strings.HasPrefix(line, property+"=") {
 			values = append(values, strings.TrimPrefix(line, property+"="))
 		}
 	}
-	if property == "WorkingDirectory" && len(values) == 1 {
-		if decoded, err := parseManagedSystemdWorkingDirectory(values[0]); err == nil {
-			values[0] = decoded
-		}
-	}
-	return strings.Join(values, " ") + "\n"
+	return values
 }
 
 type managedUpdateFakeControl struct {

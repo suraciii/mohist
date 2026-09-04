@@ -60,12 +60,22 @@ func TestPatchManagedSystemdUnitPreservesOperatorConfiguration(t *testing.T) {
 
 func TestPatchManagedSystemdUnitWritesAbsoluteWorkingDirectoryWithoutQuotes(t *testing.T) {
 	targets := []struct {
-		name   string
-		target *managedRuntimeTarget
+		name             string
+		target           *managedRuntimeTarget
+		workingDirectory string
 	}{
-		{name: "server", target: managedSystemdServerTarget()},
-		{name: "runner", target: managedSystemdRunnerTarget()},
-		{name: "space", target: managedSystemdServerTargetAt("/managed/release root/server", nil)},
+		{name: "server", target: managedSystemdServerTarget(), workingDirectory: "/managed/releases/server"},
+		{name: "runner", target: managedSystemdRunnerTarget(), workingDirectory: "/managed/releases/runner"},
+		{
+			name:             "server space and percent",
+			target:           managedSystemdServerTargetAt("/managed/release root/100%/server", nil),
+			workingDirectory: "/managed/release root/100%%/server",
+		},
+		{
+			name:             "runner space and percent",
+			target:           managedSystemdRunnerTargetAt("/managed/release root/100%/runner", nil),
+			workingDirectory: "/managed/release root/100%%/runner",
+		},
 	}
 	for _, test := range targets {
 		t.Run(test.name, func(t *testing.T) {
@@ -76,7 +86,7 @@ func TestPatchManagedSystemdUnitWritesAbsoluteWorkingDirectoryWithoutQuotes(t *t
 				t.Fatal(err)
 			}
 
-			want := "WorkingDirectory=" + test.target.WorkingDirectory + "\n"
+			want := "WorkingDirectory=" + test.workingDirectory + "\n"
 			if !strings.Contains(string(patched), want) {
 				t.Fatalf("generated WorkingDirectory is not an unquoted absolute path:\n%s", patched)
 			}
@@ -567,6 +577,55 @@ func TestCaptureAndActivateManagedServiceUsesSnapshotAndEffectiveProperties(t *t
 	assertManagedSystemdDropInUntouched(t, files, dropInPath)
 }
 
+func TestActivateManagedServiceAcceptsSpaceAndPercentWorkingDirectory(t *testing.T) {
+	targets := []*managedRuntimeTarget{
+		managedSystemdServerTargetAt("/managed/release root/100%/server", nil),
+		managedSystemdRunnerTargetAt("/managed/release root/100%/runner", nil),
+	}
+	for _, target := range targets {
+		t.Run(target.Component, func(t *testing.T) {
+			files, _, env, snapshot := newManagedSystemdActivationFixtureForTarget(target)
+
+			started, err := activateManagedService(context.Background(), env, snapshot, target)
+			if err != nil || !started {
+				t.Fatalf("activation = started %t, error %v", started, err)
+			}
+			unit, _, err := files.ReadFile(snapshot.UnitPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := validateManagedUnitTarget(unit, target); err != nil {
+				t.Fatalf("activated unit is invalid: %v\n%s", err, unit)
+			}
+		})
+	}
+}
+
+func TestSpaceAndPercentActivationFailureRestoresSnapshot(t *testing.T) {
+	target := managedSystemdRunnerTargetAt("/managed/release root/100%/runner", nil)
+	files, commands, env, snapshot := newManagedSystemdActivationFixtureForTarget(target)
+	original, _, err := files.ReadFile(snapshot.UnitSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands.properties["WorkingDirectory"] = "/operator/override\n"
+
+	started, activationErr := activateManagedService(context.Background(), env, snapshot, target)
+	if activationErr == nil || !started {
+		t.Fatalf("activation = started %t, error %v", started, activationErr)
+	}
+	if err := restoreManagedService(context.Background(), env, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	restored, restoredMode, err := files.ReadFile(snapshot.UnitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(restored) != string(original) || restoredMode != snapshot.UnitMode {
+		t.Fatalf("restored unit mode/content = %o/%q", restoredMode, restored)
+	}
+}
+
 func TestEffectiveDropInOverrideFailsAndRestoreRecoversServiceState(t *testing.T) {
 	files := newManagedSystemdTestFiles()
 	commands := newManagedSystemdTestCommands()
@@ -729,6 +788,28 @@ func newManagedSystemdActivationFixture() (
 	return files, commands, managedUpdateEnvironment{files: files, commands: commands}, snapshot, target
 }
 
+func newManagedSystemdActivationFixtureForTarget(target *managedRuntimeTarget) (
+	*managedSystemdTestFiles,
+	*managedSystemdTestCommands,
+	managedUpdateEnvironment,
+	*managedServiceSnapshot,
+) {
+	files := newManagedSystemdTestFiles()
+	commands := newManagedSystemdTestCommands()
+	unitName, _ := managedUnitName(target.Component)
+	unitPath := filepath.Join("/units", unitName)
+	snapshotPath := filepath.Join("/runtime", "transactions", "tx-special", "snapshots", target.Component+".service")
+	original := []byte("[Service]\nWorkingDirectory=/old/runtime\nExecStart=/old/runtime\n")
+	files.seed(unitPath, original, 0o640)
+	files.seed(snapshotPath, original, 0o600)
+	setManagedSystemdEffectiveTarget(commands, target)
+	snapshot := &managedServiceSnapshot{
+		Component: target.Component, UnitPath: unitPath, UnitSnapshot: snapshotPath,
+		UnitMode: 0o640, WasActive: true, WasEnabled: true,
+	}
+	return files, commands, managedUpdateEnvironment{files: files, commands: commands}, snapshot
+}
+
 func managedSystemdRunnerTarget() *managedRuntimeTarget {
 	return managedSystemdRunnerTargetAt("/managed/releases/runner", nil)
 }
@@ -769,8 +850,8 @@ func setManagedSystemdEffectiveTarget(commands *managedSystemdTestCommands, targ
 	identityPath, _ := managedTargetIdentityPath(target)
 	identityAssignment, _ := quoteManagedSystemdValue(managedRuntimeIdentityEnvironment + "=" + identityPath)
 	commands.properties["WorkingDirectory"] = target.WorkingDirectory + "\n"
-	commands.properties["ExecStart"] = execStart + "\n"
-	commands.properties["Environment"] = identityAssignment + "\n"
+	commands.properties["ExecStart"] = strings.ReplaceAll(execStart, "%%", "%") + "\n"
+	commands.properties["Environment"] = strings.ReplaceAll(identityAssignment, "%%", "%") + "\n"
 }
 
 type managedSystemdTestFile struct {

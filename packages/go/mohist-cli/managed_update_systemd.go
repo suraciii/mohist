@@ -125,6 +125,14 @@ func validateManagedUnitTarget(unit []byte, target *managedRuntimeTarget) error 
 	if err != nil {
 		return err
 	}
+	wantStoredIdentity, err := quoteManagedSystemdValue(managedRuntimeIdentityEnvironment + "=" + wantIdentity)
+	if err != nil {
+		return err
+	}
+	wantStoredIdentityWords, err := splitManagedSystemdWords(wantStoredIdentity)
+	if err != nil || len(wantStoredIdentityWords) != 1 {
+		return errors.New("managed service runtime identity is invalid")
+	}
 
 	inService := false
 	serviceSections := 0
@@ -171,7 +179,7 @@ func validateManagedUnitTarget(unit []byte, target *managedRuntimeTarget) error 
 				return wordErr
 			}
 			for _, word := range words {
-				if word.value == managedRuntimeIdentityEnvironment+"="+wantIdentity {
+				if word.value == wantStoredIdentityWords[0].value {
 					identityMatches++
 				}
 			}

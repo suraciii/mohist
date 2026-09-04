@@ -54,7 +54,15 @@ func TestManagedRecoveryCompletesVerifiedTransactionWithoutServiceMutation(t *te
 func TestManagedRecoveryCompletesCandidatePointersFromActivatingState(t *testing.T) {
 	fixture := newManagedUpdateFixture(t)
 	transaction, originalUnit := seedManagedRecovery(t, fixture, "activating")
-	seedManagedRecoveryCandidate(t, fixture, &transaction, originalUnit, true, true)
+	seedManagedRecoveryCandidateAt(
+		t,
+		fixture,
+		&transaction,
+		originalUnit,
+		managedSpecialRecoveryRoot(),
+		true,
+		true,
+	)
 	fixture.control.serverCalls = 1
 	if err := fixture.updater.completeVerifiedRecovery(
 		context.Background(), fixture.runtimeRoot, &transaction, []string{"server"},
@@ -83,15 +91,30 @@ func TestManagedRecoveryRollsBackMixedPointerWindows(t *testing.T) {
 		status            string
 		activeCandidate   bool
 		verifiedCandidate bool
+		root              string
 	}{
-		{name: "candidate verified pointer only", status: "activating", verifiedCandidate: true},
-		{name: "candidate active pointer only after failed recovery", status: "recovery-failed", activeCandidate: true},
+		{
+			name: "candidate verified pointer only", status: "activating", verifiedCandidate: true,
+			root: managedSpecialRecoveryRoot(),
+		},
+		{
+			name: "candidate active pointer only after failed recovery", status: "recovery-failed", activeCandidate: true,
+			root: managedSpecialRecoveryRoot(),
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newManagedUpdateFixture(t)
 			transaction, originalUnit := seedManagedRecovery(t, fixture, test.status)
-			seedManagedRecoveryCandidate(t, fixture, &transaction, originalUnit, test.activeCandidate, test.verifiedCandidate)
+			seedManagedRecoveryCandidateAt(
+				t,
+				fixture,
+				&transaction,
+				originalUnit,
+				test.root,
+				test.activeCandidate,
+				test.verifiedCandidate,
+			)
 
 			if err := fixture.updater.recoverPendingManagedUpdate(context.Background(), fixture.runtimeRoot); err != nil {
 				t.Fatal(err)
@@ -235,8 +258,20 @@ func seedManagedRecoveryCandidate(
 	activeCandidate bool,
 	verifiedCandidate bool,
 ) {
-	t.Helper()
 	root := filepath.Join(fixture.runtimeRoot, "releases", "mohist-server-"+managedTestCommit+"-g8", "server")
+	seedManagedRecoveryCandidateAt(t, fixture, transaction, originalUnit, root, activeCandidate, verifiedCandidate)
+}
+
+func seedManagedRecoveryCandidateAt(
+	t *testing.T,
+	fixture *managedUpdateFixture,
+	transaction *managedTransaction,
+	originalUnit string,
+	root string,
+	activeCandidate bool,
+	verifiedCandidate bool,
+) {
+	t.Helper()
 	candidate := *fixture.commands.oldTarget
 	candidate.WorkingDirectory = root
 	candidate.Entrypoint = filepath.Join(root, "Mohist.Server")
@@ -264,6 +299,10 @@ func seedManagedRecoveryCandidate(
 		value, _ := json.MarshalIndent(candidatePointer, "", "  ")
 		fixture.files.put(filepath.Join(fixture.runtimeRoot, "verified.json"), append(value, '\n'), 0o600)
 	}
+}
+
+func managedSpecialRecoveryRoot() string {
+	return filepath.Join("/managed/release root/100%", "mohist-server-"+managedTestCommit+"-g8", "server")
 }
 
 func writeManagedRecoveryTransaction(t *testing.T, fixture *managedUpdateFixture, transaction managedTransaction) {
