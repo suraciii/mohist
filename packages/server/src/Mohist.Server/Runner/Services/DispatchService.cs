@@ -241,37 +241,24 @@ public sealed class DispatchService : IScopedService
                 .Select(candidate => new PendingCandidate(
                     candidate.ReadySince,
                     WorkDispatchOwnerKinds.Workflow,
-                    candidate.WorkflowRunId,
-                    RequiresFeedbackReconciliation: false))
-                .Concat((await _workflowRuns.FindAssignedReconciliationCandidatesAsync(
-                        runnerId,
-                        candidateLimit,
-                        ct))
-                    .Select(candidate => new PendingCandidate(
-                        candidate.ReadySince,
-                        WorkDispatchOwnerKinds.Workflow,
-                        candidate.WorkflowRunId,
-                        RequiresFeedbackReconciliation: true)))
+                    candidate.WorkflowRunId))
             : (await _workflowRuns.FindAssignableCandidatesAsync(projectId, candidateLimit, ct))
                 .Select(candidate => new PendingCandidate(
                     candidate.ReadySince,
                     WorkDispatchOwnerKinds.Workflow,
-                    candidate.WorkflowRunId,
-                    RequiresFeedbackReconciliation: false));
+                    candidate.WorkflowRunId));
 
         var agentCandidates = assigned
             ? (await _agentJobs.ListAssignedPendingForRunnerAsync(runnerId, candidateLimit, ct))
                 .Select(record => new PendingCandidate(
                     record.ReadySince ?? DateTimeOffset.MinValue,
                     WorkDispatchOwnerKinds.AgentJob,
-                    record.JobKey,
-                    RequiresFeedbackReconciliation: false))
+                    record.JobKey))
             : (await _agentJobs.ListEligiblePendingAsync(projectId, candidateLimit, ct))
                 .Select(record => new PendingCandidate(
                     record.ReadySince ?? DateTimeOffset.MinValue,
                     WorkDispatchOwnerKinds.AgentJob,
-                    record.JobKey,
-                    RequiresFeedbackReconciliation: false));
+                    record.JobKey));
 
         var candidates = workflowCandidates
             .Concat(agentCandidates)
@@ -313,11 +300,7 @@ public sealed class DispatchService : IScopedService
             }
             else
             {
-                var requiredRuntimes = await ResolveWorkflowRuntimeRequirementsAsync(
-                    candidate.OwnerId,
-                    runnerId,
-                    candidate.RequiresFeedbackReconciliation,
-                    ct);
+                var requiredRuntimes = await ResolveWorkflowRuntimeRequirementsAsync(candidate.OwnerId, ct);
                 if (!readiness.Allows(requiredRuntimes))
                     continue;
 
@@ -328,7 +311,6 @@ public sealed class DispatchService : IScopedService
                     projectId,
                     runnerId,
                     assignWorker: !assigned,
-                    candidate.RequiresFeedbackReconciliation,
                     processGeneration,
                     ct);
             }
@@ -506,18 +488,12 @@ public sealed class DispatchService : IScopedService
         string? projectId,
         string runnerId,
         bool assignWorker,
-        bool requiresFeedbackReconciliation,
         string processGeneration,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         var pendingRun = await _workflowRuns.LoadAsync(workflowRunId, ct);
-        var pendingWork = pendingRun is null
-            ? null
-            : requiresFeedbackReconciliation
-                ? pendingRun.NextAssignedFeedbackReconciliationWork(runnerId)
-                : pendingRun.NextWork();
-        var pendingItem = BuildWorkflowWorkItem(pendingWork);
+        var pendingItem = pendingRun is null ? null : BuildWorkflowWorkItem(pendingRun);
         if (pendingRun is null || pendingItem is null)
             return null;
 
@@ -633,16 +609,10 @@ public sealed class DispatchService : IScopedService
 
     private async Task<IReadOnlyList<string>?> ResolveWorkflowRuntimeRequirementsAsync(
         string workflowRunId,
-        string runnerId,
-        bool requiresFeedbackReconciliation,
         CancellationToken ct)
     {
         var run = await _workflowRuns.LoadAsync(workflowRunId, ct);
-        var next = run is null
-            ? null
-            : requiresFeedbackReconciliation
-                ? run.NextAssignedFeedbackReconciliationWork(runnerId)
-                : run.NextWork();
+        var next = run?.NextWork();
         if (run is null || next is null)
             return null;
 
@@ -742,9 +712,9 @@ public sealed class DispatchService : IScopedService
         }
     }
 
-    private static WorkItem? BuildWorkflowWorkItem(WorkflowWork? work)
+    private static WorkItem? BuildWorkflowWorkItem(WorkflowRun run)
     {
-        return work switch
+        return run.NextWork() switch
         {
             WorkflowTaskWork task => WorkItem.Task(
                 task.Stage,
@@ -790,6 +760,5 @@ public sealed class DispatchService : IScopedService
     private sealed record PendingCandidate(
         DateTimeOffset ReadySince,
         string OwnerKind,
-        string OwnerId,
-        bool RequiresFeedbackReconciliation);
+        string OwnerId);
 }

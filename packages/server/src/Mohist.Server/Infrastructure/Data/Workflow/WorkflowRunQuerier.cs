@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Domain.Run;
-using System.Text.Json;
 
 namespace Mohist.Server.Infrastructure.Data.Workflow;
 
@@ -134,67 +133,6 @@ public sealed class WorkflowRunQuerier
         return rows.Select(row => new WorkflowRunScheduleCandidate(
             row.WorkflowRunId,
             ToUtc(row.ReadySince ?? row.CreatedAt ?? DateTime.UnixEpoch))).ToList();
-    }
-
-    /// <summary>
-    /// Keeps legacy repair outside the ordinary Ready scheduling query. The
-    /// database envelope is intentionally broader than the domain invariant,
-    /// so rows are streamed until the bounded result contains only confirmed
-    /// open-feedback work. Corrupt or unrelated legacy rows cannot starve a
-    /// later valid repair candidate.
-    /// </summary>
-    public async Task<IReadOnlyList<WorkflowRunScheduleCandidate>> FindAssignedReconciliationCandidatesAsync(
-        string workerId,
-        int limit = 20,
-        CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(workerId) || limit <= 0)
-            return [];
-
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = db.WorkflowRuns
-            .AsNoTracking()
-            .Where(row => row.Status == StatusString(WorkflowRunStatus.Running)
-                && row.AssignedWorkerId == workerId
-                && row.ActiveWorkId == null
-                && row.AttentionStatus != BlockedAttentionStatus)
-            .OrderBy(row => row.ReadySince)
-            .ThenBy(row => row.CreatedAt)
-            .ThenBy(row => row.WorkflowRunId)
-            .Select(row => new { row.WorkflowRunId, row.State, row.ReadySince, row.CreatedAt });
-
-        var candidates = new List<WorkflowRunScheduleCandidate>(limit);
-        await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(ct))
-        {
-            WorkflowRun? run;
-            try
-            {
-                run = JSON.Deserialize<WorkflowRun>(row.State);
-                if (run?.Stages is null
-                    || run.Feedback is null
-                    || !string.Equals(run.Id, row.WorkflowRunId, StringComparison.Ordinal)
-                    || run.NextAssignedFeedbackReconciliationWork(workerId) is null)
-                {
-                    continue;
-                }
-            }
-            catch (JsonException)
-            {
-                continue;
-            }
-            catch (InvalidOperationException)
-            {
-                continue;
-            }
-
-            candidates.Add(new WorkflowRunScheduleCandidate(
-                row.WorkflowRunId,
-                ToUtc(row.ReadySince ?? row.CreatedAt ?? DateTime.UnixEpoch)));
-            if (candidates.Count == limit)
-                break;
-        }
-
-        return candidates;
     }
 
     /// <summary>

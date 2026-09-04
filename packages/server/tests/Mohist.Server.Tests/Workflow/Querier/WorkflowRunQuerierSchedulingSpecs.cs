@@ -236,49 +236,6 @@ public class WorkflowRunQuerierSchedulingSpecs
     }
 
     [Fact]
-    public async Task FindAssignedReconciliationCandidatesAsync_FiltersLegacyEnvelopeWithoutChangingReadyQuery()
-    {
-        var prefix = NewPrefix("sched-feedback-reconcile");
-        var runnerId = $"{prefix}-runner";
-        var candidateId = $"{prefix}-zz-running-feedback";
-
-        for (var index = 0; index < 21; index++)
-            await InsertRowAsync($"{prefix}-00-running-invalid-{index:D2}", prefix, "Running", runnerId);
-        await InsertRowAsync(
-            $"{prefix}-01-running-corrupt",
-            prefix,
-            "Running",
-            runnerId,
-            stateOverride: JSON.Serialize(new
-            {
-                id = $"{prefix}-01-running-corrupt",
-                status = "running",
-                assignment = new { workerId = runnerId },
-            }));
-        await InsertRowAsync(
-            candidateId,
-            prefix,
-            "Running",
-            runnerId,
-            stateOverride: BuildFeedbackReconciliationJson(candidateId, prefix, runnerId));
-        await InsertRowAsync($"{prefix}-running-active", prefix, "Running", runnerId, activeWork: true);
-        await InsertRowAsync($"{prefix}-running-other", prefix, "Running", $"{prefix}-other-runner");
-        await InsertRowAsync($"{prefix}-running-blocked", prefix, "Running", runnerId, attentionStatus: "blocked");
-        foreach (var status in new[] { "Ready", "AwaitingApproval", "Paused", "Stopped", "Completed", "Failed" })
-        {
-            await InsertRowAsync($"{prefix}-{status.ToLowerInvariant()}", prefix, status, runnerId);
-        }
-
-        using var scope = _fixture.Services.CreateScope();
-        var querier = scope.ServiceProvider.GetRequiredService<WorkflowRunQuerier>();
-
-        var reconciliation = await querier.FindAssignedReconciliationCandidatesAsync(runnerId, limit: 1);
-
-        Assert.Equal(new[] { candidateId }, reconciliation.Select(candidate => candidate.WorkflowRunId));
-        Assert.Equal(new[] { $"{prefix}-ready" }, await querier.FindAssignedToAsync(runnerId));
-    }
-
-    [Fact]
     public async Task CountRunningAssignedToAsync_CountsRunningRowsForTheRunner()
     {
         var prefix = NewPrefix("sched-count");
@@ -440,8 +397,7 @@ public class WorkflowRunQuerierSchedulingSpecs
         string? assignedWorkerId,
         string? stateOverride = null,
         bool activeWork = false,
-        string? activeWorkerId = null,
-        string? attentionStatus = null)
+        string? activeWorkerId = null)
     {
         var state = stateOverride ?? BuildStatusJson(workflowRunId, projectId, status, assignedWorkerId);
         // For generated rows, keep the row consistent with the store's
@@ -451,6 +407,7 @@ public class WorkflowRunQuerierSchedulingSpecs
         // unprojected — their tests assert the DB layer never deserializes.
         string? projectedWorkId = null;
         string? projectedWorkerId = null;
+        string? attentionStatus = null;
         if (stateOverride is null)
         {
             var run = JSON.Deserialize<WorkflowRun>(state);
@@ -473,59 +430,6 @@ public class WorkflowRunQuerierSchedulingSpecs
 
     private static string BuildPendingJson(string id, string projectId) =>
         BuildStatusJson(id, projectId, "Pending", assignedWorkerId: null);
-
-    private static string BuildFeedbackReconciliationJson(string id, string projectId, string runnerId)
-    {
-        const string feedbackId = "fb-reconcile";
-        var run = WorkflowRun.Create(
-            id,
-            BuildMinimalDefinition(),
-            TestTime.UtcNow,
-            new WorkflowRunMetadata(null, TestTime.UtcNow, ProjectId: projectId));
-        run.Stages.Clear();
-        run.Stages.Add(new StageRun
-        {
-            Id = "build",
-            Attempt = 1,
-            Initialized = true,
-            RequiresApproval = true,
-            Status = StageRunStatus.Running,
-            Tasks =
-            {
-                new WorkflowActionAttempt
-                {
-                    Id = "apply-feedback.1",
-                    DefinitionId = "apply-feedback",
-                    Attempt = 1,
-                    Title = "Apply feedback",
-                    Uses = "spec/task",
-                    Status = WorkflowActionAttemptStatus.Completed,
-                    CausedByFeedbackId = feedbackId,
-                },
-                new WorkflowActionAttempt
-                {
-                    Id = "publish-feedback.1",
-                    DefinitionId = "publish-feedback",
-                    Attempt = 1,
-                    Title = "Publish feedback",
-                    Uses = "spec/task",
-                    Status = WorkflowActionAttemptStatus.Pending,
-                    CausedByFeedbackId = feedbackId,
-                },
-            },
-        });
-        run.CurrentStageId = "build";
-        run.Status = WorkflowRunStatus.Running;
-        run.Assignment = new WorkflowAssignment(runnerId, TestTime.UtcNow);
-        run.Feedback.Add(new ApprovalFeedback(
-            feedbackId,
-            id,
-            "build",
-            "publish the correction",
-            ApprovalFeedbackStatus.Open,
-            TestTime.UtcNow));
-        return JSON.Serialize(run);
-    }
 
     private static string BuildStatusJson(
         string id,

@@ -224,22 +224,6 @@ public static partial class WorkflowRunExtensions
             return true;
         }
 
-        /// <summary>
-        /// Restricts repair of historical Running gaps to the exact state the
-        /// feedback lifecycle now prevents.
-        /// </summary>
-        public WorkflowWork? NextAssignedFeedbackReconciliationWork(string workerId)
-        {
-            if (run.Status != WorkflowRunStatus.Running
-                || !run.IsAssignedTo(workerId)
-                || run.HasInFlightWork())
-            {
-                return null;
-            }
-
-            return run.NextOpenFeedbackWork();
-        }
-
         private WorkflowWork? NextOpenFeedbackWork()
         {
             var next = run.NextWork();
