@@ -102,9 +102,12 @@ func parseInstallUpdate(area string, args []string) (command, error) {
 		switch args[i] {
 		case "--dry-run":
 			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), "true")
-		case "--repo-root", "--cli-path", "--server-url", "--runner-root", "--unit-dir":
+		case "--repo-root", "--cli-path", "--server-url", "--runner-id", "--runner-root", "--unit-dir":
 			if args[i] == "--cli-path" && (area != "update" || component != "cli") {
 				return command{}, usage("--cli-path is only valid with mo update cli")
+			}
+			if args[i] == "--runner-id" && (area != "install" || component != "runner") {
+				return command{}, usage("--runner-id is only valid with mo install runner")
 			}
 			if i+1 >= len(args) {
 				return command{}, usage(args[i] + " requires a value")
@@ -809,7 +812,11 @@ func installComponent(
 		if runnerRoot == "" {
 			runnerRoot = filepath.Join(home, ".mohist", "projects")
 		}
-		managedEnvironment, err := runnerManagedEnvironment(runnerServerURL, runnerRoot)
+		runnerID := strings.TrimSpace(argValue(c.args, "runner-id", ""))
+		if runnerID == "" {
+			runnerID = defaultRunnerID()
+		}
+		managedEnvironment, err := runnerManagedEnvironment(runnerServerURL, runnerID, runnerRoot)
 		if err != nil {
 			writeError(deps.Stderr, err)
 			return ExitOperation
@@ -850,8 +857,20 @@ func installComponent(
 	return ExitOK
 }
 
-func runnerManagedEnvironment(serverURL, runnerRoot string) (string, error) {
+func defaultRunnerID() string {
+	host, err := os.Hostname()
+	if err != nil || strings.TrimSpace(host) == "" {
+		return "runner-local"
+	}
+	return "runner-" + strings.TrimSpace(host)
+}
+
+func runnerManagedEnvironment(serverURL, runnerID, runnerRoot string) (string, error) {
 	server, err := systemdEnvironmentAssignment("SERVER_URL", serverURL)
+	if err != nil {
+		return "", err
+	}
+	id, err := systemdEnvironmentAssignment("RUNNER_ID", runnerID)
 	if err != nil {
 		return "", err
 	}
@@ -859,7 +878,7 @@ func runnerManagedEnvironment(serverURL, runnerRoot string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return server + root, nil
+	return server + id + root, nil
 }
 
 func systemdEnvironmentAssignment(name, value string) (string, error) {

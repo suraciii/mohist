@@ -105,11 +105,20 @@ export interface RunnerCredentialResolution {
   signal?: AbortSignal
 }
 
+export function requireRunnerCredential(resolution: RunnerCredentialResolution): Promise<string> {
+  return resolveRunnerCredential(resolution).then((credential) => {
+    if (credential) return credential
+    throw new Error(
+      "managed Runner has no machine credential or enrollment bootstrap; re-run 'mo install runner'",
+    )
+  })
+}
+
 /**
  * Resolves the credential the runner will present on every server call:
  * the persisted one when present, otherwise a fresh registration through
  * the enrollment token. Returns null when neither exists — the runner
- * then runs unauthenticated and the server rejects its requests.
+ * callers that manage a service must reject the null result before startup.
  */
 export async function resolveRunnerCredential(resolution: RunnerCredentialResolution): Promise<string | null> {
   const existing = loadRunnerCredential(resolution.runnerRoot)
