@@ -161,149 +161,19 @@ public sealed partial class SlackMultiAgentIngressSpecs : IAsyncLifetime
         string appId,
         string? projectId = null)
     {
-        var id = $"connection_{Guid.NewGuid():N}";
-        var resolvedProjectId = projectId ?? $"project_{Guid.NewGuid():N}";
-        var agentId = $"agent_{Guid.NewGuid():N}";
-        var now = _fixture.TimeProvider.GetUtcNow();
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var existingProject = await db.Projects
-            .FirstOrDefaultAsync(p => p.Id == resolvedProjectId);
-        if (existingProject is null)
+        var seeded = await SlackManagedConnectionSeed.CreateAsync(_fixture, new SlackSeedOptions
         {
-            db.Projects.Add(new ProjectRow
-            {
-                Id = resolvedProjectId,
-                Name = resolvedProjectId,
-                CreatedAt = now,
-                UpdatedAt = now,
-            });
-        }
-        var enrollment = await db.SlackWorkspaceEnrollments
-            .FirstOrDefaultAsync(row => row.WorkspaceTeamId == workspaceTeamId);
-        if (enrollment is null)
-        {
-            enrollment = new SlackWorkspaceEnrollmentRow
-            {
-                Id = $"enrollment-{workspaceTeamId}",
-                WorkspaceTeamId = workspaceTeamId,
-                Lifecycle = SlackEnrollmentLifecycle.Active,
-                ManagerCapability = SlackManagerCapability.Available,
-                PlanCode = "unknown",
-                AuditJson = "[]",
-                CreatedAt = now,
-                UpdatedAt = now,
-            };
-            db.SlackWorkspaceEnrollments.Add(enrollment);
-        }
-
-        var botUserId = $"U{agentNameSuffix.GetHashCode():X}".PadRight(8, '0').Substring(0, 8);
-        db.Agents.Add(new AgentRow
-        {
-            Id = agentId,
-            ProjectId = resolvedProjectId,
-            Name = $"Mohist Agent {agentNameSuffix}",
-            Status = AgentStatus.Active,
-            State = JsonSerializer.Serialize(new Mohist.Server.Agent.Domain.Agent
-            {
-                Id = agentId,
-                ProjectId = resolvedProjectId,
-                Name = $"Mohist Agent {agentNameSuffix}",
-                Status = AgentStatus.Active,
-                Instructions = "Handle Slack requests.",
-                AgentConfig = JsonSerializer.SerializeToElement(new { model = "openai/gpt-4o", runtime = "opencode" }),
-            }, JSON.Options),
-        });
-        db.AgentConnections.Add(new AgentConnectionRow
-        {
-            Id = id,
-            ProjectId = resolvedProjectId,
-            AgentId = agentId,
-            ProviderKind = ConnectionProviderKind.Slack,
+            ProjectId = projectId,
             WorkspaceTeamId = workspaceTeamId,
-            AppId = appId,
-            BotUserId = botUserId,
-            BotName = $"Mohist {agentNameSuffix}".Trim(),
-            SetupProgress = SetupProgressKind.Complete,
-            DesiredState = DesiredStateKind.Enabled,
-            ConnectionHealth = ConnectionHealthKind.Healthy,
-            AgentReadiness = AgentReadinessKind.Ready,
             OwnerSlackUserId = ownerSlackUserId,
-            LastHeartbeatAt = now,
-            CreatedAt = now,
-            UpdatedAt = now,
-        });
-
-        var agentAppId = $"agent_app_{Guid.NewGuid():N}";
-        db.ManagedSlackAgentApps.Add(new ManagedSlackAgentAppRow
-        {
-            Id = agentAppId,
-            EnrollmentId = enrollment.Id,
-            WorkspaceTeamId = workspaceTeamId,
-            AgentConnectionId = id,
             AppId = appId,
-            BotUserId = botUserId,
-            AppLifecycle = SlackAppLifecycle.Created,
-            Authorization = SlackAuthorizationState.Authorized,
-            RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Verified,
-            DesiredManifestVersion = 1,
-            DesiredManifestHash = "desired",
-            VerifiedScopesJson = "[]",
-            OperationFence = 0,
-            AppLevelTokenRef = agentAppId,
-            BotTokenRef = agentAppId,
-            BindingState = SlackAgentAppBindingState.Bound,
-            AuditJson = "[]",
-            CreatedAt = now,
-            UpdatedAt = now,
+            AgentNameSuffix = agentNameSuffix,
+            // The multi-bot route resolves mentioned agents through the
+            // managed app's Slack app id, so it must match the connection's.
+            ManagedAppAppId = appId,
         });
-
-        var appToken = Encoding.UTF8.GetBytes("xapp");
-        var botToken = Encoding.UTF8.GetBytes("xoxb");
-        var secrets = scope.ServiceProvider.GetRequiredService<AesGcmSecretStore>();
-        await secrets.StoreAtomicallyAsync(
-            db,
-            [
-                new SecretStoreWrite(
-                    new SecretStoreAddress(resolvedProjectId, id, SecretKind.AppToken),
-                    appToken),
-                new SecretStoreWrite(
-                    new SecretStoreAddress(resolvedProjectId, id, SecretKind.BotToken),
-                    botToken),
-                new SecretStoreWrite(
-                    SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken),
-                    appToken),
-                new SecretStoreWrite(
-                    SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken),
-                    botToken),
-            ]);
-
-        var leaseId = $"slklease_spec_{Guid.NewGuid():N}";
-        db.SlackAdapterLeases.Add(new SlackAdapterLeaseRow
-        {
-            TargetKey = new SlackLeaseTargetRef.Connection(resolvedProjectId, id).TargetKey,
-            Generation = 1,
-            LeaseId = leaseId,
-            LeaseKind = SlackLeaseKind.Runtime,
-            AdapterId = SlackRuntimeLeaseTestSupport.AdapterId,
-            IssuedAt = now,
-            ExpiresAt = now + SlackAdapterLeaseService.RuntimeLeaseTtl,
-            UpdatedAt = now,
-            CredentialFingerprint = Convert.ToHexStringLower(
-                System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes("xappxoxb"))),
-        });
-        await db.SaveChangesAsync();
-        _connectionLeases[id] = leaseId;
-        return new AgentConnection
-        {
-            Id = id,
-            ProjectId = resolvedProjectId,
-            AgentId = agentId,
-            WorkspaceTeamId = workspaceTeamId,
-            AppId = appId,
-            BotUserId = botUserId,
-            OwnerSlackUserId = ownerSlackUserId,
-        };
+        _connectionLeases[seeded.Connection.Id] = seeded.LeaseId;
+        return seeded.Connection;
     }
 
     private static string IngressPath(AgentConnection connection) =>
