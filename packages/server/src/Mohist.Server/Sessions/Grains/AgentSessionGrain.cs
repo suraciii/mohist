@@ -1238,7 +1238,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         return collected.Count == 0 ? null : collected;
     }
 
-    public async Task ReleaseFollowupDispatchAsync(string operationId)
+    public async Task ReleaseFollowupDispatchAsync(string operationId, bool scheduleRetry = true)
     {
         if (string.IsNullOrWhiteSpace(operationId)) return;
         var session = await GetRequiredAsync();
@@ -1249,9 +1249,10 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         leases[index] = leases[index] with { Dispatching = false };
         SetPendingFollowups(session, leases);
         await CommitAsync(session, []);
-        _followupDispatchScheduler?.Schedule(
-            session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
-            session.Id);
+        if (scheduleRetry)
+            _followupDispatchScheduler?.Schedule(
+                session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
+                session.Id);
     }
 
     public async Task MarkFollowupTurnExecutingAsync(string operationId)
