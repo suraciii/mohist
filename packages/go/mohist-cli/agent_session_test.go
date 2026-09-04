@@ -235,3 +235,95 @@ func TestSessionStopRequiresKeyAndCancellationIsPreserved(t *testing.T) {
 		t.Fatalf("cancel code=%d stderr=%q", code, errOut.String())
 	}
 }
+
+func TestAgentModelListRendersRuntimeScopedCatalog(t *testing.T) {
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/projects/proj-1/opencode/models" || r.URL.RawQuery != "runtime=pi" {
+			t.Fatalf("unexpected request %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"models":["minimax/MiniMax-M3","openai/gpt-5.6-luna"],"modelVariants":{"openai/gpt-5.6-luna":["xhigh"]},"reasoningEfforts":{"openai/gpt-5.6-luna":["low","xhigh"]}}}`), nil
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+	if code := Run(context.Background(), []string{"agent", "model", "list", "--runtime", "pi", "--project", "proj-1"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	var catalog struct {
+		Models           []string            `json:"models"`
+		ModelVariants    map[string][]string `json:"modelVariants"`
+		ReasoningEfforts map[string][]string `json:"reasoningEfforts"`
+	}
+	if err := json.Unmarshal([]byte(out.String()), &catalog); err != nil {
+		t.Fatalf("decode stdout %q: %v", out.String(), err)
+	}
+	if !reflect.DeepEqual(catalog.Models, []string{"minimax/MiniMax-M3", "openai/gpt-5.6-luna"}) {
+		t.Fatalf("models=%#v", catalog.Models)
+	}
+	variants, ok := catalog.ModelVariants["openai/gpt-5.6-luna"]
+	if !ok || !reflect.DeepEqual(variants, []string{"xhigh"}) {
+		t.Fatalf("variants=%#v", catalog.ModelVariants)
+	}
+	if !reflect.DeepEqual(catalog.ReasoningEfforts["openai/gpt-5.6-luna"], []string{"low", "xhigh"}) {
+		t.Fatalf("efforts=%#v", catalog.ReasoningEfforts)
+	}
+}
+
+func TestAgentModelListJSONSelectsCatalogFieldsWithoutShapeLoss(t *testing.T) {
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"success":true,"data":{"models":["openai/gpt-5.6-luna"],"modelVariants":{"openai/gpt-5.6-luna":["xhigh"]},"reasoningEfforts":{"openai/gpt-5.6-luna":["xhigh"]}}}`), nil
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+	if code := Run(context.Background(), []string{"agent", "model", "list", "--runtime", "pi", "--project", "proj-1", "--json", "models,modelVariants"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	var selected map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out.String()), &selected); err != nil {
+		t.Fatalf("decode stdout %q: %v", out.String(), err)
+	}
+	if _, ok := selected["models"]; !ok {
+		t.Fatalf("models missing from %q", out.String())
+	}
+	if _, ok := selected["modelVariants"]; !ok {
+		t.Fatalf("modelVariants missing from %q", out.String())
+	}
+	if _, ok := selected["reasoningEfforts"]; ok {
+		t.Fatalf("unselected reasoningEfforts leaked into %q", out.String())
+	}
+}
+
+func TestAgentModelListFailsClosedOnInvalidResponses(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"collection-shape", `{"success":true,"data":[{"id":"m1"}]}`},
+		{"missing-models", `{"success":true,"data":{"modelVariants":{},"reasoningEfforts":{}}}`},
+		{"missing-efforts", `{"success":true,"data":{"models":[],"modelVariants":{}}}`},
+		{"wrong-value-type", `{"success":true,"data":{"models":"openai/gpt-5.6-luna","modelVariants":{},"reasoningEfforts":{}}}`},
+		{"empty-data", `{"success":true}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				return response(http.StatusOK, tc.body), nil
+			}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+			if code := Run(context.Background(), []string{"agent", "model", "list", "--runtime", "pi", "--project", "proj-1"}, deps); code != ExitOperation {
+				t.Fatalf("code=%d stderr=%q", code, errOut.String())
+			}
+			if !strings.Contains(errOut.String(), "invalid_response") {
+				t.Fatalf("stderr=%q", errOut.String())
+			}
+		})
+	}
+}
+
+func TestAgentModelListRejectsUnknownJSONField(t *testing.T) {
+	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Fatal("request must not be sent")
+		return nil, nil
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+	if code := Run(context.Background(), []string{"agent", "model", "list", "--runtime", "pi", "--project", "proj-1", "--json", "id"}, deps); code != ExitUsage {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+}
