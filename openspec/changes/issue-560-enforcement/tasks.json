@@ -1,0 +1,30 @@
+{
+  "project": "mohist-local",
+  "description": "Enforce task purpose and context permissions before shared Agent launch admission.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add pure task-scope admission and stable rejection contract",
+      "spec": "specs/agent-task-scope/spec.md",
+      "type": "WRITE",
+      "dependsOn": [],
+      "passes": false
+    },
+    {
+      "id": "T-002",
+      "title": "Freeze accepted scope through shared launch snapshots",
+      "spec": "specs/agent-task-scope/spec.md",
+      "type": "WRITE",
+      "dependsOn": ["T-001"],
+      "passes": false
+    },
+    {
+      "id": "T-003",
+      "title": "Document Workflow translator owner boundary",
+      "spec": "specs/agent-task-scope/spec.md",
+      "type": "DESIGN",
+      "dependsOn": [],
+      "passes": false
+    }
+  ]
+}
