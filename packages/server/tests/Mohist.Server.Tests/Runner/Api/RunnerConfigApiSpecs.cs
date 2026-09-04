@@ -149,6 +149,91 @@ public class RunnerConfigApiSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UpdateInterrupt_SameProcessGenerationRegistrationPreservesFence()
+    {
+        var runnerId = await _fixture.RegisterRunnerAsync();
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        var updateInterruptId = Guid.NewGuid().ToString("N");
+
+        using (var beginResponse = await _fixture.Client.PostAsJsonAsync(
+            $"/api/runner/{runnerId}/update-interrupt",
+            new { updateInterruptId }))
+        {
+            Assert.Equal(HttpStatusCode.OK, beginResponse.StatusCode);
+        }
+
+        var info = Assert.IsType<RunnerInfo>(await runner.GetInfoAsync());
+        await runner.RegisterAsync(
+            info with { ConnectionGeneration = $"reconnected-{Guid.NewGuid():N}" },
+            TestRunnerGenerationExtensions.ProcessGeneration);
+        await TestLifecycle.DeactivateAndWait(runner, _fixture.Grains);
+        runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var runtime = await runner.GetRuntimeStateAsync();
+        Assert.True(runtime.Draining);
+        Assert.Equal(updateInterruptId, runtime.UpdateInterruptId);
+        Assert.False((await runner.TryBeginPollAsync(TestRunnerGenerationExtensions.ProcessGeneration)).Admitted);
+
+        using var duplicateResponse = await _fixture.Client.PostAsJsonAsync(
+            $"/api/runner/{runnerId}/update-interrupt",
+            new { updateInterruptId });
+        Assert.Equal(HttpStatusCode.OK, duplicateResponse.StatusCode);
+        var duplicate = (await duplicateResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal("draining", duplicate.GetProperty("status").GetString());
+        Assert.Equal(updateInterruptId, duplicate.GetProperty("updateInterruptId").GetString());
+    }
+
+    [Fact]
+    public async Task UpdateInterrupt_ReplacementProcessGenerationSettlesOnlyThePendingIdentity()
+    {
+        var runnerId = await _fixture.RegisterRunnerAsync();
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        var settledId = Guid.NewGuid().ToString("N");
+        var unrelatedId = Guid.NewGuid().ToString("N");
+
+        using (var beginResponse = await _fixture.Client.PostAsJsonAsync(
+            $"/api/runner/{runnerId}/update-interrupt",
+            new { updateInterruptId = settledId }))
+        {
+            Assert.Equal(HttpStatusCode.OK, beginResponse.StatusCode);
+            var data = (await beginResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            Assert.Equal("draining", data.GetProperty("status").GetString());
+        }
+
+        var info = Assert.IsType<RunnerInfo>(await runner.GetInfoAsync());
+        await runner.RegisterAsync(info, $"replacement-generation-{Guid.NewGuid():N}");
+        await TestLifecycle.DeactivateAndWait(runner, _fixture.Grains);
+        runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        Assert.False((await runner.GetRuntimeStateAsync()).Draining);
+
+        async Task<JsonElement> CancelAsync(string id)
+        {
+            using var response = await _fixture.Client.PostAsync(
+                $"/api/runner/{runnerId}/update-interrupt/{id}/cancel",
+                content: null);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        }
+
+        var settledCancel = await CancelAsync(settledId);
+        Assert.Equal("already-cancelled", settledCancel.GetProperty("status").GetString());
+        Assert.Equal(settledId, settledCancel.GetProperty("updateInterruptId").GetString());
+
+        var unrelatedCancel = await CancelAsync(unrelatedId);
+        Assert.Equal("superseded", unrelatedCancel.GetProperty("status").GetString());
+        Assert.Equal(unrelatedId, unrelatedCancel.GetProperty("updateInterruptId").GetString());
+
+        using var replayResponse = await _fixture.Client.PostAsJsonAsync(
+            $"/api/runner/{runnerId}/update-interrupt",
+            new { updateInterruptId = settledId });
+        Assert.Equal(HttpStatusCode.OK, replayResponse.StatusCode);
+        var replay = (await replayResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal("already-cancelled", replay.GetProperty("status").GetString());
+        Assert.Equal(settledId, replay.GetProperty("updateInterruptId").GetString());
+        Assert.False((await runner.GetRuntimeStateAsync()).Draining);
+    }
+
+    [Fact]
     public async Task Config_ConfiguredPolicy_ProjectsAllFields()
     {
         _fixture.SetPolicy(new CleanupPolicyOptions

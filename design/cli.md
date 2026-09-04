@@ -299,6 +299,64 @@ to a DTO type in the comparison tests. Reflection derives JSON names from the
 Server assembly and serialization attributes. No runtime endpoint, shared
 assembly, or manual property list replaces this check.
 
+### Managed Runtime Updates
+
+`mo update server` and `mo update runner` replace installed managed services;
+they are not source-tree build shortcuts. `mo update` updates Server and Runner
+together from one captured source revision. CLI and optional Slack adapter
+updates keep their independent `mo update cli` and `mo update slack`
+transactions.
+
+Managed runtime update requires an existing verified runtime target and refuses
+to adopt a source-bound service unit implicitly. A missing or incomplete
+`active.json` or `verified.json` fails before build or service mutation.
+
+The repository root selected by `--repo-root`, or discovered from the current
+directory, is the sole source authority. Before building, the CLI requires a
+clean Git worktree, captures the exact commit and tree identities, and creates
+a read-only archive plus a separate writable build workspace. Every requested
+runtime is completely built and its payload is hashed before any installed
+service changes. A source identity change or dirty worktree observed after
+staging rejects the candidate.
+
+Each installed runtime is an immutable release under the per-user Mohist
+runtime root. Its `runtime-identity.json`, `release.json`, and, for Runner,
+`dist/build-info.json` bind the component, source revision, source tree,
+artifact digest, release identity, monotonic generation, and Runner identity
+where applicable. Metadata files are excluded from the artifact digest. The
+service uses an absolute entry point inside that release; success never depends
+on the source checkout remaining present or writable.
+
+Activation is one serialized transaction. Before changing a service, the CLI
+captures its exact unit contents and active/enabled state. It changes only the
+managed working directory, entry point, and runtime-identity reference while
+retaining tracked entry-point arguments, service environment, credentials,
+Runner identity, Server address, and other operator-owned directives. The
+captured unit fragment and its effective target must match the verified runtime
+before build. Systemd drop-ins are outside the update target and remain
+untouched. Unit replacement is atomic.
+
+After activation, Server must answer its health check with the candidate
+identity. Runner must reconnect with the candidate source revision, artifact
+digest, generation, and the same Runner identity. Process liveness alone is not
+readiness. Before Runner activation, an identity-bound interrupt closes new
+work admission; if existing work is still active, the update cancels its own
+interrupt and exits without restarting the service. A failed activation or
+verification restores the captured unit and service state, then verifies the
+restored runtime. Success is emitted only after every requested component is
+verified.
+
+One per-user lock serializes managed service installs and runtime updates. Before
+a new mutation, the CLI reads any pending transaction from its validated runtime
+directory. A transaction durably marked verified is completed only after the
+candidate runtimes and pointers are reverified. Every earlier or ambiguous state
+is rolled back from the private unit and pointer snapshots, including cancelling
+its Runner interrupt and verifying the restored runtimes. Recovery is idempotent;
+if identity, snapshots, service state, or readiness cannot be proven, the pending
+marker remains and the new mutation fails closed. Dry-run performs local
+validation and reports the selected source and components but does not build,
+write, stop, start, recover, or contact a service.
+
 ### Errors and Exit Status
 
 The reference owns error format, stable codes, and exit status. A stable code
