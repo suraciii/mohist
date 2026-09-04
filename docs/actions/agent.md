@@ -29,13 +29,13 @@ relationship between Agent, AgentJob, and AgentSession.
     prompt: ${{ prompts.review }}
 ```
 
-The Agent selected by `name` provides identity instructions, execution
-backend (OpenCode or Pi), model, optional Reasoning Effort, true model variant,
+The Agent selected by `name` provides identity instructions, execution backend
+(OpenCode, Pi, or Codex), model, optional Reasoning Effort, true model variant,
 and Skills. `prompt` is the input for this task. Use this Action when multiple
 Tasks or Profiles reuse the same role, or when routing rules and `@` mentions
 must use the same Agent identity. Runtime-specific Actions (`mohist/opencode`,
-`mohist/pi`) are no longer selectable from a Profile. The Agent definition
-owns the backend choice.
+`mohist/pi`) are no longer selectable from a Profile, and Codex adds no
+user-selectable Runtime Action. The Agent definition owns the backend choice.
 
 ## Action Inputs
 
@@ -55,9 +55,9 @@ The Agent configuration selects the execution backend, model, optional
 Reasoning Effort, true model variant, and Skills. Reasoning Effort is one of
 `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; it is independent
 from Variant. OpenCode does not support an explicit Reasoning Effort, so choose
-Pi or leave the effort unset for OpenCode. The task cannot override these
-values. `prompt` supplies only the goal for this work and cannot modify the
-Agent definition. Task-level constructs such as `expect`, `artifacts`,
+Pi or Codex, or leave the effort unset for OpenCode. The task cannot override
+these values. `prompt` supplies only the goal for this work and cannot modify
+the Agent definition. Task-level constructs such as `expect`, `artifacts`,
 `setVars`, and recovery behave as they do for other Actions.
 
 `name` uses the same resolution order as the `mo` command surface. A reference

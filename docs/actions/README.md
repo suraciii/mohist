@@ -78,9 +78,10 @@ markers.
 ### Model Selection
 
 A Workflow task that runs an Agent does not carry model options. The named
-Agent definition owns the backend (OpenCode or Pi), model, optional Reasoning
-Effort, and true model variant. The AgentJob fixes these values at launch. The Workflow supplies
-only `name`, `prompt`, `session`, and `timeout` through `mohist/agent`.
+Agent definition owns the backend (OpenCode, Pi, or Codex), model, optional
+Reasoning Effort, and true model variant. The AgentJob fixes these values at
+launch. The Workflow supplies only `name`, `prompt`, `session`, and `timeout`
+through `mohist/agent`.
 
 Project and Issue model selectors configure the Agent, not the Workflow. The
 available catalogs come from the runtime selected by the Agent. A configured
@@ -89,10 +90,10 @@ cleared. Mohist never substitutes a model from another backend.
 
 ## Shared Semantics for Agent Execution Actions
 
-`mohist/opencode` and `mohist/pi` share the following semantics as internal
-Agent-to-Runner contracts. Their own pages describe only their differences.
-`mohist/agent` launches an AgentJob whose backend is one of these Actions, so
-the same execution semantics apply to Workflow Agent tasks.
+OpenCode, Pi, and Codex share the following Agent execution semantics. The
+OpenCode and Pi internal Actions and each Runtime design describe only their
+differences. `mohist/agent` launches the AgentJob and is the only Agent Action a
+Workflow Profile selects; Codex adds no user-selectable Runtime Action.
 
 ### Workflow Session
 

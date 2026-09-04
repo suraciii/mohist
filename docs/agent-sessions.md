@@ -38,8 +38,9 @@ operate Mohist and is not a Mohist resource.
 - **AgentSession**: The continuing logical Session and audit record. It owns
   Inputs and Turns in order, context, usage, Activity, and current Runtime
   Binding. It has no completed or failed lifecycle.
-- **Runtime Session**: The physical conversation maintained by OpenCode, Pi, or
-  another backend. It can be replaced without changing AgentSession identity.
+- **Runtime Session**: The physical conversation maintained by OpenCode, Pi,
+  Codex, or another backend. It can be replaced without changing AgentSession
+  identity.
 
 An Action is the Agent-to-Runner execution contract. It carries the accepted
 Agent snapshot to a backend but has no Agent identity and owns no work lifecycle.
@@ -93,8 +94,8 @@ A Mohist Agent is a first-class Project resource. It stores:
 Runtime credentials belong in protected Runtime settings. They do not belong in
 Instructions, Agent records, or Agent Connections. Reasoning Effort uses `off`,
 `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; it is never encoded as a
-Variant. OpenCode does not support explicit Reasoning Effort. Choose Pi or leave
-it unset for OpenCode.
+Variant. OpenCode does not support explicit Reasoning Effort. Choose Pi or
+Codex, or leave it unset for OpenCode.
 
 An ordinary launch accepts task text and context references. Context is not Agent
 configuration. The Agent definition is fixed when the AgentJob starts, as are
@@ -136,6 +137,37 @@ Agent lifecycle and execution readiness are separate:
 A temporarily offline or full Runner is Availability, not a Readiness failure.
 Work may be accepted and queued. Entry points present one Mohist conclusion and
 do not maintain separate Runtime rules.
+
+### Codex Runtime
+
+Select `codex` as the Agent Runtime to execute the same AgentJob and
+AgentSession product through Codex. Workflow, Web, CLI, Slack, event routing,
+and mentions keep their existing entry points. A Workflow still uses only
+`mohist/agent`; there is no user-selectable `mohist/codex` Action.
+
+Codex Models and Reasoning Effort values come from the Codex catalog reported
+by ready Runners. Codex exposes no Variant in v1, so Variant is unavailable for
+this Runtime. Mohist never substitutes an OpenCode or Pi model when the Codex
+catalog is empty or unavailable.
+
+Codex runs unattended with the Runner's execution authority. Mohist does not
+turn a Codex tool permission request into a Workflow Approval Point and does not
+leave an AgentJob waiting for an interactive Codex answer. An unexpected
+permission or user-input request ends the current execution with
+`permission-required` while preserving the AgentSession and its binding.
+
+Runner-managed Codex configuration, authentication, and physical conversation
+history are isolated from a person's interactive Codex installation. Readiness
+distinguishes a missing CLI, missing authentication, incompatible app-server
+protocol, and catalog or Model gaps from Runner Availability. Credentials and
+provider payloads are never stored in the Agent definition or transcript.
+
+The Codex physical conversation may survive a Runner restart, but the execution
+that was active in the lost Runner generation does not. Mohist closes that old
+execution as `runner-lost`; it never adopts the old Codex Turn or reconstructs
+its result from history. A later independently accepted Input may reuse the same
+AgentSession and physical conversation, but it starts a new AgentTurn. If the
+old Input might have reached Codex, Mohist never replays it automatically.
 
 ### Configure and Test in the Web UI
 
@@ -348,10 +380,10 @@ These operations change Session execution, not work ownership.
 ## Current Scope
 
 Every entry point uses the unified AgentJob path. A Workflow task names a
-Mohist Agent through `mohist/agent`; the Agent definition selects OpenCode or Pi
-and the accepted snapshot fixes that backend to the AgentJob. Max concurrent
-runs applies to launches and Follow-ups. See [Agent Event Routing](event-routing.md)
-for Agent responses to matching events.
+Mohist Agent through `mohist/agent`; the Agent definition selects OpenCode, Pi,
+or Codex and the accepted snapshot fixes that backend to the AgentJob. Max
+concurrent runs applies to launches and Follow-ups. See
+[Agent Event Routing](event-routing.md) for Agent responses to matching events.
 
 ## Implementation Gaps
 
@@ -366,6 +398,8 @@ for Agent responses to matching events.
 - Agent Connection Readiness checks only Model and Runtime. Complete Runner and
   Runtime executability probing remains unavailable, so a launch can find more
   gaps.
+- Codex Runtime selection, catalog discovery, app-server lifecycle, execution,
+  and Session commands are specified but not implemented.
 - Not every entry point exposes acceptance, dispatch, and Turn result as
   separate resumable facts after disconnection.
 - The unified invocation interface lacks caller-owned duplicate-request
