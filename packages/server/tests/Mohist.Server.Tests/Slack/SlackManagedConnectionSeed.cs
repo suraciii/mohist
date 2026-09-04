@@ -31,6 +31,8 @@ public sealed record SlackSeedOptions
     public bool WithAgentAndManagedApp { get; init; } = true;
     public bool WithRuntimeLease { get; init; } = true;
     public IReadOnlyList<string>? AllowedMembers { get; init; }
+    public string AccessPolicy { get; init; } = AccessPolicyKind.OwnerOnly;
+    public string AgentInstructions { get; init; } = "Handle Slack requests.";
 }
 
 /// <summary>
@@ -95,7 +97,7 @@ public static class SlackManagedConnectionSeed
                     ProjectId = projectId,
                     Name = agentName,
                     Status = AgentStatus.Active,
-                    Instructions = "Handle Slack requests.",
+                    Instructions = options.AgentInstructions,
                     AgentConfig = JsonSerializer.SerializeToElement(
                         new { model = "openai/gpt-4o", runtime = "opencode" }),
                 }, JSON.Options),
@@ -117,6 +119,7 @@ public static class SlackManagedConnectionSeed
             ConnectionHealth = ConnectionHealthKind.Healthy,
             AgentReadiness = AgentReadinessKind.Ready,
             OwnerSlackUserId = options.OwnerSlackUserId,
+            AccessPolicy = options.AccessPolicy,
             LastHeartbeatAt = now,
             CreatedAt = now,
             UpdatedAt = now,
@@ -216,6 +219,7 @@ public static class SlackManagedConnectionSeed
             ConnectionHealth = ConnectionHealthKind.Healthy,
             AgentReadiness = AgentReadinessKind.Ready,
             OwnerSlackUserId = options.OwnerSlackUserId,
+            AccessPolicy = options.AccessPolicy,
             LastHeartbeatAt = now,
             CreatedAt = now,
             UpdatedAt = now,
