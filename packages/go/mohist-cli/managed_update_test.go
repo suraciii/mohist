@@ -103,6 +103,48 @@ func TestManagedUpdateSystemdFakeValidatesRawWorkingDirectory(t *testing.T) {
 	}
 }
 
+func TestManagedUpdateActivatesIndentedServiceDirectivesWithoutCrossSectionPollution(t *testing.T) {
+	fixture := newManagedUpdateFixture(t)
+	unit := "[Unit]\n" +
+		"WorkingDirectory=/unit/decoy\n" +
+		"ExecStart=/unit/decoy\n" +
+		"Environment=MOHIST_RUNTIME_IDENTITY_PATH=/unit/decoy.json\n\n" +
+		"[Service]\n" +
+		"  WorkingDirectory=/runtime/old/server\n" +
+		"\tEnvironment=\"PATH=/usr/bin\"\n" +
+		"\tEnvironment=\"MOHIST_RUNTIME_IDENTITY_PATH=/runtime/old/server/runtime-identity.json\"\n" +
+		"  ExecStart=/runtime/old/server/Mohist.Server\n" +
+		"Restart=on-failure\n\n" +
+		"[Install]\n" +
+		"WorkingDirectory=/install/decoy\n" +
+		"ExecStart=/install/decoy\n" +
+		"Environment=MOHIST_RUNTIME_IDENTITY_PATH=/install/decoy.json\n" +
+		"WantedBy=default.target\n"
+	fixture.files.put(fixture.unitPath, []byte(unit), 0o600)
+
+	if err := fixture.updater.Update(context.Background(), ManagedUpdateRequest{
+		Components: []string{"server"}, RepoRoot: "/repo",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if status := pointerText(fixture.pointer("active.json"), "status"); status != "verified" {
+		t.Fatalf("active status = %q", status)
+	}
+	activated := fixture.files.text(fixture.unitPath)
+	for _, preserved := range []string{
+		"WorkingDirectory=/unit/decoy\n",
+		"ExecStart=/unit/decoy\n",
+		"Environment=MOHIST_RUNTIME_IDENTITY_PATH=/unit/decoy.json\n",
+		"WorkingDirectory=/install/decoy\n",
+		"ExecStart=/install/decoy\n",
+		"Environment=MOHIST_RUNTIME_IDENTITY_PATH=/install/decoy.json\n",
+	} {
+		if !strings.Contains(activated, preserved) {
+			t.Fatalf("activation changed non-Service directive %q:\n%s", preserved, activated)
+		}
+	}
+}
+
 func TestManagedUpdateCommitsVerifiedRunnerRelease(t *testing.T) {
 	fixture := newManagedRunnerUpdateFixture(t)
 	serverUnitPath := "/home/test/.config/systemd/user/mohist.service"
@@ -1069,10 +1111,28 @@ func managedTestSystemdProperty(unit, property string) string {
 
 func managedTestSystemdDirectiveValues(unit, property string) []string {
 	values := []string{}
-	for _, line := range strings.Split(unit, "\n") {
-		if strings.HasPrefix(line, property+"=") {
-			values = append(values, strings.TrimPrefix(line, property+"="))
+	inService := false
+	serviceSections := 0
+	for _, line := range splitManagedUnitLines([]byte(unit)) {
+		body := string(line.body)
+		trimmed := strings.TrimSpace(body)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			inService = trimmed == "[Service]"
+			if inService {
+				serviceSections++
+			}
+			continue
 		}
+		if !inService {
+			continue
+		}
+		key, value, _, ok := managedUnitDirective(body)
+		if ok && key == property {
+			values = append(values, value)
+		}
+	}
+	if serviceSections != 1 {
+		return nil
 	}
 	return values
 }
