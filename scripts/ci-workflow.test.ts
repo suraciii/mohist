@@ -53,17 +53,24 @@ test('CI workflow needs reference existing canonical producer jobs', () => {
 test('CI Server scope uses fixed Bun without npm bootstrap', () => {
   const workflow = readFileSync(resolve(repositoryRoot, '.github/workflows/ci.yml'), 'utf8')
   const server = parseJobs(workflow).get('server') ?? ''
+  const prepareDirectoriesStep =
+    /^      - name: Prepare Server directories\n        run: mkdir -p "\$TMPDIR" artifacts\/server$/m
+  const setupBunStep =
+    /^      - name: Setup Bun\n        uses: oven-sh\/setup-bun@v2\n        with:\n          bun-version: 1\.4\.0$/m
+  const setupDotnetStep = /^      - name: Setup \.NET\n        uses: actions\/setup-dotnet@v5$/m
+  const runServerStep =
+    /^      - name: Run Server scope\n        run: \|\n          bun --no-install scripts\/test-duration\/application\.ts server$/m
 
-  assert.match(server, /^        uses: oven-sh\/setup-bun@v2$/m)
-  assert.match(server, /^          bun-version: 1\.4\.0$/m)
-  assert.match(server, /^          bun --no-install scripts\/test-duration\/application\.ts server$/m)
+  assert.match(server, setupBunStep)
+  assert.match(server, runServerStep)
   assert.doesNotMatch(server, /^\s+uses: actions\/setup-node@/m)
   assert.doesNotMatch(server, /^\s+(?:run:\s+)?npm ci(?:\s|$)/m)
 
-  const prepareDirectories = server.indexOf('run: mkdir -p "$TMPDIR" artifacts/server')
-  const setupBun = server.indexOf('uses: oven-sh/setup-bun@v2')
-  const setupDotnet = server.indexOf('uses: actions/setup-dotnet@v5')
-  const runServer = server.indexOf('bun --no-install scripts/test-duration/application.ts server')
+  const position = (pattern: RegExp) => pattern.exec(server)?.index ?? -1
+  const prepareDirectories = position(prepareDirectoriesStep)
+  const setupBun = position(setupBunStep)
+  const setupDotnet = position(setupDotnetStep)
+  const runServer = position(runServerStep)
   assert.ok(
     prepareDirectories >= 0 && prepareDirectories < setupBun && prepareDirectories < setupDotnet,
     'Server directories must exist before toolchain setup',
