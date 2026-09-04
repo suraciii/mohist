@@ -1,13 +1,13 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { isAbsolute, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import { parseSuiteConfig, validateConfig } from './config.js'
 import { planIdentity, selectApplicationTracks, selectRepositoryTracks, validatePlan } from './plan.js'
 import type { CommandConfig, SuiteConfig } from './types.js'
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const repoRoot = process.cwd()
 
 export interface GateArgs {
   readonly evidenceRoot?: string
