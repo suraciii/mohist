@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure;
 using Xunit;
 
 namespace Mohist.Server.Tests.Agent.Services;
@@ -16,11 +17,11 @@ public sealed class AgentLauncherResolveRuntimeTests
     }
 
     [Fact]
-    public void ResolveRuntime_DefaultsToOpenCode()
+    public void ResolveRuntime_DefaultsToPi()
     {
-        Assert.Equal("opencode", AgentLauncher.ResolveRuntime(null));
-        Assert.Equal("opencode", AgentLauncher.ResolveRuntime(JsonDocument.Parse("{\"runtime\":\"mystery\"}").RootElement));
-        Assert.Equal("opencode", AgentLauncher.ResolveRuntime(JsonDocument.Parse("{\"runtime\":42}").RootElement));
+        Assert.Equal(AgentConfigSchema.DefaultRuntime, AgentLauncher.ResolveRuntime(null));
+        Assert.Equal(AgentConfigSchema.DefaultRuntime, AgentLauncher.ResolveRuntime(JsonDocument.Parse("{\"runtime\":\"mystery\"}").RootElement));
+        Assert.Equal(AgentConfigSchema.DefaultRuntime, AgentLauncher.ResolveRuntime(JsonDocument.Parse("{\"runtime\":42}").RootElement));
     }
 
     [Fact]

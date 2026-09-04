@@ -49,7 +49,7 @@ function makeWork(workId: string, model: string, variant: string): DispatchWorkI
     agentJobId: workId,
     agentSessionId: null,
     projectId: null,
-    with: { prompt: workId, model, variant },
+    with: { prompt: workId, runtime: 'opencode', model, variant },
     variables: { workspace: { path: '/virtual/workspace' } },
   }
 }

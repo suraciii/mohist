@@ -578,7 +578,7 @@ public sealed record AgentJobInput(
     /// <summary>
     /// Resolved execution backend snapshot captured at launch time.
     /// Resolved launches pin the runtime (defaulting to
-    /// <c>AgentConfigSchema.OpenCodeRuntime</c>) so the runner
+    /// <c>AgentConfigSchema.DefaultRuntime</c>) so the runner
     /// executor can pick the right runtime and recovery reuses the
     /// snapshotted value rather than re-reading mutable Agent config.
     /// Append-only Orleans field id (next free after

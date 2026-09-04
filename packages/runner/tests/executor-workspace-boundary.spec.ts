@@ -536,9 +536,9 @@ function buildAgentJobWork(suppliedPath: string, workflowRunId: string, agentJob
     stage: 'agent-job',
     title: 'agent-job dispatch',
     // After #410 T-001, AgentJob dispatches carry a flat
-    // `{ prompt, instructions?, model?, variant? }` payload — no
+    // `{ prompt, instructions?, runtime, model?, variant? }` payload — no
     // `Uses` selector and no `core/script` Action shape.
-    with: { prompt: 'echo ok' },
+    with: { prompt: 'echo ok', runtime: 'opencode' },
     variables: {
       mohist: { runId: workflowRunId },
       workspace: { path: suppliedPath, branch: null, changeDir: null },

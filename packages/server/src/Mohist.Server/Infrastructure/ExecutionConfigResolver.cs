@@ -21,7 +21,7 @@ public sealed record ExecutionConfigHint(
 /// <summary>
 /// Resolved execution configuration: every field settled by the precedence
 /// rule, with <see cref="Runtime"/> never null (it defaults to
-/// <see cref="AgentConfigSchema.OpenCodeRuntime"/> when no source supplies
+/// <see cref="AgentConfigSchema.DefaultRuntime"/> when no source supplies
 /// one). Model and Variant stay null when no source supplies them.
 /// </summary>
 [GenerateSerializer]
@@ -50,7 +50,7 @@ public static class ExecutionConfigResolver
             callerHint?.Runtime,
             definition?.Runtime,
             projectDefault?.Runtime)
-            ?? AgentConfigSchema.OpenCodeRuntime;
+            ?? AgentConfigSchema.DefaultRuntime;
         return new ResolvedExecutionConfig(
             runtime,
             FirstSupplied(callerHint?.Model, definition?.Model, projectDefault?.Model),

@@ -7,7 +7,7 @@ namespace Mohist.Server.Tests.Agent.Services;
 /// <summary>
 /// Precedence matrix for the single execution-field resolution rule
 /// (issue-560 T-001): caller hint → Agent definition → Project default,
-/// runtime defaulting to opencode, explicit malformed values never masked
+/// runtime defaulting to Pi, explicit malformed values never masked
 /// by a lower-precedence source.
 /// </summary>
 [Trait("level", "L0")]
@@ -72,24 +72,24 @@ public sealed class ExecutionConfigResolverTests
     }
 
     [Fact]
-    public void Runtime_DefaultsToOpenCode_WhenNoSourceSuppliesOne()
+    public void Runtime_DefaultsToPi_WhenNoSourceSuppliesOne()
     {
         var resolved = ExecutionConfigResolver.Resolve(
             null,
             new ExecutionConfigHint(Model: "a/one"),
             new ExecutionConfigHint(Model: "b/two"));
 
-        Assert.Equal(AgentConfigSchema.OpenCodeRuntime, resolved.Runtime);
+        Assert.Equal(AgentConfigSchema.DefaultRuntime, resolved.Runtime);
         Assert.Equal("a/one", resolved.Model);
         Assert.Null(resolved.Variant);
     }
 
     [Fact]
-    public void EmptySources_ResolveToOpenCodeWithNoModel()
+    public void EmptySources_ResolveToPiWithNoModel()
     {
         var resolved = ExecutionConfigResolver.Resolve(null, null, null);
 
-        Assert.Equal(AgentConfigSchema.OpenCodeRuntime, resolved.Runtime);
+        Assert.Equal(AgentConfigSchema.DefaultRuntime, resolved.Runtime);
         Assert.Null(resolved.Model);
         Assert.Null(resolved.Variant);
     }

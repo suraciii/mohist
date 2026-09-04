@@ -79,7 +79,7 @@ function buildAgentJobWork(overrides: Partial<DispatchWorkItem> = {}): DispatchW
     agentJobId: 'aj-1',
     agentSessionId: 'session-1',
     projectId: 'proj-1',
-    with: { prompt: 'do the agent thing' },
+    with: { prompt: 'do the agent thing', runtime: 'opencode' },
     variables: {
       workspace: { path: '/tmp/agent-job-ws', branch: null, changeDir: null },
     },

@@ -547,7 +547,7 @@ describe('WorkExecutor artifact capture', () => {
     work.actionAttemptId = 'plan.1'
     work.ownerKind = 'agent-job'
     work.agentJobId = 'agent-job-1'
-    work.with = { prompt: 'review this' }
+    work.with = { prompt: 'review this', runtime: 'opencode' }
 
     const result = await executor.execute(work, new AbortController().signal)
 
@@ -589,7 +589,7 @@ describe('WorkExecutor artifact capture', () => {
     work.workflowRunId = ''
     work.ownerKind = 'agent-job'
     work.agentJobId = 'agent-job-1'
-    work.with = { prompt: 'review this' }
+    work.with = { prompt: 'review this', runtime: 'opencode' }
 
     const result = await executor.execute(work, new AbortController().signal)
 

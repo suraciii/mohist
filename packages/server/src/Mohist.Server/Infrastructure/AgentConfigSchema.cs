@@ -19,7 +19,7 @@ namespace Mohist.Server.Infrastructure;
 /// <para>
 /// The whitelist also carries the execution
 /// backend dimension (<c>runtime</c>: <c>opencode</c> | <c>pi</c>).
-/// Absent / unset resolves to <c>opencode</c>; any other value is
+/// Absent / unset resolves to <c>pi</c>; any other value is
 /// rejected as invalid. Agent CRUD uses <see cref="Validate"/> and Issue
 /// configuration uses <see cref="ValidateIssue"/> so runtime has one owner.
 /// </para>
@@ -28,6 +28,7 @@ public static class AgentConfigSchema
 {
     public const string OpenCodeRuntime = "opencode";
     public const string PiRuntime = "pi";
+    public const string DefaultRuntime = PiRuntime;
 
     public static readonly IReadOnlySet<string> AllowedRuntimes = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -150,7 +151,7 @@ public static class AgentConfigSchema
 
     /// <summary>
     /// Validate the <c>runtime</c> field when present. An absent key is
-    /// valid (the resolver defaults to <see cref="OpenCodeRuntime"/>); a
+    /// valid (the resolver defaults to <see cref="DefaultRuntime"/>); a
     /// non-string or out-of-set value is rejected with an actionable
     /// message that lists the accepted backends. Lives separately so the
     /// write-side projection paths can apply the same value check on a

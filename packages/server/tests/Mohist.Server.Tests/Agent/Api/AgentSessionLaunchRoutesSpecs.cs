@@ -221,9 +221,9 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             Assert.NotNull(snapshot);
             Assert.Equal(runnerId, snapshot!.RunnerId);
             Assert.False(string.IsNullOrWhiteSpace(snapshot.CurrentWorkId));
-            Assert.Equal(AgentConfigSchema.OpenCodeRuntime, snapshot.ExecutionDefinition!.Runtime);
+            Assert.Equal(AgentConfigSchema.DefaultRuntime, snapshot.ExecutionDefinition!.Runtime);
             Assert.Equal(
-                AgentConfigSchema.OpenCodeRuntime,
+                AgentConfigSchema.DefaultRuntime,
                 (await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId!).GetAsync())!.Runtime);
         }
         finally
