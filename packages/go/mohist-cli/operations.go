@@ -269,7 +269,9 @@ func parseEvent(args []string) (command, error) {
 				}
 				c.args = append(c.args, strings.TrimPrefix(args[i], "--"), args[i+1])
 				i++
-			} else if args[i] != "--help" {
+			} else if args[i] == "--help" || args[i] == "-h" {
+				return command{help: true, helpText: leafHelp(c.kind, c.catalog)}, nil
+			} else {
 				return command{}, usage("unknown option " + args[i])
 			}
 		}
@@ -292,7 +294,9 @@ func parseEvent(args []string) (command, error) {
 			if e != nil {
 				return command{}, e
 			}
-		} else if args[i] != "--help" {
+		} else if args[i] == "--help" || args[i] == "-h" {
+			return command{help: true, helpText: leafHelp(c.kind, c.catalog)}, nil
+		} else {
 			return command{}, usage("unknown option " + args[i])
 		}
 	}
@@ -332,7 +336,9 @@ func parseOtel(args []string) (command, error) {
 			}
 			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), args[i+1])
 			i++
-		} else if args[i] != "--help" {
+		} else if args[i] == "--help" || args[i] == "-h" {
+			return command{help: true, helpText: opsLeafHelp(c.kind, c.catalog)}, nil
+		} else {
 			return command{}, usage("unknown option " + args[i])
 		}
 	}
