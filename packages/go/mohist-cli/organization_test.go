@@ -228,3 +228,47 @@ func TestIssueViewBareJSONListsLocalCatalogWithoutHTTP(t *testing.T) {
 		t.Fatalf("code=%d calls=%d stdout=%q stderr=%q", code, calls, out.String(), errOut.String())
 	}
 }
+
+func TestOrganizationDiscoveryPrecedesRequiredPositionals(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+		exact bool
+	}{
+		{name: "issue view", args: []string{"issue", "view", "--json"}, want: strings.Join(issueFields, "\n") + "\n", exact: true},
+		{name: "epic view", args: []string{"epic", "view", "--json"}, want: strings.Join(epicFields, "\n") + "\n", exact: true},
+		{name: "epic create help", args: []string{"epic", "create", "-h"}, want: "USAGE"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			deps, out, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return nil, errors.New("must not call")
+			}))
+			code := Run(context.Background(), test.args, deps)
+			validOutput := out.String() == test.want
+			if !test.exact {
+				validOutput = strings.Contains(out.String(), test.want)
+			}
+			if code != ExitOK || calls != 0 || !validOutput || errOut.Len() != 0 {
+				t.Fatalf("code=%d calls=%d stdout=%q stderr=%q", code, calls, out.String(), errOut.String())
+			}
+		})
+	}
+}
+
+func TestOrganizationRequiredPositionalsRejectControlTokens(t *testing.T) {
+	for _, args := range [][]string{
+		{"issue", "view", "--json", "number"},
+		{"epic", "create", "--json", "title"},
+		{"label", "create", "--json", "key"},
+	} {
+		deps, _, _ := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("must not call")
+		}))
+		if code := Run(context.Background(), args, deps); code != ExitUsage {
+			t.Fatalf("code=%d for %v", code, args)
+		}
+	}
+}

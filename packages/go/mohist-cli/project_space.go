@@ -60,7 +60,7 @@ func parseProject(args []string) (command, error) {
 	case "create":
 		return parseProjectCreate(args[1:])
 	case "repo":
-		if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
 			return command{help: true, helpText: "USAGE\n    mo project repo set-default <name> [flags]\n\nSet a Repository as the Project default."}, nil
 		}
 		if len(args) < 2 || args[1] != "set-default" {
@@ -154,7 +154,10 @@ func parseSpaceFlags(kind string, args []string, path string, catalog []string, 
 
 func parseNamedSpace(kind string, args []string, catalog []string, noun string, projectRequired bool) (command, error) {
 	c := command{kind: kind, catalog: catalog}
-	if len(args) == 0 {
+	if discovered, ok, err := discoverLeaf(args, kind, catalog, leafHelp(kind, catalog)); ok {
+		return discovered, err
+	}
+	if len(args) == 0 || isControlToken(args[0]) {
 		return command{}, usage(noun + " name is required")
 	}
 	c.args = append(c.args, "name", args[0])
@@ -191,8 +194,11 @@ func parseNamedSpace(kind string, args []string, catalog []string, noun string, 
 
 func parseRepoMutation(kind string, args []string, action string) (command, error) {
 	c := command{kind: kind, catalog: repoFields}
+	if discovered, ok, err := discoverLeaf(args, kind, repoFields, leafHelp(kind, repoFields)); ok {
+		return discovered, err
+	}
 	if action == "create" || action == "edit" || action == "delete" || action == "set-default" {
-		if len(args) == 0 {
+		if len(args) == 0 || isControlToken(args[0]) {
 			return command{}, usage("repository name is required")
 		}
 		c.args = append(c.args, "name", args[0])
@@ -241,7 +247,10 @@ func parseWorkspaceList(args []string) (command, error) {
 }
 
 func parseWorkspaceCreate(args []string) (command, error) {
-	if len(args) == 0 {
+	if discovered, ok, err := discoverLeaf(args, "workspace-create", workspaceFields, leafHelp("workspace-create", workspaceFields)); ok {
+		return discovered, err
+	}
+	if len(args) == 0 || isControlToken(args[0]) {
 		return command{}, usage("workspace name is required")
 	}
 	c := command{kind: "workspace-create", catalog: workspaceFields, args: []string{"name", args[0], "project-required", "true"}}
@@ -275,7 +284,10 @@ func parseWorkspaceCreate(args []string) (command, error) {
 }
 
 func parseWorkspaceRepo(action string, args []string) (command, error) {
-	if len(args) < 2 {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		return command{help: true, helpText: "USAGE\n    mo workspace repo " + action + " <name> <repo> [--project <ref>]"}, nil
+	}
+	if len(args) < 2 || isControlToken(args[0]) || isControlToken(args[1]) {
 		return command{}, usage("workspace name and repository are required")
 	}
 	c := command{kind: "workspace-repo-" + action, args: []string{"name", args[0], "repo", args[1], "project-required", "true"}}
@@ -379,9 +391,12 @@ func parsePrompt(args []string) (command, error) {
 		catalog = previewFields
 	}
 	c := command{kind: "project-workflow-prompt-" + action, catalog: catalog, args: []string{"project-required", "true"}}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
+	}
 	start := 1
 	if action != "get" {
-		if len(args) < 2 {
+		if len(args) < 2 || isControlToken(args[1]) {
 			return command{}, usage("prompt key is required")
 		}
 		c.args = append(c.args, "key", args[1])
@@ -420,7 +435,10 @@ func parsePrompt(args []string) (command, error) {
 }
 
 func parseProjectCreate(args []string) (command, error) {
-	if len(args) == 0 {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		return command{help: true, helpText: "USAGE\n    mo project create <name> --path <dir> (--verification-command <cmd> | --verification-command-file <file|->)"}, nil
+	}
+	if len(args) == 0 || isControlToken(args[0]) {
 		return command{}, usage("project name is required")
 	}
 	c := command{kind: "project-create", args: []string{"name", args[0]}}
@@ -456,9 +474,12 @@ func parseVariable(scope string, args []string) (command, error) {
 		return command{}, usage("unknown variable command")
 	}
 	c := command{kind: scope + "-variable-" + verb, catalog: variableFields, args: []string{"project-required", "true"}}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, variableFields, leafHelp(c.kind, variableFields)); ok {
+		return discovered, err
+	}
 	start := 1
 	if verb == "get" || verb == "set" || verb == "unset" {
-		if len(args) <= start {
+		if len(args) <= start || isControlToken(args[start]) {
 			return command{}, usage("variable key is required")
 		}
 		c.args = append(c.args, "key", strings.TrimSpace(args[start]))

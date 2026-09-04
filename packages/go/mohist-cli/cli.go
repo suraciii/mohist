@@ -575,6 +575,26 @@ func parseLeaf(kind string, args []string, path string, catalog []string, usage 
 	return c, nil
 }
 
+func isControlToken(value string) bool { return strings.HasPrefix(value, "-") }
+
+func discoverLeaf(args []string, kind string, catalog []string, helpText string) (command, bool, error) {
+	for i, arg := range args {
+		if arg == "--help" || arg == "-h" {
+			return command{help: true, helpText: helpText}, true, nil
+		}
+		if arg == "--json" && (i+1 >= len(args) || isControlToken(args[i+1])) {
+			if i+1 < len(args) && (args[i+1] == "--help" || args[i+1] == "-h") {
+				return command{help: true, helpText: helpText}, true, nil
+			}
+			if len(catalog) == 0 {
+				return command{}, true, usage("--json is not supported for this command")
+			}
+			return command{kind: kind, catalog: catalog, fieldsOnly: true}, true, nil
+		}
+	}
+	return command{}, false, nil
+}
+
 func contains(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {
