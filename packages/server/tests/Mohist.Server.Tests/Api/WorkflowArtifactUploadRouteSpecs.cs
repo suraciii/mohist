@@ -183,7 +183,13 @@ public class WorkflowArtifactUploadRouteSpecs
         var runnerId = $"agent-upload-runner-{Guid.NewGuid():N}";
         var projectId = $"agent-upload-project-{Guid.NewGuid():N}";
         await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(
-            new RunnerInfo(runnerId, ["spec/task"], "test-host", projectId),
+            new RunnerInfo(
+                runnerId,
+                ["spec/task"],
+                "test-host",
+                projectId,
+                ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration,
+                RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()),
             TestRunnerGenerationExtensions.ProcessGeneration);
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
         await job.SubmitAsync(new AgentJobInput(

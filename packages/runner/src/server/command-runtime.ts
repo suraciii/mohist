@@ -215,7 +215,8 @@ export function createSessionCommandRouter(
 ): (request: SessionCommandRequest) => Promise<SessionCommandResult> {
   return async (request) => {
     const handle = resolveCommandRuntime({ runtime: request.runtime }, accessors)
-    if (!handle || !(await ensureCommandRuntimeReady(handle))) return { ok: false, error: 'unavailable' }
+    if (!handle) return { ok: false, error: 'runtime-unavailable' }
+    if (!(await ensureCommandRuntimeReady(handle))) return { ok: false, error: 'unavailable' }
     if (!request.workDir || (request.command === 'compact' && !request.runtimeSessionId)) {
       return { ok: false, error: 'unavailable' }
     }

@@ -19,6 +19,29 @@ function it(name: string, body: (fileSystem: MemoryFileSystem) => Promise<void>)
 }
 
 describe('follow-up terminal failure categories', () => {
+  it('distinguishes a disabled binding runtime from a runtime that is not ready', async () => {
+    for (const [openCodeRuntime, expectedError] of [
+      [null, 'runtime-unavailable'],
+      [{ ready: () => false }, 'unavailable'],
+    ] as const) {
+      const enqueueBeforeExecution = vi.fn()
+      const receive = createFollowupHandler({
+        followupTargetResolver: () => ({ runtimeSessionId: 'runtime-1', workDir: '/work', projectId: 'project-1' }),
+        agentSessionRuntimeEventQueue: {
+          ready: () => true,
+          enqueueBeforeExecution,
+        } as never,
+        openCodeRuntime: openCodeRuntime as never,
+      })
+
+      await expect(receive(genericFollowupPayload('opencode'))).resolves.toEqual({
+        accepted: false,
+        error: expectedError,
+      })
+      expect(enqueueBeforeExecution).not.toHaveBeenCalled()
+    }
+  })
+
   it('proceeds after authoritative admission when ordinary evidence capacity is saturated', async () => {
     const runtimeFollowup = vi.fn(async () => ({
       ok: true as const,
@@ -294,6 +317,45 @@ describe('follow-up terminal failure categories', () => {
       reason: 'manager-credential-expired',
       failureCategory: 'unknown',
     })
+  })
+
+  it('does not create an isolated Manager OpenCode runtime when shared OpenCode is disabled or not ready', async () => {
+    for (const [sharedOpenCode, expectedError] of [
+      [null, 'runtime-unavailable'],
+      [{ ready: () => false }, 'unavailable'],
+    ] as const) {
+      const isolatedOpenCodeRuntime = vi.fn(async () => ({ ready: () => true }))
+      const dispose = vi.fn(async () => undefined)
+      const enqueueBeforeExecution = vi.fn()
+      const enqueueProducedFact = vi.fn()
+      const receive = createFollowupHandler({
+        followupTargetResolver: () => ({
+          runtimeSessionId: 'runtime-1',
+          workDir: '/work',
+          projectId: '__mohist_slack_manager__',
+        }),
+        agentSessionRuntimeEventQueue: {
+          ready: () => true,
+          enqueueBeforeExecution,
+          enqueueProducedFact,
+        } as never,
+        openCodeRuntime: sharedOpenCode as never,
+        runnerRoot: '/tmp/runner',
+        createManagerExecutionBoundary: vi.fn(async () => ({
+          openCodeRuntime: isolatedOpenCodeRuntime,
+          dispose,
+        })) as never,
+      })
+
+      await expect(receive(managerFollowupPayload('opencode'))).resolves.toEqual({
+        accepted: false,
+        error: expectedError,
+      })
+      expect(isolatedOpenCodeRuntime).not.toHaveBeenCalled()
+      expect(dispose).toHaveBeenCalledTimes(1)
+      expect(enqueueBeforeExecution).not.toHaveBeenCalled()
+      expect(enqueueProducedFact).not.toHaveBeenCalled()
+    }
   })
 })
 
@@ -574,7 +636,7 @@ function genericFollowupPayload(runtime: 'opencode' | 'pi') {
   } as const
 }
 
-function managerFollowupPayload() {
+function managerFollowupPayload(runtime: 'opencode' | 'pi' = 'pi') {
   const instructions = 'Manager collaboration instructions'
   return {
     target: {
@@ -582,7 +644,7 @@ function managerFollowupPayload() {
       projectId: '__mohist_slack_manager__',
       sessionId: 'session-1',
       binding: {
-        runtime: 'pi',
+        runtime,
         runtimeSessionId: 'runtime-1',
         runnerId: 'runner-1',
         workDir: '/work',

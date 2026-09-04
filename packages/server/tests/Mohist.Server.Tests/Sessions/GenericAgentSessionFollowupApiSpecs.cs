@@ -98,6 +98,90 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
     }
 
     [Fact]
+    public async Task GenericFollowupEndpoint_DisabledRuntimeReturnsStableRejectionWithoutRedelivery()
+    {
+        var (project, sessionId, _) = await CreateIdleGenericSessionAsync("gen-followup-runtime-disabled");
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponse(
+            "session.followup",
+            new RunnerFollowupDeliveryResult(false, "runtime-unavailable"));
+        tracker.Register(_runnerId, "conn-gen-followup-runtime-disabled");
+        try
+        {
+            const string idempotencyKey = "runtime-disabled-followup";
+            using var first = await PostGenericFollowupAsync(
+                project.Id,
+                sessionId,
+                new { text = "run with a disabled runtime" },
+                idempotencyKey);
+            using var replay = await PostGenericFollowupAsync(
+                project.Id,
+                sessionId,
+                new { text = "run with a disabled runtime" },
+                idempotencyKey);
+
+            Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+            var firstData = (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            var replayData = (await replay.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            Assert.Equal("rejected", firstData.GetProperty("status").GetString());
+            Assert.Equal("runtime_unavailable", firstData.GetProperty("code").GetString());
+            Assert.Equal("failed", firstData.GetProperty("turnStatus").GetString());
+            Assert.Equal(firstData.GetProperty("inputId").GetString(), replayData.GetProperty("inputId").GetString());
+            Assert.Equal(firstData.GetProperty("turnId").GetString(), replayData.GetProperty("turnId").GetString());
+            Assert.Equal("rejected", replayData.GetProperty("status").GetString());
+            Assert.Equal("runtime_unavailable", replayData.GetProperty("code").GetString());
+            Assert.Single(runnerHub.Invocations);
+
+            var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            var turn = Assert.Single(await grain.ListTurnsAsync());
+            Assert.Equal(AgentTurnStatus.Failed, turn.Status);
+            Assert.Equal("runtime-unavailable", turn.Result?.FailureCategory);
+            Assert.Null(await grain.BeginNextFollowupDispatchAsync());
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Fact]
+    public async Task GenericFollowupEndpoint_TransientUnavailableReturnsAcceptedAndRemainsRetryable()
+    {
+        var (project, sessionId, _) = await CreateIdleGenericSessionAsync("gen-followup-runtime-not-ready");
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponse("session.followup", new RunnerFollowupDeliveryResult(false, "unavailable"));
+        tracker.Register(_runnerId, "conn-gen-followup-runtime-not-ready");
+        try
+        {
+            using var response = await PostGenericFollowupAsync(
+                project.Id,
+                sessionId,
+                new { text = "retry once the runtime is ready" });
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            Assert.Equal("accepted", data.GetProperty("status").GetString());
+            Assert.Single(runnerHub.Invocations);
+
+            var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+            var retry = await grain.BeginNextFollowupDispatchAsync();
+            Assert.NotNull(retry);
+            Assert.Equal(data.GetProperty("turnId").GetString(), retry!.TurnId);
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Fact]
     public async Task GenericRunnerRoutes_CrossProjectSession_ReturnNotFoundAndDoNotMutate()
     {
         var launched = await CreateIdleGenericSessionAsync("gen-cross-project");

@@ -86,6 +86,25 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     }
 
     [Fact]
+    public async Task Stop_DisabledBindingRuntimeReturnsStableApiError()
+    {
+        var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
+        var hub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        hub.Clear();
+        hub.SetInvocationResponse(
+            "session.stop",
+            new RunnerStopReply("unavailable", Error: "runtime-unavailable"));
+
+        using var response = await PostStopAsync(project.Id, sessionId, turnId);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("runtime_unavailable", document.RootElement.GetProperty("code").GetString());
+        Assert.Single(hub.Invocations);
+    }
+
+    [Fact]
     public async Task Stop_UnconfirmedReplySurfacesUnknownAndInterruptFlag()
     {
         var (project, sessionId, turnId, jobId) = await CreateExecutingLaunchSessionForStopAsync();

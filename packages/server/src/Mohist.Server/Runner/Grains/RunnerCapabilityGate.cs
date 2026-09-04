@@ -30,13 +30,17 @@ internal static class RunnerCapabilityGate
             && expectation.RequiredCapabilities.Any(required =>
                 !info.Capabilities.Any(capability =>
                     string.Equals(capability, required, StringComparison.Ordinal)
-                    || string.Equals(capability, "spec/*", StringComparison.Ordinal))))
+                    || (required.StartsWith("spec/", StringComparison.Ordinal)
+                        && string.Equals(capability, "spec/*", StringComparison.Ordinal)))))
             return false;
 
         var catalog = RuntimeCatalogFor(info, expectation.Runtime);
+        if (catalog is null)
+            return false;
+
         var requiresCapabilityRevision = !string.IsNullOrWhiteSpace(expectation.ReasoningEffort);
         if (requiresCapabilityRevision
-            && (catalog?.SupportsReasoningEffort != true
+            && (catalog.SupportsReasoningEffort != true
                 || catalog.Complete != true
                 || string.IsNullOrWhiteSpace(catalog.CapabilityRevision)
                 || !string.Equals(catalog.CapabilityRevision, expectation.CapabilityRevision, StringComparison.Ordinal)))
@@ -60,9 +64,6 @@ internal static class RunnerCapabilityGate
         if (expectation.ReasoningEffort is not null
             && !Contains(catalog?.ReasoningEfforts, expectation.Model, expectation.ReasoningEffort))
             return false;
-
-        if (expectation.ReasoningEffort is null)
-            return true;
 
         if (expectation.RuntimeGeneration is not > 0
             || string.IsNullOrWhiteSpace(expectation.ConnectionGeneration)

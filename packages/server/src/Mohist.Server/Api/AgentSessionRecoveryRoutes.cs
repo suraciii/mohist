@@ -238,6 +238,11 @@ public static class AgentSessionRecoveryRoutes
                 503,
                 "runner_command_not_started",
                 new { sessionId = request.SessionId, runnerId = request.RunnerId }),
+            SessionCommandError.RuntimeUnavailable => ApiResults.Fail(
+                "Runtime is unavailable",
+                503,
+                "runtime_unavailable",
+                new { sessionId = request.SessionId, runnerId = request.RunnerId }),
             SessionCommandError.Unavailable => ApiResults.Fail(
                 "Runner is unavailable",
                 503,

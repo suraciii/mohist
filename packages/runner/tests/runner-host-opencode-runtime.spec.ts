@@ -3,6 +3,7 @@ import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
 import type { PiRuntime } from '../src/runtime/pi/index.js'
 import type { ActionDefinition } from '../src/actions/manifest.js'
+import { ActionRegistry } from '../src/actions/registry.js'
 import { deferred } from './support/deferred.js'
 import type { GitRunner } from '../src/runtime/git-probe.js'
 import { UnexpectedConsoleRecorder } from './support/unexpected-console.js'
@@ -18,6 +19,7 @@ import type { ExternalProcessPolicy } from '../src/system/process-policy.js'
 import type { RunnerLogger } from '../src/system/logger.js'
 import { createLoggerCapture } from './support/logger-test.js'
 import type { OpencodeModelDiscovery } from '../src/runtime/opencode-models.js'
+import { MANAGER_OPENCODE_CAPABILITY, MANAGER_PI_CAPABILITIES } from '../src/runtime/host-helpers.js'
 
 const POLL_INTERVAL_MS = 10
 const QUIET_INTERVAL_MS = 60_000
@@ -237,7 +239,7 @@ function it(name: string, body: (resources: HostTestResources) => Promise<void>)
   })
 }
 
-function hostOptions(): ConstructorParameters<typeof RunnerHost>[0] {
+function baseHostOptions(): ConstructorParameters<typeof RunnerHost>[0] {
   return {
     serverUrl: 'https://runner.test',
     runnerId: 'runner-test',
@@ -246,6 +248,13 @@ function hostOptions(): ConstructorParameters<typeof RunnerHost>[0] {
     pollIntervalMs: POLL_INTERVAL_MS,
     heartbeatIntervalMs: QUIET_INTERVAL_MS,
     dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+  }
+}
+
+function hostOptions(): ConstructorParameters<typeof RunnerHost>[0] {
+  return {
+    ...baseHostOptions(),
+    enabledAgentRuntimes: ['pi', 'opencode'],
   }
 }
 
@@ -283,7 +292,173 @@ function expectedActionCatalog() {
   }
 }
 
+function runtimeActionRegistry(): ActionRegistry {
+  const definition = (name: string): ActionDefinition => ({
+    manifest: {
+      name,
+      inputs: {},
+      outputs: [],
+      errors: [{ code: 'action-failed', description: 'The test Action failed' }],
+    },
+    run: async () => ({ output: {} }),
+  })
+  return new ActionRegistry([definition('mohist/opencode'), definition('mohist/pi'), definition('test/shared')])
+}
+
 describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
+  it('defaults to Pi without constructing OpenCode and advertises only Pi runtime surfaces', async (resources) => {
+    const openCodeFactory = vi.fn(resources.openCodeRuntimeFactory!)
+    resources.openCodeRuntimeFactory = openCodeFactory
+    const originalPiFactory = resources.piRuntimeFactory!
+    const piRuntime = originalPiFactory()
+    const piStart = vi.spyOn(piRuntime, 'start')
+    const piShutdown = vi.spyOn(piRuntime, 'shutdown')
+    const piFactory = vi.fn(() => piRuntime)
+    resources.piRuntimeFactory = piFactory
+    const connected = deferred<void>()
+    const polled = deferred<void>()
+    connect.mockImplementation(async () => connected.resolve())
+    poll.mockImplementation(async () => {
+      polled.resolve()
+      return []
+    })
+    const controller = new AbortController()
+    const host = new RunnerHost(baseHostOptions(), runtimeActionRegistry())
+    const run = host.run(controller.signal)
+    try {
+      await connected.promise
+      await polled.promise
+
+      expect(openCodeFactory).not.toHaveBeenCalled()
+      expect(piFactory).toHaveBeenCalledTimes(1)
+      expect(piStart).toHaveBeenCalledTimes(1)
+      const registration = connect.mock.calls[0]?.[0]
+      expect(Object.keys(registration.runtimeCatalogs)).toEqual(['pi'])
+      expect(registration.capabilities).toEqual(expect.arrayContaining([...MANAGER_PI_CAPABILITIES]))
+      expect(registration.capabilities).not.toContain(MANAGER_OPENCODE_CAPABILITY)
+      expect(registration.actionCatalog.actions.map((action: { name: string }) => action.name)).toEqual([
+        'mohist/pi',
+        'test/shared',
+      ])
+      expect(poll.mock.calls[0]?.[1]).toMatchObject({
+        runtimeReadiness: [{ runtime: 'pi', ready: true, generation: 1 }],
+      })
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+    }
+    expect(piShutdown).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps Pi and OpenCode lifecycle surfaces when both runtimes are explicitly enabled', async (resources) => {
+    const installed = installFakeOpenCodeRuntimeFactory(resources)
+    const originalOpenCodeFactory = resources.openCodeRuntimeFactory!
+    let openCodeShutdown: ReturnType<typeof vi.spyOn> | null = null
+    const openCodeFactory = vi.fn((deps) => {
+      const runtime = originalOpenCodeFactory(deps)
+      openCodeShutdown = vi.spyOn(runtime, 'shutdown')
+      return runtime
+    })
+    resources.openCodeRuntimeFactory = openCodeFactory
+    const originalPiFactory = resources.piRuntimeFactory!
+    const piRuntime = originalPiFactory()
+    const piStart = vi.spyOn(piRuntime, 'start')
+    const piShutdown = vi.spyOn(piRuntime, 'shutdown')
+    const piFactory = vi.fn(() => piRuntime)
+    resources.piRuntimeFactory = piFactory
+    const connected = deferred<void>()
+    const polled = deferred<void>()
+    connect.mockImplementation(async () => connected.resolve())
+    poll.mockImplementation(async () => {
+      polled.resolve()
+      return []
+    })
+    const controller = new AbortController()
+    const host = new RunnerHost(hostOptions(), runtimeActionRegistry())
+    const run = host.run(controller.signal)
+    try {
+      await connected.promise
+      await polled.promise
+
+      expect(openCodeFactory).toHaveBeenCalledTimes(1)
+      expect(installed.client.health).toHaveBeenCalledTimes(1)
+      expect(piFactory).toHaveBeenCalledTimes(1)
+      expect(piStart).toHaveBeenCalledTimes(1)
+      const registration = connect.mock.calls[0]?.[0]
+      expect(Object.keys(registration.runtimeCatalogs).sort()).toEqual(['opencode', 'pi'])
+      expect(registration.capabilities).toEqual(
+        expect.arrayContaining([...MANAGER_PI_CAPABILITIES, MANAGER_OPENCODE_CAPABILITY]),
+      )
+      expect(registration.actionCatalog.actions.map((action: { name: string }) => action.name)).toEqual([
+        'mohist/opencode',
+        'mohist/pi',
+        'test/shared',
+      ])
+      expect(poll.mock.calls[0]?.[1]).toMatchObject({
+        runtimeReadiness: [
+          { runtime: 'opencode', ready: true, generation: expect.any(Number) },
+          { runtime: 'pi', ready: true, generation: 1 },
+        ],
+      })
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+    }
+    expect(openCodeShutdown).not.toBeNull()
+    expect(openCodeShutdown!).toHaveBeenCalledTimes(1)
+    expect(piShutdown).toHaveBeenCalledTimes(1)
+  })
+
+  it('shuts down OpenCode once when the enabled Pi factory throws during startup', async (resources) => {
+    const installed = installFakeOpenCodeRuntimeFactory(resources)
+    const originalOpenCodeFactory = resources.openCodeRuntimeFactory!
+    let openCodeShutdown: ReturnType<typeof vi.spyOn> | null = null
+    resources.openCodeRuntimeFactory = (deps) => {
+      const runtime = originalOpenCodeFactory(deps)
+      openCodeShutdown = vi.spyOn(runtime, 'shutdown')
+      return runtime
+    }
+    resources.piRuntimeFactory = () => {
+      throw new Error('Pi factory failed')
+    }
+    const host = new RunnerHost(hostOptions())
+
+    await expect(host.run(new AbortController().signal)).rejects.toThrow('Pi factory failed')
+
+    expect(installed.client.health).toHaveBeenCalledTimes(1)
+    expect(openCodeShutdown).not.toBeNull()
+    expect(openCodeShutdown!).toHaveBeenCalledTimes(1)
+  })
+
+  it('shuts down every created runtime once when enabled Pi start throws', async (resources) => {
+    installFakeOpenCodeRuntimeFactory(resources)
+    const originalOpenCodeFactory = resources.openCodeRuntimeFactory!
+    let openCodeShutdown: ReturnType<typeof vi.spyOn> | null = null
+    resources.openCodeRuntimeFactory = (deps) => {
+      const runtime = originalOpenCodeFactory(deps)
+      openCodeShutdown = vi.spyOn(runtime, 'shutdown')
+      return runtime
+    }
+    const piShutdown = vi.fn(async () => undefined)
+    resources.piRuntimeFactory = () =>
+      ({
+        start: vi.fn(async () => {
+          throw new Error('Pi start failed')
+        }),
+        ready: () => false,
+        diagnostic: () => null,
+        catalog: () => null,
+        shutdown: piShutdown,
+      }) as never
+    const host = new RunnerHost(hostOptions())
+
+    await expect(host.run(new AbortController().signal)).rejects.toThrow('Pi start failed')
+
+    expect(openCodeShutdown).not.toBeNull()
+    expect(openCodeShutdown!).toHaveBeenCalledTimes(1)
+    expect(piShutdown).toHaveBeenCalledTimes(1)
+  })
+
   it('retries an empty startup model catalog and publishes the recovered catalog', async (resources) => {
     const discovery = vi
       .fn<OpencodeModelDiscovery>()

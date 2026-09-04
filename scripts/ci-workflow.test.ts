@@ -35,6 +35,9 @@ test('CI workflow needs reference existing canonical producer jobs', () => {
   const workflow = readFileSync(resolve(repositoryRoot, '.github/workflows/ci.yml'), 'utf8')
   const jobs = parseJobs(workflow)
 
+  assert.match(workflow, /^  NPM_CONFIG_AUDIT: "false"$/m)
+  assert.match(workflow, /^  NPM_CONFIG_PREFER_OFFLINE: "true"$/m)
+
   for (const [jobID, jobSource] of jobs) {
     for (const dependency of parseInlineNeeds(jobSource)) {
       assert.ok(jobs.has(dependency), `${jobID} needs missing job ${dependency}`)

@@ -4,11 +4,345 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestInstallRunnerPersistsEnabledAgentRuntimes(t *testing.T) {
+	home := t.TempDir()
+	repoRoot := t.TempDir()
+	runnerRoot := filepath.Join(home, "custom runner")
+	files := map[string]string{}
+	modes := map[string]os.FileMode{}
+	var commands [][]string
+	var enrollmentRequests int
+	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		enrollmentRequests++
+		if request.Method != http.MethodPost || request.URL.Path != "/api/runners/enrollment-tokens" || request.URL.Host != "managed-server" {
+			t.Fatalf("unexpected enrollment request: %s %s", request.Method, request.URL.Path)
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"token":"enrollment-token"}}`), nil
+	}), map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_TOKEN": "operator-token"})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.CurrentDirectory = func() string { return repoRoot }
+	deps.WriteFile = func(path, value string, mode os.FileMode) error {
+		files[path] = value
+		modes[path] = mode
+		return nil
+	}
+	deps.Execute = func(_ context.Context, name string, args []string) error {
+		commands = append(commands, append([]string{name}, args...))
+		return nil
+	}
+
+	code := Run(context.Background(), []string{
+		"install", "runner", "--repo-root", repoRoot,
+		"--server-url", "https://managed-server", "--runner-root", runnerRoot,
+		"--enabled-agent-runtimes", " OpenCode,pi,opencode ",
+	}, deps)
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
+	}
+	if enrollmentRequests != 1 {
+		t.Fatalf("enrollment requests = %d", enrollmentRequests)
+	}
+	environmentPath := filepath.Join(home, ".config", "mohist", "runner.env")
+	if files[environmentPath] != "ENABLED_AGENT_RUNTIMES=pi,opencode\n" {
+		t.Fatalf("environment file = %q", files[environmentPath])
+	}
+	if modes[environmentPath] != 0o600 {
+		t.Fatalf("environment file mode = %o", modes[environmentPath])
+	}
+	enrollmentTokenPath := filepath.Join(runnerRoot, runnerEnrollmentTokenFile)
+	if files[enrollmentTokenPath] != "enrollment-token\n" {
+		t.Fatalf("enrollment bootstrap = %q", files[enrollmentTokenPath])
+	}
+	if modes[enrollmentTokenPath] != 0o600 {
+		t.Fatalf("enrollment bootstrap mode = %o", modes[enrollmentTokenPath])
+	}
+	managedEnvironmentPath := filepath.Join(home, ".config", "mohist", "runner-managed.env")
+	wantManagedEnvironment := "SERVER_URL=\"https://managed-server\"\nRUNNER_ROOT=\"" + runnerRoot + "\"\n"
+	if files[managedEnvironmentPath] != wantManagedEnvironment {
+		t.Fatalf("managed environment = %q, want %q", files[managedEnvironmentPath], wantManagedEnvironment)
+	}
+	if modes[managedEnvironmentPath] != 0o600 {
+		t.Fatalf("managed environment mode = %o", modes[managedEnvironmentPath])
+	}
+	unitPath := filepath.Join(home, ".config", "systemd", "user", "mohist-runner.service")
+	unit := files[unitPath]
+	if !strings.Contains(unit, "EnvironmentFile=-%h/.config/mohist/runner.env\n") {
+		t.Fatalf("unit does not reference managed environment file: %q", unit)
+	}
+	if !strings.Contains(unit, "EnvironmentFile=-%h/.config/mohist/runner-managed.env\n") {
+		t.Fatalf("unit does not reference the managed connection environment: %q", unit)
+	}
+	if !strings.Contains(unit, "ExecStart=node packages/runner/dist/cli.js\n") {
+		t.Fatalf("unit does not use the built Runner CLI entrypoint: %q", unit)
+	}
+	if strings.Contains(unit, "operator-token") || strings.Contains(unit, "enrollment-token") {
+		t.Fatalf("unit leaked a credential: %q", unit)
+	}
+	if strings.Contains(out.String(), "enrollment-token") || strings.Contains(errOut.String(), "enrollment-token") {
+		t.Fatalf("command output leaked the enrollment token: stdout=%q stderr=%q", out, errOut)
+	}
+	wantCommands := [][]string{
+		{"systemctl", "--user", "daemon-reload"},
+		{"systemctl", "--user", "enable", "mohist-runner.service"},
+		{"systemctl", "--user", "restart", "mohist-runner.service"},
+	}
+	if len(commands) != len(wantCommands) {
+		t.Fatalf("commands = %#v", commands)
+	}
+	for index := range wantCommands {
+		if strings.Join(commands[index], "\x00") != strings.Join(wantCommands[index], "\x00") {
+			t.Fatalf("command %d = %#v, want %#v", index, commands[index], wantCommands[index])
+		}
+		if strings.Contains(strings.Join(commands[index], " "), "enrollment-token") {
+			t.Fatalf("command %d leaked the enrollment token: %#v", index, commands[index])
+		}
+	}
+}
+
+func TestInstallRunnerEnabledAgentRuntimesValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "empty", args: []string{"install", "runner", "--enabled-agent-runtimes", ""}, want: "must be a non-empty"},
+		{name: "empty member", args: []string{"install", "runner", "--enabled-agent-runtimes", "pi,"}, want: "must be a non-empty"},
+		{name: "unknown", args: []string{"install", "runner", "--enabled-agent-runtimes", "pi,codex"}, want: "unknown Runtime"},
+		{name: "line injection", args: []string{"install", "runner", "--enabled-agent-runtimes", "pi\nINJECTED=value"}, want: "unknown Runtime"},
+		{name: "missing value", args: []string{"install", "runner", "--enabled-agent-runtimes"}, want: "requires a value"},
+		{name: "server scope", args: []string{"install", "server", "--enabled-agent-runtimes", "pi"}, want: "only valid with mo install runner"},
+		{name: "update scope", args: []string{"update", "runner", "--enabled-agent-runtimes", "pi"}, want: "only valid with mo install runner"},
+		{name: "duplicate flag", args: []string{"install", "runner", "--enabled-agent-runtimes", "pi", "--enabled-agent-runtimes", "opencode"}, want: "only once"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return nil, errors.New("must not call")
+			}), map[string]string{})
+			if code := Run(context.Background(), test.args, deps); code != ExitUsage {
+				t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
+			}
+			if calls != 0 {
+				t.Fatalf("HTTP calls = %d", calls)
+			}
+			if !strings.Contains(errOut.String(), test.want) {
+				t.Fatalf("stderr = %q, want %q", errOut.String(), test.want)
+			}
+		})
+	}
+}
+
+func TestInstallComponentRunnerRejectsEmptyEnrollmentTokenBeforeSideEffects(t *testing.T) {
+	writes := 0
+	executes := 0
+	deps, _, errOut := testDeps(nil, map[string]string{})
+	deps.CurrentDirectory = func() string { return "/repo" }
+	deps.WriteFile = func(string, string, os.FileMode) error {
+		writes++
+		return nil
+	}
+	deps.Execute = func(context.Context, string, []string) error {
+		executes++
+		return nil
+	}
+
+	code := installComponent(context.Background(), deps, "runner", command{}, "", "")
+
+	if code != ExitOperation {
+		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
+	}
+	if writes != 0 || executes != 0 {
+		t.Fatalf("side effects before enrollment: writes=%d executes=%d", writes, executes)
+	}
+	if !strings.Contains(errOut.String(), "runner enrollment token is required") {
+		t.Fatalf("stderr = %q", errOut.String())
+	}
+}
+
+func TestInstallRunnerWithoutRuntimeFlagDoesNotCreateEnvironmentFile(t *testing.T) {
+	home := t.TempDir()
+	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"success":true,"data":{"token":"enrollment-token"}}`), nil
+	}), map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_TOKEN": "operator-token"})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.CurrentDirectory = func() string { return t.TempDir() }
+	deps.Execute = func(context.Context, string, []string) error { return nil }
+
+	if code := Run(context.Background(), []string{"install", "runner"}, deps); code != ExitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
+	}
+	environmentPath := filepath.Join(home, ".config", "mohist", "runner.env")
+	if _, err := os.Stat(environmentPath); !os.IsNotExist(err) {
+		t.Fatalf("environment file was created without the flag: %v", err)
+	}
+	unitPath := filepath.Join(home, ".config", "systemd", "user", "mohist-runner.service")
+	unit, err := os.ReadFile(unitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(unit), "EnvironmentFile=-%h/.config/mohist/runner.env\n") {
+		t.Fatalf("unit does not tolerate the absent environment file: %q", unit)
+	}
+}
+
+func TestInstallRunnerBootstrapWriteFailureHasNoSystemdEffects(t *testing.T) {
+	home := t.TempDir()
+	var commands [][]string
+	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"success":true,"data":{"token":"enrollment-token"}}`), nil
+	}), map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_TOKEN": "operator-token"})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.CurrentDirectory = func() string { return "/repo" }
+	deps.WriteFile = func(path, _ string, _ os.FileMode) error {
+		if path == filepath.Join(home, ".mohist", "projects", runnerEnrollmentTokenFile) {
+			return errors.New("bootstrap unavailable")
+		}
+		t.Fatalf("unexpected write after bootstrap failure: %s", path)
+		return nil
+	}
+	deps.Execute = func(_ context.Context, name string, args []string) error {
+		commands = append(commands, append([]string{name}, args...))
+		return nil
+	}
+
+	if code := Run(context.Background(), []string{"install", "runner"}, deps); code != ExitOperation {
+		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
+	}
+	if len(commands) != 0 {
+		t.Fatalf("systemd commands after bootstrap failure: %#v", commands)
+	}
+}
+
+func TestRunnerManagedEnvironmentEscapesValuesAndRejectsLineInjection(t *testing.T) {
+	got, err := runnerManagedEnvironment(`https://server/"quoted"`, `C:\runner path`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "SERVER_URL=\"https://server/\\\"quoted\\\"\"\nRUNNER_ROOT=\"C:\\\\runner path\"\n"
+	if got != want {
+		t.Fatalf("managed environment = %q, want %q", got, want)
+	}
+	for _, test := range []struct {
+		name       string
+		serverURL  string
+		runnerRoot string
+	}{
+		{name: "server newline", serverURL: "https://server\nINJECTED=value", runnerRoot: "/runner"},
+		{name: "root newline", serverURL: "https://server", runnerRoot: "/runner\nINJECTED=value"},
+		{name: "root nul", serverURL: "https://server", runnerRoot: "/runner\x00tail"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := runnerManagedEnvironment(test.serverURL, test.runnerRoot); err == nil {
+				t.Fatal("expected invalid managed environment value")
+			}
+		})
+	}
+}
+
+func TestRunnerMaintenanceWithoutRuntimeFlagPreservesEnvironmentFile(t *testing.T) {
+	for _, args := range [][]string{{"install", "runner"}, {"update", "runner"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			home := t.TempDir()
+			environmentPath := filepath.Join(home, ".config", "mohist", "runner.env")
+			if err := os.MkdirAll(filepath.Dir(environmentPath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(environmentPath, []byte("ENABLED_AGENT_RUNTIMES=opencode\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return response(http.StatusOK, `{"success":true,"data":{"token":"enrollment-token"}}`), nil
+			}), map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_TOKEN": "operator-token"})
+			deps.HomeDir = func() (string, error) { return home, nil }
+			deps.CurrentDirectory = func() string { return t.TempDir() }
+			deps.Execute = func(context.Context, string, []string) error { return nil }
+
+			if code := Run(context.Background(), args, deps); code != ExitOK {
+				t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
+			}
+			contents, err := os.ReadFile(environmentPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(contents) != "ENABLED_AGENT_RUNTIMES=opencode\n" {
+				t.Fatalf("environment file changed to %q", contents)
+			}
+		})
+	}
+}
+
+func TestUpdateRunnerPreservesCredentialFiles(t *testing.T) {
+	home := t.TempDir()
+	runnerRoot := filepath.Join(home, ".mohist", "projects")
+	enrollmentTokenPath := filepath.Join(runnerRoot, runnerEnrollmentTokenFile)
+	credentialPath := filepath.Join(runnerRoot, "credential")
+	managedEnvironmentPath := filepath.Join(home, ".config", "mohist", "runner-managed.env")
+	if err := os.MkdirAll(runnerRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(enrollmentTokenPath, []byte("pending-enrollment\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(credentialPath, []byte("machine-credential\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(managedEnvironmentPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managedEnvironmentPath, []byte("SERVER_URL=\"https://managed\"\nRUNNER_ROOT=\"/custom\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps, out, errOut := testDeps(nil, map[string]string{})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	var commands [][]string
+	deps.Execute = func(_ context.Context, name string, args []string) error {
+		commands = append(commands, append([]string{name}, args...))
+		return nil
+	}
+
+	if code := Run(context.Background(), []string{"update", "runner"}, deps); code != ExitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
+	}
+	for path, want := range map[string]string{
+		enrollmentTokenPath:    "pending-enrollment\n",
+		credentialPath:         "machine-credential\n",
+		managedEnvironmentPath: "SERVER_URL=\"https://managed\"\nRUNNER_ROOT=\"/custom\"\n",
+	} {
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(contents) != want {
+			t.Fatalf("%s changed to %q", path, contents)
+		}
+	}
+	combined := out.String() + errOut.String()
+	for _, command := range commands {
+		combined += strings.Join(command, " ")
+	}
+	if strings.Contains(combined, "pending-enrollment") || strings.Contains(combined, "machine-credential") {
+		t.Fatalf("update leaked credentials: %q", combined)
+	}
+}
+
+func TestInstallHelpDocumentsRunnerRuntimeSelection(t *testing.T) {
+	deps, out, errOut := testDeps(nil, map[string]string{})
+	if code := Run(context.Background(), []string{"install", "runner", "--help"}, deps); code != ExitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "mo install runner [--enabled-agent-runtimes <list>]") {
+		t.Fatalf("help = %q", out.String())
+	}
+}
 
 func writeTestSkill(t *testing.T, root, name string) {
 	t.Helper()

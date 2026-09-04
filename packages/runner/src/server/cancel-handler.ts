@@ -149,7 +149,7 @@ async function handleCancel(
       openCode: deps.openCodeRuntime,
       pi: deps.piRuntime,
     })
-  if (!handle) return { state: 'unavailable' }
+  if (!handle) return { state: 'unavailable', error: 'runtime-unavailable' }
   if (!(await ensureCommandRuntimeReady(handle))) {
     return { state: 'unavailable' }
   }

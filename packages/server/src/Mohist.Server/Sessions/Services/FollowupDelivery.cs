@@ -43,4 +43,4 @@ public sealed record FollowupDeliveryRequest(
     ManagerExecutionGrant? ManagerExecutionGrant = null,
     string? OriginMarker = null);
 
-public sealed record FollowupDeliveryResult(bool Accepted);
+public sealed record FollowupDeliveryResult(bool Accepted, string? Error = null);

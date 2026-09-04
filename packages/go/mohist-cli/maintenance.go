@@ -16,6 +16,10 @@ var skillFields = []string{"name", "description"}
 var skillViewFields = []string{"name", "description", "content"}
 var skillPathFields = []string{"name", "path"}
 
+const runnerEnvironmentFile = "%h/.config/mohist/runner.env"
+const runnerManagedEnvironmentFile = "%h/.config/mohist/runner-managed.env"
+const runnerEnrollmentTokenFile = "enrollment-token"
+
 type localSkill struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -92,6 +96,8 @@ func parseInstallUpdate(area string, args []string) (command, error) {
 	} else if len(args) > 0 && args[0] != "--dry-run" {
 		return command{}, usage("unknown " + area + " component")
 	}
+	component := argValue(c.args, "component", "")
+	enabledAgentRuntimesSeen := false
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--dry-run", "--continue-after-cli-update":
@@ -101,6 +107,23 @@ func parseInstallUpdate(area string, args []string) (command, error) {
 				return command{}, usage(args[i] + " requires a value")
 			}
 			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), args[i+1])
+			i++
+		case "--enabled-agent-runtimes":
+			if area != "install" || component != "runner" {
+				return command{}, usage("--enabled-agent-runtimes is only valid with mo install runner")
+			}
+			if enabledAgentRuntimesSeen {
+				return command{}, usage("--enabled-agent-runtimes may be specified only once")
+			}
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+				return command{}, usage("--enabled-agent-runtimes requires a value")
+			}
+			runtimes, err := normalizeEnabledAgentRuntimes(args[i+1])
+			if err != nil {
+				return command{}, usage(err.Error())
+			}
+			c.args = append(c.args, "enabled-agent-runtimes", runtimes)
+			enabledAgentRuntimesSeen = true
 			i++
 		case "--help", "-h":
 			return command{help: true, helpText: maintenanceHelp(area)}, nil
@@ -116,9 +139,30 @@ func maintenanceHelp(area string) string {
 		return "USAGE\n    mo skill <list|view|install|path|sync> [flags]\n\nManage coder agent skills."
 	}
 	if area == "install" {
-		return "USAGE\n    mo install <server|runner|slack> [flags]\n\nInstall Mohist components as managed services."
+		return "USAGE\n    mo install <server|slack> [flags]\n    mo install runner [--enabled-agent-runtimes <list>] [flags]\n\nInstall Mohist components as managed services. Runner Runtime values are pi and opencode."
 	}
 	return "USAGE\n    mo update [<cli|server|runner|slack>] [flags]\n\nUpdate Mohist components. CLI replacement is staged and atomic."
+}
+
+func normalizeEnabledAgentRuntimes(value string) (string, error) {
+	enabled := map[string]bool{}
+	for _, candidate := range strings.Split(value, ",") {
+		runtime := strings.ToLower(strings.TrimSpace(candidate))
+		if runtime == "" {
+			return "", errors.New("--enabled-agent-runtimes must be a non-empty comma-separated set of pi and opencode")
+		}
+		if runtime != "pi" && runtime != "opencode" {
+			return "", fmt.Errorf("--enabled-agent-runtimes contains unknown Runtime %q; allowed values are pi and opencode", candidate)
+		}
+		enabled[runtime] = true
+	}
+	ordered := make([]string, 0, len(enabled))
+	for _, runtime := range []string{"pi", "opencode"} {
+		if enabled[runtime] {
+			ordered = append(ordered, runtime)
+		}
+	}
+	return strings.Join(ordered, ","), nil
 }
 
 func skillHelp(action string) string {
@@ -623,6 +667,8 @@ func copyTree(ctx context.Context, source, target string, deps Dependencies) err
 
 func runInstallUpdate(ctx context.Context, deps Dependencies, c command) int {
 	component := argValue(c.args, "component", "")
+	enrollmentToken := ""
+	runnerServerURL := ""
 	dryRun := hasArg(c.args, "dry-run")
 	if component == "" && c.kind == "install-component" {
 		writeError(deps.Stderr, errors.New("install component is required"))
@@ -657,6 +703,9 @@ func runInstallUpdate(ctx context.Context, deps Dependencies, c command) int {
 			writeError(deps.Stderr, err)
 			return ExitOperation
 		}
+		if explicit := strings.TrimSpace(argValue(c.args, "server-url", "")); explicit != "" {
+			cfg.ServerURL = explicit
+		}
 		client, err := newClient(cfg, deps.HTTPClient)
 		if err != nil {
 			writeError(deps.Stderr, err)
@@ -674,8 +723,10 @@ func runInstallUpdate(ctx context.Context, deps Dependencies, c command) int {
 			writeError(deps.Stderr, errors.New("server returned no runner enrollment token"))
 			return ExitOperation
 		}
+		enrollmentToken = token.Token
+		runnerServerURL = cfg.ServerURL
 	}
-	return installComponent(ctx, deps, component, c)
+	return installComponent(ctx, deps, component, c, enrollmentToken, runnerServerURL)
 }
 
 func updateAll(ctx context.Context, deps Dependencies, c command) int {
@@ -690,7 +741,14 @@ func updateAll(ctx context.Context, deps Dependencies, c command) int {
 	return ExitOK
 }
 
-func installComponent(ctx context.Context, deps Dependencies, component string, c command) int {
+func installComponent(
+	ctx context.Context,
+	deps Dependencies,
+	component string,
+	c command,
+	enrollmentToken string,
+	runnerServerURL string,
+) int {
 	units := map[string]string{"server": "mohist.service", "runner": "mohist-runner.service", "slack": "mohist-slack.service"}
 	unit, ok := units[component]
 	if !ok {
@@ -710,8 +768,43 @@ func installComponent(ctx context.Context, deps Dependencies, component string, 
 	if root == "" {
 		root = deps.CurrentDirectory()
 	}
-	entry := map[string]string{"server": "dotnet run --project packages/server/src/Mohist.Server/Mohist.Server.csproj", "runner": "node packages/runner/dist/index.js", "slack": "bin/build/mohist-slack"}[component]
-	unitText := "[Unit]\nDescription=Mohist " + component + "\n\n[Service]\nWorkingDirectory=" + root + "\nExecStart=" + entry + "\n\n[Install]\nWantedBy=default.target\n"
+	entry := map[string]string{"server": "dotnet run --project packages/server/src/Mohist.Server/Mohist.Server.csproj", "runner": "node packages/runner/dist/cli.js", "slack": "bin/build/mohist-slack"}[component]
+	environmentFileLine := ""
+	if component == "runner" {
+		if enrollmentToken == "" || runnerServerURL == "" {
+			writeError(deps.Stderr, errors.New("runner enrollment token is required before installing the service"))
+			return ExitOperation
+		}
+		runnerRoot := argValue(c.args, "runner-root", "")
+		if runnerRoot == "" {
+			runnerRoot = filepath.Join(home, ".mohist", "projects")
+		}
+		managedEnvironment, err := runnerManagedEnvironment(runnerServerURL, runnerRoot)
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitOperation
+		}
+		enrollmentTokenPath := filepath.Join(runnerRoot, runnerEnrollmentTokenFile)
+		if err := deps.WriteFile(enrollmentTokenPath, enrollmentToken+"\n", 0o600); err != nil {
+			writeError(deps.Stderr, err)
+			return ExitOperation
+		}
+		managedEnvironmentPath := filepath.Join(home, ".config", "mohist", "runner-managed.env")
+		if err := deps.WriteFile(managedEnvironmentPath, managedEnvironment, 0o600); err != nil {
+			writeError(deps.Stderr, err)
+			return ExitOperation
+		}
+		environmentFileLine = "EnvironmentFile=-" + runnerEnvironmentFile + "\n" +
+			"EnvironmentFile=-" + runnerManagedEnvironmentFile + "\n"
+		if runtimes := argValue(c.args, "enabled-agent-runtimes", ""); runtimes != "" {
+			environmentPath := filepath.Join(home, ".config", "mohist", "runner.env")
+			if err := deps.WriteFile(environmentPath, "ENABLED_AGENT_RUNTIMES="+runtimes+"\n", 0o600); err != nil {
+				writeError(deps.Stderr, err)
+				return ExitOperation
+			}
+		}
+	}
+	unitText := "[Unit]\nDescription=Mohist " + component + "\n\n[Service]\nWorkingDirectory=" + root + "\n" + environmentFileLine + "ExecStart=" + entry + "\n\n[Install]\nWantedBy=default.target\n"
 	path := filepath.Join(unitDir, unit)
 	if err := deps.WriteFile(path, unitText, 0o600); err != nil {
 		writeError(deps.Stderr, err)
@@ -725,6 +818,26 @@ func installComponent(ctx context.Context, deps Dependencies, component string, 
 	}
 	fmt.Fprintf(deps.Stdout, "Installed and started %s\n", unit)
 	return ExitOK
+}
+
+func runnerManagedEnvironment(serverURL, runnerRoot string) (string, error) {
+	server, err := systemdEnvironmentAssignment("SERVER_URL", serverURL)
+	if err != nil {
+		return "", err
+	}
+	root, err := systemdEnvironmentAssignment("RUNNER_ROOT", runnerRoot)
+	if err != nil {
+		return "", err
+	}
+	return server + root, nil
+}
+
+func systemdEnvironmentAssignment(name, value string) (string, error) {
+	if strings.ContainsAny(value, "\r\n\x00") {
+		return "", fmt.Errorf("%s contains characters that cannot be stored in the Runner environment file", name)
+	}
+	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value)
+	return name + `="` + escaped + `"` + "\n", nil
 }
 
 func executeMaintenance(ctx context.Context, deps Dependencies, name string, args ...string) int {

@@ -250,7 +250,6 @@ describe('RunnerHost', () => {
       })
       expect(registration).toMatchObject({
         runtimeCatalogs: {
-          opencode: { models: [], variants: {}, supportsReasoningEffort: false },
           pi: {
             models: [],
             variants: {},
@@ -466,6 +465,7 @@ describe('RunnerHost', () => {
         pollIntervalMs: POLL_INTERVAL_MS,
         heartbeatIntervalMs: QUIET_INTERVAL_MS,
         dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+        enabledAgentRuntimes: ['pi', 'opencode'],
       },
       undefined,
       { shutdownStopBudgetMs: 25 },

@@ -514,7 +514,8 @@ public sealed record AgentSessionFollowupAcceptResult(
     /// message. Append-only Orleans field id (next free after
     /// <see cref="Attachments"/>).
     /// </summary>
-    [property: Id(8)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null);
+    [property: Id(8)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
+    [property: Id(9)] string? FailureCategory = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionFollowupDispatch(

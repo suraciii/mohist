@@ -3,6 +3,7 @@ import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
 import { deferred } from './support/deferred.js'
 import type { PiRuntime } from '../src/runtime/pi/index.js'
+import { ManagerExecutionRegistry } from '../src/runtime/manager-execution-registry.js'
 import type { RunnerFileSystem } from '../src/system/filesystem.js'
 import type { RunnerLogger } from '../src/system/logger.js'
 import type { ExternalProcessPolicy } from '../src/system/process-policy.js'
@@ -238,6 +239,7 @@ function hostOptions(): ConstructorParameters<typeof RunnerHost>[0] {
     pollIntervalMs: 10,
     heartbeatIntervalMs: 60_000,
     dispatchLivenessProbeIntervalMs: 60_000,
+    enabledAgentRuntimes: ['pi', 'opencode'],
   }
 }
 
@@ -322,5 +324,38 @@ describe('RunnerHost wires OpenCodeRuntime into control followup/cancel handlers
     expect(state.capturedControlOptions).not.toBeNull()
     expect(typeof state.capturedControlOptions?.followupTargetResolver).toBe('function')
     expect(state.capturedControlOptions?.agentSessionRuntimeEventQueue).not.toBeNull()
+  })
+
+  it('wires Manager session readiness into the cancellation registry', async (resources) => {
+    installStubRuntimeFactory(resources)
+    const host = await startHost()
+    const internals = host as unknown as {
+      workExecutor: { agentJobExecutor: { options: Record<string, unknown> } }
+      managerExecutionRegistry: ManagerExecutionRegistry
+    }
+    const boundary = { dispose: vi.fn(async () => undefined) }
+    const isolated = { ready: () => true }
+    internals.managerExecutionRegistry.register({
+      executionId: 'execution-1',
+      boundary: boundary as never,
+      sessionId: 'session-1',
+      runtimeSessionId: '',
+      workDir: '/runner',
+    })
+
+    const bind = internals.workExecutor.agentJobExecutor.options['onManagerRuntimeSessionReady'] as (
+      value: Record<string, unknown>,
+    ) => void
+    bind({
+      boundary,
+      handle: { kind: 'opencode', runtime: isolated },
+      sessionId: 'session-1',
+      runtimeSessionId: 'isolated-session',
+      workDir: '/work/manager',
+    })
+
+    expect(
+      internals.managerExecutionRegistry.findForCancel('session-1', 'opencode', 'isolated-session')?.handle,
+    ).toEqual({ kind: 'opencode', runtime: isolated })
   })
 })

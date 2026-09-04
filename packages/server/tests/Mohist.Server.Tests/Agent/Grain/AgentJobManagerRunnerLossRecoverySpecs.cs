@@ -31,7 +31,8 @@ public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSu
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
             "agent-job-manager-loss-runner",
-            projectId: "agent-job-manager-loss-project");
+            projectId: "agent-job-manager-loss-project",
+            additionalCapabilities: ManagerExecutionRuntimeCapabilities.Required);
         var jobKey = $"agent-job-manager-loss-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
         var sessionId = $"manager-loss-session-{Guid.NewGuid():N}";
@@ -44,6 +45,7 @@ public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSu
             Prompt: "manager request",
             ProjectId: projectId,
             AgentId: "agent-test",
+            Runtime: "pi",
             AgentSessionId: sessionId,
             PinnedRunnerId: runnerId,
             InitialInputId: initialInputId,
@@ -139,7 +141,7 @@ public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSu
         var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await session.OpenAsync(new OpenAgentSessionCommand(
             RunnerId: string.Empty,
-            AgentRuntime: "opencode",
+            AgentRuntime: "pi",
             WorkDir: "/tmp/agent-job-fixture",
             Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
             {

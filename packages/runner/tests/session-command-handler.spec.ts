@@ -6,6 +6,7 @@ import {
   type SessionCommandRequest,
   type SessionCommandResult,
 } from '../src/server/session-command-handler.js'
+import { createSessionCommandRouter } from '../src/server/command-runtime.js'
 
 function register(handler: SessionCommandHandler | null) {
   return createSessionCommandHandler({ handler })
@@ -114,7 +115,7 @@ describe('SessionCommand contract', () => {
     expect(handler).not.toHaveBeenCalled()
   })
 
-  it.each<SessionCommandError>(['conflict', 'missing', 'notStarted', 'unavailable'])(
+  it.each<SessionCommandError>(['conflict', 'missing', 'notStarted', 'runtime-unavailable', 'unavailable'])(
     'preserves the %s error vocabulary',
     async (error) => {
       await expect(register(async () => ({ ok: false, error }))(request('compact'))).resolves.toEqual({
@@ -126,5 +127,18 @@ describe('SessionCommand contract', () => {
 
   it('reports unavailable when no runtime handler is installed', async () => {
     await expect(register(null)(request('compact'))).resolves.toEqual({ ok: false, error: 'unavailable' })
+  })
+
+  it.each([
+    ['compact', 'disabled', null, 'runtime-unavailable'],
+    ['reset', 'disabled', null, 'runtime-unavailable'],
+    ['compact', 'not ready', { ready: (): boolean => false }, 'unavailable'],
+    ['reset', 'not ready', { ready: (): boolean => false }, 'unavailable'],
+  ] as const)('%s reports the binding runtime as %s', async (command, _case, openCodeRuntime, error) => {
+    const router = createSessionCommandRouter({ openCode: openCodeRuntime as never, pi: null }, {
+      ready: () => false,
+    } as never)
+
+    await expect(router(request(command))).resolves.toEqual({ ok: false, error })
   })
 })

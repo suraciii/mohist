@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { RunnerOptions, RunnerRegistration } from '../core/types.js'
+import type { AgentRuntime, RunnerOptions, RunnerRegistration } from '../core/types.js'
 import type { PiCatalog } from './pi/types.js'
 import type { OpencodeModelCatalog } from './opencode-models.js'
 
@@ -14,6 +14,7 @@ export function buildRegistrationState(
   getConnectionId: () => string | null,
   processGeneration: string,
   opencodeCatalog: OpencodeModelCatalog,
+  enabledAgentRuntimes: ReadonlySet<AgentRuntime>,
 ): RunnerRegistration {
   const piCatalog = piRuntime?.catalog()
   const piModels = piCatalog?.models.map((model) => `${model.provider}/${model.id}`) ?? []
@@ -48,14 +49,18 @@ export function buildRegistrationState(
       // OpenCode discovery assists configuration only. Execution still lets
       // OpenCode validate the operator-selected model and variant. The Pi
       // entry is published only once its catalog has actually loaded.
-      opencode: {
-        models: [...opencodeCatalog.models],
-        variants: Object.fromEntries(
-          Object.entries(opencodeCatalog.variants).map(([model, variants]) => [model, [...variants]]),
-        ),
-        supportsReasoningEffort: false,
-      },
-      ...(piCatalog
+      ...(enabledAgentRuntimes.has('opencode')
+        ? {
+            opencode: {
+              models: [...opencodeCatalog.models],
+              variants: Object.fromEntries(
+                Object.entries(opencodeCatalog.variants).map(([model, variants]) => [model, [...variants]]),
+              ),
+              supportsReasoningEffort: false,
+            },
+          }
+        : {}),
+      ...(enabledAgentRuntimes.has('pi') && piCatalog
         ? {
             pi: {
               models: piModels,

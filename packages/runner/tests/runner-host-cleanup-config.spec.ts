@@ -260,6 +260,7 @@ describe('RunnerHost idle-system cleanup', () => {
       pollIntervalMs: 60_000,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
+      enabledAgentRuntimes: ['pi', 'opencode'] as const,
       // Uses the production interval floor while fake timers keep the
       // tests deterministic and fast.
       cleanupLoopIntervalMs: CLEANUP_INTERVAL_FLOOR_MS,

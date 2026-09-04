@@ -155,7 +155,9 @@ public sealed class AgentJobGrainPersistenceSpecs
             runnerId,
             ["spec/*"],
             "agent-job-host",
-            projectId));
+            projectId,
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
         return runnerId;
     }
 
@@ -176,7 +178,7 @@ public sealed class AgentJobGrainPersistenceSpecs
             .CreateScope()
             .ServiceProvider
             .GetRequiredService<Mohist.Server.Runner.Services.DispatchService>();
-        await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
+        await dispatch.PollAsync(runnerId, DispatchTestExtensions.ReadyPollRequest());
         await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
     }

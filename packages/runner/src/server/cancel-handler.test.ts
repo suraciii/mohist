@@ -17,6 +17,24 @@ function target() {
 }
 
 describe('Manager follow-up cancellation', () => {
+  it.each([
+    ['disabled', null, { state: 'unavailable', error: 'runtime-unavailable' }],
+    ['not ready', { ready: () => false }, { state: 'unavailable' }],
+  ])('reports a stable control error when the binding runtime is %s', async (_case, openCodeRuntime, expected) => {
+    const resolver = vi.fn(async () => ({
+      projectId: '__mohist_slack_manager__',
+      runtimeSessionId: 'isolated-session',
+      workDir: '/work/manager',
+    }))
+    const receive = createCancelHandler({
+      followupTargetResolver: resolver,
+      openCodeRuntime: openCodeRuntime as never,
+    })
+
+    await expect(receive({ target: target() })).resolves.toEqual(expected)
+    expect(resolver).not.toHaveBeenCalled()
+  })
+
   it('cancels the isolated runtime and closes its execution lease', async () => {
     const isolatedCancel = vi.fn(async () => ({
       ok: true as const,
@@ -37,11 +55,18 @@ describe('Manager follow-up cancellation', () => {
     registry.register({
       executionId: 'manager:session-1:followup-1',
       boundary: boundary as never,
-      handle: { kind: 'opencode', runtime: isolatedRuntime as never },
       sessionId: 'session-1',
-      runtimeSessionId: 'isolated-session',
+      runtimeSessionId: '',
       workDir: '/work/manager',
     })
+    expect(
+      registry.bindRuntime(boundary as never, {
+        handle: { kind: 'opencode', runtime: isolatedRuntime as never },
+        sessionId: 'session-1',
+        runtimeSessionId: 'isolated-session',
+        workDir: '/work/manager',
+      }),
+    ).toBe(true)
     const finished = vi.fn(async () => undefined)
     const receive = createCancelHandler({
       followupTargetResolver: () => ({
@@ -62,5 +87,7 @@ describe('Manager follow-up cancellation', () => {
     expect(boundary.dispose).toHaveBeenCalledOnce()
     expect(finished).toHaveBeenCalledWith('manager:session-1:followup-1')
     expect(registry.findForCancel('session-1', 'opencode', 'isolated-session')).toBeNull()
+    await registry.dispose(boundary as never)
+    expect(boundary.dispose).toHaveBeenCalledOnce()
   })
 })

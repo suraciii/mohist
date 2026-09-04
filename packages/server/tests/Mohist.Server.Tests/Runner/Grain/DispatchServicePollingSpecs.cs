@@ -1,12 +1,16 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain;
@@ -97,6 +101,93 @@ public partial class DispatchServiceReconciliationSpecs
             var workflow = Grains.GetGrain<IWorkflowGrain>(workflowIds[0]);
             Assert.Null(await workflow.GetAssignedWorkerIdAsync());
             Assert.Equal("Pending", await workflow.GetRunStatusAsync());
+        }
+        finally
+        {
+            _fixture.DispatchPollObserver.ReleaseAfterRunnerInfo();
+        }
+    }
+
+    [Theory]
+    [InlineData(ManagerExecutionRuntimeCapabilities.RedactionV1, false)]
+    [InlineData(ManagerExecutionRuntimeCapabilities.IsolatedOpenCodeV1, false)]
+    [InlineData(null, true)]
+    public async Task PollAsync_ManagerOpenCodeSecurityCapabilitiesChangedAfterInfoRead_DoesNotClaim(
+        string? revokedCapability,
+        bool replaceWithSpecWildcard)
+    {
+        await ClearBacklogAsync();
+        var runnerId = $"manager-capability-race-{Guid.NewGuid():N}";
+        const string connectionGeneration = "manager-capability-race-connection";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var fullCapabilities = new[] { AgentExecutionSources.Version1Capability }
+            .Concat(ManagerExecutionRuntimeCapabilities.Required)
+            .Append(ManagerExecutionRuntimeCapabilities.IsolatedOpenCodeV1)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var info = new RunnerInfo(
+            runnerId,
+            fullCapabilities,
+            "manager-capability-race-host",
+            SlackDeliveryOwnerIds.ManagerProjectId,
+            ConnectionGeneration: connectionGeneration,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create());
+        await runner.RegisterAsync(info, TestRunnerGenerationExtensions.ProcessGeneration);
+
+        var jobId = $"manager-capability-race-job-{Guid.NewGuid():N}";
+        var sessionId = $"manager-capability-race-session-{Guid.NewGuid():N}";
+        var job = Grains.GetGrain<IAgentJobGrain>(jobId);
+        await job.SubmitAsync(new AgentJobInput(
+            Prompt: "manager request",
+            ProjectId: SlackDeliveryOwnerIds.ManagerProjectId,
+            Runtime: "opencode",
+            AgentId: "manager-agent",
+            AgentSessionId: sessionId,
+            PinnedRunnerId: runnerId,
+            ExecutionSource: AgentExecutionSources.Slack,
+            SlackExecutionContext: SlackExecutionContextFactory.Create(
+                "workspace-1",
+                "conversation-1",
+                "thread-1",
+                "message-1",
+                "member-1",
+                "enrollment-1",
+                sessionId,
+                $"dispatch-{jobId}",
+                projectId: SlackDeliveryOwnerIds.ManagerProjectId,
+                ownerKind: SlackDeliveryOwnerKinds.Manager)));
+        var pending = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Pending, pending.Status);
+        Assert.Equal(runnerId, pending.RunnerId);
+
+        _fixture.DispatchPollObserver.Reset();
+        _fixture.DispatchPollObserver.BlockAfterRunnerInfo();
+        try
+        {
+            var poll = Dispatch.PollAsync(
+                runnerId,
+                new RunnerPollRequest(
+                    [],
+                    [],
+                    RuntimeReadiness: [new RuntimeReadinessWitness("opencode", Ready: true, Generation: 1)],
+                    ConnectionGeneration: connectionGeneration,
+                    ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
+            await _fixture.DispatchPollObserver.WaitForRunnerInfoAsync();
+
+            await runner.RegisterAsync(
+                info with
+                {
+                    Capabilities = replaceWithSpecWildcard
+                        ? ["spec/*"]
+                        : fullCapabilities
+                            .Where(capability => !string.Equals(capability, revokedCapability, StringComparison.Ordinal))
+                            .ToArray(),
+                },
+                TestRunnerGenerationExtensions.ProcessGeneration);
+            _fixture.DispatchPollObserver.ReleaseAfterRunnerInfo();
+
+            Assert.Empty((await poll).Dispatches);
+            Assert.Equal(AgentJobStatus.Pending, await job.GetStatusAsync());
         }
         finally
         {

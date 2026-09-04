@@ -658,7 +658,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
                 ShouldRedeliver: existingTurn.Status == AgentTurnStatus.Queued,
                 InputAcceptance: accepted.Acceptance,
                 TurnStatus: existingTurn.Status,
-                Attachments: accepted.Attachments);
+                Attachments: accepted.Attachments, FailureCategory: existingTurn.Result?.FailureCategory);
         }
 
         const int maxQueuedTurns = 16;

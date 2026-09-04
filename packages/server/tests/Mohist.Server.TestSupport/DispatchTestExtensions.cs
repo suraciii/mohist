@@ -19,6 +19,23 @@ namespace Mohist.Server.TestSupport;
 /// </summary>
 public static class DispatchTestExtensions
 {
+    public const string ConnectionGeneration = "test-runner-connection";
+
+    public static RunnerPollRequest ReadyPollRequest() =>
+        ReadyPollRequestForGeneration(TestRunnerGenerationExtensions.ProcessGeneration);
+
+    public static RunnerPollRequest ReadyPollRequestForGeneration(string processGeneration) =>
+        new(
+            [],
+            [],
+            RuntimeReadiness:
+            [
+                new RuntimeReadinessWitness("pi", Ready: true, Generation: 1),
+                new RuntimeReadinessWitness("opencode", Ready: true, Generation: 1),
+            ],
+            ConnectionGeneration: ConnectionGeneration,
+            ProcessGeneration: processGeneration);
+
     /// <summary>
     /// Polls via DispatchService with an empty reported set (pure new-claim
     /// path — what a fresh runner needs). Returns the single first dispatch,
@@ -29,7 +46,7 @@ public static class DispatchTestExtensions
     {
         var dispatch = ResolveScoped<DispatchService>(serviceProvider);
         var runnerId = runner.GetPrimaryKeyString();
-        var response = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
+        var response = await dispatch.PollAsync(runnerId, ReadyPollRequest());
         return response.Dispatches.FirstOrDefault();
     }
 
@@ -45,7 +62,7 @@ public static class DispatchTestExtensions
     {
         var dispatch = ResolveScoped<DispatchService>(serviceProvider);
         var runnerId = runner.GetPrimaryKeyString();
-        var response = await dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
+        var response = await dispatch.PollAsync(runnerId, ReadyPollRequest());
         return response.Dispatches;
     }
 

@@ -56,6 +56,26 @@ by querying both owner stores (`Pending/Running WHERE AssignedRunnerId=R`),
 and no Runner behavior accepts a work record. Runtime state reads use the same
 queries and are never stored.
 
+## Enabled Agent Runtimes
+
+One host-local configuration value, `ENABLED_AGENT_RUNTIMES`, is authoritative
+for Runtime lifecycle and capability projection. It is a non-empty set of
+`pi` and `opencode`, defaulting to `{ pi }`. Configuration parsing fails closed
+for empty or unknown values.
+
+Runner constructs, starts, recovers, and shuts down only members of that set.
+The registration Runtime catalogs, readiness witnesses, and Runtime-specific
+Action entries are projections of the same set. A missing Runtime accessor is
+the control-command boundary for a disabled Runtime; no command or work path
+may substitute another Runtime.
+
+Manager execution has a shared Pi capability surface and one optional OpenCode
+capability. The shared grant, epoch, broker, Pi executor, and redaction
+capabilities require Pi to be enabled and ready. The isolated OpenCode
+capability additionally requires OpenCode to be enabled and ready. Server admits
+Pi Manager work from the shared capability surface and does not require the
+optional OpenCode capability.
+
 ## Dispatch Protocol: Claim / Pull / Report
 
 ```text diagram
@@ -596,4 +616,3 @@ estimating an operation outcome is a defect
 The runtime-event queue does not yet enforce waiter-interval ownership for
 receipt evidence. A late retryable delivery can recreate evidence after its
 bounded waiter ends or can write into a later waiter for the same record.
-

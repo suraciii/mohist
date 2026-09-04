@@ -1,9 +1,10 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { currentRunnerResources, currentRunnerTransport } from "./filesystem.js"
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { currentRunnerResources, currentRunnerTransport } from './filesystem.js'
 
-export const RUNNER_CREDENTIAL_FILE = "credential"
+export const RUNNER_CREDENTIAL_FILE = 'credential'
+export const RUNNER_ENROLLMENT_TOKEN_FILE = 'enrollment-token'
 
-const defaultCredentialFileSystem = { mkdirSync, readFileSync, writeFileSync }
+const defaultCredentialFileSystem = { mkdirSync, readFileSync, unlinkSync, writeFileSync }
 
 function credentialFileSystem() {
   return currentRunnerResources()?.runnerCredentialFileSystem ?? defaultCredentialFileSystem
@@ -11,6 +12,28 @@ function credentialFileSystem() {
 
 export function runnerCredentialPath(runnerRoot: string): string {
   return `${runnerRoot}/${RUNNER_CREDENTIAL_FILE}`
+}
+
+export function runnerEnrollmentTokenPath(runnerRoot: string): string {
+  return `${runnerRoot}/${RUNNER_ENROLLMENT_TOKEN_FILE}`
+}
+
+function loadRunnerEnrollmentToken(runnerRoot: string): string | null {
+  try {
+    const value = credentialFileSystem().readFileSync(runnerEnrollmentTokenPath(runnerRoot), 'utf8').trim()
+    return value.length > 0 ? value : null
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+}
+
+function removeRunnerEnrollmentToken(runnerRoot: string): void {
+  try {
+    credentialFileSystem().unlinkSync(runnerEnrollmentTokenPath(runnerRoot))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
 }
 
 /**
@@ -22,10 +45,10 @@ export function runnerCredentialPath(runnerRoot: string): string {
  */
 export function loadRunnerCredential(runnerRoot: string): string | null {
   try {
-    const value = credentialFileSystem().readFileSync(runnerCredentialPath(runnerRoot), "utf8").trim()
+    const value = credentialFileSystem().readFileSync(runnerCredentialPath(runnerRoot), 'utf8').trim()
     return value.length > 0 ? value : null
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw error
   }
 }
@@ -54,9 +77,9 @@ export async function registerWithEnrollmentToken(
   enrollmentToken: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const response = await currentRunnerTransport()(`${serverUrl.replace(/\/$/, "")}/api/runners/register`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
+  const response = await currentRunnerTransport()(`${serverUrl.replace(/\/$/, '')}/api/runners/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ token: enrollmentToken, runnerId, hostname }),
     signal,
   })
@@ -67,8 +90,8 @@ export async function registerWithEnrollmentToken(
   }
   const payload = (await response.json()) as { data?: { token?: unknown } }
   const credential = payload.data?.token
-  if (typeof credential !== "string" || credential.length === 0) {
-    throw new Error("runner registration returned a malformed response")
+  if (typeof credential !== 'string' || credential.length === 0) {
+    throw new Error('runner registration returned a malformed response')
   }
   return credential
 }
@@ -88,20 +111,23 @@ export interface RunnerCredentialResolution {
  * the enrollment token. Returns null when neither exists — the runner
  * then runs unauthenticated and the server rejects its requests.
  */
-export async function resolveRunnerCredential(
-  resolution: RunnerCredentialResolution,
-): Promise<string | null> {
+export async function resolveRunnerCredential(resolution: RunnerCredentialResolution): Promise<string | null> {
   const existing = loadRunnerCredential(resolution.runnerRoot)
-  if (existing) return existing
-  if (!resolution.enrollmentToken) return null
+  if (existing) {
+    removeRunnerEnrollmentToken(resolution.runnerRoot)
+    return existing
+  }
+  const enrollmentToken = resolution.enrollmentToken ?? loadRunnerEnrollmentToken(resolution.runnerRoot)
+  if (!enrollmentToken) return null
 
   const credential = await registerWithEnrollmentToken(
     resolution.serverUrl,
     resolution.runnerId,
     resolution.hostname,
-    resolution.enrollmentToken,
+    enrollmentToken,
     resolution.signal,
   )
   writeRunnerCredential(resolution.runnerRoot, credential)
+  removeRunnerEnrollmentToken(resolution.runnerRoot)
   return credential
 }

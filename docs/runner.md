@@ -187,9 +187,46 @@ protection remains the deployment owner's responsibility.
 
 Runner does not select a global Runtime through `type`. A Workflow Agent task
 names a Mohist Agent through `mohist/agent`; the Agent definition selects the
-`opencode`, `pi`, or `codex` Runtime. `mohist/agent` remains the only Workflow
-Agent Action, and Agent Input supplies model options. See
+Runtime. `mohist/agent` remains the only Workflow Agent Action, and Agent Input
+supplies model options. See
 [Action Contracts](actions/README.md).
+
+`ENABLED_AGENT_RUNTIMES` controls which Agent Runtime processes this Runner may
+create. It is a comma-separated list containing `pi`, `opencode`, or both. The
+default is `pi`; OpenCode is an explicit opt-in. For a managed Runner, set the
+selection when installing it:
+
+```bash
+mo install runner --enabled-agent-runtimes pi,opencode
+```
+
+The installer stores an explicit selection in
+`~/.config/mohist/runner.env`, readable only by the current user, and the
+systemd unit reads that stable EnvironmentFile. `mo update runner` and a later
+install without the flag preserve the existing file. When the file does not
+exist, the Runner's default remains Pi.
+
+Managed installation also persists the selected Server URL and Runner root in
+`~/.config/mohist/runner-managed.env`. The one-time enrollment token is
+written with mode `0600` under the Runner root; Runner exchanges it for its
+machine credential on first start and then removes the token file. Neither
+credential is written to the systemd unit or command output.
+
+For a foreground development Runner, set the environment directly:
+
+```bash
+ENABLED_AGENT_RUNTIMES=pi,opencode npm start
+```
+
+The setting must contain at least one known Runtime. Runner refuses to start for
+an empty list or an unknown value. A disabled Runtime is absent from the
+Runner's catalogs and readiness report, so Server leaves matching work queued.
+Follow-up, cancel, compact, and reset requests for a disabled Runtime return
+Runner wire error `runtime-unavailable` and API code `runtime_unavailable`
+rather than switching the Session to another Runtime. A Runtime that is enabled
+but temporarily not ready continues to use `unavailable` on the Runner wire.
+Cancel, compact, and reset expose that transient state as
+`runner_unavailable`; follow-up remains accepted and queued for retry.
 
 Runtime replacement and shutdown use two host-local millisecond settings in
 service-manager configuration: `QUARANTINE_DRAIN_TIMEOUT_MS` (default 60 seconds)

@@ -77,6 +77,13 @@ public sealed class SessionTreeStopTargetAdapter(
                     ? "runner response was not confirmed"
                     : "runner was unavailable before dispatch");
         }
+        if (stopped.Kind == TurnControlResultKind.RuntimeUnavailable)
+        {
+            return Result(
+                target,
+                SessionTreeStopTargetOutcome.Unknown,
+                "runtime is disabled on the runner");
+        }
         if (stopped.Kind == TurnControlResultKind.AlreadyEnded)
         {
             if (stopped.Status == AgentTurnStatus.Unknown)

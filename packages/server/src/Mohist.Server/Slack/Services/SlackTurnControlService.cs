@@ -170,6 +170,7 @@ public sealed class SlackTurnControlService : IScopedService
             TurnControlResultKind.Unknown => Confirmed("unknown", "The runtime could not confirm whether work stopped."),
             TurnControlResultKind.NotCancellable => Confirmed("not_cancellable", "The runtime cannot stop this work."),
             TurnControlResultKind.RunnerUnavailable => Confirmed("runner_unavailable", "The runtime is unavailable; Stop was not confirmed."),
+            TurnControlResultKind.RuntimeUnavailable => Confirmed("runtime_unavailable", "This runtime is disabled on the Runner."),
             TurnControlResultKind.Blocked => Confirmed("blocked", "Stop recovery deadline was exhausted."),
             _ => Rejected("stale_action", "That Turn is no longer executing."),
         };
