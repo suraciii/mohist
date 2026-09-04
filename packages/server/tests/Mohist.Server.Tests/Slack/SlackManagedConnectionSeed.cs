@@ -28,8 +28,11 @@ public sealed record SlackSeedOptions
     public string? ConnectionAppToken { get; init; }
     public string? ConnectionBotToken { get; init; }
     public bool WriteConnectionSecrets { get; init; } = true;
-    public bool WithAgentAndManagedApp { get; init; } = true;
+    public bool WriteConnectionAppSecret { get; init; } = true;
+    public bool WithAgent { get; init; } = true;
+    public bool WithManagedApp { get; init; } = true;
     public bool WithRuntimeLease { get; init; } = true;
+    public string? AgentName { get; init; }
     public IReadOnlyList<string>? AllowedMembers { get; init; }
     public string AccessPolicy { get; init; } = AccessPolicyKind.OwnerOnly;
     public string AgentInstructions { get; init; } = "Handle Slack requests.";
@@ -58,9 +61,10 @@ public static class SlackManagedConnectionSeed
         var id = $"connection_{Guid.NewGuid():N}";
         var projectId = options.ProjectId ?? $"project_{Guid.NewGuid():N}";
         var agentId = $"agent_{Guid.NewGuid():N}";
-        var agentName = options.AgentNameSuffix.Length == 0
-            ? "Mohist Agent"
-            : $"Mohist Agent {options.AgentNameSuffix}";
+        var agentName = options.AgentName
+            ?? (options.AgentNameSuffix.Length == 0
+                ? "Mohist Agent"
+                : $"Mohist Agent {options.AgentNameSuffix}");
         var botName = options.AgentNameSuffix.Length == 0
             ? "Mohist"
             : $"Mohist {options.AgentNameSuffix}".Trim();
@@ -83,7 +87,7 @@ public static class SlackManagedConnectionSeed
             });
         }
 
-        if (options.WithAgentAndManagedApp)
+        if (options.WithAgent)
         {
             db.Agents.Add(new AgentRow
             {
@@ -127,7 +131,7 @@ public static class SlackManagedConnectionSeed
 
         var managedAppRowId = $"agent_app_{Guid.NewGuid():N}";
         string? enrollmentId = null;
-        if (options.WithAgentAndManagedApp)
+        if (options.WithManagedApp)
         {
             enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(
                 fixture, options.WorkspaceTeamId);
@@ -175,17 +179,21 @@ public static class SlackManagedConnectionSeed
 
         var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
         var writes = new List<SecretStoreWrite>();
-        if (options.WriteConnectionSecrets)
+        if (options.WriteConnectionSecrets && options.WriteConnectionAppSecret)
         {
             writes.Add(new SecretStoreWrite(
                 new SecretStoreAddress(projectId, id, SecretKind.AppToken),
                 Encoding.UTF8.GetBytes(options.ConnectionAppToken ?? options.AppToken)));
+        }
+
+        if (options.WriteConnectionSecrets)
+        {
             writes.Add(new SecretStoreWrite(
                 new SecretStoreAddress(projectId, id, SecretKind.BotToken),
                 Encoding.UTF8.GetBytes(options.ConnectionBotToken ?? options.BotToken)));
         }
 
-        if (options.WithAgentAndManagedApp)
+        if (options.WithManagedApp)
         {
             writes.Add(new SecretStoreWrite(
                 SecretStoreAddress.ForManagedSlackAgentApp(managedAppRowId, SecretKind.AppToken),
