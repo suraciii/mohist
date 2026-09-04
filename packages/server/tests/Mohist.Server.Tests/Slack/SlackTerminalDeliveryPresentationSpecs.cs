@@ -254,64 +254,18 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
 
     private async Task<AgentConnection> CreateConnectionAsync()
     {
-        var id = $"connection_{Guid.NewGuid():N}";
-        var projectId = $"project_{Guid.NewGuid():N}";
-        var agentId = $"agent_{Guid.NewGuid():N}";
-        var now = _fixture.TimeProvider.GetUtcNow();
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        db.Projects.Add(new ProjectRow { Id = projectId, Name = projectId, CreatedAt = now, UpdatedAt = now });
-        db.Agents.Add(new AgentRow
+        var seeded = await SlackManagedConnectionSeed.CreateAsync(_fixture, new SlackSeedOptions
         {
-            Id = agentId,
-            ProjectId = projectId,
-            Name = "Terminal presentation agent",
-            Status = AgentStatus.Active,
-            State = JsonSerializer.Serialize(new Mohist.Server.Agent.Domain.Agent
-            {
-                Id = agentId,
-                ProjectId = projectId,
-                Name = "Terminal presentation agent",
-                Status = AgentStatus.Active,
-                Instructions = "Handle Slack requests.",
-                AgentConfig = JsonSerializer.SerializeToElement(new { model = "openai/gpt-4o", runtime = "opencode" }),
-            }, JSON.Options),
-        });
-        db.AgentConnections.Add(new AgentConnectionRow
-        {
-            Id = id,
-            ProjectId = projectId,
-            AgentId = agentId,
-            ProviderKind = ConnectionProviderKind.Slack,
             WorkspaceTeamId = "T-terminal",
             AppId = "A-terminal",
             BotUserId = "U-terminal-bot",
-            BotName = "Mohist",
-            SetupProgress = SetupProgressKind.Complete,
-            DesiredState = DesiredStateKind.Enabled,
-            ConnectionHealth = ConnectionHealthKind.Healthy,
-            AgentReadiness = AgentReadinessKind.Ready,
-            OwnerSlackUserId = "U_OWNER",
-            AccessPolicy = AccessPolicyKind.OwnerOnly,
-            CreatedAt = now,
-            UpdatedAt = now,
+            AgentName = "Terminal presentation agent",
+            BotToken = "xoxb-terminal-signing-key",
+            WithManagedApp = false,
+            WriteConnectionAppSecret = false,
+            WithRuntimeLease = false,
         });
-        await db.SaveChangesAsync();
-        await scope.ServiceProvider.GetRequiredService<ISecretStore>().StoreAsync(
-            new SecretStoreAddress(projectId, id, SecretKind.BotToken),
-            Encoding.UTF8.GetBytes("xoxb-terminal-signing-key"));
-
-        return new AgentConnection
-        {
-            Id = id,
-            ProjectId = projectId,
-            AgentId = agentId,
-            WorkspaceTeamId = "T-terminal",
-            AppId = "A-terminal",
-            BotUserId = "U-terminal-bot",
-            OwnerSlackUserId = "U_OWNER",
-            AccessPolicy = AccessPolicyKind.OwnerOnly,
-        };
+        return seeded.Connection;
     }
 
     private async Task<SeededFailedLaunch> SeedFailedLaunchAsync(
