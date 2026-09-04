@@ -2,12 +2,144 @@ package mohistcli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestAgentEditReplacesNestedConfigWithSetAndClearOperations(t *testing.T) {
+	requests := 0
+	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects/proj-1/agents/agent_1":
+			return response(http.StatusOK, `{"success":true,"data":{"id":"agent_1","name":"reviewer","agentConfig":{"runtime":"opencode","model":"openai/gpt-5.6-luna","variant":"xhigh","type":"legacy","compaction":{"enabled":true}}}}`), nil
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/projects/proj-1/agents/agent_1":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			expected := map[string]any{"agentConfig": map[string]any{
+				"runtime": "pi", "model": "openai/gpt-5.6-luna", "reasoningEffort": "xhigh",
+			}}
+			if !reflect.DeepEqual(body, expected) {
+				t.Fatalf("body=%#v expected=%#v", body, expected)
+			}
+			return response(http.StatusOK, `{"success":true,"data":{"id":"agent_1","name":"reviewer"}}`), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+	args := []string{
+		"agent", "edit", "agent_1", "--project", "proj-1",
+		"--runtime", "pi", "--model", "openai/gpt-5.6-luna",
+		"--clear-variant", "--reasoning-effort", "xhigh",
+	}
+	if code := Run(context.Background(), args, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if requests != 2 {
+		t.Fatalf("requests=%d", requests)
+	}
+}
+
+func TestAgentEditClearPreservesUntouchedNestedConfig(t *testing.T) {
+	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.Method {
+		case http.MethodGet:
+			return response(http.StatusOK, `{"success":true,"data":{"id":"agent_1","name":"reviewer","agentConfig":{"runtime":"pi","model":"openai/gpt-5.6-luna","reasoningEffort":"xhigh"}}}`), nil
+		case http.MethodPatch:
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			expected := map[string]any{"agentConfig": map[string]any{
+				"runtime": "pi", "reasoningEffort": "xhigh",
+			}}
+			if !reflect.DeepEqual(body, expected) {
+				t.Fatalf("body=%#v expected=%#v", body, expected)
+			}
+			return response(http.StatusOK, `{"success":true,"data":{"id":"agent_1","name":"reviewer"}}`), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+	if code := Run(context.Background(), []string{"agent", "edit", "agent_1", "--project", "proj-1", "--clear-model"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+}
+
+func TestAgentEditClearingFinalConfigFieldSendsNull(t *testing.T) {
+	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.Method {
+		case http.MethodGet:
+			return response(http.StatusOK, `{"success":true,"data":{"id":"agent_1","name":"reviewer","agentConfig":{"variant":"xhigh"}}}`), nil
+		case http.MethodPatch:
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			value, exists := body["agentConfig"]
+			if !exists || value != nil || len(body) != 1 {
+				t.Fatalf("body=%#v", body)
+			}
+			return response(http.StatusOK, `{"success":true,"data":{"id":"agent_1","name":"reviewer"}}`), nil
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+	if code := Run(context.Background(), []string{"agent", "edit", "agent_1", "--project", "proj-1", "--clear-variant"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+}
+
+func TestAgentEditRejectsSetAndClearBeforeRequest(t *testing.T) {
+	requests := 0
+	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		requests++
+		return nil, errors.New("unexpected request")
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+	code := Run(context.Background(), []string{
+		"agent", "edit", "agent_1", "--project", "proj-1",
+		"--reasoning-effort", "xhigh", "--clear-reasoning-effort",
+	}, deps)
+	if code != ExitUsage || requests != 0 {
+		t.Fatalf("code=%d requests=%d stderr=%q", code, requests, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "--reasoning-effort cannot be used with --clear-reasoning-effort") {
+		t.Fatalf("stderr=%q", errOut.String())
+	}
+}
+
+func TestAgentEditRejectsUnknownClearFlagBeforeRequest(t *testing.T) {
+	requests := 0
+	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		requests++
+		return nil, errors.New("unexpected request")
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+	code := Run(context.Background(), []string{
+		"agent", "edit", "agent_1", "--project", "proj-1",
+		"--runtime", "pi", "--clear-variantx",
+	}, deps)
+	if code != ExitUsage || requests != 0 {
+		t.Fatalf("code=%d requests=%d stderr=%q", code, requests, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "unknown option --clear-variantx") {
+		t.Fatalf("stderr=%q", errOut.String())
+	}
+}
 
 func TestAgentLaunchPreservesWorkspaceAndParentContext(t *testing.T) {
 	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
