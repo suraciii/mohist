@@ -270,16 +270,19 @@ public abstract class WorkflowGrainTestContext
     {
         if (string.IsNullOrWhiteSpace(_workflowId)) return;
         var run = await LoadRunAsync(_workflowId);
-        foreach (var attempt in run.Stages.SelectMany(stage => stage.Tasks))
+        foreach (var stage in run.Stages)
         {
-            if (attempt.Status != WorkflowActionAttemptStatus.Running
-                || !string.Equals(attempt.Uses, "mohist/agent", StringComparison.Ordinal)
-                || string.IsNullOrWhiteSpace(attempt.WorkId)
-                || string.IsNullOrWhiteSpace(attempt.AgentLaunchFingerprint))
-                continue;
-            var key = WorkflowAgentHandoffCodec.KeyFor(
-                run.Metadata.ProjectId!, run.Id, attempt.Id, attempt.WorkId);
-            await Grains.GetGrain<IWorkflowAgentHandoffGrain>(key).ActivateAsync();
+            foreach (var attempt in stage.Tasks)
+            {
+                if (attempt.Status != WorkflowActionAttemptStatus.Running
+                    || !string.Equals(attempt.Uses, "mohist/agent", StringComparison.Ordinal)
+                    || string.IsNullOrWhiteSpace(attempt.WorkId)
+                    || string.IsNullOrWhiteSpace(attempt.AgentLaunchFingerprint))
+                    continue;
+                var key = WorkflowAgentHandoffCodec.KeyFor(
+                    run.Metadata.ProjectId!, run.Id, stage.Id, attempt.Id, attempt.WorkId);
+                await Grains.GetGrain<IWorkflowAgentHandoffGrain>(key).ActivateAsync();
+            }
         }
     }
 

@@ -436,16 +436,22 @@ public sealed partial class PublicApiProjectionEngine
             .Select(e => e.SourceTransition)
             .ToHashSet(StringComparer.Ordinal);
 
-        // --- terminal fences from the anchor snapshots ---
-        // A prepared Job anchor is committed with a null SessionId
-        // before this Session's row exists, so the fence load must
-        // reach those anchors by Job key as well — otherwise a fence
-        // set in the prepared phase would be invisible here.
+        // Resolve complete anchor keys, not only rows currently owned by this
+        // Session. Historical Workflow identities could collide across Stages;
+        // loading those rows here lets the upsert retain their explicit owner
+        // instead of discovering the conflict as a database UNIQUE violation.
         var sessionJobKeys = jobRows.Select(job => job.JobKey).ToList();
+        var sessionInputIds = facts.Inputs.Select(input => input.InputId).ToList();
+        var sessionTurnIds = facts.Turns.Select(turn => turn.TurnId).ToList();
         var anchorRows = await db.PublicExecutionSnapshots
             .Where(s => s.SessionId == sessionId
-                || (s.AnchorType == "job" && sessionJobKeys.Contains(s.AnchorId)))
+                || (s.AnchorType == "job" && sessionJobKeys.Contains(s.AnchorId))
+                || (s.AnchorType == "input" && sessionInputIds.Contains(s.AnchorId))
+                || (s.AnchorType == "turn" && sessionTurnIds.Contains(s.AnchorId)))
             .ToListAsync(ct);
+        var anchors = anchorRows.ToDictionary(
+            row => AnchorKey(row.AnchorType, row.AnchorId),
+            StringComparer.Ordinal);
         var fences = new Dictionary<string, PublicExecutionSnapshotRow>(StringComparer.Ordinal);
         foreach (var anchorRow in anchorRows)
         {
@@ -554,7 +560,7 @@ public sealed partial class PublicApiProjectionEngine
         }
 
         // --- snapshot upserts behind the same fences ---
-        UpsertAnchors(db, facts, observedAt, latestSequence, fences, terminalSequences);
+        UpsertAnchors(db, facts, observedAt, latestSequence, anchors, terminalSequences);
 
         if (created || newEvents.Count > 0)
         {
@@ -686,7 +692,7 @@ public sealed partial class PublicApiProjectionEngine
         PublicProjectionFacts facts,
         DateTimeOffset observedAt,
         long? latestSequence,
-        Dictionary<string, PublicExecutionSnapshotRow> fences,
+        Dictionary<string, PublicExecutionSnapshotRow> anchors,
         IReadOnlyDictionary<string, long> terminalSequences)
     {
         foreach (var job in facts.Jobs)
@@ -702,7 +708,7 @@ public sealed partial class PublicApiProjectionEngine
                 components,
                 observedAt,
                 latestSequence,
-                fences,
+                anchors,
                 terminalSequences);
         }
 
@@ -719,7 +725,7 @@ public sealed partial class PublicApiProjectionEngine
                 components,
                 observedAt,
                 latestSequence,
-                fences,
+                anchors,
                 terminalSequences);
         }
 
@@ -736,7 +742,7 @@ public sealed partial class PublicApiProjectionEngine
                 components,
                 observedAt,
                 latestSequence,
-                fences,
+                anchors,
                 terminalSequences);
         }
     }
@@ -749,15 +755,15 @@ public sealed partial class PublicApiProjectionEngine
         PublicAnchorComponents components,
         DateTimeOffset observedAt,
         long? latestSequence,
-        Dictionary<string, PublicExecutionSnapshotRow> fences,
+        Dictionary<string, PublicExecutionSnapshotRow> anchors,
         IReadOnlyDictionary<string, long> terminalSequences)
     {
         var status = PublicExecutionAggregator.ComputeStatus(components, sessionExists: true);
-        var existing = db.PublicExecutionSnapshots.Local.FirstOrDefault(
-            s => s.AnchorType == anchorType && s.AnchorId == anchorId);
+        var key = AnchorKey(anchorType, anchorId);
+        anchors.TryGetValue(key, out var existing);
         if (existing is null)
         {
-            db.PublicExecutionSnapshots.Add(new PublicExecutionSnapshotRow
+            var added = new PublicExecutionSnapshotRow
             {
                 AnchorType = anchorType,
                 AnchorId = anchorId,
@@ -771,7 +777,22 @@ public sealed partial class PublicApiProjectionEngine
                 TerminalSequence = ResolveTerminalSequence(components, terminalSequences),
                 LastSequence = latestSequence,
                 UpdatedAt = observedAt,
-            });
+            };
+            db.PublicExecutionSnapshots.Add(added);
+            anchors[key] = added;
+            return;
+        }
+
+        if (!string.Equals(existing.ProjectId, facts.ProjectId, StringComparison.Ordinal)
+            || (existing.SessionId is { } ownerSessionId
+                && !string.Equals(ownerSessionId, facts.SessionId, StringComparison.Ordinal)))
+        {
+            _log.LogWarning(
+                "Public projection retained {AnchorType} anchor {AnchorId} for Session {OwnerSessionId}; anchor owner conflict with Session {ConflictingSessionId} was checkpointed without ownership transfer",
+                anchorType,
+                anchorId,
+                existing.SessionId,
+                facts.SessionId);
             return;
         }
 

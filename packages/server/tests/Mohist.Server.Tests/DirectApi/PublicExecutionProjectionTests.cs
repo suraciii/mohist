@@ -463,6 +463,136 @@ public sealed class PublicExecutionProjectionTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task AnchorOwnerConflict_PreservesTerminalOwnerAndLetsAllCheckpointsCatchUp()
+    {
+        const string jobId = "job_feedback_shared";
+        const string inputId = "input_feedback_shared";
+        const string turnId = "turn_feedback_shared";
+        const string ownerSessionId = "session_feedback_plan";
+        const string conflictingSessionId = "session_feedback_check";
+        await _harness.SeedJobAsync(
+            jobId,
+            "proj_pub",
+            "agent_pub",
+            ownerSessionId,
+            inputId,
+            turnId,
+            status: AgentJobStatus.Completed,
+            terminalResult: CompletedResult("""{"text":"plan complete"}"""),
+            terminalAt: new DateTimeOffset(T0.AddMinutes(2)));
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession(ownerSessionId, "proj_pub", "agent_pub"),
+            AgentSessionActivity.Idle,
+            inputs: [PublicProjectionTestSupport.Input(inputId, jobId, recordedAt: T0)],
+            turns:
+            [
+                PublicProjectionTestSupport.Turn(
+                    turnId,
+                    inputId,
+                    jobId,
+                    AgentTurnStatus.Completed,
+                    recordedAt: T0,
+                    updatedAt: T0.AddMinutes(2),
+                    result: new AgentTurnResult(Output: """{"text":"plan complete"}""")),
+            ]));
+        Assert.True(await _harness.Engine.ProcessPendingAsync());
+
+        var ownedBefore = (await _harness.SnapshotsAsync())
+            .Where(row => row.AnchorId is jobId or inputId or turnId)
+            .ToDictionary(row => (row.AnchorType, row.AnchorId));
+        var ownerEventsBefore = await _harness.EventsAsync(ownerSessionId);
+        Assert.Equal(3, ownedBefore.Count);
+        Assert.All(ownedBefore.Values, row =>
+        {
+            Assert.Equal(ownerSessionId, row.SessionId);
+            Assert.NotNull(row.TerminalFact);
+        });
+
+        // Production shape: one historical Workflow invocation identity was
+        // reused by a later Stage. The AgentJob now joins the check Session,
+        // while terminal public anchors still belong to the plan Session.
+        await _harness.RebindJobAsync(jobId, conflictingSessionId, inputId, turnId);
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession(conflictingSessionId, "proj_pub", "agent_pub"),
+            AgentSessionActivity.Idle,
+            inputs: [PublicProjectionTestSupport.Input(inputId, jobId, recordedAt: T0.AddMinutes(3))],
+            turns:
+            [
+                PublicProjectionTestSupport.Turn(
+                    turnId,
+                    inputId,
+                    jobId,
+                    AgentTurnStatus.Completed,
+                    recordedAt: T0.AddMinutes(3),
+                    updatedAt: T0.AddMinutes(4),
+                    result: new AgentTurnResult(Output: """{"text":"check complete"}""")),
+            ]));
+
+        await _harness.SeedJobAsync(
+            "job_unrelated",
+            "proj_pub",
+            "agent_pub",
+            "session_unrelated",
+            "input_unrelated",
+            "turn_unrelated");
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession("session_unrelated", "proj_pub", "agent_pub"),
+            AgentSessionActivity.Active,
+            inputs: [PublicProjectionTestSupport.Input("input_unrelated", "job_unrelated")],
+            turns: [PublicProjectionTestSupport.Turn("turn_unrelated", "input_unrelated", "job_unrelated", AgentTurnStatus.Queued)]));
+
+        // Both targets are selected and committed by this one batch.
+        Assert.True(await _harness.Engine.ProcessPendingAsync());
+
+        var ownedAfter = (await _harness.SnapshotsAsync())
+            .Where(row => row.AnchorId is jobId or inputId or turnId)
+            .ToDictionary(row => (row.AnchorType, row.AnchorId));
+        Assert.Equal(ownedBefore.Keys, ownedAfter.Keys);
+        foreach (var entry in ownedBefore)
+        {
+            var after = ownedAfter[entry.Key];
+            Assert.Equal(entry.Value.SessionId, after.SessionId);
+            Assert.Equal(entry.Value.ProjectId, after.ProjectId);
+            Assert.Equal(entry.Value.SnapshotJson, after.SnapshotJson);
+            Assert.Equal(entry.Value.TerminalFact, after.TerminalFact);
+            Assert.Equal(entry.Value.TerminalOutcome, after.TerminalOutcome);
+            Assert.Equal(entry.Value.TerminalAt, after.TerminalAt);
+            Assert.Equal(entry.Value.TerminalSequence, after.TerminalSequence);
+        }
+        Assert.Equal(
+            ownerEventsBefore.Select(row => (row.Sequence, row.SourceTransition, row.PayloadJson)),
+            (await _harness.EventsAsync(ownerSessionId)).Select(row => (row.Sequence, row.SourceTransition, row.PayloadJson)));
+        Assert.All(await _harness.EventsAsync(conflictingSessionId), row =>
+        {
+            Assert.Equal(conflictingSessionId, row.SessionId);
+            var payload = JsonSerializer.Deserialize<PublicExecutionRead>(row.PayloadJson, JSON.PublicApi);
+            Assert.Equal(conflictingSessionId, payload!.SessionId);
+        });
+        Assert.NotNull(await _harness.SnapshotAsync("turn", "turn_unrelated"));
+
+        var reads = new PublicExecutionReadQuerier(_harness.DbFactory);
+        Assert.False(await reads.IsSessionProjectionBehindAsync(conflictingSessionId));
+        Assert.False(await reads.IsSessionProjectionBehindAsync("session_unrelated"));
+        var checkpoints = await _harness.CheckpointsAsync();
+        Assert.Single(checkpoints, row =>
+            row.Feed == PublicProjectionFeeds.AgentSessions
+            && row.SourceKey == conflictingSessionId);
+        Assert.Single(checkpoints, row =>
+            row.Feed == PublicProjectionFeeds.AgentSessions
+            && row.SourceKey == "session_unrelated");
+        Assert.Equal(3, _harness.ProjectionLogger.Entries.Count(entry =>
+            entry.Message.Contains("anchor owner conflict", StringComparison.OrdinalIgnoreCase)));
+        Assert.Contains(_harness.ProjectionLogger.Entries, entry =>
+            entry.Message.Contains("anchor owner conflict", StringComparison.OrdinalIgnoreCase)
+            && Equals(entry.State["OwnerSessionId"], ownerSessionId)
+            && Equals(entry.State["ConflictingSessionId"], conflictingSessionId));
+
+        // Reconciliation consumed the legacy collision exactly once; the next
+        // sweep has no poisoned target to retry.
+        Assert.False(await _harness.Engine.ProcessPendingAsync());
+    }
+
+    [Fact]
     public async Task CrashBeforeCommit_LeavesNoPartialSnapshotSequenceOrCheckpoint_AndReplayProducesTheSameOutcome()
     {
         await _harness.SeedJobAsync("job_crash_1", "proj_pub", "agent_pub", "session_crash_1", "input_crash_1", "turn_crash_1");

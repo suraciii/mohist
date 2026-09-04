@@ -398,6 +398,7 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
         if (!string.Equals(persisted.CommandId, supplied.CommandId, StringComparison.Ordinal)
             || !string.Equals(persisted.ProjectId, supplied.ProjectId, StringComparison.Ordinal)
             || !string.Equals(persisted.WorkflowRunId, supplied.WorkflowRunId, StringComparison.Ordinal)
+            || !string.Equals(persisted.Completion?.Stage, supplied.Completion?.Stage, StringComparison.Ordinal)
             || !string.Equals(persisted.ActionAttemptId, supplied.ActionAttemptId, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
@@ -407,11 +408,7 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
 
     private void EnsurePrimaryKey(WorkflowAgentHandoffCommand command)
     {
-        var expected = WorkflowAgentHandoffCodec.KeyFor(
-            command.ProjectId,
-            command.WorkflowRunId,
-            command.ActionAttemptId,
-            command.CommandId);
+        var expected = WorkflowAgentHandoffCodec.KeyFor(command);
         if (!string.Equals(this.GetPrimaryKeyString(), expected, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(

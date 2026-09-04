@@ -36,11 +36,7 @@ public partial class WorkflowGrain
             return true;
         }
 
-        var key = WorkflowAgentHandoffCodec.KeyFor(
-            command.ProjectId,
-            command.WorkflowRunId,
-            command.ActionAttemptId,
-            command.CommandId);
+        var key = WorkflowAgentHandoffCodec.KeyFor(command);
         var grain = GrainFactory.GetGrain<IWorkflowAgentHandoffGrain>(key);
         var prepared = await grain.PrepareAsync(command);
         if (prepared.Disposition == WorkflowAgentHandoffDisposition.Rejected)
@@ -86,22 +82,30 @@ public partial class WorkflowGrain
     {
         if (_run is null || _run.Status.IsTerminal())
             return;
-        foreach (var attempt in _run.Stages.SelectMany(stage => stage.Tasks))
+        foreach (var stage in _run.Stages)
         {
-            if (attempt.Status != WorkflowActionAttemptStatus.Running
-                || !string.Equals(attempt.Uses, "mohist/agent", StringComparison.Ordinal)
-                || string.IsNullOrWhiteSpace(attempt.WorkId)
-                || string.IsNullOrWhiteSpace(attempt.AgentLaunchFingerprint))
-                continue;
-            var projectId = _run.Metadata.ProjectId;
-            if (string.IsNullOrWhiteSpace(projectId))
-                continue;
-            var key = WorkflowAgentHandoffCodec.KeyFor(projectId, GrainKey, attempt.Id, attempt.WorkId);
-            var handoff = GrainFactory.GetGrain<IWorkflowAgentHandoffGrain>(key);
-            await handoff.AcceptAsync(new WorkflowAgentHandoffAcceptance(
-                attempt.WorkId,
-                attempt.AgentLaunchFingerprint));
-            await handoff.ActivateAsync();
+            foreach (var attempt in stage.Tasks)
+            {
+                if (attempt.Status != WorkflowActionAttemptStatus.Running
+                    || !string.Equals(attempt.Uses, "mohist/agent", StringComparison.Ordinal)
+                    || string.IsNullOrWhiteSpace(attempt.WorkId)
+                    || string.IsNullOrWhiteSpace(attempt.AgentLaunchFingerprint))
+                    continue;
+                var projectId = _run.Metadata.ProjectId;
+                if (string.IsNullOrWhiteSpace(projectId))
+                    continue;
+                var key = WorkflowAgentHandoffCodec.KeyFor(
+                    projectId,
+                    GrainKey,
+                    stage.Id,
+                    attempt.Id,
+                    attempt.WorkId);
+                var handoff = GrainFactory.GetGrain<IWorkflowAgentHandoffGrain>(key);
+                await handoff.AcceptAsync(new WorkflowAgentHandoffAcceptance(
+                    attempt.WorkId,
+                    attempt.AgentLaunchFingerprint));
+                await handoff.ActivateAsync();
+            }
         }
     }
 

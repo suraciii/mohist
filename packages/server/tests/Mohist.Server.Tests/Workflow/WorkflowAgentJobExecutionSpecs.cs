@@ -54,6 +54,7 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         var key = WorkflowAgentHandoffCodec.KeyFor(
             run.Metadata.ProjectId!,
             run.Id,
+            run.CurrentStage().Id,
             attempt.Id,
             attempt.WorkId!);
         var handoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(key);

@@ -374,6 +374,15 @@ second Session origin or work owner. A configured Session name may continue one
 logical Session within a WorkflowRun only when Agent and Workspace identities
 match. Without an explicit name, each AgentJob receives a distinct Session.
 
+The durable Workflow launch scope is `(projectId, workflowRunId, stage,
+actionAttemptId, workId)`. The handoff grain, invocation, AgentJob, initial Input,
+and initial Turn derive from that same scope, and the launch fingerprint includes
+the scope before rendered command content. Stage is required because task and
+work identifiers are local to a Stage and may repeat in another Stage, including
+approval-feedback tasks. Retries of one scope reuse its identities; a different
+Stage always creates a different invocation, Job, Input, and Turn even when its
+task identifier and rendered prompt match.
+
 Matching Prompt, model, Runtime, Workspace, or configuration does not merge
 origins. An origin-specific route only resolves the canonical Session resource.
 
