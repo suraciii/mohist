@@ -345,6 +345,10 @@ export class RunnerHost {
     let convergenceTimer: ReturnType<typeof setInterval> | undefined
     let cleanupTimer: ReturnType<typeof setInterval> | undefined
     let modelRediscoveryTimer: ReturnType<typeof setInterval> | undefined
+    const stopMaintenance = () => {
+      void this.stopMaintenanceLifecycles()
+    }
+    signal.addEventListener('abort', stopMaintenance, { once: true })
     try {
       if (!signal.aborted) {
         if (this.enabledAgentRuntimes.has('opencode')) this.modelCatalogLifecycle.trigger()
@@ -373,17 +377,23 @@ export class RunnerHost {
       if (convergenceTimer) clearInterval(convergenceTimer)
       if (cleanupTimer) clearInterval(cleanupTimer)
       if (modelRediscoveryTimer) clearInterval(modelRediscoveryTimer)
-      await Promise.all([
-        this.heartbeatLifecycle.stop(),
-        this.livenessLifecycle.stop(),
-        this.convergenceLifecycle.stop(),
-        this.cleanupLifecycle.stop(),
-        this.modelCatalogLifecycle.stop(),
-      ])
+      signal.removeEventListener('abort', stopMaintenance)
+      await this.stopMaintenanceLifecycles()
       await this.shutdownSharedConnection()
       await this.taskLogDeliveryQueue.stop()
+      await this.agentSessionRuntimeEventQueue.stop()
       await this.shutdownConnection()
     }
+  }
+
+  private stopMaintenanceLifecycles(): Promise<void[]> {
+    return Promise.all([
+      this.heartbeatLifecycle.stop(),
+      this.livenessLifecycle.stop(),
+      this.convergenceLifecycle.stop(),
+      this.cleanupLifecycle.stop(),
+      this.modelCatalogLifecycle.stop(),
+    ])
   }
 
   private onDispatchReconnected() {

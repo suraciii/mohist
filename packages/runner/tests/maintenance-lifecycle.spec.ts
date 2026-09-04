@@ -15,6 +15,21 @@ describe('MaintenanceLifecycle', () => {
     expect(cleanupSource).not.toContain('cleanupInFlight')
   })
 
+  it('orders maintenance shutdown before owned resource teardown', () => {
+    const hostSource = readFileSync(new URL('../src/runtime/host.ts', import.meta.url), 'utf8')
+    const maintenanceStop = hostSource.indexOf('await this.stopMaintenanceLifecycles()')
+
+    expect(maintenanceStop).toBeGreaterThanOrEqual(0)
+    for (const teardown of [
+      'await this.shutdownSharedConnection()',
+      'await this.taskLogDeliveryQueue.stop()',
+      'await this.agentSessionRuntimeEventQueue.stop()',
+      'await this.shutdownConnection()',
+    ]) {
+      expect(maintenanceStop).toBeLessThan(hostSource.indexOf(teardown))
+    }
+  })
+
   it('starts one pass from idle and returns it from triggerAndWait', async () => {
     vi.useFakeTimers()
     const pass = deferred()
