@@ -1,4 +1,5 @@
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure;
 using Xunit;
 
 namespace Mohist.Server.Tests.Agent.Services;
@@ -25,6 +26,7 @@ public sealed class BuiltInAgentCatalogTests
         Assert.Contains("mo` CLI capabilities", agent.Instructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("do not delete", agent.Instructions, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("xoxb-", agent.Instructions, StringComparison.Ordinal);
+        Assert.Equal(AgentConfigSchema.DefaultRuntime, agent.AgentConfig?.GetProperty("runtime").GetString());
     }
 
     [Fact]
@@ -40,7 +42,11 @@ public sealed class BuiltInAgentCatalogTests
         Assert.Contains(listed, agent => agent.Name == BuiltInAgentCatalog.MohistPlannerName);
         Assert.Contains(listed, agent => agent.Name == BuiltInAgentCatalog.MohistBuilderName);
         Assert.Contains(listed, agent => agent.Name == BuiltInAgentCatalog.MohistReviewerName);
-        Assert.All(listed, agent => Assert.False(string.IsNullOrWhiteSpace(agent.Instructions)));
+        Assert.All(listed, agent =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(agent.Instructions));
+            Assert.Equal(AgentConfigSchema.PiRuntime, agent.AgentConfig?.GetProperty("runtime").GetString());
+        });
     }
 
     [Theory]
@@ -53,6 +59,6 @@ public sealed class BuiltInAgentCatalogTests
 
         Assert.Equal("project-1", agent.ProjectId);
         Assert.Equal(name, agent.Name);
-        Assert.Equal("opencode", agent.AgentConfig?.GetProperty("runtime").GetString());
+        Assert.Equal(AgentConfigSchema.DefaultRuntime, agent.AgentConfig?.GetProperty("runtime").GetString());
     }
 }

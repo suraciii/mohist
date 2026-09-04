@@ -10,9 +10,9 @@ namespace Mohist.Server.Infrastructure;
 /// subsequent Agent edits cannot alter in-flight or queued work.
 ///
 /// <para>
-/// <see cref="Runtime"/> defaults to <see cref="AgentConfigSchema.OpenCodeRuntime"/>
-/// when the Agent's config omits <c>runtime</c>; an out-of-set value falls
-/// back to the same default. <see cref="Skills"/> is the Agent's stored
+/// <see cref="Runtime"/> defaults to <see cref="AgentConfigSchema.DefaultRuntime"/>
+/// when the Agent's config omits <c>runtime</c>. Out-of-set values are rejected
+/// by the Agent configuration boundary. <see cref="Skills"/> is the Agent's stored
 /// ordered list (possibly empty). <see cref="Model"/>,
 /// <see cref="ReasoningEffort"/>, and <see cref="Variant"/> are read from
 /// the Agent's validated config.

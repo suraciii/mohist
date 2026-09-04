@@ -123,7 +123,9 @@ export class AgentJobExecutor {
     const instructions = readOptionalString(payload, 'instructions')
     const skillNames = readSkillNames(payload)
 
-    const runtimeName = readRuntime(payload)
+    const runtime = readRuntime(payload)
+    if (runtime.kind === 'invalid') return failureResult('invalid-input', runtime.message)
+    const runtimeName = runtime.value
     const modelInput = readOptionalString(payload, 'model')
     const variant = readOptionalString(payload, 'variant')
     const reasoningEffort = readOptionalString(payload, 'reasoningEffort')
@@ -539,15 +541,20 @@ function readOptionalString(payload: JsonObject | null, key: string): string | n
 
 /**
  * Read the runtime selection from the dispatch `with.runtime`. The
- * server snapshots the resolved runtime onto the AgentJob envelope;
- * absent is treated as `opencode` so legacy / partial-rollout
- * dispatches keep their existing behavior.
+ * server snapshots the resolved runtime onto the AgentJob envelope. The
+ * executor fails closed because default selection belongs to the server and
+ * guessing here can silently bind a Session to the wrong backend.
  */
-function readRuntime(payload: JsonObject | null): 'opencode' | 'pi' {
+function readRuntime(payload: JsonObject | null): ParsedRuntime {
   const value = payload?.['runtime']
-  if (value === 'pi') return 'pi'
-  return 'opencode'
+  if (value === 'opencode' || value === 'pi') return { kind: 'ok', value }
+  return {
+    kind: 'invalid',
+    message: "AgentJob requires dispatch 'runtime' to be 'opencode' or 'pi'",
+  }
 }
+
+type ParsedRuntime = { kind: 'ok'; value: 'opencode' | 'pi' } | { kind: 'invalid'; message: string }
 
 function composePrompt(prompt: string, instructions: string | null): string {
   if (!instructions) return prompt

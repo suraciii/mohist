@@ -167,7 +167,7 @@ function buildAgentJobWork(overrides: Partial<DispatchWorkItem> = {}): DispatchW
     agentJobId: 'aj-1',
     agentSessionId: 'session-1',
     projectId: 'proj-1',
-    with: { prompt: 'do the agent thing' },
+    with: { prompt: 'do the agent thing', runtime: 'opencode' },
     variables: {
       workspace: { path: '/tmp/agent-job-ws', branch: null, changeDir: null },
     },
@@ -198,7 +198,9 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
     const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const result = await executor.execute(
-      buildAgentJobWork({ with: { prompt: 'should not run', skills: ['missing-skill-for-error-catalog-spec'] } }),
+      buildAgentJobWork({
+        with: { prompt: 'should not run', runtime: 'opencode', skills: ['missing-skill-for-error-catalog-spec'] },
+      }),
       new AbortController().signal,
     )
 
@@ -349,6 +351,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
     const work = buildAgentJobWork({
       with: {
         prompt: 'review the diff',
+        runtime: 'opencode',
         instructions: 'be terse',
         model: 'openai/gpt-5.5',
         variant: 'high',
@@ -375,6 +378,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
     const work = buildAgentJobWork({
       with: {
         prompt: 'do the thing',
+        runtime: 'opencode',
         model: 'anthropic/claude-sonnet-4',
         variant: 'max',
       },
@@ -417,6 +421,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
       uses: 'mohist/opencode',
       with: {
         prompt: 'no action resolution',
+        runtime: 'opencode',
         uses: 'mohist/opencode',
       },
     })
@@ -485,7 +490,7 @@ describe('AgentJobExecutor reports the runtime session binding', () => {
 
     const work = buildAgentJobWork({
       agentSessionId: 'session-bound',
-      with: { prompt: 'report me' },
+      with: { prompt: 'report me', runtime: 'opencode' },
     })
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe('completed')
@@ -708,6 +713,7 @@ describe('AgentJobExecutor materialises the launch-time snapshot', () => {
     const work = buildAgentJobWork({
       with: {
         prompt: 'audit the diff',
+        runtime: 'opencode',
         instructions: launchTimeInstructions,
         model: launchTimeModel,
         variant: launchTimeVariant,
@@ -729,12 +735,12 @@ describe('AgentJobExecutor materialises the launch-time snapshot', () => {
 
     // First launch pins one snapshot
     await executor.execute(
-      buildAgentJobWork({ with: { prompt: 'first', instructions: 'original' } }),
+      buildAgentJobWork({ with: { prompt: 'first', runtime: 'opencode', instructions: 'original' } }),
       new AbortController().signal,
     )
     // A second call with a different dispatch payload must use the new payload
     await executor.execute(
-      buildAgentJobWork({ with: { prompt: 'second', instructions: 'updated' } }),
+      buildAgentJobWork({ with: { prompt: 'second', runtime: 'opencode', instructions: 'updated' } }),
       new AbortController().signal,
     )
 
@@ -762,7 +768,7 @@ describe('AgentJobExecutor parses the dispatch payload', () => {
     const connection = makeFakeConnection()
     const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
-    const work = buildAgentJobWork({ with: { prompt: 'go', model: 'not a model id' } })
+    const work = buildAgentJobWork({ with: { prompt: 'go', runtime: 'opencode', model: 'not a model id' } })
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe('failed')
     expect(result.message).toMatch(/model/)

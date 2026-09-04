@@ -79,6 +79,7 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
         Assert.NotNull(dispatch!.With);
         var with = JsonSerializer.Deserialize<JsonElement>(dispatch.With!);
         Assert.Equal(AgentExecutionSources.Slack, with.GetProperty("executionSource").GetString());
+        Assert.Equal("pi", with.GetProperty("runtime").GetString());
         Assert.True(with.TryGetProperty("slackExecutionContext", out _));
     }
 

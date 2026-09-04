@@ -112,14 +112,18 @@ leaves that field unset. Resolution order is:
 2. The Agent definition.
 3. The Project default.
 
-A Runtime with no value defaults to `opencode`. An explicitly malformed Runtime
-or Model remains a configuration gap; a lower-precedence value cannot hide it.
+A Runtime with no value defaults to `pi`. An explicitly malformed Runtime or
+Model remains a configuration gap; a lower-precedence value cannot hide it.
+The Server snapshots the resolved Runtime onto every new AgentJob dispatch. A
+Runner rejects a dispatch whose Runtime is missing or unknown instead of
+guessing a backend.
 
 Changing the default affects later launches. Each AgentJob stores the resolved
 configuration at launch. An Agent without a Model can be ready when the Project
 default supplies one. Removing that default can restore `needs-setup`. A
 Readiness conclusion confirmed by a completed execution is not changed by a
-default edit alone.
+default edit alone. Existing AgentJobs and Sessions keep their stored Runtime;
+changing the default never reinterprets a historical binding.
 
 Configure the default through Project settings. The route contract is in
 [External Agent API](agent-api.md#project-default-execution-configuration).

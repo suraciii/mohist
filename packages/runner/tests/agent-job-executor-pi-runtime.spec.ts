@@ -393,7 +393,11 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     expect(parsed.kind).toBe('pi')
   })
 
-  it('treats an absent dispatch `runtime` as opencode (legacy partial rollout)', async () => {
+  it.each([
+    ['missing', null],
+    ['blank', ''],
+    ['unknown', 'mystery'],
+  ])('rejects a %s dispatch runtime instead of selecting a backend', async (_case, runtime) => {
     const openCode = makeFakeOpenCodeRuntime()
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
@@ -402,11 +406,17 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
       pi: pi.runtime,
     })
 
-    const work = buildAgentJobWork({ with: { prompt: 'legacy dispatch' } })
+    const withPayload: JsonObject =
+      runtime === null ? { prompt: 'invalid dispatch' } : { prompt: 'invalid dispatch', runtime }
+    const work = buildAgentJobWork({ with: withPayload })
     const result = await executor.execute(work, new AbortController().signal)
 
-    expect(result.status).toBe('completed')
-    expect(openCode.runTurnCalls).toHaveLength(1)
+    expect(result.status).toBe('failed')
+    expect(result.error).toEqual({
+      code: 'invalid-input',
+      message: "AgentJob requires dispatch 'runtime' to be 'opencode' or 'pi'",
+    })
+    expect(openCode.runTurnCalls).toHaveLength(0)
     expect(pi.runTurnCalls).toHaveLength(0)
   })
 

@@ -251,11 +251,10 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
     }
 
     [Fact]
-    public async Task GenericOpen_DefaultRuntime_OpensSessionWithOpenCode()
+    public async Task GenericOpen_DefaultRuntime_OpensSessionWithPi()
     {
-        // Sanity: the default (no AgentConfig.runtime, no request
-        // override) still resolves to opencode and is observed on the
-        // open call.
+        // The new-launch default is resolved and persisted before the
+        // Runner opens the Session.
         var project = await CreateProjectAsync($"generic-open-default-{Guid.NewGuid():N}");
         var agent = await CreateAgentAsync(project.Id, "open-default-agent");
 
@@ -280,7 +279,7 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
                 new { workId = $"work-{Guid.NewGuid():N}" });
             open.EnsureSuccessStatusCode();
             var openPayload = await open.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.Equal("opencode", openPayload.GetProperty("runtime").GetString());
+            Assert.Equal("pi", openPayload.GetProperty("runtime").GetString());
         }
         finally
         {

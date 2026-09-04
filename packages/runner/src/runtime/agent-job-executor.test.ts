@@ -61,6 +61,7 @@ describe('AgentJobExecutor attachment delivery', () => {
       initialTurnId: 'turn-1',
       variables: { workspace: { path: workDir } },
       with: {
+        runtime: 'opencode',
         attachments: [{ id: 'attachment-1', name: 'notes.txt', contentType: 'text/plain', size: 19 }],
       },
     }
@@ -134,6 +135,7 @@ describe('AgentJobExecutor attachment delivery', () => {
       variables: { workspace: { path: workDir } },
       with: {
         prompt: 'inspect the image',
+        runtime: 'opencode',
         attachments: [{ id: 'attachment-1', name: 'diagram.png', contentType: 'image/png', size: 3 }],
       },
     }

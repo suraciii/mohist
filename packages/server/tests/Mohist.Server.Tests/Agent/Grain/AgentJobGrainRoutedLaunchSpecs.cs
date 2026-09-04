@@ -288,7 +288,7 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
             $"routed-effort-dispatch-runner-{Guid.NewGuid():N}");
-        await InstallCapabilityFenceAsync(runnerId, projectId, "opencode");
+        await InstallCapabilityFenceAsync(runnerId, projectId, "pi");
         var eventId = "evt-routed-effort-dispatch";
         var ruleId = "rule-routed-effort-dispatch";
         var plan = BuildExecutablePlan(projectId, eventId, ruleId, "/tmp/routed-effort-dispatch")
@@ -304,7 +304,7 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
         var session = Grains.GetGrain<IAgentSessionGrain>(plan.SessionId);
         var info = await session.GetAsync();
         Assert.NotNull(info);
-        Assert.Equal("opencode", info!.Runtime);
+        Assert.Equal("pi", info!.Runtime);
 
         var snapshot = await job.GetRuntimeSnapshotAsync();
         Assert.Equal("high", snapshot.ExecutionDefinition?.ReasoningEffort);
@@ -314,13 +314,14 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
             job,
             AgentJobStatus.Running,
             TimeSpan.FromSeconds(5),
-            CapabilityFencePollRequest("opencode"));
+            CapabilityFencePollRequest("pi"));
 
         var polled = await Grains.GetGrain<IRunnerGrain>(runnerId)
             .PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
         Assert.NotNull(polled);
         var with = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(polled!.With!);
         Assert.Equal("openai/gpt-test", with.GetProperty("model").GetString());
+        Assert.Equal("pi", with.GetProperty("runtime").GetString());
         Assert.Equal("balanced", with.GetProperty("variant").GetString());
         Assert.Equal("high", with.GetProperty("reasoningEffort").GetString());
     }

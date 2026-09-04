@@ -2437,7 +2437,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             RejectIfReloadRequired();
             _session = CreateSession(new OpenAgentSessionCommand(
                 RunnerId: string.Empty,
-                AgentRuntime: command.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+                AgentRuntime: command.Runtime ?? AgentConfigSchema.DefaultRuntime,
                 WorkDir: command.WorkDir,
                 Metadata: command.Metadata,
                 Definition: command.Definition,

@@ -7,7 +7,7 @@ namespace Mohist.Server.Slack.Services;
 public sealed class ManagerAgentDefaultProfileResolver : IScopedService
 {
     public ManagerAgentDefaultProfile Resolve() =>
-        new(AgentConfigSchema.OpenCodeRuntime, null, null);
+        new(AgentConfigSchema.DefaultRuntime, null, null);
 }
 
 public sealed record ManagerAgentDefaultProfile(
