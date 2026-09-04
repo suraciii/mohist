@@ -93,6 +93,7 @@ public abstract class WorkflowGrainTestContext
             ["spec/*"],
             "test-host",
             projectId,
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration,
             RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
         if (maxWorkflowSlots != RunnerCapacity.DefaultMaxWorkflowSlots)
         {
@@ -290,6 +291,7 @@ public abstract class WorkflowGrainTestContext
             ["spec/*"],
             "test-host",
             TestProjectId(_workflowId),
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration,
             RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
     }
 

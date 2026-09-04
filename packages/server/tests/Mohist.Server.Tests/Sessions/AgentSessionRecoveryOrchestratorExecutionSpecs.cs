@@ -10,6 +10,22 @@ public sealed partial class AgentSessionRecoveryOrchestratorSpecs
     [Theory]
     [InlineData(SessionCommandKind.Compact)]
     [InlineData(SessionCommandKind.Reset)]
+    public async Task RecoveryCommand_DisabledBindingRuntimeReturnsStableApiError(SessionCommandKind command)
+    {
+        var (_, sessionId) = await CreateIdleSessionAsync($"runtime-disabled-{command.ToString().ToLowerInvariant()}");
+        var dispatcher = new RecordingSessionCommandDispatcher();
+        dispatcher.Enqueue(new SessionCommandResult(Ok: false, Error: SessionCommandError.RuntimeUnavailable));
+
+        var result = await ExecuteRecoveryAsync(command, sessionId, idempotencyKey: null, dispatcher);
+
+        Assert.Equal(503, result.Status);
+        Assert.Equal("runtime_unavailable", result.Body.GetProperty("code").GetString());
+        Assert.Single(dispatcher.Requests);
+    }
+
+    [Theory]
+    [InlineData(SessionCommandKind.Compact)]
+    [InlineData(SessionCommandKind.Reset)]
     public async Task RecoveryCommand_SimulatedRunnerRestart_AppliesOperationIdAtMostOnceAndAllowsNewOperation(SessionCommandKind command)
     {
         var (_, sessionId) = await CreateIdleSessionAsync($"runtime-unavailable-{command.ToString().ToLowerInvariant()}");

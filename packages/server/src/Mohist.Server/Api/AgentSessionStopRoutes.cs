@@ -145,6 +145,8 @@ public static class AgentSessionStopRoutes
             TurnControlResultKind.StopRequested => ApiResults.Ok(new { state = "stop-requested" }),
             TurnControlResultKind.RunnerUnavailable => ApiResults.Fail(
                 "Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId }),
+            TurnControlResultKind.RuntimeUnavailable => ApiResults.Fail(
+                "Runtime is unavailable", 503, "runtime_unavailable", new { runnerId = target.RunnerId }),
             TurnControlResultKind.Blocked => ApiResults.Conflict(
                 "Stop recovery deadline was exhausted", "stop_recovery_deadline_exhausted"),
             _ => ApiResults.Ok(new

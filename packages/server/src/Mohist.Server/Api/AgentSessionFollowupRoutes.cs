@@ -311,7 +311,23 @@ public static class AgentSessionFollowupRoutes
                 Code: "followup_acceptance_unknown")), rollbackAcceptedAttachments, ct);
         }
 
-        await dispatcher.DispatchNextAsync(projectId, target.SessionId, ct);
+        if (string.Equals(
+            accept.FailureCategory,
+            AgentSessionFollowupDispatcher.RuntimeUnavailableError,
+            StringComparison.Ordinal))
+        {
+            return RuntimeUnavailable(target.SessionId, accept);
+        }
+
+        var delivery = await dispatcher.DispatchNextAsync(projectId, target.SessionId, ct);
+        if (delivery is { Accepted: false }
+            && string.Equals(
+                delivery.Error,
+                AgentSessionFollowupDispatcher.RuntimeUnavailableError,
+                StringComparison.Ordinal))
+        {
+            return RuntimeUnavailable(target.SessionId, accept);
+        }
 
         return ApiResults.Ok(BuildAcceptedResult(target.SessionId, accept));
     }
@@ -357,6 +373,17 @@ public static class AgentSessionFollowupRoutes
             Attachments: accepted ?? [],
             RejectedAttachments: rejected ?? []);
     }
+
+    private static IResult RuntimeUnavailable(
+        string sessionId,
+        AgentSessionFollowupAcceptResult accept) =>
+        ApiResults.Ok(BuildAcceptedResult(sessionId, accept) with
+        {
+            Status = "rejected",
+            Error = "The bound runtime is disabled on the Runner.",
+            Code = "runtime_unavailable",
+            TurnStatus = "failed",
+        });
 
     private static IResult Rejected(
         string sessionId,

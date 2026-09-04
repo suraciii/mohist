@@ -37,12 +37,16 @@ public static class ManagerExecutionRuntimeCapabilities
         EpochV1,
         PrivateBrokerV1,
         PiScopedExecutorV1,
-        IsolatedOpenCodeV1,
         RedactionV1,
     };
 
     public static bool Supports(RunnerInfo info) =>
         Required.All(required => info.Capabilities.Contains(required, StringComparer.Ordinal));
+
+    public static bool Supports(RunnerInfo info, string? runtime) =>
+        Supports(info)
+        && (!string.Equals(runtime, "opencode", StringComparison.OrdinalIgnoreCase)
+            || info.Capabilities.Contains(IsolatedOpenCodeV1, StringComparer.Ordinal));
 }
 
 /// <summary>

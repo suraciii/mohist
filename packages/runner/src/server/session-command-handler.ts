@@ -1,5 +1,5 @@
 export type SessionCommand = 'compact' | 'reset'
-export type SessionCommandError = 'conflict' | 'missing' | 'notStarted' | 'unavailable'
+export type SessionCommandError = 'conflict' | 'missing' | 'notStarted' | 'runtime-unavailable' | 'unavailable'
 
 export interface SessionCommandRequest {
   sessionId: string
@@ -82,6 +82,7 @@ export function isValidSessionCommandResult(
     (candidate.error === 'conflict' ||
       candidate.error === 'missing' ||
       candidate.error === 'notStarted' ||
+      candidate.error === 'runtime-unavailable' ||
       candidate.error === 'unavailable')
   )
 }

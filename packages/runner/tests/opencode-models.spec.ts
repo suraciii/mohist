@@ -88,6 +88,7 @@ describe('OpenCode model discovery', () => {
       () => 'connection-a',
       'process-a',
       { models: ['openai/gpt-5.6-sol'], variants: { 'openai/gpt-5.6-sol': ['high'] } },
+      new Set(['opencode']),
     )
 
     expect(registration.runtimeCatalogs?.opencode).toEqual({

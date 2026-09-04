@@ -102,6 +102,7 @@ public sealed class DispatchService : IScopedService
             runnerId,
             processGeneration,
             info,
+            readiness,
             reportedWorkKeys,
             dispatches,
             ct);
@@ -163,6 +164,7 @@ public sealed class DispatchService : IScopedService
         string runnerId,
         string processGeneration,
         RunnerInfo info,
+        RunnerRuntimeReadinessSnapshot readiness,
         IReadOnlySet<string> reportedWorkKeys,
         List<WorkDispatch> dispatches,
         CancellationToken ct)
@@ -211,7 +213,9 @@ public sealed class DispatchService : IScopedService
                 continue;
 
             if (dispatch is not null
-                && (!isManagerExecution || ManagerExecutionRuntimeCapabilities.Supports(info)))
+                && (!isManagerExecution
+                    || (ManagerExecutionRuntimeCapabilities.Supports(info, dispatch.AgentDefinition?.Runtime)
+                        && readiness.Allows(RuntimeRequirementsFromDispatch(dispatch)))))
                 dispatches.Add(dispatch);
         }
 
@@ -276,19 +280,18 @@ public sealed class DispatchService : IScopedService
                 var pendingDispatch = record is null ? null : DeserializeAgentDispatch(record);
                 var isManagerExecution = pendingDispatch is not null
                     && ManagerExecutionBinding.TryRead(pendingDispatch, out _);
-                if (isManagerExecution && !ManagerExecutionRuntimeCapabilities.Supports(info))
+                if (isManagerExecution
+                    && !ManagerExecutionRuntimeCapabilities.Supports(info, pendingDispatch?.AgentDefinition?.Runtime))
                     continue;
-                var requiredRuntimes = isManagerExecution
-                    ? []
-                    : record is null
-                        ? null
-                        : RuntimeRequirementsFromDispatch(pendingDispatch);
+                var requiredRuntimes = record is null
+                    ? null
+                    : RuntimeRequirementsFromDispatch(pendingDispatch);
                 if (!readiness.Allows(requiredRuntimes))
                     continue;
                 var expectation = pendingDispatch is null
                     ? null
                     : BuildAgentJobCapabilityExpectation(info, readiness, pendingDispatch);
-                if (pendingDispatch?.AgentDefinition?.ReasoningEffort is not null && expectation is null)
+                if (expectation is null)
                     continue;
 
                 ct.ThrowIfCancellationRequested();
@@ -337,12 +340,16 @@ public sealed class DispatchService : IScopedService
 
         var witness = readiness.Witnesses.FirstOrDefault(candidate =>
             string.Equals(candidate.Runtime, definition.Runtime, StringComparison.OrdinalIgnoreCase));
+        if (witness?.Ready != true
+            || witness.Generation is not > 0
+            || string.IsNullOrWhiteSpace(info.ConnectionGeneration)
+            || !string.Equals(readiness.ConnectionGeneration, info.ConnectionGeneration, StringComparison.Ordinal))
+            return null;
+
         if (!string.IsNullOrWhiteSpace(definition.ReasoningEffort)
             && (catalog.SupportsReasoningEffort != true
                 || catalog.Complete != true
-                || string.IsNullOrWhiteSpace(catalog.CapabilityRevision)
-                || witness?.Ready != true
-                || witness.Generation is not > 0))
+                || string.IsNullOrWhiteSpace(catalog.CapabilityRevision)))
             return null;
 
         return new CapabilityClaimExpectation(
@@ -356,9 +363,21 @@ public sealed class DispatchService : IScopedService
             catalog.CapabilityRevision,
             witness?.Generation,
             info.ConnectionGeneration,
-            HasExplicitExecutionSource(dispatch)
-                ? [AgentExecutionSources.Version1Capability]
-                : null);
+            RequiredAgentJobCapabilities(dispatch, definition.Runtime));
+    }
+
+    private static string[]? RequiredAgentJobCapabilities(WorkDispatch dispatch, string runtime)
+    {
+        var required = HasExplicitExecutionSource(dispatch)
+            ? new List<string> { AgentExecutionSources.Version1Capability }
+            : [];
+        if (ManagerExecutionBinding.TryRead(dispatch, out _))
+        {
+            required.AddRange(ManagerExecutionRuntimeCapabilities.Required);
+            if (string.Equals(runtime, "opencode", StringComparison.OrdinalIgnoreCase))
+                required.Add(ManagerExecutionRuntimeCapabilities.IsolatedOpenCodeV1);
+        }
+        return required.Count == 0 ? null : required.Distinct(StringComparer.Ordinal).ToArray();
     }
 
     private static bool HasExplicitExecutionSource(WorkDispatch dispatch)

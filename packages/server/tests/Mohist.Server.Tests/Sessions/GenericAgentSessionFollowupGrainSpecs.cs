@@ -65,6 +65,31 @@ public sealed class GenericAgentSessionFollowupGrainSpecs
     }
 
     [Fact]
+    public async Task SameIdempotencyKey_AfterRuntimeUnavailableReturnsTerminalFailureWithoutRedelivery()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-disabled-replay");
+        var first = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "same input",
+            Source: "agent-session-followup",
+            IdempotencyKey: "disabled-key"));
+        await grain.BeginNextFollowupDispatchAsync();
+        await grain.MarkFollowupTurnTerminalAsync(
+            first.OperationId,
+            AgentTurnStatus.Failed,
+            new AgentTurnResult(FailureCategory: "runtime-unavailable"));
+
+        var replay = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "same input",
+            Source: "agent-session-followup",
+            IdempotencyKey: "disabled-key"));
+
+        Assert.True(replay.AlreadyAccepted);
+        Assert.False(replay.ShouldRedeliver);
+        Assert.Equal(AgentTurnStatus.Failed, replay.TurnStatus);
+        Assert.Equal("runtime-unavailable", replay.FailureCategory);
+    }
+
+    [Fact]
     public async Task ExecutingTurn_AcceptsFollowupAsNextQueuedTurnWithoutInterruptingCurrentTurn()
     {
         var (grain, sessionId) = await CreateAttachedSessionAsync("runtime-executing-followup");

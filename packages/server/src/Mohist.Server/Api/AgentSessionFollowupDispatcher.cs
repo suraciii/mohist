@@ -11,6 +11,8 @@ namespace Mohist.Server.Api;
 
 public sealed class AgentSessionFollowupDispatcher : IScopedService
 {
+    internal const string RuntimeUnavailableError = "runtime-unavailable";
+
     private readonly AgentSessionQuerier _sessions;
     private readonly IGrainFactory _grains;
     private readonly IFollowupDeliveryDispatcher _delivery;
@@ -34,19 +36,27 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
         _timeProvider = timeProvider;
     }
 
-    public Task DispatchNextAsync(string projectId, string sessionId, CancellationToken ct) =>
+    public Task<FollowupDeliveryResult?> DispatchNextAsync(string projectId, string sessionId, CancellationToken ct) =>
         DispatchAsync(projectId, sessionId, targetTurnId: null, ct);
 
-    public Task DispatchForTurnAsync(string projectId, string sessionId, string turnId, CancellationToken ct) =>
+    public Task<FollowupDeliveryResult?> DispatchForTurnAsync(
+        string projectId,
+        string sessionId,
+        string turnId,
+        CancellationToken ct) =>
         DispatchAsync(projectId, sessionId, turnId, ct);
 
-    private async Task DispatchAsync(string projectId, string sessionId, string? targetTurnId, CancellationToken ct)
+    private async Task<FollowupDeliveryResult?> DispatchAsync(
+        string projectId,
+        string sessionId,
+        string? targetTurnId,
+        CancellationToken ct)
     {
         var target = await _sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
         if (target is null || string.IsNullOrWhiteSpace(target.RunnerId)
             || string.IsNullOrWhiteSpace(target.Runtime)
             || string.IsNullOrWhiteSpace(target.RuntimeSessionId))
-            return;
+            return null;
 
         // Every newly emitted follow-up carries the v1 source marker. Hold
         // it when the selected Runner has not advertised the matching wire
@@ -57,20 +67,20 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
             || !runnerInfo.Capabilities.Any(capability =>
                 string.Equals(capability, AgentExecutionSources.Version1Capability, StringComparison.Ordinal)
                 || string.Equals(capability, "spec/*", StringComparison.Ordinal)))
-            return;
+            return null;
 
         var grain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
         var dispatch = targetTurnId is null
             ? await grain.BeginNextFollowupDispatchAsync()
             : await grain.BeginFollowupDispatchForTurnAsync(targetTurnId);
         if (dispatch is null)
-            return;
+            return null;
 
         var managerGrant = await IssueManagerGrantAsync(target, dispatch, ct);
         if (managerGrant is ManagerGrantResult { Authorized: false })
         {
             await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
-            return;
+            return null;
         }
 
         FollowupDeliveryResult result;
@@ -109,13 +119,26 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
         {
             await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
             RevokeManagerGrant(managerGrant);
-            return;
+            return null;
         }
         if (!result.Accepted)
         {
-            await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
+            if (string.Equals(result.Error, RuntimeUnavailableError, StringComparison.Ordinal))
+            {
+                await grain.MarkFollowupTurnTerminalAsync(
+                    dispatch.OperationId,
+                    AgentTurnStatus.Failed,
+                    new AgentTurnResult(
+                        FailureReason: "The bound runtime is disabled on the Runner.",
+                        FailureCategory: RuntimeUnavailableError));
+            }
+            else
+            {
+                await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
+            }
             RevokeManagerGrant(managerGrant);
         }
+        return result;
     }
 
     private async Task<ManagerGrantResult?> IssueManagerGrantAsync(

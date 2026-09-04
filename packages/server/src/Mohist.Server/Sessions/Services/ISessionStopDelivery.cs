@@ -38,6 +38,7 @@ public static class SessionStopDeliveryArbitration
             "not-cancellable" => AgentSessionStopDisposition.NotCancellable,
             "ended" => AgentSessionStopDisposition.Ended,
             "idle" => AgentSessionStopDisposition.Idle,
+            "unavailable" => AgentSessionStopDisposition.Unavailable,
             null => AgentSessionStopDisposition.Unavailable,
             _ => AgentSessionStopDisposition.StopRequested,
         };
@@ -45,7 +46,8 @@ public static class SessionStopDeliveryArbitration
         return new SessionStopDeliveryResult(
             disposition,
             response.Reply?.InterruptUnconfirmed,
-            response.DispatchStarted);
+            response.DispatchStarted,
+            response.Reply?.Error);
     }
 }
 
@@ -53,9 +55,13 @@ public sealed record SessionStopDeliveryResponse(
     RunnerStopReply? Reply,
     bool DispatchStarted);
 
-public sealed record RunnerStopReply(string? State, bool? InterruptUnconfirmed = null);
+public sealed record RunnerStopReply(
+    string? State,
+    bool? InterruptUnconfirmed = null,
+    string? Error = null);
 
 public sealed record SessionStopDeliveryResult(
     AgentSessionStopDisposition Disposition,
     bool? InterruptUnconfirmed,
-    bool DispatchStarted);
+    bool DispatchStarted,
+    string? Error = null);

@@ -108,6 +108,28 @@ public sealed class AgentSessionStopOperationsTests
         Assert.Null(context.Session.AppliedDelivery);
     }
 
+    [Theory]
+    [InlineData(null, "RunnerUnavailable")]
+    [InlineData("runtime-unavailable", "RuntimeUnavailable")]
+    public async Task Unavailable_runner_reply_preserves_runtime_availability_semantics(
+        string? error,
+        string expectedKind)
+    {
+        var executing = Control(AgentTurnStatus.Executing, AgentTurnControlClassification.Executing);
+        var context = Context(
+            new AgentTurnStopClaimResult(executing, true, "operation-1"),
+            delivery: new SessionStopDeliveryResponse(
+                new RunnerStopReply("unavailable", Error: error),
+                true));
+
+        var result = await context.StopAsync();
+
+        Assert.Equal(Enum.Parse<TurnControlResultKind>(expectedKind), result.Kind);
+        Assert.True(result.DispatchStarted);
+        Assert.Equal(("turn-1", "operation-1"), context.Session.MarkedDispatched);
+        Assert.Null(context.Session.AppliedDelivery);
+    }
+
     [Fact]
     public async Task Executing_launch_stop_does_not_arbitrate_the_job_verdict()
     {

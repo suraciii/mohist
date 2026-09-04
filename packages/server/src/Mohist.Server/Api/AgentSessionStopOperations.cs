@@ -16,6 +16,7 @@ internal enum TurnControlResultKind
     NotCancellable,
     Blocked,
     RunnerUnavailable,
+    RuntimeUnavailable,
 }
 
 internal sealed record TurnControlResult(
@@ -88,7 +89,12 @@ internal static class AgentSessionStopOperations
             ct));
 
         if (result.Disposition == AgentSessionStopDisposition.Unavailable)
-            return new(TurnControlResultKind.RunnerUnavailable, control.Status, DispatchStarted: result.DispatchStarted);
+            return new(
+                string.Equals(result.Error, "runtime-unavailable", StringComparison.Ordinal)
+                    ? TurnControlResultKind.RuntimeUnavailable
+                    : TurnControlResultKind.RunnerUnavailable,
+                control.Status,
+                DispatchStarted: result.DispatchStarted);
 
         await session.ApplyStopDeliveryAsync(
             control.TurnId,

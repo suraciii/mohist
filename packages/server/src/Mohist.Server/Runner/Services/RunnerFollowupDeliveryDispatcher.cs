@@ -64,7 +64,7 @@ public sealed class RunnerFollowupDeliveryDispatcher : IFollowupDeliveryDispatch
                 "session.followup",
                 payload,
                 ct: ct);
-            return new FollowupDeliveryResult(response.Accepted);
+            return new FollowupDeliveryResult(response.Accepted, response.Error);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

@@ -106,7 +106,7 @@ public abstract class AgentJobGrainTestSupport
             .GetRequiredService<DispatchService>();
         return dispatch.PollAsync(
             runnerId,
-            request ?? new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
+            request ?? CapabilityFencePollRequest("pi", "opencode"));
     }
 
     protected static async Task<T> WaitForAsync<T>(
@@ -138,6 +138,7 @@ public abstract class AgentJobGrainTestSupport
             ["spec/*"],
             "agent-job-host",
             pid,
+            ConnectionGeneration: CapabilityFenceConnection,
             RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
         if (maxWorkflowSlots != RunnerCapacity.DefaultMaxWorkflowSlots)
         {
@@ -179,11 +180,9 @@ public abstract class AgentJobGrainTestSupport
         new(Prompt: prompt, WorkspacePath: workspacePath, ProjectId: projectId, AgentId: "agent-test");
 
     /// <summary>
-    /// Connection generation shared by the capability-fence helpers.
-    /// Re-registering the test runner with this identity and seeding
-    /// the readiness witness is what lets an explicit reasoning-effort
-    /// dispatch clear the stage-1 capability claim fence (issue-557
-    /// T-006) instead of being left pending forever.
+    /// Connection generation shared by AgentJob registration and poll helpers.
+    /// Every claim carries a runtime-readiness witness so the Runner grain can
+    /// recheck the same generation at the atomic claim boundary.
     /// </summary>
     protected const string CapabilityFenceConnection = "test-connection";
 

@@ -120,6 +120,15 @@ export async function executeOpenCodeTurn(
     onSessionReady: async (session) => {
       attachedRuntimeSessionId = session.runtimeSessionId
       executionBinding = physicalBinding(work, binding.agentSessionId, 'opencode', session.runtimeSessionId)
+      if (managerExecution && binding.agentSessionId) {
+        await deps.options.onManagerRuntimeSessionReady?.({
+          boundary: managerExecution,
+          handle: runtimeHandle,
+          sessionId: binding.agentSessionId,
+          runtimeSessionId: session.runtimeSessionId,
+          workDir: session.workDir,
+        })
+      }
       await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
       if (!skipInitialInput && !attachedInputPublished) {
         attachedInputPublished = true

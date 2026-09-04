@@ -8,6 +8,15 @@ namespace Mohist.Server.Tests.Slack;
 [Trait("level", "L0")]
 public sealed class ManagerExecutionCredentialsTests
 {
+    private static readonly string[] PiManagerCapabilities =
+    [
+        ManagerExecutionRuntimeCapabilities.GrantV1,
+        ManagerExecutionRuntimeCapabilities.EpochV1,
+        ManagerExecutionRuntimeCapabilities.PrivateBrokerV1,
+        ManagerExecutionRuntimeCapabilities.PiScopedExecutorV1,
+        ManagerExecutionRuntimeCapabilities.RedactionV1,
+    ];
+
     private static readonly ManagerExecutionOrigin Origin = new(
         "T_WORKSPACE",
         "D_MANAGER",
@@ -138,14 +147,40 @@ public sealed class ManagerExecutionCredentialsTests
     }
 
     [Fact]
-    public void Runtime_capability_gate_rejects_mixed_version_runners()
+    public void Pi_shared_capabilities_are_sufficient_for_manager_admission()
     {
-        var old = new RunnerInfo("runner-1", ["execution-source-v1"], "host", null);
-        var current = old with { Capabilities = ManagerExecutionRuntimeCapabilities.Required.ToArray() };
+        var runner = new RunnerInfo("runner-1", PiManagerCapabilities, "host", null);
 
-        Assert.False(ManagerExecutionRuntimeCapabilities.Supports(old));
-        Assert.True(ManagerExecutionRuntimeCapabilities.Supports(current));
+        Assert.True(ManagerExecutionRuntimeCapabilities.Supports(runner));
     }
+
+    [Theory]
+    [MemberData(nameof(PiManagerCapabilitiesMissingOne))]
+    public void Missing_any_pi_shared_capability_rejects_manager_admission(string missingCapability)
+    {
+        var capabilities = PiManagerCapabilities
+            .Where(capability => !string.Equals(capability, missingCapability, StringComparison.Ordinal))
+            .ToArray();
+        var runner = new RunnerInfo("runner-1", capabilities, "host", null);
+
+        Assert.False(ManagerExecutionRuntimeCapabilities.Supports(runner));
+    }
+
+    [Fact]
+    public void OpenCode_isolation_capability_is_optional_for_pi_manager_admission()
+    {
+        var piOnly = new RunnerInfo("runner-1", PiManagerCapabilities, "host", null);
+        var piAndOpenCode = piOnly with
+        {
+            Capabilities = [.. PiManagerCapabilities, ManagerExecutionRuntimeCapabilities.IsolatedOpenCodeV1],
+        };
+
+        Assert.True(ManagerExecutionRuntimeCapabilities.Supports(piOnly));
+        Assert.True(ManagerExecutionRuntimeCapabilities.Supports(piAndOpenCode));
+    }
+
+    public static TheoryData<string> PiManagerCapabilitiesMissingOne =>
+        new(PiManagerCapabilities);
 }
 
 file sealed class SharedEpochStore : IManagerExecutionLeaseStore

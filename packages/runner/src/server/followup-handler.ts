@@ -39,6 +39,7 @@ import type { AgentSessionRuntimeEventQueue, RuntimeEventRecord } from './runtim
 import {
   callFollowup,
   ensureCommandRuntimeReady,
+  resolveAccessor,
   resolveCommandRuntime,
   type CommandRuntimeAccessors,
 } from './command-runtime.js'
@@ -86,7 +87,7 @@ export interface FollowupHandlerDeps {
 
 export interface FollowupDeliveryResult {
   accepted: boolean
-  error?: 'missing' | 'unavailable'
+  error?: 'missing' | 'runtime-unavailable' | 'unavailable'
 }
 
 export function createFollowupHandler(
@@ -173,6 +174,15 @@ async function handleFollowup(
         },
       )
       if (binding.runtime.toLowerCase() === 'opencode') {
+        const sharedOpenCode = resolveAccessor(deps.openCodeRuntime)
+        if (!sharedOpenCode) {
+          await managerExecution.dispose()
+          return runtimeUnavailable()
+        }
+        if (!sharedOpenCode.ready()) {
+          await managerExecution.dispose()
+          return unavailable()
+        }
         const isolated = await managerExecution.openCodeRuntime(target.workDir, new AbortController().signal)
         if (!isolated) {
           await managerExecution.dispose()
@@ -190,7 +200,7 @@ async function handleFollowup(
   }
   if (!handle) {
     await managerExecution?.dispose().catch(() => undefined)
-    return unavailable()
+    return runtimeUnavailable()
   }
   if (!(await ensureCommandRuntimeReady(handle))) {
     await managerExecution?.dispose().catch(() => undefined)
@@ -783,4 +793,8 @@ function isPromise<T>(value: T | Promise<T>): value is Promise<T> {
 
 function unavailable(): FollowupDeliveryResult {
   return { accepted: false, error: 'unavailable' }
+}
+
+function runtimeUnavailable(): FollowupDeliveryResult {
+  return { accepted: false, error: 'runtime-unavailable' }
 }

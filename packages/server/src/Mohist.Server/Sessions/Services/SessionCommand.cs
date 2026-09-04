@@ -13,6 +13,8 @@ public enum SessionCommandError
     Conflict,
     Missing,
     NotStarted,
+    [JsonStringEnumMemberName("runtime-unavailable")]
+    RuntimeUnavailable,
     Unavailable,
 }
 

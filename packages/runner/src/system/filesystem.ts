@@ -197,6 +197,7 @@ export interface RunnerResourceContext {
     mkdirSync(path: string, options?: { recursive?: boolean }): void
     readFileSync(path: string, encoding: 'utf8'): string
     writeFileSync(path: string, content: string, options?: { mode?: number }): void
+    unlinkSync(path: string): void
   }
   readonly logger?: RunnerLogger
   readonly buildInfoFileSystem?: {
