@@ -6,7 +6,8 @@ import { useProjectPath } from '../../../entities/project'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/components/card'
 import { Badge } from '@/shared/ui/components/badge'
 
-const RUNNER_START_HINT = 'npx mohist runner'
+const RUNNER_INSTALL_COMMAND = 'mo install runner --repo-root <path>'
+const RUNNER_START_COMMAND = 'mo service start runner'
 
 const STATUS_CONFIG: Record<RunnerStatusRow['status'], { dot: string; badge: string; label: string }> = {
   idle: { dot: 'bg-success', badge: 'bg-success-subtle text-success ring-success-border', label: 'idle' },
@@ -251,7 +252,11 @@ function RunnerEmptyState() {
     <div className="py-12 text-center">
       <p className="text-sm font-medium text-foreground mb-2">No runners connected</p>
       <p className="text-xs text-muted-foreground">
-        Start a runner: <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono text-foreground">{RUNNER_START_HINT}</code>
+        First install:{' '}
+        <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono text-foreground">{RUNNER_INSTALL_COMMAND}</code>
+        <br />
+        Later starts:{' '}
+        <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono text-foreground">{RUNNER_START_COMMAND}</code>
       </p>
     </div>
   )

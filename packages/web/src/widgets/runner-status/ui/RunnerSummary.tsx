@@ -3,7 +3,8 @@ import type { RunnerStatusSummary } from '../../../entities/runner'
 import { useRunnerSummary } from '../../../entities/runner'
 import { useProjectPath } from '../../../entities/project'
 
-const RUNNER_START_HINT = 'Start a runner with: npx mohist runner'
+const RUNNER_INSTALL_COMMAND = 'mo install runner --repo-root <path>'
+const RUNNER_START_COMMAND = 'mo service start runner'
 
 interface RunnerSummaryProps {
   summary: RunnerStatusSummary
@@ -25,7 +26,9 @@ export function RunnerSummary({ summary, targetPath = '/runners' }: RunnerSummar
           </svg>
           No runner
         </span>
-        <span className="text-muted-foreground">{RUNNER_START_HINT}</span>
+        <span className="text-muted-foreground">
+          First install: <code>{RUNNER_INSTALL_COMMAND}</code>; later starts: <code>{RUNNER_START_COMMAND}</code>
+        </span>
       </div>
     )
   }
@@ -46,7 +49,7 @@ export function RunnerSummary({ summary, targetPath = '/runners' }: RunnerSummar
           </svg>
           Runner stale/offline
         </span>
-        <span className="text-muted-foreground">{RUNNER_START_HINT}</span>
+        <span className="text-muted-foreground">Start the installed runner: <code>{RUNNER_START_COMMAND}</code></span>
       </button>
     )
   }

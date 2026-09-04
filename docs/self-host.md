@@ -6,8 +6,8 @@ startup at boot, remote access, backup, and upgrade.
 ## Product Commitments
 
 - Server state remains in one durable data root or mounted Docker volume.
-- Runner remains on the host in both systemd and Docker deployments because it
-  operates repositories and invokes execution tools.
+- Runner remains on the host in both Linux user-systemd and Docker deployments
+  because it operates repositories and invokes execution tools.
 - An optional `mohist-slack` service remains a host process and needs no public
   inbound port.
 - Managed services start at boot, restart through their supported `mo`
@@ -23,9 +23,9 @@ startup at boot, remote access, backup, and upgrade.
 
 Choose one long-running mode:
 
-- **systemd:** Use on Linux laptops, NUCs, NAS devices, or VPS hosts. `mo install`
-  creates native user services, enables startup, and can install Runner and the
-  optional Slack adapter.
+- **Linux user-systemd:** Use on Linux laptops, NUCs, NAS devices, or VPS hosts.
+  `mo install` creates native user services, enables startup, and can install
+  Runner and the optional Slack adapter.
 - **Docker:** Use when Docker isolation or migration is preferred. Server runs
   in a container with state in a mounted volume. Runner and the optional Slack
   adapter remain on the host.
@@ -45,12 +45,12 @@ Use the development scripts for a local trial. Use [Getting Started](getting-sta
 for that path. Use [Remote Access](#remote-access), [Backup](#backup), and
 [Upgrade](#upgrade) for either deployment mode.
 
-- Daily laptop use: systemd as a [Local daemon](#local-daemon).
-- Always-on home server or NAS: systemd or Docker. See [Always-on server](#always-on-server-or-nas)
+- Daily laptop use: Linux user-systemd as a [Local daemon](#local-daemon).
+- Always-on home server or NAS: Linux user-systemd or Docker. See [Always-on server](#always-on-server-or-nas)
   or [Docker mode](#docker-mode).
 - Remote VPS: either mode with a reverse proxy or VPN. See [Remote Access](#remote-access).
 
-## systemd Mode
+## Linux user-systemd Mode
 
 The `mo` CLI installs Server, optional Runner, and optional Slack adapter as
 systemd user services.
@@ -104,23 +104,11 @@ Prefer `mo update server` and `mo update runner` for managed-service restarts.
 Do not start a second instance with `dotnet run`; changing Runner identity can
 break sticky Workflow assignment.
 
-#### macOS
+#### Other platforms
 
-`mo install` does not support macOS. The CLI currently supports Linux systemd
-and Windows Scheduled Tasks. During development, use `npm run dev:server` and
-`npm run dev:runner`, or create a launchd property list.
-
-#### Windows
-
-```bash
-mo install server
-mo install runner
-
-# Install only when Slack Agent Connections are used.
-mo install slack
-```
-
-The CLI creates platform-specific Scheduled Tasks that start at login.
+Managed `mo install` services are supported on Linux user-systemd only. During
+development on other platforms, use `npm run dev:server` and
+`npm run dev:runner`.
 
 ### Always-on Server or NAS
 
@@ -520,12 +508,6 @@ After an interrupted update, the next `mo update slack` first finalizes a
 committed transaction or converges the recorded rollback/roll-forward. If
 automatic recovery cannot be verified, it refuses to replace those files until
 the operator has preserved or resolved them.
-
-On Windows, an interrupted Slack install may leave
-`mohist-slack.exe.install.previous` beside the installed binary. A later install
-refuses to overwrite that known-good backup; preserve and resolve it before
-retrying. Mohist also refuses to adopt a disabled, foreign, or altered scheduled
-task that merely uses the `Mohist_Slack` name.
 
 For Docker:
 
