@@ -43,6 +43,31 @@ public class SystemUpdateCliOutcomeTests
     }
 
     [Fact]
+    public async Task RecordCliOutcomeAsync_PersistsActiveStageWithoutReleasingLock()
+    {
+        var store = new InMemoryUpdateStore();
+        var service = CreateService(
+            new SequencedSystemInfo(CreateInfo(runningGitHash: "oldhash", sourceHead: "newhash")),
+            store,
+            new RecordingCommandRunner(),
+            new StubReadinessProbe(new(true, true, true, "/assets/app.js", null)));
+
+        var response = await service.RecordCliOutcomeAsync(new SystemUpdateOutcomeRequest(
+            JobId: "cli-job-active",
+            Status: "running",
+            Stage: "Building runner",
+            Logs: [new SystemUpdateLogEntry(FixedNow, "Building runner", "candidate staged")],
+            SourcePath: "/repo"));
+
+        Assert.Equal("running", response.Status);
+        Assert.Null(response.Outcome);
+        Assert.Null(response.CompletedAt);
+        Assert.Equal("Building runner", response.Stage);
+        Assert.Contains(response.Logs, entry => entry.Message == "candidate staged");
+        Assert.Equal(0, store.AcquireAttempts);
+    }
+
+    [Fact]
     public async Task RecordCliOutcomeAsync_AppendsRequestLogsToPersistedJobLog()
     {
         var store = new InMemoryUpdateStore();

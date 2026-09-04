@@ -21,7 +21,6 @@ export {
   useSetStageModels,
   useStageModels,
   useSystemInfo,
-  useSystemUpdate,
   useSystemUpdateStatus,
   useUpdateConfig,
   useUpdateOpencodeModel,

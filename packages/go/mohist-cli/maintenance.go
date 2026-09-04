@@ -180,7 +180,7 @@ func runMaintenance(ctx context.Context, deps Dependencies, c command) int {
 	if strings.HasPrefix(c.kind, "skill-") {
 		return runSkill(ctx, deps, c)
 	}
-	return runInstallUpdate(ctx, deps, c)
+	return runInstallUpdateWithOutcome(ctx, deps, c)
 }
 
 func skillRoot(deps Dependencies) string {
@@ -671,7 +671,7 @@ func copyTree(ctx context.Context, source, target string, deps Dependencies) err
 	})
 }
 
-func runInstallUpdate(ctx context.Context, deps Dependencies, c command) int {
+func runInstallUpdateOriginal(ctx context.Context, deps Dependencies, c command) int {
 	component := argValue(c.args, "component", "")
 	enrollmentToken := ""
 	runnerServerURL := ""
