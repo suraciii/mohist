@@ -20,6 +20,8 @@ var otelTraceFields = []string{"trace_id", "service_name", "start_time", "end_ti
 var githubFields = []string{"id", "projectId", "owner", "repo", "repositoryName", "approvers", "status", "installationId", "repositoryNodeId", "reconnectRequired", "needsAttention", "needsReprojection", "lastError", "webhookSecret", "ingressUrl", "createdAt", "updatedAt"}
 var slackFields = []string{"id", "projectId", "agentId", "workspaceTeamId", "status", "connectionState", "botName", "owner", "accessPolicy", "nextAction", "createdAt", "updatedAt"}
 
+const maxSlackReplyFileBytes = 10 * 1024 * 1024
+
 func parseOperations(area string, args []string) (command, error) {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		return command{help: true, helpText: operationsHelp(area)}, nil
@@ -573,6 +575,9 @@ func slackMessageBody(deps Dependencies, cmd command) (map[string]any, error) {
 		data, err := deps.ReadFile(file)
 		if err != nil {
 			return nil, errors.New("could not read reply file")
+		}
+		if len(data) > maxSlackReplyFileBytes {
+			return nil, usage("message send file must be at most 10 MB")
 		}
 		body["fileName"] = filepath.Base(file)
 		body["fileContentBase64"] = base64.StdEncoding.EncodeToString([]byte(data))

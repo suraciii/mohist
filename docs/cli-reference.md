@@ -546,7 +546,7 @@ Mohist App.
   connection state, and one next action. Missing provisioning credentials point
   to `setup`. An incomplete Agent installation points to the same
   `install-agent` command.
-- `mo slack message send --workspace <workspace-id> --conversation <conversation-id> --reply-to <thread-root-ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <reply-anchor-ref> --text <body> [--image <url> | --file <path>]`
+- `mo slack message send --workspace <workspace-id> --conversation <conversation-id> --reply-to <thread-root-ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <reply-anchor-ref> [--text <body>] [--image <url> | --file <path>]`
   lets an Agent speak in Slack through an anchored reply. The seven reply-anchor
   options are required for Connection Agent replies; the CLI refuses an
   anchor-less or incomplete invocation before making an HTTP request. It renders

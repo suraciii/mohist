@@ -181,6 +181,24 @@ func TestOperationsSlackConnectionMessageMapsFileAndRejectsImage(t *testing.T) {
 	}
 }
 
+func TestOperationsSlackConnectionMessageRejectsOversizedFileLocally(t *testing.T) {
+	calls := 0
+	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("must not call")
+	}), map[string]string{"MOHIST_TOKEN": "connection-token"})
+	deps.ReadFile = func(string) (string, error) {
+		return strings.Repeat("x", maxSlackReplyFileBytes+1), nil
+	}
+	args := []string{"slack", "message", "send", "--project", "proj", "--workspace", "W1", "--conversation", "C1", "--reply-to", "R1", "--connection", "K1", "--session", "S1", "--triggering-message", "M1", "--dispatch-ref", "D1", "--file", "./large.png"}
+	if code := Run(context.Background(), args, deps); code != ExitUsage || calls != 0 {
+		t.Fatalf("code=%d calls=%d stderr=%q", code, calls, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "at most 10 MB") {
+		t.Fatalf("stderr=%q", errOut.String())
+	}
+}
+
 func TestOperationsSlackConnectionMessageMapsImage(t *testing.T) {
 	var request *http.Request
 	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
