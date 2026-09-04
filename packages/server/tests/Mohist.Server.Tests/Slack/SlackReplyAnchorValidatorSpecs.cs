@@ -23,7 +23,7 @@ public sealed class SlackReplyAnchorValidatorSpecs
     }
 
     [Fact]
-    public void Threaded_followup_requires_a_durable_bound_root_instead_of_legacy_thread_fallback()
+    public void Threaded_followup_requires_its_durable_bound_root_instead_of_legacy_thread_fallback()
     {
         var session = SessionWithTurns(
             InitialInput("initial-input", "root-message", threadId: null, boundRoot: null),
@@ -35,7 +35,7 @@ public sealed class SlackReplyAnchorValidatorSpecs
                 "agent-session-followup",
                 AgentSessionInputAcceptance.Accepted,
                 FixedNow,
-                Provenance: Provenance("followup-message", "root-message", boundRoot: null)),
+                Provenance: Provenance("followup-message", "root-message", boundRoot: "root-message")),
             new AgentTurnRecord(
                 "followup-turn",
                 2,
@@ -44,16 +44,35 @@ public sealed class SlackReplyAnchorValidatorSpecs
                 OperationId: "operation-1"));
         var request = Request(session, "root-message", "followup-message", "operation-1");
 
-        Assert.False(SlackReplyAnchorValidator.Validate(session, request).Valid);
+        Assert.Equal(new SlackReplyAnchorValidationResult(true, true),
+            SlackReplyAnchorValidator.Validate(session, request));
 
-        var durable = session.Status.Inputs![0] with
-        {
-            Provenance = session.Status.Inputs![0].Provenance! with { BoundThreadRootMessageId = "root-message" },
-        };
-        session.Status = session.Status with
-        {
-            Inputs = [durable, session.Status.Inputs[1]],
-        };
+        Assert.False(SlackReplyAnchorValidator.Validate(
+            session,
+            request with { ThreadRootMessageId = "legacy-thread-root" }).Valid);
+    }
+
+    [Fact]
+    public void Threaded_current_input_uses_its_own_durable_bound_root()
+    {
+        var session = SessionWithTurns(
+            InitialInput("initial-input", "initial-message", threadId: null, boundRoot: "initial-message"),
+            new AgentTurnRecord("initial-turn", 1, ["initial-input"], AgentTurnStatus.Completed, JobId: "job-1"),
+            new AgentSessionInputRecord(
+                "followup-input",
+                2,
+                "continue",
+                "agent-session-followup",
+                AgentSessionInputAcceptance.Accepted,
+                FixedNow,
+                Provenance: Provenance("followup-message", "legacy-thread", boundRoot: "current-root")),
+            new AgentTurnRecord(
+                "followup-turn",
+                2,
+                ["followup-input"],
+                AgentTurnStatus.Executing,
+                OperationId: "operation-1"));
+        var request = Request(session, "current-root", "followup-message", "operation-1");
 
         Assert.Equal(new SlackReplyAnchorValidationResult(true, true),
             SlackReplyAnchorValidator.Validate(session, request));
