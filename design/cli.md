@@ -45,6 +45,15 @@ from presentation.
   parsing, validation, and Project resolution.
 - A renderer cannot change request parameters, resource selection, or state
   transitions.
+- Slack reply construction is one typed mapping boundary. It validates the
+  complete Connection anchor before HTTP, maps text, image, and file bodies
+  through the same carrier, and never forwards legacy field names.
+- When `MOHIST_MANAGER_MODE=1`, the CLI uses the existing Runner-provided
+  credential broker. The broker supplies the Manager credential and the CLI
+  marks the request for the Manager route; ordinary execution keeps the
+  Connection credential and route.
+- Manager status and management requests use the broker's management lease.
+  The CLI never stores or receives the broker-issued bearer values.
 
 ## Command Model
 

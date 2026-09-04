@@ -702,6 +702,9 @@ func (c *client) request(ctx context.Context, method, path string, body any) (js
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set(operatorIDHeader, c.operatorID)
+	if c.managerMode {
+		req.Header.Set("X-Mohist-Manager-Mode", "1")
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
