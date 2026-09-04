@@ -555,7 +555,16 @@ function waitForModelRetry(delayMs: number, signal: AbortSignal): Promise<boolea
   })
 }
 
-function collectUnknownKeys(payload: JsonObject | null): readonly string[] | undefined {
+/**
+ * Shared classification boundary for both runtimes' unknown-option
+ * diagnostics: every key the Server's AgentJobDispatchProjector can place in
+ * the dispatch payload — including transport/source metadata the executor
+ * consumes before the turn (executionSource, slackExecutionContext) — must be
+ * known here, or an otherwise successful job carries a spurious
+ * options-unknown-keys diagnostic. Keeping one list prevents Pi and OpenCode
+ * from drifting apart.
+ */
+export function collectUnknownKeys(payload: JsonObject | null): readonly string[] | undefined {
   if (!payload || typeof payload !== 'object') return undefined
   const known = new Set([
     'prompt',
@@ -566,6 +575,7 @@ function collectUnknownKeys(payload: JsonObject | null): readonly string[] | und
     'runtime',
     'skills',
     'attachments',
+    'executionSource',
     'slackExecutionContext',
   ])
   const unknown: string[] = []
