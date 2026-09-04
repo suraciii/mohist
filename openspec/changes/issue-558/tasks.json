@@ -1,0 +1,123 @@
+{
+  "project": "mohist-local",
+  "description": "Issue #558: canonical Agent execution history read projection (Server API), Web Agent detail history + Session timeline interpretation alignment with stable Turn anchoring, Session result export, and CLI history/export reads.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Server execution-history projection and agent-scoped history read API",
+      "spec": "specs/agent-execution-history/spec.md#Server exposes the history through a read API",
+      "description": "Implement the read-time history projection in packages/server/src/Mohist.Server/Sessions: an AgentExecutionHistoryQuerier that joins the AgentJobs mirror with session state rows (label-indexed ListByLabelsAsync path) and the AgentExecutionHistoryItemDto record contract (kind, jobId/sessionId/turnId, taskSummary, normalized status, terminal result facts with failure reason, contextRefs envelope, timing, session-attributed model and cost). Expose it via GET /api/projects/{projectRef}/agents/{agentRef}/history?status=&limit= in a new Api/AgentExecutionHistoryRoutes.cs with project isolation, agent resolution (404 on unknown agent), recency ordering, limit clamp [1,200] default 50, and a status-filter restricted to the normalized vocabulary (pending|running|executing|completed|failed|stopped|unknown; legacy cancelled normalizes to stopped). Suppression is decided per response: a Turn bound to a returned Job record produces no second record; if its Job is filtered out, the launch Turn re-appears as its own Turn record. Add the docs/agent-sessions.md history-projection section.",
+      "acceptanceCriteria": [
+        "Unit tests pin the dedup rule: an Agent launch yields exactly one Job record (launch Turn suppressed), a Follow-up Turn yields its own (Session, Turn) record, and no history response presents the same execution twice.",
+        "Unit tests pin honest-field semantics: in-flight executions carry status + startedAt with absent endedAt/durationSeconds/result; Sessions without launch context produce absent contextRefs (never defaulted); cost, when present, always carries attribution \"session\" and is never divided or allocated per Turn/Job; model is session-attributed.",
+        "Unit tests pin read-only projection semantics: an authoritative unknown Job status renders as unknown (never failed, no failure icon/wording), a completed Job with unknown/active Session Activity presents the Job result without deriving Session Activity, and a failed Job with an open Session does not mark the Session failed.",
+        "Route tests verify project isolation, 404 for unknown agent, recency ordering (Job by max(TerminalAt, SubmittedAt), Turn by UpdatedAt ?? RecordedAt, merged descending), limit clamping, and 400 rejection for status values outside the accepted vocabulary including cancelled→stopped normalization.",
+        "Regression test asserts the existing GET .../agents/{ref}/jobs and .../agents/{ref}/sessions endpoints keep their current contracts unchanged.",
+        "Task-summary derivation tests cover Turn first accepted input text, Job InitialInputId → launch Turn PromptText → Job Title fallback chain, absence when no input text exists, and single-line bounding (~200 chars) with truncation marker.",
+        "docs/agent-sessions.md documents the history projection, its vocabulary, and its absence semantics."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "AgentExecutionHistoryQuerier + AgentExecutionHistoryItemDto in packages/server/src/Mohist.Server/Sessions, Api/AgentExecutionHistoryRoutes.cs registered beside the sibling agent routes, server unit/route tests, docs/agent-sessions.md history section",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design D1–D6: read-time projection, no new store; identity is Job id for Job records and (SessionId, TurnId) for Turn records; JSON absent-when-empty idiom (WhenWritingNull). Verification: server package fast tests then npm run verify."
+    },
+    {
+      "id": "T-002",
+      "title": "Session result export read endpoint with standalone execution context",
+      "spec": "specs/session-result-export/spec.md#A Session's result exports with its execution context",
+      "description": "Add GET /api/projects/{projectRef}/sessions/{sessionId}/export?turn={turnId} returning a standalone SessionResultExportDto (sessionId, turnId, jobId only when the exported Turn is Job-bound, taskSummary, contextRefs, status, result with failure reason, timing, session-attributed model and cost). Reuse the T-001 projection against a single Session; the default Turn is the most recent, ?turn= selects any other. The export uses the same derivation, vocabulary, and absence semantics as the history record so one execution reads identically everywhere; it is a pure GET with no generation timestamp, no state mutation, and no recovery/settlement side effects.",
+      "acceptanceCriteria": [
+        "Endpoint tests verify the completed-launch export carries Session/Turn/Job identities, Issue context ref, task summary, completed outcome with result summary, timing, model, and attributed cost.",
+        "Endpoint tests verify a Follow-up Turn export carries Session+Turn identities with jobId absent (never inherited from an earlier Turn) and that a Session without launch context omits the context field entirely.",
+        "Endpoint tests verify an unknown authoritative outcome exports as unknown and is never recorded or implied as failed, and that Job result stays distinct from Session Activity exactly as in the history projection.",
+        "A test pins read-only behavior and idempotence: repeating the export for the same execution returns identical facts and Session/Turn/Job state is unchanged.",
+        "A test asserts the export and the T-001 history record for the same Turn identity present identical status, result summary, failure reason, context refs, and attributed cost (same derivation source).",
+        "Project isolation is enforced and an unknown Session (or unknown turn parameter) is rejected consistently with sibling session routes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "SessionResultExportDto + export route (e.g. Api/AgentSessionExportRoutes.cs or beside UnifiedSessionRoutes), projection reuse for single-session export, server endpoint tests",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Design D9: one server-side read, two surfaces (Web in T-004, CLI in T-005). No timestamps embedded; contract must remain byte-identical across surfaces."
+    },
+    {
+      "id": "T-003",
+      "title": "Web Agent detail history list with shared execution vocabulary and anchored links",
+      "spec": "specs/agent-execution-history/spec.md#Web Agent detail page presents history records",
+      "description": "Replace the Agent detail page's session-row list (packages/web/src/pages/agent-detail) with the execution history: add history types and query in entities/agent/api hitting the T-001 endpoint, delete the useAgentSessions four-section SessionSection layout (including the failedSessions = activity === 'unknown' grouping), and render one chronological list of distinguishable records (task summary, status, result summary, context chips, timing, model, cost labeled session-level) with status-chip filtering over the same list so no record appears twice. Create the shared execution-vocabulary module (entities/agent/model/execution.ts: status labels/icons, failure-category interpretation, context-ref envelope rendering) consumed by history rows. Row activation navigates to /sessions/{sessionId}?turn={turnId} (Job records anchor InitialTurnId). Update docs/web-ui.md for the Agent detail history section.",
+      "acceptanceCriteria": [
+        "Page tests verify one row per execution distinguishable by task summary, result, and context, and that no execution appears in more than one section (single list, filter chips do not duplicate rows).",
+        "Page tests verify an unknown-status execution renders with unknown presentation and never under a Failed grouping, with a failure icon, or with failure wording; the old activity==='unknown'→Failed grouping code is deleted.",
+        "Page/component tests verify each row's activation target is /sessions/{sessionId}?turn={turnId} with Job rows anchoring InitialTurnId.",
+        "Session-level cost is rendered labeled as session-level and never presented as the measured cost of one Turn/Job.",
+        "The shared vocabulary module is exported from entities/agent (or shared/lib per design) and unit tests pin status labels/icons and context-ref envelope rendering with absence semantics.",
+        "Query tests cover the history endpoint contract (status filter, limit) and unknown statuses render as unknown.",
+        "docs/web-ui.md documents the Agent detail history section and closes its listed implementation gaps for this page."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "entities/agent/api history types + query, entities/agent/model/execution.ts shared vocabulary module, rewritten AgentDetailPage history section, web tests, docs/web-ui.md update",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Design D7 + D8 vocabulary module: this task creates the shared module; the Session page (T-004) consumes it. Verification: web package test:fast."
+    },
+    {
+      "id": "T-004",
+      "title": "Session page timeline interpretation completion, Turn anchoring, and Web export action",
+      "spec": "specs/session-timeline-interpretation/spec.md#Timeline distinguishes user input, agent reply, key actions, errors, boundaries, and unknown states",
+      "description": "Complete the Session page timeline per design D8 and the session-timeline-interpretation spec: consume the T-003 shared vocabulary so the header/timeline present the same context envelope, status terms, and failure interpretation as history records; add ?turn= URL-parameter anchoring on /sessions/:sessionId that positions the timeline on the Turn, survives refresh, and composes with the existing raw/interpreted scroll preservation; and close the remaining #427 derivation gaps in widgets/session-transcript — SessionInput acceptance/delivery state as input items, client-side mo-command domain-action recognition with resolved target links (honest 'Ran X' fallback on failed recognition, error class on failed outcome keeping the action sentence), ≥3 consecutive low-salience collapse where error/domain-action/input/message/status/boundary items break runs and never collapse, visible Compact/Reset boundaries, and unknown rendered distinct from idle and failed. Add the Session page export action (fetch T-002 endpoint + browser JSON download). Update design/session-timeline.md status and docs/web-ui.md.",
+      "acceptanceCriteria": [
+        "Widget tests pin classification: SessionInput items show acceptance/delivery state and belong to their current Turn; recognized mo operations render as domain actions with resolved target links; unrecognized commands render honest 'Ran X' summaries without speculative promotion; failed operations render as errors retaining the original summary plus the failure fact.",
+        "Widget tests pin collapse rules: ≥3 consecutive low-salience items of one class collapse into an expandable summary; a failure inside a run breaks it, renders outside any group, and remaining items form a new group; domain actions never collapse.",
+        "Widget tests pin Compact/Reset boundary entries and that unknown Turn/Activity states render explicitly, never as failed or idle.",
+        "Page tests verify ?turn= anchoring positions the timeline on the target Turn, the anchor and interpretation survive refresh (URL-param based, not component state), and anchoring composes with the raw/interpreted toggle; raw view tests pin fact order with no reorder/filter/add relative to interpreted sources.",
+        "Page tests verify the Session page presents the same context-ref envelope and Turn outcome vocabulary as the history record for the same execution (shared module), and the export action produces the T-002 contract whose facts match the timeline.",
+        "design/session-timeline.md status section updated to record the closed gaps; docs/web-ui.md Session page documentation updated."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Session page ?turn= anchoring, timeline input/domain-action/collapse/boundary derivations in widgets/session-transcript, shared-vocabulary adoption in pages/session, Web export action, widget/page tests, design/session-timeline.md + docs/web-ui.md updates",
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "Classification stays a pure client derivation from Server facts — no heartbeat/order-based state inference, no new Server fields. Verification: web package test:fast then npm run verify."
+    },
+    {
+      "id": "T-005",
+      "title": "CLI history read, session export, and enriched job view",
+      "spec": "specs/agent-execution-history/spec.md#CLI reads return the history contract",
+      "description": "Expose the history and export contracts in the CLI (packages/cli/Mohist.Cli): new mo agent history <agentRef> [--status ...] [--limit ...] with table columns for task, status, result summary, context, timing, model, and attributed cost, --json carrying the full history record contract with absent facts omitted, and each row printing the Session id (plus Turn id for Turn records) for direct mo session view navigation; new mo session export <session-id> [--turn <turn-id>] printing the export contract (human summary default, --json raw); enrich mo agent job view <job-id> with task summary, context, model, and attributed session cost resolved through the projection while mo agent job list keeps its current shape. Register outputs in ResourceOutputCatalog with new TableShapes. unknown renders as unknown in every table. Update docs/cli-reference.md.",
+      "acceptanceCriteria": [
+        "CLI tests verify mo agent history table output includes task, status, result summary, context, timing, model, and attributed-cost columns, an unknown status renders as unknown (never 'failed'), and each row shows the Session identity (and Turn identity for Turn records) usable with the existing mo session view command.",
+        "CLI tests verify --json output carries the full history record contract fields with absent facts omitted rather than nulled or fabricated, and that --status/--limit map onto the endpoint filter and clamp behavior (invalid status surfaced as an error).",
+        "CLI tests verify mo session export prints the same export contract as the Web export (default latest Turn, --turn selection), with --json omitting absent facts (no jobId for follow-up Turns, no context when absent, unknown stays unknown).",
+        "CLI tests verify mo agent job view is enriched with task summary, context, model, and session-attributed cost while mo agent job list output shape is unchanged for existing consumers.",
+        "New commands/tables are registered in ResourceOutputCatalog with TableShapes so generic output plumbing handles them.",
+        "docs/cli-reference.md documents mo agent history, mo session export, and the enriched job view."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "MohistCliCommands.Agent.cs history command, mo session export command, enriched mo agent job view, ResourceOutputCatalog TableShape registrations, CLI tests, docs/cli-reference.md update",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Design D10: history is a new surface with one normalized vocabulary; mo agent job view keeps its own wire vocabulary and only gains interpretation fields. Verification: CLI package tests then npm run verify."
+    }
+  ]
+}
