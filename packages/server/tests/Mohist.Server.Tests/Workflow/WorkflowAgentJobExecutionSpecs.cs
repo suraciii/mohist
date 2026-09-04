@@ -1,11 +1,14 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Subscriptions;
 using Mohist.Workflow.Definition;
 using Orleans.Runtime;
 using Xunit;
@@ -395,6 +398,90 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         Assert.False(settings.TryGetProperty("old", out _));
         Assert.Equal(3, settings.GetProperty("keep").GetInt32());
         Assert.Equal(WorkflowRunStatus.Completed, (await LoadRunAsync(_workflowId!)).Status);
+    }
+
+    [Fact]
+    public async Task FeedbackAgentTerminal_QueuesPushExactlyOnceWithoutReopeningApproval()
+    {
+        var definition = new WorkflowDefinition(
+        [
+            new StageDefinition(
+                "plan",
+                [new TaskDefinition("draft", "Draft", "spec/task")],
+                [new CheckDefinition("plan-ok", "Plan OK", "spec/check")],
+                RequiresApproval: true),
+        ],
+        Approval: new ApprovalConfig(new ApprovalFeedbackConfig([
+            AgentTask("apply-feedback", "Apply approval feedback", "feedback"),
+            new TaskDefinition("publish-feedback", "Publish approval feedback", "mohist/push"),
+        ])));
+        var workflow = await StartWorkflowAsync(
+            definition,
+            $"workflow-agent-feedback-{Guid.NewGuid():N}");
+        var runnerId = _runnerId!;
+
+        var (draft, _) = await PollWorkAnyAsync();
+        await ReportAsync(runnerId, draft, "completed");
+        var (checks, _) = await PollWorkAnyAsync();
+        await ReportChecksPassAsync(runnerId, checks, "plan-ok");
+        Assert.Equal(WorkflowRunStatus.AwaitingApproval, (await LoadRunAsync(_workflowId!)).Status);
+
+        var feedbackId = await workflow.RequestChangesAsync("apply and publish", "operator-1");
+        var approvalRequestCount = (await EventStore.ListAsync(_workflowId!))
+            .Count(evt => evt.Envelope.Type == EventCatalog.ReverseDns.StageApprovalRequested);
+
+        var (agent, _) = await PollWorkAnyAsync();
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, agent.OwnerKind);
+        Assert.Equal("apply-feedback.1", agent.ActionAttemptId);
+        await ReportAsync(runnerId, agent, "completed");
+
+        var afterAgent = await LoadRunAsync(_workflowId!);
+        Assert.Equal(WorkflowRunStatus.Ready, afterAgent.Status);
+        Assert.Equal(ApprovalFeedbackStatus.Open,
+            afterAgent.Feedback.Single(item => item.Id == feedbackId).Status);
+        var pushWork = Assert.IsType<WorkflowTaskWork>(afterAgent.NextWork());
+        Assert.Equal("publish-feedback.1", pushWork.Id);
+        Assert.Equal("mohist/push", pushWork.Uses);
+
+        var terminalEnvelope = Assert.Single(EventStore.Appended,
+            recorded => recorded.Envelope.Type == EventCatalog.ReverseDns.AgentJobWorkflowTerminal
+                && string.Equals(recorded.Envelope.Subject, agent.AgentJobId, StringComparison.Ordinal));
+        var eventCountBeforeReplay = EventStore.Appended.Count;
+        var workflowEventCountBeforeReplay = (await EventStore.ListAsync(_workflowId!)).Count;
+        await Services.GetRequiredService<AgentJobWorkflowTerminalHandler>()
+            .HandleAsync(terminalEnvelope.Envelope, CancellationToken.None);
+
+        Assert.Equal(eventCountBeforeReplay, EventStore.Appended.Count);
+        Assert.Equal(workflowEventCountBeforeReplay, (await EventStore.ListAsync(_workflowId!)).Count);
+        var afterReplay = await LoadRunAsync(_workflowId!);
+        Assert.Equal(WorkflowRunStatus.Ready, afterReplay.Status);
+        Assert.Equal("publish-feedback.1", Assert.IsType<WorkflowTaskWork>(afterReplay.NextWork()).Id);
+
+        var dispatch = Services.GetRequiredService<DispatchService>();
+        var push = Assert.Single((await dispatch.PollAsync(
+            runnerId,
+            DispatchTestExtensions.ReadyPollRequest())).Dispatches);
+        Assert.Equal(WorkDispatchOwnerKinds.Workflow, push.OwnerKind);
+        Assert.Equal("publish-feedback.1", push.ActionAttemptId);
+        Assert.Equal("mohist/push", push.Uses);
+        Assert.Equal(approvalRequestCount, (await EventStore.ListAsync(_workflowId!))
+            .Count(evt => evt.Envelope.Type == EventCatalog.ReverseDns.StageApprovalRequested));
+
+        var workflowEventsAfterClaim = (await EventStore.ListAsync(_workflowId!)).Count;
+        var repeatedPoll = DispatchTestExtensions.ReadyPollRequest() with
+        {
+            InFlight = [$"{WorkDispatchOwnerKinds.Workflow}:{_workflowId}:{push.WorkId}"],
+        };
+        Assert.Empty((await dispatch.PollAsync(runnerId, repeatedPoll)).Dispatches);
+        Assert.Equal(workflowEventsAfterClaim, (await EventStore.ListAsync(_workflowId!)).Count);
+
+        await ReportAsync(runnerId, push, "completed");
+        var resolved = await LoadRunAsync(_workflowId!);
+        Assert.Equal(ApprovalFeedbackStatus.Resolved,
+            resolved.Feedback.Single(item => item.Id == feedbackId).Status);
+        Assert.Equal(2, resolved.CurrentStage().Attempt);
+        Assert.Equal(approvalRequestCount, (await EventStore.ListAsync(_workflowId!))
+            .Count(evt => evt.Envelope.Type == EventCatalog.ReverseDns.StageApprovalRequested));
     }
 
     [Fact]
