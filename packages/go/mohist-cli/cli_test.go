@@ -17,6 +17,10 @@ func testDeps(transport http.RoundTripper, env map[string]string) (Dependencies,
 		Lookup:   func(name string) (string, bool) { value, ok := env[name]; return value, ok },
 		ReadFile: func(string) (string, error) { return "file-token\n", nil },
 		HomeDir:  func() (string, error) { return "/home/test", nil },
+		OpenManagedLock: func(string) (io.Closer, error) {
+			return io.NopCloser(strings.NewReader("")), nil
+		},
+		ManagedPathExists: func(string) bool { return false },
 	}, out, errOut
 }
 
@@ -140,6 +144,10 @@ func TestRunMaintenanceDefaultsCurrentDirectory(t *testing.T) {
 		WriteFile: func(string, string, os.FileMode) error { return nil },
 		Execute:   func(context.Context, string, []string) error { return nil },
 		MkdirAll:  func(string, os.FileMode) error { return nil },
+		OpenManagedLock: func(string) (io.Closer, error) {
+			return io.NopCloser(strings.NewReader("")), nil
+		},
+		ManagedPathExists: func(string) bool { return false },
 	}
 
 	if code := Run(context.Background(), []string{"install", "server", "--unit-dir", "/tmp/mohist-test"}, deps); code != ExitOK {

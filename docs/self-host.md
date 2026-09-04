@@ -499,9 +499,31 @@ mo update
 # mo update slack
 ```
 
-`mo update` rebuilds and restarts the installed Server and Runner and
-synchronizes the `mo` CLI. The optional host Slack adapter has its own update
-boundary; run `mo update slack` separately. That command stages the new binary,
+`mo update` stages immutable releases for the installed Server and Runner, then
+activates and verifies them as one transaction. It requires a clean Git
+worktree and binds every release to the exact source commit, tree, artifact
+digest, and a monotonic generation. `mo update server` and `mo update runner`
+apply the same transaction to one service. They do not merely rebuild files in
+the checkout. Update the CLI separately with `mo update cli`.
+
+Managed update requires an existing verified runtime release. It fails closed
+instead of converting a source-bound Server or Runner installation implicitly.
+
+The update preserves the installed Runner identity, Server address, service
+environment and credentials. Existing systemd drop-ins are not rewritten. A
+Server is accepted only after its health and runtime identity match the staged
+release; a Runner is accepted only after the same identity reconnects to the
+Server. A Runner with active work is not restarted; the command exits after
+restoring work admission so it can be retried when idle. If activation fails,
+Mohist restores the previous unit and service state and verifies the restored
+runtime. A later update first completes a durably verified transaction or
+rolls an earlier/ambiguous transaction back from its private snapshots. If the
+candidate or restored runtime cannot be proven, the pending marker remains and
+new installation or update work fails closed.
+
+The optional host Slack adapter has its own update boundary and is not updated
+by `mo update`; run `mo update slack` separately. That command stages the new
+binary,
 persists a user-only snapshot under `~/.mohist/update/slack` plus a non-secret
 recovery manifest in the staging directory, stops the adapter, replaces the
 binary,
