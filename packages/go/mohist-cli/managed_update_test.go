@@ -75,6 +75,76 @@ func TestManagedUpdateCommitsVerifiedServerRelease(t *testing.T) {
 	fixture.assertEventOrder("command:dotnet publish", "write-unit", "command:systemctl --user restart")
 }
 
+func TestManagedUpdateSystemdFakeValidatesRawWorkingDirectory(t *testing.T) {
+	tests := []struct {
+		name             string
+		workingDirectory string
+		wantExitCode     int
+	}{
+		{name: "quoted", workingDirectory: `"/runtime/server"`, wantExitCode: 1},
+		{name: "relative", workingDirectory: "runtime/server", wantExitCode: 1},
+		{name: "escaped percent", workingDirectory: "/runtime/release root/100%%/server"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newManagedUpdateFixture(t)
+			unit := "[Service]\nWorkingDirectory=" + test.workingDirectory + "\nExecStart=/runtime/server/Mohist.Server\n"
+			fixture.files.put(fixture.unitPath, []byte(unit), 0o600)
+
+			result := fixture.commands.Run(context.Background(), managedCommand{
+				Name: "systemctl",
+				Args: []string{"--user", "restart", "mohist.service"},
+			})
+
+			if result.ExitCode != test.wantExitCode {
+				t.Fatalf("restart exit code = %d, want %d", result.ExitCode, test.wantExitCode)
+			}
+		})
+	}
+}
+
+func TestManagedUpdateActivatesIndentedServiceDirectivesWithoutCrossSectionPollution(t *testing.T) {
+	fixture := newManagedUpdateFixture(t)
+	unit := "[Unit]\n" +
+		"WorkingDirectory=/unit/decoy\n" +
+		"ExecStart=/unit/decoy\n" +
+		"Environment=MOHIST_RUNTIME_IDENTITY_PATH=/unit/decoy.json\n\n" +
+		"[Service]\n" +
+		"  WorkingDirectory=/runtime/old/server\n" +
+		"\tEnvironment=\"PATH=/usr/bin\"\n" +
+		"\tEnvironment=\"MOHIST_RUNTIME_IDENTITY_PATH=/runtime/old/server/runtime-identity.json\"\n" +
+		"  ExecStart=/runtime/old/server/Mohist.Server\n" +
+		"Restart=on-failure\n\n" +
+		"[Install]\n" +
+		"WorkingDirectory=/install/decoy\n" +
+		"ExecStart=/install/decoy\n" +
+		"Environment=MOHIST_RUNTIME_IDENTITY_PATH=/install/decoy.json\n" +
+		"WantedBy=default.target\n"
+	fixture.files.put(fixture.unitPath, []byte(unit), 0o600)
+
+	if err := fixture.updater.Update(context.Background(), ManagedUpdateRequest{
+		Components: []string{"server"}, RepoRoot: "/repo",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if status := pointerText(fixture.pointer("active.json"), "status"); status != "verified" {
+		t.Fatalf("active status = %q", status)
+	}
+	activated := fixture.files.text(fixture.unitPath)
+	for _, preserved := range []string{
+		"WorkingDirectory=/unit/decoy\n",
+		"ExecStart=/unit/decoy\n",
+		"Environment=MOHIST_RUNTIME_IDENTITY_PATH=/unit/decoy.json\n",
+		"WorkingDirectory=/install/decoy\n",
+		"ExecStart=/install/decoy\n",
+		"Environment=MOHIST_RUNTIME_IDENTITY_PATH=/install/decoy.json\n",
+	} {
+		if !strings.Contains(activated, preserved) {
+			t.Fatalf("activation changed non-Service directive %q:\n%s", preserved, activated)
+		}
+	}
+}
+
 func TestManagedUpdateCommitsVerifiedRunnerRelease(t *testing.T) {
 	fixture := newManagedRunnerUpdateFixture(t)
 	serverUnitPath := "/home/test/.config/systemd/user/mohist.service"
@@ -969,6 +1039,20 @@ func (commands *managedUpdateFakeCommands) Run(_ context.Context, command manage
 			}
 			unit := commands.files.text(unitPath)
 			return managedCommandResult{Stdout: managedTestSystemdProperty(unit, property)}
+		case "restart":
+			if len(command.Args) != 3 {
+				return managedCommandResult{ExitCode: 2}
+			}
+			unitPath := commands.unitPaths[command.Args[2]]
+			unit := commands.files.text(unitPath)
+			workingDirectories := managedTestSystemdDirectiveValues(unit, "WorkingDirectory")
+			if len(workingDirectories) != 1 {
+				return managedCommandResult{ExitCode: 1}
+			}
+			if _, err := parseManagedSystemdWorkingDirectory(workingDirectories[0]); err != nil {
+				return managedCommandResult{ExitCode: 1}
+			}
+			return managedCommandResult{}
 		default:
 			return managedCommandResult{}
 		}
@@ -1009,13 +1093,48 @@ func (commands *managedUpdateFakeCommands) hasSystemctlMutation() bool {
 }
 
 func managedTestSystemdProperty(unit, property string) string {
-	values := []string{}
-	for _, line := range strings.Split(unit, "\n") {
-		if strings.HasPrefix(line, property+"=") {
-			values = append(values, strings.TrimPrefix(line, property+"="))
+	values := managedTestSystemdDirectiveValues(unit, property)
+	switch property {
+	case "WorkingDirectory":
+		if len(values) == 1 {
+			if decoded, err := parseManagedSystemdWorkingDirectory(values[0]); err == nil {
+				values[0] = decoded
+			}
+		}
+	case "ExecStart", "Environment":
+		for index := range values {
+			values[index] = strings.ReplaceAll(values[index], "%%", "%")
 		}
 	}
 	return strings.Join(values, " ") + "\n"
+}
+
+func managedTestSystemdDirectiveValues(unit, property string) []string {
+	values := []string{}
+	inService := false
+	serviceSections := 0
+	for _, line := range splitManagedUnitLines([]byte(unit)) {
+		body := string(line.body)
+		trimmed := strings.TrimSpace(body)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			inService = trimmed == "[Service]"
+			if inService {
+				serviceSections++
+			}
+			continue
+		}
+		if !inService {
+			continue
+		}
+		key, value, _, ok := managedUnitDirective(body)
+		if ok && key == property {
+			values = append(values, value)
+		}
+	}
+	if serviceSections != 1 {
+		return nil
+	}
+	return values
 }
 
 type managedUpdateFakeControl struct {

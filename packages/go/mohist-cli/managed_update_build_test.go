@@ -163,7 +163,7 @@ func TestManagedUpdaterBuildFailurePrecedesServiceActivation(t *testing.T) {
 	})
 	unitPath := filepath.Join("/home/test", ".config", "systemd", "user", "mohist.service")
 	commands.unitPath = unitPath
-	files.put(unitPath, []byte("[Unit]\nDescription=managed\n[Service]\nWorkingDirectory=\"/old\"\nExecStart=\"/old/Mohist.Server\"\nEnvironment=MOHIST_RUNTIME_IDENTITY_PATH=\"/old/runtime-identity.json\"\n[Install]\nWantedBy=default.target\n"))
+	files.put(unitPath, []byte("[Unit]\nDescription=managed\n[Service]\nWorkingDirectory=/old\nExecStart=\"/old/Mohist.Server\"\nEnvironment=MOHIST_RUNTIME_IDENTITY_PATH=\"/old/runtime-identity.json\"\n[Install]\nWantedBy=default.target\n"))
 	files.put("/repo/Mohist.sln", []byte("solution"))
 
 	env := managedUpdateEnvironment{
@@ -187,7 +187,7 @@ func TestManagedUpdaterBuildFailurePrecedesServiceActivation(t *testing.T) {
 		}
 	}
 	unit, _, readErr := files.ReadFile(unitPath)
-	if readErr != nil || !strings.Contains(string(unit), "WorkingDirectory=\"/old\"") {
+	if readErr != nil || !strings.Contains(string(unit), "WorkingDirectory=/old") {
 		t.Fatalf("service unit changed before activation: %q, %v", unit, readErr)
 	}
 }
