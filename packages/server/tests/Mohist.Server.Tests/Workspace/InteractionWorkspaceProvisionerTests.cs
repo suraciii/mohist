@@ -46,7 +46,32 @@ public sealed class InteractionWorkspaceProvisionerTests
         var name = await provisioner.EnsureSlackWorkspaceAsync("p1", "T1", "C1", Now);
 
         Assert.Equal("slack-C1", name);
+        var workspace = Assert.Single(store.All);
+        Assert.Equal("p1", workspace.ProjectId);
+        Assert.Equal(new WorkspaceOrigin.Slack("T1", "C1"), workspace.Origin);
         Assert.Empty(grains.Created);
+    }
+
+    [Fact]
+    public async Task EnsureSlackWorkspace_SameOriginInDifferentProjects_CreatesIndependentWorkspaces()
+    {
+        var store = new FakeWorkspaceStore();
+        var grains = new FakeGrainFactory(store);
+        var provisioner = new InteractionWorkspaceProvisioner(store, grains);
+
+        var first = await provisioner.EnsureSlackWorkspaceAsync("p1", "T1", "C1", Now);
+        var second = await provisioner.EnsureSlackWorkspaceAsync("p2", "T1", "C1", Now);
+
+        Assert.Equal("slack-C1", first);
+        Assert.Equal("slack-C1", second);
+        Assert.Equal(2, store.All.Count);
+        Assert.Equal(["p1", "p2"], store.All.Select(workspace => workspace.ProjectId).Order().ToArray());
+        Assert.All(store.All, workspace =>
+        {
+            Assert.Equal(new WorkspaceOrigin.Slack("T1", "C1"), workspace.Origin);
+            Assert.Equal(WorkspaceStatus.Active, workspace.Status);
+        });
+        Assert.Equal(2, grains.Created.Count);
     }
 
     [Fact]
