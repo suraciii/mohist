@@ -72,6 +72,22 @@ public sealed class AgentTaskDefinitionFactoryTests
     }
 
     [Fact]
+    public void ArchivedName_RemainsOccupied_ForDerivedName()
+    {
+        const string archivedName = "Terminal rejection task";
+        var derived = AgentTaskDefinitionFactory.Build(
+            archivedName,
+            hasAcceptedAttachment: false,
+            nameHint: null,
+            callerHint: new ExecutionConfigHint(Model: "provider/task"),
+            projectDefault: null,
+            identity: "task-terminal-rejection-derived-retry",
+            occupiedNames: [archivedName]);
+
+        Assert.Equal("Terminal rejection task 2", derived.Name);
+    }
+
+    [Fact]
     public void AttachmentOnlyTask_UsesDeterministicShortToken()
     {
         var first = AgentTaskDefinitionFactory.Build(

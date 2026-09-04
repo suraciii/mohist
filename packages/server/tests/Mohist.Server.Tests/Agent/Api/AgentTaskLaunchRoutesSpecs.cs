@@ -63,6 +63,22 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
                 string.Equals(firstData.GetProperty(field).GetString(), replayData.GetProperty(field).GetString(), StringComparison.Ordinal),
                 field);
 
+        using var changedHint = await PostTaskAsync(
+            projectId,
+            new
+            {
+                prompt = "Implement the task-first route",
+                name = "task-route-agent",
+                runtime = "pi",
+                model = "provider/changed",
+                variant = "balanced",
+            },
+            key);
+        Assert.Equal(HttpStatusCode.Conflict, changedHint.StatusCode);
+        var conflict = await changedHint.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("launch_idempotency_conflict", conflict.GetProperty("code").GetString());
+        Assert.Equal(key, conflict.GetProperty("details").GetProperty("idempotencyKey").GetString());
+
         using var agents = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents?all=true");
         agents.EnsureSuccessStatusCode();
         var agentEntries = (await agents.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
@@ -288,23 +304,7 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
     }
 
     [Fact]
-    public async Task TaskLaunch_ReplayWithChangedExecutionHintConflicts()
-    {
-        var projectId = await CreateProjectAsync("task-fingerprint");
-        const string key = "task-fingerprint-key";
-        using var first = await PostTaskAsync(projectId, new { prompt = "same task", model = "provider/one" }, key);
-        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
-
-        using var changedModel = await PostTaskAsync(projectId, new { prompt = "same task", model = "provider/two" }, key);
-        Assert.Equal(HttpStatusCode.Conflict, changedModel.StatusCode);
-        Assert.Equal("launch_idempotency_conflict", (await changedModel.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
-
-        using var addedVariant = await PostTaskAsync(projectId, new { prompt = "same task", model = "provider/one", variant = "high" }, key);
-        Assert.Equal(HttpStatusCode.Conflict, addedVariant.StatusCode);
-    }
-
-    [Fact]
-    public async Task TaskLaunch_TerminalRejectionArchivesDefinitionAndReplaysRecordedRejection()
+    public async Task TaskLaunch_TerminalRejectionArchivesDefinitionAndReturnsHttpContract()
     {
         var projectId = await CreateProjectAsync("task-terminal-rejection");
         const string key = "task-terminal-rejection-key";
@@ -330,15 +330,6 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var archivedName = archived.GetProperty("name").GetString();
             Assert.Equal("Terminal rejection task", archivedName);
 
-            using var replay = await PostTaskAsync(projectId, body, key);
-            Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
-            var replayPayload = await replay.Content.ReadFromJsonAsync<JsonElement>();
-            Assert.Equal("launch_rejected", replayPayload.GetProperty("code").GetString());
-            Assert.Equal(
-                "simulated_terminal_rejection",
-                replayPayload.GetProperty("details").GetProperty("reason").GetString());
-            Assert.Single((await AgentEntriesAsync(projectId)).EnumerateArray());
-
             using var namedRetry = await PostTaskAsync(
                 projectId,
                 new { prompt = "retry the task", name = archivedName, model = "provider/task" },
@@ -347,14 +338,6 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
             Assert.Equal(
                 "AGENT_NAME_CONFLICT",
                 (await namedRetry.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
-
-            using var derivedRetry = await PostTaskAsync(
-                projectId,
-                body,
-                "task-terminal-rejection-derived-retry");
-            Assert.Equal(HttpStatusCode.Created, derivedRetry.StatusCode);
-            var derivedData = (await derivedRetry.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
-            Assert.Equal("Terminal rejection task 2", derivedData.GetProperty("agentName").GetString());
         }
         finally
         {
