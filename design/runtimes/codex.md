@@ -98,12 +98,18 @@ offline provider after readiness is an execution failure, not a different
 Runtime selection.
 
 The Runner process generation owns the app-server process and every active
-request. If either process exits, the Runtime rejects active calls, discards
-volatile Turn correlation, stops claiming Codex work, and starts a fresh
-app-server generation. The Server closes work owned by the lost Runner
-generation as `runner-lost`. A replacement generation never adopts an active
-old Codex Turn, reports its completion, or reconstructs its result from Thread
-history.
+request, but an app-server generation is not a Runner process generation. If
+app-server exits while Runner remains alive, the Runtime fixes every active call
+as `unknown`, discards volatile Turn correlation, stops claiming Codex work, and
+reports those results through the current Runner ownership. Only after a fresh
+app-server generation completes readiness may it serve other safely admitted
+work. It never adopts an active old Codex Turn, reports its completion, or
+replays its Input.
+
+If the Runner process exits, the Server closes work owned by that lost Runner
+process generation as `runner-lost`. A replacement Runner generation may resume
+an idle bound Thread for later independent input, but it never reports or
+reconstructs the old generation's Turn from Thread history.
 
 ### Managed State and Trust
 
@@ -141,10 +147,13 @@ AgentSession binding unchanged. Never create a Workflow Approval Point.
 
 Use every page of app-server `model/list` after initialization and on the
 existing bounded catalog-refresh schedule. Publish models under
-`runtimeCatalogs.codex` with the intersection of reasoning efforts reported for
-each model and Mohist's canonical effort values. Unknown native effort values
-remain diagnostics. Publish no variants in v1. Model IDs remain opaque Codex
-IDs; do not split them as OpenCode `provider/model` values.
+`runtimeCatalogs.codex` after adapting native reasoning efforts to Mohist's
+canonical values. Codex `none` maps to canonical `off` in the catalog and
+canonical `off` maps back to `none` for `turn/start`; `minimal`, `low`,
+`medium`, `high`, `xhigh`, and `max` map by exact name. Unknown native effort
+values remain diagnostics and are not published. Publish no variants in v1.
+Model IDs remain opaque Codex IDs; do not split them as OpenCode
+`provider/model` values.
 
 A complete non-empty catalog replaces the Codex snapshot. Empty or failed
 refreshes retain the last complete snapshot while readiness and diagnostics
