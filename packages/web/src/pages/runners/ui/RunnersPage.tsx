@@ -30,7 +30,8 @@ const STATUS_DOT: Record<StatusKey, string> = {
   offline: 'bg-gray-400',
 }
 
-const RUNNER_START_HINT = 'npx mohist runner'
+const RUNNER_INSTALL_COMMAND = 'mo install runner --repo-root <path>'
+const RUNNER_START_COMMAND = 'mo service start runner'
 
 function filterByScope(rows: RunnerStatusRow[], scope: ScopeFilter): RunnerStatusRow[] {
   if (scope === 'all') return rows
@@ -123,9 +124,14 @@ function RunnerEmptyState() {
     >
       <p className="text-sm font-medium text-foreground mb-2">No runners connected</p>
       <p className="text-xs text-muted-foreground">
-        Start a runner:{' '}
+        First install:{' '}
         <code className="text-xs bg-background border border-border px-1.5 py-0.5 rounded font-mono text-foreground">
-          {RUNNER_START_HINT}
+          {RUNNER_INSTALL_COMMAND}
+        </code>
+        <br />
+        Later starts:{' '}
+        <code className="text-xs bg-background border border-border px-1.5 py-0.5 rounded font-mono text-foreground">
+          {RUNNER_START_COMMAND}
         </code>
       </p>
     </div>

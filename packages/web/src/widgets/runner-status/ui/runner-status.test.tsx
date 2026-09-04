@@ -46,8 +46,8 @@ function makeSummary(overrides: Partial<RunnerStatusSummary> = {}): RunnerStatus
   }
 }
 
-const RUNNER_START_HINT = 'Start a runner with: npx mohist runner'
-const RUNNER_START_HINT_LIST = 'npx mohist runner'
+const RUNNER_INSTALL_COMMAND = 'mo install runner --repo-root <path>'
+const RUNNER_START_COMMAND = 'mo service start runner'
 
 function renderInRouter(ui: React.ReactNode, { withProject = false, initialEntries }: { withProject?: boolean; initialEntries?: string[] } = {}) {
   const tree = (
@@ -89,10 +89,11 @@ describe('RunnerSummary UI', () => {
       expect(screen.getByText('No runner')).toBeInTheDocument()
     })
 
-    it('shows startup command hint when no runners connected', () => {
+    it('distinguishes first install from later starts when no runners connected', () => {
       const summary = makeSummary({ rows: [] })
       renderInRouter(<RunnerSummary summary={summary} />)
-      expect(screen.getByText(RUNNER_START_HINT)).toBeInTheDocument()
+      expect(screen.getByText(new RegExp(RUNNER_INSTALL_COMMAND))).toBeInTheDocument()
+      expect(screen.getByText(new RegExp(RUNNER_START_COMMAND))).toBeInTheDocument()
     })
   })
 
@@ -116,7 +117,7 @@ describe('RunnerSummary UI', () => {
         hasConnectedCapacity: false,
       })
       renderInRouter(<RunnerSummary summary={summary} />)
-      expect(screen.getByText(RUNNER_START_HINT)).toBeInTheDocument()
+      expect(screen.getByText(RUNNER_START_COMMAND)).toBeInTheDocument()
     })
 
     it('links to activity page in stale/offline state', () => {
@@ -244,10 +245,12 @@ describe('RunnerList UI', () => {
       expect(screen.getByText('No runners connected')).toBeInTheDocument()
     })
 
-    it('shows startup command hint in empty state', () => {
+    it('shows first-install and later-start commands in empty state', () => {
       renderInRouter(<RunnerList rows={[]} />)
-      expect(screen.getByText(/Start a runner:/)).toBeInTheDocument()
-      expect(screen.getByText(RUNNER_START_HINT_LIST)).toBeInTheDocument()
+      expect(screen.getByText(/First install:/)).toBeInTheDocument()
+      expect(screen.getByText(RUNNER_INSTALL_COMMAND)).toBeInTheDocument()
+      expect(screen.getByText(/Later starts:/)).toBeInTheDocument()
+      expect(screen.getByText(RUNNER_START_COMMAND)).toBeInTheDocument()
     })
 
     it('does not render a misleading settings manage action on the card', () => {

@@ -101,14 +101,15 @@ describe('RunnersPage', () => {
   })
 
   describe('empty state', () => {
-    it('shows the start-command empty state when there are no eligible runners', async () => {
+    it('shows first-install and later-start commands when there are no eligible runners', async () => {
       mockRunners([])
       renderWith()
       await waitFor(() => {
         expect(screen.getByTestId('runners-empty-state')).toBeInTheDocument()
       })
       expect(screen.getByText('No runners connected')).toBeInTheDocument()
-      expect(screen.getByText('npx mohist runner')).toBeInTheDocument()
+      expect(screen.getByText('mo install runner --repo-root <path>')).toBeInTheDocument()
+      expect(screen.getByText('mo service start runner')).toBeInTheDocument()
     })
 
     it('does not show the empty state when runners exist', async () => {
