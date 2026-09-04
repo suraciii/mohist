@@ -186,8 +186,9 @@ honors explicit cancellation by terminating its process group. Host-level servic
 protection remains the deployment owner's responsibility.
 
 Runner does not select a global Runtime through `type`. A Workflow Agent task
-names a Mohist Agent through `mohist/agent`; the Agent definition selects
-`mohist/opencode` or `mohist/pi`. Agent Input supplies model options. See
+names a Mohist Agent through `mohist/agent`; the Agent definition selects the
+`opencode`, `pi`, or `codex` Runtime. `mohist/agent` remains the only Workflow
+Agent Action, and Agent Input supplies model options. See
 [Action Contracts](actions/README.md).
 
 Runtime replacement and shutdown use two host-local millisecond settings in

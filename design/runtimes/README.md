@@ -14,6 +14,9 @@ compatibility boundaries.
 - [Pi](pi.md) defines `PiRuntime`, its in-process SDK, physical Session-file
   lifecycle, Prompt execution, and Session commands. Pi is an independent peer,
   not an OpenCode extension.
+- [Codex](codex.md) defines `CodexRuntime`, its app-server v2 process and
+  protocol lifecycle, Thread-backed physical Sessions, Turn execution, and
+  Session commands. Codex is an independent peer, not an ACP adapter.
 
 Common boundaries:
 
@@ -26,9 +29,9 @@ Common boundaries:
 
 Each Runtime may report models and variants from its configured environment.
 Runner registration stores catalogs in `runtimeCatalogs`, keyed by Runtime ID
-(`opencode` or `pi`). The Server catalog query accepts a Runtime ID and
+(`opencode`, `pi`, or `codex`). The Server catalog query accepts a Runtime ID and
 aggregates only matching Runner entries. Each ready Runtime reports its latest
-catalog. OpenCode and Pi discover catalogs independently.
+catalog. OpenCode, Pi, and Codex discover catalogs independently.
 
 The query returns models and variants for the requested Runtime. A
 Profile-backed caller must provide the derived Runtime; it must not use a
@@ -47,6 +50,7 @@ through `uses`; a named Mohist Agent selects it through the Agent definition.
 ## Adding a Runtime
 
 Add one independent module for each new Runtime. Do not create a common Runtime
-interface for hypothetical similarities. A built-in Runtime adds its module,
-`mohist/<runtime-id>` Action, catalog entry, and Profile projection mapping. It
-does not change the Workflow DSL or existing Action manifests.
+interface for hypothetical similarities. A built-in Agent Runtime adds its
+module, catalog entry, Agent configuration projection, executor dispatch, and
+Session command routing. It does not add a public Workflow Action or change the
+Workflow DSL; `mohist/agent` remains the only Agent task binding.

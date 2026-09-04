@@ -424,10 +424,12 @@ Job completion as a closed conversation or a delivered user goal.
   pass `--attach`, `--name`, `--runtime`, `--model`, `--variant`, `--issue`,
   `--epic`, `--repo`, and `--workspace`. A Project default execution
   configuration supplies omitted execution hints; without one, pass the
-  execution hints explicitly. `--runtime` accepts `opencode` or `pi`, and
-  `--model` uses `provider/model`. The command sends the CLI launch origin and
-  returns the Agent, Job, Session, Input, Turn, Workspace, status, and canonical
-  Session, transcript, Job, and observation URLs. In table mode, an omitted
+  execution hints explicitly. `--runtime` accepts `opencode`, `pi`, or `codex`.
+  `--model` uses the exact ID returned by `mo agent model list --runtime
+  <runtime>`; OpenCode and Pi IDs use `provider/model`, while Codex IDs remain
+  opaque. The command sends the CLI launch origin and returns the Agent, Job,
+  Session, Input, Turn, Workspace, status, and canonical Session, transcript,
+  Job, and observation URLs. In table mode, an omitted
   `--idempotency-key` is generated and printed before the request. Retry a lost
   response with that same key; accepted replays return the original identities
   and do not start another launch. Raw JSON mode prints the complete Server
@@ -447,7 +449,8 @@ Job completion as a closed conversation or a delivered user goal.
   `--max-concurrent-runs` flags. `--avatar-file`
   supplies the avatar. Mutually exclusive `--instructions` or
   `--instructions-file` supplies Instructions. `--runtime` accepts only
-  `opencode` or `pi`. `--skills` must contain at least one nonempty Skill name.
+  `opencode`, `pi`, or `codex`. `--skills` must contain at least one nonempty
+  Skill name.
   An empty string does not clear Skills; `edit` must use `--clear-skills`
   explicitly. `--avatar-file` reads a UTF-8 avatar URL or data URI. The caller
   does not need to construct Agent config JSON. The `--agent-config`

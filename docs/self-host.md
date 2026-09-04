@@ -331,8 +331,8 @@ RUNTIME_SHUTDOWN_TIMEOUT_MS=30000
 `QUARANTINE_DRAIN_TIMEOUT_MS` bounds a quarantined OpenCode generation. Active
 turns still running when it expires fail explicitly, while completed results
 already held in volatile process memory keep retrying their owner reports until
-the process ends. `RUNTIME_SHUTDOWN_TIMEOUT_MS` is the shared
-deadline for OpenCode and Pi runtime teardown. After the deadline the
+the process ends. `RUNTIME_SHUTDOWN_TIMEOUT_MS` is the shared deadline for
+OpenCode, Pi, and Codex runtime teardown. After the deadline the
 Runner abandons the wait and proceeds with best-effort forced teardown. Keep
 the Runner service's own process limits configured separately; for example,
 use systemd `MemoryMax` on the Runner unit to protect the host from aggregate
@@ -351,9 +351,9 @@ instead. On Linux, the recommended unit override is:
 MemoryMax=4G
 ```
 
-Choose `MemoryMax` above the Runner baseline and the shared OpenCode/Pi runtime
-headroom. This unit-level aggregate limit applies to the service as a whole and
-does not change individual workflow outcomes.
+Choose `MemoryMax` above the Runner baseline and the shared OpenCode, Pi, and
+Codex runtime headroom. This unit-level aggregate limit applies to the service
+as a whole and does not change individual workflow outcomes.
 
 ## Remote Access
 
