@@ -148,20 +148,28 @@ func validateManagedUnitTarget(unit []byte, target *managedRuntimeTarget) error 
 		if !ok || hasManagedLineContinuation(body) {
 			continue
 		}
-		words, wordErr := splitManagedSystemdWords(value)
-		if wordErr != nil {
-			return wordErr
-		}
 		switch key {
 		case "WorkingDirectory":
-			if len(words) == 1 && sameManagedPath(words[0].value, target.WorkingDirectory) {
+			workingDirectory, pathErr := parseManagedSystemdWorkingDirectory(value)
+			if pathErr != nil {
+				return pathErr
+			}
+			if workingDirectory == target.WorkingDirectory {
 				workingDirectoryMatches++
 			}
 		case "ExecStart":
+			words, wordErr := splitManagedSystemdWords(value)
+			if wordErr != nil {
+				return wordErr
+			}
 			if managedWordsEqual(words, expectedWords) {
 				execMatches++
 			}
 		case "Environment":
+			words, wordErr := splitManagedSystemdWords(value)
+			if wordErr != nil {
+				return wordErr
+			}
 			for _, word := range words {
 				if word.value == managedRuntimeIdentityEnvironment+"="+wantIdentity {
 					identityMatches++
@@ -220,7 +228,7 @@ func patchManagedSystemdUnit(unit []byte, target *managedRuntimeTarget) ([]byte,
 	if err := validateManagedTarget(target); err != nil {
 		return nil, err
 	}
-	workingDirectory, err := quoteManagedSystemdValue(target.WorkingDirectory)
+	workingDirectory, err := formatManagedSystemdWorkingDirectory(target.WorkingDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -520,6 +528,37 @@ func quoteManagedSystemdValue(value string) (string, error) {
 	return `"` + escaped + `"`, nil
 }
 
+func formatManagedSystemdWorkingDirectory(value string) (string, error) {
+	if !filepath.IsAbs(value) || strings.TrimSpace(value) != value ||
+		strings.ContainsAny(value, "\r\n\x00\t\v\f\\\"'") {
+		return "", errors.New("managed service working directory contains an invalid value")
+	}
+	return strings.ReplaceAll(value, "%", "%%"), nil
+}
+
+func parseManagedSystemdWorkingDirectory(value string) (string, error) {
+	if strings.TrimSpace(value) != value || strings.ContainsAny(value, "\r\n\x00\t\v\f\\\"'") {
+		return "", errors.New("managed service unit contains an invalid WorkingDirectory")
+	}
+	var decoded strings.Builder
+	for index := 0; index < len(value); index++ {
+		if value[index] != '%' {
+			decoded.WriteByte(value[index])
+			continue
+		}
+		if index+1 == len(value) || value[index+1] != '%' {
+			return "", errors.New("managed service unit contains an unescaped WorkingDirectory specifier")
+		}
+		decoded.WriteByte('%')
+		index++
+	}
+	workingDirectory := decoded.String()
+	if !filepath.IsAbs(workingDirectory) {
+		return "", errors.New("managed service unit WorkingDirectory is not absolute")
+	}
+	return workingDirectory, nil
+}
+
 func readManagedServiceState(
 	ctx context.Context,
 	commands managedCommandRunner,
@@ -576,8 +615,9 @@ func verifyManagedEffectiveTarget(
 	target *managedRuntimeTarget,
 ) error {
 	workingDirectory, err := readManagedSystemdProperty(ctx, commands, unitName, "WorkingDirectory")
-	workingDirectoryWords, parseErr := splitManagedSystemdWords(strings.TrimSpace(workingDirectory))
-	if err != nil || parseErr != nil || len(workingDirectoryWords) != 1 || workingDirectoryWords[0].value != target.WorkingDirectory {
+	workingDirectory = strings.TrimSuffix(workingDirectory, "\n")
+	workingDirectory = strings.TrimSuffix(workingDirectory, "\r")
+	if err != nil || strings.ContainsAny(workingDirectory, "\r\n\x00") || workingDirectory != target.WorkingDirectory {
 		return fmt.Errorf("managed %s service effective working directory does not match the candidate", target.Component)
 	}
 	_, expectedArguments, err := managedExecStart(target)

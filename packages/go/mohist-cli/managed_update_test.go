@@ -75,6 +75,32 @@ func TestManagedUpdateCommitsVerifiedServerRelease(t *testing.T) {
 	fixture.assertEventOrder("command:dotnet publish", "write-unit", "command:systemctl --user restart")
 }
 
+func TestManagedUpdateSystemdFakeRejectsInvalidWorkingDirectory(t *testing.T) {
+	tests := []struct {
+		name             string
+		workingDirectory string
+	}{
+		{name: "quoted", workingDirectory: `"/runtime/server"`},
+		{name: "relative", workingDirectory: "runtime/server"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newManagedUpdateFixture(t)
+			unit := "[Service]\nWorkingDirectory=" + test.workingDirectory + "\nExecStart=/runtime/server/Mohist.Server\n"
+			fixture.files.put(fixture.unitPath, []byte(unit), 0o600)
+
+			result := fixture.commands.Run(context.Background(), managedCommand{
+				Name: "systemctl",
+				Args: []string{"--user", "restart", "mohist.service"},
+			})
+
+			if result.ExitCode == 0 {
+				t.Fatal("fake systemd accepted an invalid WorkingDirectory")
+			}
+		})
+	}
+}
+
 func TestManagedUpdateCommitsVerifiedRunnerRelease(t *testing.T) {
 	fixture := newManagedRunnerUpdateFixture(t)
 	serverUnitPath := "/home/test/.config/systemd/user/mohist.service"
@@ -969,6 +995,17 @@ func (commands *managedUpdateFakeCommands) Run(_ context.Context, command manage
 			}
 			unit := commands.files.text(unitPath)
 			return managedCommandResult{Stdout: managedTestSystemdProperty(unit, property)}
+		case "restart":
+			if len(command.Args) != 3 {
+				return managedCommandResult{ExitCode: 2}
+			}
+			unitPath := commands.unitPaths[command.Args[2]]
+			unit := commands.files.text(unitPath)
+			workingDirectory := strings.TrimSuffix(managedTestSystemdProperty(unit, "WorkingDirectory"), "\n")
+			if _, err := parseManagedSystemdWorkingDirectory(workingDirectory); err != nil {
+				return managedCommandResult{ExitCode: 1}
+			}
+			return managedCommandResult{}
 		default:
 			return managedCommandResult{}
 		}
@@ -1013,6 +1050,11 @@ func managedTestSystemdProperty(unit, property string) string {
 	for _, line := range strings.Split(unit, "\n") {
 		if strings.HasPrefix(line, property+"=") {
 			values = append(values, strings.TrimPrefix(line, property+"="))
+		}
+	}
+	if property == "WorkingDirectory" && len(values) == 1 {
+		if decoded, err := parseManagedSystemdWorkingDirectory(values[0]); err == nil {
+			values[0] = decoded
 		}
 	}
 	return strings.Join(values, " ") + "\n"
