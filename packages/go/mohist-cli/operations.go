@@ -437,7 +437,11 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 	area := strings.Split(cmd.kind, "-")[1]
 	action := strings.TrimPrefix(cmd.kind, "ops-"+area+"-")
 	project := argValue(cmd.args, "project", "")
-	if contains([]string{"runner", "github"}, area) || area == "slack" && !contains([]string{"setup", "status"}, action) {
+	needsProject := contains([]string{"runner", "github"}, area)
+	if area == "slack" && !contains([]string{"setup", "status"}, action) {
+		needsProject = !(isManagerMode(deps.Lookup) && action == "message-send")
+	}
+	if needsProject {
 		if project == "" {
 			project, _ = resolveProject(deps, "")
 		}
