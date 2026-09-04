@@ -513,8 +513,7 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 				q.Set("workspaceTeamId", workspace)
 				path += "?" + q.Encode()
 			}
-		}
-		if action == "install-agent" || action == "create" {
+		} else if action == "install-agent" || action == "create" {
 			path = "/api/projects/" + url.PathEscape(project) + "/slack-manager/install-agent"
 			method = http.MethodPost
 			body = map[string]any{"agent": argValue(cmd.args, "agent", "")}
@@ -548,13 +547,13 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 
 func slackMessageBody(deps Dependencies, cmd command) (map[string]any, error) {
 	body := map[string]any{
-		"workspaceTeamId":      strings.TrimSpace(argValue(cmd.args, "workspace", "")),
-		"conversationId":       strings.TrimSpace(argValue(cmd.args, "conversation", "")),
-		"threadTs":              strings.TrimSpace(argValue(cmd.args, "reply-to", "")),
-		"connectionId":          strings.TrimSpace(argValue(cmd.args, "connection", "")),
-		"sessionId":             strings.TrimSpace(argValue(cmd.args, "session", "")),
-		"triggeringMessageId":   strings.TrimSpace(argValue(cmd.args, "triggering-message", "")),
-		"dispatchRef":           strings.TrimSpace(argValue(cmd.args, "dispatch-ref", "")),
+		"workspaceTeamId":     strings.TrimSpace(argValue(cmd.args, "workspace", "")),
+		"conversationId":      strings.TrimSpace(argValue(cmd.args, "conversation", "")),
+		"threadTs":            strings.TrimSpace(argValue(cmd.args, "reply-to", "")),
+		"connectionId":        strings.TrimSpace(argValue(cmd.args, "connection", "")),
+		"sessionId":           strings.TrimSpace(argValue(cmd.args, "session", "")),
+		"triggeringMessageId": strings.TrimSpace(argValue(cmd.args, "triggering-message", "")),
+		"dispatchRef":         strings.TrimSpace(argValue(cmd.args, "dispatch-ref", "")),
 	}
 	if hasArg(cmd.args, "text") {
 		text := argValue(cmd.args, "text", "")
