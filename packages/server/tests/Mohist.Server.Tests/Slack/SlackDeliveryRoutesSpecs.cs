@@ -287,52 +287,17 @@ public sealed class SlackDeliveryRoutesSpecs : IClassFixture<DefaultMohistIntegr
         await db.SaveChangesAsync();
     }
 
-    private async Task<AgentConnection> CreateConnectionAsync(
-        string? projectId = null,
-        string agentId = "agent-1")
+    private async Task<AgentConnection> CreateConnectionAsync(string? projectId = null)
     {
-        var id = $"connection_{Guid.NewGuid():N}";
-        projectId ??= $"project_{Guid.NewGuid():N}";
-        var now = _fixture.TimeProvider.GetUtcNow();
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        if (!await db.Projects.AnyAsync(project => project.Id == projectId))
+        var seeded = await SlackManagedConnectionSeed.CreateAsync(_fixture, new SlackSeedOptions
         {
-            db.Projects.Add(new ProjectRow
-            {
-                Id = projectId,
-                Name = projectId,
-                CreatedAt = now,
-                UpdatedAt = now,
-            });
-        }
-        db.AgentConnections.Add(new AgentConnectionRow
-        {
-            Id = id,
             ProjectId = projectId,
-            AgentId = agentId,
-            ProviderKind = ConnectionProviderKind.Slack,
-            WorkspaceTeamId = "T123",
-            AppId = "A123",
-            BotUserId = "U123",
-            BotName = "Mohist",
-            SetupProgress = SetupProgressKind.Complete,
-            DesiredState = DesiredStateKind.Enabled,
-            ConnectionHealth = ConnectionHealthKind.Healthy,
-            AgentReadiness = AgentReadinessKind.Ready,
-            OwnerSlackUserId = "U_OWNER",
-            LastHeartbeatAt = now,
-            CreatedAt = now,
-            UpdatedAt = now,
+            WithAgent = false,
+            WithManagedApp = false,
+            WriteConnectionSecrets = false,
+            WithRuntimeLease = false,
         });
-        await db.SaveChangesAsync();
-        return new AgentConnection
-        {
-            Id = id,
-            ProjectId = projectId,
-            AgentId = agentId,
-            WorkspaceTeamId = "T123",
-        };
+        return seeded.Connection;
     }
 
     private static string Path(AgentConnection connection, string suffix) =>

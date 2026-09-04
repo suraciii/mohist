@@ -223,44 +223,13 @@ public sealed class SlackReplySegmentationSpecs : IClassFixture<DefaultMohistInt
 
     private async Task<AgentConnection> CreateConnectionAsync()
     {
-        var id = $"connection_{Guid.NewGuid():N}";
-        var projectId = $"project_{Guid.NewGuid():N}";
-        var now = _fixture.TimeProvider.GetUtcNow();
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        db.Projects.Add(new ProjectRow
+        var seeded = await SlackManagedConnectionSeed.CreateAsync(_fixture, new SlackSeedOptions
         {
-            Id = projectId,
-            Name = projectId,
-            CreatedAt = now,
-            UpdatedAt = now,
+            WithAgent = false,
+            WithManagedApp = false,
+            WriteConnectionSecrets = false,
+            WithRuntimeLease = false,
         });
-        db.AgentConnections.Add(new AgentConnectionRow
-        {
-            Id = id,
-            ProjectId = projectId,
-            AgentId = "agent-1",
-            ProviderKind = ConnectionProviderKind.Slack,
-            WorkspaceTeamId = "T123",
-            AppId = "A123",
-            BotUserId = "U123",
-            BotName = "Mohist",
-            SetupProgress = SetupProgressKind.Complete,
-            DesiredState = DesiredStateKind.Enabled,
-            ConnectionHealth = ConnectionHealthKind.Healthy,
-            AgentReadiness = AgentReadinessKind.Ready,
-            OwnerSlackUserId = "U_OWNER",
-            LastHeartbeatAt = now,
-            CreatedAt = now,
-            UpdatedAt = now,
-        });
-        await db.SaveChangesAsync();
-        return new AgentConnection
-        {
-            Id = id,
-            ProjectId = projectId,
-            AgentId = "agent-1",
-            WorkspaceTeamId = "T123",
-        };
+        return seeded.Connection;
     }
 }
