@@ -59,6 +59,10 @@ test('CI Server scope uses fixed Bun without npm bootstrap', () => {
   assert.match(server, /^          bun --no-install scripts\/test-duration\/application\.ts server$/m)
   assert.doesNotMatch(server, /^\s+uses: actions\/setup-node@/m)
   assert.doesNotMatch(server, /^\s+(?:run:\s+)?npm ci(?:\s|$)/m)
+
+  const prepareDirectories = server.indexOf('run: mkdir -p "$TMPDIR" artifacts/server')
+  const setupBun = server.indexOf('uses: oven-sh/setup-bun@v2')
+  assert.ok(prepareDirectories >= 0 && prepareDirectories < setupBun, 'Server directories must exist before setup')
 })
 
 test('CI evidence Gate consumes a standalone bundle without reinstalling the monorepo', () => {

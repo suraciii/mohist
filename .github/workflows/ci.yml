@@ -76,6 +76,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Prepare Server directories
+        run: mkdir -p "$TMPDIR" artifacts/server
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -99,7 +102,6 @@ jobs:
 
       - name: Run Server scope
         run: |
-          mkdir -p "$TMPDIR" artifacts/server
           bun --no-install scripts/test-duration/application.ts server
 
       - name: Capture Server evidence
