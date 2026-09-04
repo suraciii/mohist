@@ -59,15 +59,20 @@ export class MaintenanceLifecycle {
     const controller = new AbortController()
     this.currentController = controller
 
-    let pass: Promise<void>
-    try {
-      pass = Promise.resolve(this.operation(controller.signal))
-    } catch (error) {
-      pass = Promise.reject(error)
-    }
-
+    let resolvePass!: () => void
+    let rejectPass!: (reason?: unknown) => void
+    const pass = new Promise<void>((resolve, reject) => {
+      resolvePass = resolve
+      rejectPass = reject
+    })
     this.currentPass = pass
     this.state = 'running'
+
+    try {
+      Promise.resolve(this.operation(controller.signal)).then(resolvePass, rejectPass)
+    } catch (error) {
+      rejectPass(error)
+    }
 
     // Keep fire-and-forget triggers from creating unhandled rejections while
     // preserving the rejection for callers of triggerAndWait().

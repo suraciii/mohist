@@ -6,6 +6,8 @@ import { deferred } from './support/deferred.js'
 async function flushPassCompletion(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
 }
 
 describe('MaintenanceLifecycle', () => {
@@ -79,6 +81,49 @@ describe('MaintenanceLifecycle', () => {
     expect(operation).toHaveBeenCalledOnce()
     await flushPassCompletion()
     expect(operation).toHaveBeenCalledTimes(2)
+  })
+
+  it('registers the pass before a synchronous reentrant trigger', async () => {
+    vi.useFakeTimers()
+    let lifecycle!: ReturnType<typeof createMaintenanceLifecycle>
+    let activePasses = 0
+    let maximumActivePasses = 0
+    const operation = vi.fn(() => {
+      activePasses += 1
+      maximumActivePasses = Math.max(maximumActivePasses, activePasses)
+      if (operation.mock.calls.length === 1) lifecycle.trigger()
+      activePasses -= 1
+    })
+    lifecycle = createMaintenanceLifecycle(operation)
+
+    lifecycle.trigger()
+
+    expect(operation).toHaveBeenCalledOnce()
+    expect(lifecycle.lifecycleState).toBe('pending')
+    await flushPassCompletion()
+    expect(operation).toHaveBeenCalledTimes(2)
+    expect(maximumActivePasses).toBe(1)
+    expect(lifecycle.lifecycleState).toBe('idle')
+  })
+
+  it('does not overwrite a synchronous reentrant stop', async () => {
+    vi.useFakeTimers()
+    let lifecycle!: ReturnType<typeof createMaintenanceLifecycle>
+    let stopping!: Promise<void>
+    const operation = vi.fn(() => {
+      stopping = lifecycle.stop()
+    })
+    lifecycle = createMaintenanceLifecycle(operation)
+
+    lifecycle.trigger()
+
+    expect(operation).toHaveBeenCalledOnce()
+    expect(lifecycle.lifecycleState).toBe('stopping')
+    await stopping
+    expect(lifecycle.lifecycleState).toBe('stopped')
+    lifecycle.trigger()
+    expect(operation).toHaveBeenCalledOnce()
+    await expect(lifecycle.triggerAndWait()).rejects.toThrow('stopping or stopped')
   })
 
   it('rejects awaitable work after stopping begins and ignores late triggers', async () => {
