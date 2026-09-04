@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Builder;
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 
@@ -28,7 +30,7 @@ public static partial class RunnerRoutes
                 runnerId,
                 result.UpdateInterruptId,
                 status));
-        });
+        }).RequireScopes(Scope.Operator, Scope.Runner);
     }
 }
 

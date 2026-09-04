@@ -2,11 +2,13 @@ package mohistcli
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -933,7 +935,9 @@ func updateAllLocked(ctx context.Context, deps Dependencies, c command, root str
 		return code
 	}
 	for _, component := range []string{"server", "runner", "slack"} {
-		if code := runInstallUpdateLocked(ctx, deps, command{kind: "update-" + component, args: []string{"component", component, "repo-root", root}}, component, "", ""); code != ExitOK {
+		args := append([]string(nil), c.args...)
+		args = append(args, "component", component, "repo-root", root)
+		if code := runInstallUpdateLocked(ctx, deps, command{kind: "update-" + component, args: args}, component, "", ""); code != ExitOK {
 			return code
 		}
 	}
@@ -972,9 +976,12 @@ func installComponent(
 	if strings.HasPrefix(c.kind, "update-") && (component == "server" || component == "runner") {
 		release, err = buildManagedRelease(ctx, deps, component, root, home)
 		if err != nil {
-			writeError(deps.Stderr, err)
+			fmt.Fprintf(deps.Stderr, "%v; recover with 'mo service start %s'\n", err, component)
 			return ExitOperation
 		}
+	}
+	if release.Root != "" {
+		return activateManagedRelease(ctx, deps, component, c, release, home, unitDir, unit)
 	}
 	environmentFileLine := ""
 	if component == "runner" && c.kind == "install-component" {
@@ -1048,6 +1055,340 @@ func installComponent(
 	}
 	fmt.Fprintf(deps.Stdout, "Installed and started %s\n", unit)
 	return ExitOK
+}
+
+type managedUpdateFence struct {
+	client *client
+	id     string
+	runner string
+}
+
+type managedIdentity struct {
+	Component      string `json:"component"`
+	Version        string `json:"version"`
+	SourceRevision string `json:"sourceRevision"`
+	GitHash        string `json:"gitHash"`
+	TreeHash       string `json:"treeHash"`
+	ArtifactDigest string `json:"artifactDigest"`
+	ReleaseID      string `json:"releaseId"`
+	Generation     int64  `json:"generation"`
+}
+
+func activateManagedRelease(ctx context.Context, deps Dependencies, component string, c command, candidate managedRelease, home, unitDir, unit string) int {
+	if deps.RemoveAll == nil {
+		deps.RemoveAll = os.RemoveAll
+	}
+	if deps.Rename == nil {
+		deps.Rename = os.Rename
+	}
+	unitPath := filepath.Join(unitDir, unit)
+	oldUnit, hadUnit := "", false
+	if _, statErr := os.Stat(unitPath); statErr == nil {
+		oldUnit, _ = deps.ReadFile(unitPath)
+		hadUnit = true
+	}
+	currentPath := filepath.Join(home, ".mohist", "releases", component, "current")
+	verifiedPath := filepath.Join(home, ".mohist", "releases", component, "verified")
+	oldCurrent, oldVerified := "", ""
+	if _, statErr := os.Stat(currentPath); statErr == nil {
+		oldCurrent, _ = deps.ReadFile(currentPath)
+	}
+	if _, statErr := os.Stat(verifiedPath); statErr == nil {
+		oldVerified, _ = deps.ReadFile(verifiedPath)
+	}
+
+	var fence *managedUpdateFence
+	var err error
+	if component == "runner" {
+		fence, err = beginRunnerUpdateFence(ctx, deps, c)
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitOperation
+		}
+	}
+	recover := func(cause error) int {
+		recoveryErr := restoreManagedUpdate(ctx, deps, unitPath, unit, oldUnit, hadUnit, currentPath, verifiedPath, oldCurrent, oldVerified)
+		if recoveryErr != nil {
+			cause = fmt.Errorf("%w; recovery also failed: %v", cause, recoveryErr)
+		}
+		if fence != nil {
+			if fenceErr := cancelRunnerUpdateFence(ctx, fence); fenceErr != nil {
+				cause = fmt.Errorf("%w; fence release failed: %v", cause, fenceErr)
+			}
+		}
+		fmt.Fprintf(deps.Stderr, "%v; recover with 'mo service start %s'\n", cause, component)
+		return ExitOperation
+	}
+
+	if hadUnit {
+		if err := deps.Execute(ctx, "systemctl", []string{"--user", "stop", unit}); err != nil {
+			return recover(fmt.Errorf("stop %s: %w", component, err))
+		}
+	}
+	unitText := managedUnitText(component, candidate, c, home)
+	if err := replaceManagedUnit(deps, unitPath, unitText); err != nil {
+		return recover(fmt.Errorf("activate %s: %w", component, err))
+	}
+	for _, args := range [][]string{{"--user", "daemon-reload"}, {"--user", "enable", unit}, {"--user", "restart", unit}} {
+		if err := deps.Execute(ctx, "systemctl", args); err != nil {
+			return recover(fmt.Errorf("%s %s: %w", args[len(args)-1], component, err))
+		}
+	}
+
+	if shouldVerifyManagedIdentity(deps, component, c) {
+		if err := verifyManagedIdentity(ctx, deps, component, c, candidate); err != nil {
+			return recover(err)
+		}
+	}
+	if err := writeManagedPointer(deps, currentPath, candidate.Root); err != nil {
+		return recover(fmt.Errorf("commit active %s target: %w", component, err))
+	}
+	if err := writeManagedPointer(deps, verifiedPath, candidate.Root); err != nil {
+		return recover(fmt.Errorf("commit verified %s target: %w", component, err))
+	}
+	if fence != nil {
+		if err := cancelRunnerUpdateFence(ctx, fence); err != nil {
+			return recover(err)
+		}
+	}
+	fmt.Fprintf(deps.Stdout, "Installed and started %s\n", unit)
+	return ExitOK
+}
+
+func managedUnitText(component string, release managedRelease, c command, home string) string {
+	environmentFileLine := ""
+	if component == "runner" {
+		environmentFileLine = "EnvironmentFile=-%h/.config/mohist/runner.env\nEnvironmentFile=-%h/.config/mohist/runner-managed.env\n"
+	}
+	entry := release.Entrypoint
+	if component == "runner" {
+		node, err := exec.LookPath("node")
+		if err != nil {
+			node = "/usr/bin/node"
+		}
+		entry = node + " " + entry
+	}
+	return "[Unit]\nDescription=Mohist " + component + "\n\n[Service]\nWorkingDirectory=" + release.Root + "\n" + environmentFileLine + "Environment=MOHIST_RUNTIME_IDENTITY_PATH=" + release.ManifestPath + "\nExecStart=" + entry + "\n\n[Install]\nWantedBy=default.target\n"
+}
+
+func replaceManagedUnit(deps Dependencies, target, value string) error {
+	mkdirAll := deps.MkdirAll
+	if mkdirAll == nil {
+		mkdirAll = os.MkdirAll
+	}
+	if err := mkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(filepath.Dir(target), ".mohist-unit-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	_ = temp.Close()
+	_ = os.Remove(tempPath)
+	defer func() { _ = deps.RemoveAll(tempPath) }()
+	if err := deps.WriteFile(tempPath, value, 0o600); err != nil {
+		return err
+	}
+	backup := ""
+	if _, err := os.Stat(target); err == nil {
+		backup, err = temporaryBackupPath(target)
+		if err != nil {
+			return err
+		}
+		if err := deps.Rename(target, backup); err != nil {
+			return err
+		}
+	}
+	if err := deps.Rename(tempPath, target); err != nil {
+		if backup != "" {
+			_ = deps.Rename(backup, target)
+		}
+		return err
+	}
+	if backup != "" {
+		_ = deps.RemoveAll(backup)
+	}
+	return nil
+}
+
+func restoreManagedUpdate(ctx context.Context, deps Dependencies, unitPath, unit string, oldUnit string, hadUnit bool, currentPath, verifiedPath, oldCurrent, oldVerified string) error {
+	var first error
+	if err := deps.Execute(ctx, "systemctl", []string{"--user", "stop", unit}); err != nil && first == nil {
+		first = err
+	}
+	if hadUnit {
+		if err := deps.WriteFile(unitPath, oldUnit, 0o600); err != nil && first == nil {
+			first = err
+		}
+	} else if err := deps.RemoveAll(unitPath); err != nil && first == nil {
+		first = err
+	}
+	if err := restoreManagedPointer(deps, currentPath, oldCurrent); err != nil && first == nil {
+		first = err
+	}
+	if err := restoreManagedPointer(deps, verifiedPath, oldVerified); err != nil && first == nil {
+		first = err
+	}
+	if err := deps.Execute(ctx, "systemctl", []string{"--user", "daemon-reload"}); err != nil && first == nil {
+		first = err
+	}
+	if hadUnit {
+		if err := deps.Execute(ctx, "systemctl", []string{"--user", "restart", unit}); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+func writeManagedPointer(deps Dependencies, path, value string) error {
+	return deps.WriteFile(path, value+"\n", 0o600)
+}
+
+func restoreManagedPointer(deps Dependencies, path, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return deps.RemoveAll(path)
+	}
+	return writeManagedPointer(deps, path, strings.TrimSpace(value))
+}
+
+func shouldVerifyManagedIdentity(deps Dependencies, component string, c command) bool {
+	if component == "runner" {
+		return strings.TrimSpace(argValue(c.args, "runner-id", "")) != ""
+	}
+	if strings.TrimSpace(argValue(c.args, "server-url", "")) != "" {
+		return true
+	}
+	if deps.Lookup == nil {
+		return false
+	}
+	_, ok := deps.Lookup("MOHIST_SERVER_URL")
+	return ok
+}
+
+func verifyManagedIdentity(ctx context.Context, deps Dependencies, component string, c command, candidate managedRelease) error {
+	cfg, err := ResolveConfig(deps)
+	if err != nil {
+		return fmt.Errorf("runtime identity verification unavailable: %w", err)
+	}
+	if explicit := strings.TrimSpace(argValue(c.args, "server-url", "")); explicit != "" {
+		cfg.ServerURL = explicit
+	}
+	client, err := newClient(cfg, deps.HTTPClient)
+	if err != nil {
+		return err
+	}
+	data, _, err := getData(ctx, client, identityPath(component, c))
+	if err != nil {
+		return fmt.Errorf("runtime identity verification failed: %w", err)
+	}
+	var actual managedIdentity
+	if component == "server" {
+		var response struct{ Running managedIdentity `json:"running"` }
+		if err := json.Unmarshal(data, &response); err != nil {
+			return fmt.Errorf("runtime identity verification returned malformed Server identity: %w", err)
+		}
+		actual = response.Running
+	} else {
+		var response struct {
+			RunnerID       string `json:"runnerId"`
+			BuildGitHash   string `json:"buildGitHash"`
+			Component      string `json:"component"`
+			Version        string `json:"version"`
+			SourceRevision string `json:"sourceRevision"`
+			TreeHash       string `json:"treeHash"`
+			ArtifactDigest string `json:"artifactDigest"`
+			ReleaseID      string `json:"releaseId"`
+			Generation     int64  `json:"generation"`
+		}
+		if err := json.Unmarshal(data, &response); err != nil {
+			return fmt.Errorf("runtime identity verification returned malformed Runner identity: %w", err)
+		}
+		actual = managedIdentity{Component: response.Component, Version: response.Version, SourceRevision: response.SourceRevision, GitHash: response.BuildGitHash, TreeHash: response.TreeHash, ArtifactDigest: response.ArtifactDigest, ReleaseID: response.ReleaseID, Generation: response.Generation}
+		if response.RunnerID != strings.TrimSpace(argValue(c.args, "runner-id", "")) {
+			return fmt.Errorf("runtime identity mismatch: expected runnerId=%q actual runnerId=%q", argValue(c.args, "runner-id", ""), response.RunnerID)
+		}
+	}
+	var expected managedIdentity
+	manifestData, readErr := deps.ReadFile(candidate.ManifestPath)
+	if readErr != nil || json.Unmarshal([]byte(manifestData), &expected) != nil {
+		return errors.New("candidate identity manifest could not be read during verification")
+	}
+	if expected != actual {
+		return fmt.Errorf("runtime identity mismatch: expected=%s actual=%s", identityText(expected), identityText(actual))
+	}
+	return nil
+}
+
+func identityPath(component string, c command) string {
+	if component == "runner" {
+		return "/api/runner/identity?runnerId=" + url.QueryEscape(strings.TrimSpace(argValue(c.args, "runner-id", "")))
+	}
+	return "/api/system/info"
+}
+
+func identityText(identity managedIdentity) string {
+	data, _ := json.Marshal(identity)
+	return string(data)
+}
+
+func beginRunnerUpdateFence(ctx context.Context, deps Dependencies, c command) (*managedUpdateFence, error) {
+	runnerID := strings.TrimSpace(argValue(c.args, "runner-id", ""))
+	if runnerID == "" {
+		return nil, nil
+	}
+	cfg, err := ResolveConfig(deps)
+	if err != nil {
+		return nil, err
+	}
+	if explicit := strings.TrimSpace(argValue(c.args, "server-url", "")); explicit != "" {
+		cfg.ServerURL = explicit
+	}
+	client, err := newClient(cfg, deps.HTTPClient)
+	if err != nil {
+		return nil, err
+	}
+	id, err := newUpdateInterruptID()
+	if err != nil {
+		return nil, err
+	}
+	data, code, err := postJSON(ctx, deps, client, "/api/runner/"+url.PathEscape(runnerID)+"/update-interrupt", map[string]string{"updateInterruptId": id})
+	if err != nil {
+		if code == "not_found" || code == "runner_not_found" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("Runner update fence could not be acquired: %w", err)
+	}
+	var response struct {
+		Status          string `json:"status"`
+		UpdateInterruptID string `json:"updateInterruptId"`
+	}
+	if json.Unmarshal(data, &response) != nil || response.UpdateInterruptID != id || response.Status != "draining" {
+		return nil, fmt.Errorf("Runner update fence was superseded or not owned: expected=%s actual=%s/%s", id, response.UpdateInterruptID, response.Status)
+	}
+	return &managedUpdateFence{client: client, id: id, runner: runnerID}, nil
+}
+
+func cancelRunnerUpdateFence(ctx context.Context, fence *managedUpdateFence) error {
+	data, _, err := postJSON(ctx, Dependencies{}, fence.client, "/api/runner/"+url.PathEscape(fence.runner)+"/update-interrupt/"+url.PathEscape(fence.id)+"/cancel", map[string]any{})
+	if err != nil {
+		return err
+	}
+	var response struct{ Status string `json:"status"` }
+	if json.Unmarshal(data, &response) != nil || (response.Status != "cancelled" && response.Status != "already-cancelled") {
+		return fmt.Errorf("Runner update fence was not released because ownership was superseded")
+	}
+	return nil
+}
+
+func newUpdateInterruptID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }
 
 func defaultRunnerID() string {

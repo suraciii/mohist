@@ -12,16 +12,21 @@ public static class RunnerIdentityRoutes
     {
         app.MapGet("/api/runner/identity", async (HttpContext context, IGrainFactory grains, RunnerConnectionTracker tracker) =>
         {
+            var runnerId = context.Request.Query["runnerId"].ToString();
             var hostname = context.Request.Query["hostname"].ToString();
             if (string.IsNullOrWhiteSpace(hostname))
                 hostname = Environment.MachineName;
 
             var globalRegistry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
             var globalRunners = await globalRegistry.ListAllAsync();
-            var candidate = globalRunners.FirstOrDefault(r =>
-                string.Equals(r.Hostname, hostname, StringComparison.OrdinalIgnoreCase));
+            var candidate = !string.IsNullOrWhiteSpace(runnerId)
+                ? globalRunners.FirstOrDefault(r => string.Equals(r.RunnerId, runnerId, StringComparison.Ordinal))
+                : globalRunners.FirstOrDefault(r =>
+                    string.Equals(r.Hostname, hostname, StringComparison.OrdinalIgnoreCase));
             if (candidate is null)
-                return ApiResults.NotFound($"No runner registered for hostname '{hostname}'");
+                return ApiResults.NotFound(!string.IsNullOrWhiteSpace(runnerId)
+                    ? $"No runner registered with id '{runnerId}'"
+                    : $"No runner registered for hostname '{hostname}'");
 
             var grain = grains.GetGrain<IRunnerGrain>(candidate.RunnerId);
             RunnerRuntimeState? runtime = null;

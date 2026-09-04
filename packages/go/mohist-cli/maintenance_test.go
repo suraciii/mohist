@@ -3,6 +3,7 @@ package mohistcli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -10,6 +11,101 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestManagedRunnerUpdateVerifiesBeforeReleasingFence(t *testing.T) {
+	home := t.TempDir()
+	candidateRoot := filepath.Join(home, ".mohist", "releases", "runner", "candidate")
+	if err := os.MkdirAll(candidateRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	entrypoint := filepath.Join(candidateRoot, "dist", "cli.js")
+	if err := os.MkdirAll(filepath.Dir(entrypoint), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entrypoint, []byte("runner"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(candidateRoot, "identity.json")
+	manifest := `{"component":"runner","version":"v1","sourceRevision":"git-1","gitHash":"git-1","treeHash":"tree-1","artifactDigest":"sha256:x","releaseId":"release-1","generation":1}`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls = append(calls, request.Method+" "+request.URL.Path)
+		if request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/update-interrupt") {
+			var body struct{ UpdateInterruptID string `json:"updateInterruptId"` }
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			return response(http.StatusOK, `{"success":true,"data":{"status":"draining","updateInterruptId":"`+body.UpdateInterruptID+`"}}`), nil
+		}
+		if request.Method == http.MethodGet {
+			return response(http.StatusOK, `{"success":true,"data":{"runnerId":"runner-1","component":"runner","version":"v1","sourceRevision":"git-1","buildGitHash":"git-1","treeHash":"tree-1","artifactDigest":"sha256:x","releaseId":"release-1","generation":1}}`), nil
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"status":"cancelled"}}`), nil
+	}), map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_TOKEN": "operator"})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.ReadFile = os.ReadFile
+	deps.Execute = func(_ context.Context, name string, args []string) error {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return nil
+	}
+	c := command{kind: "update-runner", args: []string{"runner-id", "runner-1"}}
+	if code := activateManagedRelease(context.Background(), deps, "runner", c, managedRelease{Root: candidateRoot, Entrypoint: entrypoint, ManifestPath: manifestPath}, home, filepath.Join(home, ".config", "systemd", "user"), "mohist-runner.service"); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "Installed and started") || strings.Contains(out.String(), "success") && strings.Index(out.String(), "success") < strings.Index(strings.Join(calls, "\n"), "GET") {
+		t.Fatalf("premature success: stdout=%q calls=%#v", out.String(), calls)
+	}
+	if len(calls) == 0 || !strings.Contains(calls[len(calls)-1], "/cancel") {
+		t.Fatalf("fence was not released last: %#v", calls)
+	}
+}
+
+func TestManagedUpdateMismatchRestoresPreviousUnitAndReportsIdentities(t *testing.T) {
+	home := t.TempDir()
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(unitDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	unitPath := filepath.Join(unitDir, "mohist.service")
+	oldUnit := "old unit\n"
+	if err := os.WriteFile(unitPath, []byte(oldUnit), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	candidateRoot := filepath.Join(home, ".mohist", "releases", "server", "candidate")
+	if err := os.MkdirAll(candidateRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	entrypoint := filepath.Join(candidateRoot, "Mohist.Server")
+	manifestPath := filepath.Join(candidateRoot, "identity.json")
+	if err := os.WriteFile(entrypoint, []byte("server"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, []byte(`{"component":"server","version":"expected","sourceRevision":"expected","gitHash":"expected","treeHash":"tree","artifactDigest":"digest","releaseId":"expected","generation":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"success":true,"data":{"running":{"component":"server","version":"actual","sourceRevision":"actual","gitHash":"actual","treeHash":"tree","artifactDigest":"digest","releaseId":"actual","generation":1}}}`), nil
+	}), map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_TOKEN": "operator"})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.ReadFile = os.ReadFile
+	deps.Execute = func(context.Context, string, []string) error { return nil }
+	if code := activateManagedRelease(context.Background(), deps, "server", command{kind: "update-server"}, managedRelease{Root: candidateRoot, Entrypoint: entrypoint, ManifestPath: manifestPath}, home, unitDir, "mohist.service"); code != ExitOperation {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	data, err := os.ReadFile(unitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != oldUnit {
+		t.Fatalf("unit was not restored: %q", data)
+	}
+	if !strings.Contains(errOut.String(), "expected=") || !strings.Contains(errOut.String(), "actual=") || !strings.Contains(errOut.String(), "mo service start server") {
+		t.Fatalf("stderr=%q", errOut.String())
+	}
+}
 
 func TestServiceCommandsUseUserSystemdAndJournalctl(t *testing.T) {
 	tests := []struct {

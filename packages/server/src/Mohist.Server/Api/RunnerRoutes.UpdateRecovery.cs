@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Builder;
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
 
@@ -37,7 +39,7 @@ public static partial class RunnerRoutes
                 result.UpdateInterruptId,
                 workIds,
                 workIds.Length));
-        });
+        }).RequireScopes(Scope.Operator, Scope.Runner);
     }
 
     private static string BeginStatusValue(RunnerUpdateInterruptBeginStatus status) => status switch
