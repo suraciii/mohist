@@ -6,6 +6,7 @@ import { defaultWorkspaceRegistryFilePath } from '../src/runtime/workspace-regis
 import type { DefaultRunnerTestResources } from './support/test-resources.js'
 import { withDefaultRunnerTestResources } from './support/test-resources.js'
 import { capturedLogs } from './support/logger-test.js'
+import { deferred } from './support/deferred.js'
 
 // Lifecycle coverage for the convergence backstop wiring:
 //   - On startup (after the first control connection) the runner fires a
@@ -665,5 +666,88 @@ describe('RunnerHost converges active workflow runs', () => {
 
     controller.abort()
     await expect(run).resolves.toBeUndefined()
+  })
+
+  it('StartupConvergence_AwaitsBlockedPass_AndCoalescesTimerReconnectAndStatusTriggers', async () => {
+    await seedActiveEntry('wr-blocked', join(testRoot(), 'mohist-local/workspaces/issue-1'))
+    const firstQuery = deferred<Record<string, string>>()
+    const secondQuery = deferred<Record<string, string>>()
+    let queryCount = 0
+    const events = configureHost(async () => {
+      queryCount += 1
+      if (queryCount === 1) return firstQuery.promise
+      return secondQuery.promise
+    })
+    const convergenceIntervalMs = 1_000
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      ...defaultOptions(),
+      cleanupConvergenceIntervalMs: convergenceIntervalMs,
+      pollIntervalMs: 60_000,
+    })
+    const run = host.run(controller.signal)
+
+    try {
+      expect(await events.statusQueries.next()).toEqual(['wr-blocked'])
+      expect(events.polls.count).toBe(0)
+
+      currentConvergenceTestState().capturedOnReconnected!('conn-after')
+      await currentConvergenceTestState().capturedWorkflowStatusChanged!()
+      await vi.advanceTimersByTimeAsync(convergenceIntervalMs * 3)
+      expect(workflowRunsStatus).toHaveBeenCalledOnce()
+
+      firstQuery.resolve({ 'wr-blocked': 'Running' })
+      expect(await events.statusQueries.next()).toEqual(['wr-blocked'])
+      expect(workflowRunsStatus).toHaveBeenCalledTimes(2)
+
+      controller.abort()
+      expect((workflowRunsStatus.mock.calls[1]?.[1] as AbortSignal).aborted).toBe(true)
+      let stopped = false
+      void run.then(() => {
+        stopped = true
+      })
+      await Promise.resolve()
+      expect(stopped).toBe(false)
+
+      secondQuery.resolve({ 'wr-blocked': 'Running' })
+      await expect(run).resolves.toBeUndefined()
+    } finally {
+      controller.abort()
+      firstQuery.resolve({ 'wr-blocked': 'Running' })
+      secondQuery.resolve({ 'wr-blocked': 'Running' })
+      await run.catch(() => undefined)
+    }
+  })
+
+  it('StoppedHost_LateReconnectCallbackCannotTriggerANewHost', async () => {
+    const oldEvents = configureHost()
+    const oldController = new AbortController()
+    const oldHost = new RunnerHost(defaultOptions())
+    const oldRun = oldHost.run(oldController.signal)
+    const oldCallbackReady = oldEvents.connected.next()
+    await oldCallbackReady
+    await oldEvents.polls.next()
+    const oldReconnect = currentConvergenceTestState().capturedOnReconnected!
+    oldController.abort()
+    await expect(oldRun).resolves.toBeUndefined()
+
+    await seedActiveEntry('wr-new', join(testRoot(), 'mohist-local/workspaces/issue-2'))
+    const newEvents = configureHost(async () => ({ 'wr-new': 'Running' }))
+    const newController = new AbortController()
+    const newHost = new RunnerHost(defaultOptions())
+    const newRun = newHost.run(newController.signal)
+    try {
+      await newEvents.statusQueries.next()
+      const callsBeforeLateCallback = workflowRunsStatus.mock.calls.length
+      oldReconnect?.('late-old-connection')
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(workflowRunsStatus.mock.calls.length).toBe(callsBeforeLateCallback)
+      newController.abort()
+      await expect(newRun).resolves.toBeUndefined()
+    } finally {
+      newController.abort()
+      await newRun.catch(() => undefined)
+    }
   })
 })

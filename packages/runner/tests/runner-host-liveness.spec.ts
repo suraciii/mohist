@@ -496,4 +496,63 @@ describe('RunnerHost', () => {
       await run.catch(() => undefined)
     }
   })
+
+  it('SelfCheckTimer_CoalescesWhileProbeIsBlocked_AndAbortsBeforeShutdown', async () => {
+    const pollStarted = deferred<void>()
+    const pollRelease = deferred<[]>()
+    const probeStarted = deferred<void>()
+    const probeRelease = deferred<boolean>()
+    let probeSignal!: AbortSignal
+    getConnectionId.mockReturnValue('conn-A')
+    probeLiveness.mockImplementation(async (signal: AbortSignal) => {
+      probeSignal = signal
+      probeStarted.resolve()
+      return probeRelease.promise
+    })
+    forceReconnect.mockResolvedValue(undefined)
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    poll.mockImplementationOnce(async () => {
+      pollStarted.resolve()
+      return pollRelease.promise
+    })
+    startControl.mockResolvedValue(undefined)
+    stopControl.mockResolvedValue(undefined)
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: POLL_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: SELF_CHECK_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+    try {
+      await pollStarted.promise
+      await vi.advanceTimersByTimeAsync(SELF_CHECK_INTERVAL_MS)
+      await probeStarted.promise
+      await vi.advanceTimersByTimeAsync(SELF_CHECK_INTERVAL_MS * 3)
+      expect(probeLiveness).toHaveBeenCalledOnce()
+
+      controller.abort()
+      expect(probeSignal.aborted).toBe(true)
+      let stopped = false
+      void run.then(() => {
+        stopped = true
+      })
+      await Promise.resolve()
+      expect(stopped).toBe(false)
+
+      probeRelease.resolve(true)
+      pollRelease.resolve([])
+      await expect(run).resolves.toBeUndefined()
+    } finally {
+      controller.abort()
+      probeRelease.resolve(true)
+      pollRelease.resolve([])
+      await run.catch(() => undefined)
+    }
+  })
 })

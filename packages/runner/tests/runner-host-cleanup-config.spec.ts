@@ -37,6 +37,7 @@ interface CleanupTestState {
   cleanupCalls: CleanupCall[]
   fetchConfigCalls: undefined[]
   fetchAttempts: number
+  fetchSignal: AbortSignal | null
   onCleanupCall: ((call: CleanupCall) => void) | null
   onFetchConfig: (() => void) | null
   stubFetchConfigBehavior: null | (() => Promise<CleanupPolicy | null>)
@@ -45,6 +46,14 @@ interface CleanupTestState {
 }
 
 const CLEANUP_INTERVAL_FLOOR_MS = 1000
+
+function deferred<T = void>() {
+  let resolve!: (value?: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = (value?: T) => resolvePromise(value as T)
+  })
+  return { promise, resolve }
+}
 
 const cleanupTestStorage = new AsyncLocalStorage<CleanupTestState>()
 
@@ -66,6 +75,7 @@ function createCleanupTestState(
     cleanupCalls: [],
     fetchConfigCalls: [],
     fetchAttempts: 0,
+    fetchSignal: null,
     onCleanupCall: null,
     onFetchConfig: null,
     stubFetchConfigBehavior: null,
@@ -109,6 +119,7 @@ vi.mock('../src/server/connection.js', () => ({
 
     fetchConfig = async (_signal: AbortSignal) => {
       const state = currentCleanupTestState()
+      state.fetchSignal = _signal
       state.fetchConfigCalls.push(undefined)
       state.onFetchConfig?.()
       if (!state.stubFetchConfigBehavior) return null
@@ -150,14 +161,6 @@ vi.mock('../src/runtime/cleanup-loop.js', () => {
     DefaultCleanupRunner: class {},
   }
 })
-
-function deferred() {
-  let resolve!: () => void
-  const promise = new Promise<void>((resolvePromise) => {
-    resolve = resolvePromise
-  })
-  return { promise, resolve }
-}
 
 interface EventQueue<T> {
   readonly count: number
@@ -555,6 +558,34 @@ describe('RunnerHost idle-system cleanup', () => {
     await cleanup
     controller.abort()
     await expect(run).resolves.toBeUndefined()
+  })
+
+  it('CleanupCancellation_IsAcknowledgedBeforeRuntimeShutdown', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    const hostEvents = configureHost()
+    const cleanupEvents = observeCleanupTicks()
+    const fetchRelease = deferred<CleanupPolicy | null>()
+    testState().stubFetchConfigBehavior = async () => fetchRelease.promise
+    const controller = new AbortController()
+    const host = new RunnerHost(defaultOptions())
+    const run = host.run(controller.signal)
+    await waitForHostStartup(hostEvents)
+    const runtime = await testState().runtimeHandles.runtimeCreated
+    const runtimeShutdown = vi.spyOn(runtime, 'shutdown').mockResolvedValue(undefined)
+
+    const fetchStarted = cleanupEvents.fetches.next()
+    await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
+    await fetchStarted
+    expect(testState().fetchSignal).toBeInstanceOf(AbortSignal)
+
+    controller.abort()
+    expect(testState().fetchSignal?.aborted).toBe(true)
+    await Promise.resolve()
+    expect(runtimeShutdown).not.toHaveBeenCalled()
+
+    fetchRelease.resolve(null)
+    await expect(run).resolves.toBeUndefined()
+    expect(runtimeShutdown).toHaveBeenCalledOnce()
   })
 
   it('IssuesIndependentFetchPerTick_NoCachingAcrossTicks', async () => {

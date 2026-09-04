@@ -28,7 +28,6 @@ export interface HostCleanupDeps {
 }
 
 export function createHostCleanup(deps: HostCleanupDeps) {
-  let cleanupInFlight: Promise<void> | null = null
   let lastCleanupPolicy: CleanupPolicy | null = null
 
   async function runConvergenceOnce(signal: AbortSignal): Promise<void> {
@@ -40,16 +39,6 @@ export function createHostCleanup(deps: HostCleanupDeps) {
         exception: error,
       })
     }
-  }
-
-  function runCleanupOnce(signal: AbortSignal): Promise<void> {
-    if (cleanupInFlight) return cleanupInFlight
-    const pass = executeCleanupOnce(signal)
-    cleanupInFlight = pass
-    void pass.finally(() => {
-      if (cleanupInFlight === pass) cleanupInFlight = null
-    })
-    return pass
   }
 
   async function executeCleanupOnce(signal: AbortSignal): Promise<void> {
@@ -158,5 +147,5 @@ export function createHostCleanup(deps: HostCleanupDeps) {
     }
   }
 
-  return { runConvergenceOnce, runCleanupOnce, runSelfCheck }
+  return { runConvergenceOnce, runCleanupOnce: executeCleanupOnce, runSelfCheck }
 }
