@@ -190,6 +190,9 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         {
             _pollAdmissionToken = null;
             var state = _state.State ??= new RunnerState();
+            var replacesCurrentProcessGeneration =
+                !string.IsNullOrWhiteSpace(state.CurrentProcessGeneration)
+                && !string.Equals(state.CurrentProcessGeneration, processGeneration, StringComparison.Ordinal);
             var closingGeneration = state.ClosingProcessGeneration;
             if (string.IsNullOrWhiteSpace(closingGeneration)
                 && !string.IsNullOrWhiteSpace(state.CurrentProcessGeneration)
@@ -224,9 +227,9 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _status = RunnerStatus.Online;
             var now = _timeProvider.GetUtcNow();
             state.PresenceLeaseExpiresAt = now + PresenceTimeout;
-            // Registration is the update handoff completion boundary. Persist
-            // it before reopening admission so an activation cannot silently
-            // erase a confirmed fence while the old process is still active.
+            // Only a replacement process completes the update handoff. The
+            // same process may register again after reconnecting and must not
+            // reopen admission across a durable update fence.
             var updateInterruptFence = UpdateInterruptFence();
             _readinessConnectionGeneration = null;
             _runtimeReadiness.Clear();
@@ -234,11 +237,19 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _pendingBuildGitHash = null;
             _pendingRuntimeIdentity = null;
             _slots = await _definitions.GetOrInitAsync(RunnerId);
-            await PersistUpdateInterruptFenceAsync(
-                updateInterruptFence,
-                pendingId: null,
-                lastCancelledId: null);
-            _draining = false;
+            if (replacesCurrentProcessGeneration
+                && !string.IsNullOrWhiteSpace(updateInterruptFence.PendingId))
+            {
+                await PersistUpdateInterruptFenceAsync(
+                    updateInterruptFence,
+                    pendingId: null,
+                    lastCancelledId: updateInterruptFence.PendingId);
+            }
+            else
+            {
+                await PersistAsync();
+            }
+            _draining = !string.IsNullOrWhiteSpace(updateInterruptFence.PendingId);
             await EnsurePresenceReminderAsync();
             EnsurePresenceTimer();
             await UpsertRegistryAsync();

@@ -62,6 +62,9 @@ type Dependencies struct {
 	RemoveAll               func(string) error
 	Rename                  func(string, string) error
 	Chmod                   func(string, os.FileMode) error
+	ManagedUpdate           ManagedUpdateRuntime
+	OpenManagedLock         func(string) (io.Closer, error)
+	ManagedPathExists       func(string) bool
 }
 
 type Config struct {
@@ -389,20 +392,9 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 		return ExitOperation
 	}
 	client.deps = deps
-	if managerMode := isManagerMode(deps.Lookup); managerMode {
-		broker := deps.ManagerCredentialBroker
-		if broker == nil {
-			brokerPath := strings.TrimSpace(lookup(deps.Lookup, "MOHIST_MANAGER_CREDENTIAL_BROKER"))
-			if brokerPath == "" {
-				writeError(deps.Stderr, errors.New("Manager credential broker is unavailable"))
-				return ExitOperation
-			}
-			broker = unixManagerCredentialBroker(brokerPath)
-		}
-		client.managerMode = true
-		client.token = ""
-		client.refreshToken = ""
-		client.http = &http.Client{Transport: managerCredentialTransport{broker: broker}}
+	if err := configureManagerClient(deps, client); err != nil {
+		writeError(deps.Stderr, err)
+		return ExitOperation
 	}
 	if strings.HasPrefix(command.kind, "auth-") {
 		return runAuth(ctx, deps, client, cfg, command)
@@ -631,6 +623,29 @@ func newClient(cfg Config, httpClient *http.Client) (*client, error) {
 	}
 	base.RawPath = ""
 	return &client{http: httpClient, base: base, token: cfg.OperatorToken, operatorID: cfg.OperatorID, machineLocal: cfg.CredentialSource == "machine-local admin credential", refreshToken: cfg.RefreshToken}, nil
+}
+
+func configureManagerClient(deps Dependencies, value *client) error {
+	lookupEnv := deps.Lookup
+	if lookupEnv == nil {
+		lookupEnv = os.LookupEnv
+	}
+	if !isManagerMode(lookupEnv) {
+		return nil
+	}
+	broker := deps.ManagerCredentialBroker
+	if broker == nil {
+		brokerPath := strings.TrimSpace(lookup(lookupEnv, "MOHIST_MANAGER_CREDENTIAL_BROKER"))
+		if brokerPath == "" {
+			return errors.New("Manager credential broker is unavailable")
+		}
+		broker = unixManagerCredentialBroker(brokerPath)
+	}
+	value.managerMode = true
+	value.token = ""
+	value.refreshToken = ""
+	value.http = &http.Client{Transport: managerCredentialTransport{broker: broker}}
+	return nil
 }
 
 type envelope struct {

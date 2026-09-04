@@ -93,16 +93,19 @@ func parseInstallUpdate(area string, args []string) (command, error) {
 	if len(args) > 0 && contains([]string{"cli", "server", "runner", "slack"}, args[0]) {
 		c.args = append(c.args, "component", args[0])
 		args = args[1:]
-	} else if len(args) > 0 && args[0] != "--dry-run" {
+	} else if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		return command{}, usage("unknown " + area + " component")
 	}
 	component := argValue(c.args, "component", "")
 	enabledAgentRuntimesSeen := false
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--dry-run", "--continue-after-cli-update":
+		case "--dry-run":
 			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), "true")
-		case "--repo-root", "--cli-path", "--listen-url", "--server-url", "--runner-root", "--unit-dir":
+		case "--repo-root", "--cli-path", "--server-url", "--runner-root", "--unit-dir":
+			if args[i] == "--cli-path" && (area != "update" || component != "cli") {
+				return command{}, usage("--cli-path is only valid with mo update cli")
+			}
 			if i+1 >= len(args) {
 				return command{}, usage(args[i] + " requires a value")
 			}
@@ -139,9 +142,9 @@ func maintenanceHelp(area string) string {
 		return "USAGE\n    mo skill <list|view|install|path|sync> [flags]\n\nManage coder agent skills."
 	}
 	if area == "install" {
-		return "USAGE\n    mo install <server|slack> [flags]\n    mo install runner [--enabled-agent-runtimes <list>] [flags]\n\nInstall Mohist components as managed services. Runner Runtime values are pi and opencode."
+		return "USAGE\n    mo install <server|slack> [flags]\n    mo install runner [--enabled-agent-runtimes <list>] [flags]\n\nInstall Mohist components as user services. Runner Runtime values are pi and opencode."
 	}
-	return "USAGE\n    mo update [<cli|server|runner|slack>] [flags]\n\nUpdate Mohist components. CLI replacement is staged and atomic."
+	return "USAGE\n    mo update [<cli|server|runner|slack>] [flags]\n\nUpdate the managed Server and Runner together, or select one component explicitly."
 }
 
 func normalizeEnabledAgentRuntimes(value string) (string, error) {
@@ -674,7 +677,7 @@ func runInstallUpdate(ctx context.Context, deps Dependencies, c command) int {
 		writeError(deps.Stderr, errors.New("install component is required"))
 		return ExitUsage
 	}
-	if dryRun {
+	if dryRun && (c.kind == "install-component" || component == "cli" || component == "slack") {
 		action := "update"
 		if c.kind == "install-component" {
 			action = "install"
@@ -690,11 +693,43 @@ func runInstallUpdate(ctx context.Context, deps Dependencies, c command) int {
 		case "cli":
 			return updateCLI(ctx, deps, argValue(c.args, "repo-root", ""), argValue(c.args, "cli-path", ""))
 		case "server":
-			return executeMaintenance(ctx, deps, "dotnet", "build", "Mohist.sln")
+			return runManagedRuntimeUpdate(ctx, deps, ManagedUpdateRequest{
+				Components: []string{"server"}, RepoRoot: argValue(c.args, "repo-root", ""),
+				UnitDir: argValue(c.args, "unit-dir", ""), DryRun: dryRun,
+			})
 		case "runner":
-			return executeMaintenance(ctx, deps, "npm", "run", "build", "-w", "packages/runner")
+			return runManagedRuntimeUpdate(ctx, deps, ManagedUpdateRequest{
+				Components: []string{"runner"}, RepoRoot: argValue(c.args, "repo-root", ""),
+				UnitDir: argValue(c.args, "unit-dir", ""), DryRun: dryRun,
+			})
 		case "slack":
 			return executeMaintenance(ctx, deps, "go", "-C", "packages/go/mohist-slack", "build", "-o", "bin/build/mohist-slack")
+		}
+	}
+	if c.kind == "install-component" {
+		home, err := deps.HomeDir()
+		if err != nil {
+			writeError(deps.Stderr, errors.New("managed install home directory is unavailable"))
+			return ExitOperation
+		}
+		runtimeRoot := filepath.Join(home, ".local", "share", "mohist", "runtime")
+		openLock := deps.OpenManagedLock
+		if openLock == nil {
+			openLock = (realManagedFiles{}).OpenLock
+		}
+		pathExists := deps.ManagedPathExists
+		if pathExists == nil {
+			pathExists = (realManagedFiles{}).Exists
+		}
+		lock, err := openLock(filepath.Join(runtimeRoot, "update.lock"))
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitOperation
+		}
+		defer lock.Close()
+		if pathExists(filepath.Join(runtimeRoot, "pending.json")) {
+			writeError(deps.Stderr, errors.New("managed install is blocked by an unresolved update transaction"))
+			return ExitOperation
 		}
 	}
 	if component == "runner" {
@@ -730,15 +765,10 @@ func runInstallUpdate(ctx context.Context, deps Dependencies, c command) int {
 }
 
 func updateAll(ctx context.Context, deps Dependencies, c command) int {
-	if code := updateCLI(ctx, deps, argValue(c.args, "repo-root", ""), argValue(c.args, "cli-path", "")); code != ExitOK {
-		return code
-	}
-	for _, component := range []string{"server", "runner", "slack"} {
-		if code := runInstallUpdate(ctx, deps, command{kind: "update-" + component, args: []string{"component", component}}); code != ExitOK {
-			return code
-		}
-	}
-	return ExitOK
+	return runManagedRuntimeUpdate(ctx, deps, ManagedUpdateRequest{
+		Components: []string{"server", "runner"}, RepoRoot: argValue(c.args, "repo-root", ""),
+		UnitDir: argValue(c.args, "unit-dir", ""), DryRun: hasArg(c.args, "dry-run"),
+	})
 }
 
 func installComponent(

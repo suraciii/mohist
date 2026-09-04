@@ -12,16 +12,28 @@ public static class RunnerIdentityRoutes
     {
         app.MapGet("/api/runner/identity", async (HttpContext context, IGrainFactory grains, RunnerConnectionTracker tracker) =>
         {
-            var hostname = context.Request.Query["hostname"].ToString();
-            if (string.IsNullOrWhiteSpace(hostname))
-                hostname = Environment.MachineName;
-
+            var runnerId = context.Request.Query["runnerId"].ToString();
             var globalRegistry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
             var globalRunners = await globalRegistry.ListAllAsync();
-            var candidate = globalRunners.FirstOrDefault(r =>
-                string.Equals(r.Hostname, hostname, StringComparison.OrdinalIgnoreCase));
-            if (candidate is null)
-                return ApiResults.NotFound($"No runner registered for hostname '{hostname}'");
+            RunnerInfo? candidate;
+            if (!string.IsNullOrWhiteSpace(runnerId))
+            {
+                candidate = globalRunners.FirstOrDefault(r =>
+                    string.Equals(r.RunnerId, runnerId, StringComparison.Ordinal));
+                if (candidate is null)
+                    return ApiResults.NotFound($"No runner registered with id '{runnerId}'");
+            }
+            else
+            {
+                var hostname = context.Request.Query["hostname"].ToString();
+                if (string.IsNullOrWhiteSpace(hostname))
+                    hostname = Environment.MachineName;
+
+                candidate = globalRunners.FirstOrDefault(r =>
+                    string.Equals(r.Hostname, hostname, StringComparison.OrdinalIgnoreCase));
+                if (candidate is null)
+                    return ApiResults.NotFound($"No runner registered for hostname '{hostname}'");
+            }
 
             var grain = grains.GetGrain<IRunnerGrain>(candidate.RunnerId);
             RunnerRuntimeState? runtime = null;

@@ -7,9 +7,41 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+type recordingManagedUpdateRuntime struct {
+	requests []ManagedUpdateRequest
+	err      error
+}
+
+func (runtime *recordingManagedUpdateRuntime) Update(_ context.Context, request ManagedUpdateRequest) error {
+	request.Components = append([]string(nil), request.Components...)
+	runtime.requests = append(runtime.requests, request)
+	return runtime.err
+}
+
+type recordingMaintenanceFiles struct {
+	values   map[string]string
+	accesses []string
+}
+
+func (files *recordingMaintenanceFiles) ReadFile(path string) (string, error) {
+	files.accesses = append(files.accesses, "read "+path)
+	value, ok := files.values[path]
+	if !ok {
+		return "", os.ErrNotExist
+	}
+	return value, nil
+}
+
+func (files *recordingMaintenanceFiles) WriteFile(path, value string, _ os.FileMode) error {
+	files.accesses = append(files.accesses, "write "+path)
+	files.values[path] = value
+	return nil
+}
 
 func TestInstallRunnerPersistsEnabledAgentRuntimes(t *testing.T) {
 	home := t.TempDir()
@@ -120,6 +152,8 @@ func TestInstallRunnerEnabledAgentRuntimesValidation(t *testing.T) {
 		{name: "server scope", args: []string{"install", "server", "--enabled-agent-runtimes", "pi"}, want: "only valid with mo install runner"},
 		{name: "update scope", args: []string{"update", "runner", "--enabled-agent-runtimes", "pi"}, want: "only valid with mo install runner"},
 		{name: "duplicate flag", args: []string{"install", "runner", "--enabled-agent-runtimes", "pi", "--enabled-agent-runtimes", "opencode"}, want: "only once"},
+		{name: "bare update cli path", args: []string{"update", "--cli-path", "/tmp/mo"}, want: "only valid with mo update cli"},
+		{name: "retired continuation", args: []string{"update", "--continue-after-cli-update"}, want: "unknown option"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -248,87 +282,134 @@ func TestRunnerManagedEnvironmentEscapesValuesAndRejectsLineInjection(t *testing
 	}
 }
 
-func TestRunnerMaintenanceWithoutRuntimeFlagPreservesEnvironmentFile(t *testing.T) {
-	for _, args := range [][]string{{"install", "runner"}, {"update", "runner"}} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			home := t.TempDir()
-			environmentPath := filepath.Join(home, ".config", "mohist", "runner.env")
-			if err := os.MkdirAll(filepath.Dir(environmentPath), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(environmentPath, []byte("ENABLED_AGENT_RUNTIMES=opencode\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
-				return response(http.StatusOK, `{"success":true,"data":{"token":"enrollment-token"}}`), nil
-			}), map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_TOKEN": "operator-token"})
-			deps.HomeDir = func() (string, error) { return home, nil }
-			deps.CurrentDirectory = func() string { return t.TempDir() }
-			deps.Execute = func(context.Context, string, []string) error { return nil }
-
-			if code := Run(context.Background(), args, deps); code != ExitOK {
-				t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
-			}
-			contents, err := os.ReadFile(environmentPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(contents) != "ENABLED_AGENT_RUNTIMES=opencode\n" {
-				t.Fatalf("environment file changed to %q", contents)
-			}
-		})
-	}
-}
-
-func TestUpdateRunnerPreservesCredentialFiles(t *testing.T) {
-	home := t.TempDir()
-	runnerRoot := filepath.Join(home, ".mohist", "projects")
-	enrollmentTokenPath := filepath.Join(runnerRoot, runnerEnrollmentTokenFile)
-	credentialPath := filepath.Join(runnerRoot, "credential")
-	managedEnvironmentPath := filepath.Join(home, ".config", "mohist", "runner-managed.env")
-	if err := os.MkdirAll(runnerRoot, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(enrollmentTokenPath, []byte("pending-enrollment\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(credentialPath, []byte("machine-credential\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(managedEnvironmentPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(managedEnvironmentPath, []byte("SERVER_URL=\"https://managed\"\nRUNNER_ROOT=\"/custom\"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	deps, out, errOut := testDeps(nil, map[string]string{})
+func TestUpdateRunnerDelegatesScopeAndPreservesRuntimeEnvironment(t *testing.T) {
+	home := "/home/operator"
+	repoRoot := "/source checkout"
+	unitDir := "/unit directory"
+	environmentPath := filepath.Join(home, ".config", "mohist", "runner.env")
+	files := &recordingMaintenanceFiles{values: map[string]string{
+		environmentPath: "ENABLED_AGENT_RUNTIMES=opencode\n",
+	}}
+	wantEnvironment := files.values[environmentPath]
+	runtime := &recordingManagedUpdateRuntime{}
+	deps, _, errOut := testDeps(nil, map[string]string{})
+	deps.ManagedUpdate = runtime
 	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.ReadFile = files.ReadFile
+	deps.WriteFile = files.WriteFile
 	var commands [][]string
 	deps.Execute = func(_ context.Context, name string, args []string) error {
 		commands = append(commands, append([]string{name}, args...))
 		return nil
 	}
 
-	if code := Run(context.Background(), []string{"update", "runner"}, deps); code != ExitOK {
+	code := Run(context.Background(), []string{
+		"update", "runner", "--repo-root", repoRoot, "--unit-dir", unitDir,
+	}, deps)
+	if code != ExitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
 	}
-	for path, want := range map[string]string{
+	if len(runtime.requests) != 1 {
+		t.Fatalf("managed update requests = %#v", runtime.requests)
+	}
+	request := runtime.requests[0]
+	if len(request.Components) != 1 || request.Components[0] != "runner" ||
+		request.RepoRoot != repoRoot || request.UnitDir != unitDir || request.DryRun {
+		t.Fatalf("managed update request = %#v", request)
+	}
+	if len(files.accesses) != 0 {
+		t.Fatalf("managed update routing accessed filesystem: %#v", files.accesses)
+	}
+	if len(commands) != 0 {
+		t.Fatalf("managed update routing executed commands: %#v", commands)
+	}
+	if files.values[environmentPath] != wantEnvironment {
+		t.Fatalf("environment file changed to %q", files.values[environmentPath])
+	}
+}
+
+func TestUpdateDefaultsToOneManagedServerRunnerTransaction(t *testing.T) {
+	runtime := &recordingManagedUpdateRuntime{}
+	deps, _, errOut := testDeps(nil, map[string]string{})
+	deps.ManagedUpdate = runtime
+	var commands [][]string
+	deps.Execute = func(_ context.Context, name string, args []string) error {
+		commands = append(commands, append([]string{name}, args...))
+		return nil
+	}
+
+	code := Run(context.Background(), []string{"update", "--repo-root", "/exact/source"}, deps)
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
+	}
+	if len(runtime.requests) != 1 {
+		t.Fatalf("managed update requests = %#v", runtime.requests)
+	}
+	request := runtime.requests[0]
+	if !reflect.DeepEqual(request.Components, []string{"server", "runner"}) || request.RepoRoot != "/exact/source" {
+		t.Fatalf("managed update request = %#v", request)
+	}
+	if len(commands) != 0 {
+		t.Fatalf("default update escaped the managed transaction: %#v", commands)
+	}
+}
+
+func TestUpdateRunnerPreservesCredentialFiles(t *testing.T) {
+	home := "/home/operator"
+	repoRoot := "/source checkout"
+	unitDir := "/unit directory"
+	runnerRoot := filepath.Join(home, ".mohist", "projects")
+	enrollmentTokenPath := filepath.Join(runnerRoot, runnerEnrollmentTokenFile)
+	credentialPath := filepath.Join(runnerRoot, "credential")
+	environmentPath := filepath.Join(home, ".config", "mohist", "runner.env")
+	managedEnvironmentPath := filepath.Join(home, ".config", "mohist", "runner-managed.env")
+	wantFiles := map[string]string{
 		enrollmentTokenPath:    "pending-enrollment\n",
 		credentialPath:         "machine-credential\n",
+		environmentPath:        "ENABLED_AGENT_RUNTIMES=pi\n",
 		managedEnvironmentPath: "SERVER_URL=\"https://managed\"\nRUNNER_ROOT=\"/custom\"\n",
-	} {
-		contents, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(contents) != want {
-			t.Fatalf("%s changed to %q", path, contents)
+	}
+	files := &recordingMaintenanceFiles{values: map[string]string{}}
+	for path, value := range wantFiles {
+		files.values[path] = value
+	}
+	runtime := &recordingManagedUpdateRuntime{}
+	deps, out, errOut := testDeps(nil, map[string]string{})
+	deps.ManagedUpdate = runtime
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.ReadFile = files.ReadFile
+	deps.WriteFile = files.WriteFile
+	var commands [][]string
+	deps.Execute = func(_ context.Context, name string, args []string) error {
+		commands = append(commands, append([]string{name}, args...))
+		return nil
+	}
+
+	if code := Run(context.Background(), []string{
+		"update", "runner", "--repo-root", repoRoot, "--unit-dir", unitDir, "--dry-run",
+	}, deps); code != ExitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
+	}
+	if len(runtime.requests) != 1 {
+		t.Fatalf("managed update requests = %#v", runtime.requests)
+	}
+	request := runtime.requests[0]
+	if len(request.Components) != 1 || request.Components[0] != "runner" ||
+		request.RepoRoot != repoRoot || request.UnitDir != unitDir || !request.DryRun {
+		t.Fatalf("managed update request = %#v", request)
+	}
+	if len(files.accesses) != 0 {
+		t.Fatalf("managed update routing accessed filesystem: %#v", files.accesses)
+	}
+	if len(commands) != 0 {
+		t.Fatalf("managed update routing executed commands: %#v", commands)
+	}
+	for path, want := range wantFiles {
+		if files.values[path] != want {
+			t.Fatalf("%s changed to %q", path, files.values[path])
 		}
 	}
 	combined := out.String() + errOut.String()
-	for _, command := range commands {
-		combined += strings.Join(command, " ")
-	}
 	if strings.Contains(combined, "pending-enrollment") || strings.Contains(combined, "machine-credential") {
 		t.Fatalf("update leaked credentials: %q", combined)
 	}

@@ -1,3 +1,4 @@
+using System.Net;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Runner.Services;
@@ -61,6 +62,64 @@ public class RunnerIdentityConnectionSpecs
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
+
+    [Fact]
+    public async Task RunnerIdentity_WithRunnerId_SelectsExactRunnerWhenHostnameIsShared()
+    {
+        var firstRunnerId = $"identity-exact-first-{Guid.NewGuid():N}";
+        var secondRunnerId = $"identity-exact-second-{Guid.NewGuid():N}";
+        var hostname = $"identity-shared-host-{Guid.NewGuid():N}";
+
+        await RegisterAsync(firstRunnerId, hostname);
+        await RegisterAsync(secondRunnerId, hostname);
+
+        try
+        {
+            var identity = await _fixture.Client.GetDataAsync<RunnerIdentityDto>(
+                $"/api/runner/identity?runnerId={Uri.EscapeDataString(secondRunnerId)}&hostname={Uri.EscapeDataString(hostname)}");
+
+            Assert.Equal(secondRunnerId, identity.RunnerId);
+            Assert.Equal(hostname, identity.Hostname);
+        }
+        finally
+        {
+            await UnregisterAsync(secondRunnerId);
+            await UnregisterAsync(firstRunnerId);
+        }
+    }
+
+    [Fact]
+    public async Task RunnerIdentity_WithUnknownRunnerId_DoesNotFallBackToHostname()
+    {
+        var knownRunnerId = $"identity-known-{Guid.NewGuid():N}";
+        var unknownRunnerId = $"identity-unknown-{Guid.NewGuid():N}";
+        var hostname = $"identity-known-host-{Guid.NewGuid():N}";
+
+        await RegisterAsync(knownRunnerId, hostname);
+
+        try
+        {
+            using var response = await _fixture.Client.GetAsync(
+                $"/api/runner/identity?runnerId={Uri.EscapeDataString(unknownRunnerId)}&hostname={Uri.EscapeDataString(hostname)}");
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+        finally
+        {
+            await UnregisterAsync(knownRunnerId);
+        }
+    }
+
+    private Task RegisterAsync(string runnerId, string hostname)
+        => _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
+            capabilities = new[] { "spec/*" },
+            hostname,
+        });
+
+    private Task UnregisterAsync(string runnerId)
+        => _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/unregister");
 
     private sealed record RunnerIdentityDto(
         string RunnerId,
