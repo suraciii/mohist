@@ -134,7 +134,7 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
             }
             else
             {
-                await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
+                await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId, scheduleRetry: false);
             }
             RevokeManagerGrant(managerGrant);
         }
