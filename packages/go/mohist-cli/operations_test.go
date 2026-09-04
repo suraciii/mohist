@@ -60,6 +60,66 @@ func TestOperationsDeadLetterRedeliverUsesPost(t *testing.T) {
 	}
 }
 
+func TestOperationsDiscoveryLeavesAreLocal(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "routing help", args: []string{"routing", "rule", "view", "--help"}, want: "JSON FIELDS"},
+		{name: "routing short help", args: []string{"routing", "rule", "view", "-h"}, want: "JSON FIELDS"},
+		{name: "webhook help", args: []string{"webhook", "subscription", "view", "--help"}, want: "JSON FIELDS"},
+		{name: "event redeliver help", args: []string{"event", "dead-letter", "redeliver", "--help"}, want: "JSON FIELDS"},
+		{name: "event redeliver short help", args: []string{"event", "dead-letter", "redeliver", "-h"}, want: "JSON FIELDS"},
+		{name: "event tail short help", args: []string{"event", "tail", "-h"}, want: "JSON FIELDS"},
+		{name: "otel query help", args: []string{"otel", "query", "--help"}, want: "JSON FIELDS"},
+		{name: "otel query short help", args: []string{"otel", "query", "-h"}, want: "JSON FIELDS"},
+		{name: "otel query catalog", args: []string{"otel", "query", "--json"}, want: "columns"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return nil, errors.New("HTTP must not be used")
+			}), map[string]string{})
+			deps.ReadFile = func(string) (string, error) {
+				t.Fatal("Project or config resolution must not be used")
+				return "", nil
+			}
+			if code := Run(context.Background(), tc.args, deps); code != ExitOK {
+				t.Fatalf("code=%d stderr=%q", code, errOut.String())
+			}
+			if calls != 0 || !strings.Contains(out.String(), tc.want) {
+				t.Fatalf("calls=%d output=%q", calls, out.String())
+			}
+		})
+	}
+}
+
+func TestOperationsNoCatalogBareJSONIsLocalUsageError(t *testing.T) {
+	cases := [][]string{
+		{"webhook", "event-types", "--json"},
+		{"server", "status", "--json"},
+	}
+	for _, args := range cases {
+		t.Run(strings.Join(args, "/"), func(t *testing.T) {
+			calls := 0
+			deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return nil, errors.New("HTTP must not be used")
+			}), map[string]string{})
+			deps.ReadFile = func(string) (string, error) {
+				t.Fatal("Project or config resolution must not be used")
+				return "", nil
+			}
+			if code := Run(context.Background(), args, deps); code != ExitUsage || calls != 0 || errOut.Len() == 0 {
+				t.Fatalf("code=%d calls=%d stderr=%q", code, calls, errOut.String())
+			}
+		})
+	}
+}
+
 func TestOperationsEventTailUsesInjectedStreamAndCancellation(t *testing.T) {
 	deps, out, errOut := testDeps(nil, map[string]string{})
 	deps.EventTail = func(ctx context.Context, project string, types []string, match string, writer io.Writer) error {
