@@ -47,6 +47,17 @@ test('CI workflow needs reference existing canonical producer jobs', () => {
   assert.match(jobs.get('repository') ?? '', /npm run test:slack:race/)
 })
 
+test('CI evidence Gate consumes a standalone bundle without reinstalling the monorepo', () => {
+  const workflow = readFileSync(resolve(repositoryRoot, '.github/workflows/ci.yml'), 'utf8')
+  const jobs = parseJobs(workflow)
+  const repository = jobs.get('repository') ?? ''
+  const gate = jobs.get('gate') ?? ''
+
+  assert.match(repository, /esbuild scripts\/test-duration\/gate\.ts .*--outfile=artifacts\/gate\.mjs/)
+  assert.doesNotMatch(gate, /npm ci/)
+  assert.match(gate, /node artifacts\/gate\.mjs --evidence-root/)
+})
+
 // Path filtering policy: the changes job owns the scope map, application
 // jobs are conditioned on their lane, and shared build inputs force every
 // scope. Each application lane lists the package roots it owns.
