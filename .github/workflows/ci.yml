@@ -76,12 +76,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - name: Prepare Server directories
+        run: mkdir -p "$TMPDIR" artifacts/server
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22.19.0
-          cache: npm
-          cache-dependency-path: package-lock.json
+          bun-version: 1.4.0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -96,16 +97,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Install dependencies
-        run: npm ci --workspaces=false
-
       - name: Restore .NET
         run: dotnet restore Mohist.sln
 
       - name: Run Server scope
         run: |
-          mkdir -p "$TMPDIR" artifacts/server
-          npm run test:app -- server
+          bun --no-install scripts/test-duration/application.ts server
 
       - name: Capture Server evidence
         if: always()
