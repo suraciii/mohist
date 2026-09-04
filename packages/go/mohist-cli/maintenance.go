@@ -2,11 +2,13 @@ package mohistcli
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -543,6 +545,175 @@ type stagedArtifact struct {
 	target string
 }
 
+type managedReleaseManifest struct {
+	Component      string `json:"component"`
+	Version        string `json:"version"`
+	SourceRevision string `json:"sourceRevision"`
+	GitHash        string `json:"gitHash"`
+	TreeHash       string `json:"treeHash"`
+	ArtifactDigest string `json:"artifactDigest"`
+	ReleaseID      string `json:"releaseId"`
+	Generation     int64  `json:"generation"`
+}
+
+type managedRelease struct {
+	Root         string
+	Entrypoint   string
+	ManifestPath string
+}
+
+func resolveMaintenanceRepoRoot(deps Dependencies, requested string) (string, error) {
+	root := strings.TrimSpace(requested)
+	if root == "" {
+		root = deps.CurrentDirectory()
+	}
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("could not resolve source root: %w", err)
+	}
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		if err == nil {
+			err = errors.New("source root is not a directory")
+		}
+		return "", fmt.Errorf("invalid source root %q: %w", root, err)
+	}
+	return root, nil
+}
+
+func buildManagedRelease(ctx context.Context, deps Dependencies, component, sourceRoot, home string) (managedRelease, error) {
+	now := deps.Now()
+	releaseID := fmt.Sprintf("%s-%d", component, now.UnixNano())
+	releaseRoot := filepath.Join(home, ".mohist", "releases", component, releaseID)
+	if err := deps.MkdirAll(releaseRoot, 0o700); err != nil {
+		return managedRelease{}, err
+	}
+
+	var entrypoint string
+	switch component {
+	case "server":
+		project := filepath.Join(sourceRoot, "packages", "server", "src", "Mohist.Server", "Mohist.Server.csproj")
+		if err := deps.Execute(ctx, "dotnet", []string{"publish", project, "-c", "Release", "--no-restore", "-o", releaseRoot}); err != nil {
+			_ = deps.RemoveAll(releaseRoot)
+			return managedRelease{}, err
+		}
+		entrypoint = filepath.Join(releaseRoot, "Mohist.Server")
+	case "runner":
+		if err := deps.Execute(ctx, "npm", []string{"--prefix", sourceRoot, "run", "build", "--workspace", "packages/runner"}); err != nil {
+			_ = deps.RemoveAll(releaseRoot)
+			return managedRelease{}, err
+		}
+		dist := filepath.Join(sourceRoot, "packages", "runner", "dist")
+		if err := copyTree(ctx, dist, filepath.Join(releaseRoot, "dist"), deps); err != nil {
+			_ = deps.RemoveAll(releaseRoot)
+			return managedRelease{}, err
+		}
+		packageJSON := filepath.Join(sourceRoot, "packages", "runner", "package.json")
+		data, err := os.ReadFile(packageJSON)
+		if err != nil {
+			_ = deps.RemoveAll(releaseRoot)
+			return managedRelease{}, err
+		}
+		if err := deps.WriteFile(filepath.Join(releaseRoot, "package.json"), string(data), 0o600); err != nil {
+			_ = deps.RemoveAll(releaseRoot)
+			return managedRelease{}, err
+		}
+		entrypoint = filepath.Join(releaseRoot, "dist", "cli.js")
+	default:
+		return managedRelease{}, fmt.Errorf("unsupported managed release component %q", component)
+	}
+	if info, err := os.Stat(entrypoint); err != nil || info.IsDir() {
+		if err == nil {
+			err = errors.New("canonical entrypoint is a directory")
+		}
+		_ = deps.RemoveAll(releaseRoot)
+		return managedRelease{}, fmt.Errorf("canonical %s entrypoint %q is missing: %w", component, entrypoint, err)
+	}
+
+	sourceRevision := "unknown"
+	if output, err := deps.ExecuteOutput(ctx, "git", []string{"-C", sourceRoot, "rev-parse", "HEAD"}); err == nil && strings.TrimSpace(output) != "" {
+		sourceRevision = strings.TrimSpace(output)
+	}
+	treeHash := sourceRevision
+	if output, err := deps.ExecuteOutput(ctx, "git", []string{"-C", sourceRoot, "write-tree"}); err == nil && strings.TrimSpace(output) != "" {
+		treeHash = strings.TrimSpace(output)
+	}
+	digest, err := directoryDigest(releaseRoot, "")
+	if err != nil {
+		_ = deps.RemoveAll(releaseRoot)
+		return managedRelease{}, err
+	}
+	manifest := managedReleaseManifest{
+		Component: component, Version: releaseID, SourceRevision: sourceRevision,
+		GitHash: sourceRevision, TreeHash: treeHash, ArtifactDigest: digest,
+		ReleaseID: releaseID, Generation: 1,
+	}
+	manifestData, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		_ = deps.RemoveAll(releaseRoot)
+		return managedRelease{}, err
+	}
+	manifestPath := filepath.Join(releaseRoot, "identity.json")
+	if err := deps.WriteFile(manifestPath, string(manifestData)+"\n", 0o600); err != nil {
+		_ = deps.RemoveAll(releaseRoot)
+		return managedRelease{}, err
+	}
+	if err := validateManagedRelease(component, entrypoint, manifestPath); err != nil {
+		_ = deps.RemoveAll(releaseRoot)
+		return managedRelease{}, err
+	}
+	return managedRelease{Root: releaseRoot, Entrypoint: entrypoint, ManifestPath: manifestPath}, nil
+}
+
+func directoryDigest(root, excluded string) (string, error) {
+	hash := sha256.New()
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if path == excluded {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		_, _ = hash.Write([]byte(strings.TrimPrefix(path, root)))
+		_, _ = hash.Write(data)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("sha256:%x", hash.Sum(nil)), nil
+}
+
+func validateManagedRelease(component, entrypoint, manifestPath string) error {
+	if !filepath.IsAbs(entrypoint) || !filepath.IsAbs(manifestPath) {
+		return errors.New("managed release paths must be absolute")
+	}
+	info, err := os.Stat(entrypoint)
+	if err != nil || info.IsDir() {
+		return fmt.Errorf("canonical %s entrypoint validation failed: %w", component, err)
+	}
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("managed %s identity manifest validation failed: %w", component, err)
+	}
+	var manifest managedReleaseManifest
+	if err := json.Unmarshal(data, &manifest); err != nil || manifest.Component != component || manifest.Version == "" || manifest.ReleaseID == "" || manifest.Generation <= 0 || manifest.ArtifactDigest == "" || manifest.SourceRevision == "" {
+		return fmt.Errorf("managed %s identity manifest is missing or corrupt", component)
+	}
+	digest, err := directoryDigest(filepath.Dir(manifestPath), manifestPath)
+	if err != nil || digest != manifest.ArtifactDigest {
+		return fmt.Errorf("managed %s identity manifest digest does not match the candidate", component)
+	}
+	return nil
+}
+
 func stageDirectory(ctx context.Context, deps Dependencies, source, target, _ string) (string, error) {
 	parent := filepath.Dir(target)
 	if err := deps.MkdirAll(parent, 0o700); err != nil {
@@ -701,19 +872,24 @@ func runInstallUpdate(ctx context.Context, deps Dependencies, c command) int {
 }
 
 func runInstallUpdateLocked(ctx context.Context, deps Dependencies, c command, component, enrollmentToken, runnerServerURL string) int {
+	root, err := resolveMaintenanceRepoRoot(deps, argValue(c.args, "repo-root", ""))
+	if err != nil {
+		writeError(deps.Stderr, err)
+		return ExitOperation
+	}
 	if strings.HasPrefix(c.kind, "update-") {
 		if component == "" {
-			return updateAllLocked(ctx, deps, c)
+			return updateAllLocked(ctx, deps, c, root)
 		}
 		switch component {
 		case "cli":
-			return updateCLI(ctx, deps, argValue(c.args, "repo-root", ""), argValue(c.args, "cli-path", ""))
+			return updateCLI(ctx, deps, root, argValue(c.args, "cli-path", ""))
 		case "server":
-			return executeMaintenance(ctx, deps, "dotnet", "build", "Mohist.sln")
+			return installComponent(ctx, deps, component, command{kind: c.kind, args: append(c.args, "repo-root", root)}, "", "")
 		case "runner":
-			return executeMaintenance(ctx, deps, "npm", "run", "build", "-w", "packages/runner")
+			return installComponent(ctx, deps, component, command{kind: c.kind, args: append(c.args, "repo-root", root)}, "", "")
 		case "slack":
-			return executeMaintenance(ctx, deps, "go", "-C", "packages/go/mohist-slack", "build", "-o", "bin/build/mohist-slack")
+			return executeMaintenance(ctx, deps, "go", "-C", filepath.Join(root, "packages/go/mohist-slack"), "build", "-o", filepath.Join(root, "packages/go/mohist-slack/bin/build/mohist-slack"))
 		}
 	}
 	if component == "runner" {
@@ -745,19 +921,19 @@ func runInstallUpdateLocked(ctx context.Context, deps Dependencies, c command, c
 		enrollmentToken = token.Token
 		runnerServerURL = cfg.ServerURL
 	}
-	return installComponent(ctx, deps, component, c, enrollmentToken, runnerServerURL)
+	return installComponent(ctx, deps, component, command{kind: c.kind, args: append(c.args, "repo-root", root)}, enrollmentToken, runnerServerURL)
 }
 
 func updateAll(ctx context.Context, deps Dependencies, c command) int {
 	return runInstallUpdate(ctx, deps, c)
 }
 
-func updateAllLocked(ctx context.Context, deps Dependencies, c command) int {
-	if code := updateCLI(ctx, deps, argValue(c.args, "repo-root", ""), argValue(c.args, "cli-path", "")); code != ExitOK {
+func updateAllLocked(ctx context.Context, deps Dependencies, c command, root string) int {
+	if code := updateCLI(ctx, deps, root, argValue(c.args, "cli-path", "")); code != ExitOK {
 		return code
 	}
 	for _, component := range []string{"server", "runner", "slack"} {
-		if code := runInstallUpdateLocked(ctx, deps, command{kind: "update-" + component, args: []string{"component", component}}, component, "", ""); code != ExitOK {
+		if code := runInstallUpdateLocked(ctx, deps, command{kind: "update-" + component, args: []string{"component", component, "repo-root", root}}, component, "", ""); code != ExitOK {
 			return code
 		}
 	}
@@ -787,13 +963,21 @@ func installComponent(
 	if unitDir == "" {
 		unitDir = filepath.Join(home, ".config", "systemd", "user")
 	}
-	root := argValue(c.args, "repo-root", "")
-	if root == "" {
-		root = deps.CurrentDirectory()
+	root, err := resolveMaintenanceRepoRoot(deps, argValue(c.args, "repo-root", ""))
+	if err != nil {
+		writeError(deps.Stderr, err)
+		return ExitOperation
 	}
-	entry := map[string]string{"server": "dotnet run --project packages/server/src/Mohist.Server/Mohist.Server.csproj", "runner": "node packages/runner/dist/cli.js", "slack": "bin/build/mohist-slack"}[component]
+	release := managedRelease{}
+	if strings.HasPrefix(c.kind, "update-") && (component == "server" || component == "runner") {
+		release, err = buildManagedRelease(ctx, deps, component, root, home)
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitOperation
+		}
+	}
 	environmentFileLine := ""
-	if component == "runner" {
+	if component == "runner" && c.kind == "install-component" {
 		if enrollmentToken == "" || runnerServerURL == "" {
 			writeError(deps.Stderr, errors.New("runner enrollment token is required before installing the service"))
 			return ExitOperation
@@ -831,7 +1015,26 @@ func installComponent(
 			}
 		}
 	}
-	unitText := "[Unit]\nDescription=Mohist " + component + "\n\n[Service]\nWorkingDirectory=" + root + "\n" + environmentFileLine + "ExecStart=" + entry + "\n\n[Install]\nWantedBy=default.target\n"
+	entry := map[string]string{
+		"server": "dotnet run --project packages/server/src/Mohist.Server/Mohist.Server.csproj",
+		"runner": "node packages/runner/dist/cli.js",
+		"slack":  filepath.Join(root, "bin", "build", "mohist-slack"),
+	}[component]
+	workingDirectory := root
+	manifestLine := ""
+	if release.Root != "" {
+		entry = release.Entrypoint
+		workingDirectory = release.Root
+		manifestLine = "Environment=MOHIST_RUNTIME_IDENTITY_PATH=" + release.ManifestPath + "\n"
+	}
+	if component == "runner" && release.Root != "" {
+		node, err := exec.LookPath("node")
+		if err != nil {
+			node = "/usr/bin/node"
+		}
+		entry = node + " " + entry
+	}
+	unitText := "[Unit]\nDescription=Mohist " + component + "\n\n[Service]\nWorkingDirectory=" + workingDirectory + "\n" + environmentFileLine + manifestLine + "ExecStart=" + entry + "\n\n[Install]\nWantedBy=default.target\n"
 	path := filepath.Join(unitDir, unit)
 	if err := deps.WriteFile(path, unitText, 0o600); err != nil {
 		writeError(deps.Stderr, err)

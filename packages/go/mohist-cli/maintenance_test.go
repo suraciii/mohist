@@ -352,6 +352,17 @@ func TestRunnerMaintenanceWithoutRuntimeFlagPreservesEnvironmentFile(t *testing.
 	for _, args := range [][]string{{"install", "runner"}, {"update", "runner"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			home := t.TempDir()
+			repoRoot := t.TempDir()
+			dist := filepath.Join(repoRoot, "packages", "runner", "dist")
+			if err := os.MkdirAll(dist, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dist, "cli.js"), []byte("runner"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(repoRoot, "packages", "runner", "package.json"), []byte(`{"name":"runner"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			environmentPath := filepath.Join(home, ".config", "mohist", "runner.env")
 			if err := os.MkdirAll(filepath.Dir(environmentPath), 0o700); err != nil {
 				t.Fatal(err)
@@ -363,10 +374,10 @@ func TestRunnerMaintenanceWithoutRuntimeFlagPreservesEnvironmentFile(t *testing.
 				return response(http.StatusOK, `{"success":true,"data":{"token":"enrollment-token"}}`), nil
 			}), map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_TOKEN": "operator-token"})
 			deps.HomeDir = func() (string, error) { return home, nil }
-			deps.CurrentDirectory = func() string { return t.TempDir() }
+			deps.CurrentDirectory = func() string { return repoRoot }
 			deps.Execute = func(context.Context, string, []string) error { return nil }
 
-			if code := Run(context.Background(), args, deps); code != ExitOK {
+			if code := Run(context.Background(), append(args, "--repo-root", repoRoot), deps); code != ExitOK {
 				t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
 			}
 			contents, err := os.ReadFile(environmentPath)
@@ -382,6 +393,17 @@ func TestRunnerMaintenanceWithoutRuntimeFlagPreservesEnvironmentFile(t *testing.
 
 func TestUpdateRunnerPreservesCredentialFiles(t *testing.T) {
 	home := t.TempDir()
+	repoRoot := t.TempDir()
+	runnerDist := filepath.Join(repoRoot, "packages", "runner", "dist")
+	if err := os.MkdirAll(runnerDist, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runnerDist, "cli.js"), []byte("new runner"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "packages", "runner", "package.json"), []byte(`{"name":"runner"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	runnerRoot := filepath.Join(home, ".mohist", "projects")
 	enrollmentTokenPath := filepath.Join(runnerRoot, runnerEnrollmentTokenFile)
 	credentialPath := filepath.Join(runnerRoot, "credential")
@@ -409,7 +431,7 @@ func TestUpdateRunnerPreservesCredentialFiles(t *testing.T) {
 		return nil
 	}
 
-	if code := Run(context.Background(), []string{"update", "runner"}, deps); code != ExitOK {
+	if code := Run(context.Background(), []string{"update", "runner", "--repo-root", repoRoot}, deps); code != ExitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
 	}
 	for path, want := range map[string]string{
@@ -431,6 +453,121 @@ func TestUpdateRunnerPreservesCredentialFiles(t *testing.T) {
 	}
 	if strings.Contains(combined, "pending-enrollment") || strings.Contains(combined, "machine-credential") {
 		t.Fatalf("update leaked credentials: %q", combined)
+	}
+}
+
+func TestUpdateRunnerStagesAbsoluteCandidateWithManifest(t *testing.T) {
+	home := t.TempDir()
+	repoRoot := t.TempDir()
+	dist := filepath.Join(repoRoot, "packages", "runner", "dist")
+	if err := os.MkdirAll(dist, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dist, "cli.js"), []byte("runner"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "packages", "runner", "package.json"), []byte(`{"name":"runner"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps, _, errOut := testDeps(nil, map[string]string{})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	var commands [][]string
+	deps.Execute = func(_ context.Context, name string, args []string) error {
+		commands = append(commands, append([]string{name}, args...))
+		return nil
+	}
+	if code := Run(context.Background(), []string{"update", "runner", "--repo-root", repoRoot}, deps); code != ExitOK {
+		t.Fatalf("exit code=%d stderr=%q", code, errOut.String())
+	}
+	unitPath := filepath.Join(home, ".config", "systemd", "user", "mohist-runner.service")
+	unit, err := os.ReadFile(unitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(unit)
+	if strings.Contains(text, repoRoot) || !strings.Contains(text, "MOHIST_RUNTIME_IDENTITY_PATH=") || !strings.Contains(text, "ExecStart=") {
+		t.Fatalf("unit contains non-managed paths or no manifest: %q", text)
+	}
+	if !strings.Contains(text, ".mohist/releases/runner/") || !strings.Contains(text, "/dist/cli.js") {
+		t.Fatalf("unit does not point to installed runner candidate: %q", text)
+	}
+	if len(commands) != 4 || commands[0][0] != "npm" || commands[1][2] != "daemon-reload" || commands[2][2] != "enable" {
+		t.Fatalf("commands=%#v", commands)
+	}
+	manifestPath := strings.TrimPrefix(strings.Split(text, "MOHIST_RUNTIME_IDENTITY_PATH=")[1], "")
+	manifestPath = strings.TrimSpace(strings.Split(manifestPath, "\n")[0])
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(manifest), `"component": "runner"`) || !strings.Contains(string(manifest), `"generation": 1`) {
+		t.Fatalf("manifest=%q", manifest)
+	}
+}
+
+func TestUpdateRunnerMissingCanonicalEntrypointDoesNotInvokeSystemd(t *testing.T) {
+	home := t.TempDir()
+	repoRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repoRoot, "packages", "runner", "dist"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "packages", "runner", "package.json"), []byte(`{"name":"runner"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps, _, errOut := testDeps(nil, map[string]string{})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	systemdCalls := 0
+	deps.Execute = func(_ context.Context, name string, _ []string) error {
+		if name == "systemctl" {
+			systemdCalls++
+		}
+		return nil
+	}
+	if code := Run(context.Background(), []string{"update", "runner", "--repo-root", repoRoot}, deps); code != ExitOperation {
+		t.Fatalf("exit code=%d stderr=%q", code, errOut.String())
+	}
+	if systemdCalls != 0 || !strings.Contains(errOut.String(), "canonical runner entrypoint") {
+		t.Fatalf("systemdCalls=%d stderr=%q", systemdCalls, errOut.String())
+	}
+}
+
+func TestUpdateServerPublishesInstalledCandidateWithManifest(t *testing.T) {
+	home := t.TempDir()
+	repoRoot := t.TempDir()
+	project := filepath.Join(repoRoot, "packages", "server", "src", "Mohist.Server")
+	if err := os.MkdirAll(project, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "Mohist.Server.csproj"), []byte("<Project />"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps, _, errOut := testDeps(nil, map[string]string{})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	var commands [][]string
+	deps.Execute = func(_ context.Context, name string, args []string) error {
+		commands = append(commands, append([]string{name}, args...))
+		if name == "dotnet" {
+			for i := 0; i+1 < len(args); i++ {
+				if args[i] == "-o" {
+					return os.WriteFile(filepath.Join(args[i+1], "Mohist.Server"), []byte("server"), 0o700)
+				}
+			}
+		}
+		return nil
+	}
+	if code := Run(context.Background(), []string{"update", "server", "--repo-root", repoRoot}, deps); code != ExitOK {
+		t.Fatalf("exit code=%d stderr=%q", code, errOut.String())
+	}
+	unit, err := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", "mohist.service"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(unit)
+	if strings.Contains(text, repoRoot) || !strings.Contains(text, ".mohist/releases/server/") || !strings.Contains(text, "MOHIST_RUNTIME_IDENTITY_PATH=") {
+		t.Fatalf("unit=%q", text)
+	}
+	if len(commands) != 4 || commands[0][0] != "dotnet" || commands[0][1] != "publish" {
+		t.Fatalf("commands=%#v", commands)
 	}
 }
 
