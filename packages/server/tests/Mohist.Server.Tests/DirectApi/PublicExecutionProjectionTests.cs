@@ -462,6 +462,7 @@ public sealed class PublicExecutionProjectionTests : IAsyncDisposable
         Assert.Equal("turn:turn_fence_1:terminal", (await _harness.SnapshotAsync("turn", "turn_fence_1"))!.TerminalFact);
     }
 
+
     [Fact]
     public async Task CrashBeforeCommit_LeavesNoPartialSnapshotSequenceOrCheckpoint_AndReplayProducesTheSameOutcome()
     {

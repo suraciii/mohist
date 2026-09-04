@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
@@ -11,6 +12,7 @@ using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Subscriptions;
 using Mohist.Workflow.Definition;
 using Orleans.Runtime;
+using Orleans.Storage;
 using Xunit;
 
 namespace Mohist.Server.Tests.Workflow;
@@ -54,6 +56,7 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         var key = WorkflowAgentHandoffCodec.KeyFor(
             run.Metadata.ProjectId!,
             run.Id,
+            run.CurrentStage().Id,
             attempt.Id,
             attempt.WorkId!);
         var handoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(key);
@@ -84,6 +87,84 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task WorkflowAgentAction_ReactivationResumesLegacyHandoffForAlreadyTerminalJob()
+    {
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [AgentTask("build", "Build the change", "delivery")], [])
+        ]);
+        var workflow = await StartWorkflowAsync(
+            definition,
+            $"workflow-agent-legacy-handoff-{Guid.NewGuid():N}");
+        var runnerId = _runnerId!;
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, (await workflow.AssignWorkerAsync(runnerId)).Status);
+
+        Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var run = await LoadRunAsync(_workflowId!);
+        var attempt = Assert.Single(run.CurrentStage().Tasks);
+        var stageKey = WorkflowAgentHandoffCodec.KeyFor(
+            run.Metadata.ProjectId!,
+            run.Id,
+            run.CurrentStage().Id,
+            attempt.Id,
+            attempt.WorkId!);
+        var stageHandoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(stageKey);
+        await stageHandoff.ActivateAsync();
+        var dispatch = (await PollWorkAsync(runnerId)).Work;
+        var job = Grains.GetGrain<IAgentJobGrain>(dispatch.AgentJobId!);
+        var runtimeSessionId = $"runtime-{dispatch.WorkId}";
+        Assert.True(await job.RecordRuntimeSessionBindingAsync(
+            runnerId,
+            dispatch.WorkId,
+            dispatch.AgentSessionId!,
+            runtimeSessionId));
+        var result = await job.ReportResultAsync(
+            runnerId,
+            dispatch.WorkId,
+            new WorkResult(
+                "completed",
+                AgentSessionId: dispatch.AgentSessionId,
+                AgentTurnId: dispatch.InitialTurnId,
+                Runtime: dispatch.AgentDefinition?.Runtime,
+                RuntimeSessionId: runtimeSessionId));
+        Assert.True(result.Accepted, result.Reason);
+        Assert.Equal(AgentJobStatus.Completed, (await job.GetRuntimeSnapshotAsync()).Status);
+        Assert.Equal(WorkflowRunStatus.Running, (await LoadRunAsync(run.Id)).Status);
+
+        await TestLifecycle.DeactivateAndWait(stageHandoff, Grains);
+        var storage = Services.GetRequiredService<IGrainStorage>();
+        var stored = new GrainState<WorkflowAgentHandoffState>();
+        await storage.ReadStateAsync("workflow-agent-handoff", stageHandoff.GetGrainId(), stored);
+        Assert.NotNull(stored.State.Plan);
+        var legacyKey = WorkflowAgentHandoffCodec.LegacyKeyFor(
+            run.Metadata.ProjectId!,
+            run.Id,
+            attempt.Id,
+            attempt.WorkId!);
+        var legacyHandoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(legacyKey);
+        await storage.WriteStateAsync(
+            "workflow-agent-handoff",
+            legacyHandoff.GetGrainId(),
+            new GrainState<WorkflowAgentHandoffState> { State = stored.State });
+        await storage.WriteStateAsync(
+            "workflow-agent-handoff",
+            stageHandoff.GetGrainId(),
+            new GrainState<WorkflowAgentHandoffState>
+            {
+                State = new WorkflowAgentHandoffState(),
+                ETag = stored.ETag,
+            });
+
+        await DeactivateWorkflowAsync(run.Id);
+        workflow = Grains.GetGrain<IWorkflowGrain>(run.Id);
+        Assert.Equal("Running", await workflow.GetRunStatusAsync());
+
+        await Services.GetRequiredService<IEventDispatcher>().DrainAsync();
+        run = await LoadRunAsync(run.Id);
+        Assert.Equal(WorkflowActionAttemptStatus.Completed, run.CurrentStage().Tasks.Single().Status);
+        Assert.Equal(WorkflowRunStatus.Completed, run.Status);
+    }
+
+    [Fact]
     public async Task WorkflowAgentAction_ReusesNamedSessionAcrossAgentJobs()
     {
         var definition = new WorkflowDefinition([
@@ -107,6 +188,145 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         Assert.Equal(first.Work.AgentSessionId, second.Work.AgentSessionId);
         await ReportAsync(runnerId, second.Work, "completed");
         Assert.Equal(WorkflowRunStatus.Completed, (await LoadRunAsync(_workflowId!)).Status);
+    }
+
+    [Fact]
+    public async Task WorkflowAgentAction_SameNamedSessionAndTaskIdAcrossStages_UsesDistinctLaunchIdentities()
+    {
+        var definition = new WorkflowDefinition([
+            new StageDefinition("plan", [AgentTask("shared", "Plan the change", "delivery")], []),
+            new StageDefinition("check", [AgentTask("shared", "Check the change", "delivery")], []),
+        ]);
+        var workflow = await StartWorkflowAsync(
+            definition,
+            $"workflow-agent-cross-stage-session-{Guid.NewGuid():N}");
+        var runnerId = _runnerId!;
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, (await workflow.AssignWorkerAsync(runnerId)).Status);
+
+        Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var firstDispatch = (await PollWorkAsync(runnerId)).Work;
+        var firstRun = await LoadRunAsync(_workflowId!);
+        var firstAttempt = Assert.Single(firstRun.Stages.Single(stage => stage.Id == "plan").Tasks);
+        await ReportAsync(runnerId, firstDispatch, "completed");
+
+        Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var secondDispatch = (await PollWorkAsync(runnerId)).Work;
+        var secondRun = await LoadRunAsync(_workflowId!);
+        var secondAttempt = Assert.Single(secondRun.Stages.Single(stage => stage.Id == "check").Tasks);
+
+        Assert.Equal(firstAttempt.DefinitionId, secondAttempt.DefinitionId);
+        Assert.Equal(firstDispatch.AgentSessionId, secondDispatch.AgentSessionId);
+        Assert.NotEqual(firstAttempt.AgentInvocationId, secondAttempt.AgentInvocationId);
+        Assert.NotEqual(firstDispatch.AgentJobId, secondDispatch.AgentJobId);
+        Assert.NotEqual(firstDispatch.InitialInputId, secondDispatch.InitialInputId);
+        Assert.NotEqual(firstDispatch.InitialTurnId, secondDispatch.InitialTurnId);
+        await using (var scope = Services.CreateAsyncScope())
+        {
+            var session = await scope.ServiceProvider.GetRequiredService<IAgentSessionStore>()
+                .LoadAsync(secondDispatch.AgentSessionId!);
+            var secondInput = Assert.Single(
+                session!.Status.Inputs!,
+                input => string.Equals(input.Id, secondDispatch.InitialInputId, StringComparison.Ordinal));
+            Assert.Equal(secondAttempt.AgentInvocationId, secondInput.IdempotencyKey);
+        }
+
+        await ReportAsync(runnerId, secondDispatch, "completed");
+        Assert.Equal(WorkflowRunStatus.Completed, (await LoadRunAsync(_workflowId!)).Status);
+    }
+
+    [Fact]
+    public async Task WorkflowAgentHandoffs_SameExactWorkIdentityAcrossStages_AppendsDistinctNamedSessionFollowups()
+    {
+        var definition = new WorkflowDefinition([
+            new StageDefinition("bootstrap", [AgentTask("bootstrap", "Bootstrap", "delivery")], [])
+        ]);
+        var workflow = await StartWorkflowAsync(
+            definition,
+            $"workflow-agent-exact-cross-stage-{Guid.NewGuid():N}");
+        var runnerId = _runnerId!;
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, (await workflow.AssignWorkerAsync(runnerId)).Status);
+        Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var bootstrapRun = await LoadRunAsync(_workflowId!);
+        var bootstrapAttempt = Assert.Single(bootstrapRun.CurrentStage().Tasks);
+        var bootstrapKey = WorkflowAgentHandoffCodec.KeyFor(
+            bootstrapRun.Metadata.ProjectId!,
+            bootstrapRun.Id,
+            bootstrapRun.CurrentStage().Id,
+            bootstrapAttempt.Id,
+            bootstrapAttempt.WorkId!);
+        var bootstrapHandoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(bootstrapKey);
+        await bootstrapHandoff.ActivateAsync();
+        var bootstrapPlan = await bootstrapHandoff.GetPlanAsync();
+        Assert.NotNull(bootstrapPlan?.Invocation);
+        await ReportAsync(runnerId, (await PollWorkAsync(runnerId)).Work, "completed");
+
+        const string sharedIdentity = "apply-feedback.1";
+        var planCommand = bootstrapPlan!.Command with
+        {
+            CommandId = sharedIdentity,
+            ActionAttemptId = sharedIdentity,
+            Prompt = "Apply the feedback",
+            ReuseSessionId = bootstrapPlan.Invocation!.SessionId,
+            Completion = bootstrapPlan.Command.Completion! with
+            {
+                WorkId = sharedIdentity,
+                Stage = "plan",
+            },
+        };
+        var checkCommand = planCommand with
+        {
+            Completion = planCommand.Completion! with { Stage = "check" },
+        };
+
+        var planHandoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(
+            WorkflowAgentHandoffCodec.KeyFor(planCommand));
+        var preparedPlan = await planHandoff.PrepareAsync(planCommand);
+        await planHandoff.AcceptAsync(new WorkflowAgentHandoffAcceptance(
+            sharedIdentity,
+            WorkflowAgentHandoffCodec.Fingerprint(planCommand)));
+        var activatedPlan = await planHandoff.ActivateAsync();
+
+        var checkHandoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(
+            WorkflowAgentHandoffCodec.KeyFor(checkCommand));
+        var preparedCheck = await checkHandoff.PrepareAsync(checkCommand);
+        await checkHandoff.AcceptAsync(new WorkflowAgentHandoffAcceptance(
+            sharedIdentity,
+            WorkflowAgentHandoffCodec.Fingerprint(checkCommand)));
+        var activatedCheck = await checkHandoff.ActivateAsync();
+
+        var activatedPlanState = await planHandoff.GetPlanAsync();
+        var activatedCheckState = await checkHandoff.GetPlanAsync();
+        Assert.Null(activatedPlanState!.ActivationError);
+        Assert.Null(activatedCheckState!.ActivationError);
+        Assert.Equal(WorkflowAgentActivationStep.Completed, activatedPlanState.ActivationStep);
+        Assert.Equal(WorkflowAgentActivationStep.Completed, activatedCheckState.ActivationStep);
+        Assert.Equal(bootstrapPlan.Invocation.SessionId, preparedPlan.Invocation!.SessionId);
+        Assert.Equal(preparedPlan.Invocation.SessionId, preparedCheck.Invocation!.SessionId);
+        Assert.NotEqual(preparedPlan.Invocation.InvocationId, preparedCheck.Invocation.InvocationId);
+        Assert.NotEqual(preparedPlan.Invocation.JobKey, preparedCheck.Invocation.JobKey);
+        Assert.NotEqual(preparedPlan.Invocation.InputId, preparedCheck.Invocation.InputId);
+        Assert.NotEqual(preparedPlan.Invocation.TurnId, preparedCheck.Invocation.TurnId);
+        Assert.Equal(preparedPlan.Invocation, activatedPlan.Invocation);
+        Assert.Equal(preparedCheck.Invocation, activatedCheck.Invocation);
+
+        var planReplay = await planHandoff.PrepareAsync(planCommand);
+        var checkReplay = await checkHandoff.PrepareAsync(checkCommand);
+        Assert.True(planReplay.AlreadyPersisted);
+        Assert.True(checkReplay.AlreadyPersisted);
+        Assert.Equal(preparedPlan.Invocation, planReplay.Invocation);
+        Assert.Equal(preparedCheck.Invocation, checkReplay.Invocation);
+
+        await using var scope = Services.CreateAsyncScope();
+        var session = await scope.ServiceProvider.GetRequiredService<IAgentSessionStore>()
+            .LoadAsync(preparedPlan.Invocation.SessionId);
+        var planInput = Assert.Single(
+            session!.Status.Inputs!,
+            input => string.Equals(input.Id, preparedPlan.Invocation.InputId, StringComparison.Ordinal));
+        var checkInput = Assert.Single(
+            session.Status.Inputs!,
+            input => string.Equals(input.Id, preparedCheck.Invocation.InputId, StringComparison.Ordinal));
+        Assert.Equal(preparedPlan.Invocation.InvocationId, planInput.IdempotencyKey);
+        Assert.Equal(preparedCheck.Invocation.InvocationId, checkInput.IdempotencyKey);
     }
 
     [Fact]

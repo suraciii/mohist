@@ -320,6 +320,7 @@ public sealed class WorkflowAgentHandoffSpecs
         var wrongKey = WorkflowAgentHandoffCodec.KeyFor(
             projectId,
             command.WorkflowRunId,
+            command.Completion!.Stage,
             command.ActionAttemptId,
             $"other-{command.CommandId}");
         var handoff = await ActivateAsync(wrongKey, new());
@@ -342,6 +343,49 @@ public sealed class WorkflowAgentHandoffSpecs
         Assert.Equal(first.JobKey, second.JobKey);
     }
 
+    [Fact]
+    public void InvocationFor_SameFeedbackAttemptAcrossStages_UsesOneStageScopedIdentity()
+    {
+        var command = Command("project-1", "mohist/builder", "apply feedback") with
+        {
+            WorkflowRunId = "workflow-run-1",
+            ActionAttemptId = "apply-feedback.1",
+            CommandId = "apply-feedback.1",
+        };
+        var plan = command with
+        {
+            Session = "feedback-plan",
+            Completion = command.Completion! with
+            {
+                WorkId = "apply-feedback.1",
+                Stage = "plan",
+            },
+        };
+        var check = command with
+        {
+            Session = "feedback-check",
+            Completion = command.Completion! with
+            {
+                WorkId = "apply-feedback.1",
+                Stage = "check",
+            },
+        };
+
+        var planInvocation = WorkflowAgentHandoffCodec.InvocationFor(plan);
+        var checkInvocation = WorkflowAgentHandoffCodec.InvocationFor(check);
+        var planRetryInvocation = WorkflowAgentHandoffCodec.InvocationFor(plan);
+
+        Assert.Equal(Key(plan), Key(plan with { }));
+        Assert.Equal(planInvocation, planRetryInvocation);
+        Assert.NotEqual(Key(plan), Key(check));
+        Assert.NotEqual(WorkflowAgentHandoffCodec.Fingerprint(plan), WorkflowAgentHandoffCodec.Fingerprint(check));
+        Assert.NotEqual(planInvocation.InvocationId, checkInvocation.InvocationId);
+        Assert.NotEqual(planInvocation.JobKey, checkInvocation.JobKey);
+        Assert.NotEqual(planInvocation.SessionId, checkInvocation.SessionId);
+        Assert.NotEqual(planInvocation.InputId, checkInvocation.InputId);
+        Assert.NotEqual(planInvocation.TurnId, checkInvocation.TurnId);
+    }
+
     /// <summary>
     /// Constructs an activated handoff grain over <paramref name="store"/>.
     /// The persisted state is read before OnActivateAsync, mirroring how the
@@ -360,11 +404,7 @@ public sealed class WorkflowAgentHandoffSpecs
     }
 
     private static string Key(WorkflowAgentHandoffCommand command) =>
-        WorkflowAgentHandoffCodec.KeyFor(
-            command.ProjectId,
-            command.WorkflowRunId,
-            command.ActionAttemptId,
-            command.CommandId);
+        WorkflowAgentHandoffCodec.KeyFor(command);
 
     private static WorkflowAgentHandoffCommand Command(
         string projectId,

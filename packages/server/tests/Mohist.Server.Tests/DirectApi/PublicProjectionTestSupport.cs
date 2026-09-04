@@ -45,10 +45,11 @@ public sealed class PublicProjectionTestSupport : IAsyncDisposable
             DbFactory,
             NullLogger<AgentJobStore>.Instance,
             Time);
+        ProjectionLogger = new TestLogger<PublicApiProjectionEngine>();
         Engine = new PublicApiProjectionEngine(
             DbFactory,
             Time,
-            NullLogger<PublicApiProjectionEngine>.Instance);
+            ProjectionLogger);
     }
 
     public TestSqliteDatabase Database { get; }
@@ -57,6 +58,7 @@ public sealed class PublicProjectionTestSupport : IAsyncDisposable
     public EventStore EventStore { get; }
     public AgentSessionStore SessionStore { get; }
     public AgentJobStore JobStore { get; }
+    public TestLogger<PublicApiProjectionEngine> ProjectionLogger { get; }
     public PublicApiProjectionEngine Engine { get; }
 
     public static string SerializeJobState(AgentJobState state) =>
@@ -125,6 +127,32 @@ public sealed class PublicProjectionTestSupport : IAsyncDisposable
         await JobStore.SaveLedgerAsync(ledger with
         {
             StateJson = SerializeJobState(state),
+        });
+    }
+
+    public async Task RebindJobAsync(
+        string jobKey,
+        string sessionId,
+        string inputId,
+        string turnId)
+    {
+        var ledger = await JobStore.LoadLedgerAsync(jobKey)
+            ?? throw new InvalidOperationException($"The seeded job {jobKey} disappeared.");
+        var state = JsonSerializer.Deserialize<AgentJobState>(ledger.StateJson, JSON.Options)
+            ?? throw new InvalidOperationException($"The seeded job {jobKey} state is unreadable.");
+        state.Input = (state.Input
+            ?? throw new InvalidOperationException($"The seeded job {jobKey} has no input.")) with
+        {
+            AgentSessionId = sessionId,
+            InitialInputId = inputId,
+            InitialTurnId = turnId,
+        };
+        await JobStore.SaveLedgerAsync(ledger with
+        {
+            StateJson = SerializeJobState(state),
+            AgentSessionId = sessionId,
+            InitialInputId = inputId,
+            InitialTurnId = turnId,
         });
     }
 

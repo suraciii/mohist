@@ -230,6 +230,23 @@ commit resumes after the checkpoint and cannot emit a duplicate public sequence.
 This is projection recovery, not replay of a Runner, launch, follow-up, or stop
 effect.
 
+Input, Turn, and Job anchor IDs are globally unique canonical identities. Before
+upsert, the projector resolves every complete `(anchorType, anchorId)` key for the
+target, including rows currently owned by another Session. A row with a different
+non-null Session owner is an explicit canonical collision: the projector retains
+that owner and its terminal fence, emits no event or replacement snapshot for
+the conflicting anchor, and records the conflict for operators. It never
+transfers an anchor between Sessions. Ownership preflight includes both committed
+rows and anchors staged earlier in the current projection batch.
+
+An anchor collision does not roll back unrelated projection work. The conflicting
+target consumes its canonical source watermarks without changing the occupied
+anchor, so later targets can advance on the same or next sweep. This ordinary
+checkpointed sweep is the controlled reconciliation path for identities created
+before global uniqueness was enforced; operators do not delete canonical Job or
+Session data. A Session generation rebuild uses the same owner rule and remains
+available when its public event stream itself must be reconstructed.
+
 ## Five-state mapping and precedence
 
 `status` is a projection over canonical facts and never replaces Job, Session,
