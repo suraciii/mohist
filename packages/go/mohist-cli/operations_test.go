@@ -2,6 +2,7 @@ package mohistcli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -81,8 +82,101 @@ func TestOperationsSlackAnchorValidationIsLocal(t *testing.T) {
 		return nil, errors.New("must not call")
 	}), map[string]string{"MOHIST_TOKEN": "token"})
 	code := Run(context.Background(), []string{"slack", "message", "send", "--project", "proj", "--text", "hello"}, deps)
-	if code != ExitUsage || calls != 0 || !strings.Contains(errOut.String(), "--workspace") {
+	for _, field := range []string{"--workspace", "--conversation", "--reply-to", "--connection", "--session", "--triggering-message", "--dispatch-ref"} {
+		if !strings.Contains(errOut.String(), field) {
+			t.Fatalf("missing %s in stderr=%q", field, errOut.String())
+		}
+	}
+	if code != ExitUsage || calls != 0 {
 		t.Fatalf("code=%d calls=%d stderr=%q", code, calls, errOut.String())
+	}
+}
+
+func TestOperationsSlackStatusSendsWorkspaceQuery(t *testing.T) {
+	var request *http.Request
+	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		request = r
+		return response(http.StatusOK, `{"success":true,"data":{"workspaceTeamId":"T1"}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "management-token"})
+	if code := Run(context.Background(), []string{"slack", "status", "--workspace-team", "T1"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if request == nil || request.URL.Query().Get("workspaceTeamId") != "T1" || request.Header.Get("Authorization") != "Bearer management-token" {
+		t.Fatalf("request=%v", request)
+	}
+}
+
+func TestOperationsSlackConnectionMessageMapsTextAndStdin(t *testing.T) {
+	var request *http.Request
+	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		request = r
+		return response(http.StatusOK, `{"success":true,"data":{"accepted":true}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "connection-token"})
+	deps.Input = strings.NewReader("line one\nline two\n")
+	args := []string{"slack", "message", "send", "--project", "proj", "--workspace", " W1 ", "--conversation", "C1", "--reply-to", "R1", "--connection", "K1", "--session", "S1", "--triggering-message", "M1", "--dispatch-ref", "D1", "--text", "-"}
+	if code := Run(context.Background(), args, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	var body map[string]any
+	data, _ := io.ReadAll(request.Body)
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	for field, want := range map[string]string{"workspaceTeamId": "W1", "conversationId": "C1", "threadTs": "R1", "connectionId": "K1", "sessionId": "S1", "triggeringMessageId": "M1", "dispatchRef": "D1", "text": "line one\nline two\n"} {
+		if body[field] != want {
+			t.Fatalf("body[%s]=%v, want %q; body=%s", field, body[field], want, data)
+		}
+	}
+	if request.URL.Path != "/api/projects/proj/slack-connections/reply" || request.Header.Get("Authorization") != "Bearer connection-token" {
+		t.Fatalf("request=%v", request)
+	}
+}
+
+func TestOperationsSlackConnectionMessageMapsFileAndRejectsImage(t *testing.T) {
+	var request *http.Request
+	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		request = r
+		return response(http.StatusOK, `{"success":true,"data":{"accepted":true}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "connection-token"})
+	deps.ReadFile = func(path string) (string, error) {
+		if path != "./picture.png" {
+			t.Fatalf("read path=%q", path)
+		}
+		return "image-bytes", nil
+	}
+	args := []string{"slack", "message", "send", "--project", "proj", "--workspace", "W1", "--conversation", "C1", "--reply-to", "R1", "--connection", "K1", "--session", "S1", "--triggering-message", "M1", "--dispatch-ref", "D1", "--file", "./picture.png"}
+	if code := Run(context.Background(), args, deps); code != ExitOK || request == nil {
+		t.Fatalf("code=%d request=%v stderr=%q", code, request, errOut.String())
+	}
+	var body map[string]any
+	data, _ := io.ReadAll(request.Body)
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["fileName"] != "picture.png" || body["fileContentBase64"] != "aW1hZ2UtYnl0ZXM=" || body["imageUrl"] != nil {
+		t.Fatalf("body=%s", data)
+	}
+	if code := Run(context.Background(), append(args, "--image", "https://example.test/picture.png"), deps); code != ExitUsage || request == nil {
+		t.Fatalf("mutually exclusive code=%d stderr=%q", code, errOut.String())
+	}
+}
+
+func TestOperationsSlackManagerMessageUsesBrokerAndManagerRoute(t *testing.T) {
+	var request *http.Request
+	deps, _, errOut := testDeps(nil, map[string]string{"MOHIST_MANAGER_MODE": "1"})
+	deps.ManagerCredentialBroker = func(_ context.Context, r *http.Request) (*http.Response, error) {
+		request = r
+		if r.Header.Get("X-Mohist-Manager-Mode") != "1" {
+			t.Fatalf("manager marker=%q", r.Header.Get("X-Mohist-Manager-Mode"))
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"accepted":true}}`), nil
+	}
+	args := []string{"slack", "message", "send", "--workspace", "W1", "--conversation", "C1", "--reply-to", "R1", "--connection", "K1", "--session", "S1", "--triggering-message", "M1", "--dispatch-ref", "D1", "--text", "hello"}
+	if code := Run(context.Background(), args, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if request == nil || request.URL.Path != "/api/slack-manager/reply" || request.Header.Get("Authorization") != "" {
+		t.Fatalf("request=%v", request)
 	}
 }
 

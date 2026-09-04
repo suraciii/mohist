@@ -592,29 +592,16 @@ card's provider message identity and never replaces its navigation surface.
 
 ### Reply Action CLI: `mo slack message send`
 
-The reply action command surface is `mo slack message send`. A Connection
-Agent reply is anchored-only: the CLI requires the complete reply anchor
-before it contacts the Server.
-
-```text literal
-mo slack message send --workspace <workspace-id> --conversation <id> --reply-to <ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <ref> --text "<body>"
-printf 'long body\n\nmultiple paragraphs\n' | mo slack message send --workspace <workspace-id> --conversation <id> --reply-to <ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <ref> --text -
-mo slack message send --workspace <workspace-id> --conversation <id> --reply-to <ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <ref> --text "see this screenshot" --file ./screenshot.png
-mo slack message send --workspace <workspace-id> --conversation <id> --reply-to <ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <ref> --text "architecture diagram" --image https://example.com/diagram.png
-```
-
-- **Explicit destination.** All anchor flags are required; an anchor-less or
-  partial send is refused by the CLI with no HTTP request and the missing
-  fields listed. The Agent reads these values from the injected reply anchor
-  instead of choosing a destination from memory.
+- **Explicit destination.** The exact invocation is in the [CLI reference](../docs/cli-reference.md#slack). The CLI maps one validated request carrier to the Server wire fields and refuses a partial anchor before making a request. The Agent reads the anchor from injected context instead of choosing a destination from memory.
 - **Explicit ownership and dispatch identity.** Server validates the complete
   anchor against durable Session provenance and its Turn before it scopes
   terminal reply selection and coalescing to that logical Turn. Distinct sends
   are accepted only while the Turn is active; an identical retry after
   terminal completion still returns the committed delivery intent.
-- **Manager separation.** Manager-mode sends use the dedicated Manager reply
-  route and its credential/origin contract, separate from this anchor
-  requirement.
+- **Manager separation.** `MOHIST_MANAGER_MODE=1` selects the existing Runner
+  credential broker. The CLI sets the Manager marker, uses the broker-issued
+  Manager credential, and calls the dedicated Manager reply route without
+  reading bearer values from the environment.
 - **Body through `--text`.** A string, or `-` for stdin so shell escaping does
   not consume newlines. The Agent writes standard Markdown; the renderer
   converts it to Slack mrkdwn and degrades unsupported tables and headings to
