@@ -243,6 +243,9 @@ jobs:
           mkdir -p "$TMPDIR" artifacts/repository
           node --import tsx scripts/test-duration/repository.ts
 
+      - name: Build evidence Gate
+        run: npx --no-install esbuild scripts/test-duration/gate.ts --bundle --platform=node --format=esm --outfile=artifacts/gate.mjs
+
       - name: Capture Repository evidence
         if: always()
         shell: bash
@@ -273,11 +276,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22.19.0
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
 
       - name: Download scope evidence
         uses: actions/download-artifact@v5
@@ -293,4 +291,4 @@ jobs:
             ${{ needs.server.result == 'skipped' && 'server' || '' }}
             ${{ needs.web.result == 'skipped' && 'web' || '' }}
             ${{ needs.runner.result == 'skipped' && 'runner' || '' }}
-        run: node --import tsx scripts/test-duration/gate.ts --evidence-root "$GITHUB_WORKSPACE/artifacts" --skipped-scopes "$SKIPPED_SCOPES"
+        run: node artifacts/gate.mjs --evidence-root "$GITHUB_WORKSPACE/artifacts" --skipped-scopes "$SKIPPED_SCOPES"
