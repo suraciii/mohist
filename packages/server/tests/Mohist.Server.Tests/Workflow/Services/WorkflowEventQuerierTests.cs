@@ -72,10 +72,10 @@ public sealed class WorkflowEventQuerierTests
         var eventStore = services.GetRequiredService<IEventStore>();
         var dbFactory = services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await dbFactory.CreateDbContextAsync();
-        foreach (var specification in RerunHistory)
+        for (var index = 0; index < RerunHistory.Length; index++)
         {
-            await eventStore.AppendAsync(db, Event(runId, specification, _fixture.TimeProvider.GetUtcNow()));
-            _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(1));
+            var specification = RerunHistory[index];
+            await eventStore.AppendAsync(db, Event(runId, specification, now.AddSeconds(index)));
         }
         await db.SaveChangesAsync();
 
