@@ -100,6 +100,6 @@ func unixManagerCredentialBroker(socketPath string) ManagerCredentialBroker {
 }
 
 func isManagerMode(lookup EnvLookup) bool {
-	value := lookup("MOHIST_MANAGER_MODE")
+	value, _ := lookup("MOHIST_MANAGER_MODE")
 	return value == "1" || value == "true" || value == "TRUE" || value == "yes" || value == "YES"
 }
