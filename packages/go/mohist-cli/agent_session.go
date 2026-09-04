@@ -30,7 +30,7 @@ var stopFields = []string{"state", "interruptUnconfirmed", "operationId", "rootS
 var detachFields = []string{"state", "childSessionId", "parentSessionId", "edgeId", "childLaunchJobId", "attachedRevision", "detachedRevision", "historic", "reason"}
 var scheduleFields = []string{"scheduleId", "status", "dueAt", "text", "inputId", "createdAt", "idempotencyKey", "cancelledAt"}
 var recoveryFields = []string{"id", "status", "contextWindowSize", "contextWindowUsed", "contextUsagePercent", "contextWindowUsedBefore", "operation", "wasCompacted"}
-var modelFields = []string{"id"}
+var modelFields = []string{"models", "modelVariants", "reasoningEfforts"}
 
 func parseAgent(args []string) (command, error) {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
@@ -470,7 +470,7 @@ func runAgent(ctx context.Context, deps Dependencies, c *client, cmd command) in
 		if runtime := argValue(cmd.args, "runtime", ""); runtime != "" {
 			path += "?runtime=" + url.QueryEscape(runtime)
 		}
-		return resourceRequest(ctx, deps, c, http.MethodGet, path, nil, cmd, true)
+		return runAgentModelList(ctx, deps, c, path, cmd)
 	}
 	if action == "list" {
 		path := agentPath(project, "")
@@ -531,6 +531,51 @@ func runAgent(ctx context.Context, deps Dependencies, c *client, cmd command) in
 		return resourceRequest(ctx, deps, c, http.MethodPost, agentPath(project, "/install"), map[string]any{"preset": argValue(cmd.args, "target", argValue(cmd.args, "agent", ""))}, cmd, false)
 	}
 	return ExitUsage
+}
+
+// agentModelCatalog keeps the runtime/model/variant/reasoning relationships as
+// structured values; the Server aggregates them per connected Runner.
+type agentModelCatalog struct {
+	Models           []string            `json:"models"`
+	ModelVariants    map[string][]string `json:"modelVariants"`
+	ReasoningEfforts map[string][]string `json:"reasoningEfforts"`
+}
+
+// The model catalog endpoint returns one object, not a collection, so the
+// response is decoded strictly: missing keys or malformed values must fail
+// closed instead of rendering a catalog that looks authoritative.
+func runAgentModelList(ctx context.Context, deps Dependencies, c *client, path string, cmd command) int {
+	data, err := c.request(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		writeError(deps.Stderr, err)
+		return ExitOperation
+	}
+	if cmd.fieldsOnly {
+		for _, field := range cmd.catalog {
+			fmt.Fprintln(deps.Stdout, field)
+		}
+		return ExitOK
+	}
+	var response map[string]json.RawMessage
+	if err := json.Unmarshal(data, &response); err != nil {
+		writeError(deps.Stderr, errors.New("error: Agent model catalog response has an invalid shape [invalid_response]"))
+		return ExitOperation
+	}
+	for _, key := range []string{"models", "modelVariants", "reasoningEfforts"} {
+		if _, ok := response[key]; !ok {
+			writeError(deps.Stderr, fmt.Errorf("error: Agent model catalog response is missing %q [invalid_response]", key))
+			return ExitOperation
+		}
+	}
+	var catalog agentModelCatalog
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		writeError(deps.Stderr, errors.New("error: Agent model catalog response has an invalid shape [invalid_response]"))
+		return ExitOperation
+	}
+	if len(cmd.fields) > 0 {
+		response = pick(response, cmd.fields)
+	}
+	return writeJSON(deps.Stdout, response)
 }
 
 func agentJSONName(name string) string {
