@@ -288,16 +288,35 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
             var accepted = await session.AcceptFollowupAsync(new AcceptFollowupCommand(
                 Text: plan.Command.Prompt,
                 Source: "workflow",
-                IdempotencyKey: invocation.CommandId,
+                IdempotencyKey: FollowupIdempotencyKey(plan, invocation),
                 PreMintedInputId: invocation.InputId,
                 PreMintedTurnId: invocation.TurnId,
-                AllowPendingInitialLaunch: true));
+                AllowPendingInitialLaunch: true,
+                ForceNewTurn: true));
             if (!string.Equals(accepted.InputId, invocation.InputId, StringComparison.Ordinal)
                 || !string.Equals(accepted.TurnId, invocation.TurnId, StringComparison.Ordinal))
                 throw new InvalidOperationException("Workflow named Session replay resolved conflicting Input or Turn identity.");
             return;
         }
         await session.EnsureInitialLaunchAsync(BuildSessionCommand(plan, invocation, definition));
+    }
+
+    private string FollowupIdempotencyKey(
+        WorkflowAgentHandoffPlan plan,
+        WorkflowAgentInvocation invocation)
+    {
+        // A legacy handoff may have accepted its follow-up before persisting
+        // the next activation step. Keep that exact retry key; every newly
+        // prepared handoff uses its Stage-scoped invocation identity.
+        var command = plan.Command;
+        var legacyKey = WorkflowAgentHandoffCodec.LegacyKeyFor(
+            command.ProjectId,
+            command.WorkflowRunId,
+            command.ActionAttemptId,
+            command.CommandId);
+        return string.Equals(this.GetPrimaryKeyString(), legacyKey, StringComparison.Ordinal)
+            ? invocation.CommandId
+            : invocation.InvocationId;
     }
 
     private static EnsureInitialLaunchCommand BuildSessionCommand(

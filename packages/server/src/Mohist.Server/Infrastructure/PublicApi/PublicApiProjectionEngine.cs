@@ -443,17 +443,45 @@ public sealed partial class PublicApiProjectionEngine
         var sessionJobKeys = jobRows.Select(job => job.JobKey).ToList();
         var sessionInputIds = facts.Inputs.Select(input => input.InputId).ToList();
         var sessionTurnIds = facts.Turns.Select(turn => turn.TurnId).ToList();
+        var desiredAnchorKeys = sessionJobKeys.Select(id => AnchorKey("job", id))
+            .Concat(sessionInputIds.Select(id => AnchorKey("input", id)))
+            .Concat(sessionTurnIds.Select(id => AnchorKey("turn", id)))
+            .ToHashSet(StringComparer.Ordinal);
+        var anchors = db.PublicExecutionSnapshots.Local
+            .Where(s => s.SessionId == sessionId
+                || (s.AnchorType == "job" && sessionJobKeys.Contains(s.AnchorId))
+                || (s.AnchorType == "input" && sessionInputIds.Contains(s.AnchorId))
+                || (s.AnchorType == "turn" && sessionTurnIds.Contains(s.AnchorId)))
+            .ToDictionary(
+                row => AnchorKey(row.AnchorType, row.AnchorId),
+                StringComparer.Ordinal);
         var anchorRows = await db.PublicExecutionSnapshots
             .Where(s => s.SessionId == sessionId
                 || (s.AnchorType == "job" && sessionJobKeys.Contains(s.AnchorId))
                 || (s.AnchorType == "input" && sessionInputIds.Contains(s.AnchorId))
                 || (s.AnchorType == "turn" && sessionTurnIds.Contains(s.AnchorId)))
             .ToListAsync(ct);
-        var anchors = anchorRows.ToDictionary(
-            row => AnchorKey(row.AnchorType, row.AnchorId),
-            StringComparer.Ordinal);
-        var fences = new Dictionary<string, PublicExecutionSnapshotRow>(StringComparer.Ordinal);
         foreach (var anchorRow in anchorRows)
+        {
+            anchors.TryAdd(AnchorKey(anchorRow.AnchorType, anchorRow.AnchorId), anchorRow);
+        }
+
+        var ownerConflicts = desiredAnchorKeys
+            .Where(key => anchors.TryGetValue(key, out var anchor) && HasOwnerConflict(anchor, facts))
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var key in ownerConflicts)
+        {
+            var anchor = anchors[key];
+            _log.LogWarning(
+                "Public projection retained {AnchorType} anchor {AnchorId} for Session {OwnerSessionId}; anchor owner conflict with Session {ConflictingSessionId} was checkpointed without ownership transfer",
+                anchor.AnchorType,
+                anchor.AnchorId,
+                anchor.SessionId,
+                facts.SessionId);
+        }
+
+        var fences = new Dictionary<string, PublicExecutionSnapshotRow>(StringComparer.Ordinal);
+        foreach (var anchorRow in anchors.Values)
         {
             if (anchorRow.TerminalFact is not null)
             {
@@ -496,6 +524,11 @@ public sealed partial class PublicApiProjectionEngine
         foreach (var item in transitionFacts)
         {
             var transition = item.Transition;
+            if (ownerConflicts.Contains(AnchorKey(transition.AnchorKind, transition.AnchorId)))
+            {
+                continue;
+            }
+
             if (existingTransitions.Contains(transition.Identity))
             {
                 continue;
@@ -560,7 +593,14 @@ public sealed partial class PublicApiProjectionEngine
         }
 
         // --- snapshot upserts behind the same fences ---
-        UpsertAnchors(db, facts, observedAt, latestSequence, anchors, terminalSequences);
+        UpsertAnchors(
+            db,
+            facts,
+            observedAt,
+            latestSequence,
+            anchors,
+            ownerConflicts,
+            terminalSequences);
 
         if (created || newEvents.Count > 0)
         {
@@ -693,6 +733,7 @@ public sealed partial class PublicApiProjectionEngine
         DateTimeOffset observedAt,
         long? latestSequence,
         Dictionary<string, PublicExecutionSnapshotRow> anchors,
+        HashSet<string> ownerConflicts,
         IReadOnlyDictionary<string, long> terminalSequences)
     {
         foreach (var job in facts.Jobs)
@@ -709,6 +750,7 @@ public sealed partial class PublicApiProjectionEngine
                 observedAt,
                 latestSequence,
                 anchors,
+                ownerConflicts,
                 terminalSequences);
         }
 
@@ -726,6 +768,7 @@ public sealed partial class PublicApiProjectionEngine
                 observedAt,
                 latestSequence,
                 anchors,
+                ownerConflicts,
                 terminalSequences);
         }
 
@@ -743,6 +786,7 @@ public sealed partial class PublicApiProjectionEngine
                 observedAt,
                 latestSequence,
                 anchors,
+                ownerConflicts,
                 terminalSequences);
         }
     }
@@ -756,10 +800,16 @@ public sealed partial class PublicApiProjectionEngine
         DateTimeOffset observedAt,
         long? latestSequence,
         Dictionary<string, PublicExecutionSnapshotRow> anchors,
+        HashSet<string> ownerConflicts,
         IReadOnlyDictionary<string, long> terminalSequences)
     {
         var status = PublicExecutionAggregator.ComputeStatus(components, sessionExists: true);
         var key = AnchorKey(anchorType, anchorId);
+        if (ownerConflicts.Contains(key))
+        {
+            return;
+        }
+
         anchors.TryGetValue(key, out var existing);
         if (existing is null)
         {
@@ -780,19 +830,6 @@ public sealed partial class PublicApiProjectionEngine
             };
             db.PublicExecutionSnapshots.Add(added);
             anchors[key] = added;
-            return;
-        }
-
-        if (!string.Equals(existing.ProjectId, facts.ProjectId, StringComparison.Ordinal)
-            || (existing.SessionId is { } ownerSessionId
-                && !string.Equals(ownerSessionId, facts.SessionId, StringComparison.Ordinal)))
-        {
-            _log.LogWarning(
-                "Public projection retained {AnchorType} anchor {AnchorId} for Session {OwnerSessionId}; anchor owner conflict with Session {ConflictingSessionId} was checkpointed without ownership transfer",
-                anchorType,
-                anchorId,
-                existing.SessionId,
-                facts.SessionId);
             return;
         }
 
@@ -931,6 +968,13 @@ public sealed partial class PublicApiProjectionEngine
     private static bool IsTerminalTransition(string eventType) =>
         eventType == PublicSessionEventTypes.TurnTerminal
         || eventType == PublicSessionEventTypes.InputRejected;
+
+    private static bool HasOwnerConflict(
+        PublicExecutionSnapshotRow anchor,
+        PublicProjectionFacts facts) =>
+        !string.Equals(anchor.ProjectId, facts.ProjectId, StringComparison.Ordinal)
+        || (anchor.SessionId is { } ownerSessionId
+            && !string.Equals(ownerSessionId, facts.SessionId, StringComparison.Ordinal));
 
     private static string AnchorKey(string anchorType, string anchorId) => anchorType + ":" + anchorId;
 

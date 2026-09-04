@@ -101,6 +101,28 @@ public partial class WorkflowGrain
                     attempt.Id,
                     attempt.WorkId);
                 var handoff = GrainFactory.GetGrain<IWorkflowAgentHandoffGrain>(key);
+                var plan = await handoff.GetPlanAsync();
+                if (plan is null)
+                {
+                    // Running attempts persisted before Stage joined the key
+                    // retain their accepted handoff under the exact old key.
+                    // New launches never write there; this read is bounded to
+                    // recovery of already-running work.
+                    var legacyKey = WorkflowAgentHandoffCodec.LegacyKeyFor(
+                        projectId,
+                        GrainKey,
+                        attempt.Id,
+                        attempt.WorkId);
+                    handoff = GrainFactory.GetGrain<IWorkflowAgentHandoffGrain>(legacyKey);
+                    plan = await handoff.GetPlanAsync();
+                }
+
+                if (plan is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Running Workflow Agent attempt '{attempt.Id}' has no persisted handoff.");
+                }
+
                 await handoff.AcceptAsync(new WorkflowAgentHandoffAcceptance(
                     attempt.WorkId,
                     attempt.AgentLaunchFingerprint));

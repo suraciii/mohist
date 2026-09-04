@@ -373,7 +373,10 @@ public sealed class WorkflowAgentHandoffSpecs
 
         var planInvocation = WorkflowAgentHandoffCodec.InvocationFor(plan);
         var checkInvocation = WorkflowAgentHandoffCodec.InvocationFor(check);
+        var planRetryInvocation = WorkflowAgentHandoffCodec.InvocationFor(plan);
 
+        Assert.Equal(Key(plan), Key(plan with { }));
+        Assert.Equal(planInvocation, planRetryInvocation);
         Assert.NotEqual(Key(plan), Key(check));
         Assert.NotEqual(WorkflowAgentHandoffCodec.Fingerprint(plan), WorkflowAgentHandoffCodec.Fingerprint(check));
         Assert.NotEqual(planInvocation.InvocationId, checkInvocation.InvocationId);

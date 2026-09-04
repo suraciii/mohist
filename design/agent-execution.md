@@ -383,6 +383,18 @@ approval-feedback tasks. Retries of one scope reuse its identities; a different
 Stage always creates a different invocation, Job, Input, and Turn even when its
 task identifier and rendered prompt match.
 
+A named Session follow-up uses the Stage-scoped invocation ID as its idempotency
+key. Replaying the same launch therefore returns the same Input and Turn, while
+the same task or work ID in another Stage appends a distinct follow-up to the
+shared Session. Because Workflow pre-mints that Turn identity, the follow-up
+requests a distinct queued Turn instead of coalescing with another pending input.
+
+New launches write only the Stage-scoped handoff. During activation recovery,
+an already-running attempt first reads that key and, only when it has no plan,
+reads the exact pre-Stage key so work accepted before the identity change can
+finish. The recovered plan keeps its original invocation and fingerprint; the
+legacy key is never used to prepare new work.
+
 Matching Prompt, model, Runtime, Workspace, or configuration does not merge
 origins. An origin-specific route only resolves the canonical Session resource.
 

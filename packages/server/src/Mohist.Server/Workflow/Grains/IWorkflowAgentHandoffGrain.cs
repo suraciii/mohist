@@ -192,6 +192,20 @@ public static class WorkflowAgentHandoffCodec
         return $"workflow-agent-handoff/{StableToken(identity)}";
     }
 
+    internal static string LegacyKeyFor(
+        string projectId,
+        string workflowRunId,
+        string actionAttemptId,
+        string commandId)
+    {
+        var identity = string.Join('\u001f',
+            Require(projectId, nameof(projectId)),
+            Require(workflowRunId, nameof(workflowRunId)),
+            Require(actionAttemptId, nameof(actionAttemptId)),
+            Require(commandId, nameof(commandId)));
+        return $"workflow-agent-handoff/{StableToken(identity)}";
+    }
+
     public static string Fingerprint(WorkflowAgentHandoffCommand command)
     {
         ArgumentNullException.ThrowIfNull(command);
