@@ -20,11 +20,7 @@ function RunnerScopeLabel({ scope }: { scope: RunnerStatusRow['scope'] }) {
   if (scope.type === 'global') {
     return <Badge variant="secondary">global</Badge>
   }
-  return (
-    <Badge variant="outline">
-      {scope.projectName ?? scope.projectId ?? 'project'}
-    </Badge>
-  )
+  return <Badge variant="outline">{scope.projectName ?? scope.projectId ?? 'project'}</Badge>
 }
 
 function RunnerStatusBadge({ status }: { status: RunnerStatusRow['status'] }) {
@@ -194,13 +190,9 @@ function RunnerRow({ row }: { row: RunnerStatusRow }) {
         <MetaItem label="heartbeat">
           {row.lastHeartbeatAt ? formatHeartbeatAge(row.lastHeartbeatAt) : 'unknown'}
         </MetaItem>
-        {row.lastHeartbeatAt && (
-          <MetaItem label="at">{formatHeartbeatTimestamp(row.lastHeartbeatAt)}</MetaItem>
-        )}
+        {row.lastHeartbeatAt && <MetaItem label="at">{formatHeartbeatTimestamp(row.lastHeartbeatAt)}</MetaItem>}
         {row.connectionState && (
-          <span
-            className={`text-xs ${row.connectionState === 'connected' ? 'text-success' : 'text-muted-foreground'}`}
-          >
+          <span className={`text-xs ${row.connectionState === 'connected' ? 'text-success' : 'text-muted-foreground'}`}>
             {row.connectionState}
           </span>
         )}
@@ -209,8 +201,8 @@ function RunnerRow({ row }: { row: RunnerStatusRow }) {
 
       {/* Active work */}
       {activeWorks.length > 0 && (
-          <div
-            className="mt-2 space-y-1 rounded-md bg-info-subtle px-2.5 py-1.5"
+        <div
+          className="mt-2 space-y-1 rounded-md bg-info-subtle px-2.5 py-1.5"
           data-testid="runner-active-works"
           data-count={activeWorks.length}
         >
@@ -253,7 +245,9 @@ function RunnerEmptyState() {
       <p className="text-sm font-medium text-foreground mb-2">No runners connected</p>
       <p className="text-xs text-muted-foreground">
         First install:{' '}
-        <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono text-foreground">{RUNNER_INSTALL_COMMAND}</code>
+        <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono text-foreground">
+          {RUNNER_INSTALL_COMMAND}
+        </code>
         <br />
         Later starts:{' '}
         <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono text-foreground">{RUNNER_START_COMMAND}</code>
@@ -289,11 +283,7 @@ export function RunnerListCard() {
         <CardTitle>Runners</CardTitle>
       </CardHeader>
       <CardContent className="pt-3">
-        {isLoading ? (
-          <div className="py-4 text-xs text-muted-foreground">Loading...</div>
-        ) : (
-          <RunnerList rows={rows} />
-        )}
+        {isLoading ? <div className="py-4 text-xs text-muted-foreground">Loading...</div> : <RunnerList rows={rows} />}
       </CardContent>
     </Card>
   )

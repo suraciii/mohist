@@ -10,9 +10,10 @@ import { useRunners } from '../../../entities/runner'
 
 let currentRunners: RunnerStatusRow[] = []
 
-const runnersHook: typeof useRunners = () => ({
-  data: currentRunners,
-}) as ReturnType<typeof useRunners>
+const runnersHook: typeof useRunners = () =>
+  ({
+    data: currentRunners,
+  }) as ReturnType<typeof useRunners>
 
 function makeRow(overrides: Partial<RunnerStatusRow> = {}): RunnerStatusRow {
   return {
@@ -49,7 +50,7 @@ function renderWith({
   initialProjects = [TEST_PROJECT],
 }: {
   initialProjectId?: string | null
-  initialProjects?: typeof TEST_PROJECT[]
+  initialProjects?: (typeof TEST_PROJECT)[]
 } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
