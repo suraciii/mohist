@@ -255,33 +255,23 @@ public class WorkflowRerunFromStageApiSpecs : IAsyncLifetime
 
     private async Task CorruptWorkflowRunStateAsync(string workflowRunId)
     {
-        await DeactivateWorkflowAsync(workflowRunId);
-
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_connectionString)
-            .Options;
-        await using var db = new MohistDbContext(options);
-        var row = await db.WorkflowRuns.FindAsync(workflowRunId)
-            ?? throw new InvalidOperationException($"Workflow run {workflowRunId} not found in store");
-        row.State = "{}";
-        await db.SaveChangesAsync();
-
-        await _grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
+        _fixture.WorkflowRunLoadFailures.FailLoadsFor(workflowRunId);
+        var workflow = _grains.GetGrain<IWorkflowGrain>(workflowRunId);
+        var grainId = workflow.GetGrainId();
+        await workflow.Deactivate();
+        await CollectWorkflowActivationAsync(grainId);
     }
 
-    private async Task DeactivateWorkflowAsync(string workflowRunId)
+    private async Task CollectWorkflowActivationAsync(GrainId grainId)
     {
-        await _grains.GetGrain<IWorkflowGrain>(workflowRunId).Deactivate();
         var management = _grains.GetGrain<IManagementGrain>(0);
         await management.ForceActivationCollection(TimeSpan.Zero);
         await TestWait.ForAsync(
-            async () => await management.GetDetailedGrainStatistics(),
-            activations => !activations.Any(stat =>
-                stat.GrainType.Contains(nameof(WorkflowGrain), StringComparison.Ordinal)
-                && stat.GrainId.ToString()!.Contains(workflowRunId, StringComparison.Ordinal)),
+            () => management.GetDetailedGrainStatistics(),
+            activations => activations.All(stat => stat.GrainId != grainId),
             TimeSpan.FromSeconds(3),
             TimeSpan.FromMilliseconds(50),
-            $"Workflow grain '{workflowRunId}' to deactivate",
+            $"Workflow grain '{grainId}' to deactivate",
             () => management.ForceActivationCollection(TimeSpan.Zero));
     }
 

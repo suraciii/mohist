@@ -19,6 +19,7 @@ using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.PublicApi;
@@ -65,6 +66,8 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public virtual AgentLaunchParticipantProbe LaunchFaults => _factory.Services.GetRequiredService<AgentLaunchParticipantProbe>();
     public virtual ReportPersistenceFailureProbe ReportPersistenceFailures =>
         _factory.Services.GetRequiredService<ReportPersistenceFailureProbe>();
+    internal WorkflowRunLoadFailureProbe WorkflowRunLoadFailures =>
+        _factory.Services.GetRequiredService<WorkflowRunLoadFailureProbe>();
     public virtual AgentSessionPersistenceTestProbe Persistence => _factory.Persistence;
     public virtual FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
 
@@ -323,6 +326,12 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            services.RemoveAll<IWorkflowRunStore>();
+            services.AddScoped<WorkflowRunStore>();
+            services.AddSingleton<WorkflowRunLoadFailureProbe>();
+            services.AddScoped<IWorkflowRunStore>(provider => new FaultInjectingWorkflowRunStore(
+                provider.GetRequiredService<WorkflowRunStore>(),
+                provider.GetRequiredService<WorkflowRunLoadFailureProbe>()));
             services.RemoveAll<IWorkflowReportPersistenceFailureInjector>();
             services.RemoveAll<IAgentJobReportPersistenceFailureInjector>();
             services.AddSingleton<ReportPersistenceFailureProbe>();
