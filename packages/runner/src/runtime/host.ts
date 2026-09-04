@@ -335,11 +335,6 @@ export class RunnerHost {
         exception: error,
       })
     }
-    // Initialize the process-memory runtime-event queue before accepting
-    // control commands or claiming work.
-    await this.loadAgentSessionRuntimeEventQueue(signal)
-    await this.initializeSharedConnection(signal)
-    await this.connectRunner(signal)
     let heartbeat: ReturnType<typeof setInterval> | undefined
     let selfCheck: ReturnType<typeof setInterval> | undefined
     let convergenceTimer: ReturnType<typeof setInterval> | undefined
@@ -350,6 +345,11 @@ export class RunnerHost {
     }
     signal.addEventListener('abort', stopMaintenance, { once: true })
     try {
+      // Initialize the process-memory runtime-event queue before accepting
+      // control commands or claiming work.
+      await this.loadAgentSessionRuntimeEventQueue(signal)
+      await this.initializeSharedConnection(signal)
+      await this.connectRunner(signal)
       if (!signal.aborted) {
         if (this.enabledAgentRuntimes.has('opencode')) this.modelCatalogLifecycle.trigger()
         // Kick a non-blocking drain: an unavailable server does not gate
@@ -367,7 +367,10 @@ export class RunnerHost {
         convergenceTimer = setInterval(() => this.convergenceLifecycle.trigger(), this.cleanupConvergenceIntervalMs)
         cleanupTimer = setInterval(() => this.cleanupLifecycle.trigger(), this.cleanupLoopIntervalMs)
         if (this.enabledAgentRuntimes.has('opencode')) {
-          modelRediscoveryTimer = setInterval(() => this.modelCatalogLifecycle.trigger(), this.modelRediscoveryIntervalMs)
+          modelRediscoveryTimer = setInterval(
+            () => this.modelCatalogLifecycle.trigger(),
+            this.modelRediscoveryIntervalMs,
+          )
         }
         await this.runWorkerPool(signal)
       }
