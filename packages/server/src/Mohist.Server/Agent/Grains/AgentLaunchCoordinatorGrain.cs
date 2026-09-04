@@ -563,7 +563,7 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
             Source: plan.ConnectionOrigin is null ? "agent-launch" : "agent-connection",
             JobId: plan.JobKey,
             Metadata: metadata,
-            Runtime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+            Runtime: plan.Runtime ?? AgentConfigSchema.DefaultRuntime,
             WorkDir: plan.WorkspacePath,
             Attachments: plan.Attachments,
             Provenance: plan.ConnectionOrigin is { } provenanceOrigin
@@ -581,7 +581,7 @@ public sealed partial class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoo
             StartupContext: plan.StartupContext,
             Definition: new AgentExecutionDefinition(
                 plan.AgentInstructions ?? string.Empty,
-                plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+                plan.Runtime ?? AgentConfigSchema.DefaultRuntime,
                 plan.Model,
                 plan.Variant,
                 plan.Skills ?? [],

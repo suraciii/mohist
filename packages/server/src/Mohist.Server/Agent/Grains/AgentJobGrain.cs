@@ -335,7 +335,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     public async Task SubmitAsync(AgentJobInput input)
     {
         await HydrateAsync();
-
+        input = WithRuntimeDefaultForSubmission(input, State.Input);
         if (State.Input is not null)
         {
             var existingInput = InputWithAgentConfig()!;
@@ -452,12 +452,12 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
 
         await sessionGrain.OpenAsync(new OpenAgentSessionCommand(
             RunnerId: string.Empty,
-            AgentRuntime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+            AgentRuntime: plan.Runtime ?? AgentConfigSchema.DefaultRuntime,
             WorkDir: plan.WorkspacePath,
             Metadata: metadata,
             Definition: new AgentExecutionDefinition(
                 plan.AgentInstructions ?? string.Empty,
-                plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+                plan.Runtime ?? AgentConfigSchema.DefaultRuntime,
                 plan.Model,
                 plan.Variant,
                 plan.Skills ?? [],
@@ -472,7 +472,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 Model: plan.Model,
                 WorkspacePath: plan.WorkspacePath,
                 ProjectId: plan.ProjectId,
-                Runtime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+                Runtime: plan.Runtime ?? AgentConfigSchema.DefaultRuntime,
                 AgentId: plan.AgentId,
                 AgentInstructions: plan.AgentInstructions,
                 AgentConfig: null,
@@ -508,7 +508,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
                 Model: plan.Model,
                 WorkspacePath: plan.WorkspacePath,
                 ProjectId: plan.ProjectId,
-                Runtime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+                Runtime: plan.Runtime ?? AgentConfigSchema.DefaultRuntime,
                 AgentId: plan.AgentId,
                 AgentInstructions: plan.AgentInstructions,
                 AgentConfig: DeserializeAgentConfig(plan.AgentConfigJson),
@@ -734,7 +734,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             WorkspaceName: command.WorkspaceName,
             WorkspacePath: command.WorkspacePath,
             ProjectId: command.ProjectId,
-            Runtime: command.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
+            Runtime: command.Runtime ?? AgentConfigSchema.DefaultRuntime,
             AgentId: command.AgentId,
             AgentInstructions: string.IsNullOrWhiteSpace(command.AgentInstructions) ? null : command.AgentInstructions,
             AgentConfig: command.AgentConfig,

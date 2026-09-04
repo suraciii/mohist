@@ -894,7 +894,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             }
         }
 
-        return AgentConfigSchema.OpenCodeRuntime;
+        return AgentConfigSchema.DefaultRuntime;
     }
 
     /// <summary>

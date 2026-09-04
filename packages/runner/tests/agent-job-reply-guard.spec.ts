@@ -67,6 +67,7 @@ function buildWork(overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem 
     variables: { workspace: { path: WORK_DIR } },
     with: {
       prompt: 'Inspect the change and report the result.',
+      runtime: 'opencode',
       slackExecutionContext: slackExecutionContext(),
     },
     ...overrides,
@@ -292,7 +293,9 @@ test('does not advise after an accepted or rejected reply action attempt', async
     turnEvents: [replyOpenCodeEvent(), replyOpenCodeEvent('tool_call.completed')],
   })
   const result = await new AgentJobExecutor(connection(), { openCode: runtime.runtime, pi: null }).execute(
-    buildWork({ with: { prompt: 'Publish the result.', slackExecutionContext: slackExecutionContext() } }),
+    buildWork({
+      with: { prompt: 'Publish the result.', runtime: 'opencode', slackExecutionContext: slackExecutionContext() },
+    }),
     new AbortController().signal,
   )
 
@@ -365,10 +368,14 @@ test('preserves the original result and does not retry after an advisory timeout
 
 test('bypasses the guard for absent and malformed Slack contexts', async () => {
   const workItems = [
-    { work: buildWork({ with: { prompt: 'No Slack guard.' } }), status: 'completed' },
+    { work: buildWork({ with: { prompt: 'No Slack guard.', runtime: 'opencode' } }), status: 'completed' },
     {
       work: buildWork({
-        with: { prompt: 'Malformed Slack guard.', slackExecutionContext: { version: 1, replyAnchor: {} } },
+        with: {
+          prompt: 'Malformed Slack guard.',
+          runtime: 'opencode',
+          slackExecutionContext: { version: 1, replyAnchor: {} },
+        },
       }),
       status: 'failed',
     },

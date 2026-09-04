@@ -748,7 +748,7 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
         workType: 'task',
         ownerKind: 'agent-job',
         agentJobId: 'aj-1',
-        with: { prompt: 'do the agent-job thing' },
+        with: { prompt: 'do the agent-job thing', runtime: 'opencode' },
         variables: { workspace: { path: '/virtual/agent-job', branch: null, changeDir: null } },
       },
       new AbortController().signal,

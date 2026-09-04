@@ -1,3 +1,5 @@
+using Mohist.Server.Infrastructure;
+
 namespace Mohist.Server.Agent.Services;
 
 public static class BuiltInAgentCatalog
@@ -14,7 +16,7 @@ public static class BuiltInAgentCatalog
             MohistSlackName,
             "Mohist's Slack workspace manager.",
             BuiltInAgentAssets.MohistSlackInstructions,
-            Runtime: "opencode",
+            Runtime: AgentConfigSchema.DefaultRuntime,
             Model: null,
             Variant: null,
             Skills: []),
@@ -22,7 +24,7 @@ public static class BuiltInAgentCatalog
             MohistPlannerName,
             "Mohist's built-in Workflow planning Agent.",
             BuiltInAgentAssets.MohistPlannerInstructions,
-            Runtime: "opencode",
+            Runtime: AgentConfigSchema.DefaultRuntime,
             Model: null,
             Variant: null,
             Skills: []),
@@ -30,7 +32,7 @@ public static class BuiltInAgentCatalog
             MohistBuilderName,
             "Mohist's built-in Workflow implementation Agent.",
             BuiltInAgentAssets.MohistBuilderInstructions,
-            Runtime: "opencode",
+            Runtime: AgentConfigSchema.DefaultRuntime,
             Model: null,
             Variant: null,
             Skills: []),
@@ -38,7 +40,7 @@ public static class BuiltInAgentCatalog
             MohistReviewerName,
             "Mohist's built-in Workflow review Agent.",
             BuiltInAgentAssets.MohistReviewerInstructions,
-            Runtime: "opencode",
+            Runtime: AgentConfigSchema.DefaultRuntime,
             Model: null,
             Variant: null,
             Skills: [])

@@ -29,7 +29,7 @@ public sealed partial class AgentConnectionStoreSpecs
         var executability = AgentReadinessService.Evaluate(agent, null);
         Assert.Equal(AgentExecutabilityStates.Unknown, executability.State);
         Assert.NotEqual(AgentExecutabilityStates.NotConfigured, executability.State);
-        Assert.Equal("opencode", AgentLauncher.ResolveRuntime(agent!.AgentConfig));
+        Assert.Equal(AgentConfigSchema.DefaultRuntime, AgentLauncher.ResolveRuntime(agent!.AgentConfig));
     }
 
     private async Task SeedReadinessAgentAsync(string projectId, string agentId, JsonElement agentConfig)

@@ -11,6 +11,16 @@ namespace Mohist.Server.Agent.Grains;
 
 public sealed partial class AgentJobGrain
 {
+    private static AgentJobInput WithRuntimeDefaultForSubmission(AgentJobInput input, AgentJobInput? existingInput) =>
+        existingInput is not null && string.IsNullOrWhiteSpace(existingInput.Runtime)
+            ? input
+            : input with
+            {
+                Runtime = string.IsNullOrWhiteSpace(input.Runtime)
+                    ? AgentConfigSchema.DefaultRuntime
+                    : input.Runtime,
+            };
+
     private async Task<WorkDispatch> BuildDispatchAsync(string workId)
     {
         var input = InputWithAgentConfig()!;
