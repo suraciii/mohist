@@ -30,7 +30,6 @@ internal static class SlackReplyAnchorValidator
             .Where(input => !string.IsNullOrWhiteSpace(input.JobId))
             .OrderBy(input => input.Sequence)
             .FirstOrDefault();
-        var initialProvenance = initialInput?.Provenance;
 
         var matchingInputs = inputs.Where(input => MatchesProvenance(input.Provenance, request)).ToArray();
         if (matchingInputs.Length != 1)
@@ -40,7 +39,7 @@ internal static class SlackReplyAnchorValidator
         // A threaded follow-up must use the Session's durable bound root. An
         // unthreaded input is rooted at its own triggering message.
         var expectedThreadRoot = !string.IsNullOrWhiteSpace(input.Provenance!.ThreadId)
-            ? DurableBoundRoot(initialProvenance)
+            ? DurableBoundRoot(input.Provenance)
             : input.Provenance.MessageId;
         if (string.IsNullOrWhiteSpace(expectedThreadRoot)
             || !string.Equals(expectedThreadRoot, request.ThreadRootMessageId, StringComparison.Ordinal))

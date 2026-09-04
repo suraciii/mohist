@@ -37,29 +37,31 @@ type Execute func(context.Context, string, []string) error
 type Wait func(context.Context, time.Duration) error
 type EventTail func(context.Context, string, []string, string, io.Writer) error
 type HealthProbe func(context.Context, string) error
+type ManagerCredentialBroker func(context.Context, *http.Request) (*http.Response, error)
 
 // Dependencies makes process boundaries explicit and keeps command tests local.
 type Dependencies struct {
-	HTTPClient       *http.Client
-	Stdout           io.Writer
-	Stderr           io.Writer
-	Lookup           EnvLookup
-	ReadFile         ReadFile
-	WriteFile        WriteFile
-	HomeDir          func() (string, error)
-	Execute          Execute
-	OpenBrowser      Execute
-	Input            io.Reader
-	Now              func() time.Time
-	Wait             Wait
-	Executable       func() string
-	CurrentDirectory func() string
-	EventTail        EventTail
-	HealthProbe      HealthProbe
-	MkdirAll         func(string, os.FileMode) error
-	RemoveAll        func(string) error
-	Rename           func(string, string) error
-	Chmod            func(string, os.FileMode) error
+	HTTPClient              *http.Client
+	Stdout                  io.Writer
+	Stderr                  io.Writer
+	Lookup                  EnvLookup
+	ReadFile                ReadFile
+	WriteFile               WriteFile
+	HomeDir                 func() (string, error)
+	Execute                 Execute
+	OpenBrowser             Execute
+	Input                   io.Reader
+	Now                     func() time.Time
+	Wait                    Wait
+	Executable              func() string
+	CurrentDirectory        func() string
+	EventTail               EventTail
+	HealthProbe             HealthProbe
+	ManagerCredentialBroker ManagerCredentialBroker
+	MkdirAll                func(string, os.FileMode) error
+	RemoveAll               func(string) error
+	Rename                  func(string, string) error
+	Chmod                   func(string, os.FileMode) error
 }
 
 type Config struct {
@@ -387,6 +389,21 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 		return ExitOperation
 	}
 	client.deps = deps
+	if managerMode := isManagerMode(deps.Lookup); managerMode {
+		broker := deps.ManagerCredentialBroker
+		if broker == nil {
+			brokerPath := strings.TrimSpace(lookup(deps.Lookup, "MOHIST_MANAGER_CREDENTIAL_BROKER"))
+			if brokerPath == "" {
+				writeError(deps.Stderr, errors.New("Manager credential broker is unavailable"))
+				return ExitOperation
+			}
+			broker = unixManagerCredentialBroker(brokerPath)
+		}
+		client.managerMode = true
+		client.token = ""
+		client.refreshToken = ""
+		client.http = &http.Client{Transport: managerCredentialTransport{broker: broker}}
+	}
 	if strings.HasPrefix(command.kind, "auth-") {
 		return runAuth(ctx, deps, client, cfg, command)
 	}
@@ -603,6 +620,7 @@ type client struct {
 	operatorID   string
 	machineLocal bool
 	refreshToken string
+	managerMode  bool
 	deps         Dependencies
 }
 
@@ -632,6 +650,9 @@ func (c *client) get(ctx context.Context, path string) (json.RawMessage, error) 
 	}
 	req.Header.Set(operatorIDHeader, c.operatorID)
 	req.Header.Set("Accept", "application/json")
+	if c.managerMode {
+		req.Header.Set("X-Mohist-Manager-Mode", "1")
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {

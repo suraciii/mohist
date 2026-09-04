@@ -130,13 +130,6 @@ public sealed partial class AgentSessionGrain
         if (!string.Equals(executionSource, AgentExecutionSources.Slack, StringComparison.Ordinal))
             return turnInputs[0].Provenance;
 
-        var initial = (session.Status.Inputs ?? [])
-            .Where(input => EffectiveExecutionSource(input) == AgentExecutionSources.Slack)
-            .OrderBy(input => input.Sequence)
-            .FirstOrDefault(input => !string.IsNullOrWhiteSpace(input.JobId));
-        var initialProvenance = initial?.Provenance;
-        var root = initialProvenance?.BoundThreadRootMessageId;
-
         var representative = turnInputs[0].Provenance
             ?? throw new InvalidOperationException($"AgentSession {session.Id} Slack follow-up representative has no provenance.");
         if (string.IsNullOrWhiteSpace(representative.WorkspaceId)
@@ -154,8 +147,8 @@ public sealed partial class AgentSessionGrain
         if (string.IsNullOrWhiteSpace(representative.ThreadId))
             return representative with { BoundThreadRootMessageId = representative.MessageId };
 
-        if (string.IsNullOrWhiteSpace(root))
+        if (string.IsNullOrWhiteSpace(representative.BoundThreadRootMessageId))
             throw new InvalidOperationException($"AgentSession {session.Id} Slack follow-up has no durable bound thread root.");
-        return representative with { BoundThreadRootMessageId = root };
+        return representative;
     }
 }

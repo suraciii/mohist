@@ -2,9 +2,11 @@ package mohistcli
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -17,6 +19,8 @@ var otelQueryFields = []string{"columns", "rows", "truncated", "truncate_reason"
 var otelTraceFields = []string{"trace_id", "service_name", "start_time", "end_time", "span_count"}
 var githubFields = []string{"id", "projectId", "owner", "repo", "repositoryName", "approvers", "status", "installationId", "repositoryNodeId", "reconnectRequired", "needsAttention", "needsReprojection", "lastError", "webhookSecret", "ingressUrl", "createdAt", "updatedAt"}
 var slackFields = []string{"id", "projectId", "agentId", "workspaceTeamId", "status", "connectionState", "botName", "owner", "accessPolicy", "nextAction", "createdAt", "updatedAt"}
+
+const maxSlackReplyFileBytes = 10 * 1024 * 1024
 
 func parseOperations(area string, args []string) (command, error) {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
@@ -130,10 +134,14 @@ func parseOperations(area string, args []string) (command, error) {
 		return command{}, usage("--yes is required for permanent deletion")
 	}
 	if area == "slack" && action == "message-send" {
-		for _, required := range []string{"workspace", "conversation", "connection", "session", "triggering-message", "dispatch-ref"} {
-			if !hasArg(c.args, required) {
-				return command{}, usage("message send requires --" + required)
+		missing := []string{}
+		for _, required := range []string{"workspace", "conversation", "reply-to", "connection", "session", "triggering-message", "dispatch-ref"} {
+			if strings.TrimSpace(argValue(c.args, required, "")) == "" {
+				missing = append(missing, "--"+required)
 			}
+		}
+		if len(missing) > 0 {
+			return command{}, usage("message send requires non-blank anchor fields: " + strings.Join(missing, ", "))
 		}
 		if !hasArg(c.args, "text") && !hasArg(c.args, "image") && !hasArg(c.args, "file") {
 			return command{}, usage("message send requires --text, --image, or --file")
@@ -141,6 +149,9 @@ func parseOperations(area string, args []string) (command, error) {
 		if hasArg(c.args, "image") && hasArg(c.args, "file") {
 			return command{}, usage("--image and --file are mutually exclusive")
 		}
+	}
+	if area == "slack" && action == "status" && strings.TrimSpace(argValue(c.args, "workspace-team", "")) == "" {
+		return command{}, usage("slack status requires non-blank --workspace-team")
 	}
 	return c, validateFields(c.fields, c.catalog, "mo "+area+" "+strings.ReplaceAll(action, "-", " "))
 }
@@ -428,7 +439,11 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 	area := strings.Split(cmd.kind, "-")[1]
 	action := strings.TrimPrefix(cmd.kind, "ops-"+area+"-")
 	project := argValue(cmd.args, "project", "")
-	if contains([]string{"runner", "github", "slack"}, area) {
+	needsProject := contains([]string{"runner", "github"}, area)
+	if area == "slack" && !contains([]string{"setup", "status"}, action) {
+		needsProject = !(isManagerMode(deps.Lookup) && action == "message-send")
+	}
+	if needsProject {
 		if project == "" {
 			project, _ = resolveProject(deps, "")
 		}
@@ -440,6 +455,7 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 	path := ""
 	method := http.MethodGet
 	var body any
+	var err error
 	collection := false
 	if area == "server" {
 		path = map[string]string{"status": "/api/status?all=true", "health": "/api/health", "info": "/api/system/info", "logs": "/api/logs/tail"}[action]
@@ -489,15 +505,34 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 		collection = action == "list"
 		if action == "setup" || action == "status" {
 			path = "/api/slack-manager/" + action
-		}
-		if action == "install-agent" || action == "create" {
+			if action == "status" {
+				q := url.Values{}
+				workspace := strings.TrimSpace(argValue(cmd.args, "workspace-team", ""))
+				if workspace == "" {
+					writeError(deps.Stderr, errors.New("--workspace-team is required for slack status"))
+					return ExitUsage
+				}
+				q.Set("workspaceTeamId", workspace)
+				path += "?" + q.Encode()
+			}
+		} else if action == "install-agent" || action == "create" {
 			path = "/api/projects/" + url.PathEscape(project) + "/slack-manager/install-agent"
 			method = http.MethodPost
 			body = map[string]any{"agent": argValue(cmd.args, "agent", "")}
 		} else if action == "message-send" {
-			path += "/reply"
+			path = "/api/projects/" + url.PathEscape(project) + "/slack-connections/reply"
 			method = http.MethodPost
-			body = map[string]any{"workspace": argValue(cmd.args, "workspace", ""), "conversation": argValue(cmd.args, "conversation", ""), "connection": argValue(cmd.args, "connection", ""), "session": argValue(cmd.args, "session", ""), "triggeringMessage": argValue(cmd.args, "triggering-message", ""), "dispatchRef": argValue(cmd.args, "dispatch-ref", ""), "text": argValue(cmd.args, "text", "")}
+			body, err = slackMessageBody(deps, cmd)
+			if err != nil {
+				writeError(deps.Stderr, err)
+				if _, ok := err.(*usageError); ok {
+					return ExitUsage
+				}
+				return ExitOperation
+			}
+			if isManagerMode(deps.Lookup) {
+				path = "/api/slack-manager/reply"
+			}
 		} else if action != "list" {
 			path += "/" + url.PathEscape(argValue(cmd.args, "id", ""))
 		}
@@ -510,6 +545,48 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 		collection = true
 	}
 	return remoteOperation(ctx, deps, c, method, path, body, cmd, collection)
+}
+
+func slackMessageBody(deps Dependencies, cmd command) (map[string]any, error) {
+	body := map[string]any{
+		"workspaceTeamId":     strings.TrimSpace(argValue(cmd.args, "workspace", "")),
+		"conversationId":      strings.TrimSpace(argValue(cmd.args, "conversation", "")),
+		"threadTs":            strings.TrimSpace(argValue(cmd.args, "reply-to", "")),
+		"connectionId":        strings.TrimSpace(argValue(cmd.args, "connection", "")),
+		"sessionId":           strings.TrimSpace(argValue(cmd.args, "session", "")),
+		"triggeringMessageId": strings.TrimSpace(argValue(cmd.args, "triggering-message", "")),
+		"dispatchRef":         strings.TrimSpace(argValue(cmd.args, "dispatch-ref", "")),
+	}
+	if hasArg(cmd.args, "text") {
+		text := argValue(cmd.args, "text", "")
+		if text == "-" {
+			data, err := io.ReadAll(deps.Input)
+			if err != nil {
+				return nil, errors.New("could not read reply text from stdin")
+			}
+			text = string(data)
+		}
+		body["text"] = text
+	}
+	if image := strings.TrimSpace(argValue(cmd.args, "image", "")); image != "" {
+		body["imageUrl"] = image
+	}
+	if file := strings.TrimSpace(argValue(cmd.args, "file", "")); file != "" {
+		data, err := deps.ReadFile(file)
+		if err != nil {
+			return nil, errors.New("could not read reply file")
+		}
+		if len(data) > maxSlackReplyFileBytes {
+			return nil, usage("message send file must be at most 10 MB")
+		}
+		body["fileName"] = filepath.Base(file)
+		body["fileContentBase64"] = base64.StdEncoding.EncodeToString([]byte(data))
+	}
+	text, _ := body["text"].(string)
+	if strings.TrimSpace(text) == "" && body["imageUrl"] == nil && body["fileContentBase64"] == nil {
+		return nil, usage("message send requires non-blank text, image, or file content")
+	}
+	return body, nil
 }
 
 func runOtel(ctx context.Context, deps Dependencies, c *client, cmd command) int {

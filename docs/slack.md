@@ -385,6 +385,21 @@ The Connection ID, triggering message ID, and dispatch reference identify the
 answer. Repeated sends converge only within the owning Connection and Turn. A
 later input or another Connection gets a separate answer.
 
+- A **Connection reply** is an Agent-authored message for one accepted input. It
+  carries the complete workspace, conversation, reply-root, Connection, Session,
+  triggering-message, and dispatch-reference anchor. The Server validates those
+  values against the current input before accepting text, an image URL, or a
+  file. Image and file content are mutually exclusive.
+- A **Manager reply** is an operator-bound message from Manager execution. When
+  `MOHIST_MANAGER_MODE=1`, the existing Manager credential broker selects the
+  Manager credential and `/api/slack-manager/reply`. The Server validates the
+  credential's current-input origin; the Manager does not supply Slack
+  credentials or choose a different destination.
+- `mo slack status` reads workspace status through `/api/slack-manager/status`
+  with `workspaceTeamId` in the query and the management credential. Manager
+  status and management requests use the same broker and never a Connection
+  credential.
+
 - Status fields such as exit code, artifact count, or IDs are metadata, not the
   Agent's answer.
 - Silence is valid. A Turn with no reply is not a failure, and Mohist invents no

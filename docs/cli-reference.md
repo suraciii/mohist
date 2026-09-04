@@ -542,12 +542,12 @@ Mohist App.
   accept token literals. The CLI reads only the fields needed for the current
   step. Mohist encrypts them after validation and never includes them in output,
   errors, JSON, or logs.
-- `mo slack status` shows the current Mohist App, Agent integrations, local
+- `mo slack status --workspace-team <team-id>` shows the current Mohist App, Agent integrations, local
   connection state, and one next action. Missing provisioning credentials point
   to `setup`. An incomplete Agent installation points to the same
   `install-agent` command.
-- `mo slack message send --workspace <workspace-id> --conversation <conversation-id> --reply-to <thread-root-ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <reply-anchor-ref> --text <body> [--image <url> | --file <path>]`
-  lets an Agent speak in Slack through an anchored reply. The six reply-anchor
+- `mo slack message send --workspace <workspace-id> --conversation <conversation-id> --reply-to <thread-root-ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <reply-anchor-ref> [--text <body>] [--image <url> | --file <path>]`
+  lets an Agent speak in Slack through an anchored reply. The seven reply-anchor
   options are required for Connection Agent replies; the CLI refuses an
   anchor-less or incomplete invocation before making an HTTP request. It renders
   Markdown body text as native Slack formatting, including bold, inline code,
