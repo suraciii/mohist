@@ -165,7 +165,34 @@ public sealed class WorkflowAgentHandoffConflictException : Exception
 
 public static class WorkflowAgentHandoffCodec
 {
+    public static string KeyFor(WorkflowAgentHandoffCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        return KeyFor(
+            command.ProjectId,
+            command.WorkflowRunId,
+            command.Completion?.Stage ?? string.Empty,
+            command.ActionAttemptId,
+            command.CommandId);
+    }
+
     public static string KeyFor(
+        string projectId,
+        string workflowRunId,
+        string stage,
+        string actionAttemptId,
+        string commandId)
+    {
+        var identity = DurableScope(
+            Require(projectId, nameof(projectId)),
+            Require(workflowRunId, nameof(workflowRunId)),
+            stage ?? string.Empty,
+            Require(actionAttemptId, nameof(actionAttemptId)),
+            Require(commandId, nameof(commandId)));
+        return $"workflow-agent-handoff/{StableToken(identity)}";
+    }
+
+    internal static string LegacyKeyFor(
         string projectId,
         string workflowRunId,
         string actionAttemptId,
@@ -183,10 +210,7 @@ public static class WorkflowAgentHandoffCodec
     {
         ArgumentNullException.ThrowIfNull(command);
         var canonical = string.Join('\u001f',
-            command.CommandId ?? string.Empty,
-            command.ProjectId ?? string.Empty,
-            command.WorkflowRunId ?? string.Empty,
-            command.ActionAttemptId ?? string.Empty,
+            DurableScope(command),
             command.AgentRef ?? string.Empty,
             command.Prompt ?? string.Empty,
             command.Session ?? string.Empty,
@@ -199,11 +223,7 @@ public static class WorkflowAgentHandoffCodec
     public static WorkflowAgentInvocation InvocationFor(WorkflowAgentHandoffCommand command)
     {
         ArgumentNullException.ThrowIfNull(command);
-        var token = StableToken(string.Join('\u001f',
-            command.ProjectId,
-            command.WorkflowRunId,
-            command.ActionAttemptId,
-            command.CommandId));
+        var token = StableToken(DurableScope(command));
         // A non-empty session name is the logical AgentSession identity of the
         // whole WorkflowRun: every attempt with the same name derives the same
         // session id, while a different name or run stays isolated. Unnamed
@@ -227,6 +247,22 @@ public static class WorkflowAgentHandoffCodec
     }
 
     private static string StableToken(string identity) => Hash(identity)[..32];
+
+    private static string DurableScope(WorkflowAgentHandoffCommand command) =>
+        DurableScope(
+            command.ProjectId ?? string.Empty,
+            command.WorkflowRunId ?? string.Empty,
+            command.Completion?.Stage ?? string.Empty,
+            command.ActionAttemptId ?? string.Empty,
+            command.CommandId ?? string.Empty);
+
+    private static string DurableScope(
+        string projectId,
+        string workflowRunId,
+        string stage,
+        string actionAttemptId,
+        string commandId) =>
+        string.Join('\u001f', projectId, workflowRunId, stage, actionAttemptId, commandId);
 
     private static string CanonicalCompletion(WorkflowAgentHandoffCompletionSnapshot? completion) =>
         completion is null
