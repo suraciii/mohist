@@ -87,6 +87,7 @@ import {
   type HostExecutionContext,
 } from './host-execution.js'
 import { actionCatalogForEnabledRuntimes, normalizeEnabledAgentRuntimes } from './enabled-agent-runtimes.js'
+import { createMaintenanceLifecycle, type MaintenanceLifecycle } from './maintenance-lifecycle.js'
 
 export { startTaskLogFlushTrigger } from './host-task-log.js'
 
@@ -141,12 +142,14 @@ export class RunnerHost {
   private readonly shutdownStopBudgetMs: number
   private readonly hostShutdown: ReturnType<typeof createHostShutdown>
   private readonly waitForConnectionRetry: (delayMs: number, signal: AbortSignal) => Promise<void>
+  private readonly heartbeatLifecycle: MaintenanceLifecycle
+  private readonly livenessLifecycle: MaintenanceLifecycle
+  private readonly convergenceLifecycle: MaintenanceLifecycle
+  private readonly cleanupLifecycle: MaintenanceLifecycle
+  private readonly modelCatalogLifecycle: MaintenanceLifecycle
   private readonly skillResolver = new SkillResolver()
   private readonly processGeneration = randomUUID()
   private readonly enabledAgentRuntimes: ReadonlySet<AgentRuntime>
-
-  // Lets an out-of-loop reconnect callback bound its immediate heartbeat.
-  private activeSignal: AbortSignal | null = null
 
   // WorkExecutor is created once per host; per-work recreation leaves shared lifecycle state cold.
   private workExecutor: WorkExecutor | null = null
@@ -259,10 +262,7 @@ export class RunnerHost {
               this.agentSessionRuntimeEventQueue,
             ),
           },
-          onWorkflowStatusChanged: async () => {
-            const signal = this.activeSignal
-            if (signal && !signal.aborted) await this.cleanup.runConvergenceOnce(signal)
-          },
+          onWorkflowStatusChanged: () => this.convergenceLifecycle.trigger(),
         }),
         agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
         processGeneration: this.processGeneration,
@@ -286,6 +286,11 @@ export class RunnerHost {
       inFlight: this.inFlight,
       shutdownStopBudgetMs: this.shutdownStopBudgetMs,
     })
+    this.heartbeatLifecycle = createMaintenanceLifecycle((signal) => this.heartbeatOnce(signal))
+    this.livenessLifecycle = createMaintenanceLifecycle((signal) => this.cleanup.runSelfCheck(signal))
+    this.convergenceLifecycle = createMaintenanceLifecycle((signal) => this.cleanup.runConvergenceOnce(signal))
+    this.cleanupLifecycle = createMaintenanceLifecycle((signal) => this.cleanup.runCleanupOnce(signal))
+    this.modelCatalogLifecycle = createMaintenanceLifecycle((signal) => this.runModelCatalogMaintenance(signal))
   }
 
   private get executionContext(): HostExecutionContext {
@@ -309,85 +314,82 @@ export class RunnerHost {
   }
 
   async run(signal: AbortSignal) {
-    this.activeSignal = signal
+    // Load the runner-local workspace registry before any dispatch /
+    // control WebSocket RPC can fire. A missing file is treated as an empty
+    // registry; corrupt JSON is similarly tolerated (see
+    // WorkspaceRegistry.loadFromDisk). The load is best-effort — a
+    // failed read does not block startup.
     try {
-      // Load the runner-local workspace registry before any dispatch /
-      // control WebSocket RPC can fire. A missing file is treated as an empty
-      // registry; corrupt JSON is similarly tolerated (see
-      // WorkspaceRegistry.loadFromDisk). The load is best-effort — a
-      // failed read does not block startup.
-      try {
-        await this.workspaceRegistry.load()
-      } catch (error) {
-        log.error('failed to load workspace registry; starting empty', {
-          exception: error,
-        })
-      }
-      // Named workspace registry: same rebuildable-index rules as the
-      // workflow registry — a missing or corrupt file starts empty.
-      try {
-        await this.namedWorkspaceRegistry.load()
-      } catch (error) {
-        log.error('failed to load named workspace registry; starting empty', {
-          exception: error,
-        })
-      }
-      // Initialize the process-memory runtime-event queue before accepting
-      // control commands or claiming work.
-      await this.loadAgentSessionRuntimeEventQueue(signal)
-      await this.initializeSharedConnection(signal)
-      await this.connectRunner(signal)
-      if (this.enabledAgentRuntimes.has('opencode')) void this.recoverEmptyModelCatalog(signal)
-      // Kick a non-blocking drain: an unavailable server does not gate
-      // startup; queued evidence retries while this process remains alive.
-      if (this.agentSessionRuntimeEventQueue.ready()) {
-        void this.agentSessionRuntimeEventQueue.kick().catch(() => undefined)
-      }
-      // Startup convergence: pick up any terminal events the runner
-      // missed while it was offline (e.g. completed while the previous
-      // process was down). Runs immediately after control WebSocket is up so the
-      // push channel is available in parallel.
-      await this.cleanup.runConvergenceOnce(signal)
-      const heartbeat = setInterval(() => void this.heartbeatOnce(signal), this.options.heartbeatIntervalMs)
-      const selfCheck = setInterval(
-        () => void this.cleanup.runSelfCheck(signal),
-        this.options.dispatchLivenessProbeIntervalMs,
-      )
-      const convergenceTimer = setInterval(
-        () => void this.cleanup.runConvergenceOnce(signal),
-        this.cleanupConvergenceIntervalMs,
-      )
-      const cleanupTimer = setInterval(() => void this.cleanup.runCleanupOnce(signal), this.cleanupLoopIntervalMs)
-      const modelRediscoveryTimer = this.enabledAgentRuntimes.has('opencode')
-        ? setInterval(() => void this.runModelRediscoveryOnce(signal), this.modelRediscoveryIntervalMs)
-        : null
-      try {
+      await this.workspaceRegistry.load()
+    } catch (error) {
+      log.error('failed to load workspace registry; starting empty', {
+        exception: error,
+      })
+    }
+    // Named workspace registry: same rebuildable-index rules as the
+    // workflow registry — a missing or corrupt file starts empty.
+    try {
+      await this.namedWorkspaceRegistry.load()
+    } catch (error) {
+      log.error('failed to load named workspace registry; starting empty', {
+        exception: error,
+      })
+    }
+    // Initialize the process-memory runtime-event queue before accepting
+    // control commands or claiming work.
+    await this.loadAgentSessionRuntimeEventQueue(signal)
+    await this.initializeSharedConnection(signal)
+    await this.connectRunner(signal)
+    let heartbeat: ReturnType<typeof setInterval> | undefined
+    let selfCheck: ReturnType<typeof setInterval> | undefined
+    let convergenceTimer: ReturnType<typeof setInterval> | undefined
+    let cleanupTimer: ReturnType<typeof setInterval> | undefined
+    let modelRediscoveryTimer: ReturnType<typeof setInterval> | undefined
+    try {
+      if (!signal.aborted) {
+        if (this.enabledAgentRuntimes.has('opencode')) this.modelCatalogLifecycle.trigger()
+        // Kick a non-blocking drain: an unavailable server does not gate
+        // startup; queued evidence retries while this process remains alive.
+        if (this.agentSessionRuntimeEventQueue.ready()) {
+          void this.agentSessionRuntimeEventQueue.kick().catch(() => undefined)
+        }
+        // Startup convergence: pick up any terminal events the runner
+        // missed while it was offline (e.g. completed while the previous
+        // process was down). Runs immediately after control WebSocket is up so the
+        // push channel is available in parallel.
+        await this.convergenceLifecycle.triggerAndWait()
+        heartbeat = setInterval(() => this.heartbeatLifecycle.trigger(), this.options.heartbeatIntervalMs)
+        selfCheck = setInterval(() => this.livenessLifecycle.trigger(), this.options.dispatchLivenessProbeIntervalMs)
+        convergenceTimer = setInterval(() => this.convergenceLifecycle.trigger(), this.cleanupConvergenceIntervalMs)
+        cleanupTimer = setInterval(() => this.cleanupLifecycle.trigger(), this.cleanupLoopIntervalMs)
+        if (this.enabledAgentRuntimes.has('opencode')) {
+          modelRediscoveryTimer = setInterval(() => this.modelCatalogLifecycle.trigger(), this.modelRediscoveryIntervalMs)
+        }
         await this.runWorkerPool(signal)
-      } finally {
-        clearInterval(heartbeat)
-        clearInterval(selfCheck)
-        clearInterval(convergenceTimer)
-        clearInterval(cleanupTimer)
-        if (modelRediscoveryTimer) clearInterval(modelRediscoveryTimer)
       }
     } finally {
-      try {
-        await this.shutdownSharedConnection()
-        await this.taskLogDeliveryQueue.stop()
-        await this.shutdownConnection()
-      } finally {
-        this.activeSignal = null
-      }
+      if (heartbeat) clearInterval(heartbeat)
+      if (selfCheck) clearInterval(selfCheck)
+      if (convergenceTimer) clearInterval(convergenceTimer)
+      if (cleanupTimer) clearInterval(cleanupTimer)
+      if (modelRediscoveryTimer) clearInterval(modelRediscoveryTimer)
+      await Promise.all([
+        this.heartbeatLifecycle.stop(),
+        this.livenessLifecycle.stop(),
+        this.convergenceLifecycle.stop(),
+        this.cleanupLifecycle.stop(),
+        this.modelCatalogLifecycle.stop(),
+      ])
+      await this.shutdownSharedConnection()
+      await this.taskLogDeliveryQueue.stop()
+      await this.shutdownConnection()
     }
   }
 
   private onDispatchReconnected() {
-    void this.sendImmediateHeartbeat()
-    const signal = this.activeSignal
-    if (signal) {
-      void this.cleanup.runConvergenceOnce(signal)
-      void this.cleanup.runCleanupOnce(signal)
-    }
+    this.heartbeatLifecycle.trigger()
+    this.convergenceLifecycle.trigger()
+    this.cleanupLifecycle.trigger()
   }
 
   private async heartbeatOnce(signal: AbortSignal): Promise<void> {
@@ -399,18 +401,7 @@ export class RunnerHost {
     }
   }
 
-  private async sendImmediateHeartbeat() {
-    const signal = this.activeSignal
-    if (!signal || signal.aborted) return
-    try {
-      await this.connection.heartbeat(this.registrationState(), signal)
-      await this.observeManagerDeploymentEpoch()
-    } catch (error) {
-      log.error('immediate runner heartbeat failed', { exception: error })
-    }
-  }
-
-  private async recoverEmptyModelCatalog(signal: AbortSignal): Promise<void> {
+  private async runModelCatalogMaintenance(signal: AbortSignal): Promise<void> {
     let retryDelayMs = INITIAL_EMPTY_MODEL_CATALOG_RETRY_MS
     const maxRetryDelayMs = Math.min(MAX_EMPTY_MODEL_CATALOG_RETRY_MS, this.modelRediscoveryIntervalMs)
     while (!signal.aborted) {
@@ -435,7 +426,7 @@ export class RunnerHost {
         models: [...next.models],
         variants: Object.fromEntries(Object.entries(next.variants).map(([model, variants]) => [model, [...variants]])),
       }
-      await this.sendImmediateHeartbeat()
+      this.heartbeatLifecycle.trigger()
       return true
     } catch (error) {
       if (!signal.aborted) log.error('opencode model rediscovery failed', { exception: error })

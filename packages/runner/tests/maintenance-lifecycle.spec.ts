@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { createMaintenanceLifecycle } from '../src/runtime/maintenance-lifecycle.js'
 import { deferred } from './support/deferred.js'
@@ -8,6 +9,12 @@ async function flushPassCompletion(): Promise<void> {
 }
 
 describe('MaintenanceLifecycle', () => {
+  it('keeps cleanup single-flight ownership in the Host lifecycle', () => {
+    const cleanupSource = readFileSync(new URL('../src/runtime/host-cleanup.ts', import.meta.url), 'utf8')
+
+    expect(cleanupSource).not.toContain('cleanupInFlight')
+  })
+
   it('starts one pass from idle and returns it from triggerAndWait', async () => {
     vi.useFakeTimers()
     const pass = deferred()
