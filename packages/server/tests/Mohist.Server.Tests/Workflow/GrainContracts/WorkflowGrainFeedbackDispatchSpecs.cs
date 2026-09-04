@@ -240,7 +240,9 @@ public sealed class WorkflowGrainFeedbackDispatchSpecs
         await arrangement.ReportCompletedAsync(apply);
 
         var afterApply = await RequireRunAsync(arrangement);
+        Assert.Equal(WorkflowRunStatus.Ready, afterApply.Status);
         Assert.Equal(ApprovalFeedbackStatus.Open, afterApply.Feedback.Single(f => f.Id == feedbackId).Status);
+        Assert.Equal("publish-feedback.1", Assert.IsType<WorkflowTaskWork>(afterApply.NextWork()).Id);
         var publish = (await arrangement.AssignAndClaimAsync())!;
         Assert.Equal("publish-feedback.1", publish.Id);
         Assert.Equal(approvalRequestCount, (await arrangement.Events.ListAsync(arrangement.RunId))

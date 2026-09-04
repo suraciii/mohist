@@ -88,6 +88,8 @@ internal sealed class WorkflowWorkLifecycle
 
             if (resolved is not null)
                 events.AddRange(run.Rerun(now));
+            else if (feedbackId is not null)
+                run.PrepareNextDispatchForOpenFeedback(now);
         }
         else
         {
