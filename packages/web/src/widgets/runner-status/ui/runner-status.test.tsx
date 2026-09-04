@@ -49,10 +49,19 @@ function makeSummary(overrides: Partial<RunnerStatusSummary> = {}): RunnerStatus
 const RUNNER_INSTALL_COMMAND = 'mo install runner --repo-root <path>'
 const RUNNER_START_COMMAND = 'mo service start runner'
 
-function renderInRouter(ui: React.ReactNode, { withProject = false, initialEntries }: { withProject?: boolean; initialEntries?: string[] } = {}) {
+function renderInRouter(
+  ui: React.ReactNode,
+  { withProject = false, initialEntries }: { withProject?: boolean; initialEntries?: string[] } = {},
+) {
   const tree = (
     <MemoryRouter initialEntries={initialEntries}>
-      {withProject ? <ProjectProvider initialProjects={[TEST_PROJECT]} initialProjectId={TEST_PROJECT.id}>{ui}</ProjectProvider> : ui}
+      {withProject ? (
+        <ProjectProvider initialProjects={[TEST_PROJECT]} initialProjectId={TEST_PROJECT.id}>
+          {ui}
+        </ProjectProvider>
+      ) : (
+        ui
+      )}
     </MemoryRouter>
   )
   return render(tree)
@@ -383,7 +392,9 @@ describe('RunnerList UI', () => {
         makeRow({
           status: 'busy',
           connectionState: 'connected',
-          activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow', title: 'Fix login bug' }],
+          activeWorks: [
+            { workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow', title: 'Fix login bug' },
+          ],
         }),
       ]
       renderInRouter(<RunnerList rows={rows} />)
@@ -452,7 +463,7 @@ describe('RunnerList UI', () => {
               ownerId: 'wf-1',
               workType: 'workflow',
               title: 'Add dark mode',
-              issue: { projectId: 'proj-x', issueNumber: 42, },
+              issue: { projectId: 'proj-x', issueNumber: 42 },
             },
           ],
         }),
@@ -476,7 +487,7 @@ describe('RunnerList UI', () => {
               ownerId: 'wf-1',
               workType: 'workflow',
               title: 'Add dark mode',
-              issue: { projectId: 'proj-x', issueNumber: 42, },
+              issue: { projectId: 'proj-x', issueNumber: 42 },
             },
           ],
         }),
@@ -506,9 +517,7 @@ describe('RunnerList UI', () => {
     })
 
     it('makes each runner row navigable to its detail page keyed by id', () => {
-      const rows = [
-        makeRow({ id: 'runner-9', status: 'idle', connectionState: 'connected' }),
-      ]
+      const rows = [makeRow({ id: 'runner-9', status: 'idle', connectionState: 'connected' })]
       renderInRouter(<RunnerList rows={rows} />, { withProject: true })
       const row = screen.getByTestId('runner-row')
       expect(row).toHaveAttribute('data-href', '/mohist-local/runners/runner-9')
@@ -538,14 +547,18 @@ describe('RunnerList UI', () => {
 
     it('shows last heartbeat for stale runner', () => {
       vi.setSystemTime(new Date('2026-01-01T12:10:00Z'))
-      const rows = [makeRow({ lastHeartbeatAt: '2026-01-01T12:00:00Z', status: 'stale', connectionState: 'disconnected' })]
+      const rows = [
+        makeRow({ lastHeartbeatAt: '2026-01-01T12:00:00Z', status: 'stale', connectionState: 'disconnected' }),
+      ]
       renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('10m ago')).toBeInTheDocument()
     })
 
     it('shows explicit heartbeat diagnostic for offline runner', () => {
       vi.setSystemTime(new Date('2026-01-01T14:00:00Z'))
-      const rows = [makeRow({ lastHeartbeatAt: '2026-01-01T12:00:00Z', status: 'offline', connectionState: 'disconnected' })]
+      const rows = [
+        makeRow({ lastHeartbeatAt: '2026-01-01T12:00:00Z', status: 'offline', connectionState: 'disconnected' }),
+      ]
       renderInRouter(<RunnerList rows={rows} />)
       expect(screen.getByText('2h ago')).toBeInTheDocument()
     })

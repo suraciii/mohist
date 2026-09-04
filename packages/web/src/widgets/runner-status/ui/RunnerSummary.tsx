@@ -49,7 +49,9 @@ export function RunnerSummary({ summary, targetPath = '/runners' }: RunnerSummar
           </svg>
           Runner stale/offline
         </span>
-        <span className="text-muted-foreground">Start the installed runner: <code>{RUNNER_START_COMMAND}</code></span>
+        <span className="text-muted-foreground">
+          Start the installed runner: <code>{RUNNER_START_COMMAND}</code>
+        </span>
       </button>
     )
   }
@@ -63,7 +65,11 @@ export function RunnerSummary({ summary, targetPath = '/runners' }: RunnerSummar
       >
         <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-info-subtle text-info">
           <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9 5a1 1 0 100 2h2a1 1 0 100-2H9zM8.95 9.636a1 1 0 011.06 0l1.275 1.638a1 1 0 01-.742 1.636H8.05a1 1 0 01-.742-1.637l1.275-1.637a1 1 0 010-1.638z" clipRule="evenodd" />
+            <path
+              fillRule="evenodd"
+              d="M10 18a8 8 0 100-16 8 8 0 000 16zM9 5a1 1 0 100 2h2a1 1 0 100-2H9zM8.95 9.636a1 1 0 011.06 0l1.275 1.638a1 1 0 01-.742 1.636H8.05a1 1 0 01-.742-1.637l1.275-1.637a1 1 0 010-1.638z"
+              clipRule="evenodd"
+            />
           </svg>
           Runner busy
         </span>
@@ -82,7 +88,11 @@ export function RunnerSummary({ summary, targetPath = '/runners' }: RunnerSummar
     >
       <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-success-subtle text-success">
         <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+          <path
+            fillRule="evenodd"
+            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+            clipRule="evenodd"
+          />
         </svg>
         Runner idle
       </span>

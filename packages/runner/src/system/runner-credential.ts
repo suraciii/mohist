@@ -108,9 +108,7 @@ export interface RunnerCredentialResolution {
 export function requireRunnerCredential(resolution: RunnerCredentialResolution): Promise<string> {
   return resolveRunnerCredential(resolution).then((credential) => {
     if (credential) return credential
-    throw new Error(
-      "managed Runner has no machine credential or enrollment bootstrap; re-run 'mo install runner'",
-    )
+    throw new Error("managed Runner has no machine credential or enrollment bootstrap; re-run 'mo install runner'")
   })
 }
 
