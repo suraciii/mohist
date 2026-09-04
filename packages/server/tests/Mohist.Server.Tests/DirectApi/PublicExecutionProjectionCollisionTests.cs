@@ -159,6 +159,10 @@ public sealed class PublicExecutionProjectionCollisionTests : IAsyncDisposable
         const string secondSessionId = "session_same_batch_second";
         const string inputId = "input_same_batch_shared";
         const string turnId = "turn_same_batch_shared";
+        const string unrelatedSessionId = "session_same_batch_unrelated";
+        const string unrelatedJobId = "job_same_batch_unrelated";
+        const string unrelatedInputId = "input_same_batch_unrelated";
+        const string unrelatedTurnId = "turn_same_batch_unrelated";
         await _harness.SeedJobAsync(
             "job_same_batch_first",
             "proj_pub",
@@ -183,6 +187,22 @@ public sealed class PublicExecutionProjectionCollisionTests : IAsyncDisposable
             AgentSessionActivity.Active,
             inputs: [PublicProjectionTestSupport.Input(inputId, "job_same_batch_second")],
             turns: [PublicProjectionTestSupport.Turn(turnId, inputId, "job_same_batch_second", AgentTurnStatus.Queued)]));
+        await _harness.SeedJobAsync(
+            unrelatedJobId,
+            "proj_pub",
+            "agent_pub",
+            unrelatedSessionId,
+            unrelatedInputId,
+            unrelatedTurnId);
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession(unrelatedSessionId, "proj_pub", "agent_pub"),
+            AgentSessionActivity.Active,
+            inputs: [PublicProjectionTestSupport.Input(unrelatedInputId, unrelatedJobId)],
+            turns: [PublicProjectionTestSupport.Turn(
+                unrelatedTurnId,
+                unrelatedInputId,
+                unrelatedJobId,
+                AgentTurnStatus.Queued)]));
 
         Assert.True(await _harness.Engine.ProcessPendingAsync());
 
@@ -205,6 +225,10 @@ public sealed class PublicExecutionProjectionCollisionTests : IAsyncDisposable
         var reads = new PublicExecutionReadQuerier(_harness.DbFactory);
         Assert.False(await reads.IsSessionProjectionBehindAsync(firstSessionId));
         Assert.False(await reads.IsSessionProjectionBehindAsync(secondSessionId));
+        Assert.Equal(PublicReadStatus.Found, (await reads.ReadJobAsync("proj_pub", unrelatedJobId)).Status);
+        Assert.Equal(PublicReadStatus.Found, (await reads.ReadInputAsync("proj_pub", unrelatedInputId)).Status);
+        Assert.Equal(PublicReadStatus.Found, (await reads.ReadTurnAsync("proj_pub", unrelatedTurnId)).Status);
+        Assert.False(await reads.IsSessionProjectionBehindAsync(unrelatedSessionId));
         var checkpoints = await _harness.CheckpointsAsync();
         Assert.Single(checkpoints, row =>
             row.Feed == PublicProjectionFeeds.AgentSessions
@@ -212,6 +236,15 @@ public sealed class PublicExecutionProjectionCollisionTests : IAsyncDisposable
         Assert.Single(checkpoints, row =>
             row.Feed == PublicProjectionFeeds.AgentSessions
             && row.SourceKey == secondSessionId);
+        Assert.Single(checkpoints, row =>
+            row.Feed == PublicProjectionFeeds.AgentJobs
+            && row.SourceKey == unrelatedJobId);
+        Assert.Single(checkpoints, row =>
+            row.Feed == PublicProjectionFeeds.AgentSessions
+            && row.SourceKey == unrelatedSessionId);
+        Assert.Single(checkpoints, row =>
+            row.Feed == PublicProjectionFeeds.AgentSessionLifecycle
+            && row.SourceKey == unrelatedSessionId);
         Assert.Equal(2, _harness.ProjectionLogger.Entries.Count(entry =>
             entry.Message.Contains("anchor owner conflict", StringComparison.OrdinalIgnoreCase)));
         Assert.False(await _harness.Engine.ProcessPendingAsync());
@@ -246,7 +279,7 @@ public sealed class PublicExecutionProjectionCollisionTests : IAsyncDisposable
             inputs: [PublicProjectionTestSupport.Input(sharedInputId, sharedJobId)],
             turns: [PublicProjectionTestSupport.Turn(sharedTurnId, sharedInputId, sharedJobId, AgentTurnStatus.Queued)]));
 
-        var expected = new List<(string SessionId, string InputId)>();
+        var expected = new List<(string SessionId, string JobId, string InputId, string TurnId)>();
         for (var index = 0; index < 21; index++)
         {
             var suffix = index.ToString("D2");
@@ -254,7 +287,7 @@ public sealed class PublicExecutionProjectionCollisionTests : IAsyncDisposable
             var jobId = $"job_multibatch_{suffix}";
             var inputId = $"input_multibatch_{suffix}";
             var turnId = $"turn_multibatch_{suffix}";
-            expected.Add((sessionId, inputId));
+            expected.Add((sessionId, jobId, inputId, turnId));
             await _harness.SeedJobAsync(jobId, "proj_pub", "agent_pub", sessionId, inputId, turnId);
             await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
                 _harness.BuildSession(sessionId, "proj_pub", "agent_pub"),
@@ -284,10 +317,28 @@ public sealed class PublicExecutionProjectionCollisionTests : IAsyncDisposable
         {
             Assert.Equal(
                 PublicReadStatus.Found,
+                (await reads.ReadJobAsync("proj_pub", item.JobId)).Status);
+            Assert.Equal(
+                PublicReadStatus.Found,
                 (await reads.ReadInputAsync("proj_pub", item.InputId)).Status);
-            Assert.Single(checkpoints, row =>
+            Assert.Equal(
+                PublicReadStatus.Found,
+                (await reads.ReadTurnAsync("proj_pub", item.TurnId)).Status);
+            var jobCheckpoint = Assert.Single(checkpoints, row =>
+                row.Feed == PublicProjectionFeeds.AgentJobs
+                && row.SourceKey == item.JobId);
+            var jobLedger = await _harness.JobStore.LoadLedgerAsync(item.JobId);
+            Assert.NotNull(jobLedger);
+            Assert.Equal(jobLedger!.Revision.ToString(), jobCheckpoint.Watermark);
+            var sessionCheckpoint = Assert.Single(checkpoints, row =>
                 row.Feed == PublicProjectionFeeds.AgentSessions
                 && row.SourceKey == item.SessionId);
+            Assert.NotEmpty(sessionCheckpoint.Watermark);
+            var lifecycleCheckpoint = Assert.Single(checkpoints, row =>
+                row.Feed == PublicProjectionFeeds.AgentSessionLifecycle
+                && row.SourceKey == item.SessionId);
+            Assert.True(long.TryParse(lifecycleCheckpoint.Watermark, out var lifecycleHead));
+            Assert.True(lifecycleHead > 0);
         }
 
         Assert.Single(checkpoints, row =>
