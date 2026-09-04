@@ -40,7 +40,7 @@ changing a document in `design/`.
 
 ## Runtime integration
 
-- [runtimes/](runtimes/README.md) — External execution backends: process, SDK, physical session, event and compatibility boundaries; currently OpenCode and Pi.
+- [runtimes/](runtimes/README.md) — External execution backends: process, SDK, physical session, event and compatibility boundaries; OpenCode, Pi, and Codex.
 
 ## Workflow core domain
 

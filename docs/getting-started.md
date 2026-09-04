@@ -21,14 +21,17 @@ and visualization plane.
 
 You need .NET SDK 11.0 or later (`dotnet --version`), Node.js 22.19.0 or later
 (`node --version`), npm 10 or later (`npm --version`), Go 1.25 or later
-(`go version`), and an Agent Runtime: the OpenCode CLI (`opencode --version`)
-or a configured Pi Runtime.
+(`go version`), and an Agent Runtime: the OpenCode CLI (`opencode --version`),
+a configured Pi Runtime, or a compatible Codex CLI (`codex --version`).
 
 For OpenCode, follow the [official opencode documentation](https://opencode.ai)
 when the CLI is not installed. Pi runs through the Runner's in-process Pi SDK
-and uses the Runner user's Pi configuration. Mohist does not include an AI
-model. Workflow Agent tasks run named Mohist Agents; each Agent definition
-selects its backend.
+and uses the Runner user's Pi configuration. Codex runs through its
+[official app-server](https://developers.openai.com/codex/app-server/) with
+Runner-managed configuration, authentication, and history isolated from a
+person's interactive Codex installation. Mohist does not include an AI model.
+Workflow Agent tasks run named Mohist Agents; each Agent definition selects its
+backend.
 
 ## 1. Get the Source and Install Dependencies
 
