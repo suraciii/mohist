@@ -500,6 +500,114 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
     }
   })
 
+  it('cancels empty-catalog recovery backoff before rediscovery or teardown', async (resources) => {
+    installFakeOpenCodeRuntimeFactory(resources)
+    const connected = deferred<void>()
+    const recoveryStarted = deferred<void>()
+    const recoveryRelease = deferred<void>()
+    const discovery = vi.fn<OpencodeModelDiscovery>().mockResolvedValue({ models: [], variants: {}, complete: false })
+    resources.opencodeModelDiscovery = discovery
+    connect.mockImplementation(async () => connected.resolve())
+    const waitForConnectionRetry = vi.fn(async (_delayMs: number, signal: AbortSignal) => {
+      recoveryStarted.resolve()
+      await recoveryRelease.promise
+      if (signal.aborted) throw signal.reason
+    })
+    const controller = new AbortController()
+    const host = new RunnerHost(hostOptions(), undefined, { waitForConnectionRetry })
+    const run = host.run(controller.signal)
+    try {
+      await connected.promise
+      await vi.advanceTimersByTimeAsync(0)
+      await recoveryStarted.promise
+      expect(discovery).toHaveBeenCalledOnce()
+      expect(waitForConnectionRetry).toHaveBeenCalledWith(5_000, expect.any(AbortSignal))
+      const recoverySignal = waitForConnectionRetry.mock.calls[0]?.[1] as AbortSignal
+
+      controller.abort()
+      expect(recoverySignal.aborted).toBe(true)
+      let stopped = false
+      void run.then(() => {
+        stopped = true
+      })
+      await Promise.resolve()
+      expect(stopped).toBe(false)
+
+      recoveryRelease.resolve()
+      await expect(run).resolves.toBeUndefined()
+      expect(discovery).toHaveBeenCalledOnce()
+    } finally {
+      controller.abort()
+      recoveryRelease.resolve()
+      await run.catch(() => undefined)
+    }
+  })
+
+  it('waits for blocked heartbeat acknowledgement before runtime and transport teardown', async (resources) => {
+    const installed = installFakeOpenCodeRuntimeFactory(resources)
+    const connected = deferred<void>()
+    const heartbeatStarted = deferred<void>()
+    const heartbeatRelease = deferred<void>()
+    const disconnectRelease = deferred<void>()
+    const controlRelease = deferred<void>()
+    const runtimeShutdownStarted = deferred<void>()
+    const order: string[] = []
+    let heartbeatSignal!: AbortSignal
+    connect.mockImplementation(async () => connected.resolve())
+    heartbeat.mockImplementation(async (_registration: unknown, signal: AbortSignal) => {
+      heartbeatSignal = signal
+      heartbeatStarted.resolve()
+      await heartbeatRelease.promise
+    })
+    disconnect.mockImplementation(async () => {
+      order.push('transport-disconnect')
+      await disconnectRelease.promise
+    })
+    stopControl.mockImplementation(async () => {
+      order.push('control-stop')
+      await controlRelease.promise
+    })
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      ...hostOptions(),
+      pollIntervalMs: QUIET_INTERVAL_MS,
+      heartbeatIntervalMs: POLL_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+    try {
+      await connected.promise
+      const runtime = await installed.runtimeCreated
+      vi.spyOn(runtime, 'shutdown').mockImplementation(async () => {
+        order.push('runtime-shutdown')
+        runtimeShutdownStarted.resolve()
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      await heartbeatStarted.promise
+
+      controller.abort()
+      expect(heartbeatSignal.aborted).toBe(true)
+      await Promise.resolve()
+      expect(order).toEqual([])
+
+      heartbeatRelease.resolve()
+      await runtimeShutdownStarted.promise
+      expect(order[0]).toBe('runtime-shutdown')
+      expect(order).not.toContain('transport-disconnect')
+      expect(order).not.toContain('control-stop')
+
+      disconnectRelease.resolve()
+      controlRelease.resolve()
+      await expect(run).resolves.toBeUndefined()
+    } finally {
+      controller.abort()
+      heartbeatRelease.resolve()
+      disconnectRelease.resolve()
+      controlRelease.resolve()
+      await run.catch(() => undefined)
+    }
+  })
+
   it('keeps polling for new work after an unowned runtime has cooled down', async (resources) => {
     const installed = installFakeOpenCodeRuntimeFactory(resources)
     const connected = deferred<void>()
