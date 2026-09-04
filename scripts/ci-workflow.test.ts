@@ -62,7 +62,13 @@ test('CI Server scope uses fixed Bun without npm bootstrap', () => {
 
   const prepareDirectories = server.indexOf('run: mkdir -p "$TMPDIR" artifacts/server')
   const setupBun = server.indexOf('uses: oven-sh/setup-bun@v2')
-  assert.ok(prepareDirectories >= 0 && prepareDirectories < setupBun, 'Server directories must exist before setup')
+  const setupDotnet = server.indexOf('uses: actions/setup-dotnet@v5')
+  const runServer = server.indexOf('bun --no-install scripts/test-duration/application.ts server')
+  assert.ok(
+    prepareDirectories >= 0 && prepareDirectories < setupBun && prepareDirectories < setupDotnet,
+    'Server directories must exist before toolchain setup',
+  )
+  assert.ok(setupBun < runServer, 'Bun must be set up before the Server scope runs')
 })
 
 test('CI evidence Gate consumes a standalone bundle without reinstalling the monorepo', () => {
