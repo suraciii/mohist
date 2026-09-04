@@ -3,7 +3,7 @@ import { hostname } from 'node:os'
 import { RunnerHost } from './runtime/host.js'
 import { defaultRunnerRoot } from './runtime/workspace.js'
 import { configureRunnerLogger } from './system/logger.js'
-import { resolveRunnerCredential } from './system/runner-credential.js'
+import { requireRunnerCredential } from './system/runner-credential.js'
 import { parseEnabledAgentRuntimes } from './runtime/enabled-agent-runtimes.js'
 
 const controller = new AbortController()
@@ -17,22 +17,16 @@ try {
   const runnerId = env('RUNNER_ID') ?? env('RunnerId') ?? `runner-${hostname()}`
   const runnerRoot = env('RUNNER_ROOT') ?? env('RunnerRoot') ?? defaultRunnerRoot()
   const hostnameValue = hostname()
-  // Install registration: a fresh runner exchanges the one-time
-  // enrollment token (injected by `mo install runner`) for its own
-  // machine credential; afterwards the persisted credential is used.
-  // A failed registration is fatal so systemd restarts the runner and
-  // the error stays visible in the journal.
-  const credential = await resolveRunnerCredential({
+  // Install registration: a fresh runner exchanges the one-time bootstrap
+  // for its own machine credential; afterwards the persisted credential is
+  // used. Missing authentication is fatal for managed service startup.
+  const credential = await requireRunnerCredential({
     serverUrl,
     runnerId,
     runnerRoot,
     hostname: hostnameValue,
-    enrollmentToken: env('MOHIST_ENROLLMENT_TOKEN'),
     signal: controller.signal,
   })
-  if (!credential) {
-    logger.warn('no runner credential and no MOHIST_ENROLLMENT_TOKEN; server requests will be unauthenticated')
-  }
   await new RunnerHost({
     serverUrl,
     runnerId,

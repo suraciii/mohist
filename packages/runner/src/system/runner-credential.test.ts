@@ -2,6 +2,7 @@ import { describe, expect, it as vitestIt } from 'vitest'
 
 import {
   loadRunnerCredential,
+  requireRunnerCredential,
   registerWithEnrollmentToken,
   resolveRunnerCredential,
   runnerCredentialPath,
@@ -211,6 +212,39 @@ describe('resolveRunnerCredential', () => {
     })
 
     expect(credential).toBeNull()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when managed startup has no credential or bootstrap', async () => {
+    await expect(
+      requireRunnerCredential({
+        serverUrl,
+        runnerId: 'runner-1',
+        runnerRoot: '/runner',
+        hostname: 'host-1',
+        signal,
+      }),
+    ).rejects.toThrow(/no machine credential or enrollment bootstrap/)
+  })
+
+  it('reuses the persisted credential across startup resolutions', async ({ files, fetch }) => {
+    files.set(runnerCredentialPath('/runner'), { content: 'moh_runner_abc\n', mode: 0o600 })
+
+    const first = await requireRunnerCredential({
+      serverUrl,
+      runnerId: 'runner-1',
+      runnerRoot: '/runner',
+      hostname: 'host-1',
+    })
+    const second = await requireRunnerCredential({
+      serverUrl,
+      runnerId: 'runner-1',
+      runnerRoot: '/runner',
+      hostname: 'host-1',
+    })
+
+    expect(first).toBe('moh_runner_abc')
+    expect(second).toBe('moh_runner_abc')
     expect(fetch).not.toHaveBeenCalled()
   })
 })

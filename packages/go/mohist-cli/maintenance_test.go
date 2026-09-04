@@ -140,7 +140,7 @@ func TestInstallRunnerPersistsEnabledAgentRuntimes(t *testing.T) {
 
 	code := Run(context.Background(), []string{
 		"install", "runner", "--repo-root", repoRoot,
-		"--server-url", "https://managed-server", "--runner-root", runnerRoot,
+		"--server-url", "https://managed-server", "--runner-id", "runner-stable", "--runner-root", runnerRoot,
 		"--enabled-agent-runtimes", " OpenCode,pi,opencode ",
 	}, deps)
 	if code != ExitOK {
@@ -164,7 +164,7 @@ func TestInstallRunnerPersistsEnabledAgentRuntimes(t *testing.T) {
 		t.Fatalf("enrollment bootstrap mode = %o", modes[enrollmentTokenPath])
 	}
 	managedEnvironmentPath := filepath.Join(home, ".config", "mohist", "runner-managed.env")
-	wantManagedEnvironment := "SERVER_URL=\"https://managed-server\"\nRUNNER_ROOT=\"" + runnerRoot + "\"\n"
+	wantManagedEnvironment := "SERVER_URL=\"https://managed-server\"\nRUNNER_ID=\"runner-stable\"\nRUNNER_ROOT=\"" + runnerRoot + "\"\n"
 	if files[managedEnvironmentPath] != wantManagedEnvironment {
 		t.Fatalf("managed environment = %q, want %q", files[managedEnvironmentPath], wantManagedEnvironment)
 	}
@@ -323,11 +323,11 @@ func TestInstallRunnerBootstrapWriteFailureHasNoSystemdEffects(t *testing.T) {
 }
 
 func TestRunnerManagedEnvironmentEscapesValuesAndRejectsLineInjection(t *testing.T) {
-	got, err := runnerManagedEnvironment(`https://server/"quoted"`, `C:\runner path`)
+	got, err := runnerManagedEnvironment(`https://server/"quoted"`, "runner-1", `C:\runner path`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "SERVER_URL=\"https://server/\\\"quoted\\\"\"\nRUNNER_ROOT=\"C:\\\\runner path\"\n"
+	want := "SERVER_URL=\"https://server/\\\"quoted\\\"\"\nRUNNER_ID=\"runner-1\"\nRUNNER_ROOT=\"C:\\\\runner path\"\n"
 	if got != want {
 		t.Fatalf("managed environment = %q, want %q", got, want)
 	}
@@ -341,7 +341,7 @@ func TestRunnerManagedEnvironmentEscapesValuesAndRejectsLineInjection(t *testing
 		{name: "root nul", serverURL: "https://server", runnerRoot: "/runner\x00tail"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := runnerManagedEnvironment(test.serverURL, test.runnerRoot); err == nil {
+			if _, err := runnerManagedEnvironment(test.serverURL, "runner-1", test.runnerRoot); err == nil {
 				t.Fatal("expected invalid managed environment value")
 			}
 		})
