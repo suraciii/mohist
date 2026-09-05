@@ -20,18 +20,23 @@ and visualization plane.
 ## Prerequisites
 
 You need .NET SDK 11.0 or later (`dotnet --version`), Node.js 22.19.0 or later
-(`node --version`), npm 10 or later (`npm --version`), Go 1.25 or later
-(`go version`), and an Agent Runtime: the OpenCode CLI (`opencode --version`),
-a configured Pi Runtime, or a compatible Codex CLI (`codex --version`).
-
-For OpenCode, follow the [official opencode documentation](https://opencode.ai)
-when the CLI is not installed. Pi runs through the Runner's in-process Pi SDK
-and uses the Runner user's Pi configuration. Codex runs through its
-[official app-server](https://developers.openai.com/codex/app-server/) with
-Runner-managed configuration, authentication, and history isolated from a
-person's interactive Codex installation. Mohist does not include an AI model.
-Workflow Agent tasks run named Mohist Agents; each Agent definition selects its
-backend.
+(`node --version`), npm 10 or later (`npm --version`), and Go 1.25 or later
+(`go version`). Pi is the default Agent Runtime. It runs through the Runner's
+in-process Pi SDK and uses the Runner user's Pi configuration, so the default
+path needs no separate runtime CLI. Pi ships with Mohist Runner and its version
+is pinned by Mohist; when using Pi, configure provider credentials in the
+Runner user's environment. The OpenCode CLI is an explicit opt-in prerequisite
+that the default path does not need to install; install it only when opting in
+and confirm with `opencode --version`, following the
+[official opencode documentation](https://opencode.ai) when the CLI is not
+installed. The Codex CLI app-server is an explicit opt-in prerequisite that the
+default path does not need to install; install it only when opting in and
+confirm with `codex --version`, following its
+[official app-server documentation](https://developers.openai.com/codex/app-server/).
+Codex runs with Runner-managed configuration, authentication, and history
+isolated from a person's interactive Codex installation. Mohist does not
+include an AI model. Workflow Agent tasks run named Mohist Agents; each Agent
+definition selects its backend.
 
 ## 1. Get the Source and Install Dependencies
 
@@ -140,16 +145,40 @@ Workflow Agent tasks use named Mohist Agents (`mohist/planner`,
 the backend, model, optional Reasoning Effort, and variant. A Workflow task
 cannot override them.
 
-When using OpenCode, confirm that its CLI works:
+Pi is the default Agent Runtime and runs through the Runner's in-process Pi
+SDK, so the default path needs no separate runtime CLI. Confirm that the
+connected Runner is ready to execute Pi by listing its registrations and
+checking the published capability set:
+
+```bash
+mo runner list --json id,status,capabilities
+```
+
+The connected Runner's `capabilities` array must include
+`manager-pi-scoped-executor-v1`. That capability value is one of the entries
+the Runner exports from the `MANAGER_PI_CAPABILITIES` set in
+`packages/runner/src/runtime/host-helpers.ts`, and it is the same signal the
+Runner uses internally to gate Pi-backed execution (`supportsManagerExecution`
+in that file). When it is absent, see [Runner](runner.md) for the
+`ENABLED_AGENT_RUNTIMES` setting and confirm the Runner was started on a Linux
+host with the Pi catalog loaded.
+
+When using the OpenCode opt-in, confirm that its CLI works:
 
 ```bash
 # Confirm that opencode can start.
 opencode --help
 ```
 
-Without a model, the Agent uses its runtime default. Configure a model on the
-Agent or in Project Agent settings. See [Agents and AgentSessions](agent-sessions.md)
-and [Workflow Profiles](workflow-profiles.md#agent-tasks).
+When the OpenCode CLI is not installed, install it following the
+[official opencode documentation](https://opencode.ai).
+
+Without a model, the Agent uses its runtime default. The Runtime itself
+defaults to `pi` when an entry point does not supply one; see
+[Agents and AgentSessions](agent-sessions.md#project-default-execution-configuration)
+for the full resolution order. Configure a model on the Agent or in Project
+Agent settings. See [Agents and AgentSessions](agent-sessions.md) and
+[Workflow Profiles](workflow-profiles.md#agent-tasks).
 
 ## 7. Create Your First Project
 
@@ -171,13 +200,20 @@ mo agent start --prompt "Inspect this repository and report the highest-priority
 ```
 
 When the Project does not have a default, list available models and provide the
-execution hints explicitly:
+execution hints explicitly. Choose the runtime you opted in to:
 
 ```bash
+# OpenCode opt-in: list models and pass the execution hints explicitly.
 mo agent model list --runtime opencode
 mo agent start \
   --prompt "Inspect this repository and report the highest-priority next step" \
   --runtime opencode --model provider/model
+
+# Pi opt-in: same shape, just select the pi runtime explicitly instead.
+mo agent model list --runtime pi
+mo agent start \
+  --prompt "Inspect this repository and report the highest-priority next step" \
+  --runtime pi --model provider/model
 ```
 
 The command prints the Agent, AgentJob, AgentSession, first Input, first Turn,
