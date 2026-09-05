@@ -20,18 +20,23 @@ and visualization plane.
 ## Prerequisites
 
 You need .NET SDK 11.0 or later (`dotnet --version`), Node.js 22.19.0 or later
-(`node --version`), npm 10 or later (`npm --version`), Go 1.25 or later
-(`go version`), and an Agent Runtime: the OpenCode CLI (`opencode --version`),
-a configured Pi Runtime, or a compatible Codex CLI (`codex --version`).
-
-For OpenCode, follow the [official opencode documentation](https://opencode.ai)
-when the CLI is not installed. Pi runs through the Runner's in-process Pi SDK
-and uses the Runner user's Pi configuration. Codex runs through its
-[official app-server](https://developers.openai.com/codex/app-server/) with
-Runner-managed configuration, authentication, and history isolated from a
-person's interactive Codex installation. Mohist does not include an AI model.
-Workflow Agent tasks run named Mohist Agents; each Agent definition selects its
-backend.
+(`node --version`), npm 10 or later (`npm --version`), and Go 1.25 or later
+(`go version`). Pi is the default Agent Runtime. It runs through the Runner's
+in-process Pi SDK and uses the Runner user's Pi configuration, so the default
+path needs no separate runtime CLI. Pi ships with Mohist Runner and its version
+is pinned by Mohist; when using Pi, configure provider credentials in the
+Runner user's environment. The OpenCode CLI is an explicit opt-in prerequisite
+that the default path does not need to install; install it only when opting in
+and confirm with `opencode --version`, following the
+[official opencode documentation](https://opencode.ai) when the CLI is not
+installed. The Codex CLI app-server is an explicit opt-in prerequisite that the
+default path does not need to install; install it only when opting in and
+confirm with `codex --version`, following its
+[official app-server documentation](https://developers.openai.com/codex/app-server/).
+Codex runs with Runner-managed configuration, authentication, and history
+isolated from a person's interactive Codex installation. Mohist does not
+include an AI model. Workflow Agent tasks run named Mohist Agents; each Agent
+definition selects its backend.
 
 ## 1. Get the Source and Install Dependencies
 
