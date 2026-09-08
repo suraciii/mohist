@@ -111,6 +111,235 @@ public sealed class AgentSessionCanonicalRefreshGrainSpecs : AgentSessionGrainPe
         Assert.Contains("transcript publish failed", warning.Message);
     }
 
+    [Fact]
+    public async Task FollowupExecuting_PublishesOnlyAfterChangedStateCommit()
+    {
+        var grain = await OpenBoundGrainAsync("opencode");
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "follow-up", "agent-session-followup", "executing-key"));
+        var publicationCount = Fixture.TranscriptPublisher.Published.Count;
+        var eventCount = Fixture.StateStore.Events.Count;
+        var entered = Signal();
+        var release = Signal();
+        Fixture.StateStore.BeforeSaveAsync = async _ =>
+        {
+            entered.TrySetResult();
+            await release.Task;
+        };
+        AgentSession? publishedState = null;
+        Fixture.TranscriptPublisher.BeforePublish = envelope =>
+        {
+            if (IsCanonicalHint(envelope)) publishedState = Fixture.StateStore.State;
+        };
+
+        var executing = grain.MarkFollowupTurnExecutingAsync(accepted.OperationId);
+        try
+        {
+            await Task.WhenAny(entered.Task, executing);
+            Assert.True(entered.Task.IsCompleted, "The transition must enter the failure-aware state commit.");
+            Assert.False(executing.IsCompleted);
+            Assert.Empty(CanonicalHintsSince(publicationCount));
+            Assert.Equal(AgentTurnStatus.Queued, Assert.Single(Fixture.StateStore.State!.Status.Turns!).Status);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await executing;
+        }
+
+        AssertHint(Assert.Single(CanonicalHintsSince(publicationCount)), grain);
+        Assert.NotNull(publishedState);
+        var turn = Assert.Single(publishedState.Status.Turns!);
+        Assert.Equal(accepted.TurnId, turn.Id);
+        Assert.Equal(AgentTurnStatus.Executing, turn.Status);
+        Assert.Equal(accepted.OperationId, Assert.Single(publishedState.Status.PendingFollowups!).OperationId);
+        Assert.Empty(Fixture.TranscriptStore.Flushes);
+        Assert.Equal(eventCount, Fixture.StateStore.Events.Count);
+    }
+
+    [Theory]
+    [InlineData(AgentTurnStatus.Completed, true)]
+    [InlineData(AgentTurnStatus.Failed, true)]
+    [InlineData(AgentTurnStatus.Cancelled, true)]
+    [InlineData(AgentTurnStatus.Unknown, true)]
+    [InlineData(AgentTurnStatus.Failed, false)]
+    public async Task FollowupTerminal_PublishesCommittedTurnAndLeaseRemovalWithoutRuntimeEvents(
+        AgentTurnStatus terminalStatus, bool startExecuting)
+    {
+        var grain = NewGrain();
+        await grain.OpenAsync(Open("opencode"));
+        if (startExecuting)
+            await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-1"));
+        else
+            await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+                "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job"));
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "follow-up", "agent-session-followup", "terminal-key", AllowPendingInitialLaunch: !startExecuting));
+        var eventCount = Fixture.StateStore.Events.Count;
+        if (startExecuting)
+            await grain.MarkFollowupTurnExecutingAsync(accepted.OperationId);
+        var publicationCount = Fixture.TranscriptPublisher.Published.Count;
+        AgentSession? publishedState = null;
+        Fixture.TranscriptPublisher.BeforePublish = envelope =>
+        {
+            if (IsCanonicalHint(envelope)) publishedState = Fixture.StateStore.State;
+        };
+        var result = new AgentTurnResult(FailureCategory: startExecuting ? null : "runtime-unavailable");
+
+        await grain.MarkFollowupTurnTerminalAsync(accepted.OperationId, terminalStatus, result);
+
+        AssertHint(Assert.Single(CanonicalHintsSince(publicationCount)), grain);
+        Assert.NotNull(publishedState);
+        var turn = Assert.Single(publishedState.Status.Turns!, turn => turn.Id == accepted.TurnId);
+        Assert.Equal(terminalStatus, turn.Status);
+        Assert.Equal(result, turn.Result);
+        Assert.Empty(publishedState.Status.PendingFollowups!);
+        Assert.Null(publishedState.Status.PendingFollowup);
+        Assert.Equal(terminalStatus == AgentTurnStatus.Unknown ? AgentSessionActivity.Unknown : AgentSessionActivity.Idle,
+            publishedState.Status.Activity);
+        Assert.Equal(startExecuting ? "runtime-1" : null, publishedState.Status.AgentRuntimeSessionId);
+        Assert.Empty(Fixture.TranscriptStore.Flushes);
+        Assert.Equal(eventCount, Fixture.StateStore.Events.Count);
+
+        publicationCount = Fixture.TranscriptPublisher.Published.Count;
+        await grain.MarkFollowupTurnTerminalAsync(accepted.OperationId, terminalStatus, result);
+        await grain.MarkFollowupTurnExecutingAsync(accepted.OperationId);
+        Assert.Empty(CanonicalHintsSince(publicationCount));
+    }
+
+    [Fact]
+    public async Task FollowupTerminal_WaitsForStateCommitBeforePublishingOrScheduling()
+    {
+        var grain = await OpenBoundGrainAsync("opencode");
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "follow-up", "agent-session-followup", "terminal-save-key"));
+        var publicationCount = Fixture.TranscriptPublisher.Published.Count;
+        var dispatchCount = Fixture.FollowupDispatch.Requests.Count;
+        var entered = Signal();
+        var release = Signal();
+        Fixture.StateStore.BeforeSaveAsync = async _ =>
+        {
+            entered.TrySetResult();
+            await release.Task;
+        };
+
+        var terminating = grain.MarkFollowupTurnTerminalAsync(accepted.OperationId, AgentTurnStatus.Failed, null);
+        try
+        {
+            await Task.WhenAny(entered.Task, terminating);
+            Assert.True(entered.Task.IsCompleted, "The transition must enter the failure-aware state commit.");
+            Assert.False(terminating.IsCompleted);
+            Assert.Empty(CanonicalHintsSince(publicationCount));
+            Assert.Equal(dispatchCount, Fixture.FollowupDispatch.Requests.Count);
+            Assert.Equal(AgentTurnStatus.Queued, Assert.Single(Fixture.StateStore.State!.Status.Turns!).Status);
+            Assert.Single(Fixture.StateStore.State.Status.PendingFollowups!);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await terminating;
+        }
+
+        AssertHint(Assert.Single(CanonicalHintsSince(publicationCount)), grain);
+        Assert.Equal(dispatchCount + 1, Fixture.FollowupDispatch.Requests.Count);
+        Assert.Equal(AgentTurnStatus.Failed, Assert.Single(Fixture.StateStore.State!.Status.Turns!).Status);
+        Assert.Empty(Fixture.StateStore.State.Status.PendingFollowups!);
+    }
+
+    [Fact]
+    public async Task FollowupState_UnchangedOperationsDoNotPublishHints()
+    {
+        var grain = await OpenBoundGrainAsync("opencode");
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "follow-up", "agent-session-followup", "unchanged-key"));
+        var publicationCount = Fixture.TranscriptPublisher.Published.Count;
+        foreach (var operationId in new[] { "", " ", "unknown-operation" })
+        {
+            await grain.MarkFollowupTurnExecutingAsync(operationId);
+            await grain.MarkFollowupTurnTerminalAsync(operationId, AgentTurnStatus.Failed, null);
+        }
+        Assert.Empty(CanonicalHintsSince(publicationCount));
+        Assert.Equal(AgentTurnStatus.Queued, Assert.Single(Fixture.StateStore.State!.Status.Turns!).Status);
+        Assert.Single(Fixture.StateStore.State.Status.PendingFollowups!);
+
+        await grain.MarkFollowupTurnExecutingAsync(accepted.OperationId);
+        publicationCount = Fixture.TranscriptPublisher.Published.Count;
+        await grain.MarkFollowupTurnExecutingAsync(accepted.OperationId);
+        Assert.Empty(CanonicalHintsSince(publicationCount));
+        Assert.Equal(AgentTurnStatus.Executing, Assert.Single(Fixture.StateStore.State!.Status.Turns!).Status);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FollowupState_SaveFailureDoesNotPublishOrExposeUncommittedState(bool terminal)
+    {
+        var grain = await OpenBoundGrainAsync("opencode");
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "follow-up", "agent-session-followup", "state-failure-key"));
+        var publicationCount = Fixture.TranscriptPublisher.Published.Count;
+        var dispatchCount = Fixture.FollowupDispatch.Requests.Count;
+        var saveCount = Fixture.StateStore.SaveCount;
+        Fixture.StateStore.FailNextSave(grain.GetPrimaryKeyString(), new InvalidOperationException("state unavailable"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => terminal
+            ? grain.MarkFollowupTurnTerminalAsync(accepted.OperationId, AgentTurnStatus.Failed, null)
+            : grain.MarkFollowupTurnExecutingAsync(accepted.OperationId));
+
+        Assert.Empty(CanonicalHintsSince(publicationCount));
+        Assert.Equal(saveCount, Fixture.StateStore.SaveCount);
+        Assert.Equal(dispatchCount, Fixture.FollowupDispatch.Requests.Count);
+        Assert.Equal(AgentTurnStatus.Queued, Assert.Single(Fixture.StateStore.State!.Status.Turns!).Status);
+        Assert.Single(Fixture.StateStore.State.Status.PendingFollowups!);
+        Assert.Equal(AgentTurnStatus.Queued, Assert.Single(await grain.ListTurnsAsync()).Status);
+
+        if (terminal)
+            await grain.MarkFollowupTurnTerminalAsync(accepted.OperationId, AgentTurnStatus.Failed, null);
+        else
+            await grain.MarkFollowupTurnExecutingAsync(accepted.OperationId);
+        AssertHint(Assert.Single(CanonicalHintsSince(publicationCount)), grain);
+        Assert.Equal(terminal ? AgentTurnStatus.Failed : AgentTurnStatus.Executing,
+            Assert.Single(Fixture.StateStore.State!.Status.Turns!).Status);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FollowupState_PublishFailurePreservesCommittedStateAndIdempotency(bool terminal)
+    {
+        var grain = await OpenBoundGrainAsync("opencode");
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "follow-up", "agent-session-followup", "publish-failure-key"));
+        var publicationCount = Fixture.TranscriptPublisher.Published.Count;
+        var dispatchCount = Fixture.FollowupDispatch.Requests.Count;
+        var attempts = 0;
+        Fixture.TranscriptPublisher.BeforePublish = envelope =>
+        {
+            if (!IsCanonicalHint(envelope)) return;
+            attempts++;
+            throw new InvalidOperationException("publisher unavailable");
+        };
+
+        if (terminal)
+            await grain.MarkFollowupTurnTerminalAsync(accepted.OperationId, AgentTurnStatus.Failed, null);
+        else
+            await grain.MarkFollowupTurnExecutingAsync(accepted.OperationId);
+
+        Assert.Equal(1, attempts);
+        Assert.Empty(CanonicalHintsSince(publicationCount));
+        Assert.Equal(terminal ? AgentTurnStatus.Failed : AgentTurnStatus.Executing,
+            Assert.Single(Fixture.StateStore.State!.Status.Turns!).Status);
+        Assert.Equal(terminal ? 0 : 1, Fixture.StateStore.State.Status.PendingFollowups!.Count);
+        Assert.Equal(dispatchCount + (terminal ? 1 : 0), Fixture.FollowupDispatch.Requests.Count);
+        if (terminal)
+            await grain.MarkFollowupTurnTerminalAsync(accepted.OperationId, AgentTurnStatus.Failed, null);
+        else
+            await grain.MarkFollowupTurnExecutingAsync(accepted.OperationId);
+        Assert.Equal(1, attempts);
+        Assert.Single(Fixture.Logger.Entries, entry => entry.Level == LogLevel.Warning
+            && entry.Message.Contains("transcript publish failed", StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData("message.delta", "text")]
     [InlineData("reasoning.delta", "reasoning")]

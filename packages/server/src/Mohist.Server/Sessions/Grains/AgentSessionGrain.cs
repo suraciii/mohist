@@ -1260,14 +1260,12 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         if (string.IsNullOrWhiteSpace(operationId))
             return;
         var session = await GetRequiredAsync();
+        var previousStatus = session.Status;
         var events = session.MarkFollowupTurnExecuting(operationId, Now());
-        if (events.Count == 0)
-        {
-            await _stateStore.SaveAsync(SessionId, session);
-            _session = session;
-            return;
-        }
+        var changed = !ReferenceEquals(previousStatus, session.Status);
         await CommitAsync(session, events);
+        if (changed)
+            await PublishCanonicalRefreshAsync(session);
     }
 
     public async Task MarkFollowupTurnTerminalAsync(
@@ -1280,25 +1278,12 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         var session = await GetRequiredAsync();
         var lease = GetPendingFollowups(session).FirstOrDefault(candidate =>
             string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal));
+        var previousStatus = session.Status;
         var events = session.MarkFollowupTurnTerminal(operationId, status, result, Now());
-        if (events.Count == 0)
-        {
-            await _stateStore.SaveAsync(SessionId, session);
-            _session = session;
-            if (lease is not null)
-                await ReleaseFollowupConcurrencyPermitAsync(
-                    session,
-                    lease.ConcurrencyToken,
-                    lease.ConcurrencyAgentId,
-                    lease.ConcurrencyPermitId,
-                    lease.ConcurrencyGeneration,
-                    lease.ConcurrencyWaiterId);
-            _followupDispatchScheduler?.Schedule(
-                session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
-                session.Id);
-            return;
-        }
+        var changed = !ReferenceEquals(previousStatus, session.Status);
         await CommitAsync(session, events);
+        if (changed)
+            await PublishCanonicalRefreshAsync(session);
         if (lease is not null)
             await ReleaseFollowupConcurrencyPermitAsync(
                 session,
