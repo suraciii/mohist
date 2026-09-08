@@ -541,14 +541,31 @@ one dispatch reference for the work item. Per dispatch reference, Server
 allows:
 
 - At most one replaceable Session-card projection, persisted with its provider
-  message identity. Its text is a stable Session reference; its blocks carry
-  navigation and state-bound controls. It never carries Agent-authored text.
+  message identity. Its blocks show the canonical Session reference,
+  navigation, and state-bound controls. Its top-level text retains the Session
+  reference as a fallback. It never carries Agent-authored text.
 - At most one terminal Agent reply, deduplicated by a stable Turn delivery key.
   It is a separate message in the same thread and never depends on the Session
   card's Pending, Claimed, Delivered, or Delivery uncertain state.
 - Fast work may omit the Session card and project only the Received reaction
   plus one final answer. If the platform cannot react on the user's message,
   the Received fallback remains a Server-authored receipt.
+
+Slack renders blocks independently from the top-level text fallback. Every
+Session card must start with a `section` whose `plain_text` is
+`Session: {sessionId}`, using the canonical Session ID. Append an optional
+navigation `section` with `mrkdwn` text `<url|Open in Mohist>`, then the
+existing signed control blocks unchanged. Missing navigation or controls must
+not remove the identity section; an ID-only card still has that one block.
+
+Navigation must be an ordinary link, not a button. It carries no `action_id`
+or `value` and creates no provider interaction inbox entry. Its URL uses the
+resolved project name and the same canonical Session ID, with escaped path
+segments and the configured base path. Allow HTTPS, or HTTP with an explicitly
+allowlisted development origin. Reject malformed, credentialed,
+query-bearing, fragment-bearing, localhost, loopback, private, and link-local
+origins. The development allowlist must not bypass local-host rejection.
+An unusable origin or unresolved project omits only navigation.
 
 Default reactions: `Received=👀`, `Working=⏳`, `Completed=✅`, exception `⚠️`.
 Reactions are liveness signals, not Session/Turn facts; a missing, late, or

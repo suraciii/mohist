@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
@@ -18,6 +19,7 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Slack.Domain;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -95,6 +97,8 @@ public sealed partial class SlackChannelThreadIngressSpecs
         var initialProgressPayload = SlackDeliveryPayload.Parse(initialProgress.PayloadJson);
         Assert.Equal(SlackDeliveryOperations.PostMessage, initialProgressPayload.Operation);
         Assert.Contains($"Session: {sessionId}", initialProgressPayload.Text, StringComparison.Ordinal);
+        Assert.Equal($"Session: {sessionId}", Assert.NotNull(initialProgressPayload.Blocks)[0].GetProperty("text").GetProperty("text").GetString());
+        Assert.DoesNotContain(SlackTurnControlService.StopActionId, initialProgressPayload.Blocks?.GetRawText(), StringComparison.Ordinal);
         Assert.Contains(sessionId!, initialProgressPayload.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("Working", initialProgressPayload.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("xoxb-", initialProgress.PayloadJson, StringComparison.Ordinal);
@@ -132,30 +136,69 @@ public sealed partial class SlackChannelThreadIngressSpecs
         Assert.False(string.IsNullOrWhiteSpace(replay.GetProperty("sessionId").GetString()));
     }
 
-    [Fact]
-    public async Task Followup_after_terminal_continues_bound_session()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("https://mohist.example/base")]
+    public async Task Followup_after_terminal_continues_bound_session(string? externalWebUrl)
     {
-        var connection = await CreateConnectionAsync();
-        var first = await PostChannelAsync(connection, "C-channel-B",
-            messageTs: "1710000000.000200",
-            threadTs: null,
-            mentions: new[] { connection.BotUserId },
-            text: "<@U123> first task");
-        var firstSessionId = first.GetProperty("sessionId").GetString();
+        var options = _fixture.Services.GetRequiredService<IOptions<SlackProviderOptions>>().Value;
+        var previousUrl = options.ExternalWebUrl;
+        options.ExternalWebUrl = externalWebUrl;
+        try
+        {
+            var connection = await CreateConnectionAsync(withSigningMaterial: true);
+            var conversationId = $"C-channel-B-{connection.Id}";
+            var first = await PostChannelAsync(connection, conversationId,
+                messageTs: "1710000000.000200",
+                threadTs: null,
+                mentions: new[] { connection.BotUserId },
+                text: "<@U123> first task");
+            var firstSessionId = first.GetProperty("sessionId").GetString()!;
 
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(firstSessionId!)
-            .MarkTurnTerminalAsync(
-                first.GetProperty("turnId").GetString()!,
-                AgentTurnStatus.Completed,
-                null);
+            await _fixture.Grains.GetGrain<IAgentSessionGrain>(firstSessionId)
+                .MarkTurnTerminalAsync(
+                    first.GetProperty("turnId").GetString()!,
+                    AgentTurnStatus.Completed,
+                    null);
+            await _fixture.Grains.GetGrain<IAgentSessionGrain>(firstSessionId)
+                .AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+                    $"runtime-{firstSessionId}", "/mohist-tests/slack-channel-followup"));
 
-        var followup = await PostChannelAsync(connection, "C-channel-B",
-            messageTs: "1710000000.000210",
-            threadTs: "1710000000.000200",
-            mentions: Array.Empty<string>(),
-            text: "follow-up question");
-        Assert.Equal(firstSessionId, followup.GetProperty("sessionId").GetString());
-        Assert.True(followup.GetProperty("followup").GetBoolean());
+            var followup = await PostChannelAsync(connection, conversationId,
+                messageTs: "1710000000.000210",
+                threadTs: "1710000000.000200",
+                mentions: Array.Empty<string>(),
+                text: "follow-up question");
+            Assert.Equal(firstSessionId, followup.GetProperty("sessionId").GetString());
+            Assert.True(followup.GetProperty("followup").GetBoolean());
+
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+            var cards = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries
+                .Where(row => row.Kind == SlackOutboxKinds.ReplaceableProgress).ToArray();
+            Assert.Equal(2, cards.Length);
+            foreach (var card in cards)
+                AssertSessionCard(SlackDeliveryPayload.Parse(card.PayloadJson), connection.ProjectId, firstSessionId, externalWebUrl);
+            var followupCard = Assert.Single(cards, row => row.DispatchRef!.StartsWith($"agent-session-followup:{firstSessionId}:", StringComparison.Ordinal));
+            var providerIdentity = new SlackProviderMessageIdentity(conversationId, "1710000000.000211");
+            await outbox.MarkDeliveredAsync(connection.ProjectId, followupCard.Id, providerIdentity);
+
+            var replay = await PostChannelAsync(connection, conversationId, "1710000000.000210", "1710000000.000200", [], "follow-up question");
+            Assert.Equal(firstSessionId, replay.GetProperty("sessionId").GetString());
+            var replayedCards = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries
+                .Where(row => row.Kind == SlackOutboxKinds.ReplaceableProgress).ToArray();
+            Assert.Equal(2, replayedCards.Length);
+            var replayed = Assert.Single(replayedCards, row => row.DispatchRef == followupCard.DispatchRef);
+            Assert.Equal(followupCard.Id, replayed.Id);
+            Assert.Equal(SlackOutboxStates.Delivered, replayed.State);
+            var replayedPayload = SlackDeliveryPayload.Parse(replayed.PayloadJson);
+            Assert.Equal(providerIdentity, replayedPayload.ProviderMessageIdentity);
+            Assert.Equal(SlackDeliveryPayload.Parse(followupCard.PayloadJson).Blocks?.GetRawText(), replayedPayload.Blocks?.GetRawText());
+        }
+        finally
+        {
+            options.ExternalWebUrl = previousUrl;
+        }
     }
 
     [Fact]
@@ -239,6 +282,8 @@ public sealed partial class SlackChannelThreadIngressSpecs
             SlackDeliveryPayload.Parse(progressRow.PayloadJson).Operation);
         var progressPayload = SlackDeliveryPayload.Parse(progressRow.PayloadJson);
         Assert.Contains($"Session: {executionSessionId}", progressPayload.Text, StringComparison.Ordinal);
+        Assert.Equal($"Session: {executionSessionId}", Assert.NotNull(progressPayload.Blocks)[0].GetProperty("text").GetProperty("text").GetString());
+        Assert.DoesNotContain(SlackTurnControlService.StopActionId, progressPayload.Blocks?.GetRawText(), StringComparison.Ordinal);
         Assert.DoesNotContain("Working", progressPayload.Text, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -369,6 +414,32 @@ public sealed partial class SlackChannelThreadIngressSpecs
         Assert.Equal(originalSessionId, reloaded);
     }
 
+    private static void AssertSessionCard(SlackDeliveryPayload payload, string projectName, string sessionId, string? externalWebUrl)
+    {
+        Assert.Equal($"Agent session.\nSession: {sessionId}", payload.Text);
+        Assert.DoesNotContain("Working", payload.Text, StringComparison.OrdinalIgnoreCase);
+        var blocks = Assert.NotNull(payload.Blocks);
+        Assert.Equal("section", blocks[0].GetProperty("type").GetString());
+        Assert.Equal("plain_text", blocks[0].GetProperty("text").GetProperty("type").GetString());
+        Assert.Equal($"Session: {sessionId}", blocks[0].GetProperty("text").GetProperty("text").GetString());
+        var sections = blocks.EnumerateArray().Where(block => block.GetProperty("type").GetString() == "section").ToArray();
+        Assert.Equal(externalWebUrl is null ? 1 : 2, sections.Length);
+        if (externalWebUrl is not null)
+        {
+            Assert.Equal("mrkdwn", sections[1].GetProperty("text").GetProperty("type").GetString());
+            Assert.Equal($"<{externalWebUrl}/{projectName}/sessions/{sessionId}|Open in Mohist>",
+                sections[1].GetProperty("text").GetProperty("text").GetString());
+            Assert.Equal(new[] { "text", "type" }, sections[1].EnumerateObject().Select(property => property.Name).Order());
+        }
+        var action = Assert.Single(blocks.EnumerateArray(), block => block.GetProperty("type").GetString() == "actions");
+        var button = Assert.Single(action.GetProperty("elements").EnumerateArray());
+        Assert.Equal(SlackTurnControlService.StopActionId, button.GetProperty("action_id").GetString());
+        var stop = JSON.Deserialize<SlackStopActionPayload>(button.GetProperty("value").GetString()!);
+        Assert.NotNull(stop);
+        Assert.Equal(sessionId, stop.SessionId);
+        Assert.False(string.IsNullOrWhiteSpace(stop.Signature));
+    }
+
     private async Task SetAgentConfigAsync(AgentConnection connection, object? config)
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -416,14 +487,14 @@ public sealed partial class SlackChannelThreadIngressSpecs
         return document.RootElement.GetProperty("data").Clone();
     }
 
-    private async Task<AgentConnection> CreateConnectionAsync(string agentNameSuffix = "")
+    private async Task<AgentConnection> CreateConnectionAsync(string agentNameSuffix = "", bool withSigningMaterial = false)
     {
         var seeded = await SlackManagedConnectionSeed.CreateAsync(_fixture, new SlackSeedOptions
         {
             AgentNameSuffix = agentNameSuffix,
-            // This family only ever provisioned managed-app credentials; the
-            // ingress and lease paths resolve tokens through the managed app.
-            WriteConnectionSecrets = false,
+            // Ingress and leases use managed-app credentials. State-changing
+            // controls additionally need the Connection's signing material.
+            WriteConnectionSecrets = withSigningMaterial,
         });
         _connectionLeases[seeded.Connection.Id] = seeded.LeaseId;
         return seeded.Connection;

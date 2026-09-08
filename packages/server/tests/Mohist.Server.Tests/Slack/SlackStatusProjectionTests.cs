@@ -151,7 +151,7 @@ public sealed class SlackStatusProjectionTests
         await store.MarkDeliveredAsync("p1", progress.Id, new SlackProviderMessageIdentity("C1", "100.002"));
         var blocks = JsonSerializer.SerializeToElement(new[]
         {
-            new { type = "actions", elements = new[] { new { type = "button", url = "https://mohist.example/p1/sessions/s1" } }, },
+            new { type = "section", text = new { type = "mrkdwn", text = "<https://mohist.example/p1/sessions/s1|Open in Mohist>" } },
         });
         await projection.EnqueueFailureAsync("p1", "c1", source, "100.000", "failed", blocks: blocks);
 

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
@@ -13,6 +14,7 @@ using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Project.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Slack.Services;
@@ -45,25 +47,18 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
             failed.ConversationId,
             failed.MessageTs);
 
+        JsonElement sessionBlocks;
+        var providerIdentity = new SlackProviderMessageIdentity(failed.ConversationId, "1710000000.000002");
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
-            var sessionBlocks = JsonSerializer.SerializeToElement(new[]
-            {
-                new
+            var builder = new SlackSessionCardBlocksBuilder(
+                new SlackWebLinkBuilder(Options.Create(new SlackProviderOptions
                 {
-                    type = "actions",
-                    elements = new[]
-                    {
-                        new
-                        {
-                            type = "button",
-                            text = new { type = "plain_text", text = "Open in Mohist" },
-                            url = $"https://mohist.example/{connection.ProjectId}/sessions/{failed.SessionId}",
-                        },
-                    },
-                },
-            });
-            await scope.ServiceProvider.GetRequiredService<SlackStatusProjection>()
+                    ExternalWebUrl = "https://mohist.example",
+                })),
+                scope.ServiceProvider.GetRequiredService<ProjectQuerier>());
+            sessionBlocks = await builder.BuildAsync(connection.ProjectId, failed.SessionId, null);
+            var progress = await scope.ServiceProvider.GetRequiredService<SlackStatusProjection>()
                 .EnqueueWorkingAsync(
                     connection.ProjectId,
                     connection.Id,
@@ -71,6 +66,8 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
                     failed.ThreadTs,
                     blocks: sessionBlocks,
                     sessionId: failed.SessionId);
+            await scope.ServiceProvider.GetRequiredService<SlackOutboxStore>()
+                .MarkDeliveredAsync(connection.ProjectId, progress.Id, providerIdentity);
         }
 
         await HandleAsync(new SlackTerminalDelivery(
@@ -98,8 +95,18 @@ public sealed class SlackTerminalDeliveryPresentationSpecs
         var card = Assert.Single(rows, row => row.Kind == SlackOutboxKinds.ReplaceableProgress);
         var cardPayload = SlackDeliveryPayload.Parse(card.PayloadJson);
         Assert.Equal($"Agent session.\nSession: {failed.SessionId}", cardPayload.Text);
-        Assert.Contains("Open in Mohist", cardPayload.Blocks?.GetRawText(), StringComparison.Ordinal);
-        Assert.Contains($"/sessions/{failed.SessionId}", cardPayload.Blocks?.GetRawText(), StringComparison.Ordinal);
+        Assert.Equal(providerIdentity, cardPayload.ProviderMessageIdentity);
+        Assert.Equal(SlackOutboxStates.Delivered, card.State);
+        var cardBlocks = Assert.NotNull(cardPayload.Blocks);
+        Assert.Equal(sessionBlocks.GetRawText(), cardBlocks.GetRawText());
+        Assert.Equal(2, cardBlocks.GetArrayLength());
+        Assert.Equal("section", cardBlocks[0].GetProperty("type").GetString());
+        Assert.Equal($"Session: {failed.SessionId}", cardBlocks[0].GetProperty("text").GetProperty("text").GetString());
+        Assert.Equal("section", cardBlocks[1].GetProperty("type").GetString());
+        Assert.Equal("mrkdwn", cardBlocks[1].GetProperty("text").GetProperty("type").GetString());
+        Assert.Equal($"<https://mohist.example/{connection.ProjectId}/sessions/{failed.SessionId}|Open in Mohist>",
+            cardBlocks[1].GetProperty("text").GetProperty("text").GetString());
+        Assert.Equal(new[] { "text", "type" }, cardBlocks[1].EnumerateObject().Select(property => property.Name).Order());
         var failure = Assert.Single(rows, row => row.Kind == SlackOutboxKinds.ExplicitFailure);
         Assert.NotEqual(card.Id, failure.Id);
         Assert.Equal(SlackOutboxStates.Pending, failure.State);
