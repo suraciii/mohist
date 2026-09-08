@@ -15,7 +15,7 @@ public sealed class SlackSessionCardBlocksBuilder : IScopedService
         _projects = projects;
     }
 
-    public async Task<JsonElement?> BuildAsync(
+    public async Task<JsonElement> BuildAsync(
         string projectId,
         string sessionId,
         JsonElement? controlBlocks)
@@ -23,22 +23,24 @@ public sealed class SlackSessionCardBlocksBuilder : IScopedService
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
 
-        if (!_links.HasUsableExternalWebUrl)
-            return controlBlocks;
-
-        var project = await _projects.GetByIdAsync(projectId);
-        var link = project is null
-            ? null
-            : _links.BuildOpenSession(project.Name, sessionId);
-        return Combine(controlBlocks, link?.Blocks);
-    }
-
-    private static JsonElement? Combine(JsonElement? first, JsonElement? second)
-    {
-        var blocks = new List<JsonElement>();
-        Add(blocks, first);
-        Add(blocks, second);
-        return blocks.Count == 0 ? null : JsonSerializer.SerializeToElement(blocks);
+        var blocks = new List<JsonElement>
+        {
+            JsonSerializer.SerializeToElement(new
+            {
+                type = "section",
+                text = new { type = "plain_text", text = $"Session: {sessionId}" },
+            }),
+        };
+        if (_links.HasUsableExternalWebUrl)
+        {
+            var project = await _projects.GetByIdAsync(projectId);
+            var link = project is null
+                ? null
+                : _links.BuildOpenSession(project.Name, sessionId);
+            Add(blocks, link?.Blocks);
+        }
+        Add(blocks, controlBlocks);
+        return JsonSerializer.SerializeToElement(blocks);
     }
 
     private static void Add(List<JsonElement> target, JsonElement? source)

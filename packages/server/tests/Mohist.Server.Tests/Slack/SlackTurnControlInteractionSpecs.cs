@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
@@ -13,6 +14,7 @@ using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Contracts;
@@ -185,7 +187,27 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
             actorSlackUserId,
             new SlackMessageIdentity(connection.WorkspaceTeamId, conversationId, "1710000000.000001"),
             "1710000000.000001");
-        return Assert.IsType<SlackStopAction>(action);
+        var stop = Assert.IsType<SlackStopAction>(action);
+        var builder = new SlackSessionCardBlocksBuilder(
+            new SlackWebLinkBuilder(Options.Create(new SlackProviderOptions
+            {
+                ExternalWebUrl = "https://mohist.example",
+            })),
+            scope.ServiceProvider.GetRequiredService<ProjectQuerier>());
+        var card = await builder.BuildAsync(connection.ProjectId, seeded.SessionId, stop.Blocks);
+        Assert.Equal(3, card.GetArrayLength());
+        Assert.Equal("section", card[0].GetProperty("type").GetString());
+        Assert.Equal($"Session: {seeded.SessionId}", card[0].GetProperty("text").GetProperty("text").GetString());
+        Assert.Equal("section", card[1].GetProperty("type").GetString());
+        Assert.Equal("mrkdwn", card[1].GetProperty("text").GetProperty("type").GetString());
+        Assert.Equal($"<https://mohist.example/{connection.ProjectId}/sessions/{seeded.SessionId}|Open in Mohist>",
+            card[1].GetProperty("text").GetProperty("text").GetString());
+        Assert.Equal(new[] { "text", "type" }, card[1].EnumerateObject().Select(property => property.Name).Order());
+        Assert.Equal(stop.Blocks[0].GetRawText(), card[2].GetRawText());
+        var button = Assert.Single(card[2].GetProperty("elements").EnumerateArray());
+        Assert.Equal(stop.ActionId, button.GetProperty("action_id").GetString());
+        Assert.Equal(stop.ActionValue, button.GetProperty("value").GetString());
+        return stop;
     }
 
     private async Task<JsonElement> PostInteractionAsync(

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
@@ -85,6 +86,8 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         var secondPayload = SlackDeliveryPayload.Parse(secondProgress.PayloadJson);
         Assert.Contains($"Session: {firstSessionId}", firstPayload.Text, StringComparison.Ordinal);
         Assert.Contains($"Session: {secondSessionId}", secondPayload.Text, StringComparison.Ordinal);
+        Assert.Equal($"Session: {firstSessionId}", Assert.NotNull(firstPayload.Blocks)[0].GetProperty("text").GetProperty("text").GetString());
+        Assert.Equal($"Session: {secondSessionId}", Assert.NotNull(secondPayload.Blocks)[0].GetProperty("text").GetProperty("text").GetString());
         Assert.DoesNotContain("Working", firstPayload.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Working", secondPayload.Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(SlackTurnControlService.StopActionId, firstPayload.Blocks?.GetRawText(), StringComparison.Ordinal);
@@ -118,23 +121,76 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         Assert.Equal(AgentJobStatus.Completed, (await firstJob.GetTerminalResultAsync()).Status);
     }
 
-    [Fact]
-    public async Task Established_ordinary_dm_followup_bypasses_the_new_work_gate()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("https://mohist.example/base")]
+    public async Task Established_ordinary_dm_followup_bypasses_the_new_work_gate(string? externalWebUrl)
     {
-        var connection = await CreateConnectionAsync();
-        var initial = await PostIngressAsync(connection, "D-DM-FOLLOWUP-READY", "1710000000.001300", "initial task");
-        var sessionId = initial.GetProperty("sessionId").GetString();
-        await SetAgentConfigAsync(connection, null);
+        var options = _fixture.Services.GetRequiredService<IOptions<SlackProviderOptions>>().Value;
+        var previousUrl = options.ExternalWebUrl;
+        options.ExternalWebUrl = externalWebUrl;
+        try
+        {
+            var connection = await CreateConnectionAsync();
+            var initial = await PostIngressAsync(connection, "D-DM-FOLLOWUP-READY", "1710000000.001300", "initial task");
+            var sessionId = initial.GetProperty("sessionId").GetString()!;
+            await SetAgentConfigAsync(connection, null);
 
-        var followup = await PostIngressAsync(
-            connection,
-            "D-DM-FOLLOWUP-READY",
-            "1710000000.001400",
-            "ordinary follow-up");
+            var followup = await PostIngressAsync(
+                connection,
+                "D-DM-FOLLOWUP-READY",
+                "1710000000.001400",
+                "ordinary follow-up");
 
-        Assert.True(followup.GetProperty("followup").GetBoolean());
-        Assert.Equal(sessionId, followup.GetProperty("sessionId").GetString());
-        Assert.Empty(await GetAdmissionNudgesAsync(connection, "D-DM-FOLLOWUP-READY"));
+            Assert.True(followup.GetProperty("followup").GetBoolean());
+            Assert.Equal(sessionId, followup.GetProperty("sessionId").GetString());
+            Assert.Empty(await GetAdmissionNudgesAsync(connection, "D-DM-FOLLOWUP-READY"));
+
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+            var cards = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries
+                .Where(row => row.Kind == SlackOutboxKinds.ReplaceableProgress).ToArray();
+            Assert.Equal(2, cards.Length);
+            foreach (var card in cards)
+                AssertSessionCard(SlackDeliveryPayload.Parse(card.PayloadJson), connection.ProjectId, sessionId, externalWebUrl);
+            var followupCard = Assert.Single(cards, row => row.DispatchRef!.StartsWith($"agent-session-followup:{sessionId}:", StringComparison.Ordinal));
+            var providerIdentity = new SlackProviderMessageIdentity("D-DM-FOLLOWUP-READY", "1710000000.001401");
+            await outbox.MarkDeliveredAsync(connection.ProjectId, followupCard.Id, providerIdentity);
+
+            var replay = await PostIngressAsync(connection, "D-DM-FOLLOWUP-READY", "1710000000.001400", "ordinary follow-up");
+            Assert.Equal(sessionId, replay.GetProperty("sessionId").GetString());
+            var reply = await outbox.EnqueueAgentReplyAsync(
+                connection.ProjectId, "D-DM-FOLLOWUP-READY", followupCard.ThreadTs!,
+                "The Agent's answer.", connection.Id, followupCard.DispatchRef!);
+            Assert.True(reply.Accepted);
+            await scope.ServiceProvider.GetRequiredService<SlackStatusProjection>().EnqueueFailureAsync(
+                connection.ProjectId, connection.Id,
+                new SlackMessageIdentity(connection.WorkspaceTeamId, "D-DM-FOLLOWUP-READY", "1710000000.001400"),
+                followupCard.ThreadTs, "System delivery failed.");
+            var rows = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries;
+            var terminal = Assert.Single(rows, row => row.Kind == SlackOutboxKinds.TerminalResult);
+            Assert.Equal(reply.DeliveryId, terminal.Id);
+            Assert.NotEqual(followupCard.Id, terminal.Id);
+            Assert.Equal("The Agent's answer.", SlackDeliveryPayload.Parse(terminal.PayloadJson).Text);
+            var failure = Assert.Single(rows, row => row.Kind == SlackOutboxKinds.ExplicitFailure);
+            Assert.NotEqual(followupCard.Id, failure.Id);
+            Assert.NotEqual(terminal.Id, failure.Id);
+            Assert.Null(SlackDeliveryPayload.Parse(terminal.PayloadJson).ProviderMessageIdentity);
+            Assert.Null(SlackDeliveryPayload.Parse(failure.PayloadJson).ProviderMessageIdentity);
+            var replayedCards = rows
+                .Where(row => row.Kind == SlackOutboxKinds.ReplaceableProgress).ToArray();
+            Assert.Equal(2, replayedCards.Length);
+            var replayed = Assert.Single(replayedCards, row => row.DispatchRef == followupCard.DispatchRef);
+            Assert.Equal(followupCard.Id, replayed.Id);
+            Assert.Equal(SlackOutboxStates.Delivered, replayed.State);
+            var replayedPayload = SlackDeliveryPayload.Parse(replayed.PayloadJson);
+            Assert.Equal(providerIdentity, replayedPayload.ProviderMessageIdentity);
+            Assert.Equal(SlackDeliveryPayload.Parse(followupCard.PayloadJson).Blocks?.GetRawText(), replayedPayload.Blocks?.GetRawText());
+        }
+        finally
+        {
+            options.ExternalWebUrl = previousUrl;
+        }
     }
 
     [Fact]
@@ -198,6 +254,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         var payload = SlackDeliveryPayload.Parse(progress.PayloadJson);
         var sessionId = result.GetProperty("sessionId").GetString();
         Assert.Contains($"Session: {sessionId}", payload.Text, StringComparison.Ordinal);
+        Assert.Equal($"Session: {sessionId}", Assert.NotNull(payload.Blocks)[0].GetProperty("text").GetProperty("text").GetString());
         Assert.Contains(sessionId!, payload.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("Working", payload.Text, StringComparison.OrdinalIgnoreCase);
     }
@@ -232,6 +289,32 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
             .Where(row => row.LabelConnectionId == connection.Id
                 && row.LabelSlackConversationId == "D-DM-BUSY")
             .ToListAsync());
+    }
+
+    private static void AssertSessionCard(SlackDeliveryPayload payload, string projectName, string sessionId, string? externalWebUrl)
+    {
+        Assert.Equal($"Agent session.\nSession: {sessionId}", payload.Text);
+        Assert.DoesNotContain("Working", payload.Text, StringComparison.OrdinalIgnoreCase);
+        var blocks = Assert.NotNull(payload.Blocks);
+        Assert.Equal("section", blocks[0].GetProperty("type").GetString());
+        Assert.Equal("plain_text", blocks[0].GetProperty("text").GetProperty("type").GetString());
+        Assert.Equal($"Session: {sessionId}", blocks[0].GetProperty("text").GetProperty("text").GetString());
+        var sections = blocks.EnumerateArray().Where(block => block.GetProperty("type").GetString() == "section").ToArray();
+        Assert.Equal(externalWebUrl is null ? 1 : 2, sections.Length);
+        if (externalWebUrl is not null)
+        {
+            Assert.Equal("mrkdwn", sections[1].GetProperty("text").GetProperty("type").GetString());
+            Assert.Equal($"<{externalWebUrl}/{projectName}/sessions/{sessionId}|Open in Mohist>",
+                sections[1].GetProperty("text").GetProperty("text").GetString());
+            Assert.Equal(new[] { "text", "type" }, sections[1].EnumerateObject().Select(property => property.Name).Order());
+        }
+        var action = Assert.Single(blocks.EnumerateArray(), block => block.GetProperty("type").GetString() == "actions");
+        var button = Assert.Single(action.GetProperty("elements").EnumerateArray());
+        Assert.Equal(SlackTurnControlService.StopActionId, button.GetProperty("action_id").GetString());
+        var stop = JSON.Deserialize<SlackStopActionPayload>(button.GetProperty("value").GetString()!);
+        Assert.NotNull(stop);
+        Assert.Equal(sessionId, stop.SessionId);
+        Assert.False(string.IsNullOrWhiteSpace(stop.Signature));
     }
 
     private async Task<JsonElement> PostIngressAsync(
