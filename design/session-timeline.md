@@ -105,7 +105,13 @@ Session cannot append current content or change current Activity.
 The Server publishes a canonical-only `session.activity` refresh hint after
 each saved transcript batch. It also publishes the hint after committing an
 accepted or queued Input and its Turn state, including when no physical
-Runtime Session exists. The hint carries canonical Session identity without a
+Runtime Session exists. Server-owned follow-up transitions into executing or
+a terminal state also publish the hint after their changed state is committed,
+even when no Runtime event or transcript fact accompanies the transition. This
+includes a queued Turn failing before its Runtime becomes available. Repeated
+or unknown operations that leave the state unchanged publish no hint.
+
+The hint carries canonical Session identity without a
 physical Runtime identity. It is an invalidation signal, not a new Activity
 transition, transcript fact, or domain event.
 
@@ -117,6 +123,8 @@ fields retain their existing serialization policy.
 
 All writes needed by the refreshed snapshot must succeed before the hint is
 published. A failed save or an empty persistence cycle publishes no hint. A
+failed follow-up state save must retain the existing failed-save quarantine;
+uncommitted in-memory state must not become a successful no-op retry. A
 hint publication failure must not change committed execution state; existing
 reconnect reconciliation restores the saved snapshot. No separate delivery
 queue is added for these hints.
