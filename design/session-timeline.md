@@ -109,6 +109,12 @@ Runtime Session exists. The hint carries canonical Session identity without a
 physical Runtime identity. It is an invalidation signal, not a new Activity
 transition, transcript fact, or domain event.
 
+On the Web event wire, a canonical-only hint includes `runtimeSessionId: null`.
+The property must remain present after notification serialization: an omitted
+identity is malformed, not equivalent to an explicitly absent physical binding.
+This requirement is local to the transcript envelope; other notification
+fields retain their existing serialization policy.
+
 All writes needed by the refreshed snapshot must succeed before the hint is
 published. A failed save or an empty persistence cycle publishes no hint. A
 hint publication failure must not change committed execution state; existing

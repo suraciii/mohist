@@ -68,6 +68,45 @@ public sealed class EventWebSocketConnectionTests
         Assert.Equal("event.task-log", (await fixture.NextJsonAsync()).GetProperty("method").GetString());
     }
 
+    [Theory]
+    [InlineData(null, "session.activity")]
+    [InlineData(null, "session.context_reset")]
+    [InlineData("runtime-1", "message.delta")]
+    public async Task TranscriptNotificationPreservesExplicitRuntimeBinding(string? runtimeSessionId, string type)
+    {
+        await using var fixture = new ConnectionFixture();
+        fixture.Socket.ReceiveText("""
+            {"jsonrpc":"2.0","id":"set","method":"subscription.set","params":{"domain":null,"transcript":{"types":["session.activity","session.context_reset","message.delta"]},"taskLogs":[]}}
+            """);
+        Assert.Equal("set", Id(await fixture.NextJsonAsync()));
+        var envelope = Transcript(type) with
+        {
+            RuntimeSessionId = runtimeSessionId,
+            Runtime = runtimeSessionId is null ? null : "opencode",
+            Payload = runtimeSessionId is null ? JsonSerializer.SerializeToElement(new { }) : Transcript(type).Payload,
+        };
+
+        fixture.PublishTranscript(envelope);
+
+        var notification = await fixture.NextJsonAsync();
+        Assert.Equal("2.0", notification.GetProperty("jsonrpc").GetString());
+        Assert.Equal("event.transcript", notification.GetProperty("method").GetString());
+        var serialized = notification.GetProperty("params").GetProperty("event");
+        Assert.Equal(envelope.Id, serialized.GetProperty("id").GetString());
+        Assert.Equal("session-1", serialized.GetProperty("sessionId").GetString());
+        Assert.Equal(type, serialized.GetProperty("type").GetString());
+        Assert.Equal(envelope.Sequence, serialized.GetProperty("sequence").GetInt64());
+        Assert.Equal(envelope.CreatedAt, serialized.GetProperty("createdAt").GetString());
+        Assert.True(JsonElement.DeepEquals(envelope.Payload, serialized.GetProperty("payload")));
+        Assert.True(serialized.TryGetProperty("runtimeSessionId", out var binding));
+        Assert.Equal(runtimeSessionId is null ? JsonValueKind.Null : JsonValueKind.String, binding.ValueKind);
+        Assert.Equal(runtimeSessionId, binding.GetString());
+        if (runtimeSessionId is null)
+            Assert.False(serialized.TryGetProperty("runtime", out _));
+        else
+            Assert.Equal("opencode", serialized.GetProperty("runtime").GetString());
+    }
+
     [Fact]
     public async Task InvalidReplacementLeavesPriorSubscriptionActive()
     {
