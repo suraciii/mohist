@@ -86,7 +86,7 @@ function useLiveEvents(
       if (isAgentDetailEvent(routedName)) {
         dispatchAgentEvent(routedName, transcript.detail as AgentDetailEventMap[typeof routedName])
       }
-      handleEvent(routedName, transcript.payload, { dispatchAgentDetail: false })
+      handleEvent(routedName, transcript.detail, { dispatchAgentDetail: false })
     },
     [handleEvent],
   )

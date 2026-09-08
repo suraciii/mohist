@@ -28,6 +28,7 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs
         var sessionId = grain.GetPrimaryKeyString();
         var before = await grain.GetAsync();
         var saveCount = _fixture.StateStore.SaveCount;
+        var publishedBefore = PublishedFor(sessionId);
 
         var result = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput> { Event("message.delta"), Event("session.liveness") },
@@ -42,7 +43,7 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs
         Assert.Equal(saveCount, _fixture.StateStore.SaveCount);
         Assert.Equal(before, await grain.GetAsync());
         Assert.Empty(FlushesFor(sessionId));
-        Assert.Empty(PublishedFor(sessionId));
+        Assert.Equal(publishedBefore, PublishedFor(sessionId));
     }
 
     [Fact]
@@ -51,6 +52,7 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs
         var grain = await OpenBoundGrainAsync("runtime-current");
         var sessionId = grain.GetPrimaryKeyString();
         var saveCount = _fixture.StateStore.SaveCount;
+        var publishedBefore = PublishedFor(sessionId);
 
         var result = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput> { Event("message.delta"), Event("message.delta"), Event("session.liveness") },
@@ -63,7 +65,7 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs
         Assert.Equal(3, warning.State["DiscardedEventCount"]);
         Assert.Equal(saveCount, _fixture.StateStore.SaveCount);
         Assert.Empty(FlushesFor(sessionId));
-        Assert.Empty(PublishedFor(sessionId));
+        Assert.Equal(publishedBefore, PublishedFor(sessionId));
     }
 
     [Fact]
@@ -73,6 +75,7 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs
         var sessionId = grain.GetPrimaryKeyString();
         var before = await grain.GetAsync();
         var saveCount = _fixture.StateStore.SaveCount;
+        var publishedBefore = PublishedFor(sessionId);
 
         var result = await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new List<AgentSessionRuntimeEventInput>
@@ -88,7 +91,7 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs
         Assert.Equal(before, await grain.GetAsync());
         Assert.Equal(3, DiscardWarnings(sessionId).Count);
         Assert.Empty(FlushesFor(sessionId));
-        Assert.Empty(PublishedFor(sessionId));
+        Assert.Equal(publishedBefore, PublishedFor(sessionId));
     }
 
     [Fact]
@@ -97,6 +100,7 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs
         var grain = await OpenBoundGrainAsync("runtime-current");
         var sessionId = grain.GetPrimaryKeyString();
         var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
+        var publishedBefore = PublishedFor(sessionId);
         var activityFlush = _fixture.TranscriptStore.WaitForAsync(
             flush => flush.Turn.SessionId == sessionId
                 && flush.Parts.Any(part => part.Type == TranscriptPartTypes.SessionActivity));
@@ -115,7 +119,15 @@ public sealed class AgentSessionEventDiscardObservabilitySpecs
 
         Assert.Equal(["message.delta", "session.activity"], result.Select(entry => entry.Type));
         Assert.Equal(3, DiscardWarnings(sessionId).Count);
-        Assert.Equal(["message.delta", "session.activity"], PublishedFor(sessionId).Select(entry => entry.Type));
+        var published = PublishedFor(sessionId);
+        Assert.Equal(publishedBefore, published.Take(publishedBefore.Count));
+        var added = published.Skip(publishedBefore.Count).ToArray();
+        Assert.Equal(3, added.Length);
+        Assert.Equal(["message.delta", "session.activity"], added
+            .Where(entry => entry.RuntimeSessionId == "runtime-current").Select(entry => entry.Type));
+        var hint = Assert.Single(added, entry => entry.RuntimeSessionId is null);
+        Assert.Equal(RuntimeEventTypes.SessionActivity, hint.Type);
+        Assert.Equal("{}", hint.Payload.GetRawText());
         var flush = await activityFlush;
         var activity = Assert.Single(flush.Parts, part => part.Type == TranscriptPartTypes.SessionActivity);
         Assert.Contains("\"status\":\"failed\"", activity.PayloadJson, StringComparison.Ordinal);

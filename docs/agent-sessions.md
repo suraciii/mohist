@@ -342,6 +342,13 @@ retains earlier content for audit but Mohist does not replay it into the new
 Runtime Session. Old unresolved facts remain visible and do not become current
 activity.
 
+An open AgentSession page must follow the same logical Session through a
+Runtime replacement without a manual reload. It must show newly accepted or
+queued Input even before a Runtime Session is available. Delayed content from
+the previous Runtime Session must not appear as current execution. The
+[Session timeline](web-ui.md#session-timeline) provides the readable record and
+the Raw diagnostic view.
+
 See [Agent execution design](../design/agent-execution.md#runtime-session-missing-recovery)
 and [Action Contracts](actions/README.md#shared-semantics-for-agent-execution-actions).
 

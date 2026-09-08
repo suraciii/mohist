@@ -218,4 +218,41 @@ public sealed class AgentSessionTranscriptStoreTests : IDisposable
         Assert.Equal("sequence-last-model", summary.ResolvedModel);
         Assert.Equal("sequence-last-failure", summary.FailureCategory);
     }
+
+    [Theory]
+    [InlineData(TranscriptPartTypes.Text)]
+    [InlineData(TranscriptPartTypes.Reasoning)]
+    public async Task PublicProjection_UsesAccumulatedTextAcrossFlushesWithoutChangingRaw(string type)
+    {
+        var store = CreateStore();
+        const string sessionId = "session-public-text";
+        const string first = "before\n\n<openviking-";
+        const string second = "context source=\"auto-recall\" format=\"digest\">memory";
+        const string third = "</openviking-context>\n\nafter\n\nlast paragraph";
+
+        await store.SaveAsync(new AgentSessionTranscriptFlush(true, Turn(sessionId),
+            [Part(type, "same-message", textDelta: first)]));
+        await AssertSavedProjection(first, first);
+
+        await store.SaveAsync(new AgentSessionTranscriptFlush(false, Turn(sessionId),
+            [Part(type, "same-message", textDelta: second)]));
+        await AssertSavedProjection(first + second, first + second);
+
+        await store.SaveAsync(new AgentSessionTranscriptFlush(false, Turn(sessionId),
+            [Part(type, "same-message", textDelta: third)]));
+        await AssertSavedProjection("before\n\n\n\nafter\n\nlast paragraph", first + second + third);
+
+        async Task AssertSavedProjection(string expectedPublic, string expectedRaw)
+        {
+            await using var db = _db.CreateContext();
+            var loaded = await TranscriptPartLoader.LoadAsync(db, [sessionId]);
+            var data = new AgentSessionTranscriptData(loaded.Turns, loaded.Parts);
+            var projected = Assert.Single(SessionTranscriptBuilder.Build(data).Turns);
+            var raw = Assert.Single(SessionTranscriptBuilder.Build(data, view: "raw").Turns);
+            Assert.Equal(expectedPublic, Assert.Single(projected.Assistant).Text);
+            Assert.Equal(expectedRaw, Assert.Single(raw.Assistant).Text);
+            Assert.Equal(expectedRaw, Assert.Single(loaded.Parts).Text);
+            Assert.Equal(type, Assert.Single(projected.Assistant).Type);
+        }
+    }
 }

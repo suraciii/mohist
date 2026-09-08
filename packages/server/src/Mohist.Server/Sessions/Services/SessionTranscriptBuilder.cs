@@ -63,11 +63,15 @@ internal static class SessionTranscriptBuilder
                     var partAt = part.FirstSeenAt.ToString("o");
                     if (part.Type == "text" || part.Type == "reasoning")
                     {
+                        var partId = $"{dto.Id}-p{++partIndex}";
+                        var text = diagnostic ? part.Text : PublicText(part.Text);
+                        if (!diagnostic && string.IsNullOrWhiteSpace(text))
+                            continue;
                         dto.Assistant.Add(new AgentSessionTranscriptPartDto
                         {
-                            Id = $"{dto.Id}-p{++partIndex}",
+                            Id = partId,
                             Type = part.Type,
-                            Text = part.Text,
+                            Text = text,
                             StartedAt = partAt,
                             CompletedAt = null,
                         });
@@ -240,23 +244,23 @@ internal static class SessionTranscriptBuilder
         if (canonicalTurn is not null && inputs is not null)
         {
             var inputById = inputs.ToDictionary(input => input.Id, StringComparer.Ordinal);
-            var texts = canonicalTurn.InputIds
+            var turnInputs = canonicalTurn.InputIds
                 .Where(inputById.ContainsKey)
-                .Select(inputId => inputById[inputId].Text)
-                .Where(text => !string.IsNullOrWhiteSpace(text))
+                .Select(inputId => inputById[inputId])
                 .ToArray();
-            // Canonical input text carries the runner execution envelope
-            // markers; the public transcript strips them exactly like the
-            // legacy accumulator path did.
-            var canonical = StripInternalPromptSections(string.Join("\n", texts));
-            if (!string.IsNullOrWhiteSpace(canonical)) return canonical;
-            if (canonicalTurn.InputIds.Count > 0) return "Attachment input";
+            if (turnInputs.Length > 0)
+            {
+                var canonical = string.Join("\n", turnInputs.Select(input => PublicText(input.Text)));
+                if (!string.IsNullOrWhiteSpace(canonical)) return canonical;
+                return turnInputs.Any(input => input.Attachments is { Count: > 0 })
+                    ? "Attachment input"
+                    : string.Empty;
+            }
         }
 
-        var sanitized = StripInternalPromptSections(turn.PromptText);
-        return string.IsNullOrWhiteSpace(sanitized)
+        return string.IsNullOrWhiteSpace(turn.PromptText)
             ? recoveryPrompt ?? "Task input recorded"
-            : sanitized;
+            : PublicText(turn.PromptText);
     }
 
     private static bool IsDiagnosticView(string? view) =>
@@ -330,57 +334,34 @@ internal static class SessionTranscriptBuilder
             result.FailureCategory,
             result.ExitCode);
 
-    private static string StripInternalPromptSections(string? prompt)
+    private static readonly (string Opening, string Closing)[] InternalTextSections =
+    [
+        ("[mohist-agent-session-startup]", "[/mohist-agent-session-startup]"),
+        ("[mohist-workspace-anchor]", "[/mohist-workspace-anchor]"),
+        ("[mohist-execution-definition]", "[/mohist-execution-definition]"),
+        ("[mohist-system-facts]", "[/mohist-system-facts]"),
+        ("<openviking-context>", "</openviking-context>"),
+        ("<openviking-context source=\"auto-recall\" format=\"digest\">", "</openviking-context>"),
+        ("<openviking-context source=\"session-resume\" format=\"archive-digest\">", "</openviking-context>"),
+        ("<openviking-context source=\"session-start\">", "</openviking-context>"),
+    ];
+
+    private static string PublicText(string? text)
     {
-        if (string.IsNullOrWhiteSpace(prompt)) return string.Empty;
-        var value = prompt;
-        var removedInternalSection = false;
-        foreach (var marker in new[]
+        var value = text ?? string.Empty;
+        foreach (var (opening, closing) in InternalTextSections)
         {
-            "mohist-agent-session-startup",
-            "mohist-workspace-anchor",
-            "mohist-execution-definition",
-            "mohist-system-facts",
-        })
-        {
-            var before = value;
-            value = RemoveMarkedSection(value, marker);
-            removedInternalSection |= !string.Equals(before, value, StringComparison.Ordinal);
+            while (true)
+            {
+                var start = value.IndexOf(opening, StringComparison.Ordinal);
+                if (start < 0) break;
+                var end = value.IndexOf(closing, start + opening.Length, StringComparison.Ordinal);
+                // An incomplete block is ordinary text until its closing marker is saved.
+                if (end < 0) break;
+                value = value.Remove(start, end + closing.Length - start);
+            }
         }
-
-        const string parentPrefix = "Parent issue context (read-only background; JSON):";
-        var parentStart = value.IndexOf(parentPrefix, StringComparison.Ordinal);
-        if (parentStart >= 0)
-        {
-            var taskStart = value.IndexOf("\n\n", parentStart, StringComparison.Ordinal);
-            taskStart = taskStart < 0 ? -1 : value.IndexOf("\n\n", taskStart + 2, StringComparison.Ordinal);
-            value = taskStart < 0 ? string.Empty : value[(taskStart + 2)..];
-        }
-
-        if (removedInternalSection)
-        {
-            var paragraphs = value
-                .Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (paragraphs.Length > 1)
-                value = paragraphs[^1];
-        }
-
-        return value.Trim();
-    }
-
-    private static string RemoveMarkedSection(string value, string marker)
-    {
-        var opening = $"[{marker}]";
-        var closing = $"[/{marker}]";
-        while (true)
-        {
-            var start = value.IndexOf(opening, StringComparison.Ordinal);
-            if (start < 0) return value;
-            var end = value.IndexOf(closing, start + opening.Length, StringComparison.Ordinal);
-            value = end < 0
-                ? value[..start]
-                : value.Remove(start, end + closing.Length - start);
-        }
+        return value;
     }
 
     private static string? RecoveryPromptText(IReadOnlyList<AgentSessionTranscriptPartRow> parts)

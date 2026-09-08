@@ -7,6 +7,7 @@ import { useSessionTranscript } from './useSessionTranscript'
 
 function Wrapper({ events, isRunning = true }: { events: SessionTurn[]; isRunning?: boolean }) {
   const result = useSessionTranscript({
+    view: 'raw',
     issueNumber: 84,
     sessionId: 'session-84',
     runtimeSessionId: 'runtime-84',
@@ -22,7 +23,7 @@ function Wrapper({ events, isRunning = true }: { events: SessionTurn[]; isRunnin
         {result.turns
           .flatMap((turn) => turn.assistant)
           .filter((part) => part.type === 'text' || part.type === 'reasoning')
-          .map((part) => part.type === 'text' || part.type === 'reasoning' ? part.text : '')
+          .map((part) => (part.type === 'text' || part.type === 'reasoning' ? part.text : ''))
           .join('')}
       </div>
       <div data-testid="latest-user">{result.turns.at(-1)?.user.text ?? ''}</div>

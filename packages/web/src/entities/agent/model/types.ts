@@ -60,7 +60,7 @@ export type PlanRoundCompleteEvent = {
 }
 
 type SessionRuntimeBase = {
-  runtimeSessionId?: string
+  runtimeSessionId?: string | null
   sessionId?: string
   runtime?: string
   type?: string
@@ -147,13 +147,14 @@ export type AgentDetailEventMap = {
     acceptance?: string
   }
   'session.activity': SessionRuntimeBase & {
-    activity: 'idle' | 'active' | 'unknown'
+    activity?: 'idle' | 'active' | 'unknown'
     observedAt?: string
     operationId?: string
     status?: 'completed' | 'failed' | 'timeout' | 'cancelled' | string
     failureReason?: string | null
     failureCategory?: string | null
   }
+  'session.context_reset': SessionRuntimeBase & { reason?: string }
   'message.delta': SessionRuntimeBase & { text: string; model?: string }
   'reasoning.delta': SessionRuntimeBase & { text: string; model?: string }
   'tool_call.started': SessionRuntimeBase & {
