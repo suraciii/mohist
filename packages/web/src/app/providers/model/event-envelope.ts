@@ -75,7 +75,7 @@ export function unwrapEnvelope(rawData: unknown): Record<string, unknown> {
 }
 
 export function readEnvelopeField(candidate: Record<string, unknown>, camelCase: string, pascalCase: string): unknown {
-  return candidate[camelCase] ?? candidate[pascalCase]
+  return camelCase in candidate ? candidate[camelCase] : candidate[pascalCase]
 }
 
 export function asRecord(value: unknown): Record<string, unknown> | null {
@@ -110,15 +110,11 @@ export function normalizeTranscriptDetail(
   innerPayload?: Record<string, unknown>,
 ): Record<string, unknown> {
   const runtimeSessionId =
-    readEnvelopeField(candidate, 'runtimeSessionId', 'RuntimeSessionId') ??
-    readEnvelopeField(candidate, 'agentSessionId', 'AgentSessionId') ??
-    (innerPayload && readEnvelopeField(innerPayload, 'runtimeSessionId', 'RuntimeSessionId'))
-  const runtime =
-    readEnvelopeField(candidate, 'runtime', 'Runtime') ??
-    (innerPayload && readEnvelopeField(innerPayload, 'runtime', 'Runtime'))
-  const sessionId =
-    readEnvelopeField(candidate, 'sessionId', 'SessionId') ??
-    (innerPayload && readEnvelopeField(innerPayload, 'sessionId', 'SessionId'))
+    'runtimeSessionId' in candidate || 'RuntimeSessionId' in candidate
+      ? readEnvelopeField(candidate, 'runtimeSessionId', 'RuntimeSessionId')
+      : readEnvelopeField(candidate, 'agentSessionId', 'AgentSessionId')
+  const runtime = readEnvelopeField(candidate, 'runtime', 'Runtime')
+  const sessionId = readEnvelopeField(candidate, 'sessionId', 'SessionId')
   const workId = readEnvelopeField(candidate, 'workId', 'WorkId')
   const sequence = readEnvelopeField(candidate, 'sequence', 'Sequence')
   const createdAt = readEnvelopeField(candidate, 'createdAt', 'CreatedAt')
@@ -163,14 +159,9 @@ export function normalizeTranscriptDetail(
   if (innerPayload !== undefined) {
     normalized.payload = innerPayload
   }
-  if (normalized.runtimeSessionId === undefined && runtimeSessionId !== undefined) {
-    normalized.runtimeSessionId = runtimeSessionId
-  }
-  if (normalized.runtime === undefined && runtime !== undefined) {
-    normalized.runtime = runtime
-  }
-  if (normalized.sessionId === undefined) {
-    normalized.sessionId = sessionId
+  for (const [field, value] of Object.entries({ sessionId, runtimeSessionId, runtime })) {
+    if (value === undefined) delete normalized[field]
+    else normalized[field] = value
   }
   if (normalized.executionId === undefined) {
     normalized.executionId = workId

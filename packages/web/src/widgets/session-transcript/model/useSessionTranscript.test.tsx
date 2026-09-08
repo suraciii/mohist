@@ -8,6 +8,7 @@ import { useSessionTranscript } from './useSessionTranscript'
 
 function Wrapper({ events, isRunning = true }: { events: SessionTurn[]; isRunning?: boolean }) {
   const result = useSessionTranscript({
+    view: 'raw',
     issueNumber: 84,
     sessionId: 'session-84',
     runtimeSessionId: 'runtime-84',
@@ -108,6 +109,7 @@ function followupTurn(): SessionTurn {
 
 function WrapperWithoutBinding({ events, isRunning = true }: { events: SessionTurn[]; isRunning?: boolean }) {
   const result = useSessionTranscript({
+    view: 'raw',
     issueNumber: 84,
     sessionId: 'session-84',
     runtimeSessionId: '',
@@ -125,6 +127,7 @@ function WrapperWithoutBinding({ events, isRunning = true }: { events: SessionTu
 
 function WrapperHistorical({ events, isRunning = true }: { events: SessionTurn[]; isRunning?: boolean }) {
   const result = useSessionTranscript({
+    view: 'raw',
     issueNumber: 84,
     sessionId: 'session-84',
     runtimeSessionId: 'runtime-84',
@@ -173,6 +176,7 @@ describe('useSessionTranscript', () => {
     }
     function ReconciliationHarness({ events }: { events: SessionTurn[] }) {
       const result = useSessionTranscript({
+        view: 'raw',
         issueNumber: 84,
         projectId: 'project-1',
         sessionId: 'session-84',

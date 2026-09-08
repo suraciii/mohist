@@ -150,6 +150,7 @@ export function useUnifiedSessionDataSource(dependencies: Partial<UnifiedSession
     sessionId,
     runtimeSessionId,
     runtime: summary?.runtime ?? null,
+    view: transcriptView,
     initialTurns: initialTurns.length > 0 ? initialTurns : undefined,
     sessionQueryKeys: [metadataQueryKey, transcriptQueryKey],
     isRunning,
@@ -157,8 +158,9 @@ export function useUnifiedSessionDataSource(dependencies: Partial<UnifiedSession
   })
   const timelineInput = useMemo(
     () => ({
-      turns: transcript.turns,
-      liveDetails: transcript.liveDetails,
+      view: transcriptView,
+      turns: transcriptView === 'public' ? initialTurns : transcript.turns,
+      liveDetails: transcriptView === 'raw' ? transcript.liveDetails : undefined,
       summary: summary
         ? {
             activity: summary.activity,
@@ -170,7 +172,7 @@ export function useUnifiedSessionDataSource(dependencies: Partial<UnifiedSession
           }
         : null,
     }),
-    [summary, transcript.liveDetails, transcript.turns],
+    [summary, initialTurns, transcriptView, transcript.liveDetails, transcript.turns],
   )
   const timeline = useSessionTimeline(timelineInput)
 

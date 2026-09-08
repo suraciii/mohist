@@ -315,9 +315,6 @@ The implementation currently has these gaps:
 - The Web UI does not expose Slack Connection owner transfer, credential
   rotation or revalidation, Enable, Disable, or Delete.
 - Tool entries do not yet use the full sentence, salience, or collapse rules.
-- Summary can still show internal context and locally appended Runtime text.
-  An open Session page can miss newly accepted Input or a Runtime replacement
-  until it refreshes.
 
 Confirmed-missing recovery, Compact, and Reset are implemented, and their
 context boundaries appear in the timeline.

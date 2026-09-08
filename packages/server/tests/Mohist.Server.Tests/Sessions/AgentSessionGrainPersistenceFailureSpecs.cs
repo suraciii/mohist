@@ -25,6 +25,7 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
         // covered by IssueGrainEventSaveFailureSpecs, which constructs the
         // grain directly so DeactivateOnIdle does not reload it.)
         var grain = await OpenBoundGrainAsync();
+        var publicationCount = Fixture.TranscriptPublisher.Published.Count;
         var persistence = grain.PersistenceCheckpoint(Fixture.Persistence);
 
         Fixture.StateStore.FailNextSave(
@@ -45,6 +46,8 @@ public class AgentSessionGrainPersistStateFailureSpecs : AgentSessionGrainPersis
         // failing flush.
         Assert.Equal(2, Fixture.StateStore.SaveCount);
         Assert.Empty(Fixture.TranscriptStore.Flushes);
+        Assert.DoesNotContain(Fixture.TranscriptPublisher.Published.Skip(publicationCount),
+            envelope => envelope.Type == RuntimeEventTypes.SessionActivity && envelope.RuntimeSessionId is null);
 
         var stateError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Contains("failed to save state", stateError.Message);
@@ -66,6 +69,7 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
         // the next flush must retry only the transcript and never re-save
         // state (which would re-append already-committed lifecycle events).
         var grain = await OpenBoundGrainAsync();
+        var publicationCount = Fixture.TranscriptPublisher.Published.Count;
         var firstPersistence = grain.PersistenceCheckpoint(Fixture.Persistence);
         var secondPersistence = grain.PersistenceCheckpoint(Fixture.Persistence);
 
@@ -86,6 +90,8 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
         // State/event committed on the first flush; no second state save.
         Assert.Equal(3, Fixture.StateStore.SaveCount);
         Assert.Empty(Fixture.TranscriptStore.Flushes);
+        Assert.DoesNotContain(Fixture.TranscriptPublisher.Published.Skip(publicationCount),
+            envelope => envelope.Type == RuntimeEventTypes.SessionActivity && envelope.RuntimeSessionId is null);
 
         var second = await secondPersistence.WaitAsync();
         Assert.Equal(AgentSessionPersistenceOutcome.Succeeded, second.Outcome);
@@ -99,6 +105,10 @@ public class AgentSessionGrainPersistTranscriptFailureSpecs : AgentSessionGrainP
         var retryFlush = Assert.Single(Fixture.TranscriptStore.Flushes);
         var part = Assert.Single(retryFlush.Parts);
         Assert.Equal("world", part.TextDelta);
+        var hint = Assert.Single(Fixture.TranscriptPublisher.Published.Skip(publicationCount),
+            envelope => envelope.Type == RuntimeEventTypes.SessionActivity && envelope.RuntimeSessionId is null);
+        Assert.Equal(grain.GetPrimaryKeyString(), hint.SessionId);
+        Assert.Equal("{}", hint.Payload.GetRawText());
     }
 }
 
@@ -123,6 +133,7 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
         Fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
         var openedSaveCount = Fixture.StateStore.SaveCount;
         var attachEventCount = Fixture.StateStore.Events.Count;
+        var publicationCount = Fixture.TranscriptPublisher.Published.Count;
 
         Fixture.TranscriptStore.FailNextSave(
             grain.GetPrimaryKeyString(),
@@ -139,6 +150,8 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
         // transcript flush failed and is pending retry.
         Assert.Equal(openedSaveCount + 1, Fixture.StateStore.SaveCount);
         Assert.Empty(Fixture.TranscriptStore.Flushes);
+        Assert.DoesNotContain(Fixture.TranscriptPublisher.Published.Skip(publicationCount),
+            envelope => envelope.Type == RuntimeEventTypes.SessionActivity && envelope.RuntimeSessionId is null);
         var transcriptError = Assert.Single(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Contains("durable transcript evidence", transcriptError.Message);
         Assert.Contains("transcript store down", transcriptError.Exception?.Message ?? string.Empty);
@@ -157,6 +170,10 @@ public class AgentSessionGrainRecoveryTranscriptFailureSpecs : AgentSessionGrain
             .Count(e => e is AgentSessionContextCompacted);
         Assert.Equal(1, recoveryEvents);
         Assert.Equal(attachEventCount + 1, Fixture.StateStore.Events.Count);
+        var hint = Assert.Single(Fixture.TranscriptPublisher.Published.Skip(publicationCount),
+            envelope => envelope.Type == RuntimeEventTypes.SessionActivity && envelope.RuntimeSessionId is null);
+        Assert.Equal(grain.GetPrimaryKeyString(), hint.SessionId);
+        Assert.Equal("{}", hint.Payload.GetRawText());
     }
 
     [Fact]
@@ -228,6 +245,7 @@ public class AgentSessionGrainDeactivationSpecs : AgentSessionGrainPersistenceSp
 
         Assert.Equal(1, Fixture.StateStore.SaveCount);
         Assert.Empty(Fixture.TranscriptStore.Flushes);
+        Assert.Empty(Fixture.TranscriptPublisher.Published);
         Assert.DoesNotContain(Fixture.Logger.Entries, e => e.Level == LogLevel.Error);
     }
 

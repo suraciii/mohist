@@ -40,7 +40,7 @@ export interface LiveEventsApi {
   ) => TaskLogRegistration
   registerTranscriptReconciliation: (
     sessionId: string,
-    runtimeSessionId: string,
+    runtimeSessionId: string | null,
     refetch: (signal: AbortSignal) => Promise<unknown>,
   ) => RegistrationHandle
 }
@@ -70,7 +70,7 @@ export type WebSocketFactory = (url: string) => WebSocketLike
 
 interface TranscriptRegistration {
   sessionId: string
-  runtimeSessionId: string
+  runtimeSessionId: string | null
   reconcile: (signal: AbortSignal) => Promise<unknown>
 }
 
@@ -110,8 +110,8 @@ function taskScopeKey(scope: TaskLogSubscription): string {
   return `${scope.workflowRunId}\u0000${scope.taskId}`
 }
 
-function transcriptIdentityKey(sessionId: string, runtimeSessionId: string): string {
-  return `${sessionId}\u0000${runtimeSessionId}`
+function transcriptIdentityKey(sessionId: string, runtimeSessionId: string | null): string {
+  return `${sessionId}\u0000${runtimeSessionId ?? ''}`
 }
 
 function socketUrl(projectId: string, location: Pick<Location, 'protocol' | 'host'>): string {
@@ -246,7 +246,7 @@ export class LiveEventsController implements LiveEventsApi {
 
   registerTranscriptReconciliation(
     sessionId: string,
-    runtimeSessionId: string,
+    runtimeSessionId: string | null,
     reconcile: (signal: AbortSignal) => Promise<unknown>,
   ): RegistrationHandle {
     const token = Symbol(sessionId)
@@ -410,10 +410,12 @@ export class LiveEventsController implements LiveEventsApi {
     )
     const bufferedTranscriptIdentities = new Set<string>()
     for (const [, registration] of transcriptRegistrations) {
-      const key = transcriptIdentityKey(registration.sessionId, registration.runtimeSessionId)
-      if (bufferedTranscriptIdentities.has(key)) continue
-      bufferedTranscriptIdentities.add(key)
-      this.transcriptBuffers.set(key, { generation, events: [] })
+      for (const runtimeSessionId of [registration.runtimeSessionId, null]) {
+        const key = transcriptIdentityKey(registration.sessionId, runtimeSessionId)
+        if (bufferedTranscriptIdentities.has(key)) continue
+        bufferedTranscriptIdentities.add(key)
+        this.transcriptBuffers.set(key, { generation, events: [] })
+      }
     }
     for (const [, entry] of taskLogRegistrations) {
       entry.bufferingGeneration = generation
@@ -464,7 +466,9 @@ export class LiveEventsController implements LiveEventsApi {
       this.transcriptBuffers.delete(key)
       const [sessionId, runtimeSessionId] = key.split('\u0000')
       const stillRegistered = [...this.transcripts.values()].some(
-        (registration) => registration.sessionId === sessionId && registration.runtimeSessionId === runtimeSessionId,
+        (registration) =>
+          registration.sessionId === sessionId &&
+          (!runtimeSessionId || registration.runtimeSessionId === runtimeSessionId),
       )
       if (!stillRegistered) continue
       for (const event of buffer.events) {
@@ -488,8 +492,13 @@ export class LiveEventsController implements LiveEventsApi {
   private receiveTranscript(event: Record<string, unknown>, generation: number): void {
     const sessionId = event.sessionId
     const runtimeSessionId = event.runtimeSessionId
-    if (typeof sessionId !== 'string' || typeof runtimeSessionId !== 'string') return
-    const buffer = this.transcriptBuffers.get(transcriptIdentityKey(sessionId, runtimeSessionId))
+    if (typeof sessionId !== 'string' || !sessionId.trim()) return
+    const canonicalBoundary =
+      runtimeSessionId === null && (event.type === 'session.activity' || event.type === 'session.context_reset')
+    if (!canonicalBoundary && (typeof runtimeSessionId !== 'string' || !runtimeSessionId.trim())) return
+    const buffer = this.transcriptBuffers.get(
+      transcriptIdentityKey(sessionId, canonicalBoundary ? null : (runtimeSessionId as string)),
+    )
     if (buffer?.generation !== generation) {
       this.options.onTranscriptEvent(event)
       return

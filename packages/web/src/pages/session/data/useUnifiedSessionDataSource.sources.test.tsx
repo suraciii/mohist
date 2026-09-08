@@ -5,7 +5,12 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { ProjectProvider } from '../../../entities/project'
 import { useUnifiedSessionDataSource, type UnifiedSessionDataSourceDependencies } from './useUnifiedSessionDataSource'
-import type { AgentSessionTranscriptResponse, SessionFollowupResult, SessionTurn, UnifiedSessionSummaryDto } from '../../../entities/coder-session'
+import type {
+  AgentSessionTranscriptResponse,
+  SessionFollowupResult,
+  SessionTurn,
+  UnifiedSessionSummaryDto,
+} from '../../../entities/coder-session'
 import type { TurnControlResult } from '../../../entities/agent'
 
 const TEST_PROJECT = {
@@ -43,8 +48,16 @@ function makeSummary(overrides: Partial<UnifiedSessionSummaryDto> = {}): Unified
   }
 }
 
-interface CapturedFollowup { sessionId: string; text: string; attachments: string[] | undefined; idempotencyKey: string }
-interface CapturedTurnControl { sessionId: string; turnId: string }
+interface CapturedFollowup {
+  sessionId: string
+  text: string
+  attachments: string[] | undefined
+  idempotencyKey: string
+}
+interface CapturedTurnControl {
+  sessionId: string
+  turnId: string
+}
 
 let followupSequence: SessionFollowupResult[] = []
 const followupCalls: CapturedFollowup[] = []
@@ -54,9 +67,10 @@ const turnControlCalls: CapturedTurnControl[] = []
 const followupMock = {
   mutateAsync: vi.fn(async (input: CapturedFollowup): Promise<SessionFollowupResult> => {
     followupCalls.push(input)
-    const next = followupSequence.length > 0
-      ? followupSequence.shift()!
-      : { status: 'accepted' as const, inputId: 'input-1', turnId: 'turn-1' }
+    const next =
+      followupSequence.length > 0
+        ? followupSequence.shift()!
+        : { status: 'accepted' as const, inputId: 'input-1', turnId: 'turn-1' }
     return next
   }),
   isPending: false,
@@ -71,7 +85,9 @@ const turnControlMock = {
   isPending: false,
 }
 
-function makeDependencies(overrides: Partial<UnifiedSessionDataSourceDependencies> = {}): UnifiedSessionDataSourceDependencies {
+function makeDependencies(
+  overrides: Partial<UnifiedSessionDataSourceDependencies> = {},
+): UnifiedSessionDataSourceDependencies {
   return {
     useSessionTranscript: (() => ({
       turns: [],
@@ -84,7 +100,9 @@ function makeDependencies(overrides: Partial<UnifiedSessionDataSourceDependencie
       isStreaming: false,
     })) as never,
     useUnifiedSessionSummary: (() => ({ data: makeSummary(), isLoading: false, isError: false })) as never,
-    useUnifiedSessionTranscript: (() => ({ data: { turns: [], partCount: 0, lastActivityAt: null } as AgentSessionTranscriptResponse })) as never,
+    useUnifiedSessionTranscript: (() => ({
+      data: { turns: [], partCount: 0, lastActivityAt: null } as AgentSessionTranscriptResponse,
+    })) as never,
     useGenericFollowup: (() => followupMock) as never,
     useGenericTurnControl: (() => turnControlMock) as never,
     ...overrides,
@@ -210,49 +228,63 @@ describe('useUnifiedSessionDataSource — both Session sources', () => {
         kind: 'task',
         sentAt: '2026-07-31T10:00:00.000Z',
       },
-      assistant: [{
-        id: 'part-1',
-        type: 'tool',
-        tool: {
-          toolCallId: 'tool-1',
-          toolName: 'bash',
-          status: 'completed',
-          rawInput: 'mo issue start 42',
-          rawOutput: 'ok',
-          completedAt: '2026-07-31T10:01:00.000Z',
-          startedAt: '2026-07-31T10:00:30.000Z',
+      assistant: [
+        {
+          id: 'part-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tool-1',
+            toolName: 'bash',
+            status: 'completed',
+            rawInput: 'mo issue start 42',
+            rawOutput: 'ok',
+            completedAt: '2026-07-31T10:01:00.000Z',
+            startedAt: '2026-07-31T10:00:30.000Z',
+          },
         },
-      }],
+      ],
     }
-    const { result } = renderUnifiedHook(makeDependencies({
-      useUnifiedSessionSummary: (() => ({
-        data: makeSummary({
-          activity: 'idle',
-          contextRefs: { issueNumber: 42 },
-          inputs: [{ id: 'input-1', sequence: 1, source: 'web', acceptance: 'accepted' }],
-          turns: [{ id: 'turn-1', sequence: 1, inputIds: ['input-1'], status: 'completed' }],
-        }),
-        isLoading: false,
-        isError: false,
-      })) as never,
-      useSessionTranscript: (() => ({
-        turns: [transcriptTurn],
-        liveDetails: [],
-        transcriptVersion: 0,
-        scrollToBottom: vi.fn(),
-        newContentAvailable: false,
-        setIsNearBottom: vi.fn(),
-        isFinalizing: false,
-        isThinking: false,
-        isStreaming: false,
-      })) as never,
-    }))
+    const { result } = renderUnifiedHook(
+      makeDependencies({
+        useUnifiedSessionSummary: (() => ({
+          data: makeSummary({
+            activity: 'idle',
+            contextRefs: { issueNumber: 42 },
+            inputs: [{ id: 'input-1', sequence: 1, source: 'web', acceptance: 'accepted' }],
+            turns: [{ id: 'turn-1', sequence: 1, inputIds: ['input-1'], status: 'completed' }],
+          }),
+          isLoading: false,
+          isError: false,
+        })) as never,
+        useUnifiedSessionTranscript: (() => ({
+          data: { turns: [transcriptTurn], partCount: 1, lastActivityAt: null },
+        })) as never,
+        useSessionTranscript: (() => ({
+          turns: [transcriptTurn],
+          liveDetails: [{ type: 'message.delta', text: 'raw-only-secret', sourceId: 'raw-only' }],
+          transcriptVersion: 0,
+          scrollToBottom: vi.fn(),
+          newContentAvailable: false,
+          setIsNearBottom: vi.fn(),
+          isFinalizing: false,
+          isThinking: false,
+          isStreaming: false,
+        })) as never,
+      }),
+    )
 
-    expect(result.current.facts?.map((fact) => fact.sourceId)).toEqual(expect.arrayContaining(['input:input-1', 'part:part-1', 'summary:activity']))
+    expect(result.current.facts?.map((fact) => fact.sourceId)).toEqual(
+      expect.arrayContaining(['input:input-1', 'part:part-1', 'summary:activity']),
+    )
     expect(result.current.items?.some((item) => item.renderClass === 'domain-action')).toBe(true)
+    expect(JSON.stringify(result.current.facts)).not.toContain('raw-only-secret')
     expect(result.current.entries?.length).toBeGreaterThan(0)
     expect(result.current.currentActivity).toMatchObject({ state: 'idle', label: '空闲' })
-    expect(result.current.resolveTimelineReference?.({ kind: 'issue', label: 'Issue #42', issueNumber: 42 })).toBe('/Test/issues/42')
-    expect(result.current.resolveTimelineReference?.({ kind: 'workflow', label: 'Workflow', workflowRunId: 'run-1' })).toBeNull()
+    expect(result.current.resolveTimelineReference?.({ kind: 'issue', label: 'Issue #42', issueNumber: 42 })).toBe(
+      '/Test/issues/42',
+    )
+    expect(
+      result.current.resolveTimelineReference?.({ kind: 'workflow', label: 'Workflow', workflowRunId: 'run-1' }),
+    ).toBeNull()
   })
 })

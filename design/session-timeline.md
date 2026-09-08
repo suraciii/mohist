@@ -257,9 +257,8 @@ identity, and raw payloads.
 
 ## Status
 
-The Web has a classified timeline and a Raw view. Summary still combines saved
-transcript text with locally appended Runtime details. Public filtering covers
-only some internal input blocks and can discard ordinary text. Real-time
-delivery can precede transcript persistence, and Runtime-bound matching can
-leave the canonical page stale after replacement. Saved-batch refresh hints
-and the single complete-text projection remain implementation gaps.
+The Web has a classified timeline and a Raw view. Summary uses the saved public
+transcript; Raw retains Runtime details and the authorized diagnostic text.
+The Server removes complete known internal text sections before projecting
+public user, text, and reasoning content. Saved-batch canonical refresh hints
+refresh the open canonical page independently of its physical Runtime binding.

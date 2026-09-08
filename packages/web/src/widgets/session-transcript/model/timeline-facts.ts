@@ -20,6 +20,7 @@ export interface SessionTimelineSummaryInput {
 }
 
 export interface SessionTimelineFactInput {
+  view?: 'public' | 'raw'
   transcript?: { turns?: readonly SessionTurn[] | null } | null
   turns?: readonly SessionTurn[] | null
   summary?: SessionTimelineSummaryInput | null
@@ -269,6 +270,7 @@ function partFact(
   turn: SessionTurn,
   turnSequence: number | undefined,
   partIndex: number,
+  view: 'public' | 'raw',
 ): TimelineFact {
   const source = record(part) ?? {}
   const occurredAt = dateValue(source.startedAt, dateValue(source.at, turn.startedAt))
@@ -277,13 +279,13 @@ function partFact(
 
   if (source.type === 'text') {
     return fact(sourceId, 'transcript', 'message', occurredAt, order, part, {
-      text: stringValue(source.text),
+      text: view === 'raw' && typeof source.text === 'string' ? source.text : stringValue(source.text),
       correlationId: `${turn.id}:text`,
     })
   }
   if (source.type === 'reasoning') {
     return fact(sourceId, 'transcript', 'reasoning', occurredAt, order, part, {
-      text: stringValue(source.text),
+      text: view === 'raw' && typeof source.text === 'string' ? source.text : stringValue(source.text),
       correlationId: `${turn.id}:reasoning`,
     })
   }
@@ -327,6 +329,7 @@ function turnInputFacts(
   inputs: readonly SessionInputObservation[],
   agentTurns: readonly AgentTurnObservation[],
   fallback: string,
+  view: 'public' | 'raw',
 ): TimelineFact[] {
   const turnsById = new Map(turns.map((turn) => [turn.id, turn]))
   const observationsByInput = new Map<string, AgentTurnObservation>()
@@ -337,8 +340,31 @@ function turnInputFacts(
     const observation = observationsByInput.get(input.id)
     const transcriptTurn = observation ? turnsById.get(observation.id) : undefined
     const relatedInputIndex = observation?.inputIds.indexOf(input.id) ?? 0
-    const text = transcriptTurn && relatedInputIndex === 0 ? transcriptTurn.user.text : '消息'
+    const text =
+      transcriptTurn && relatedInputIndex === 0
+        ? view === 'raw'
+          ? transcriptTurn.user.text
+          : stringValue(transcriptTurn.user.text)
+        : undefined
+    const attachments = input.attachments?.map((attachment) => attachment.name) ?? []
+    const displayText = text ?? (attachments.length > 0 ? `附件：${attachments.join('、')}` : undefined)
     const occurredAt = transcriptTurn?.user.sentAt ?? fallback
+    if (displayText === undefined) {
+      const label = `输入 ${input.acceptance}`
+      return fact(
+        `input:${input.id}`,
+        'input',
+        'status',
+        occurredAt,
+        timestampOrder(occurredAt, input.sequence, 0),
+        input,
+        {
+          text: label,
+          status: { label, state: input.acceptance, turnId: observation?.id },
+          correlationId: observation?.id,
+        },
+      )
+    }
     return fact(
       `input:${input.id}`,
       'input',
@@ -347,8 +373,8 @@ function turnInputFacts(
       timestampOrder(occurredAt, input.sequence, 0),
       input,
       {
-        text,
-        input: { text, acceptance: observation ? input.acceptance : 'unknown', turnId: observation?.id },
+        text: displayText,
+        input: { text: displayText, acceptance: observation ? input.acceptance : 'unknown', turnId: observation?.id },
         correlationId: observation?.id,
       },
     )
@@ -360,12 +386,13 @@ function unmatchedTurnInputFacts(
   agentTurns: readonly AgentTurnObservation[],
   inputIds: Set<string>,
   fallback: string,
+  view: 'public' | 'raw',
 ): TimelineFact[] {
   const turnsById = new Map(agentTurns.map((turn) => [turn.id, turn]))
   return turns.flatMap((turn, index) => {
     const observation = turnsById.get(turn.id)
     const hasMatchedInput = observation?.inputIds.some((inputId) => inputIds.has(inputId)) ?? false
-    if (hasMatchedInput) return []
+    if (hasMatchedInput || (view === 'public' && !stringValue(turn.user.text))) return []
     const occurredAt = turn.user.sentAt || turn.startedAt || fallback
     return [
       fact(
@@ -508,6 +535,7 @@ function dedupeFacts(facts: TimelineFact[]): TimelineFact[] {
 }
 
 export function buildTimelineFacts(input: SessionTimelineFactInput): TimelineFact[] {
+  const view = input.view ?? 'public'
   const turns = input.turns ?? input.transcript?.turns ?? []
   const summary = input.summary
   const inputs = input.inputs ?? summary?.inputs ?? []
@@ -521,17 +549,22 @@ export function buildTimelineFacts(input: SessionTimelineFactInput): TimelineFac
     '1970-01-01T00:00:00.000Z'
   const facts: TimelineFact[] = []
 
-  const inputFacts = turnInputFacts(turns, inputs, agentTurns, fallback)
+  const inputFacts = turnInputFacts(turns, inputs, agentTurns, fallback, view)
   facts.push(...inputFacts)
   facts.push(
-    ...unmatchedTurnInputFacts(turns, agentTurns, new Set(inputs.map((inputEntry) => inputEntry.id)), fallback),
+    ...unmatchedTurnInputFacts(turns, agentTurns, new Set(inputs.map((inputEntry) => inputEntry.id)), fallback, view),
   )
   for (const [turnIndex, turn] of turns.entries()) {
     const observation = agentTurns.find((candidate) => candidate.id === turn.id)
     facts.push(
-      ...turn.assistant.map((part, partIndex) =>
-        partFact(part, turn, observation?.sequence, turnIndex * 100 + partIndex),
-      ),
+      ...turn.assistant
+        .filter(
+          (part) =>
+            view === 'raw' ||
+            (part.type !== 'text' && part.type !== 'reasoning') ||
+            stringValue(part.text) !== undefined,
+        )
+        .map((part, partIndex) => partFact(part, turn, observation?.sequence, turnIndex * 100 + partIndex, view)),
     )
   }
   facts.push(...turnStateFacts(agentTurns, turns, fallback))

@@ -9,19 +9,25 @@ describe('Live-then-refetch transcript equivalence', () => {
   it('live tool grouping matches replayed context-group after refetch simulation', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        view: 'raw',
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        runtime: 'opencode',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
+        runtime: 'opencode',
         sessionId: 'session-123',
         toolCallId: 'tc-read-1',
         toolName: 'Read',
@@ -32,9 +38,11 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
+        runtime: 'opencode',
         sessionId: 'session-123',
         toolCallId: 'tc-read-2',
         toolName: 'Read',
@@ -44,17 +52,17 @@ describe('Live-then-refetch transcript equivalence', () => {
     })
 
     await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      )
+      const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(2)
     })
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
+        runtime: 'opencode',
         sessionId: 'session-123',
         toolCallId: 'tc-read-1',
         toolName: 'Read',
@@ -65,9 +73,11 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
+        runtime: 'opencode',
         sessionId: 'session-123',
         toolCallId: 'tc-read-2',
         toolName: 'Read',
@@ -81,31 +91,35 @@ describe('Live-then-refetch transcript equivalence', () => {
     })
 
     const liveTurns = result.current.turns
-    const liveToolParts = liveTurns.flatMap(t => t.assistant).filter(
-      (part): part is ToolPart => part.type === 'tool',
-    )
+    const liveToolParts = liveTurns.flatMap((t) => t.assistant).filter((part): part is ToolPart => part.type === 'tool')
 
     expect(liveToolParts).toHaveLength(2)
-    expect(liveToolParts.every(p => p.tool.status === 'completed')).toBe(true)
-    expect(liveToolParts.every(p => p.tool.normalizedName === 'read')).toBe(true)
+    expect(liveToolParts.every((p) => p.tool.status === 'completed')).toBe(true)
+    expect(liveToolParts.every((p) => p.tool.normalizedName === 'read')).toBe(true)
   })
 
   it('live tool identity remains consistent after terminal refetch reconciliation', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        view: 'raw',
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        runtime: 'opencode',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
+        runtime: 'opencode',
         sessionId: 'session-123',
         toolCallId: 'tc-ident',
         toolName: 'grep',
@@ -115,17 +129,19 @@ describe('Live-then-refetch transcript equivalence', () => {
     })
 
     await waitFor(() => {
-      const toolPart = result.current.turns.at(-1)?.assistant.find(
-        (part): part is ToolPart => part.type === 'tool' && part.tool.toolCallId === 'tc-ident',
-      )
+      const toolPart = result.current.turns
+        .at(-1)
+        ?.assistant.find((part): part is ToolPart => part.type === 'tool' && part.tool.toolCallId === 'tc-ident')
       expect(toolPart?.tool.normalizedName).toBe('grep')
     })
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
+        runtime: 'opencode',
         sessionId: 'session-123',
         toolCallId: 'tc-ident',
         toolName: 'grep',
@@ -138,9 +154,9 @@ describe('Live-then-refetch transcript equivalence', () => {
       expect(result.current.isFinalizing).toBe(true)
     })
 
-    const toolPart = result.current.turns.at(-1)?.assistant.find(
-      (part): part is ToolPart => part.type === 'tool' && part.tool.toolCallId === 'tc-ident',
-    )
+    const toolPart = result.current.turns
+      .at(-1)
+      ?.assistant.find((part): part is ToolPart => part.type === 'tool' && part.tool.toolCallId === 'tc-ident')
     expect(toolPart?.tool.normalizedName).toBe('grep')
     expect(toolPart?.tool.status).toBe('completed')
     expect(toolPart?.tool.output).toBe('found 3 matches')
@@ -149,13 +165,17 @@ describe('Live-then-refetch transcript equivalence', () => {
   it('multiple sequential live tool events maintain correct order after refetch', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        view: 'raw',
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        runtime: 'opencode',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     const toolSequence = [
       { id: 'tc-seq-1', tool: 'read', input: { file_path: 'a.txt' }, output: 'a' },
@@ -166,9 +186,11 @@ describe('Live-then-refetch transcript equivalence', () => {
     for (const item of toolSequence) {
       act(() => {
         dispatchAgentEvent('coder_tool_call', {
-          issueNumber: 123,          projectId: 'project-1',
+          issueNumber: 123,
+          projectId: 'project-1',
           executionId: 'exec-123',
           runtimeSessionId: 'runtime-123',
+          runtime: 'opencode',
           sessionId: 'session-123',
           toolCallId: item.id,
           toolName: item.tool,
@@ -179,18 +201,18 @@ describe('Live-then-refetch transcript equivalence', () => {
     }
 
     await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      )
+      const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
       expect(toolParts).toHaveLength(3)
     })
 
     for (const item of toolSequence) {
       act(() => {
         dispatchAgentEvent('coder_tool_call', {
-          issueNumber: 123,          projectId: 'project-1',
+          issueNumber: 123,
+          projectId: 'project-1',
           executionId: 'exec-123',
           runtimeSessionId: 'runtime-123',
+          runtime: 'opencode',
           sessionId: 'session-123',
           toolCallId: item.id,
           toolName: item.tool,
@@ -204,32 +226,36 @@ describe('Live-then-refetch transcript equivalence', () => {
       expect(result.current.isFinalizing).toBe(true)
     })
 
-    const toolParts = result.current.turns.at(-1)?.assistant.filter(
-      (part): part is ToolPart => part.type === 'tool',
-    )
+    const toolParts = result.current.turns.at(-1)?.assistant.filter((part): part is ToolPart => part.type === 'tool')
     expect(toolParts).toHaveLength(3)
     expect(toolParts?.[0].tool.toolCallId).toBe('tc-seq-1')
     expect(toolParts?.[1].tool.toolCallId).toBe('tc-seq-2')
     expect(toolParts?.[2].tool.toolCallId).toBe('tc-seq-3')
-    expect(toolParts?.every(p => p.tool.status === 'completed')).toBe(true)
+    expect(toolParts?.every((p) => p.tool.status === 'completed')).toBe(true)
   })
 
   it('text append before and after tool events preserved through reconciliation', async () => {
     const initialTurns = [makeTurn()]
 
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      runtimeSessionId: 'runtime-123',
-      initialTurns,
-      isRunning: true,
-    }))
+    const { result } = renderHookWithQueryClient(() =>
+      useSessionTranscript({
+        view: 'raw',
+        issueNumber: 123,
+        sessionId: 'session-123',
+        runtimeSessionId: 'runtime-123',
+        runtime: 'opencode',
+        initialTurns,
+        isRunning: true,
+      }),
+    )
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
+        runtime: 'opencode',
         text: 'Reading files...',
         sessionId: 'session-123',
       })
@@ -237,9 +263,11 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
+        runtime: 'opencode',
         sessionId: 'session-123',
         toolCallId: 'tc-file',
         toolName: 'read',
@@ -250,9 +278,11 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
+        runtime: 'opencode',
         text: 'Done reading.',
         sessionId: 'session-123',
       })
@@ -260,9 +290,11 @@ describe('Live-then-refetch transcript equivalence', () => {
 
     act(() => {
       dispatchAgentEvent('coder_tool_call', {
-        issueNumber: 123,        projectId: 'project-1',
+        issueNumber: 123,
+        projectId: 'project-1',
         executionId: 'exec-123',
         runtimeSessionId: 'runtime-123',
+        runtime: 'opencode',
         sessionId: 'session-123',
         toolCallId: 'tc-file',
         toolName: 'read',
@@ -275,14 +307,10 @@ describe('Live-then-refetch transcript equivalence', () => {
       expect(result.current.isFinalizing).toBe(true)
     })
 
-    const textPart = result.current.turns.at(-1)?.assistant.find(
-      (p): p is TextPart => p.type === 'text',
-    )
+    const textPart = result.current.turns.at(-1)?.assistant.find((p): p is TextPart => p.type === 'text')
     expect(textPart?.text).toBe('Reading files...Done reading.')
 
-    const toolPart = result.current.turns.at(-1)?.assistant.find(
-      (part): part is ToolPart => part.type === 'tool',
-    )
+    const toolPart = result.current.turns.at(-1)?.assistant.find((part): part is ToolPart => part.type === 'tool')
     expect(toolPart?.tool.status).toBe('completed')
     expect(toolPart?.tool.output).toBe('file content')
   })

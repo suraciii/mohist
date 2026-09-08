@@ -115,13 +115,21 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
         }
 
         public List<TranscriptEnvelope> Published { get; } = [];
+        public Action<TranscriptEnvelope>? BeforePublish { get; set; }
 
-        public void Clear() => Published.Clear();
+        public void Clear()
+        {
+            Published.Clear();
+            BeforePublish = null;
+        }
 
         public Task PublishAsync(string projectId, TranscriptEnvelope envelope, CancellationToken ct = default)
         {
             if (_isCurrentScenario(envelope.SessionId))
+            {
+                BeforePublish?.Invoke(envelope);
                 Published.Add(envelope);
+            }
             return Task.CompletedTask;
         }
     }
@@ -149,6 +157,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
 
         public List<AgentSessionEvent> Events { get; } = [];
         public int SaveCount { get; private set; }
+        public Func<string, Task>? BeforeSaveAsync { get; set; }
         private (string Key, Exception Error)? _nextFailure;
         private string? _commitThenThrowNextKey;
 
@@ -166,6 +175,7 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
                 _lastSavedKey = null;
                 Events.Clear();
                 _commitThenThrowNextKey = null;
+                BeforeSaveAsync = null;
             }
         }
 
@@ -220,8 +230,10 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             return Task.CompletedTask;
         }
 
-        public Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default)
+        public async Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default)
         {
+            if (IsCurrentScenario(key) && BeforeSaveAsync is { } beforeSave)
+                await beforeSave(key);
             var commitThenThrow = string.Equals(_commitThenThrowNextKey, key, StringComparison.Ordinal);
             if (!commitThenThrow)
                 ThrowIfPending(key);
@@ -232,7 +244,6 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
                 _commitThenThrowNextKey = null;
                 throw new InvalidOperationException("store committed before transport failure");
             }
-            return Task.CompletedTask;
         }
 
         public Task DeleteAsync(string key)
@@ -280,6 +291,7 @@ public sealed class FakeAgentSessionTranscriptStore : IAgentSessionTranscriptSto
 {
     private readonly Func<string, bool> _isCurrentScenario;
     public List<AgentSessionTranscriptFlush> Flushes { get; } = [];
+    public Func<AgentSessionTranscriptFlush, Task>? BeforeSaveAsync { get; set; }
     private (string SessionId, Exception Error)? _nextFailure;
     private readonly object _gate = new();
     private readonly List<PendingFlushWait> _waiters = [];
@@ -296,6 +308,7 @@ public sealed class FakeAgentSessionTranscriptStore : IAgentSessionTranscriptSto
         lock (_gate)
         {
             _nextFailure = null;
+            BeforeSaveAsync = null;
             Flushes.Clear();
             foreach (var waiter in _waiters)
                 waiter.Completion.TrySetCanceled();
@@ -303,8 +316,10 @@ public sealed class FakeAgentSessionTranscriptStore : IAgentSessionTranscriptSto
         }
     }
 
-    public Task SaveAsync(AgentSessionTranscriptFlush transcript, CancellationToken ct = default)
+    public async Task SaveAsync(AgentSessionTranscriptFlush transcript, CancellationToken ct = default)
     {
+        if (_isCurrentScenario(transcript.Turn.SessionId) && BeforeSaveAsync is { } beforeSave)
+            await beforeSave(transcript);
         lock (_gate)
         {
             if (_nextFailure is { } failure &&
@@ -315,7 +330,7 @@ public sealed class FakeAgentSessionTranscriptStore : IAgentSessionTranscriptSto
             }
 
             if (!_isCurrentScenario(transcript.Turn.SessionId))
-                return Task.CompletedTask;
+                return;
 
             Flushes.Add(transcript);
             for (var index = _waiters.Count - 1; index >= 0; index--)
@@ -328,7 +343,6 @@ public sealed class FakeAgentSessionTranscriptStore : IAgentSessionTranscriptSto
                 waiter.Completion.TrySetResult(transcript);
             }
         }
-        return Task.CompletedTask;
     }
 
     public Task<AgentSessionTranscriptFlush> WaitForAsync(Func<AgentSessionTranscriptFlush, bool> predicate)
