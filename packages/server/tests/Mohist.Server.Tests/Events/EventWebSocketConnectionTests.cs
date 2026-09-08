@@ -643,7 +643,7 @@ public sealed class EventWebSocketConnectionTests
         if (forwardedProto is not null) context.Request.Headers["X-Forwarded-Proto"] = forwardedProto;
         if (forwardedHost is not null) context.Request.Headers["X-Forwarded-Host"] = forwardedHost;
 
-        Assert.Equal(expected, ProjectEventSocketRoutes.HasValidOrigin(context.Request, context.Connection.RemoteIpAddress));
+        Assert.Equal(expected, ProjectEventSocketRoutes.HasValidOrigin(context.Request, context.Connection.RemoteIpAddress, new EventSocketOptions()));
     }
 
     private static CloudEvent CloudEventFor(string projectId, string type, string issue = "42") => new(
