@@ -43,11 +43,14 @@ describe('buildTimelineFacts', () => {
       },
     })
 
-    expect(facts.filter(fact => fact.kind === 'input')).toMatchObject([
+    expect(facts.filter((fact) => fact.kind === 'input')).toMatchObject([
       { sourceId: 'input:input-1', input: { text: 'prompt-turn-1', acceptance: 'accepted', turnId: 'turn-1' } },
-      { sourceId: 'input:input-2', input: { text: '消息', acceptance: 'accepted', turnId: 'turn-1' } },
     ])
-    expect(facts.find(fact => fact.sourceId === 'part:part-tool')).toMatchObject({
+    expect(facts.find((fact) => fact.sourceId === 'input:input-2')).toMatchObject({
+      kind: 'status',
+      status: { state: 'accepted', turnId: 'turn-1' },
+    })
+    expect(facts.find((fact) => fact.sourceId === 'part:part-tool')).toMatchObject({
       kind: 'tool',
       raw: tool,
       tool: {
@@ -57,11 +60,13 @@ describe('buildTimelineFacts', () => {
         status: 'completed',
       },
     })
-    expect(facts).toContainEqual(expect.objectContaining({
-      sourceId: 'turn:turn-1:state',
-      kind: 'status',
-      status: { label: '执行中', state: 'executing', turnId: 'turn-1' },
-    }))
+    expect(facts).toContainEqual(
+      expect.objectContaining({
+        sourceId: 'turn:turn-1:state',
+        kind: 'status',
+        status: { label: '执行中', state: 'executing', turnId: 'turn-1' },
+      }),
+    )
   })
 
   it('shows terminal turn results and context boundaries as separate facts', () => {
@@ -75,34 +80,42 @@ describe('buildTimelineFacts', () => {
     const facts = buildTimelineFacts({
       turns: [turn('turn-failed', [reset])],
       summary: {
-        turns: [{
-          id: 'turn-failed',
-          sequence: 2,
-          inputIds: [],
-          status: 'failed',
-          result: { failureReason: 'provider unavailable' },
-        }],
+        turns: [
+          {
+            id: 'turn-failed',
+            sequence: 2,
+            inputIds: [],
+            status: 'failed',
+            result: { failureReason: 'provider unavailable' },
+          },
+        ],
         recoveryHistory: [{ type: 'compaction', recordedAt: '2026-08-03T10:00:02.000Z', summary: 'summary' }],
       },
     })
 
-    expect(facts).toContainEqual(expect.objectContaining({
-      sourceId: 'part:reset',
-      kind: 'boundary',
-      boundary: { kind: 'reset', reason: 'runtime reset' },
-    }))
-    expect(facts).toContainEqual(expect.objectContaining({
-      sourceId: 'turn:turn-failed:result',
-      kind: 'error',
-      error: { message: 'provider unavailable', kind: 'failed' },
-    }))
-    expect(facts).toContainEqual(expect.objectContaining({
-      sourceId: 'recovery:compaction:2026-08-03T10:00:02.000Z:0',
-      kind: 'boundary',
-      boundary: { kind: 'compaction', summary: 'summary' },
-    }))
-    expect(facts.findIndex(fact => fact.sourceId === 'part:reset')).toBeLessThan(
-      facts.findIndex(fact => fact.sourceId === 'recovery:compaction:2026-08-03T10:00:02.000Z:0'),
+    expect(facts).toContainEqual(
+      expect.objectContaining({
+        sourceId: 'part:reset',
+        kind: 'boundary',
+        boundary: { kind: 'reset', reason: 'runtime reset' },
+      }),
+    )
+    expect(facts).toContainEqual(
+      expect.objectContaining({
+        sourceId: 'turn:turn-failed:result',
+        kind: 'error',
+        error: { message: 'provider unavailable', kind: 'failed' },
+      }),
+    )
+    expect(facts).toContainEqual(
+      expect.objectContaining({
+        sourceId: 'recovery:compaction:2026-08-03T10:00:02.000Z:0',
+        kind: 'boundary',
+        boundary: { kind: 'compaction', summary: 'summary' },
+      }),
+    )
+    expect(facts.findIndex((fact) => fact.sourceId === 'part:reset')).toBeLessThan(
+      facts.findIndex((fact) => fact.sourceId === 'recovery:compaction:2026-08-03T10:00:02.000Z:0'),
     )
   })
 
@@ -129,14 +142,14 @@ describe('buildTimelineFacts', () => {
       lastActivityAt: at,
     })
 
-    expect(facts.filter(fact => fact.source === 'live')).toHaveLength(2)
+    expect(facts.filter((fact) => fact.source === 'live')).toHaveLength(2)
     expect(facts[0]?.raw).toBe(started)
     expect(facts[1]?.raw).toBe(completed)
     expect(facts[0]).toMatchObject({ sourceId: 'event-start', order: 7_000_001, kind: 'tool' })
     expect(facts[1]).toMatchObject({ sourceId: 'event-complete', order: 8_000_002, kind: 'tool' })
   })
 
-  it('keeps an input independent with unknown acceptance when no association is proven', () => {
+  it('keeps accepted input state independent when no text association is proven', () => {
     const facts = buildTimelineFacts({
       turns: [turn('turn-unmatched')],
       summary: {
@@ -145,13 +158,90 @@ describe('buildTimelineFacts', () => {
       },
     })
 
-    expect(facts).toContainEqual(expect.objectContaining({
-      sourceId: 'input:input-unmatched',
-      input: { text: '消息', acceptance: 'unknown', turnId: undefined },
-    }))
-    expect(facts).toContainEqual(expect.objectContaining({
-      sourceId: 'turn:turn-unmatched:input',
-      input: { text: 'prompt-turn-unmatched', acceptance: 'unknown' },
-    }))
+    expect(facts).toContainEqual(
+      expect.objectContaining({
+        sourceId: 'input:input-unmatched',
+        kind: 'status',
+        text: '输入 accepted',
+        status: { label: '输入 accepted', state: 'accepted', turnId: undefined },
+        raw: { id: 'input-unmatched', sequence: 1, source: 'web', acceptance: 'accepted' },
+      }),
+    )
+    expect(facts).toContainEqual(
+      expect.objectContaining({
+        sourceId: 'turn:turn-unmatched:input',
+        input: { text: 'prompt-turn-unmatched', acceptance: 'unknown', turnId: undefined },
+      }),
+    )
+  })
+
+  it('omits empty projected text without losing acceptance, turn state, or real attachments', () => {
+    const empty = {
+      ...turn('turn-1'),
+      user: { ...turn('turn-1').user, text: '' },
+      assistant: [
+        { id: 'text-empty', type: 'text' as const, text: '', startedAt: at, completedAt: null },
+        { id: 'thought-empty', type: 'reasoning' as const, text: ' ', startedAt: at, completedAt: null },
+      ],
+    }
+    const facts = buildTimelineFacts({
+      turns: [empty, { ...empty, id: 'unmatched' }],
+      summary: {
+        inputs: [
+          { id: 'input-1', sequence: 1, source: 'slack', acceptance: 'accepted' },
+          {
+            id: 'input-file',
+            sequence: 2,
+            source: 'slack',
+            acceptance: 'accepted',
+            attachments: [{ id: 'file-1', name: 'diagram.png', size: 12, source: 'slack', availability: 'available' }],
+          },
+        ],
+        turns: [{ id: 'turn-1', sequence: 1, inputIds: ['input-1'], status: 'queued' }],
+      },
+    })
+    expect(facts.filter((fact) => fact.kind === 'message' || fact.kind === 'reasoning')).toEqual([])
+    expect(facts.filter((fact) => fact.kind === 'input')).toMatchObject([
+      { sourceId: 'input:input-file', input: { text: '附件：diagram.png' } },
+    ])
+    expect(facts.find((fact) => fact.sourceId === 'input:input-1')).toMatchObject({
+      kind: 'status',
+      status: { state: 'accepted' },
+    })
+    expect(facts.find((fact) => fact.sourceId === 'turn:turn-1:state')).toMatchObject({
+      kind: 'status',
+      status: { state: 'queued' },
+    })
+  })
+
+  it.each(['', ' \n\t '])('preserves original Raw user and assistant facts containing %j', (text) => {
+    const original = {
+      ...turn('turn-raw'),
+      user: { ...turn('turn-raw').user, text },
+      assistant: [
+        { id: 'raw-text', type: 'text' as const, text, startedAt: at, completedAt: null },
+        { id: 'raw-reasoning', type: 'reasoning' as const, text, startedAt: at, completedAt: null },
+      ],
+    }
+    const raw = buildTimelineFacts({ view: 'raw', turns: [original] })
+    expect(raw).toHaveLength(3)
+    expect(raw.find((fact) => fact.kind === 'input')).toMatchObject({ text, input: { text }, raw: original })
+    for (const part of original.assistant) {
+      expect(raw.find((fact) => fact.sourceId === `part:${part.id}`)).toMatchObject({ text, raw: part })
+    }
+    expect(buildTimelineFacts({ view: 'public', turns: [original] })).toEqual([])
+    const associatedRaw = buildTimelineFacts({
+      view: 'raw',
+      turns: [original],
+      summary: {
+        inputs: [{ id: 'input-raw', sequence: 1, source: 'slack', acceptance: 'accepted' }],
+        turns: [{ id: original.id, sequence: 1, inputIds: ['input-raw'], status: 'queued' }],
+      },
+    })
+    expect(associatedRaw.find((fact) => fact.sourceId === 'input:input-raw')).toMatchObject({
+      kind: 'input',
+      text,
+      input: { text, acceptance: 'accepted' },
+    })
   })
 })

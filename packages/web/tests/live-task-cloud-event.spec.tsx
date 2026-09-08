@@ -247,13 +247,17 @@ describe('LiveTaskProvider transcript routing', () => {
     const payload = {
       projectId: 'project-1',
       executionId: 'execution-1',
-      runtimeSessionId: 'runtime-1',
+      sessionId: 'nested-session',
+      runtimeSessionId: 'nested-runtime',
+      runtime: 'pi',
       ...partialPayload,
     }
 
     onTranscriptEvent({
       Type: eventName,
       SessionId: 'session-1',
+      RuntimeSessionId: 'runtime-1',
+      Runtime: 'opencode',
       Sequence: 1,
       CreatedAt: '2026-06-11T00:00:00.0000000Z',
       Payload: payload,
@@ -264,12 +268,17 @@ describe('LiveTaskProvider transcript routing', () => {
       expect(received[0]).toMatchObject({
         Type: eventName,
         SessionId: 'session-1',
+        RuntimeSessionId: 'runtime-1',
+        Runtime: 'opencode',
         Sequence: 1,
         CreatedAt: '2026-06-11T00:00:00.0000000Z',
         Payload: payload,
         type: eventName,
         payload,
         ...payload,
+        sessionId: 'session-1',
+        runtimeSessionId: 'runtime-1',
+        runtime: 'opencode',
       })
     })
     off()
@@ -300,13 +309,17 @@ describe('LiveTaskProvider transcript routing', () => {
     const payload = {
       projectId: 'project-1',
       executionId: 'execution-1',
-      runtimeSessionId: 'runtime-1',
+      sessionId: 'nested-session',
+      runtimeSessionId: 'nested-runtime',
+      runtime: 'pi',
       ...partialPayload,
     }
 
     onTranscriptEvent({
       Type: eventName,
       SessionId: 'session-1',
+      RuntimeSessionId: 'runtime-1',
+      Runtime: 'opencode',
       Sequence: 1,
       CreatedAt: '2026-06-11T00:00:00.0000000Z',
       Payload: payload,
@@ -317,12 +330,17 @@ describe('LiveTaskProvider transcript routing', () => {
       expect(received[0]).toMatchObject({
         Type: eventName,
         SessionId: 'session-1',
+        RuntimeSessionId: 'runtime-1',
+        Runtime: 'opencode',
         Sequence: 1,
         CreatedAt: '2026-06-11T00:00:00.0000000Z',
         Payload: payload,
         type: eventName,
         payload,
         ...payload,
+        sessionId: 'session-1',
+        runtimeSessionId: 'runtime-1',
+        runtime: 'opencode',
       })
     })
     off()

@@ -203,8 +203,21 @@ scannable, while required intervention must be visible immediately.
 - Compact and Reset create visible divider entries. Earlier content remains
   visible, and later work begins with empty context.
 
-A raw event view shows the same underlying timeline data without presentation
-processing and helps diagnose a result.
+Summary shows the latest saved conversation and execution record. It updates
+as Mohist saves progress, rather than displaying each arriving text fragment.
+New saved progress and accepted or queued Input must appear without a manual
+reload.
+
+Summary omits recognized internal setup and recalled-memory blocks from input,
+reply, and reasoning text. It keeps the surrounding conversation, including
+every ordinary paragraph. An omitted block must not leave an empty message or
+pretend that an attachment was sent. Unknown or unfinished blocks remain
+visible. This is a readability rule, not a guarantee that sensitive content is
+hidden.
+
+Select **Raw** to inspect the original text and event payloads from the same
+record, including the internal blocks omitted by Summary. Switching back to
+Summary must not display text retained from Raw.
 
 The page also supports model, usage, compaction records, current Activity,
 Follow-up, Stop of a queued or active Turn, Compact, and Reset. Follow-up joins
@@ -302,10 +315,6 @@ The implementation currently has these gaps:
 - The Web UI does not expose Slack Connection owner transfer, credential
   rotation or revalidation, Enable, Disable, or Delete.
 - Tool entries do not yet use the full sentence, salience, or collapse rules.
-- Mohist domain actions have no separate presentation.
-- SessionInput acceptance and AgentTurn state have independent evidence but are
-  not part of the timeline.
-- There is no raw event view.
 
 Confirmed-missing recovery, Compact, and Reset are implemented, and their
 context boundaries appear in the timeline.

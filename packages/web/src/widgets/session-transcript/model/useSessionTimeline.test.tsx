@@ -48,14 +48,16 @@ describe('useSessionTimeline', () => {
   })
 
   it('returns one fact set for both unfolded items and grouped entries', () => {
-    const { result } = renderHook(() => useSessionTimeline({
-      turns: [readTurn()],
-      summary: { activity: 'idle' },
-    }))
+    const { result } = renderHook(() =>
+      useSessionTimeline({
+        turns: [readTurn()],
+        summary: { activity: 'idle' },
+      }),
+    )
 
-    expect(result.current.facts.filter(fact => fact.kind === 'tool')).toHaveLength(3)
-    expect(result.current.items.filter(item => item.renderClass === 'file-read')).toHaveLength(3)
-    expect(result.current.entries.some(entry => entry.summary === '读取了 3 个文件')).toBe(true)
+    expect(result.current.facts.filter((fact) => fact.kind === 'tool')).toHaveLength(3)
+    expect(result.current.items.filter((item) => item.renderClass === 'file-read')).toHaveLength(3)
+    expect(result.current.entries.some((entry) => entry.summary === '读取了 3 个文件')).toBe(true)
     expect(result.current.currentActivity).toMatchObject({ state: 'idle', label: '空闲' })
   })
 
@@ -70,15 +72,21 @@ describe('useSessionTimeline', () => {
   })
 
   it('uses queued turn state before active session activity', () => {
-    const { result } = renderHook(() => useSessionTimeline({
-      summary: {
-        activity: 'active',
-        currentTurnId: 'turn-queued',
-        turns: [{ id: 'turn-queued', sequence: 1, inputIds: [], status: 'queued' }],
-      },
-    }))
+    const { result } = renderHook(() =>
+      useSessionTimeline({
+        summary: {
+          activity: 'active',
+          currentTurnId: 'turn-queued',
+          turns: [{ id: 'turn-queued', sequence: 1, inputIds: [], status: 'queued' }],
+        },
+      }),
+    )
 
-    expect(result.current.currentActivity).toMatchObject({ state: 'queued', label: '排队中', sourceId: 'turn:turn-queued:state' })
+    expect(result.current.currentActivity).toMatchObject({
+      state: 'queued',
+      label: '排队中',
+      sourceId: 'turn:turn-queued:state',
+    })
     expect(result.current.items).toContainEqual(expect.objectContaining({ renderClass: 'status', summary: '排队中' }))
   })
 
@@ -88,22 +96,26 @@ describe('useSessionTimeline', () => {
       startedAt: at,
       completedAt: null,
       user: { role: 'mohist', text: 'Continue', kind: 'followup', sentAt: at },
-      assistant: [{
-        id: 'message-complete',
-        type: 'text',
-        text: 'Previous output',
-        startedAt: at,
-        completedAt: at,
-      }],
+      assistant: [
+        {
+          id: 'message-complete',
+          type: 'text',
+          text: 'Previous output',
+          startedAt: at,
+          completedAt: at,
+        },
+      ],
     }
-    const { result } = renderHook(() => useSessionTimeline({
-      turns: [turn],
-      summary: {
-        activity: 'active',
-        currentTurnId: 'turn-executing',
-        turns: [{ id: 'turn-executing', sequence: 1, inputIds: [], status: 'executing' }],
-      },
-    }))
+    const { result } = renderHook(() =>
+      useSessionTimeline({
+        turns: [turn],
+        summary: {
+          activity: 'active',
+          currentTurnId: 'turn-executing',
+          turns: [{ id: 'turn-executing', sequence: 1, inputIds: [], status: 'executing' }],
+        },
+      }),
+    )
 
     expect(result.current.currentActivity).toMatchObject({ state: 'active', label: '执行中' })
   })
@@ -114,24 +126,28 @@ describe('useSessionTimeline', () => {
     const wrapper = ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     )
-    const rendered = renderHook(() => {
-      const transcript = useSessionTranscript({
-        issueNumber: 0,
-        sessionId: 'session-1',
-        runtimeSessionId: 'runtime-1',
-        runtime: 'opencode',
-        isRunning: true,
-        initialTurns: emptyTurns,
-      })
-      return {
-        transcript,
-        timeline: useSessionTimeline({
-          turns: transcript.turns,
-          liveDetails: transcript.liveDetails,
-          summary: { activity: 'active' },
-        }),
-      }
-    }, { wrapper })
+    const rendered = renderHook(
+      () => {
+        const transcript = useSessionTranscript({
+          view: 'raw',
+          issueNumber: 0,
+          sessionId: 'session-1',
+          runtimeSessionId: 'runtime-1',
+          runtime: 'opencode',
+          isRunning: true,
+          initialTurns: emptyTurns,
+        })
+        return {
+          transcript,
+          timeline: useSessionTimeline({
+            turns: transcript.turns,
+            liveDetails: transcript.liveDetails,
+            summary: { activity: 'active' },
+          }),
+        }
+      },
+      { wrapper },
+    )
     mountedHookUnmount = rendered.unmount
     const { result } = rendered
 
@@ -181,7 +197,7 @@ describe('useSessionTimeline', () => {
       sequence: 2,
       payload: { source: 'started' },
     })
-    const toolItem = result.current.timeline.items.find(item => item.id === 'call-1')
+    const toolItem = result.current.timeline.items.find((item) => item.id === 'call-1')
     expect(toolItem).toMatchObject({
       id: 'call-1',
       renderClass: 'file-read',

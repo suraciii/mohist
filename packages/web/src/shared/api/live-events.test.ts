@@ -104,6 +104,30 @@ async function flushPromises() {
 }
 
 describe('LiveEventsController', () => {
+  it('admits only explicit canonical-only boundaries and buffers them during reconciliation', async () => {
+    const { controller, sockets, transcript } = setup()
+    const gate = deferred()
+    controller.registerTranscriptReconciliation('session-1', null, () => gate.promise)
+    sockets[0].open()
+    sockets[0].receive({ jsonrpc: '2.0', id: request(sockets[0]).id, result: {} })
+    const send = (event: Record<string, unknown>) =>
+      sockets[0].receive({
+        jsonrpc: '2.0',
+        method: 'event.transcript',
+        params: { event },
+      })
+    send({ type: 'session.activity', sessionId: '', runtimeSessionId: null })
+    send({ type: 'session.activity', sessionId: 'session-1' })
+    send({ type: 'message.delta', sessionId: 'session-1', runtimeSessionId: null, payload: { text: 'invalid' } })
+    const hint = { type: 'session.activity', sessionId: 'session-1', runtimeSessionId: null, payload: {} }
+    send(hint)
+    expect(transcript).not.toHaveBeenCalled()
+    gate.resolve()
+    await flushPromises()
+    expect(transcript).toHaveBeenCalledExactlyOnceWith(hint)
+    controller.stop()
+  })
+
   it('opens the project socket and sends the fixed complete subscription first', () => {
     const { sockets, urls } = setup()
     expect(urls).toEqual(['wss://mohist.test/api/projects/project%2Fone/events/socket'])

@@ -32,6 +32,7 @@ interface UseSessionTranscriptOptions {
   sessionId: string
   runtimeSessionId: string
   runtime?: string | null
+  view: 'public' | 'raw'
   isHistoricalRuntimeView?: boolean
   initialTurns?: SessionTurn[]
   sessionQueryKeys?: readonly (readonly unknown[])[]
@@ -57,20 +58,14 @@ function matchesSessionEvent(
   const eventRsid = detail.runtimeSessionId
   const eventRt = detail.runtime
 
-  if (isNonEmptyStr(eventSid) && eventSid !== pageCanonicalId) return false
-
-  const hasPageRsid = isNonEmptyStr(pageRuntimeSessionId)
-  const hasEventRsid = isNonEmptyStr(eventRsid)
-
-  if (hasPageRsid && hasEventRsid) {
-    if (eventRsid !== pageRuntimeSessionId) return false
-    if (pageRuntime != null && eventRt != null && eventRt !== pageRuntime) return false
-    return true
-  }
-
-  if (hasPageRsid && !hasEventRsid) return false
-
-  return false
+  return (
+    isNonEmptyStr(pageCanonicalId) &&
+    eventSid === pageCanonicalId &&
+    isNonEmptyStr(pageRuntimeSessionId) &&
+    eventRsid === pageRuntimeSessionId &&
+    isNonEmptyStr(pageRuntime) &&
+    eventRt === pageRuntime
+  )
 }
 
 export interface UseSessionTranscriptResult {
@@ -93,6 +88,8 @@ export function useSessionTranscript({
   sessionId,
   runtimeSessionId,
   runtime,
+  view,
+  isHistoricalRuntimeView = false,
   initialTurns,
   sessionQueryKeys,
   isRunning,
@@ -128,12 +125,18 @@ export function useSessionTranscript({
   const liveDetailOrdinalRef = useRef(0)
   const liveSourceIdsRef = useRef(new Set<string>())
 
-  useEffect(() => {
+  const scope = `${sessionId}\u0000${runtimeSessionId}\u0000${runtime}\u0000${view}`
+  const [currentScope, setCurrentScope] = useState(scope)
+  if (currentScope !== scope) {
+    setCurrentScope(scope)
+    setTurns(initialTurns ?? [])
     hasLiveTailRef.current = false
     setLiveDetails([])
+    liveToolCallMapRef.current.clear()
+    pendingCorrelationRef.current.clear()
     liveDetailOrdinalRef.current = 0
     liveSourceIdsRef.current.clear()
-  }, [issueNumber, sessionId, runtimeSessionId])
+  }
 
   const scrollToBottom = useCallback(() => {
     setIsNearBottom(true)
@@ -198,41 +201,95 @@ export function useSessionTranscript({
   }, [invalidateSessionQueries])
 
   useEffect(() => {
-    if (!sessionId || !runtimeSessionId) return
+    if (!sessionId || isHistoricalRuntimeView) return
+    let disposed = false
+    let refreshing = false
+    let dirty = false
+    const queryKeys = sessionQueryKeys ?? [
+      terminalInvalidationKey ?? issueWorkflowKeys.session(projectId, issueNumber, 'coder-sessions', sessionId),
+    ]
+    // A saved hint arriving during a read needs one trailing snapshot, not a
+    // cancelled request per event or an assumption that the in-flight read is current.
+    const refresh = async () => {
+      dirty = true
+      if (refreshing) return
+      refreshing = true
+      try {
+        do {
+          dirty = queryKeys.some((queryKey) => queryClient.isFetching({ queryKey, exact: true }) > 0)
+          await Promise.all(
+            queryKeys.map((queryKey) =>
+              queryClient.invalidateQueries({ queryKey, exact: true }, { cancelRefetch: false }),
+            ),
+          )
+        } while (dirty && !disposed)
+      } finally {
+        refreshing = false
+      }
+    }
+    const onBoundary = (detail: { sessionId?: string | null; runtimeSessionId?: string | null }) => {
+      if (detail.sessionId === sessionId && detail.runtimeSessionId === null) {
+        void refresh().catch(() => {})
+      }
+    }
+    const unsubActivity = onAgentEvent('session.activity', onBoundary)
+    const unsubReset = onAgentEvent('session.context_reset', onBoundary)
+    return () => {
+      disposed = true
+      unsubActivity()
+      unsubReset()
+    }
+  }, [
+    sessionId,
+    isHistoricalRuntimeView,
+    queryClient,
+    projectId,
+    issueNumber,
+    sessionQueryKeys?.[0],
+    sessionQueryKeys?.[1],
+    terminalInvalidationKey,
+  ])
+
+  useEffect(() => {
+    if (!sessionId) return
     let cancelled = false
     const queryKeys = sessionQueryKeys ?? []
     const transcriptQueryKey = queryKeys.find((queryKey) => queryKey.includes('transcript'))
-    const registration = liveEvents.registerTranscriptReconciliation(sessionId, runtimeSessionId, async (signal) => {
-      for (const queryKey of queryKeys) {
-        if (cancelled || signal.aborted) return
-        const cancel = () => void queryClient.cancelQueries({ queryKey, exact: true })
-        signal.addEventListener('abort', cancel, { once: true })
-        try {
-          await queryClient.refetchQueries({ queryKey, exact: true }, { throwOnError: true })
-        } finally {
-          signal.removeEventListener('abort', cancel)
+    const registration = liveEvents.registerTranscriptReconciliation(
+      sessionId,
+      runtimeSessionId || null,
+      async (signal) => {
+        for (const queryKey of queryKeys) {
+          if (cancelled || signal.aborted) return
+          const cancel = () => void queryClient.cancelQueries({ queryKey, exact: true })
+          signal.addEventListener('abort', cancel, { once: true })
+          try {
+            await queryClient.refetchQueries({ queryKey, exact: true }, { throwOnError: true })
+          } finally {
+            signal.removeEventListener('abort', cancel)
+          }
         }
-      }
-      if (cancelled || signal.aborted) return
-      const response = transcriptQueryKey
-        ? queryClient.getQueryData<{ turns?: SessionTurn[] }>(transcriptQueryKey)
-        : undefined
-      const authoritativeTurns = response?.turns ?? []
-      flushSync(() => {
         if (cancelled || signal.aborted) return
-        hasLiveTailRef.current = false
-        liveToolCallMapRef.current.clear()
-        pendingCorrelationRef.current.clear()
-        liveDetailOrdinalRef.current = 0
-        liveSourceIdsRef.current.clear()
-        setLiveDetails([])
-        setTurns(authoritativeTurns)
-        setIsFinalizing(false)
-        setIsThinking(false)
-        clearStreaming()
-        setTranscriptVersion((version) => version + 1)
-      })
-    })
+        const response = transcriptQueryKey
+          ? queryClient.getQueryData<{ turns?: SessionTurn[] }>(transcriptQueryKey)
+          : undefined
+        const authoritativeTurns = response?.turns ?? []
+        flushSync(() => {
+          if (cancelled || signal.aborted) return
+          hasLiveTailRef.current = false
+          liveToolCallMapRef.current.clear()
+          pendingCorrelationRef.current.clear()
+          liveDetailOrdinalRef.current = 0
+          liveSourceIdsRef.current.clear()
+          setLiveDetails([])
+          setTurns(authoritativeTurns)
+          setIsFinalizing(false)
+          setIsThinking(false)
+          clearStreaming()
+          setTranscriptVersion((version) => version + 1)
+        })
+      },
+    )
     return () => {
       cancelled = true
       registration.dispose()
@@ -248,7 +305,7 @@ export function useSessionTranscript({
   ])
 
   useEffect(() => {
-    if (hasLiveTailRef.current && isRunning) {
+    if (view === 'raw' && hasLiveTailRef.current && isRunning) {
       return
     }
     setTurns(initialTurns ?? [])
@@ -259,7 +316,7 @@ export function useSessionTranscript({
     setIsThinking(false)
     clearStreaming()
     setTranscriptVersion((version) => version + 1)
-  }, [initialTurns, isRunning, clearStreaming])
+  }, [initialTurns, isRunning, view, clearStreaming])
 
   useEffect(() => {
     if (!isRunning) {
@@ -287,7 +344,7 @@ export function useSessionTranscript({
       runtimeSessionId?: string | null
       runtime?: string | null
     }) => {
-      if (!mountedRef.current) return false
+      if (!mountedRef.current || view !== 'raw') return false
       return matchesSessionEvent(sessionId, runtimeSessionId, runtime, detail)
     }
     const captureLiveDetail = (eventName: string, detail: Record<string, unknown>) => {
@@ -677,11 +734,20 @@ export function useSessionTranscript({
       }
       for (const unsub of unsubs) unsub()
     }
-  }, [sessionId, runtimeSessionId, runtime, issueNumber, queryClient, invalidateAndRefetch, invalidateSessionQueries])
+  }, [
+    sessionId,
+    runtimeSessionId,
+    runtime,
+    view,
+    issueNumber,
+    queryClient,
+    invalidateAndRefetch,
+    invalidateSessionQueries,
+  ])
 
   return {
-    turns,
-    liveDetails,
+    turns: view === 'public' ? (initialTurns ?? []) : turns,
+    liveDetails: view === 'public' ? [] : liveDetails,
     transcriptVersion,
     isNearBottom,
     setIsNearBottom,

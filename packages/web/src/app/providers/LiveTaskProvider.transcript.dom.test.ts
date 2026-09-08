@@ -25,6 +25,23 @@ beforeEach(() => {
 })
 
 describe('LiveTaskProvider transcript routing', () => {
+  it('never replaces header routing identities with conflicting or missing nested identities', () => {
+    const payload = { sessionId: 'nested', runtimeSessionId: 'nested-runtime', runtime: 'nested-runtime-kind' }
+    expect(
+      __testing__.unwrapTranscriptEnvelope({
+        type: 'session.activity',
+        sessionId: 'canonical',
+        runtimeSessionId: null,
+        runtime: null,
+        payload,
+      })?.detail,
+    ).toMatchObject({ sessionId: 'canonical', runtimeSessionId: null, runtime: null, payload })
+    const missing = __testing__.unwrapTranscriptEnvelope({ type: 'message.delta', sequence: 1, payload })?.detail
+    expect(missing).not.toHaveProperty('sessionId')
+    expect(missing).not.toHaveProperty('runtimeSessionId')
+    expect(missing).not.toHaveProperty('runtime')
+  })
+
   it('unwraps transcript envelopes with runtime metadata and payload', () => {
     const envelope = {
       type: 'message.delta',

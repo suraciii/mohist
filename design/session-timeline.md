@@ -54,6 +54,73 @@ memory, or raw transcript data.
 
 ## Semantics
 
+### Summary Projection
+
+Summary consumes the saved public transcript and canonical Session
+observations. The Server owns one complete-text projection before client
+classification. It removes only complete, exactly recognized Mohist execution
+envelopes and OpenViking context blocks. The recognized marker pairs have one
+allowlist in that projection; clients must not copy its parser.
+
+The projection applies to input, reply, and reasoning text regardless of role.
+The client uses projected transcript text for those timeline classes; canonical
+Input and Turn observations supply their separate state facts. The projection
+preserves all text outside matched blocks, including multiple ordinary
+paragraphs. Unknown markers and unmatched or unclosed blocks remain unchanged.
+It must not guess internal content from ordinary prose or expand into general
+diagnostic-payload redaction.
+
+Text or reasoning parts emptied by this projection produce no Summary item.
+Empty projected input text must not create a blank message or imply an
+attachment. Real attachment evidence, Input acceptance, and Turn state remain
+independent facts. Stored text and Raw responses remain unchanged. This
+projection controls readability, not confidentiality; an unfinished block can
+remain visible in a saved snapshot.
+
+Summary replaces its text from accumulated public transcript parts. It must
+not append Runtime text fragments or classify Raw detail payloads. No local
+live tail may block a newer saved snapshot or survive a switch from Raw into
+Summary. This boundary accepts saved-batch updates instead of per-token
+rendering and requires no streaming parser or second accumulated transcript.
+
+### Live Reconciliation and Identity
+
+The open page follows the canonical AgentSession identity. A canonical Session
+boundary or refresh hint invalidates its Session summary and transcript
+queries even while idle, before a Runtime binding exists, or after that
+binding changes. Compact, Reset, and Runtime replacement must not require the
+page to reload. The refreshed Server snapshot determines the current binding
+and state.
+
+Canonical-only hints apply to the canonical page, not a historical Runtime
+view, which remains scoped to its selected physical Runtime Session.
+
+Runtime detail is separate from canonical invalidation. A detail must match
+the page's canonical Session, physical Runtime Session, and Runtime before it
+can enter the current live view. Missing or conflicting identity must not
+relax that match. Envelope routing identities are authoritative; nested
+payload fields must not replace them. Late detail from an old physical
+Session cannot append current content or change current Activity.
+
+The Server publishes a canonical-only `session.activity` refresh hint after
+each saved transcript batch. It also publishes the hint after committing an
+accepted or queued Input and its Turn state, including when no physical
+Runtime Session exists. The hint carries canonical Session identity without a
+physical Runtime identity. It is an invalidation signal, not a new Activity
+transition, transcript fact, or domain event.
+
+All writes needed by the refreshed snapshot must succeed before the hint is
+published. A failed save or an empty persistence cycle publishes no hint. A
+hint publication failure must not change committed execution state; existing
+reconnect reconciliation restores the saved snapshot. No separate delivery
+queue is added for these hints.
+
+The client uses the existing Web event channel and query refetch mechanism to
+replace Summary from saved state. Raw Runtime details may update the Raw view;
+they do not trigger one Summary HTTP request per text fragment. Saved-batch
+hints, canonical boundaries, and reconnect reconciliation drive Summary
+refresh. This path adds no timer, polling loop, parser, or configuration flag.
+
 ### Classification
 
 Classification is a pure function from transcript fact sequence to item
@@ -122,8 +189,8 @@ parsed, remains a `shell` item.
   `toolCallId`.
 - `completed` and `failed` are irreversible terminal states. Late facts cannot
   move them backward.
-- Streaming text and reasoning append by message association. Seal the current
-  stream before inserting a non-text item. A later chunk starts a new item.
+- Text and reasoning keep their message association when a saved snapshot
+  replaces Summary. Item order follows the saved fact sequence.
 - A fallback item may be promoted when facts become complete, for example from
   `shell` to `domain-action`. Its Id does not change.
 
@@ -167,8 +234,9 @@ infer state from heartbeats or item order.
 
 A page-level toggle shows the same timeline data in raw fact order: one row per
 transcript fact with an expandable payload. The two views are two levels of the
-same data, not two feeds. Switching views anchors the scroll position by item
-Id.
+same data, not two feeds. Raw retains original text and payloads and may append
+matching Runtime detail from the existing channel. Switching views anchors the
+scroll position by item Id without carrying Raw text into Summary.
 
 The raw view is a controlled Web diagnostic presentation. It is not an external
 API export. Direct callers receive only the public projection from
@@ -189,12 +257,8 @@ identity, and raw payloads.
 
 ## Status
 
-The current Web implementation provides a conversational message view with
-classified tool cards. It does not yet implement the `TimelineItem` derivation
-layer, salience policy, failure-breaking groups, Mohist domain-action
-recognition, or raw event view. SessionInput acceptance and AgentTurn state
-remain in a separate evidence area.
-
-Transcript facts, persistence, and real-time delivery are implemented. The
-presentation model requires no new transcript facts and does not change Server
-responsibilities.
+The Web has a classified timeline and a Raw view. Summary uses the saved public
+transcript; Raw retains Runtime details and the authorized diagnostic text.
+The Server removes complete known internal text sections before projecting
+public user, text, and reasoning content. Saved-batch canonical refresh hints
+refresh the open canonical page independently of its physical Runtime binding.
