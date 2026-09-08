@@ -46,7 +46,9 @@ function deferred() {
   return { promise, resolve, reject }
 }
 
-function setup(options: { random?: () => number } = {}) {
+function setup(
+  options: { random?: () => number; setTimer?: typeof setTimeout; clearTimer?: typeof clearTimeout } = {},
+) {
   const sockets: FakeWebSocket[] = []
   const urls: string[] = []
   const domain = vi.fn()
@@ -75,6 +77,7 @@ function setup(options: { random?: () => number } = {}) {
     clearTimer: vi.fn() as unknown as typeof clearTimeout,
     random: options.random ?? (() => 0.5),
     location: { protocol: 'https:', host: 'mohist.test' },
+    ...options,
   })
   controller.start()
   return { controller, queryClient, sockets, urls, domain, transcript, status, acknowledged, timers }
@@ -104,6 +107,55 @@ async function flushPromises() {
 }
 
 describe('LiveEventsController', () => {
+  it('uses the global receiver when the default timer schedules a reconnect', () => {
+    const scheduled: Array<{ callback: () => void; delay: number }> = []
+    vi.stubGlobal('setTimeout', function (this: unknown, callback: () => void, delay: number) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation')
+      scheduled.push({ callback, delay })
+      return scheduled.length
+    })
+    const { controller, sockets, urls } = setup({ setTimer: undefined })
+    try {
+      expect(() => sockets[0].disconnect()).not.toThrow()
+      expect(scheduled).toHaveLength(1)
+      expect(scheduled[0].delay).toBe(1000)
+
+      scheduled[0].callback()
+
+      expect(sockets).toHaveLength(2)
+      expect(urls[1]).toBe(urls[0])
+      sockets[1].open()
+      expect(request(sockets[1]).method).toBe('subscription.set')
+    } finally {
+      controller.stop()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('uses the global receiver to cancel the default timer and cannot reconnect after stop', () => {
+    const cleared: unknown[] = []
+    vi.stubGlobal('clearTimeout', function (this: unknown, timer: unknown) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation')
+      cleared.push(timer)
+    })
+    const { controller, sockets, timers, status } = setup({ clearTimer: undefined })
+    try {
+      sockets[0].disconnect()
+      expect(timers).toHaveLength(1)
+
+      expect(() => controller.stop()).not.toThrow()
+
+      expect(cleared).toEqual([1])
+      expect(status).toHaveBeenLastCalledWith('disconnected')
+      timers[0].callback()
+      expect(sockets).toHaveLength(1)
+      controller.stop()
+      expect(cleared).toEqual([1])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('admits only explicit canonical-only boundaries and buffers them during reconciliation', async () => {
     const { controller, sockets, transcript } = setup()
     const gate = deferred()
