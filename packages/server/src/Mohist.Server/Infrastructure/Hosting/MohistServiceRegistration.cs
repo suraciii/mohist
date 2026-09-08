@@ -285,6 +285,13 @@ public static class MohistServiceRegistration
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
         services.AddCloudEventPushHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
         services.AddSingleton<IEventMatchFailureSink, EventSocketMatchFailureSink>();
+        var trustedEventProxies = configuration.GetSection($"{EventSocketOptions.SectionName}:{nameof(EventSocketOptions.TrustedProxyAddresses)}")
+            .Get<string[]>() ?? [];
+        services.AddOptions<EventSocketOptions>()
+            .Configure(options => options.TrustedProxyAddresses = trustedEventProxies)
+            .Validate(options => options.TrustedProxyAddresses.All(address => System.Net.IPAddress.TryParse(address, out _)),
+                "EventSocket:TrustedProxyAddresses must contain only valid IP addresses.")
+            .ValidateOnStart();
         services.AddSingleton<EventWebSocketRegistry>();
         services.AddHostedService(sp => sp.GetRequiredService<EventWebSocketRegistry>());
         services.AddSingleton<ITranscriptEventPublisher, WebSocketTranscriptEventPublisher>();
