@@ -36,16 +36,8 @@ public sealed class SlackWebLinkBuilder : IScopedService
         {
             new
             {
-                type = "actions",
-                elements = new object[]
-                {
-                    new
-                    {
-                        type = "button",
-                        text = new { type = "plain_text", text = "Open in Mohist" },
-                        url,
-                    },
-                },
+                type = "section",
+                text = new { type = "mrkdwn", text = $"<{url}|Open in Mohist>" },
             },
         });
         return new SlackWebLink(url, blocks);

@@ -5,9 +5,12 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Project.Services;
 using Mohist.Server.Slack.Domain;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Tests.Support;
 using Xunit;
@@ -53,7 +56,7 @@ public sealed class SlackStatusProjectionSpecs
         var projection = new SlackStatusProjection(store);
         var source = new SlackMessageIdentity("T1", "C1", "100.001");
         const string sessionId = "agent-session-1";
-        var blocks = JsonSerializer.SerializeToElement(new[]
+        var controls = JsonSerializer.SerializeToElement(new[]
         {
             new
             {
@@ -63,12 +66,20 @@ public sealed class SlackStatusProjectionSpecs
                     new
                     {
                         type = "button",
-                        text = new { type = "plain_text", text = "Open in Mohist" },
-                        url = "https://mohist.example/p1/sessions/agent-session-1",
+                        text = new { type = "plain_text", text = "Stop" },
+                        action_id = SlackTurnControlService.StopActionId,
+                        value = "opaque-control-value",
                     },
                 },
             },
         });
+        var builder = new SlackSessionCardBlocksBuilder(
+            new SlackWebLinkBuilder(Options.Create(new SlackProviderOptions
+            {
+                ExternalWebUrl = "https://mohist.example",
+            })),
+            new ProjectQuerier(new TestDbContextFactory(database.Options)));
+        var blocks = await builder.BuildAsync("p1", sessionId, controls);
 
         var progress = await projection.EnqueueWorkingAsync(
             "p1", "c1", source, null, blocks: blocks, sessionId: sessionId);
@@ -84,8 +95,19 @@ public sealed class SlackStatusProjectionSpecs
         Assert.Equal("Agent session.\nSession: agent-session-1", payload.Text);
         Assert.Contains(sessionId, payload.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("Working", payload.Text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Open in Mohist", payload.Blocks?.GetRawText(), StringComparison.Ordinal);
-        Assert.Contains($"/sessions/{sessionId}", payload.Blocks?.GetRawText(), StringComparison.Ordinal);
+        var persistedBlocks = Assert.NotNull(payload.Blocks).EnumerateArray().ToArray();
+        Assert.Equal(3, persistedBlocks.Length);
+        Assert.Equal("section", persistedBlocks[0].GetProperty("type").GetString());
+        Assert.Equal("plain_text", persistedBlocks[0].GetProperty("text").GetProperty("type").GetString());
+        Assert.Equal($"Session: {sessionId}", persistedBlocks[0].GetProperty("text").GetProperty("text").GetString());
+        Assert.Equal("section", persistedBlocks[1].GetProperty("type").GetString());
+        Assert.Equal("mrkdwn", persistedBlocks[1].GetProperty("text").GetProperty("type").GetString());
+        Assert.Equal($"<https://mohist.example/p1/sessions/{sessionId}|Open in Mohist>",
+            persistedBlocks[1].GetProperty("text").GetProperty("text").GetString());
+        Assert.Equal(new[] { "text", "type" }, persistedBlocks[1].EnumerateObject().Select(property => property.Name).Order());
+        Assert.Equal(controls[0].GetRawText(), persistedBlocks[2].GetRawText());
+        Assert.Equal(progress.Id, current.Id);
+        Assert.Equal(SlackOutboxStates.Delivered, current.State);
     }
 
     [Fact]
@@ -121,7 +143,7 @@ public sealed class SlackStatusProjectionSpecs
         await store.MarkDeliveredAsync("p1", progress.Id, new SlackProviderMessageIdentity("C1", "100.002"));
         var blocks = JsonSerializer.SerializeToElement(new[]
         {
-            new { type = "actions", elements = new[] { new { type = "button", url = "https://mohist.example/p1/sessions/s1" } }, },
+            new { type = "section", text = new { type = "mrkdwn", text = "<https://mohist.example/p1/sessions/s1|Open in Mohist>" } },
         });
         await projection.EnqueueFailureAsync("p1", "c1", source, "100.000", "failed", blocks: blocks);
 
@@ -433,6 +455,13 @@ public sealed class SlackStatusProjectionSpecs
         string desiredState = DesiredStateKind.Enabled)
     {
         await using var db = database.CreateContext();
+        db.Projects.Add(new ProjectRow
+        {
+            Id = "p1",
+            Name = "p1",
+            CreatedAt = time.GetUtcNow(),
+            UpdatedAt = time.GetUtcNow(),
+        });
         db.AgentConnections.Add(new AgentConnectionRow
         {
             Id = "c1",

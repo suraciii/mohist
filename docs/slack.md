@@ -354,18 +354,22 @@ Slack carries two signals with different owners:
   Completed, and ⚠️ exception. Every accepted input reaches a terminal
   reaction on completion, failure, cancellation, Agent crash, or service
   restart.
-- **The Session card** is owned by Mohist. It carries the stable Session
-  reference, **Open in Mohist** when available, and state-bound controls such as
-  Stop. It is an observation and control surface, not a progress sentence or an
-  Agent reply, so it never remains as a misleading `Working...` message.
+- **The Session card** is owned by Mohist. Its body must show the canonical
+  Session ID, with **Open in Mohist** when available and state-bound controls
+  such as Stop. It is an observation and control surface, not a progress
+  sentence or an Agent reply, so it never remains as a misleading `Working...`
+  message.
 - **The reply** is owned by the Agent. The Agent sends content through the send
   action and the injected reply anchor. Reasoning, tool calls, and intermediate
   output never become Slack messages.
 
 Reactions are best-effort and never change work state. The Web Session timeline
-holds the complete execution record. **Open in Mohist** links there when an
-External Web URL is configured; otherwise the Session card keeps its stable
-Session ID. Mohist never sends a localhost address to Slack.
+holds the complete execution record. With a usable External Web URL,
+**Open in Mohist** must be an ordinary link to that canonical Session, not a
+Slack App action. Opening it does not depend on Slack interactivity. Without
+a usable URL, the card must still show its Session ID and any available Stop
+control. The ID must be readable in the card itself, not only a notification
+preview or link destination. Mohist never sends a localhost address to Slack.
 
 ### One Input, One Answer
 
