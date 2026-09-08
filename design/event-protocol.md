@@ -503,6 +503,10 @@ to `domain.types` and `domain.match`, and resumes printing new events after
 reconnect. CLI is the only client surface that accepts arbitrary domain type or
 match selections. It does not claim that events during the gap were observed.
 
+Web must invoke native reconnect scheduling and cancellation timers with their
+owning global receiver. The timer adapter must not bind them to connection
+options. Injected timers retain the same scheduling and cancellation contract.
+
 After each successful initial or reconnect `subscription.set` response, Web
 invalidates and refetches every active query for that Project's domain data. It
 also invokes the authoritative rendered-transcript refetch for every registered
