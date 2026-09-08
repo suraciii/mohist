@@ -210,14 +210,26 @@ The request must be a WebSocket upgrade. Before returning `101`, Server resolves
 uses the `mohist_session` cookie. For cookie-authenticated upgrades, Server also
 requires `Origin` scheme and authority to exactly equal the request's canonical
 scheme and authority; a missing or different value is rejected before upgrade.
-The canonical values are normally `Request.Scheme` and `Request.Host`. If and
-only if the immediate `RemoteIpAddress` is loopback, Server accepts a pair of
-single-valued `X-Forwarded-Proto` and `X-Forwarded-Host` headers from the local
-reverse proxy and uses their validated scheme and authority instead. Both
+The canonical values are normally `Request.Scheme` and `Request.Host`. A remote
+TLS-terminating proxy needs a narrowly scoped trust boundary; enabling global
+forwarded-header rewriting would also change unrelated local-peer authorization.
+The event socket therefore trusts forwarded origin headers only from an
+immediate `RemoteIpAddress` that is loopback or exactly matches a configured
+trusted proxy. [Deployment configuration](../docs/self-host.md#live-updates-through-a-remote-proxy)
+owns the setting, accepted address forms, and startup validation. Address matching
+normalizes IPv4-mapped IPv6 to IPv4. It never reads `X-Forwarded-For` or follows
+a proxy chain.
+
+If a trusted peer supplies either `X-Forwarded-Proto` or `X-Forwarded-Host`, both
 headers must be present together, contain exactly one value with no comma-list,
-and parse respectively as a valid HTTP scheme and Host authority; malformed,
-multiple, or incomplete forwarded values reject the upgrade. Forwarded headers
-from a non-loopback peer are ignored and never affect the canonical origin.
+and parse respectively as a valid HTTP scheme and Host authority. Malformed,
+multiple, or incomplete forwarded values reject the upgrade without falling
+back to the direct origin. A valid pair replaces only the canonical scheme and
+authority for this check. If neither header is present, the direct request
+values remain authoritative. Forwarded headers from an untrusted or missing
+peer address are ignored. The validator must not rewrite `Request.Scheme`,
+`Request.Host`, or `RemoteIpAddress`.
+
 There is no configurable trusted-origin list. `mo` and other non-browser clients
 use `Authorization: Bearer <token>` on the upgrade request and are not required
 to send `Origin`. Tokens are never accepted in the query string. No Project

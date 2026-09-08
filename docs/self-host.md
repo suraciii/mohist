@@ -383,6 +383,38 @@ mkcert mohist.local your-server-ip
 # See `mo server --help`.
 ```
 
+#### Live updates through a remote proxy
+
+A browser's live connection must retain the public origin when a reverse proxy
+terminates HTTPS and reaches Server over HTTP. If that proxy runs on another
+host, add its immediate connection IP to Server's `~/.mohist/config.jsonc`:
+
+```json
+{
+  "EventSocket": {
+    "TrustedProxyAddresses": ["192.0.2.10"]
+  }
+}
+```
+
+`EventSocket:TrustedProxyAddresses` is an array of exact IPv4 or IPv6 addresses.
+Use the proxy address that Server sees, not the browser address. Hostnames,
+CIDR ranges, URLs, and empty or invalid entries must fail Server startup. The
+default is an empty array; local loopback proxies remain trusted. IPv4 and its
+IPv4-mapped IPv6 form identify the same address. Changes require a Server
+restart.
+
+The proxy must overwrite `X-Forwarded-Proto` and `X-Forwarded-Host` with the
+public scheme and authority. A forwarded pair must contain one value per
+header, not comma-separated chains. A mismatched browser Origin or a malformed
+pair rejects the live connection. See the [live origin validation
+contract](../design/event-protocol.md#boundary-and-authentication).
+
+This setting trusts only the event socket's origin check. It does not make a
+remote peer local, grant credentials, enable cross-origin access, or change
+other HTTP routes. Do not add a client address or an untrusted proxy to fix a
+rejected connection.
+
 ### Tailscale or WireGuard VPN
 
 Put the Server and client devices on one private network:
