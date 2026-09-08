@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Events.WebSocket;
@@ -19,6 +20,7 @@ public static class ProjectEventSocketRoutes
     private static async Task<IResult> HandleAsync(
         HttpContext context,
         EventWebSocketRegistry registry,
+        IOptions<EventSocketOptions> options,
         CancellationToken ct)
     {
         if (context.Request.QueryString.HasValue)
@@ -36,7 +38,7 @@ public static class ProjectEventSocketRoutes
 
         if (context.Items.TryGetValue(CredentialCarrierResolution.HttpContextItemKey, out var carrier)
             && carrier is CredentialCarrier.Cookie
-            && !HasValidOrigin(context.Request, context.Connection.RemoteIpAddress))
+            && !HasValidOrigin(context.Request, context.Connection.RemoteIpAddress, options.Value))
             return Results.Json(
                 new ApiResponse<object>(false, default, "WebSocket Origin does not match the request authority", "forbidden"),
                 statusCode: StatusCodes.Status403Forbidden);
@@ -46,7 +48,7 @@ public static class ProjectEventSocketRoutes
         return Results.Empty;
     }
 
-    internal static bool HasValidOrigin(HttpRequest request, IPAddress? remoteAddress)
+    internal static bool HasValidOrigin(HttpRequest request, IPAddress? remoteAddress, EventSocketOptions options)
     {
         var scheme = request.Scheme;
         var authority = request.Host.Value;
@@ -55,7 +57,7 @@ public static class ProjectEventSocketRoutes
         var hasProto = forwardedProto.Count > 0;
         var hasHost = forwardedHost.Count > 0;
 
-        if (IPAddress.IsLoopback(remoteAddress ?? IPAddress.None) && (hasProto || hasHost))
+        if (IsTrustedProxy(remoteAddress, options) && (hasProto || hasHost))
         {
             if (!hasProto || !hasHost
                 || forwardedProto.Count != 1 || forwardedHost.Count != 1
@@ -75,6 +77,14 @@ public static class ProjectEventSocketRoutes
 
         return string.Equals(origin.Scheme, scheme, StringComparison.OrdinalIgnoreCase)
             && string.Equals(origin.Authority, authority, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsTrustedProxy(IPAddress? remoteAddress, EventSocketOptions options)
+    {
+        if (remoteAddress is null) return false;
+        var peer = remoteAddress.IsIPv4MappedToIPv6 ? remoteAddress.MapToIPv4() : remoteAddress;
+        return IPAddress.IsLoopback(peer)
+            || options.TrustedProxyAddresses.Any(address => IPAddress.Parse(address).MapToIPv6().Equals(peer.MapToIPv6()));
     }
 
     private static bool IsValidScheme(string scheme) =>

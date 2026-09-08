@@ -180,8 +180,8 @@ export class LiveEventsController implements LiveEventsApi {
     this.options = {
       ...options,
       createWebSocket: options.createWebSocket ?? ((url) => new WebSocket(url)),
-      setTimer: options.setTimer ?? setTimeout,
-      clearTimer: options.clearTimer ?? clearTimeout,
+      setTimer: options.setTimer ?? globalThis.setTimeout.bind(globalThis),
+      clearTimer: options.clearTimer ?? globalThis.clearTimeout.bind(globalThis),
       random: options.random ?? Math.random,
       location: options.location ?? window.location,
     }
