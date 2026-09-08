@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
@@ -155,8 +156,24 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         var runnerHub = _fixture.Services.GetRequiredService<IRunnerControlTransport>() as RecordingRunnerControlTransport
             ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
-        runnerHub.Clear();
-        runnerHub.SetInvocationResponse("session.followup", new RunnerFollowupDeliveryResult(false, "unavailable"));
+        using var transportOwner = runnerHub.CreateOwner(_runnerId);
+        var retryObserved = new TaskCompletionSource<IReadOnlyList<object?>>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRetry = new TaskCompletionSource<RunnerFollowupDeliveryResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        IReadOnlyList<object?>? firstArguments = null;
+        var attempts = 0;
+        transportOwner.SetInvocationResponseFactory("session.followup", arguments =>
+        {
+            if (Interlocked.Increment(ref attempts) == 1)
+            {
+                firstArguments = arguments;
+                return new RunnerFollowupDeliveryResult(false, "unavailable");
+            }
+
+            retryObserved.TrySetResult(arguments);
+            return releaseRetry.Task;
+        });
         tracker.Register(_runnerId, "conn-gen-followup-runtime-not-ready");
         try
         {
@@ -168,15 +185,49 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
             Assert.Equal("accepted", data.GetProperty("status").GetString());
-            Assert.Single(runnerHub.Invocations);
+            Assert.Equal("accepted", data.GetProperty("inputAcceptance").GetString());
+            Assert.Equal("queued", data.GetProperty("turnStatus").GetString());
 
-            var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-            var retry = await grain.BeginNextFollowupDispatchAsync();
-            Assert.NotNull(retry);
-            Assert.Equal(data.GetProperty("turnId").GetString(), retry!.TurnId);
+            // Release schedules the next attempt before the HTTP response;
+            // observe its claim instead of competing to claim the same turn.
+            var retry = Assert.IsType<FollowupParams>(Assert.Single(
+                await retryObserved.Task.WaitAsync(TestContext.Current.CancellationToken)));
+            Assert.NotNull(firstArguments);
+            var first = Assert.IsType<FollowupParams>(Assert.Single(firstArguments));
+            Assert.Equal(2, Volatile.Read(ref attempts));
+            Assert.Equal(2, transportOwner.Invocations.Count);
+            Assert.All(transportOwner.Invocations, invocation =>
+            {
+                Assert.Equal(_runnerId, invocation.ConnectionId);
+                Assert.Equal("session.followup", invocation.Method);
+            });
+            Assert.Equal(data.GetProperty("inputId").GetString(), first.InputId);
+            Assert.Equal(data.GetProperty("turnId").GetString(), first.TurnId);
+            Assert.Equal(first.InputId, retry.InputId);
+            Assert.Equal(first.TurnId, retry.TurnId);
+            Assert.Equal(first.OperationId, retry.OperationId);
+            Assert.Equal(first.Text, retry.Text);
+            Assert.Equal(sessionId, retry.Target.SessionId);
+
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var saved = await scope.ServiceProvider.GetRequiredService<IAgentSessionStore>().LoadAsync(sessionId);
+            Assert.NotNull(saved);
+            var input = Assert.Single(saved.Status.Inputs!);
+            Assert.Equal(first.InputId, input.Id);
+            Assert.Equal(AgentSessionInputAcceptance.Accepted, input.Acceptance);
+            var turn = Assert.Single(saved.Status.Turns!);
+            Assert.Equal(first.TurnId, turn.Id);
+            Assert.Equal(AgentTurnStatus.Queued, turn.Status);
+            Assert.Equal(input.Id, Assert.Single(turn.InputIds));
+            var lease = Assert.Single(saved.Status.PendingFollowups!);
+            Assert.Equal(first.OperationId, lease.OperationId);
+            Assert.True(lease.Accepted);
+            Assert.True(lease.Dispatching);
+            Assert.True(lease.PayloadSealed);
         }
         finally
         {
+            releaseRetry.TrySetResult(new RunnerFollowupDeliveryResult(true));
             tracker.Unregister(_runnerId);
         }
     }

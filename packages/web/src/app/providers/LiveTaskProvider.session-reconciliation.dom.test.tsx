@@ -2,6 +2,8 @@ import { useMemo } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { useMswServer } from '../../../tests/support/msw'
 import { ProjectProvider } from '../../entities/project'
 import {
   unifiedSessionSummaryQueryOptions,
@@ -80,7 +82,7 @@ const requests: string[] = []
 let summary: UnifiedSessionSummaryDto
 let publicTurns: SessionTurn[]
 let rawTurns: SessionTurn[]
-let holdSummary: Promise<void> | undefined
+let holdSummary: ReturnType<typeof deferred> | undefined
 let client: QueryClient
 const viewedIssueHook = () => ({ current: null })
 const pathnameReader = () => '/Test/sessions/session-1'
@@ -152,12 +154,40 @@ async function connect() {
 function deferred() {
   let resolve!: () => void
   let reject!: (error: Error) => void
+  let markStarted!: () => void
   const promise = new Promise<void>((done, fail) => {
     resolve = done
     reject = fail
   })
-  return { promise, resolve, reject }
+  const started = new Promise<void>((done) => {
+    markStarted = done
+  })
+  return { promise, resolve, reject, started, markStarted }
 }
+
+useMswServer(
+  http.get('*/api/projects/test-project/sessions/session-1', async ({ request }) => {
+    requests.push(request.url)
+    // Capture at request start so a held read cannot observe a later commit.
+    const response = HttpResponse.json({ success: true, data: summary })
+    const pending = holdSummary
+    pending?.markStarted()
+    try {
+      await pending?.promise
+    } catch {
+      return HttpResponse.error()
+    }
+    return response
+  }),
+  http.get('*/api/projects/test-project/sessions/session-1/transcript', ({ request }) => {
+    requests.push(request.url)
+    const view = new URL(request.url).searchParams.get('view')
+    return HttpResponse.json({
+      success: true,
+      data: { turns: view === 'raw' ? rawTurns : publicTurns, partCount: 1, lastActivityAt: at },
+    })
+  }),
+)
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -188,21 +218,6 @@ beforeEach(() => {
   rawTurns = [turn(rawText)]
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
   vi.stubGlobal('WebSocket', FakeWebSocket)
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (!url.includes('/sessions/session-1')) return new Response(JSON.stringify({ success: true, data: [] }))
-      requests.push(url)
-      const isTranscript = url.includes('/transcript')
-      const data = isTranscript
-        ? { turns: url.includes('view=raw') ? rawTurns : publicTurns, partCount: 1, lastActivityAt: at }
-        : summary
-      const body = JSON.stringify({ success: true, data })
-      if (!isTranscript) await holdSummary
-      return new Response(body)
-    }),
-  )
 })
 afterEach(() => {
   cleanup()
@@ -250,8 +265,9 @@ describe('canonical Session saved-state reconciliation through the socket', () =
     await connect()
     const before = requests.length
     const gate = deferred()
-    holdSummary = gate.promise
+    holdSummary = gate
     act(() => sockets[0].hint())
+    await act(async () => gate.started)
     await settle()
     summary = { ...summary, activity: 'active' }
     publicTurns = [turn('Newest committed text')]
@@ -272,7 +288,7 @@ describe('canonical Session saved-state reconciliation through the socket', () =
     await connect()
     const before = requests.length
     const gate = deferred()
-    holdSummary = gate.promise
+    holdSummary = gate
     let previousQuery!: Promise<void>
     act(() => {
       previousQuery = client.refetchQueries({
@@ -280,6 +296,7 @@ describe('canonical Session saved-state reconciliation through the socket', () =
         exact: true,
       })
     })
+    await act(async () => gate.started)
     expect(requests.length - before).toBe(1)
     summary = { ...summary, activity: 'active' }
     publicTurns = [turn('Saved after the independent read started')]
@@ -373,12 +390,13 @@ describe('canonical Session saved-state reconciliation through the socket', () =
       await vi.advanceTimersByTimeAsync(1250)
     })
     const gate = deferred()
-    holdSummary = gate.promise
+    holdSummary = gate
     act(() => {
       sockets[1].open()
       sockets[1].acknowledge()
       sockets[1].text('buffered tail')
     })
+    await act(async () => gate.started)
     expect(screen.getByTestId('facts')).not.toHaveTextContent('buffered tail')
     rawTurns = [turn('Reconnected snapshot')]
     holdSummary = undefined
@@ -392,8 +410,9 @@ describe('canonical Session saved-state reconciliation through the socket', () =
     const page = mount()
     await connect()
     const gate = deferred()
-    holdSummary = gate.promise
+    holdSummary = gate
     act(() => sockets[0].hint())
+    await act(async () => gate.started)
     holdSummary = undefined
     await act(async () => gate.reject(new Error('read failed')))
     await settle()
@@ -402,11 +421,13 @@ describe('canonical Session saved-state reconciliation through the socket', () =
     await settle()
     expect(screen.getByTestId('facts')).toHaveTextContent('Recovered committed answer')
     const lastGate = deferred()
-    holdSummary = lastGate.promise
+    holdSummary = lastGate
     act(() => {
       sockets[0].hint()
       sockets[0].hint()
     })
+    await act(async () => lastGate.started)
+    await settle()
     const beforeUnmount = requests.length
     page.unmount()
     holdSummary = undefined
@@ -419,8 +440,9 @@ describe('canonical Session saved-state reconciliation through the socket', () =
     mount()
     await connect()
     const oldRead = deferred()
-    holdSummary = oldRead.promise
+    holdSummary = oldRead
     act(() => sockets[0].hint())
+    await act(async () => oldRead.started)
     act(() => sockets[0].disconnect())
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1250)
