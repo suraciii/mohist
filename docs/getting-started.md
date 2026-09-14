@@ -93,6 +93,8 @@ mo install runner --repo-root "$PWD"
 mo runner status
 ```
 
+Managed mo install services are supported on Linux user-systemd only; see [Self-hosting](self-host.md) for the always-on deployment path.
+
 The installer requests a one-time enrollment from Server, starts Runner as a
 managed service, and lets Runner keep its own machine credential. Later starts
 can use `mo service start runner` without enrolling again.
