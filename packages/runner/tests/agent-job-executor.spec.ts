@@ -827,20 +827,23 @@ describe('AgentJobExecutor parses the dispatch payload', () => {
       const work = buildAgentJobWork({ variables: { workspace } })
       const result = await executor.execute(work, new AbortController().signal)
       expect(result.status).toBe('failed')
-      expect(result.message).toMatch(/workspace\.path/)
+      expect(result.error?.code).toBe('invalid-dispatch')
+      expect(result.message).toMatch(/workspace\.(name|path)/)
       expect(runtime.runTurnCalls).toHaveLength(0)
     })
   })
 
-  it('uses the runner default workdir when a direct AgentJob has no workspace', async () => {
+  it('rejects a direct AgentJob without a workspace as an invalid dispatch', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
     const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const result = await executor.execute(buildAgentJobWork({ variables: {} }), new AbortController().signal)
 
-    expect(result.status).toBe('completed')
-    expect(runtime.runTurnCalls[0]?.target.workDir).toBe(process.cwd())
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('invalid-dispatch')
+    expect(result.message).toMatch(/workspace\.(name|path)/)
+    expect(runtime.runTurnCalls).toHaveLength(0)
   })
 
   it('does not flag `runtime` as an unknown dispatch option key', async () => {

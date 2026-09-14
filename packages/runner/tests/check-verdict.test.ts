@@ -65,7 +65,7 @@ describe('Check verdict validation', () => {
     title: 'Run checks',
     uses: 'mohist/opencode',
     with: { checks },
-    variables,
+    variables: { workspace: { path: workspacePath }, ...variables },
     projectId: 'project-1',
     issueNumber: 1,
   })

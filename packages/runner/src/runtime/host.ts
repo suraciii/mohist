@@ -502,7 +502,7 @@ export class RunnerHost {
       this.actions,
       this.workspace,
       this.connection,
-      undefined,
+      this.options.runnerRoot,
       undefined,
       this.openCodeRuntime,
       new AgentJobExecutor(
@@ -511,7 +511,7 @@ export class RunnerHost {
           openCode: () => this.openCodeRuntime,
           pi: () => this.piRuntime,
         },
-        process.cwd(),
+        this.options.runnerRoot,
         this.skillResolver,
         this.namedWorkspaceManager,
         {

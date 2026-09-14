@@ -89,7 +89,7 @@ export class AgentJobExecutor {
   constructor(
     private readonly connection: ServerConnection,
     private readonly runtimes: AgentJobRuntimeAccessors,
-    private readonly defaultWorkDir: string = process.cwd(),
+    private readonly defaultWorkDir: string | null = null,
     private readonly skillResolver: SkillResolver = new SkillResolver(),
     private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
     private readonly options: AgentJobExecutorOptions = {},
@@ -154,19 +154,14 @@ export class AgentJobExecutor {
       }
       throw error
     }
-    if (workspaceBinding.kind === 'invalid') {
-      return failureResult(
-        'invalid-input',
-        "AgentJob requires 'workspace.name' or 'workspace.path' to be a non-empty string when 'workspace' is provided in dispatch variables",
-      )
-    }
+    if (workspaceBinding.kind === 'failure') return workspaceBinding.result
     if (workspaceBinding.kind === 'materialization-failed') {
       return failureResult(
         'workspace-materialization-failed',
         `AgentJob failed to materialize the named workspace: ${workspaceBinding.message}`,
       )
     }
-    const workDir = workspaceBinding.kind === 'default' ? this.defaultWorkDir : workspaceBinding.workDir
+    const workDir = workspaceBinding.workDir
 
     const resolvedSkills = await this.skillResolver.resolve(skillNames, workDir)
     if (!resolvedSkills.ok) return failureResult(resolvedSkills.code, resolvedSkills.message)
@@ -437,8 +432,7 @@ async function resolveBinding(
 }
 
 type WorkspaceBindingResolution =
-  | { kind: 'default' }
-  | { kind: 'invalid' }
+  | { kind: 'failure'; result: WorkItemResult }
   | { kind: 'path'; workDir: string }
   | { kind: 'named'; workDir: string; projectId: string; workspaceName: string; repositoryName?: string }
   | { kind: 'materialization-failed'; message: string }
@@ -451,19 +445,19 @@ type WorkspaceBindingResolution =
 //     so the job retries against the home runner);
 //   - `path` (legacy free-path binding, routed/workflow dimension):
 //     use the path verbatim;
-//   - absent: the runner's default working directory.
+//   - absent or malformed: reject the dispatch rather than choosing
+//     a directory owned by the runner process.
 async function resolveWorkspaceBinding(
   work: DispatchWorkItem,
   signal: AbortSignal,
   namedWorkspaceManager: NamedWorkspaceManager | null,
 ): Promise<WorkspaceBindingResolution> {
   const ws = work.variables?.['workspace']
-  if (ws === undefined) return { kind: 'default' }
-  if (!isObject(ws)) return { kind: 'invalid' }
+  if (!isObject(ws)) return invalidWorkspaceBinding()
 
   const name = ws['name']
   if (typeof name === 'string' && name.trim().length > 0) {
-    if (!namedWorkspaceManager) return { kind: 'invalid' }
+    if (!namedWorkspaceManager) return invalidWorkspaceBinding()
     try {
       const projectId = work.projectId ?? ''
       const materialized = await namedWorkspaceManager.materialize(
@@ -515,7 +509,19 @@ async function resolveWorkspaceBinding(
   }
 
   const path = ws['path']
-  return typeof path === 'string' && path.trim().length > 0 ? { kind: 'path', workDir: path } : { kind: 'invalid' }
+  return typeof path === 'string' && path.trim().length > 0
+    ? { kind: 'path', workDir: path }
+    : invalidWorkspaceBinding()
+}
+
+function invalidWorkspaceBinding(): WorkspaceBindingResolution {
+  return {
+    kind: 'failure',
+    result: failureResult(
+      'invalid-dispatch',
+      "AgentJob requires 'workspace.name' or 'workspace.path' to be a non-empty string in dispatch variables",
+    ),
+  }
 }
 
 // The prompt anchor injected when the execution is bound to a named

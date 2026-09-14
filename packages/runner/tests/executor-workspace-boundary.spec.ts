@@ -50,6 +50,34 @@ describe('workspace preparation across stages', () => {
     expect(recorded).toEqual({ prepare: 0 })
   })
 
+  it('fails an unresolved workflow workspace before preparing it', async () => {
+    let prepareCalls = 0
+    const workspaceManager = {
+      async prepare() {
+        prepareCalls += 1
+        throw new Error('workspace preparation must not start')
+      },
+    } as unknown as WorkspaceManager
+    const executor = new WorkExecutor(
+      buildRegistry(async () => ({ output: { reached: false } })),
+      workspaceManager,
+      connection() as never,
+      '/runner',
+    )
+
+    const result = await executor.execute(
+      buildWork('https://example.test/repository.git', 'workflow-missing-workspace', 'plan', 'plan:write', {
+        variables: {},
+      }),
+      new AbortController().signal,
+    )
+
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('workspace-setup')
+    expect(result.message).toMatch(/explicit non-empty.*workspace\.(path|name)/)
+    expect(prepareCalls).toBe(0)
+  })
+
   it('serializes a workspace network timeout as a retry-safe failure', async () => {
     const timeout = new WorkspaceNetworkTimeoutError(
       'Workspace preparation network command timed out: git-ls-remote after 120s',
@@ -511,7 +539,13 @@ function connection(): Pick<ServerConnection, 'uploadArtifact' | 'report'> {
   } as unknown as Pick<ServerConnection, 'uploadArtifact' | 'report'>
 }
 
-function buildWork(repo: string, workflowRunId: string, stage: string, workId: string): DispatchWorkItem {
+function buildWork(
+  repo: string,
+  workflowRunId: string,
+  stage: string,
+  workId: string,
+  overrides: Partial<DispatchWorkItem> = {},
+): DispatchWorkItem {
   return {
     workflowRunId,
     workId,
@@ -524,7 +558,9 @@ function buildWork(repo: string, workflowRunId: string, stage: string, workId: s
       workflow: { runId: workflowRunId },
       issue: { number: 9, projectId: 'project-1' },
       repository: { name: 'master', gitUrl: repo, baseBranch: 'master' },
+      workspace: { path: '/runner' },
     },
+    ...overrides,
   }
 }
 
