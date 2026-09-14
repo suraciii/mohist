@@ -252,7 +252,7 @@ async function handleFollowup(
           expectedRuntime: current.runtime,
           expectedRuntimeSessionId: current.runtimeSessionId,
           replacementRuntimeSessionId: replacement.runtimeSessionId,
-          replacementRuntime: replacement.runtime,
+          ...(replacement.runtime !== current.runtime ? { replacementRuntime: replacement.runtime } : {}),
           expectedQueuedTurnId: payload.turnId,
         }
         const signal = new AbortController().signal
