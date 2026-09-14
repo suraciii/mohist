@@ -20,6 +20,7 @@ import type { TaskLogBatch } from '../runtime/task-log.js'
 import { parsePolledDispatch } from './connection-dispatch.js'
 import { reportWork } from './connection-report.js'
 import { extractErrorMessage, RuntimeEventDeliveryError } from './connection-errors.js'
+import { RunnerTransport, type RunnerRequestTransport } from './connection-transport.js'
 export {
   RunnerTransportError,
   type RunnerTransportErrorKind,
@@ -66,6 +67,7 @@ export class ServerConnection {
   private readonly buildGitHash: string | null
   private readonly buildInfo: BuildInfo | null
   private readonly credential: string | null
+  private readonly requestTransport: RunnerRequestTransport
   readonly runnerId: string
   private managerDeploymentEpoch: string | null = null
 
@@ -77,6 +79,7 @@ export class ServerConnection {
     this.buildGitHash = buildGitHash
     this.buildInfo = buildInfo
     this.credential = options.credential ?? null
+    this.requestTransport = new RunnerTransport({ credential: this.credential })
     this.runnerId = options.runnerId
   }
 
@@ -138,7 +141,7 @@ export class ServerConnection {
       deploymentEpoch?: string | null
     },
   ): Promise<PolledDispatch[]> {
-    const response = await this.fetchWithAuth(this.url('poll'), {
+    const response = await this.requestTransport.request('poll', this.url('poll'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(report),
@@ -146,33 +149,30 @@ export class ServerConnection {
     })
     this.observeDeploymentEpoch(response.headers.get('x-mohist-manager-deployment-epoch'))
     if (response.status === 204) return []
-    if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
-    const payload = (await response.json()) as {
+    const payload = await this.requestTransport.readJson<{
       dispatches?: WorkDispatchResponse[]
-    }
-    return (payload.dispatches ?? []).map((dispatch) => parsePolledDispatch(dispatch))
+    }>(response, 'poll')
+    return (payload?.dispatches ?? []).map((dispatch) => parsePolledDispatch(dispatch))
   }
 
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {
-    const response = await this.fetchWithAuth(this.url('config'), {
+    const response = await this.requestTransport.request('fetchConfig', this.url('config'), {
       method: 'GET',
       signal,
     })
-    if (!response.ok) throw new Error(`fetchConfig failed: ${response.status} ${await response.text()}`)
-    const payload = (await response.json()) as RunnerConfigResponse
-    return payload.cleanupPolicy ?? null
+    const payload = await this.requestTransport.readJson<RunnerConfigResponse>(response, 'fetchConfig')
+    return payload?.cleanupPolicy ?? null
   }
 
   async workflowRunsStatus(workflowRunIds: string[], signal: AbortSignal): Promise<Record<string, string>> {
     if (workflowRunIds.length === 0) return {}
-    const response = await this.fetchWithAuth(this.url('workflow-runs/status'), {
+    const response = await this.requestTransport.request('workflowRunsStatus', this.url('workflow-runs/status'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ workflowRunIds }),
       signal,
     })
-    if (!response.ok) throw new Error(`workflowRunsStatus failed: ${response.status} ${await response.text()}`)
-    const payload = (await response.json()) as unknown
+    const payload = await this.requestTransport.readJson<unknown>(response, 'workflowRunsStatus')
     const statuses = readObject(payload, ['statuses'])
     if (!statuses) return {}
     const result: Record<string, string> = {}
@@ -189,15 +189,7 @@ export class ServerConnection {
     binding?: AgentExecutionBinding,
     reportOwner?: DispatchReportOwner,
   ): Promise<Record<string, unknown>> {
-    return await reportWork(
-      this.fetchWithAuth.bind(this),
-      this.url.bind(this),
-      work,
-      result,
-      signal,
-      binding,
-      reportOwner,
-    )
+    return await reportWork(this.requestTransport, this.url.bind(this), work, result, signal, binding, reportOwner)
   }
 
   /**
@@ -853,14 +845,12 @@ export class ServerConnection {
   }
 
   private async post(path: string, body: unknown, signal: AbortSignal): Promise<Response> {
-    const response = await this.fetchWithAuth(this.url(path), {
+    return await this.requestTransport.request(path, this.url(path), {
       method: 'POST',
       headers: body === undefined ? undefined : { 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal,
     })
-    if (!response.ok) throw new Error(`${path} failed: ${response.status} ${await response.text()}`)
-    return response
   }
 
   private async runtimeEventDeliveryError(operation: string, response: Response): Promise<RuntimeEventDeliveryError> {

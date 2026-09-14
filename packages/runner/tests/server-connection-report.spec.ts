@@ -1,5 +1,5 @@
 import { describe, expect, it as vitestIt } from 'vitest'
-import { ServerConnection } from '../src/server/connection.js'
+import { RunnerTransportError, ServerConnection } from '../src/server/connection.js'
 import { transportFetch, withFakeTransport } from './support/fake-transport.js'
 
 interface MockResponseInit {
@@ -30,6 +30,75 @@ function options() {
 }
 
 describe('ServerConnection.report', () => {
+  it('preserves accepted, refused, and outstanding acknowledgements', async () => {
+    const connection = new ServerConnection(options())
+    const work = { workflowRunId: 'wf-1', workId: 'work-1', workType: 'task' }
+    const signal = new AbortController().signal
+
+    for (const verdict of ['accepted', 'refused', 'outstanding'] as const) {
+      fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: JSON.stringify({ verdict }) }))
+      await expect(connection.report(work, { status: 'completed' }, signal)).resolves.toEqual({ verdict })
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls.every(([url]) => url === 'https://runner.test/api/runner/runner-1/report')).toBe(true)
+  })
+
+  it('preserves a nullable acknowledgement as an outstanding report', async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: 'null' }))
+    const connection = new ServerConnection(options())
+
+    await expect(
+      connection.report(
+        { workflowRunId: 'wf-1', workId: 'work-1', workType: 'task' },
+        { status: 'completed' },
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual({ verdict: null })
+  })
+
+  it('classifies malformed acknowledgement JSON as a protocol transport failure', async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: 'not-json' }))
+    const connection = new ServerConnection(options())
+
+    const error = await connection
+      .report(
+        { workflowRunId: 'wf-1', workId: 'work-1', workType: 'task' },
+        { status: 'completed' },
+        new AbortController().signal,
+      )
+      .catch((value: unknown) => value)
+
+    expect(error).toBeInstanceOf(RunnerTransportError)
+    expect(error).toMatchObject({ operation: 'report', kind: 'protocol' })
+  })
+
+  it('classifies report HTTP failures with stable transport fields', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        status: 409,
+        body: JSON.stringify({ code: 'report_outstanding', data: { message: 'report is still being processed' } }),
+      }),
+    )
+    const connection = new ServerConnection(options())
+
+    const error = await connection
+      .report(
+        { workflowRunId: 'wf-1', workId: 'work-1', workType: 'task' },
+        { status: 'completed' },
+        new AbortController().signal,
+      )
+      .catch((value: unknown) => value)
+
+    expect(error).toBeInstanceOf(RunnerTransportError)
+    expect(error).toMatchObject({
+      operation: 'report',
+      kind: 'http',
+      httpStatus: 409,
+      serverCode: 'report_outstanding',
+    })
+  })
+
   it('forwardsCleanupAttemptsToServerWhenResultIncludesThem', async () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '{}' }))
     const connection = new ServerConnection(options())

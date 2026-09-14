@@ -1,5 +1,5 @@
 import { describe, expect, it as vitestIt } from 'vitest'
-import { ServerConnection } from './connection.js'
+import { RunnerTransportError, ServerConnection } from './connection.js'
 import { WorkspaceHomeClaimedError } from '../runtime/workspace-entity.js'
 import { transportFetch, withFakeTransport } from '../../tests/support/fake-transport.js'
 
@@ -65,6 +65,112 @@ describe('ServerConnection machine credential', () => {
     const [, init] = fetchSpy.mock.calls[0]!
     const headers = new Headers(init?.headers)
     expect(headers.get('authorization')).toBeNull()
+  })
+})
+
+describe('ServerConnection lifecycle transport', () => {
+  it('classifies registration HTTP failures without changing the request body', async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify({ code: 'runner_rejected', data: { message: 'registration rejected' } }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    const connection = new ServerConnection({ ...options, credential: 'runner-secret' })
+    const registration = {
+      processGeneration: 'generation-1',
+      capabilities: ['spec/*'],
+      actionCatalog: { actions: [], tombstones: [] },
+      projectId: 'project-1',
+    }
+
+    const error = await connection.connect(registration, signal).catch((value: unknown) => value)
+
+    expect(error).toBeInstanceOf(RunnerTransportError)
+    expect(error).toMatchObject({
+      operation: 'register',
+      kind: 'http',
+      httpStatus: 401,
+      serverCode: 'runner_rejected',
+    })
+    const [url, init] = fetchSpy.mock.calls[0]!
+    expect(url).toBe('https://runner.test/api/runner/runner-1/register')
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject(registration)
+  })
+
+  it('preserves the heartbeat deployment epoch while using the shared request seam', async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(null, {
+        status: 204,
+        headers: { 'x-mohist-manager-deployment-epoch': 'epoch-2' },
+      }),
+    )
+    const connection = new ServerConnection(options)
+
+    await connection.heartbeat(
+      {
+        processGeneration: 'generation-1',
+        capabilities: [],
+        actionCatalog: { actions: [], tombstones: [] },
+      },
+      signal,
+    )
+
+    expect(connection.deploymentEpoch).toBe('epoch-2')
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe('https://runner.test/api/runner/runner-1/heartbeat')
+  })
+
+  it('keeps unregister as a bodyless POST and classifies network failures', async () => {
+    const failure = new Error('ECONNREFUSED')
+    fetchSpy.mockRejectedValue(failure)
+    const connection = new ServerConnection(options)
+
+    const error = await connection.disconnect(signal).catch((value: unknown) => value)
+
+    expect(error).toBeInstanceOf(RunnerTransportError)
+    expect(error).toMatchObject({ operation: 'unregister', kind: 'network' })
+    expect((error as RunnerTransportError).safeMessage).not.toContain('ECONNREFUSED')
+    const [url, init] = fetchSpy.mock.calls[0]!
+    expect(url).toBe('https://runner.test/api/runner/runner-1/unregister')
+    expect((init as RequestInit).method).toBe('POST')
+    expect((init as RequestInit).body).toBeUndefined()
+  })
+
+  it('keeps poll 204 empty and observes its deployment epoch', async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(null, {
+        status: 204,
+        headers: { 'x-mohist-manager-deployment-epoch': 'epoch-poll' },
+      }),
+    )
+    const connection = new ServerConnection(options)
+
+    const result = await connection.poll(signal, {
+      processGeneration: 'generation-1',
+      inFlight: [],
+      awaitingAck: [],
+      admissionReady: true,
+    })
+
+    expect(result).toEqual([])
+    expect(connection.deploymentEpoch).toBe('epoch-poll')
+  })
+
+  it('classifies malformed poll JSON as a protocol transport failure', async () => {
+    fetchSpy.mockResolvedValue(new Response('{', { status: 200 }))
+    const connection = new ServerConnection(options)
+
+    const error = await connection
+      .poll(signal, {
+        processGeneration: 'generation-1',
+        inFlight: [],
+        awaitingAck: [],
+        admissionReady: true,
+      })
+      .catch((value: unknown) => value)
+
+    expect(error).toBeInstanceOf(RunnerTransportError)
+    expect(error).toMatchObject({ operation: 'poll', kind: 'protocol' })
   })
 })
 
