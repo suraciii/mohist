@@ -74,7 +74,8 @@ export async function resolveOrRecoverBinding(request: ResolveOrRecoverBindingRe
       return failure('unavailable-runtime', error instanceof Error ? error.message : String(error))
     }
     if (resolved.ok) return { ok: true, binding: expected, recovered: false }
-    if (resolved.kind !== 'missing-session') return failure(resolved.kind, resolved.message)
+    if (resolved.kind !== 'missing-session' && !(request.allowRuntimeReplacement && resolved.kind === 'unavailable-runtime'))
+      return failure(resolved.kind, resolved.message)
   }
 
   const created = await createEmptySession(request.runtime, expected)

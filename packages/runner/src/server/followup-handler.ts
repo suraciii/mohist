@@ -9,13 +9,12 @@
 //     late binding), so a runtime built or replaced after
 //     control WebSocket client construction is visible to later commands
 //   - admits a follow-up command only when (a) the binding resolves and
-//     (b) the captured runtime is ready and (c) the volatile queue is healthy;
+//     (b) the captured runtime is ready, or an unavailable OpenCode binding
+//       can be replaced by ready Pi, and (c) the volatile queue is healthy;
 //     otherwise returns `{ accepted: false, error: "unavailable" }`
 //     without enqueuing input or invoking the runtime
-//   - dispatches to the binding's runtime:
-//     the wire binding's `runtime` field selects between the OpenCode
-//     and Pi backends; an unknown or not-ready runtime reports
-//     `unavailable` and the command is not silently dropped
+//   - dispatches to the binding's runtime, or to ready Pi when an OpenCode
+//     physical binding is unavailable; unknown runtimes remain unavailable
 //   - enqueues a `session.input` record through `enqueueBeforeExecution`
 //     and waits for its authoritative Server receipt before invoking
 //     `runtime.followup`; queue admission or receipt failure returns
