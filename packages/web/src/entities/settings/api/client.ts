@@ -19,9 +19,7 @@ export const AGENT_RUNTIMES = [AGENT_RUNTIME_OPENCODE, AGENT_RUNTIME_PI, AGENT_R
 export type { AgentRuntime } from '../model/types'
 
 export function isAgentRuntime(value: string | null | undefined): value is AgentRuntime {
-  return (
-    value === AGENT_RUNTIME_OPENCODE || value === AGENT_RUNTIME_PI || value === AGENT_RUNTIME_CODEX
-  )
+  return value === AGENT_RUNTIME_OPENCODE || value === AGENT_RUNTIME_PI || value === AGENT_RUNTIME_CODEX
 }
 
 export const DEFAULT_AGENT_RUNTIME: AgentRuntime = AGENT_RUNTIME_PI

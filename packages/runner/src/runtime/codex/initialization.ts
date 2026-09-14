@@ -17,7 +17,7 @@
  */
 
 import type { CodexDiagnostic, CodexResult } from './types.js'
-import { isCodexInitializeResult, type CodexJsonRpcMessage } from './protocol-types.js'
+import { isCodexInitializeResult, type CodexInitializeResult, type CodexJsonRpcMessage } from './protocol-types.js'
 import { normalizeIncompatibleRuntimeCodex, normalizeUnavailableRuntimeCodex } from './errors.js'
 
 /**
@@ -103,7 +103,8 @@ export async function performCodexInitialization(
     const error = normalizeUnavailableRuntimeCodex(diagnostics)
     return { ok: false, error, diagnostics: error.diagnostics }
   }
-  if (!isCodexInitializeResult(response)) {
+  const result = initializeResult(response)
+  if (result === null) {
     const diagnostic: CodexDiagnostic = {
       severity: 'error',
       code: 'incompatible-runtime',
@@ -113,7 +114,6 @@ export async function performCodexInitialization(
     const error = normalizeIncompatibleRuntimeCodex(diagnostics)
     return { ok: false, error, diagnostics: error.diagnostics }
   }
-  const result = response.result
   if (result.codexHome !== options.managedCodexHome) {
     const diagnostic: CodexDiagnostic = {
       severity: 'error',
@@ -156,6 +156,17 @@ export async function performCodexInitialization(
  * tested with a fake transport and so the runtime can wire a real
  * handle to it.
  */
+function initializeResult(value: unknown): CodexInitializeResult | null {
+  if (isCodexInitializeResult(value)) return value.result
+  if (!value || typeof value !== 'object') return null
+  const envelope = {
+    jsonrpc: '2.0' as const,
+    id: 0,
+    result: value,
+  }
+  return isCodexInitializeResult(envelope) ? envelope.result : null
+}
+
 export function codexInitializationTransportFromHandle(handle: {
   send<P, R>(request: { readonly method: string; readonly params?: P; readonly id: number }): Promise<R>
   notify?: (envelope: { readonly method: string; readonly params?: unknown }) => boolean

@@ -68,6 +68,23 @@ describe('performCodexInitialization', () => {
     expect(transport.notifications).toEqual([{ method: 'initialized', params: undefined }])
   })
 
+  it('accepts the bare result returned by the line-framed server handle', async () => {
+    const transport = buildTransport({
+      send: async () => ({
+        protocolVersion: 'v2',
+        codexHome: '/runner/.mohist/codex',
+        userAgent: 'codex/0.153.0',
+      }),
+    })
+    const result = await performCodexInitialization(transport, {
+      managedCodexHome: '/runner/.mohist/codex',
+      startupTimeoutMs: 5_000,
+    })
+
+    expect(result).toMatchObject({ ok: true, value: { codexHome: '/runner/.mohist/codex' } })
+    expect(transport.notifications).toHaveLength(1)
+  })
+
   it('rejects a non-managed codexHome response as incompatible-runtime', async () => {
     const transport = buildTransport({
       send: async (request) => ({

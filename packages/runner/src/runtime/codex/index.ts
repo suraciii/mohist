@@ -116,6 +116,24 @@ export type {
 } from './server-process.js'
 
 export {
+  createCodexCatalogManager,
+  createCodexModelCatalogLoader,
+  canonicalReasoningEffortForCodex,
+  mapCodexCanonicalReasoningEffort,
+  mapCodexNativeReasoningEffort,
+  nativeReasoningEffortForCodex,
+  validateCodexTurnConfiguration,
+} from './model-catalog.js'
+export type {
+  CodexCatalogManager,
+  CodexCatalogRefreshResult,
+  CodexModelCatalogOptions,
+  CodexModelListTransport,
+  CodexResolvedTurnConfiguration,
+  CodexTurnConfigurationInput,
+} from './model-catalog.js'
+
+export {
   CODEX_APPROVAL_POLICY,
   CODEX_SANDBOX_POLICY,
   CODEX_LOCKED_METHODS,

@@ -7,6 +7,7 @@ import {
 } from '../src/runtime/opencode-models.js'
 import { withTestRunnerResources } from './support/test-resources.js'
 import { buildRegistrationState } from '../src/runtime/registration-state.js'
+import type { CodexCatalog } from '../src/runtime/codex/types.js'
 
 describe('OpenCode model discovery', () => {
   it('parses nested model ids, multiline metadata, and malformed metadata recovery', () => {
@@ -102,5 +103,40 @@ describe('OpenCode model discovery', () => {
     })
     expect(registration.environmentVersion).toBe('environment-a')
     expect(registration.environmentLoadedAt).toBe('2026-09-18T00:00:00.000Z')
+  })
+
+  it('publishes a complete Codex catalog with canonical reasoning efforts', () => {
+    const catalog: CodexCatalog = {
+      models: [
+        {
+          id: 'gpt-5',
+          displayName: 'GPT-5',
+          reasoningEfforts: ['off', 'high'],
+          defaultReasoningEffort: 'off',
+          supportsReasoningEffort: true,
+        },
+      ],
+      complete: true,
+      capabilityRevision: 'codex-revision',
+    }
+    const registration = buildRegistrationState(
+      { projectId: 'project-a' } as never,
+      null,
+      { actions: [], tombstones: [] },
+      () => 'connection-a',
+      'process-a',
+      { models: [], variants: {} },
+      new Set(['codex']),
+      { catalog: () => catalog },
+    )
+
+    expect(registration.runtimeCatalogs?.codex).toEqual({
+      models: ['gpt-5'],
+      variants: {},
+      reasoningEfforts: { 'gpt-5': ['off', 'high'] },
+      supportsReasoningEffort: true,
+      complete: true,
+      capabilityRevision: 'codex-revision',
+    })
   })
 })

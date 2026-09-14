@@ -59,11 +59,13 @@ export interface CodexAuthenticationProbe {
 
 export interface CodexCatalogLoader {
   /**
-   * Drive `model/list` over the locked protocol subset. Returns the
-   * first non-empty page or `null` when the catalog could not be
-   * loaded.
+   * Drive `model/list` over the locked protocol subset. Returns a
+   * complete, non-empty snapshot or `null` when the catalog could not
+   * be loaded.
    */
   loadCatalog(): Promise<CodexCatalog | null>
+  /** The current refresh diagnostic, including a retained-snapshot failure. */
+  diagnostic?: () => CodexDiagnostic | null
 }
 
 export interface CodexReadinessProbe {
@@ -144,14 +146,28 @@ export async function evaluateCodexReadiness(
     const error = normalizeUnavailableRuntimeCodex(diagnostics)
     return { ok: false, error, diagnostics: error.diagnostics }
   }
-  const catalog = await options.probe.catalog.loadCatalog()
-  if (!catalog || catalog.models.length === 0) {
+  let catalog: CodexCatalog | null
+  try {
+    catalog = await options.probe.catalog.loadCatalog()
+  } catch (cause) {
     const diagnostic: CodexDiagnostic = {
+      severity: 'error',
+      code: 'catalog-refresh-failed',
+      message: `Codex model catalog refresh failed: ${cause instanceof Error ? cause.message : 'unknown catalog failure'}`,
+    }
+    diagnostics.push(diagnostic)
+    const error = normalizeUnavailableRuntimeCodex(diagnostics)
+    return { ok: false, error, diagnostics: error.diagnostics }
+  }
+  const catalogDiagnostic = options.probe.catalog.diagnostic?.() ?? null
+  if (catalogDiagnostic) diagnostics.push(catalogDiagnostic)
+  if (!catalog || catalog.models.length === 0) {
+    const diagnostic: CodexDiagnostic = catalogDiagnostic ?? {
       severity: 'error',
       code: 'catalog-empty',
       message: 'Codex model catalog loaded empty or failed to load; refusing to claim Codex work',
     }
-    diagnostics.push(diagnostic)
+    if (!catalogDiagnostic) diagnostics.push(diagnostic)
     const error = normalizeUnavailableRuntimeCodex(diagnostics)
     return { ok: false, error, diagnostics: error.diagnostics }
   }

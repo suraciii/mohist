@@ -66,7 +66,12 @@ describe('Codex locked v2 protocol subset', () => {
       isCodexInitializeRequest({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 42 } }),
     ).toBe(false)
     expect(
-      isCodexInitializeRequest({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name: 7, version: 'x' } } }),
+      isCodexInitializeRequest({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { clientInfo: { name: 7, version: 'x' } },
+      }),
     ).toBe(false)
     expect(isCodexInitializeRequest({ jsonrpc: '2.0', id: 1, method: 'initialize', params: 'broken' })).toBe(false)
   })
@@ -86,12 +91,10 @@ describe('Codex locked v2 protocol subset', () => {
         result: { protocolVersion: 'v2', codexHome: '/runner/.mohist/codex' },
       }),
     ).toBe(true)
-    expect(
-      isCodexInitializeResult({ jsonrpc: '2.0', id: 1, result: { protocolVersion: 'v2' } }),
-    ).toBe(false)
-    expect(
-      isCodexInitializeResult({ jsonrpc: '2.0', id: 1, result: { protocolVersion: 'v2', codexHome: 42 } }),
-    ).toBe(false)
+    expect(isCodexInitializeResult({ jsonrpc: '2.0', id: 1, result: { protocolVersion: 'v2' } })).toBe(false)
+    expect(isCodexInitializeResult({ jsonrpc: '2.0', id: 1, result: { protocolVersion: 'v2', codexHome: 42 } })).toBe(
+      false,
+    )
   })
 
   it('matches thread/start requests only with a string cwd', () => {
@@ -103,9 +106,7 @@ describe('Codex locked v2 protocol subset', () => {
         params: { cwd: '/work', model: 'gpt-5', reasoningEffort: 'medium' },
       }),
     ).toBe(true)
-    expect(
-      isCodexThreadStartRequest({ jsonrpc: '2.0', id: 1, method: 'thread/start', params: { cwd: 7 } }),
-    ).toBe(false)
+    expect(isCodexThreadStartRequest({ jsonrpc: '2.0', id: 1, method: 'thread/start', params: { cwd: 7 } })).toBe(false)
     expect(
       isCodexThreadStartRequest({ jsonrpc: '2.0', id: 1, method: 'thread/resume', params: { cwd: '/work' } }),
     ).toBe(false)
@@ -119,9 +120,7 @@ describe('Codex locked v2 protocol subset', () => {
         result: { threadId: 'thr_1', cwd: '/work', model: 'gpt-5', reasoningEffort: 'medium' },
       }),
     ).toBe(true)
-    expect(
-      isCodexThreadStartResult({ jsonrpc: '2.0', id: 1, result: { threadId: 42, cwd: '/work' } }),
-    ).toBe(false)
+    expect(isCodexThreadStartResult({ jsonrpc: '2.0', id: 1, result: { threadId: 42, cwd: '/work' } })).toBe(false)
   })
 
   it('matches thread/resume requests only with threadId + cwd + optional excludeTurns', () => {
@@ -372,9 +371,9 @@ describe('Codex locked v2 protocol subset', () => {
     expect(
       isCodexTurnCompletedEvent({ type: 'turn/completed', threadId: 'thr_1', turnId: 'turn_1', status: 'paused' }),
     ).toBe(false)
-    expect(isCodexTurnCompletedEvent({ type: 'turn/aborted', threadId: 'thr_1', turnId: 'turn_1', status: 'completed' })).toBe(
-      false,
-    )
+    expect(
+      isCodexTurnCompletedEvent({ type: 'turn/aborted', threadId: 'thr_1', turnId: 'turn_1', status: 'completed' }),
+    ).toBe(false)
     expect(
       isCodexTurnCompletedEvent({ type: 'turn/completed', threadId: 'thr_1', turnId: 7, status: 'completed' }),
     ).toBe(false)
@@ -382,9 +381,9 @@ describe('Codex locked v2 protocol subset', () => {
 
   it('matches thread/status events only with a string type + threadId + status', () => {
     expect(isCodexThreadStatusEvent({ type: 'thread/status', threadId: 'thr_1', status: 'idle' })).toBe(true)
-    expect(isCodexThreadStatusEvent({ type: 'thread/status', threadId: 'thr_1', turnId: 'turn_1', status: 'busy' })).toBe(
-      true,
-    )
+    expect(
+      isCodexThreadStatusEvent({ type: 'thread/status', threadId: 'thr_1', turnId: 'turn_1', status: 'busy' }),
+    ).toBe(true)
     expect(isCodexThreadStatusEvent({ type: 'thread/status', threadId: 'thr_1', status: 7 })).toBe(false)
     expect(isCodexThreadStatusEvent({ type: 'thread/status', threadId: 7, status: 'idle' })).toBe(false)
   })

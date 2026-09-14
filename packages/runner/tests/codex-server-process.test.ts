@@ -7,7 +7,7 @@ import {
   type CodexServerFactoryOptions,
 } from '../src/runtime/codex/server-process.js'
 import { FakeChildProcess } from './support/fake-process.js'
-import type { ChildProcessWithoutNullStreams, SpawnOptions } from 'node:child_process'
+import type { ProcessSpawner } from '../src/system/process.js'
 
 /**
  * Encoding helper used by the fake child: every JSON-RPC envelope is
@@ -17,6 +17,9 @@ import type { ChildProcessWithoutNullStreams, SpawnOptions } from 'node:child_pr
 function encode(envelope: unknown): Buffer {
   return Buffer.from(`${JSON.stringify(envelope)}\n`, 'utf8')
 }
+
+type SpawnOptions = Parameters<ProcessSpawner>[2]
+type SpawnedChild = ReturnType<ProcessSpawner>
 
 type WritableSide = {
   write(chunk: string | Buffer, cb?: (err?: Error | null) => void): boolean
@@ -54,15 +57,15 @@ class FakeCodexChild extends FakeChildProcess {
 interface FakeSpawner {
   readonly child: FakeCodexChild
   readonly calls: Array<{ command: string; args: string[]; options: SpawnOptions }>
-  readonly spawn: (command: string, args: string[], options: SpawnOptions) => ChildProcessWithoutNullStreams
+  readonly spawn: (command: string, args: string[], options: SpawnOptions) => SpawnedChild
 }
 
 function buildSpawner(): FakeSpawner {
   const child = new FakeCodexChild()
   const calls: Array<{ command: string; args: string[]; options: SpawnOptions }> = []
-  const spawn = (command: string, args: string[], options: SpawnOptions): ChildProcessWithoutNullStreams => {
+  const spawn = (command: string, args: string[], options: SpawnOptions): SpawnedChild => {
     calls.push({ command, args: [...args], options })
-    return child as unknown as ChildProcessWithoutNullStreams
+    return child as unknown as SpawnedChild
   }
   return { child, calls, spawn }
 }
@@ -166,17 +169,18 @@ describe('createSpawnedCodexServer', () => {
   })
 
   it('drives the bounded shutdown within the deadline', async () => {
+    vi.useFakeTimers()
     const spawner = buildSpawner()
     const handle = await createSpawnedCodexServer({
       ...BASE_OPTIONS,
       shutdownTimeoutMs: 100,
       spawner: spawner.spawn,
     })
-    const closeStart = Date.now()
-    spawner.child.emit('exit', 0, null)
-    await handle.close()
-    const elapsed = Date.now() - closeStart
-    expect(elapsed).toBeLessThan(DEFAULT_CODEX_SHUTDOWN_TIMEOUT_MS)
+    const closePromise = handle.close()
+    await vi.advanceTimersByTimeAsync(100)
+    await closePromise
+    expect(spawner.child.killSignals).toEqual(['SIGTERM', 'SIGKILL'])
+    expect(DEFAULT_CODEX_SHUTDOWN_TIMEOUT_MS).toBeGreaterThan(100)
   })
 
   it('forces SIGTERM when the child has not exited before the deadline', async () => {

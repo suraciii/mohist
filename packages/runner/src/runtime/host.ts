@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 import type { AgentRuntime, RunnerOptions, RunnerRegistration } from '../core/types.js'
 import { ServerConnection } from '../server/connection.js'
 import { runnerTransportDiagnostics } from '../server/connection-errors.js'
@@ -39,6 +40,7 @@ import {
 } from './host-update-shutdown.js'
 import { getOpenCodeRuntimeFactory, type OpenCodeRuntime } from './opencode/index.js'
 import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from './pi/index.js'
+import { getCodexRuntimeFactory, type CodexRuntime } from './codex/index.js'
 import { workKey } from './work-key.js'
 import { loadBuildInfo } from './build-info.js'
 import {
@@ -135,6 +137,7 @@ export class RunnerHost {
    */
   private openCodeRuntime: OpenCodeRuntime | null = null
   private piRuntime: PiRuntime | null = null
+  private codexRuntime: CodexRuntime | null = null
   private piRuntimeGeneration = 0
   private providerPolicyDiagnostic: string | null = null
   private runtimeEventQueueAvailable = false
@@ -146,6 +149,7 @@ export class RunnerHost {
   private readonly livenessLifecycle: MaintenanceLifecycle
   private readonly cleanupLifecycle: MaintenanceLifecycle
   private readonly modelCatalogLifecycle: MaintenanceLifecycle
+  private readonly codexModelCatalogLifecycle: MaintenanceLifecycle
   private readonly skillResolver = new SkillResolver()
   private readonly processGeneration = randomUUID()
   private readonly enabledAgentRuntimes: ReadonlySet<AgentRuntime>
@@ -259,6 +263,9 @@ export class RunnerHost {
     this.livenessLifecycle = createMaintenanceLifecycle((signal) => this.cleanup.runSelfCheck(signal))
     this.cleanupLifecycle = createMaintenanceLifecycle((signal) => this.cleanup.runCleanupOnce(signal))
     this.modelCatalogLifecycle = createMaintenanceLifecycle((signal) => this.runModelCatalogMaintenance(signal))
+    this.codexModelCatalogLifecycle = createMaintenanceLifecycle((signal) =>
+      this.runCodexModelCatalogMaintenance(signal),
+    )
   }
 
   private get executionContext(): HostExecutionContext {
@@ -296,6 +303,7 @@ export class RunnerHost {
     let selfCheck: ReturnType<typeof setInterval> | undefined
     let cleanupTimer: ReturnType<typeof setInterval> | undefined
     let modelRediscoveryTimer: ReturnType<typeof setInterval> | undefined
+    let codexModelRediscoveryTimer: ReturnType<typeof setInterval> | undefined
     const stopMaintenance = () => {
       void this.stopMaintenanceLifecycles()
     }
@@ -308,6 +316,7 @@ export class RunnerHost {
       await this.connectRunner(signal)
       if (!signal.aborted) {
         if (this.enabledAgentRuntimes.has('opencode')) this.modelCatalogLifecycle.trigger()
+        if (this.enabledAgentRuntimes.has('codex')) this.codexModelCatalogLifecycle.trigger()
         // Kick a non-blocking drain: an unavailable server does not gate
         // startup; queued evidence retries while this process remains alive.
         if (this.agentSessionRuntimeEventQueue.ready()) {
@@ -322,6 +331,12 @@ export class RunnerHost {
             this.modelRediscoveryIntervalMs,
           )
         }
+        if (this.enabledAgentRuntimes.has('codex')) {
+          codexModelRediscoveryTimer = setInterval(
+            () => this.codexModelCatalogLifecycle.trigger(),
+            this.modelRediscoveryIntervalMs,
+          )
+        }
         await this.runWorkerPool(signal)
       }
     } finally {
@@ -329,6 +344,7 @@ export class RunnerHost {
       if (selfCheck) clearInterval(selfCheck)
       if (cleanupTimer) clearInterval(cleanupTimer)
       if (modelRediscoveryTimer) clearInterval(modelRediscoveryTimer)
+      if (codexModelRediscoveryTimer) clearInterval(codexModelRediscoveryTimer)
       signal.removeEventListener('abort', stopMaintenance)
       await this.stopMaintenanceLifecycles()
       await this.shutdownSharedConnection()
@@ -344,6 +360,7 @@ export class RunnerHost {
       this.livenessLifecycle.stop(),
       this.cleanupLifecycle.stop(),
       this.modelCatalogLifecycle.stop(),
+      this.codexModelCatalogLifecycle.stop(),
     ])
   }
 
@@ -373,6 +390,39 @@ export class RunnerHost {
         return
       }
       retryDelayMs = Math.min(retryDelayMs * 2, maxRetryDelayMs)
+    }
+  }
+
+  private async runCodexModelCatalogMaintenance(signal: AbortSignal): Promise<void> {
+    let retryDelayMs = INITIAL_EMPTY_MODEL_CATALOG_RETRY_MS
+    const maxRetryDelayMs = Math.min(MAX_EMPTY_MODEL_CATALOG_RETRY_MS, this.modelRediscoveryIntervalMs)
+    while (!signal.aborted) {
+      if (await this.runCodexModelRediscoveryOnce()) return
+      try {
+        await this.waitForConnectionRetry(retryDelayMs, signal)
+      } catch (error) {
+        if (!signal.aborted) log.error('codex model recovery wait failed', { exception: error })
+        return
+      }
+      retryDelayMs = Math.min(retryDelayMs * 2, maxRetryDelayMs)
+    }
+  }
+
+  private async runCodexModelRediscoveryOnce(): Promise<boolean> {
+    const runtime = this.codexRuntime
+    if (!runtime) return false
+    try {
+      const refreshed = await runtime.refreshCatalog()
+      if (!runtime.ready() && runtime.diagnostic()) {
+        log.warn('codex model catalog refresh failed; retaining last complete snapshot', {
+          reason: runtime.diagnostic()?.message,
+        })
+      }
+      if (refreshed.changed) this.heartbeatLifecycle.trigger()
+      return refreshed.catalog !== null && runtime.ready()
+    } catch (error) {
+      log.error('codex model rediscovery failed', { exception: error })
+      return false
     }
   }
 
@@ -429,6 +479,22 @@ export class RunnerHost {
         })
       }
       this.syncOpenCodeWorkOwners()
+    }
+    if (this.enabledAgentRuntimes.has('codex')) {
+      const factory = getCodexRuntimeFactory()
+      this.codexRuntime = factory({
+        codexHome: join(this.options.runnerRoot, '.mohist', 'codex'),
+        cwd: process.cwd(),
+        ...(this.options.runtimeShutdownTimeoutMs !== undefined
+          ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs }
+          : {}),
+      })
+      const codexStart = await this.codexRuntime.start()
+      if (!codexStart.ok) {
+        log.error('codex runtime not ready at startup; claiming gated until it recovers', {
+          reason: codexStart.error.message,
+        })
+      }
     }
     if (this.enabledAgentRuntimes.has('pi')) {
       this.piRuntime = getPiRuntimeFactory()({
@@ -516,6 +582,14 @@ export class RunnerHost {
         /* best effort */
       }
       this.piRuntime = null
+    }
+    if (this.codexRuntime !== null) {
+      try {
+        await this.codexRuntime.shutdown()
+      } catch {
+        /* best effort */
+      }
+      this.codexRuntime = null
     }
   }
 
@@ -721,7 +795,12 @@ export class RunnerHost {
       processGeneration: this.processGeneration,
       inFlight: this.inFlight.keys(),
       awaitingAck: this.awaitingAck.keys(),
-      runtimeReadiness: runtimeReadinessWitnesses(this.openCodeRuntime, this.piRuntime, this.piRuntimeGeneration),
+      runtimeReadiness: runtimeReadinessWitnesses(
+        this.openCodeRuntime,
+        this.piRuntime,
+        this.piRuntimeGeneration,
+        this.codexRuntime,
+      ),
       connectionId: this.control.getConnectionId(),
       admission: this.currentAdmissionObservation(),
       deploymentEpoch: this.connection.deploymentEpoch,
@@ -762,10 +841,12 @@ export class RunnerHost {
         this.processGeneration,
         this.opencodeModelCatalog,
         this.enabledAgentRuntimes,
+        this.codexRuntime,
       ),
       {
         pi: this.piRuntime?.ready() === true,
         opencode: this.openCodeRuntime?.ready() === true,
+        codex: this.codexRuntime?.ready() === true,
       },
     )
   }

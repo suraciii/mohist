@@ -30,10 +30,13 @@ export interface RawCodexError {
 }
 
 const STRUCTURED_NOT_FOUND_PATTERN = /thread[_\s-]?not[_\s-]?found|thread[_\s-]?missing|no[_\s-]?such[_\s-]?thread/i
-const PERMISSION_PATTERN = /permission|approval|approval[_\s-]?required|user[_\s-]?input|elicitation|dynamic[_\s-]?tool/i
-const INCOMPATIBLE_PATTERN = /incompatible|protocol[_\s-]?version|unsupported[_\s-]?method|unknown[_\s-]?method|schema[_\s-]?mismatch/i
+const PERMISSION_PATTERN =
+  /permission|approval|approval[_\s-]?required|user[_\s-]?input|elicitation|dynamic[_\s-]?tool/i
+const INCOMPATIBLE_PATTERN =
+  /incompatible|protocol[_\s-]?version|unsupported[_\s-]?method|unknown[_\s-]?method|schema[_\s-]?mismatch/i
 const INVALID_INPUT_PATTERN = /invalid[_\s-]?input|invalid[_\s-]?params|invalid[_\s-]?request|missing[_\s-]?field/i
-const UNAVAILABLE_PATTERN = /unavailable|runtime[_\s-]?not[_\s-]?ready|not[_\s-]?ready|connection[_\s-]?lost|spawn[_\s-]?failed|startup[_\s-]?timeout/i
+const UNAVAILABLE_PATTERN =
+  /unavailable|runtime[_\s-]?not[_\s-]?ready|not[_\s-]?ready|connection[_\s-]?lost|spawn[_\s-]?failed|startup[_\s-]?timeout/i
 const DEADLINE_PATTERN = /deadline|timeout|timed[_\s-]?out/i
 const INTERRUPTED_PATTERN = /interrupted|interrupt[_\s-]?requested/i
 
@@ -45,7 +48,7 @@ const INTERRUPTED_PATTERN = /interrupted|interrupt[_\s-]?requested/i
  * another Runtime.
  */
 export function errorKindForCodex(raw: RawCodexError | string): CodexErrorKind {
-  const message = typeof raw === 'string' ? raw : raw.message ?? ''
+  const message = typeof raw === 'string' ? raw : (raw.message ?? '')
   const code = typeof raw === 'string' ? undefined : raw.code
   const messageMatch = (pattern: RegExp) => pattern.test(message)
 
@@ -74,9 +77,7 @@ export function errorKindForCodex(raw: RawCodexError | string): CodexErrorKind {
  * transport, timeout, authentication, permission, 5xx, and protocol
  * mismatches stay `unknown`.
  */
-export function normalizeMissingSessionCodex(
-  diagnostics: readonly CodexDiagnostic[] = [],
-): CodexError {
+export function normalizeMissingSessionCodex(diagnostics: readonly CodexDiagnostic[] = []): CodexError {
   return {
     kind: 'missing-session',
     message:
@@ -97,9 +98,7 @@ export function normalizeMissingSessionCodex(
  * CLI availability gaps surfaced as actionable diagnostics. The
  * Runner does not fall back to another Runtime.
  */
-export function normalizeUnavailableRuntimeCodex(
-  diagnostics: readonly CodexDiagnostic[] = [],
-): CodexError {
+export function normalizeUnavailableRuntimeCodex(diagnostics: readonly CodexDiagnostic[] = []): CodexError {
   return {
     kind: 'unavailable-runtime',
     message: 'Codex runtime is not available',
@@ -118,10 +117,7 @@ export function normalizeUnavailableRuntimeCodex(
  * `invalid-input` carries caller-side validation failures. The runtime
  * never treats an invalid input as an opportunity to fall back.
  */
-export function normalizeInvalidInputCodex(
-  message: string,
-  diagnostics: readonly CodexDiagnostic[] = [],
-): CodexError {
+export function normalizeInvalidInputCodex(message: string, diagnostics: readonly CodexDiagnostic[] = []): CodexError {
   return {
     kind: 'invalid-input',
     message,
@@ -134,9 +130,7 @@ export function normalizeInvalidInputCodex(
  * mismatches, and unknown methods. The runtime rejects these before
  * claiming work.
  */
-export function normalizeIncompatibleRuntimeCodex(
-  diagnostics: readonly CodexDiagnostic[] = [],
-): CodexError {
+export function normalizeIncompatibleRuntimeCodex(diagnostics: readonly CodexDiagnostic[] = []): CodexError {
   return {
     kind: 'incompatible-runtime',
     message: 'Installed Codex is incompatible with the locked v2 protocol subset',
@@ -181,9 +175,7 @@ export function normalizeTurnFailedCodex(
  * `turn/completed` event for the exact active Turn. Used by cancel and
  * closeout paths.
  */
-export function normalizeInterruptedCodex(
-  diagnostics: readonly CodexDiagnostic[] = [],
-): CodexError {
+export function normalizeInterruptedCodex(diagnostics: readonly CodexDiagnostic[] = []): CodexError {
   return {
     kind: 'interrupted',
     message: 'Codex turn was interrupted before completion',
@@ -228,9 +220,7 @@ export function normalizeDeadlineExceededCodex(
  * user-input rejection. Unconfirmed denial stays `unknown` and never
  * creates a Workflow Approval Point.
  */
-export function normalizePermissionRequiredCodex(
-  diagnostics: readonly CodexDiagnostic[] = [],
-): CodexError {
+export function normalizePermissionRequiredCodex(diagnostics: readonly CodexDiagnostic[] = []): CodexError {
   return {
     kind: 'permission-required',
     message: 'Codex server-initiated request could not be answered by the headless runtime',
@@ -239,7 +229,8 @@ export function normalizePermissionRequiredCodex(
       {
         severity: 'error',
         code: 'permission-required',
-        message: 'Restore Codex server connectivity, or run with an interactive approval product; the runner fails closed',
+        message:
+          'Restore Codex server connectivity, or run with an interactive approval product; the runner fails closed',
       },
     ],
   }

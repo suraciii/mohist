@@ -116,9 +116,7 @@ describe('Codex runtime error normalization', () => {
     })
     expect(normalizeInterruptedCodex()).toMatchObject({
       kind: 'interrupted',
-      diagnostics: expect.arrayContaining([
-        expect.objectContaining({ severity: 'info', code: 'interrupted' }),
-      ]),
+      diagnostics: expect.arrayContaining([expect.objectContaining({ severity: 'info', code: 'interrupted' })]),
     })
     expect(normalizeDeadlineExceededCodex(120_000)).toMatchObject({
       kind: 'deadline-exceeded',
@@ -163,9 +161,7 @@ describe('Codex runtime error normalization', () => {
   })
 
   it('appends caller-supplied diagnostics without mutating them', () => {
-    const supplied = [
-      { severity: 'info' as const, code: 'thread-not-found-source', message: 'upstream says gone' },
-    ]
+    const supplied = [{ severity: 'info' as const, code: 'thread-not-found-source', message: 'upstream says gone' }]
     const error = normalizeMissingSessionCodex(supplied)
     expect(error.diagnostics[0]).toEqual(supplied[0])
     expect(error.diagnostics[1]).toMatchObject({ severity: 'error', code: 'missing-session' })

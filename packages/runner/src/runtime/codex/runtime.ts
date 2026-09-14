@@ -18,7 +18,6 @@
  * contained inside this module.
  */
 
-import { createHash } from 'node:crypto'
 import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
 import { CODEX_DEFAULT_TIMEOUTS } from './types.js'
 import type {
@@ -31,7 +30,6 @@ import type {
   CodexCancelResult,
   CodexCompactRequest,
   CodexCompactResult,
-  CodexModelDescriptor,
   CodexReadyState,
   CodexResetRequest,
   CodexResetResult,
@@ -43,14 +41,12 @@ import { defaultCodexClock } from './runtime-clock.js'
 import type { CodexServerFactory, CodexServerHandle } from './server-process.js'
 import { normalizeUnavailableRuntimeCodex } from './errors.js'
 import {
-  type CodexAuthenticationProbe,
-  type CodexCatalogLoader,
-  type CodexCliProbe,
-  type CodexReadinessProbe,
-  evaluateCodexReadiness,
-} from './readiness.js'
+  createCodexModelCatalogLoader,
+  type CodexCatalogManager,
+  validateCodexTurnConfiguration,
+} from './model-catalog.js'
+import { type CodexReadinessProbe, evaluateCodexReadiness } from './readiness.js'
 import { codexInitializationTransportFromHandle, performCodexInitialization } from './initialization.js'
-import { isCodexModelListResult } from './protocol-types.js'
 
 export interface CodexRuntimeDeps {
   readonly codexHome: string
@@ -86,9 +82,9 @@ export interface CodexRuntimeDeps {
  *   - `catalog()`: the published catalog snapshot.
  *   - `shutdown()`: bounded shutdown of the app-server child.
  *
- * The full implementations of each entry point land in T-004 to
- * T-008; this file wires the boundary types and the readiness seam
- * implemented in T-003.
+ * The full implementations of the turn and Session command entry points
+ * land in later runtime tasks; this file wires the boundary types, readiness,
+ * and catalog seam implemented here.
  */
 export class CodexRuntime {
   private readonly deps: Required<Pick<CodexRuntimeDeps, 'codexHome' | 'cwd'>> & CodexRuntimeDeps
@@ -108,6 +104,7 @@ export class CodexRuntime {
     closed: boolean
   }
   private readonly readinessProbe: CodexReadinessProbe | null
+  private catalogManager: CodexCatalogManager | null = null
 
   constructor(deps: CodexRuntimeDeps) {
     this.deps = deps
@@ -126,7 +123,10 @@ export class CodexRuntime {
   }
 
   async start(): Promise<CodexResult<CodexReadyState>> {
-    if (this.state.ready) return { ok: true, value: this.readyState(), diagnostics: [] }
+    if (this.state.ready) {
+      const diagnostics = this.state.diagnostic ? [this.state.diagnostic] : []
+      return { ok: true, value: this.readyState(), diagnostics }
+    }
     if (this.state.startInFlight) return this.state.startInFlight
     const attempt = this.attemptStart()
     this.state.startInFlight = attempt
@@ -141,12 +141,50 @@ export class CodexRuntime {
     return this.state.ready
   }
 
+  generation(): number | null {
+    return this.state.generation
+  }
+
   diagnostic(): CodexDiagnostic | null {
     return this.state.diagnostic
   }
 
   catalog(): CodexCatalog | null {
     return this.state.catalog
+  }
+
+  /**
+   * Refresh the catalog on the host's bounded maintenance cadence. A failed
+   * refresh keeps the last complete snapshot, gates readiness, and exposes
+   * the current diagnostic. A successful refresh clears the failure and only
+   * changes registration when the snapshot content changed.
+   */
+  async refreshCatalog(): Promise<{ readonly changed: boolean; readonly catalog: CodexCatalog | null }> {
+    if (!this.state.generation || !this.catalogManager) {
+      const diagnostic: CodexDiagnostic = {
+        severity: 'error',
+        code: 'catalog-refresh-unavailable',
+        message: 'Codex model catalog cannot refresh before app-server readiness',
+      }
+      this.state.ready = false
+      this.state.diagnostic = diagnostic
+      return { changed: false, catalog: this.state.catalog }
+    }
+    const result = await this.catalogManager.refreshCatalog()
+    this.state.catalog = result.catalog
+    this.state.diagnostic = result.diagnostics[0] ?? null
+    this.state.ready = result.ok
+    return { changed: result.changed, catalog: result.catalog }
+  }
+
+  /** Validate the frozen model and canonical effort immediately before turn/start. */
+  validateTurnConfiguration(options: {
+    readonly model?: unknown
+    readonly reasoningEffort?: unknown
+    readonly variant?: unknown
+    readonly unknownKeys?: readonly string[]
+  }) {
+    return validateCodexTurnConfiguration(this.state.catalog, options)
   }
 
   /**
@@ -393,10 +431,11 @@ export class CodexRuntime {
       return { ok: false, error: readinessResult.error, diagnostics: readinessResult.diagnostics }
     }
     this.state.ready = true
-    this.state.diagnostic = null
+    this.state.diagnostic = readinessResult.diagnostics[0] ?? null
     this.state.catalog = readinessResult.value.catalog
+    this.catalogManager = catalogLoader
     this.state.generation = 1
-    return { ok: true, value: this.readyState(), diagnostics: [] }
+    return { ok: true, value: this.readyState(), diagnostics: readinessResult.diagnostics }
   }
 
   private recordFailure(diagnostic: CodexDiagnostic): CodexResult<CodexReadyState> {
@@ -416,63 +455,9 @@ export class CodexRuntime {
   }
 }
 
-/**
- * Build a catalog loader that drives `model/list` on the supplied
- * spawned handle. T-003 only requires that the catalog is non-empty;
- * the canonical reasoning-effort mapping, the page-through, and the
- * change-detection heartbeats land in T-004.
- */
-function codexCatalogLoaderFromHandle(handle: CodexServerHandle): CodexCatalogLoader {
-  return {
-    async loadCatalog() {
-      let envelope: unknown
-      try {
-        envelope = await handle.send<{ readonly cursor?: string | null; readonly pageSize?: number }, unknown>({
-          id: 2,
-          method: 'model/list',
-          params: { pageSize: 256 },
-        })
-      } catch {
-        return null
-      }
-      if (!isCodexModelListResult(envelope)) return null
-      const native = envelope.result
-      if (!Array.isArray(native.models) || native.models.length === 0) return null
-      const models: CodexModelDescriptor[] = []
-      for (const candidate of native.models) {
-        if (!candidate || typeof candidate !== 'object') continue
-        const entry = candidate as { id?: unknown; displayName?: unknown }
-        if (typeof entry.id !== 'string') continue
-        models.push({
-          id: entry.id,
-          displayName: typeof entry.displayName === 'string' ? entry.displayName : null,
-          reasoningEfforts: [],
-          defaultReasoningEffort: null,
-          supportsReasoningEffort: true,
-        })
-      }
-      if (models.length === 0) return null
-      return {
-        models,
-        complete: native.complete === true,
-        capabilityRevision: capabilityRevisionForCodexCatalog(models),
-      }
-    },
-  }
-}
-
-/**
- * Hash the catalog content (model ids + display names) so the Runner
- * registration witness can detect changes between reloads. The
- * canonical reasoning-effort mapping lands in T-004; this minimal
- * revision is sufficient for T-003.
- */
-function capabilityRevisionForCodexCatalog(models: readonly CodexModelDescriptor[]): string {
-  const canonical = JSON.stringify(
-    models.map((model) => ({
-      id: model.id,
-      displayName: model.displayName,
-    })),
-  )
-  return createHash('sha256').update(canonical).digest('hex')
+/** Build the retained-snapshot catalog manager over the live app-server handle. */
+function codexCatalogLoaderFromHandle(handle: CodexServerHandle): CodexCatalogManager {
+  return createCodexModelCatalogLoader({
+    send: (request) => handle.send(request),
+  })
 }

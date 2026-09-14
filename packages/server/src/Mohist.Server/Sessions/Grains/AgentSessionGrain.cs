@@ -27,7 +27,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     internal static readonly TimeSpan OneShotReminderPeriod = TimeSpan.FromMinutes(1);
     private const string OpenCodeRuntime = "opencode";
     private const string PiRuntime = "pi";
-    private const string CodexRuntime = "codex";
 
     private readonly IAgentSessionStore _stateStore;
     private readonly IAgentSessionTranscriptStore _transcriptStore;

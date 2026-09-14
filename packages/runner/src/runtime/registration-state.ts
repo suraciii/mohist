@@ -2,9 +2,14 @@ import { createHash } from 'node:crypto'
 import type { AgentRuntime, RunnerOptions, RunnerRegistration } from '../core/types.js'
 import type { PiCatalog } from './pi/types.js'
 import type { OpencodeModelCatalog } from './opencode-models.js'
+import type { CodexCatalog } from './codex/types.js'
 
 export interface RegistrationPiCatalogSource {
   catalog: () => PiCatalog | null
+}
+
+export interface RegistrationCodexCatalogSource {
+  catalog: () => CodexCatalog | null
 }
 
 export function buildRegistrationState(
@@ -15,6 +20,7 @@ export function buildRegistrationState(
   processGeneration: string,
   opencodeCatalog: OpencodeModelCatalog,
   enabledAgentRuntimes: ReadonlySet<AgentRuntime>,
+  codexRuntime?: RegistrationCodexCatalogSource | null,
 ): RunnerRegistration {
   const piCatalog = piRuntime?.catalog()
   const piModels = piCatalog?.models.map((model) => `${model.provider}/${model.id}`) ?? []
@@ -27,6 +33,7 @@ export function buildRegistrationState(
         .digest('hex')
     : null
   const managerCapabilitiesAvailable = process.platform === 'linux' && piCatalog !== null
+  const codexCatalog = enabledAgentRuntimes.has('codex') ? (codexRuntime?.catalog() ?? null) : null
   return {
     processGeneration,
     capabilities: [
@@ -71,6 +78,20 @@ export function buildRegistrationState(
               supportsReasoningEffort: true,
               complete: true,
               capabilityRevision: piCapabilityRevision,
+            },
+          }
+        : {}),
+      ...(codexCatalog && codexCatalog.complete && codexCatalog.models.length > 0
+        ? {
+            codex: {
+              models: codexCatalog.models.map((model) => model.id),
+              variants: {},
+              reasoningEfforts: Object.fromEntries(
+                codexCatalog.models.map((model) => [model.id, [...model.reasoningEfforts]]),
+              ),
+              supportsReasoningEffort: true,
+              complete: true,
+              capabilityRevision: codexCatalog.capabilityRevision,
             },
           }
         : {}),

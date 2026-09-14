@@ -101,6 +101,8 @@ export interface CodexFilePart {
 export interface CodexTurnOptions {
   readonly model?: string | null
   readonly reasoningEffort?: CodexCanonicalReasoningEffort | null
+  /** Codex v1 has no variant; a configured value is rejected at turn/start. */
+  readonly variant?: string | null
   readonly unknownKeys?: readonly string[]
 }
 

@@ -203,9 +203,7 @@ export interface CodexThreadStartResult {
   readonly reasoningEffort?: string
 }
 
-export function isCodexThreadStartRequest(
-  value: unknown,
-): value is CodexJsonRpcRequest<CodexThreadStartParams> {
+export function isCodexThreadStartRequest(value: unknown): value is CodexJsonRpcRequest<CodexThreadStartParams> {
   if (!isCodexRequestEnvelope(value) || value.method !== 'thread/start') return false
   const params = value.params
   if (!params || typeof params !== 'object') return false
@@ -235,9 +233,7 @@ export interface CodexThreadResumeResult {
   readonly reasoningEffort?: string
 }
 
-export function isCodexThreadResumeRequest(
-  value: unknown,
-): value is CodexJsonRpcRequest<CodexThreadResumeParams> {
+export function isCodexThreadResumeRequest(value: unknown): value is CodexJsonRpcRequest<CodexThreadResumeParams> {
   if (!isCodexRequestEnvelope(value) || value.method !== 'thread/resume') return false
   const params = value.params
   if (!params || typeof params !== 'object') return false
@@ -296,9 +292,7 @@ export interface CodexTurnStartResult {
   readonly status: string
 }
 
-export function isCodexTurnStartRequest(
-  value: unknown,
-): value is CodexJsonRpcRequest<CodexTurnStartParams> {
+export function isCodexTurnStartRequest(value: unknown): value is CodexJsonRpcRequest<CodexTurnStartParams> {
   if (!isCodexRequestEnvelope(value) || value.method !== 'turn/start') return false
   const params = value.params
   if (!params || typeof params !== 'object') return false
@@ -310,7 +304,14 @@ export function isCodexTurnStartRequest(
 
 export function isCodexTurnInputItem(value: unknown): value is CodexTurnInputItem {
   if (!value || typeof value !== 'object') return false
-  const candidate = value as { type?: unknown; text?: unknown; url?: unknown; mime?: unknown; filename?: unknown; path?: unknown }
+  const candidate = value as {
+    type?: unknown
+    text?: unknown
+    url?: unknown
+    mime?: unknown
+    filename?: unknown
+    path?: unknown
+  }
   if (candidate.type === 'text') return typeof candidate.text === 'string'
   if (candidate.type === 'image') {
     if (typeof candidate.url !== 'string') return false
@@ -328,9 +329,7 @@ export interface CodexTurnSteerParams {
   readonly input: ReadonlyArray<CodexTurnInputItem>
 }
 
-export function isCodexTurnSteerRequest(
-  value: unknown,
-): value is CodexJsonRpcRequest<CodexTurnSteerParams> {
+export function isCodexTurnSteerRequest(value: unknown): value is CodexJsonRpcRequest<CodexTurnSteerParams> {
   if (!isCodexRequestEnvelope(value) || value.method !== 'turn/steer') return false
   const params = value.params
   if (!params || typeof params !== 'object') return false
@@ -352,9 +351,7 @@ export interface CodexTurnInterruptResult {
   readonly accepted: boolean
 }
 
-export function isCodexTurnInterruptRequest(
-  value: unknown,
-): value is CodexJsonRpcRequest<CodexTurnInterruptParams> {
+export function isCodexTurnInterruptRequest(value: unknown): value is CodexJsonRpcRequest<CodexTurnInterruptParams> {
   if (!isCodexRequestEnvelope(value) || value.method !== 'turn/interrupt') return false
   const params = value.params
   if (!params || typeof params !== 'object') return false
@@ -362,9 +359,7 @@ export function isCodexTurnInterruptRequest(
   return typeof candidate.threadId === 'string' && typeof candidate.turnId === 'string'
 }
 
-export function isCodexTurnInterruptResult(
-  value: unknown,
-): value is CodexJsonRpcSuccess<CodexTurnInterruptResult> {
+export function isCodexTurnInterruptResult(value: unknown): value is CodexJsonRpcSuccess<CodexTurnInterruptResult> {
   if (!isCodexSuccessEnvelope(value)) return false
   const result = value.result
   if (!result || typeof result !== 'object') return false
