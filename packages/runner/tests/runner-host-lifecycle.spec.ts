@@ -347,6 +347,8 @@ describe('RunnerHost', () => {
       uses: 'test/block',
       ownerKind: 'agent-job',
       agentJobId: `job-${id}`,
+      projectId: 'project-1',
+      with: { prompt: `work ${id}`, runtime: 'opencode', executionSource: 'non-slack' },
       variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     })
     let pollIndex = 0
@@ -442,6 +444,7 @@ describe('RunnerHost', () => {
       workType: 'task',
       ownerKind: 'agent-job',
       agentJobId: 'job-affected',
+      projectId: 'project-1',
       with: { prompt: 'blocked execution', runtime: 'opencode', executionSource: 'non-slack' },
       variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     }

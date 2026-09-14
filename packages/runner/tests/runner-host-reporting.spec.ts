@@ -245,6 +245,7 @@ describe('RunnerHost', () => {
       workType: 'task',
       uses: 'test/block',
       ownerKind: 'workflow',
+      projectId: 'project-1',
       variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     }
     const reported = deferred<void>()
@@ -285,6 +286,7 @@ describe('RunnerHost', () => {
       workType: 'task',
       uses: 'mohist/opencode',
       ownerKind: 'workflow',
+      projectId: 'project-1',
       capabilityRevision: 'revision-from-an-older-catalog',
       variables: { workspace: { path: '/virtual/stale-capability' } },
     }
@@ -345,6 +347,7 @@ describe('RunnerHost', () => {
       workType: 'task',
       uses: 'test/block',
       ownerKind: 'workflow',
+      projectId: 'project-1',
       variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     }
     let pollIndex = 0
@@ -402,6 +405,7 @@ describe('RunnerHost', () => {
       workType: 'task',
       uses: 'test/block',
       ownerKind: 'workflow',
+      projectId: 'project-1',
       variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     }
     let pollIndex = 0
@@ -448,6 +452,7 @@ describe('RunnerHost', () => {
         workType: 'task',
         uses: 'test/block',
         ownerKind: 'workflow',
+        projectId: 'project-1',
         variables: { workspace: { path: '/virtual/mohist-runner-test' } },
       },
       {
@@ -456,6 +461,7 @@ describe('RunnerHost', () => {
         workType: 'task',
         uses: 'test/block',
         ownerKind: 'workflow',
+        projectId: 'project-1',
         variables: { workspace: { path: '/virtual/mohist-runner-test' } },
       },
     ]
@@ -552,6 +558,7 @@ describe('RunnerHost', () => {
       workType: 'task',
       uses: 'test/block',
       ownerKind: 'workflow',
+      projectId: 'project-1',
       variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     }
     poll.mockResolvedValueOnce([{ work }]).mockResolvedValue([])
@@ -636,6 +643,7 @@ describe('RunnerHost', () => {
       workType: 'task',
       uses: 'test/block',
       ownerKind: 'workflow',
+      projectId: 'project-1',
       variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     }
     poll.mockResolvedValueOnce([{ work }]).mockResolvedValue([])

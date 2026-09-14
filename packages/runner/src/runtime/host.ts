@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentRuntime, RunnerOptions, RunnerRegistration } from '../core/types.js'
 import { ServerConnection } from '../server/connection.js'
+import { validateDispatchEnvelope } from '../server/connection-dispatch.js'
 import { RunnerControlWebSocketClient } from '../server/runner-control-websocket.js'
 import { createRunnerControlHandlers } from '../server/runner-control-handlers.js'
 import { reportAndRequireDurableAck } from './work-report.js'
@@ -606,7 +607,7 @@ export class RunnerHost {
       }
 
       await this.prepareOpenCodeWork(
-        works.map((item) => item.work),
+        works.map((item) => item.work).filter((work) => validateDispatchEnvelope(work) === undefined),
         signal,
       )
 
@@ -625,8 +626,9 @@ export class RunnerHost {
         if (this.inFlight.has(key) || this.awaitingAck.has(key)) continue
 
         const isManagerExecution = isManagerExecutionWork(work)
+        const envelopeValid = validateDispatchEnvelope(work) === undefined
         let managerBoundary: ManagerExecutionBoundary | null = null
-        if (isManagerExecution) {
+        if (isManagerExecution && envelopeValid) {
           if (!supportsManagerExecution(this.registrationState()) || !polled.managerExecutionGrant) continue
           managerBoundary = await createManagerExecutionBoundary(
             polled.managerExecutionGrant,
@@ -638,7 +640,7 @@ export class RunnerHost {
           if (!managerBoundary) continue
         }
 
-        if (isManagerExecution && managerBoundary) {
+        if (isManagerExecution && envelopeValid && managerBoundary) {
           this.managerExecutions.set(key, managerBoundary)
           this.managerExecutionRegistry.register({
             executionId: polled.managerExecutionGrant!.executionId,

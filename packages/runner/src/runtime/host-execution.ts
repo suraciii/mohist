@@ -3,6 +3,7 @@ import { reportAndRequireDurableAck } from './work-report.js'
 import { isShutdownFailureResult, isSyntheticStopResult } from './host-update-shutdown.js'
 import { AWAITING_ACK_RETRY_INTERVAL_MS } from './host-timing.js'
 import { runnerLogger } from '../system/logger.js'
+import { validateDispatchEnvelope } from '../server/connection-dispatch.js'
 import type { AwaitingAckEntry, InFlightEntry } from './host-state.js'
 import type { DispatchWorkItem, RunnerOptions, WorkItemResult } from '../core/types.js'
 import type { ServerConnection } from '../server/connection.js'
@@ -136,23 +137,28 @@ async function executeAndTransitionCore(
 ): Promise<void> {
   let result: WorkItemResult
   try {
-    const runtime = workRuntime(work)
-    if (work.capabilityRevision && runtime && context.currentCatalogRevision(runtime) !== work.capabilityRevision) {
-      log.warn('rejecting stale capability snapshot before execution', {
-        work: work.workId,
-        runtime,
-        frozen: work.capabilityRevision,
-        current: context.currentCatalogRevision(runtime),
-      })
-      result = staleCapabilityResult(work)
+    const envelopeFailure = validateDispatchEnvelope(work)
+    if (envelopeFailure) {
+      result = envelopeFailure
     } else {
-      result = await executeWork(
-        context.taskLogDeps(),
-        context.workExecutorRef()!,
-        work,
-        signal,
-        context.managerExecutionFor(key),
-      )
+      const runtime = workRuntime(work)
+      if (work.capabilityRevision && runtime && context.currentCatalogRevision(runtime) !== work.capabilityRevision) {
+        log.warn('rejecting stale capability snapshot before execution', {
+          work: work.workId,
+          runtime,
+          frozen: work.capabilityRevision,
+          current: context.currentCatalogRevision(runtime),
+        })
+        result = staleCapabilityResult(work)
+      } else {
+        result = await executeWork(
+          context.taskLogDeps(),
+          context.workExecutorRef()!,
+          work,
+          signal,
+          context.managerExecutionFor(key),
+        )
+      }
     }
   } catch (error) {
     if (signal.aborted && !entry.managerInvalidated) return
