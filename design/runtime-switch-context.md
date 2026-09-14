@@ -22,8 +22,8 @@ binding generation and records the new runtime and physical identity.
 The replacement context is system/infrastructure context, not a user Input or
 Turn. It contains the canonical Session ID, workspace, and source conversation
 identity. The agent may use the existing bounded Session transcript/view
-command; Slack history injection or a new Slack history command is out of scope
-until separately specified.
+command (`mo session transcript <session-id>`); Slack history injection or a
+new Slack history command is out of scope until separately specified.
 
 ## Semantics
 
