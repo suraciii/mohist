@@ -36,7 +36,7 @@ mo install runner --repo-root "$PWD"  # First registration and start
 mo service start runner
 ```
 
-Managed mo install services are supported on Linux user-systemd only; see [Self-hosting](self-host.md) for the always-on deployment path.
+Managed `mo install` services are supported on Linux user-systemd only. During development on other platforms, use `npm run dev:server` and `npm run dev:runner`.
 
 The first installation requests a one-time enrollment from the running Server.
 Runner exchanges it for a machine credential and stores that credential under
