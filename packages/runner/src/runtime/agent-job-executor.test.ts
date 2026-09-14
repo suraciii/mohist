@@ -163,6 +163,40 @@ describe('AgentJobExecutor attachment delivery', () => {
 })
 
 describe('AgentJobExecutor transport metadata classification', () => {
+  it('rejects a source-less dispatch before touching the runtime', async () => {
+    const ready = vi.fn(() => true)
+    const runTurn = vi.fn()
+    const workDir = '/virtual/mohist-agent-job-source-required'
+    const work: DispatchWorkItem = {
+      workflowRunId: '',
+      workId: 'work-source-required',
+      workType: 'agent-job',
+      ownerKind: 'agent-job',
+      projectId: 'project-1',
+      agentJobId: 'job-source-required',
+      agentSessionId: 'session-1',
+      initialInputId: 'input-1',
+      initialTurnId: 'turn-1',
+      variables: { workspace: { path: workDir } },
+      with: { prompt: 'must not run', runtime: 'opencode' },
+    }
+
+    const result = await new AgentJobExecutor(
+      {} as never,
+      {
+        openCode: { ready, diagnostic: () => null, runTurn } as never,
+        pi: null,
+      },
+      workDir,
+    ).execute(work, new AbortController().signal)
+
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('invalid-input')
+    expect(result.message).toBe('executionSource is required')
+    expect(ready).not.toHaveBeenCalled()
+    expect(runTurn).not.toHaveBeenCalled()
+  })
+
   it('does not surface executionSource as unknown Pi options', async (fileSystem) => {
     const workDir = '/virtual/mohist-agent-job-pi-source'
     const runTurn = vi.fn(async (_request: { prompt: string; options?: { unknownKeys?: readonly string[] } }) => ({

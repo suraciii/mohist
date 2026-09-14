@@ -56,9 +56,8 @@ export function readExecutionSourceContext(
   const sourcePresent = payload !== null && Object.prototype.hasOwnProperty.call(payload, 'executionSource')
   const source = payload?.executionSource
 
-  // The discriminator is required unconditionally; a missing
-  // `executionSource` field is the same invalid-input condition the
-  // strict switch used to gate and is now the only outcome.
+  // The discriminator is required unconditionally; missing and null
+  // values are invalid rather than inferred from the payload shape.
   if (!sourcePresent) return invalid('executionSource is required')
   if (source === undefined || source === null) return invalid('executionSource is required')
   if (source !== SLACK_EXECUTION_SOURCE && source !== NON_SLACK_EXECUTION_SOURCE)
