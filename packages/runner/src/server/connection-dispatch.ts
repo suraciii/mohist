@@ -40,11 +40,10 @@ export function validateDispatchEnvelope(work: DispatchWorkItem): void | WorkIte
   if (ownerKind === 'agent-job') {
     const runtime = declaredAgentRuntime(work)
     if (runtime === null) return invalidDispatch('runtime', 'runtime must be opencode or pi')
+  } else {
+    const runtimeFailure = validateWorkflowRuntime(work)
+    if (runtimeFailure) return runtimeFailure
   }
-  // Workflow runtime Actions pin their runtime in the canonical `uses`
-  // token. Other Workflow actions, including the production mohist/* action
-  // catalog, are ordinary actions and must not be mistaken for runtime
-  // dispatches.
 
   const workspace = isObject(work.variables?.['workspace']) ? work.variables['workspace'] : null
   const managerDispatch = ownerKind === 'agent-job' && work.projectId === MANAGER_PROJECT_ID
@@ -160,6 +159,25 @@ function declaredAgentRuntime(work: DispatchWorkItem): 'opencode' | 'pi' | null 
   const value = work.with?.['runtime']
   if (value !== 'opencode' && value !== 'pi') return null
   return value
+}
+
+function validateWorkflowRuntime(work: DispatchWorkItem): WorkItemResult | undefined {
+  if (!isRuntimeDispatch(work)) return undefined
+  return runtimeForWorkflow(work) === null
+    ? invalidDispatch('runtime', 'workflow dispatch must resolve a runtime from uses')
+    : undefined
+}
+
+function runtimeForWorkflow(work: DispatchWorkItem): 'opencode' | 'pi' | null {
+  const uses = work.uses?.trim().toLowerCase()
+  if (uses === 'mohist/opencode') return 'opencode'
+  if (uses === 'mohist/pi') return 'pi'
+  return null
+}
+
+function isRuntimeDispatch(work: DispatchWorkItem): boolean {
+  const uses = work.uses?.trim().toLowerCase()
+  return uses === 'mohist/opencode' || uses === 'mohist/pi'
 }
 
 export function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem {

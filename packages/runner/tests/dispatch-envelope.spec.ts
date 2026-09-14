@@ -180,6 +180,20 @@ describe('dispatch envelope validation', () => {
     expect(workKey(work, { ownerKind: 'agent-job', agentJobId: 'job-1' })).toBe('agent-job:job-1:work-1')
   })
 
+  it('does not mistake an arbitrary mohist action for a runtime dispatch', () => {
+    const source = validAgentJobWork()
+    const work: DispatchWorkItem = {
+      ...source,
+      ownerKind: 'workflow',
+      agentJobId: null,
+      uses: 'mohist/unknown',
+      with: { prompt: 'ordinary workflow action input' },
+      variables: { ...source.variables, executionSource: 'non-slack' },
+      agentDefinition: null,
+    }
+    expect(validateDispatchEnvelope(work)).toBeUndefined()
+  })
+
   it.each([
     'mohist/task-list',
     'mohist/rebase',

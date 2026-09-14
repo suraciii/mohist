@@ -78,6 +78,9 @@ public sealed class RunnerPollRecoveryStateApiSpecs
             Assert.False(string.IsNullOrWhiteSpace(freshActionAttemptId));
             Assert.True(fresh.TryGetProperty("recoveryRemaining", out var freshState));
             Assert.Equal(JsonValueKind.Null, freshState.ValueKind);
+            var reportOwner = fresh.GetProperty("reportOwner");
+            Assert.Equal(WorkDispatchOwnerKinds.Workflow, reportOwner.GetProperty("ownerKind").GetString());
+            Assert.Equal(workflowRunId, reportOwner.GetProperty("workflowRunId").GetString());
 
             using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
             {
