@@ -28,6 +28,7 @@ export interface ResolveOrRecoverBindingRequest {
   readonly replace: (expected: RuntimeBinding, replacement: RuntimeBinding) => Promise<void>
   readonly recoveryKey?: string
   readonly coordinator?: BindingRecoveryCoordinator
+  readonly allowRuntimeReplacement?: boolean
 }
 
 export class BindingRecoveryCoordinator {
@@ -61,7 +62,7 @@ export async function resolveOrRecoverBinding(request: ResolveOrRecoverBindingRe
   if (expected.runnerId !== request.runnerId) {
     return failure('different-runner', 'The Runtime Session binding belongs to a different Runner')
   }
-  if (request.runtime.kind !== expected.runtime) {
+  if (!request.allowRuntimeReplacement && request.runtime.kind !== expected.runtime) {
     return failure('incompatible-runtime', 'The Runtime Session binding does not match the selected runtime')
   }
 
@@ -81,6 +82,7 @@ export async function resolveOrRecoverBinding(request: ResolveOrRecoverBindingRe
 
   const replacement: RuntimeBinding = {
     ...expected,
+    runtime: request.runtime.kind,
     runtimeSessionId: created.value.runtimeSessionId,
     workDir: created.value.workDir,
   }

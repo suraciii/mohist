@@ -198,6 +198,14 @@ async function handleFollowup(
       return unavailable()
     }
   }
+  let allowRuntimeReplacement = false
+  if (!handle && !managerContext && binding.runtime.toLowerCase() === 'opencode') {
+    const pi = resolveAccessor(deps.piRuntime)
+    if (pi) {
+      handle = { kind: 'pi', runtime: pi }
+      allowRuntimeReplacement = true
+    }
+  }
   if (!handle) {
     await managerExecution?.dispose().catch(() => undefined)
     return runtimeUnavailable()
@@ -213,7 +221,7 @@ async function handleFollowup(
   if (!managerContext && connection && runnerId) {
     const expected = {
       runnerId: binding.runnerId,
-      runtime: handle.kind,
+      runtime: binding.runtime as 'opencode' | 'pi',
       runtimeSessionId: target.runtimeSessionId,
       workDir: target.workDir,
     } as const
@@ -222,22 +230,14 @@ async function handleFollowup(
       expected,
       runtime: handle,
       probe: async (candidate) => {
-        const result =
-          handle.kind === 'opencode'
-            ? await handle.runtime.resolveSession({
-                target: {
-                  runtime: 'opencode',
-                  runtimeSessionId: candidate.runtimeSessionId,
-                  workDir: candidate.workDir,
-                },
-              })
-            : await handle.runtime.resolveSession({
-                target: {
-                  runtime: 'pi',
-                  runtimeSessionId: candidate.runtimeSessionId,
-                  workDir: candidate.workDir,
-                },
-              })
+        const candidateHandle = resolveCommandRuntime(candidate, {
+          openCode: deps.openCodeRuntime,
+          pi: deps.piRuntime,
+        })
+        if (!candidateHandle) return { ok: false, kind: 'unavailable-runtime', message: 'runtime is unavailable' }
+        const result = candidateHandle.kind === 'opencode'
+          ? await candidateHandle.runtime.resolveSession({ target: { runtime: 'opencode', runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
+          : await candidateHandle.runtime.resolveSession({ target: { runtime: 'pi', runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
         return result.ok
           ? { ok: true, activeTurn: result.value.activeTurn }
           : { ok: false, kind: result.error.kind, message: result.error.message }
@@ -248,6 +248,7 @@ async function handleFollowup(
           expectedRuntime: current.runtime,
           expectedRuntimeSessionId: current.runtimeSessionId,
           replacementRuntimeSessionId: replacement.runtimeSessionId,
+          replacementRuntime: replacement.runtime,
           expectedQueuedTurnId: payload.turnId,
         }
         const signal = new AbortController().signal
@@ -265,6 +266,7 @@ async function handleFollowup(
       },
       recoveryKey: `${sessionTargetId(sessionTarget)}:${expected.runtimeSessionId ?? 'unbound'}`,
       coordinator: deps.bindingRecoveryCoordinator ?? undefined,
+      allowRuntimeReplacement,
     })
     if (!recovery.ok || !recovery.binding.runtimeSessionId) return unavailable()
     selectedTarget = { ...target, runtimeSessionId: recovery.binding.runtimeSessionId }
@@ -323,7 +325,7 @@ async function handleFollowup(
 
   const followupRequest = {
     target: {
-      runtime: binding.runtime,
+      runtime: handle.kind,
       runtimeSessionId: selectedTarget.runtimeSessionId,
       workDir: selectedTarget.workDir,
     },

@@ -379,7 +379,8 @@ public static partial class RunnerRoutes
                     req.ExpectedRuntime,
                     req.ExpectedRuntimeSessionId,
                     req.ReplacementRuntimeSessionId,
-                    req.ExpectedQueuedTurnId));
+                    req.ExpectedQueuedTurnId,
+                    req.ReplacementRuntime));
                 return Results.Ok(ToRunnerGenericAgentSession(session));
             }
             catch (StaleRuntimeSessionBindingException ex)
@@ -710,7 +711,8 @@ public record MissingRuntimeSessionRecoveryRequest(
     string ExpectedRuntime,
     string ExpectedRuntimeSessionId,
     string ReplacementRuntimeSessionId,
-    string? ExpectedQueuedTurnId = null);
+    string? ExpectedQueuedTurnId = null,
+    string? ReplacementRuntime = null);
 public record WorkflowAgentSessionResetRequest(
     string ExpectedRunnerId,
     string ExpectedRuntime,

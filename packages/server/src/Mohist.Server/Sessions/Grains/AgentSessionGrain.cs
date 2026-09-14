@@ -253,7 +253,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         var now = Now();
         var events = session.RebindRuntimeSession(
             new AgentRuntimeBinding(command.ExpectedRunnerId, command.ExpectedRuntime, command.ExpectedRuntimeSessionId),
-            new AgentRuntimeBinding(command.ExpectedRunnerId, command.ExpectedRuntime, command.ReplacementRuntimeSessionId),
+            new AgentRuntimeBinding(command.ExpectedRunnerId, command.ReplacementRuntime ?? command.ExpectedRuntime, command.ReplacementRuntimeSessionId),
             "missing-recovery",
             now,
             session.BindingEpoch);
