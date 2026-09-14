@@ -1250,10 +1250,9 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         leases[index] = leases[index] with { Dispatching = false };
         SetPendingFollowups(session, leases);
         await CommitAsync(session, []);
-        if (scheduleRetry)
-            _followupDispatchScheduler?.Schedule(
-                session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
-                session.Id);
+        if (scheduleRetry) _followupDispatchScheduler?.Schedule(
+            session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
+            session.Id);
     }
 
     public async Task MarkFollowupTurnExecutingAsync(string operationId)
