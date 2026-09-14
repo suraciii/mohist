@@ -33,6 +33,54 @@ function eventQueue(order: string[]) {
 }
 
 describe('follow-up Runtime binding recovery', () => {
+  it('switches an unavailable OpenCode binding to Pi without changing the logical input', async () => {
+    const order: string[] = []
+    const openCode = {
+      ready: () => false,
+      resolveSession: vi.fn(async () => ({
+        ok: false as const,
+        error: { kind: 'unavailable-runtime', message: 'disabled' },
+        diagnostics: [],
+      })),
+    }
+    const pi = {
+      ready: () => true,
+      resolveSession: vi.fn(),
+      createSession: vi.fn(async () => ({
+        ok: true as const,
+        value: { runtimeSessionId: 'pi-new', workDir: '/work' },
+        diagnostics: [],
+      })),
+      followup: vi.fn(async (request: { target: { runtimeSessionId: string } }) => {
+        order.push(`followup:${request.target.runtimeSessionId}`)
+        return {
+          ok: true as const,
+          value: { facts: { runtimeSessionId: request.target.runtimeSessionId } },
+          diagnostics: [],
+        }
+      }),
+    }
+    const recover = vi.fn(async (_project: string, _session: string, body: Record<string, unknown>) => {
+      expect(body).toMatchObject({
+        expectedRuntime: 'opencode',
+        replacementRuntime: 'pi',
+        replacementRuntimeSessionId: 'pi-new',
+      })
+    })
+    const receive = createFollowupHandler({
+      followupTargetResolver: () => ({ runtimeSessionId: 'runtime-old', workDir: '/work', projectId: 'project-1' }),
+      agentSessionRuntimeEventQueue: eventQueue(order) as never,
+      openCodeRuntime: openCode as never,
+      piRuntime: pi as never,
+      connection: { recoverMissingAgentSession: recover } as never,
+      runnerId: 'runner-1',
+    })
+    await expect(receive(payload() as never)).resolves.toEqual({ accepted: true })
+    expect(pi.createSession).toHaveBeenCalledOnce()
+    expect(pi.followup).toHaveBeenCalledOnce()
+    expect(recover).toHaveBeenCalledOnce()
+  })
+
   it('replaces a confirmed-missing binding before submitting the input', async () => {
     const order: string[] = []
     const followup = vi.fn(async (request: { target: { runtimeSessionId: string } }) => {

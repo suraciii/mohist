@@ -9,13 +9,12 @@
 //     late binding), so a runtime built or replaced after
 //     control WebSocket client construction is visible to later commands
 //   - admits a follow-up command only when (a) the binding resolves and
-//     (b) the captured runtime is ready and (c) the volatile queue is healthy;
+//     (b) the captured runtime is ready, or an unavailable OpenCode binding
+//       can be replaced by ready Pi, and (c) the volatile queue is healthy;
 //     otherwise returns `{ accepted: false, error: "unavailable" }`
 //     without enqueuing input or invoking the runtime
-//   - dispatches to the binding's runtime:
-//     the wire binding's `runtime` field selects between the OpenCode
-//     and Pi backends; an unknown or not-ready runtime reports
-//     `unavailable` and the command is not silently dropped
+//   - dispatches to the binding's runtime, or to ready Pi when an OpenCode
+//     physical binding is unavailable; unknown runtimes remain unavailable
 //   - enqueues a `session.input` record through `enqueueBeforeExecution`
 //     and waits for its authoritative Server receipt before invoking
 //     `runtime.followup`; queue admission or receipt failure returns
@@ -198,6 +197,14 @@ async function handleFollowup(
       return unavailable()
     }
   }
+  let allowRuntimeReplacement = false
+  if (!managerContext && binding.runtime.toLowerCase() === 'opencode' && (!handle || !handle.runtime.ready())) {
+    const pi = resolveAccessor(deps.piRuntime)
+    if (pi) {
+      handle = { kind: 'pi', runtime: pi }
+      allowRuntimeReplacement = true
+    }
+  }
   if (!handle) {
     await managerExecution?.dispose().catch(() => undefined)
     return runtimeUnavailable()
@@ -213,7 +220,7 @@ async function handleFollowup(
   if (!managerContext && connection && runnerId) {
     const expected = {
       runnerId: binding.runnerId,
-      runtime: handle.kind,
+      runtime: binding.runtime as 'opencode' | 'pi',
       runtimeSessionId: target.runtimeSessionId,
       workDir: target.workDir,
     } as const
@@ -222,21 +229,22 @@ async function handleFollowup(
       expected,
       runtime: handle,
       probe: async (candidate) => {
+        const candidateHandle = resolveCommandRuntime(candidate, {
+          openCode: deps.openCodeRuntime,
+          pi: deps.piRuntime,
+        })
+        if (!candidateHandle) return { ok: false, kind: 'unavailable-runtime', message: 'runtime is unavailable' }
         const result =
-          handle.kind === 'opencode'
-            ? await handle.runtime.resolveSession({
+          candidateHandle.kind === 'opencode'
+            ? await candidateHandle.runtime.resolveSession({
                 target: {
                   runtime: 'opencode',
                   runtimeSessionId: candidate.runtimeSessionId,
                   workDir: candidate.workDir,
                 },
               })
-            : await handle.runtime.resolveSession({
-                target: {
-                  runtime: 'pi',
-                  runtimeSessionId: candidate.runtimeSessionId,
-                  workDir: candidate.workDir,
-                },
+            : await candidateHandle.runtime.resolveSession({
+                target: { runtime: 'pi', runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir },
               })
         return result.ok
           ? { ok: true, activeTurn: result.value.activeTurn }
@@ -248,6 +256,7 @@ async function handleFollowup(
           expectedRuntime: current.runtime,
           expectedRuntimeSessionId: current.runtimeSessionId,
           replacementRuntimeSessionId: replacement.runtimeSessionId,
+          ...(replacement.runtime !== current.runtime ? { replacementRuntime: replacement.runtime } : {}),
           expectedQueuedTurnId: payload.turnId,
         }
         const signal = new AbortController().signal
@@ -265,6 +274,7 @@ async function handleFollowup(
       },
       recoveryKey: `${sessionTargetId(sessionTarget)}:${expected.runtimeSessionId ?? 'unbound'}`,
       coordinator: deps.bindingRecoveryCoordinator ?? undefined,
+      allowRuntimeReplacement,
     })
     if (!recovery.ok || !recovery.binding.runtimeSessionId) return unavailable()
     selectedTarget = { ...target, runtimeSessionId: recovery.binding.runtimeSessionId }
@@ -323,7 +333,7 @@ async function handleFollowup(
 
   const followupRequest = {
     target: {
-      runtime: binding.runtime,
+      runtime: handle.kind,
       runtimeSessionId: selectedTarget.runtimeSessionId,
       workDir: selectedTarget.workDir,
     },
