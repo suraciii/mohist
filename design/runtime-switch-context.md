@@ -42,7 +42,7 @@ If replacement or binding CAS fails, the original binding and canonical history
 remain unchanged and the Turn is reported as retryable/unavailable. A failed
 replacement must not leave a partially adopted physical session as current.
 
-```text
+```text diagram
 old binding unavailable
   -> create fallback physical session
   -> persist (logical Session unchanged, runtime binding replaced)
