@@ -8,12 +8,12 @@ import (
 )
 
 type updateOutcomeReporter struct {
-	client    *client
-	jobID     string
+	client     *client
+	jobID       string
 	sourcePath string
-	now       func() time.Time
-	stageLogs []cliOutcomeLog
-	finished  bool
+	now        func() time.Time
+	stageLogs  []cliOutcomeLog
+	finished   bool
 }
 
 type cliOutcomeLog struct {
