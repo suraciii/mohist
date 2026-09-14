@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -840,6 +841,14 @@ func installComponent(
 				return ExitOperation
 			}
 		}
+	}
+	if component == "server" {
+		dotnet, err := exec.LookPath("dotnet")
+		if err != nil {
+			dotnet = "/usr/bin/dotnet"
+		}
+		project := filepath.Join(root, "packages", "server", "src", "Mohist.Server", "Mohist.Server.csproj")
+		entry = dotnet + " run --project " + project
 	}
 	unitText := "[Unit]\nDescription=Mohist " + component + "\n\n[Service]\nWorkingDirectory=" + root + "\n" + environmentFileLine + "ExecStart=" + entry + "\n\n[Install]\nWantedBy=default.target\n"
 	path := filepath.Join(unitDir, unit)

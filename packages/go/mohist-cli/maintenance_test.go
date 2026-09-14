@@ -425,6 +425,89 @@ func TestInstallHelpDocumentsRunnerRuntimeSelection(t *testing.T) {
 	}
 }
 
+func TestInstallServerWritesManagedUnitWithAbsoluteEntrypoint(t *testing.T) {
+	home := t.TempDir()
+	sourceRoot := t.TempDir()
+	files := map[string]string{}
+	modes := map[string]os.FileMode{}
+	var commands [][]string
+	deps, out, errOut := testDeps(nil, map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_OPERATOR_TOKEN": "operator-secret"})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.CurrentDirectory = func() string { return sourceRoot }
+	deps.WriteFile = func(path, value string, mode os.FileMode) error {
+		files[path] = value
+		modes[path] = mode
+		return nil
+	}
+	deps.Execute = func(_ context.Context, name string, args []string) error {
+		commands = append(commands, append([]string{name}, args...))
+		return nil
+	}
+
+	code := Run(context.Background(), []string{"install", "server", "--repo-root", sourceRoot}, deps)
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, stdout = %s, stderr = %s", code, out.String(), errOut.String())
+	}
+
+	unitPath := filepath.Join(home, ".config", "systemd", "user", "mohist.service")
+	if modes[unitPath] != 0o600 {
+		t.Fatalf("unit file mode = %o, want 0o600", modes[unitPath])
+	}
+	unit := files[unitPath]
+	if unit == "" {
+		t.Fatalf("unit file was not written")
+	}
+
+	var execStartValue string
+	for _, line := range strings.Split(unit, "\n") {
+		if strings.HasPrefix(line, "ExecStart=") {
+			execStartValue = strings.TrimPrefix(line, "ExecStart=")
+			break
+		}
+	}
+	if execStartValue == "" {
+		t.Fatalf("unit file does not contain an ExecStart= line: %q", unit)
+	}
+	if !strings.HasPrefix(execStartValue, "/") {
+		t.Fatalf("ExecStart value does not begin with an absolute path: %q", execStartValue)
+	}
+	if strings.Contains(execStartValue, "packages/server/src/Mohist.Server/Mohist.Server.csproj") && !strings.Contains(execStartValue, sourceRoot) {
+		t.Fatalf("ExecStart references the relative project path from the source checkout: %q", execStartValue)
+	}
+	if !strings.Contains(unit, sourceRoot) {
+		t.Fatalf("unit does not reference the resolved source root %q: %q", sourceRoot, unit)
+	}
+
+	wantCommands := [][]string{
+		{"systemctl", "--user", "daemon-reload"},
+		{"systemctl", "--user", "enable", "mohist.service"},
+		{"systemctl", "--user", "restart", "mohist.service"},
+	}
+	if len(commands) != len(wantCommands) {
+		t.Fatalf("commands = %#v, want %#v", commands, wantCommands)
+	}
+	for index, want := range wantCommands {
+		if strings.Join(commands[index], "\x00") != strings.Join(want, "\x00") {
+			t.Fatalf("command %d = %#v, want %#v", index, commands[index], want)
+		}
+	}
+
+	combined := out.String() + "\n" + errOut.String() + "\n" + unit + "\n"
+	for _, command := range commands {
+		combined += strings.Join(command, " ") + "\n"
+	}
+	for _, secret := range []string{"operator-secret", "enrollment-token"} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("output leaked %q: %s", secret, combined)
+		}
+	}
+	for _, marker := range []string{"MOHIST_OPERATOR_TOKEN_PATH", "MOHIST_TOKEN", "enrollment-token"} {
+		if strings.Contains(unit, marker) {
+			t.Fatalf("unit contains forbidden marker %q: %s", marker, unit)
+		}
+	}
+}
+
 func writeTestSkill(t *testing.T, root, name string) {
 	t.Helper()
 	path := filepath.Join(root, name, "SKILL.md")
