@@ -9,7 +9,7 @@ import (
 
 type updateOutcomeReporter struct {
 	client     *client
-	jobID       string
+	jobID      string
 	sourcePath string
 	now        func() time.Time
 	stageLogs  []cliOutcomeLog

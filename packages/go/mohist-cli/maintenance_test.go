@@ -293,7 +293,10 @@ func TestUpdateRunnerDelegatesScopeAndPreservesRuntimeEnvironment(t *testing.T) 
 	}}
 	wantEnvironment := files.values[environmentPath]
 	runtime := &recordingManagedUpdateRuntime{}
-	deps, _, errOut := testDeps(nil, map[string]string{})
+	deps, _, errOut := testDeps(nil, map[string]string{
+		"MOHIST_SERVER_URL": "http://server",
+		"MOHIST_TOKEN":      "operator-token",
+	})
 	deps.ManagedUpdate = runtime
 	deps.HomeDir = func() (string, error) { return home, nil }
 	deps.ReadFile = files.ReadFile
@@ -375,7 +378,10 @@ func TestUpdateRunnerPreservesCredentialFiles(t *testing.T) {
 		files.values[path] = value
 	}
 	runtime := &recordingManagedUpdateRuntime{}
-	deps, out, errOut := testDeps(nil, map[string]string{})
+	deps, out, errOut := testDeps(nil, map[string]string{
+		"MOHIST_SERVER_URL": "http://server",
+		"MOHIST_TOKEN":      "operator-token",
+	})
 	deps.ManagedUpdate = runtime
 	deps.HomeDir = func() (string, error) { return home, nil }
 	deps.ReadFile = files.ReadFile
