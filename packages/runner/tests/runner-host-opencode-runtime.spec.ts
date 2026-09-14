@@ -265,6 +265,7 @@ function hostWithFakeTerminalDelivery(): RunnerHost {
 
 function workflowVariables(): Record<string, unknown> {
   return {
+    executionSource: 'non-slack',
     repository: { gitUrl: 'https://example.com/repo.git', baseBranch: 'main' },
     issue: { number: 1 },
     workspace: { path: '/virtual/mohist-runner-host-opencode-runtime' },

@@ -120,9 +120,10 @@ export async function executeAndTransition(
   signal: AbortSignal,
   key: string,
   entry: InFlightEntry,
+  validationFailure: WorkItemResult | null = null,
 ): Promise<void> {
   try {
-    await executeAndTransitionCore(context, work, signal, key, entry)
+    await executeAndTransitionCore(context, work, signal, key, entry, validationFailure)
   } finally {
     await context.releaseManagerExecution(key)
   }
@@ -134,10 +135,11 @@ async function executeAndTransitionCore(
   signal: AbortSignal,
   key: string,
   entry: InFlightEntry,
+  validationFailure: WorkItemResult | null,
 ): Promise<void> {
   let result: WorkItemResult
   try {
-    const envelopeFailure = validateDispatchEnvelope(work)
+    const envelopeFailure = validationFailure ?? validateDispatchEnvelope(work)
     if (envelopeFailure) {
       result = envelopeFailure
     } else {

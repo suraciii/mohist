@@ -133,6 +133,12 @@ export interface PolledDispatch {
   readonly work: DispatchWorkItem
   readonly managerExecutionGrant?: ManagerExecutionGrantResponse
   readonly originMarker?: string | null
+  /**
+   * A per-dispatch boundary failure. Poll keeps the work item in the
+   * reported set so the Host can settle malformed Manager metadata through
+   * the normal report/ack path instead of dropping the claim.
+   */
+  readonly validationFailure?: WorkItemResult
 }
 
 export type WorkDispatchResponse = {

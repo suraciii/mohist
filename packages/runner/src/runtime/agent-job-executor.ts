@@ -144,7 +144,13 @@ export class AgentJobExecutor {
 
     let workspaceBinding: WorkspaceBindingResolution
     try {
-      workspaceBinding = await resolveWorkspaceBinding(work, signal, this.namedWorkspaceManager)
+      workspaceBinding = await resolveWorkspaceBinding(
+        work,
+        signal,
+        this.namedWorkspaceManager,
+        managerExecution,
+        this.defaultWorkDir,
+      )
     } catch (error) {
       if (error instanceof WorkspaceHomeClaimedError) {
         return failureResult(
@@ -451,9 +457,19 @@ async function resolveWorkspaceBinding(
   work: DispatchWorkItem,
   signal: AbortSignal,
   namedWorkspaceManager: NamedWorkspaceManager | null,
+  managerExecution: ManagerExecutionBoundary | null,
+  defaultWorkDir: string | null,
 ): Promise<WorkspaceBindingResolution> {
   const ws = work.variables?.['workspace']
-  if (!isObject(ws)) return invalidWorkspaceBinding()
+  if (!isObject(ws)) {
+    // Manager conversations are not bound to a Server-owned workspace. The
+    // execution boundary supplies the explicit Runner root used for that
+    // isolated turn; ordinary AgentJob work must carry its own binding.
+    if (managerExecution && work.projectId === '__mohist_slack_manager__' && defaultWorkDir) {
+      return { kind: 'path', workDir: defaultWorkDir }
+    }
+    return invalidWorkspaceBinding()
+  }
 
   const name = ws['name']
   if (typeof name === 'string' && name.trim().length > 0) {

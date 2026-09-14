@@ -16,7 +16,7 @@ import type { BuildInfo } from '../runtime/build-info.js'
 import { parseObject } from '../core/json.js'
 import { getSegments } from '../core/json-path.js'
 import type { TaskLogBatch } from '../runtime/task-log.js'
-import { parseDispatchWorkItem } from './connection-dispatch.js'
+import { parsePolledDispatch } from './connection-dispatch.js'
 import { reportWork } from './connection-report.js'
 import { extractErrorMessage, RuntimeEventDeliveryError } from './connection-errors.js'
 export { RuntimeEventDeliveryError } from './connection-errors.js'
@@ -139,11 +139,7 @@ export class ServerConnection {
     const payload = (await response.json()) as {
       dispatches?: WorkDispatchResponse[]
     }
-    return (payload.dispatches ?? []).map((dispatch) => ({
-      work: parseDispatchWorkItem(dispatch),
-      ...(dispatch.managerExecutionGrant ? { managerExecutionGrant: dispatch.managerExecutionGrant } : {}),
-      ...(dispatch.originMarker != null ? { originMarker: dispatch.originMarker } : {}),
-    }))
+    return (payload.dispatches ?? []).map((dispatch) => parsePolledDispatch(dispatch))
   }
 
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {

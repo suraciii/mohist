@@ -71,7 +71,8 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         string workflowRunId,
         string projectId,
         string workId = "task-1.1",
-        TaskDefinition? taskDefinition = null)
+        TaskDefinition? taskDefinition = null,
+        int? issueNumber = 42)
     {
         var tasks = new List<TaskDefinition>
         {
@@ -87,7 +88,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
                     checks),
             ]),
             DateTimeOffset.UnixEpoch,
-            new WorkflowRunMetadata(null, DateTimeOffset.UnixEpoch, ProjectId: projectId, IssueNumber: 42, EpicNumber: 7));
+            new WorkflowRunMetadata(null, DateTimeOffset.UnixEpoch, ProjectId: projectId, IssueNumber: issueNumber, EpicNumber: 7));
         run.Start(DateTimeOffset.UnixEpoch);
         run.InitializeStage(tasks, checks, DateTimeOffset.UnixEpoch);
         run.AssignTo("runner-1", DateTimeOffset.UnixEpoch);
@@ -211,6 +212,7 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal(persistedTask.Id, dispatch.ActionAttemptId);
         Assert.Equal("Historical script", dispatch.Title);
         Assert.Equal("core/script", dispatch.Uses);
+        Assert.Equal(projectId, dispatch.ProjectId);
         Assert.Equal(WorkDispatchOwnerKinds.Workflow, dispatch.OwnerKind);
         Assert.Equal(JSON.Serialize(rawWith), dispatch.With);
         Assert.Equal(JSON.Serialize(artifacts), dispatch.Artifacts);
@@ -219,11 +221,33 @@ public partial class WorkflowItemTranslatorSpecs : IAsyncLifetime
         Assert.Equal(JSON.Serialize(recovery), dispatch.Recovery);
         Assert.Equal(1, dispatch.RecoveryRemaining);
         using (var variables = JsonDocument.Parse(dispatch.Variables!))
+        {
             Assert.True(variables.RootElement.TryGetProperty("vars", out _));
+            Assert.Equal("non-slack", variables.RootElement.GetProperty("executionSource").GetString());
+        }
 
         Assert.Equal(persistedStateBefore, JSON.Serialize(run));
         Assert.Equal(JSON.Serialize(rawWith), JSON.Serialize(persistedTask.WithInput));
         Assert.Equal(JSON.Serialize(recovery), JSON.Serialize(persistedTask.Recovery));
+    }
+
+    [Fact]
+    public async Task TranslateToDispatch_PreservesProjectIdentityWithoutIssueReference()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var projectId = "proj-translate-no-issue";
+        var run = await SeedRunningWorkflowAsync(runId, projectId, issueNumber: null);
+
+        var dispatch = await _translator.TranslateToDispatchAsync(
+            WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", null),
+            runId,
+            run,
+            "runner-1");
+
+        Assert.Equal(projectId, dispatch.ProjectId);
+        Assert.Null(dispatch.Issue);
+        using var variables = JsonDocument.Parse(dispatch.Variables!);
+        Assert.Equal("non-slack", variables.RootElement.GetProperty("executionSource").GetString());
     }
 
     [Fact]

@@ -607,13 +607,17 @@ export class RunnerHost {
       }
 
       await this.prepareOpenCodeWork(
-        works.map((item) => item.work).filter((work) => validateDispatchEnvelope(work) === undefined),
+        works
+          .filter((item) => item.validationFailure === undefined)
+          .map((item) => item.work)
+          .filter((work) => validateDispatchEnvelope(work) === undefined),
         signal,
       )
 
       // A single poll may return multiple dispatches (repair + new claims).
       // Execute each concurrently, skipping re-deliveries the process
-      // already holds.
+      // already holds. Admission is recorded before execution starts so a
+      // synchronous rejection cannot finish before it joins inFlight.
       for (const polled of works) {
         const work = polled.work
         if (signal.aborted) break
@@ -626,21 +630,39 @@ export class RunnerHost {
         if (this.inFlight.has(key) || this.awaitingAck.has(key)) continue
 
         const isManagerExecution = isManagerExecutionWork(work)
-        const envelopeValid = validateDispatchEnvelope(work) === undefined
+        const envelopeFailure = validateDispatchEnvelope(work)
+        let validationFailure = polled.validationFailure ?? envelopeFailure ?? null
         let managerBoundary: ManagerExecutionBoundary | null = null
-        if (isManagerExecution && envelopeValid) {
-          if (!supportsManagerExecution(this.registrationState()) || !polled.managerExecutionGrant) continue
-          managerBoundary = await createManagerExecutionBoundary(
-            polled.managerExecutionGrant,
-            this.options.runnerRoot,
-            {
-              workDir: this.options.runnerRoot,
-            },
-          )
-          if (!managerBoundary) continue
+        if (isManagerExecution && validationFailure === null) {
+          if (!supportsManagerExecution(this.registrationState())) continue
+          if (!polled.managerExecutionGrant) {
+            validationFailure = {
+              status: 'failed',
+              message: 'Manager dispatch requires a grant',
+              error: { code: 'invalid-dispatch', message: 'Manager dispatch requires a grant' },
+            }
+          } else {
+            managerBoundary = await createManagerExecutionBoundary(
+              polled.managerExecutionGrant,
+              this.options.runnerRoot,
+              {
+                workDir: this.options.runnerRoot,
+              },
+            )
+            if (!managerBoundary) {
+              validationFailure = {
+                status: 'failed',
+                message: 'Manager dispatch grant could not establish an execution boundary',
+                error: {
+                  code: 'invalid-dispatch',
+                  message: 'Manager dispatch grant could not establish an execution boundary',
+                },
+              }
+            }
+          }
         }
 
-        if (isManagerExecution && envelopeValid && managerBoundary) {
+        if (isManagerExecution && validationFailure === null && managerBoundary) {
           this.managerExecutions.set(key, managerBoundary)
           this.managerExecutionRegistry.register({
             executionId: polled.managerExecutionGrant!.executionId,
@@ -657,8 +679,8 @@ export class RunnerHost {
           work,
           controller,
         }
-        entry.done = executeAndTransition(this.executionContext, work, controller.signal, key, entry)
         this.inFlight.set(key, entry)
+        entry.done = executeAndTransition(this.executionContext, work, controller.signal, key, entry, validationFailure)
 
         this.syncOpenCodeWorkOwners()
       }

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { ServerConnection } from '../src/server/connection.js'
@@ -5,6 +6,7 @@ import { validateDispatchEnvelope } from '../src/server/connection-dispatch.js'
 import { executeAndTransition, reportOnce, type HostExecutionContext } from '../src/runtime/host-execution.js'
 import { AgentJobExecutor } from '../src/runtime/agent-job-executor.js'
 import { WorkExecutor } from '../src/runtime/executor.js'
+import { PUBLISHED_SLACK_SKILL_NAME, PUBLISHED_SLACK_SKILL_VERSION } from '../src/runtime/slack-execution-context.js'
 import type { DispatchWorkItem, PolledDispatch, RunnerOptions, WorkDispatchResponse } from '../src/core/types.js'
 import type { HostTaskLogDeps } from '../src/runtime/host-task-log.js'
 import type { AwaitingAckEntry, InFlightEntry } from '../src/runtime/host-state.js'
@@ -230,13 +232,62 @@ function workflowDispatch(): WorkDispatchResponse {
     workType: 'task',
     stage: 'build',
     title: 'Workflow work',
-    uses: 'mohist/pi',
+    uses: 'spec/task',
     with: JSON.stringify({ prompt: 'run the workflow action' }),
     expect: null,
-    variables: JSON.stringify({ workspace: { path: '/virtual/workflow-2' } }),
+    variables: JSON.stringify({
+      executionSource: 'non-slack',
+      workspace: { path: '/virtual/workflow-2' },
+    }),
     projectId: 'project-1',
     issueNumber: 685,
     ownerKind: 'workflow',
+  }
+}
+
+function managerAgentJobDispatch(overrides: Partial<WorkDispatchResponse> = {}): WorkDispatchResponse {
+  const dispatch = agentJobDispatch()
+  const payload = JSON.parse(dispatch.with ?? '{}') as Record<string, unknown>
+  payload.runtime = 'pi'
+  payload.executionSource = 'slack'
+  payload.slackExecutionContext = slackExecutionContext()
+  return {
+    ...dispatch,
+    ...overrides,
+    workflowRunId: '',
+    projectId: '__mohist_slack_manager__',
+    with: JSON.stringify(payload),
+    variables: null,
+    agentDefinition: { ...dispatch.agentDefinition!, runtime: 'pi' },
+  }
+}
+
+function slackExecutionContext() {
+  const instructions = readFileSync(
+    new URL(
+      '../../server/src/Mohist.Server/Agent/Services/Assets/mohist-slack-collaboration.skill.md',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  return {
+    version: 1,
+    replyAnchor: {
+      workspaceId: 'T_MANAGER',
+      conversationId: 'C_MANAGER',
+      threadRootMessageId: '100.0',
+      triggeringMessageId: '101.0',
+      initiatingMemberId: 'U_MANAGER',
+      connectionId: 'connection-manager',
+      sessionId: 'session-manager',
+      dispatchRef: 'slack:session-manager:input-1',
+    },
+    collaborationSkill: {
+      name: PUBLISHED_SLACK_SKILL_NAME,
+      version: PUBLISHED_SLACK_SKILL_VERSION,
+      instructions,
+      contentHash: createHash('sha256').update(instructions, 'utf8').digest('hex'),
+    },
   }
 }
 
@@ -359,6 +410,11 @@ function withoutAgentField(field: string, value?: string): WorkDispatchResponse 
     dispatch.uses = 'mohist/opencode'
   } else if (field === 'repository') {
     delete variables.repository
+  } else if (field === 'slackExecutionContext') {
+    withPayload.executionSource = 'slack'
+    delete withPayload.slackExecutionContext
+  } else if (field === 'workspace') {
+    delete variables.workspace
   }
 
   dispatch.with = JSON.stringify(withPayload)
@@ -406,6 +462,16 @@ const invalidEnvelopeVectors: ReadonlyArray<{
     field: 'repository',
     dispatch: () => withoutAgentField('repository'),
   },
+  {
+    name: 'Slack source context absent',
+    field: 'slackExecutionContext',
+    dispatch: () => withoutAgentField('slackExecutionContext'),
+  },
+  {
+    name: 'workspace binding absent',
+    field: 'workspace',
+    dispatch: () => withoutAgentField('workspace'),
+  },
 ]
 
 describe('runner control strict envelope contract', () => {
@@ -414,7 +480,7 @@ describe('runner control strict envelope contract', () => {
     async () => {
       const connection = new ServerConnection(contractOptions)
       const grant = managerGrant('execution-1')
-      const agentResponse = agentJobDispatch({
+      const agentResponse = managerAgentJobDispatch({
         managerExecutionGrant: grant,
         originMarker: 'slack-manager',
       })
@@ -429,7 +495,7 @@ describe('runner control strict envelope contract', () => {
         workType: 'task',
         stage: 'build',
         title: 'Workflow work',
-        uses: 'mohist/pi',
+        uses: 'spec/task',
         projectId: 'project-1',
         issueNumber: 685,
         ownerKind: 'workflow',
@@ -442,14 +508,14 @@ describe('runner control strict envelope contract', () => {
 
       const agent = polled[1]!
       expect(agent.work).toMatchObject({
-        workflowRunId: 'workflow-1',
+        workflowRunId: '',
         workId: 'agent-work-1',
         actionAttemptId: 'agent-attempt-1',
         workType: 'task',
         stage: 'execute',
         title: 'Agent work',
         uses: null,
-        projectId: 'project-1',
+        projectId: '__mohist_slack_manager__',
         issueNumber: 684,
         epicNumber: 68,
         ownerKind: 'agent-job',
@@ -458,17 +524,11 @@ describe('runner control strict envelope contract', () => {
         with: {
           prompt: 'do the agent work',
           instructions: 'be careful',
-          runtime: 'opencode',
-          executionSource: 'non-slack',
+          runtime: 'pi',
+          executionSource: 'slack',
+          slackExecutionContext: expect.any(Object),
         },
-        variables: {
-          workspace: { name: 'pay' },
-          repository: {
-            name: 'server',
-            gitUrl: 'https://example.test/server.git',
-            baseBranch: 'main',
-          },
-        },
+        variables: null,
         expect: { markers: [{ path: '_output', contains: 'done' }] },
         artifacts: { files: [{ path: 'notes.txt' }] },
         setVars: { result: 'done' },
@@ -481,7 +541,7 @@ describe('runner control strict envelope contract', () => {
       expect(agent.work.parentIssueContext).toEqual({ title: 'Parent issue', body: 'Parent body' })
       expect(agent.work.agentDefinition).toEqual({
         instructions: 'be careful',
-        runtime: 'opencode',
+        runtime: 'pi',
         model: 'model-1',
         variant: 'fast',
         skills: ['repo-guide'],
@@ -498,6 +558,66 @@ describe('runner control strict envelope contract', () => {
       expect(agent.work).not.toHaveProperty('originMarker')
     },
   )
+
+  it.each([
+    {
+      name: 'missing grant',
+      dispatch: () => managerAgentJobDispatch({ managerExecutionGrant: null, originMarker: 'slack-manager' }),
+    },
+    {
+      name: 'malformed grant',
+      dispatch: () => managerAgentJobDispatch({ managerExecutionGrant: {} as never, originMarker: 'slack-manager' }),
+    },
+    {
+      name: 'missing origin marker',
+      dispatch: () =>
+        managerAgentJobDispatch({ managerExecutionGrant: managerGrant('missing-origin'), originMarker: null }),
+    },
+    {
+      name: 'mismatched origin marker',
+      dispatch: () =>
+        managerAgentJobDispatch({ managerExecutionGrant: managerGrant('wrong-origin'), originMarker: 'other-origin' }),
+    },
+    {
+      name: 'grant attached to a non-Manager dispatch',
+      dispatch: () =>
+        agentJobDispatch({ managerExecutionGrant: managerGrant('wrong-owner'), originMarker: 'slack-manager' }),
+    },
+  ])('$name Manager metadata settles through report/ack without execution', async ({ dispatch: buildDispatch }) => {
+    await withFakeTransport(async () => {
+      const connection = new ServerConnection(contractOptions)
+      const [polled] = await poll(connection, [buildDispatch()])
+      const work = polled!.work
+      const harness = executionHarness(connection, work)
+
+      expect(polled!.validationFailure).toMatchObject({
+        status: 'failed',
+        error: { code: 'invalid-dispatch' },
+      })
+      transportFetch.mockResolvedValueOnce(jsonResponse({ verdict: 'accepted' }))
+      await executeAndTransition(
+        harness.context,
+        work,
+        contractSignal,
+        harness.key,
+        harness.context.inFlight.get(harness.key)!,
+        polled!.validationFailure!,
+      )
+
+      expect(transportFetch).toHaveBeenCalledTimes(2)
+      expect(transportFetch.mock.calls[1]![0]).toContain('/report')
+      const reportBody = JSON.parse((transportFetch.mock.calls[1]![1] as RequestInit).body as string) as Record<
+        string,
+        unknown
+      >
+      expect(reportBody.status).toBe('failed')
+      expect(reportBody.error).toMatchObject({ code: 'invalid-dispatch' })
+      expect(harness.workExecutorRef).not.toHaveBeenCalled()
+      expect(harness.runtimeAccessors[0]).not.toHaveBeenCalled()
+      expect(harness.runtimeAccessors[1]).not.toHaveBeenCalled()
+      expect(harness.context.awaitingAck.size).toBe(0)
+    })
+  })
 
   it.each(invalidEnvelopeVectors)(
     'rejects $name before runtime, named workspace, or workflow workspace startup',
@@ -546,8 +666,16 @@ describe('runner control strict envelope contract', () => {
     const connection = new ServerConnection(contractOptions)
     const firstGrant = managerGrant('execution-first')
     const secondGrant = managerGrant('execution-second')
-    const first = agentJobDispatch({ workId: 'agent-work-first', managerExecutionGrant: firstGrant })
-    const second = agentJobDispatch({ workId: 'agent-work-second', managerExecutionGrant: secondGrant })
+    const first = managerAgentJobDispatch({
+      workId: 'agent-work-first',
+      managerExecutionGrant: firstGrant,
+      originMarker: 'slack-manager',
+    })
+    const second = managerAgentJobDispatch({
+      workId: 'agent-work-second',
+      managerExecutionGrant: secondGrant,
+      originMarker: 'slack-manager',
+    })
     const later = agentJobDispatch({ workId: 'agent-work-later' })
 
     transportFetch.mockResolvedValueOnce(jsonResponse({ dispatches: [first, second] }))

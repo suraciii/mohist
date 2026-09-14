@@ -1,6 +1,16 @@
 import { parseObject, isObject } from '../core/json.js'
 import { stringAt } from '../core/json-path.js'
-import type { DispatchWorkItem, WorkDispatchResponse, WorkItemResult } from '../core/types.js'
+import { readExecutionSourceContext } from '../runtime/slack-execution-context.js'
+import type {
+  DispatchWorkItem,
+  ManagerExecutionGrantResponse,
+  PolledDispatch,
+  WorkDispatchResponse,
+  WorkItemResult,
+} from '../core/types.js'
+
+const MANAGER_PROJECT_ID = '__mohist_slack_manager__'
+const MANAGER_ORIGIN_MARKER = 'slack-manager'
 
 export function validateDispatchEnvelope(work: DispatchWorkItem): void | WorkItemResult {
   const ownerKind = work.ownerKind
@@ -19,35 +29,128 @@ export function validateDispatchEnvelope(work: DispatchWorkItem): void | WorkIte
   }
   if (!nonEmptyString(work.projectId)) return invalidDispatch('projectId')
 
-  const payload = work.with
-  if (ownerKind === 'agent-job') {
-    const source = payload?.['executionSource']
-    if (source !== 'slack' && source !== 'non-slack') {
-      return invalidDispatch('executionSource', 'executionSource must be slack or non-slack')
-    }
+  const sourcePayload = ownerKind === 'agent-job' ? work.with : work.variables
+  const sourceContext = readExecutionSourceContext(sourcePayload ?? null)
+  if (sourceContext.kind === 'invalid') {
+    const field = sourcePayload?.['executionSource'] === 'slack' ? 'slackExecutionContext' : 'executionSource'
+    return invalidDispatch(field, `${field} is invalid: ${sourceContext.message}`)
   }
 
   if (ownerKind === 'agent-job') {
     const runtime = declaredAgentRuntime(work)
     if (runtime === null) return invalidDispatch('runtime', 'runtime must be opencode or pi')
-  } else if (!isChecksDispatch(work) && !nonEmptyString(work.uses)) {
+  } else if (isRuntimeDispatch(work) && runtimeForWorkflow(work) === null) {
     return invalidDispatch('runtime', 'workflow dispatch must resolve a runtime from uses')
   }
 
   const workspace = isObject(work.variables?.['workspace']) ? work.variables['workspace'] : null
-  if (workspace && nonEmptyString(workspace['name']) && nonEmptyString(work.workflowRunId)) {
-    const missingRepositoryField = ['name', 'gitUrl', 'baseBranch'].find(
-      (field) => !nonEmptyString(stringAt(work.variables ?? {}, ['repository', field])),
-    )
-    if (missingRepositoryField) {
-      return invalidDispatch(
-        `repository.${missingRepositoryField}`,
-        `named workspace requires repository.${missingRepositoryField}`,
+  const managerDispatch = ownerKind === 'agent-job' && work.projectId === MANAGER_PROJECT_ID
+  if (!workspace && !managerDispatch) return invalidDispatch('workspace', 'dispatch requires a workspace binding')
+  if (workspace) {
+    const namedWorkspace = nonEmptyString(workspace['name'])
+    const freePath = nonEmptyString(workspace['path'])
+    if (!namedWorkspace && !freePath) {
+      return invalidDispatch('workspace', 'workspace.name or workspace.path must be a non-empty string')
+    }
+    if (namedWorkspace && nonEmptyString(work.workflowRunId)) {
+      const missingRepositoryField = ['name', 'gitUrl', 'baseBranch'].find(
+        (field) => !nonEmptyString(stringAt(work.variables ?? {}, ['repository', field])),
       )
+      if (missingRepositoryField) {
+        return invalidDispatch(
+          `repository.${missingRepositoryField}`,
+          `named workspace requires repository.${missingRepositoryField}`,
+        )
+      }
     }
   }
 
   return undefined
+}
+
+/** Parse one wire dispatch without allowing Manager metadata to escape its work item. */
+export function parsePolledDispatch(dispatch: WorkDispatchResponse): PolledDispatch {
+  const work = parseDispatchWorkItem(dispatch)
+  const metadata = parseManagerMetadata(work, dispatch)
+  return {
+    work,
+    ...(metadata.grant ? { managerExecutionGrant: metadata.grant } : {}),
+    ...(metadata.originMarker !== undefined ? { originMarker: metadata.originMarker } : {}),
+    ...(metadata.failure ? { validationFailure: metadata.failure } : {}),
+  }
+}
+
+function parseManagerMetadata(
+  work: DispatchWorkItem,
+  dispatch: WorkDispatchResponse,
+): {
+  grant?: ManagerExecutionGrantResponse
+  originMarker?: string | null
+  failure?: WorkItemResult
+} {
+  const rawGrant: unknown = dispatch.managerExecutionGrant
+  const rawOrigin: unknown = dispatch.originMarker
+  const hasGrant = rawGrant !== undefined && rawGrant !== null
+  const hasOrigin = rawOrigin !== undefined && rawOrigin !== null
+  const isManager = work.projectId === MANAGER_PROJECT_ID
+
+  if (hasOrigin && (typeof rawOrigin !== 'string' || rawOrigin.trim().length === 0)) {
+    return { failure: invalidDispatch('originMarker', 'originMarker must be a non-empty string when present') }
+  }
+
+  if (!isManager) {
+    if (hasGrant || hasOrigin) {
+      return {
+        failure: invalidDispatch(
+          'managerExecutionGrant',
+          'Manager grant and originMarker may only be attached to Manager dispatches',
+        ),
+      }
+    }
+    return {}
+  }
+
+  if (!hasGrant) return { failure: invalidDispatch('managerExecutionGrant', 'Manager dispatch requires a grant') }
+  if (!isManagerGrant(rawGrant))
+    return { failure: invalidDispatch('managerExecutionGrant', 'Manager grant is malformed') }
+  if (rawOrigin !== MANAGER_ORIGIN_MARKER) {
+    return { failure: invalidDispatch('originMarker', 'Manager dispatch requires originMarker slack-manager') }
+  }
+
+  return {
+    grant: rawGrant,
+    originMarker: rawOrigin,
+  }
+}
+
+function isManagerGrant(value: unknown): value is ManagerExecutionGrantResponse {
+  if (!isObject(value)) return false
+  if (
+    !nonEmptyString(value['managementCredential']) ||
+    !nonEmptyString(value['replyCredential']) ||
+    !nonEmptyString(value['executionId']) ||
+    !nonEmptyString(value['expiresAt']) ||
+    !nonEmptyString(value['deploymentEpoch'])
+  )
+    return false
+  return Number.isFinite(Date.parse(value['expiresAt']))
+}
+
+function declaredAgentRuntime(work: DispatchWorkItem): 'opencode' | 'pi' | null {
+  const value = work.with?.['runtime']
+  if (value !== 'opencode' && value !== 'pi') return null
+  return value
+}
+
+function runtimeForWorkflow(work: DispatchWorkItem): 'opencode' | 'pi' | null {
+  const uses = work.uses?.trim().toLowerCase()
+  if (uses === 'mohist/opencode') return 'opencode'
+  if (uses === 'mohist/pi') return 'pi'
+  return null
+}
+
+function isRuntimeDispatch(work: DispatchWorkItem): boolean {
+  return !isChecksDispatch(work) && work.uses?.trim().toLowerCase().startsWith('mohist/') === true
 }
 
 export function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem {
@@ -84,16 +187,6 @@ export function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchW
     work.initialTurnId = dispatch.initialTurnId ?? undefined
   if (dispatch.capabilityRevision != null) work.capabilityRevision = dispatch.capabilityRevision ?? undefined
   return work
-}
-
-function declaredAgentRuntime(work: DispatchWorkItem): 'opencode' | 'pi' | null {
-  const payload = work.with
-  const hasPayloadRuntime =
-    payload !== null && payload !== undefined && Object.prototype.hasOwnProperty.call(payload, 'runtime')
-  const value = hasPayloadRuntime ? payload?.['runtime'] : work.agentDefinition?.runtime
-  if (typeof value !== 'string') return null
-  const normalized = value.trim().toLowerCase()
-  return normalized === 'opencode' || normalized === 'pi' ? normalized : null
 }
 
 function isChecksDispatch(work: DispatchWorkItem): boolean {

@@ -143,7 +143,8 @@ const vectors: Vector[] = [
       ...validAgentJobWork(),
       ownerKind: 'workflow',
       agentJobId: null,
-      uses: null,
+      uses: 'mohist/unknown',
+      variables: { ...validAgentJobWork().variables, executionSource: 'non-slack' },
     }),
   },
   {
@@ -164,7 +165,7 @@ const vectors: Vector[] = [
 ]
 
 describe('dispatch envelope validation', () => {
-  it('accepts a complete AgentJob envelope and resolves runtime from agentDefinition when needed', () => {
+  it('accepts a complete AgentJob envelope and requires runtime in the executor payload', () => {
     const work = validAgentJobWork()
     expect(validateDispatchEnvelope(work)).toBeUndefined()
 
@@ -175,7 +176,11 @@ describe('dispatch envelope validation', () => {
       runtime: 'pi',
       skills: [],
     }
-    expect(validateDispatchEnvelope(fromDefinition)).toBeUndefined()
+    expect(validateDispatchEnvelope(fromDefinition)).toMatchObject({
+      status: 'failed',
+      error: { code: 'invalid-dispatch' },
+      message: 'runtime must be opencode or pi',
+    })
   })
 
   it.each(vectors)(
