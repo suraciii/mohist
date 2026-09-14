@@ -20,6 +20,16 @@ import type { TaskLogBatch } from '../runtime/task-log.js'
 import { parsePolledDispatch } from './connection-dispatch.js'
 import { reportWork } from './connection-report.js'
 import { extractErrorMessage, RuntimeEventDeliveryError } from './connection-errors.js'
+export {
+  RunnerTransportError,
+  type RunnerTransportErrorKind,
+  type RunnerTransportErrorOptions,
+} from './connection-errors.js'
+export {
+  RunnerTransport,
+  type RunnerRequestTransport,
+  type RunnerTransportOptions,
+} from './connection-transport.js'
 export { RuntimeEventDeliveryError } from './connection-errors.js'
 import {
   getWorkspaceReclaimability as getWorkspaceReclaimabilityViaTransport,
