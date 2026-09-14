@@ -11,6 +11,9 @@ export function validateDispatchEnvelope(work: DispatchWorkItem): void | WorkIte
   if (ownerKind === 'workflow' && !nonEmptyString(work.workflowRunId)) {
     return invalidDispatch('workflowRunId', 'workflowRunId is required for workflow-owned work')
   }
+  if (ownerKind === 'workflow' && work.agentJobId != null) {
+    return invalidDispatch('agentJobId', 'agentJobId must be absent for workflow-owned work')
+  }
   if (ownerKind === 'agent-job' && !nonEmptyString(work.agentJobId)) {
     return invalidDispatch('agentJobId', 'agentJobId is required for agent-job-owned work')
   }

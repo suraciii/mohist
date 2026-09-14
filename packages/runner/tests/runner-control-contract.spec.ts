@@ -1,5 +1,14 @@
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { ServerConnection } from '../src/server/connection.js'
+import { validateDispatchEnvelope } from '../src/server/connection-dispatch.js'
+import { executeAndTransition, reportOnce, type HostExecutionContext } from '../src/runtime/host-execution.js'
+import { AgentJobExecutor } from '../src/runtime/agent-job-executor.js'
+import { WorkExecutor } from '../src/runtime/executor.js'
+import type { DispatchWorkItem, PolledDispatch, RunnerOptions, WorkDispatchResponse } from '../src/core/types.js'
+import type { HostTaskLogDeps } from '../src/runtime/host-task-log.js'
+import type { AwaitingAckEntry, InFlightEntry } from '../src/runtime/host-state.js'
+import { transportFetch, withFakeTransport } from './support/fake-transport.js'
 import type {
   FollowupParams,
   JsonRpcErrorResponse,
@@ -125,3 +134,488 @@ function readCatalog(): FixtureCatalog {
   const url = new URL('../../../fixtures/runner-control.json', import.meta.url)
   return JSON.parse(readFileSync(url, 'utf8')) as FixtureCatalog
 }
+
+const contractOptions: RunnerOptions = {
+  serverUrl: 'https://runner.test',
+  runnerId: 'runner-contract',
+  runnerRoot: '/virtual/runner-contract',
+  pollIntervalMs: 100,
+  heartbeatIntervalMs: 1_000,
+  dispatchLivenessProbeIntervalMs: 1_000,
+}
+
+const contractPollReport = {
+  processGeneration: 'contract-generation',
+  inFlight: [],
+  awaitingAck: [],
+  admissionReady: true,
+}
+
+const contractSignal = new AbortController().signal
+
+function contractIt(name: string, body: () => Promise<void>): void {
+  it(name, async () => await withFakeTransport(async () => await body()))
+}
+
+function jsonResponse(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
+function agentJobDispatch(overrides: Partial<WorkDispatchResponse> = {}): WorkDispatchResponse {
+  return {
+    workflowRunId: 'workflow-1',
+    workId: 'agent-work-1',
+    actionAttemptId: 'agent-attempt-1',
+    workType: 'task',
+    stage: 'execute',
+    title: 'Agent work',
+    uses: null,
+    with: JSON.stringify({
+      prompt: 'do the agent work',
+      instructions: 'be careful',
+      runtime: 'opencode',
+      executionSource: 'non-slack',
+      model: 'model-1',
+      variant: 'fast',
+    }),
+    expect: JSON.stringify({ markers: [{ path: '_output', contains: 'done' }] }),
+    variables: JSON.stringify({
+      workspace: { name: 'pay' },
+      repository: {
+        name: 'server',
+        gitUrl: 'https://example.test/server.git',
+        baseBranch: 'main',
+      },
+      issue: { number: 684 },
+    }),
+    projectId: 'project-1',
+    issueNumber: 684,
+    epicNumber: 68,
+    parentIssueContext: { title: 'Parent issue', body: 'Parent body' },
+    artifacts: JSON.stringify({ files: [{ path: 'notes.txt' }] }),
+    setVars: JSON.stringify({ result: 'done' }),
+    ownerKind: 'agent-job',
+    agentJobId: 'agent-job-1',
+    agentSessionId: 'session-1',
+    recovery: JSON.stringify({ budget: 1 }),
+    recoveryRemaining: 1,
+    agentDefinition: {
+      instructions: 'be careful',
+      runtime: 'opencode',
+      model: 'model-1',
+      variant: 'fast',
+      skills: ['repo-guide'],
+    },
+    agentSessionStartup: {
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      allowedSubagents: [],
+      spawnCommand: 'spawn-agent',
+      workDir: '/virtual/workspace',
+    },
+    initialInputId: 'input-1',
+    initialTurnId: 'turn-1',
+    capabilityRevision: 'catalog-1',
+    ...overrides,
+  }
+}
+
+function workflowDispatch(): WorkDispatchResponse {
+  return {
+    workflowRunId: 'workflow-2',
+    workId: 'workflow-work-1',
+    workType: 'task',
+    stage: 'build',
+    title: 'Workflow work',
+    uses: 'mohist/pi',
+    with: JSON.stringify({ prompt: 'run the workflow action' }),
+    expect: null,
+    variables: JSON.stringify({ workspace: { path: '/virtual/workflow-2' } }),
+    projectId: 'project-1',
+    issueNumber: 685,
+    ownerKind: 'workflow',
+  }
+}
+
+function managerGrant(executionId: string) {
+  return {
+    managementCredential: `management-${executionId}`,
+    replyCredential: `reply-${executionId}`,
+    executionId,
+    expiresAt: '2099-01-01T00:00:00.000Z',
+    deploymentEpoch: 'epoch-1',
+  }
+}
+
+async function poll(
+  connection: ServerConnection,
+  dispatches: readonly WorkDispatchResponse[],
+): Promise<PolledDispatch[]> {
+  transportFetch.mockResolvedValueOnce(jsonResponse({ dispatches }))
+  return await connection.poll(contractSignal, contractPollReport)
+}
+
+interface ExecutionHarness {
+  readonly context: HostExecutionContext
+  readonly key: string
+  readonly runtimeAccessors: ReturnType<typeof vi.fn>[]
+  readonly workspacePrepare: ReturnType<typeof vi.fn>
+  readonly namedMaterialize: ReturnType<typeof vi.fn>
+  readonly namedMaterializeForIssue: ReturnType<typeof vi.fn>
+  readonly workExecutorRef: ReturnType<typeof vi.fn>
+  readonly currentCatalogRevision: ReturnType<typeof vi.fn>
+}
+
+function executionHarness(connection: ServerConnection, work: DispatchWorkItem): ExecutionHarness {
+  const key = `${work.ownerKind ?? 'unknown'}:${work.agentJobId ?? work.workflowRunId}:${work.workId}`
+  const inFlight = new Map<string, InFlightEntry>()
+  const awaitingAck = new Map<string, { work: DispatchWorkItem; entry: AwaitingAckEntry }>()
+  const entry: InFlightEntry = {
+    done: Promise.resolve(),
+    work,
+    controller: new AbortController(),
+  }
+  inFlight.set(key, entry)
+
+  const openCodeAccessor = vi.fn(() => null)
+  const piAccessor = vi.fn(() => null)
+  const workspacePrepare = vi.fn()
+  const namedMaterialize = vi.fn()
+  const namedMaterializeForIssue = vi.fn()
+  const namedWorkspaceManager = {
+    materialize: namedMaterialize,
+    materializeForIssue: namedMaterializeForIssue,
+  }
+  const agentJobExecutor = new AgentJobExecutor(
+    connection,
+    { openCode: openCodeAccessor as never, pi: piAccessor as never },
+    null,
+    undefined,
+    namedWorkspaceManager as never,
+  )
+  const workExecutor = new WorkExecutor(
+    {} as never,
+    { prepare: workspacePrepare } as never,
+    connection,
+    null,
+    undefined,
+    null,
+    agentJobExecutor,
+    null,
+    undefined,
+    null,
+    undefined,
+    namedWorkspaceManager as never,
+  )
+  const workExecutorRef = vi.fn(() => workExecutor)
+  const currentCatalogRevision = vi.fn(() => null)
+  const taskLogDeps = vi.fn((): HostTaskLogDeps => {
+    throw new Error('invalid envelopes must not create task-log dependencies')
+  })
+
+  const context: HostExecutionContext = {
+    options: contractOptions,
+    connection,
+    taskLogDeps,
+    workExecutorRef,
+    syncOpenCodeWorkOwners: vi.fn(),
+    inFlight,
+    awaitingAck,
+    currentCatalogRevision,
+    managerExecutionFor: vi.fn(() => null),
+    releaseManagerExecution: vi.fn(async () => undefined),
+  }
+  return {
+    context,
+    key,
+    runtimeAccessors: [openCodeAccessor, piAccessor],
+    workspacePrepare,
+    namedMaterialize,
+    namedMaterializeForIssue,
+    workExecutorRef,
+    currentCatalogRevision,
+  }
+}
+
+function withoutAgentField(field: string, value?: string): WorkDispatchResponse {
+  const dispatch = structuredClone(agentJobDispatch())
+  const withPayload = JSON.parse(dispatch.with ?? '{}') as Record<string, unknown>
+  const variables = JSON.parse(dispatch.variables ?? '{}') as Record<string, unknown>
+
+  if (field === 'executionSource') {
+    delete withPayload.executionSource
+  } else if (field === 'runtime') {
+    if (value === undefined) {
+      delete withPayload.runtime
+      delete dispatch.agentDefinition
+    } else withPayload.runtime = value
+  } else if (field === 'ownerKind' || field === 'projectId' || field === 'agentJobId') {
+    delete (dispatch as unknown as Record<string, unknown>)[field]
+  } else if (field === 'owner-id-mismatch') {
+    dispatch.ownerKind = 'workflow'
+    dispatch.uses = 'mohist/opencode'
+  } else if (field === 'repository') {
+    delete variables.repository
+  }
+
+  dispatch.with = JSON.stringify(withPayload)
+  dispatch.variables = JSON.stringify(variables)
+  return dispatch
+}
+
+const invalidEnvelopeVectors: ReadonlyArray<{
+  name: string
+  field: string
+  dispatch: () => WorkDispatchResponse
+}> = [
+  {
+    name: 'executionSource absent',
+    field: 'executionSource',
+    dispatch: () => withoutAgentField('executionSource'),
+  },
+  {
+    name: 'ownerKind absent',
+    field: 'ownerKind',
+    dispatch: () => withoutAgentField('ownerKind'),
+  },
+  {
+    name: 'owner id does not match ownerKind',
+    field: 'agentJobId',
+    dispatch: () => withoutAgentField('owner-id-mismatch'),
+  },
+  {
+    name: 'projectId absent',
+    field: 'projectId',
+    dispatch: () => withoutAgentField('projectId'),
+  },
+  {
+    name: 'runtime absent',
+    field: 'runtime',
+    dispatch: () => withoutAgentField('runtime'),
+  },
+  {
+    name: 'runtime unknown',
+    field: 'runtime',
+    dispatch: () => withoutAgentField('runtime', 'unknown-runtime'),
+  },
+  {
+    name: 'named-workspace repository triple absent',
+    field: 'repository',
+    dispatch: () => withoutAgentField('repository'),
+  },
+]
+
+describe('runner control strict envelope contract', () => {
+  contractIt(
+    'polls Workflow and AgentJob envelopes through ServerConnection and keeps grant metadata outside work',
+    async () => {
+      const connection = new ServerConnection(contractOptions)
+      const grant = managerGrant('execution-1')
+      const agentResponse = agentJobDispatch({
+        managerExecutionGrant: grant,
+        originMarker: 'slack-manager',
+      })
+
+      const polled = await poll(connection, [workflowDispatch(), agentResponse])
+      expect(polled).toHaveLength(2)
+
+      const workflow = polled[0]!
+      expect(workflow.work).toMatchObject({
+        workflowRunId: 'workflow-2',
+        workId: 'workflow-work-1',
+        workType: 'task',
+        stage: 'build',
+        title: 'Workflow work',
+        uses: 'mohist/pi',
+        projectId: 'project-1',
+        issueNumber: 685,
+        ownerKind: 'workflow',
+        with: { prompt: 'run the workflow action' },
+        variables: { workspace: { path: '/virtual/workflow-2' } },
+      })
+      expect(validateDispatchEnvelope(workflow.work)).toBeUndefined()
+      expect(workflow).not.toHaveProperty('managerExecutionGrant')
+      expect(workflow).not.toHaveProperty('originMarker')
+
+      const agent = polled[1]!
+      expect(agent.work).toMatchObject({
+        workflowRunId: 'workflow-1',
+        workId: 'agent-work-1',
+        actionAttemptId: 'agent-attempt-1',
+        workType: 'task',
+        stage: 'execute',
+        title: 'Agent work',
+        uses: null,
+        projectId: 'project-1',
+        issueNumber: 684,
+        epicNumber: 68,
+        ownerKind: 'agent-job',
+        agentJobId: 'agent-job-1',
+        agentSessionId: 'session-1',
+        with: {
+          prompt: 'do the agent work',
+          instructions: 'be careful',
+          runtime: 'opencode',
+          executionSource: 'non-slack',
+        },
+        variables: {
+          workspace: { name: 'pay' },
+          repository: {
+            name: 'server',
+            gitUrl: 'https://example.test/server.git',
+            baseBranch: 'main',
+          },
+        },
+        expect: { markers: [{ path: '_output', contains: 'done' }] },
+        artifacts: { files: [{ path: 'notes.txt' }] },
+        setVars: { result: 'done' },
+        recovery: { budget: 1 },
+        recoveryRemaining: 1,
+        initialInputId: 'input-1',
+        initialTurnId: 'turn-1',
+        capabilityRevision: 'catalog-1',
+      })
+      expect(agent.work.parentIssueContext).toEqual({ title: 'Parent issue', body: 'Parent body' })
+      expect(agent.work.agentDefinition).toEqual({
+        instructions: 'be careful',
+        runtime: 'opencode',
+        model: 'model-1',
+        variant: 'fast',
+        skills: ['repo-guide'],
+      })
+      expect(agent.work.agentSessionStartup).toMatchObject({
+        projectId: 'project-1',
+        sessionId: 'session-1',
+        spawnCommand: 'spawn-agent',
+      })
+      expect(validateDispatchEnvelope(agent.work)).toBeUndefined()
+      expect(agent.managerExecutionGrant).toEqual(grant)
+      expect(agent.originMarker).toBe('slack-manager')
+      expect(agent.work).not.toHaveProperty('managerExecutionGrant')
+      expect(agent.work).not.toHaveProperty('originMarker')
+    },
+  )
+
+  it.each(invalidEnvelopeVectors)(
+    'rejects $name before runtime, named workspace, or workflow workspace startup',
+    async ({ field, dispatch: buildDispatch }) => {
+      await withFakeTransport(async () => {
+        const connection = new ServerConnection(contractOptions)
+        const workDispatch = buildDispatch()
+        const [polled] = await poll(connection, [workDispatch])
+        const work = polled!.work
+        const harness = executionHarness(connection, work)
+
+        const validation = validateDispatchEnvelope(work)
+        expect(validation).toMatchObject({
+          status: 'failed',
+          error: { code: 'invalid-dispatch' },
+        })
+        expect(validation?.message).toContain(field.split('.')[0])
+
+        transportFetch.mockResolvedValueOnce(jsonResponse({ verdict: 'accepted' }))
+        await executeAndTransition(
+          harness.context,
+          work,
+          contractSignal,
+          harness.key,
+          harness.context.inFlight.get(harness.key)!,
+        )
+
+        expect(transportFetch).toHaveBeenCalledTimes(2)
+        const reportCall = transportFetch.mock.calls[1]!
+        const reportBody = JSON.parse((reportCall[1] as RequestInit).body as string) as Record<string, unknown>
+        expect(reportBody.status).toBe('failed')
+        expect(reportBody.error).toMatchObject({ code: 'invalid-dispatch' })
+        expect(reportBody.status).not.toBe('completed')
+        expect(harness.runtimeAccessors[0]).not.toHaveBeenCalled()
+        expect(harness.runtimeAccessors[1]).not.toHaveBeenCalled()
+        expect(harness.currentCatalogRevision).not.toHaveBeenCalled()
+        expect(harness.workExecutorRef).not.toHaveBeenCalled()
+        expect(harness.workspacePrepare).not.toHaveBeenCalled()
+        expect(harness.namedMaterialize).not.toHaveBeenCalled()
+        expect(harness.namedMaterializeForIssue).not.toHaveBeenCalled()
+      })
+    },
+  )
+
+  contractIt('keeps Manager grants isolated per polled dispatch and across poll calls', async () => {
+    const connection = new ServerConnection(contractOptions)
+    const firstGrant = managerGrant('execution-first')
+    const secondGrant = managerGrant('execution-second')
+    const first = agentJobDispatch({ workId: 'agent-work-first', managerExecutionGrant: firstGrant })
+    const second = agentJobDispatch({ workId: 'agent-work-second', managerExecutionGrant: secondGrant })
+    const later = agentJobDispatch({ workId: 'agent-work-later' })
+
+    transportFetch.mockResolvedValueOnce(jsonResponse({ dispatches: [first, second] }))
+    transportFetch.mockResolvedValueOnce(jsonResponse({ dispatches: [later] }))
+    const firstPoll = await connection.poll(contractSignal, contractPollReport)
+    const secondPoll = await connection.poll(contractSignal, contractPollReport)
+
+    expect(firstPoll[0]?.managerExecutionGrant).toEqual(firstGrant)
+    expect(firstPoll[1]?.managerExecutionGrant).toEqual(secondGrant)
+    expect(firstPoll[0]?.managerExecutionGrant).not.toEqual(firstPoll[1]?.managerExecutionGrant)
+    expect(firstPoll[0]?.work.workId).toBe('agent-work-first')
+    expect(firstPoll[1]?.work.workId).toBe('agent-work-second')
+    expect(secondPoll[0]?.work.workId).toBe('agent-work-later')
+    expect(secondPoll[0]).not.toHaveProperty('managerExecutionGrant')
+    expect(secondPoll[0]).not.toHaveProperty('originMarker')
+
+    const connectionSource = readFileSync(new URL('../src/server/connection.ts', import.meta.url), 'utf8')
+    expect(connectionSource).not.toContain('lastPolledDispatches')
+    expect(connectionSource).not.toContain('takeLastPolledDispatches')
+  })
+
+  contractIt(
+    'reports an invalid envelope once through awaitingAck and does not re-report it on the next poll',
+    async () => {
+      const connection = new ServerConnection(contractOptions)
+      const [polled] = await poll(connection, [withoutAgentField('executionSource')])
+      const work = polled!.work
+      const harness = executionHarness(connection, work)
+
+      transportFetch.mockResolvedValueOnce(jsonResponse({ verdict: 'accepted' }))
+      await executeAndTransition(
+        harness.context,
+        work,
+        contractSignal,
+        harness.key,
+        harness.context.inFlight.get(harness.key)!,
+      )
+
+      expect(harness.context.awaitingAck.size).toBe(0)
+      const reportCallsAfterExecution = transportFetch.mock.calls.filter(([input]) => String(input).endsWith('/report'))
+      expect(reportCallsAfterExecution).toHaveLength(1)
+      const reportBody = JSON.parse((reportCallsAfterExecution[0]![1] as RequestInit).body as string) as Record<
+        string,
+        unknown
+      >
+      expect(reportBody.status).toBe('failed')
+      expect(reportBody.error).toMatchObject({ code: 'invalid-dispatch' })
+
+      await reportOnce(harness.context, harness.key)
+      expect(transportFetch.mock.calls.filter(([input]) => String(input).endsWith('/report'))).toHaveLength(1)
+
+      transportFetch.mockResolvedValueOnce(jsonResponse({ dispatches: [] }))
+      await expect(
+        connection.poll(contractSignal, {
+          ...contractPollReport,
+          inFlight: [...harness.context.inFlight.keys()],
+          awaitingAck: [...harness.context.awaitingAck.keys()],
+        }),
+      ).resolves.toEqual([])
+      expect(harness.context.awaitingAck).not.toHaveProperty(harness.key)
+      expect(transportFetch.mock.calls.filter(([input]) => String(input).endsWith('/report'))).toHaveLength(1)
+
+      const nextPollBody = JSON.parse((transportFetch.mock.calls.at(-1)![1] as RequestInit).body as string) as {
+        inFlight: string[]
+        awaitingAck: string[]
+      }
+      expect(nextPollBody.inFlight).toEqual([])
+      expect(nextPollBody.awaitingAck).toEqual([])
+    },
+  )
+})
