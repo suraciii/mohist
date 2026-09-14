@@ -135,10 +135,18 @@ export class AgentJobExecutor {
     const runtime = readRuntime(payload)
     if (runtime.kind === 'invalid') return failureResult('invalid-input', runtime.message)
     const runtimeName = runtime.value
-    const modelInput = readOptionalString(payload, 'model')
-    const variant = readOptionalString(payload, 'variant')
-    const reasoningEffort = readOptionalString(payload, 'reasoningEffort')
+    const dispatchAgent = isObject(work.variables?.agent) ? work.variables.agent : null
+    const modelInput = readOptionalString(payload, 'model') ?? readOptionalString(dispatchAgent, 'model')
+    const requestedVariant = readOptionalString(payload, 'variant') ?? readOptionalString(dispatchAgent, 'variant')
+    const reasoningEffort =
+      readOptionalString(payload, 'reasoningEffort') ??
+      readOptionalString(dispatchAgent, 'reasoningEffort') ??
+      (runtimeName === 'pi' ? requestedVariant : null)
+    const variant = runtimeName === 'pi' ? null : requestedVariant
     const model = parseModel(modelInput)
+    if (runtimeName === 'pi' && dispatchAgent !== null && !modelInput) {
+      return failureResult('invalid-input', "AgentJob Pi execution requires an explicit 'model' in the dispatch")
+    }
     if (modelInput && model.kind === 'failure') {
       return failureResult('invalid-input', `AgentJob ${model.message}`)
     }
