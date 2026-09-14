@@ -6,7 +6,6 @@ import type {
   GeneralConfig,
   RuntimeConsistencyResponse,
   SystemInfo,
-  SystemUpdateStartResponse,
   SystemUpdateStatusEnvelope,
   WorkflowProfileDetail,
 } from '../model/types'
@@ -355,13 +354,6 @@ export function enableWorkflowProfile(projectId: string | null | undefined, prof
 
 export function getSystemInfo() {
   return request<SystemInfo>('/system/info')
-}
-
-export function startSystemUpdate() {
-  return request<SystemUpdateStartResponse>('/system/update', {
-    method: 'POST',
-    body: JSON.stringify({}),
-  })
 }
 
 export function getSystemUpdateStatus() {

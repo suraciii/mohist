@@ -30,7 +30,8 @@ const STATUS_DOT: Record<StatusKey, string> = {
   offline: 'bg-gray-400',
 }
 
-const RUNNER_START_HINT = 'npx mohist runner'
+const RUNNER_INSTALL_COMMAND = 'mo install runner --repo-root <path>'
+const RUNNER_START_COMMAND = 'mo service start runner'
 
 function filterByScope(rows: RunnerStatusRow[], scope: ScopeFilter): RunnerStatusRow[] {
   if (scope === 'all') return rows
@@ -47,13 +48,7 @@ function countByStatus(rows: RunnerStatusRow[]): Record<StatusKey, number> {
   return counts
 }
 
-function ScopeFilterBar({
-  value,
-  onChange,
-}: {
-  value: ScopeFilter
-  onChange: (next: ScopeFilter) => void
-}) {
+function ScopeFilterBar({ value, onChange }: { value: ScopeFilter; onChange: (next: ScopeFilter) => void }) {
   return (
     <div
       role="group"
@@ -71,9 +66,7 @@ function ScopeFilterBar({
             aria-pressed={active}
             data-testid={`runners-scope-${option.key}`}
             className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-              active
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
+              active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             {option.label}
@@ -93,14 +86,12 @@ function RunnerStatusSummaryBar({ rows }: { rows: RunnerStatusRow[] }) {
       data-scope-counts={JSON.stringify(counts)}
       className="flex items-center gap-4 flex-wrap"
     >
-      <span className="text-sm font-medium text-foreground tabular-nums">{total} runner{total !== 1 ? 's' : ''}</span>
+      <span className="text-sm font-medium text-foreground tabular-nums">
+        {total} runner{total !== 1 ? 's' : ''}
+      </span>
       <span className="h-4 w-px bg-border" />
       {STATUS_KEYS.map((status) => (
-        <div
-          key={status}
-          data-testid={`runners-summary-${status}`}
-          className="inline-flex items-center gap-1.5"
-        >
+        <div key={status} data-testid={`runners-summary-${status}`} className="inline-flex items-center gap-1.5">
           <span className={`inline-block h-2 w-2 rounded-full ${STATUS_DOT[status]}`} aria-hidden="true" />
           <span className="text-xs text-muted-foreground">{STATUS_LABEL[status]}</span>
           <span
@@ -123,9 +114,14 @@ function RunnerEmptyState() {
     >
       <p className="text-sm font-medium text-foreground mb-2">No runners connected</p>
       <p className="text-xs text-muted-foreground">
-        Start a runner:{' '}
+        First install:{' '}
         <code className="text-xs bg-background border border-border px-1.5 py-0.5 rounded font-mono text-foreground">
-          {RUNNER_START_HINT}
+          {RUNNER_INSTALL_COMMAND}
+        </code>
+        <br />
+        Later starts:{' '}
+        <code className="text-xs bg-background border border-border px-1.5 py-0.5 rounded font-mono text-foreground">
+          {RUNNER_START_COMMAND}
         </code>
       </p>
     </div>
@@ -139,18 +135,12 @@ function NoProjectState() {
       className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-16 text-center"
     >
       <p className="text-sm font-medium text-foreground">No project selected</p>
-      <p className="text-xs text-muted-foreground mt-1">
-        Select a project to view its eligible runners.
-      </p>
+      <p className="text-xs text-muted-foreground mt-1">Select a project to view its eligible runners.</p>
     </div>
   )
 }
 
-export function RunnersPage({
-  runnersHook = useRunners,
-}: {
-  runnersHook?: typeof useRunners
-} = {}) {
+export function RunnersPage({ runnersHook = useRunners }: { runnersHook?: typeof useRunners } = {}) {
   useDocumentTitle('Runners — Mohist')
 
   const { projectId } = useProject()
@@ -160,11 +150,7 @@ export function RunnersPage({
   const filteredRows = useMemo(() => filterByScope(rows, scope), [rows, scope])
 
   return (
-    <div
-      data-testid="runners-page"
-      data-scope-filter={scope}
-      className="flex-1 overflow-y-auto bg-background"
-    >
+    <div data-testid="runners-page" data-scope-filter={scope} className="flex-1 overflow-y-auto bg-background">
       <div className="max-w-4xl mx-auto px-6 py-6 space-y-5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>

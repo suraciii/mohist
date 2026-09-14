@@ -12,6 +12,7 @@ namespace Mohist.Server.Api;
 public sealed class AgentSessionFollowupDispatcher : IScopedService
 {
     internal const string RuntimeUnavailableError = "runtime-unavailable";
+    private const string TransientUnavailableError = "unavailable";
 
     private readonly AgentSessionQuerier _sessions;
     private readonly IGrainFactory _grains;
@@ -132,9 +133,13 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
                         FailureReason: "The bound runtime is disabled on the Runner.",
                         FailureCategory: RuntimeUnavailableError));
             }
-            else
+            else if (string.Equals(result.Error, TransientUnavailableError, StringComparison.Ordinal))
             {
                 await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
+            }
+            else
+            {
+                await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId, scheduleRetry: false);
             }
             RevokeManagerGrant(managerGrant);
         }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -72,7 +73,7 @@ func TestInstallRunnerPersistsEnabledAgentRuntimes(t *testing.T) {
 
 	code := Run(context.Background(), []string{
 		"install", "runner", "--repo-root", repoRoot,
-		"--server-url", "https://managed-server", "--runner-root", runnerRoot,
+		"--server-url", "https://managed-server", "--runner-id", "runner-stable", "--runner-root", runnerRoot,
 		"--enabled-agent-runtimes", " OpenCode,pi,opencode ",
 	}, deps)
 	if code != ExitOK {
@@ -96,7 +97,7 @@ func TestInstallRunnerPersistsEnabledAgentRuntimes(t *testing.T) {
 		t.Fatalf("enrollment bootstrap mode = %o", modes[enrollmentTokenPath])
 	}
 	managedEnvironmentPath := filepath.Join(home, ".config", "mohist", "runner-managed.env")
-	wantManagedEnvironment := "SERVER_URL=\"https://managed-server\"\nRUNNER_ROOT=\"" + runnerRoot + "\"\n"
+	wantManagedEnvironment := "SERVER_URL=\"https://managed-server\"\nRUNNER_ID=\"runner-stable\"\nRUNNER_ROOT=\"" + runnerRoot + "\"\n"
 	if files[managedEnvironmentPath] != wantManagedEnvironment {
 		t.Fatalf("managed environment = %q, want %q", files[managedEnvironmentPath], wantManagedEnvironment)
 	}
@@ -257,11 +258,11 @@ func TestInstallRunnerBootstrapWriteFailureHasNoSystemdEffects(t *testing.T) {
 }
 
 func TestRunnerManagedEnvironmentEscapesValuesAndRejectsLineInjection(t *testing.T) {
-	got, err := runnerManagedEnvironment(`https://server/"quoted"`, `C:\runner path`)
+	got, err := runnerManagedEnvironment(`https://server/"quoted"`, "runner-1", `C:\runner path`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "SERVER_URL=\"https://server/\\\"quoted\\\"\"\nRUNNER_ROOT=\"C:\\\\runner path\"\n"
+	want := "SERVER_URL=\"https://server/\\\"quoted\\\"\"\nRUNNER_ID=\"runner-1\"\nRUNNER_ROOT=\"C:\\\\runner path\"\n"
 	if got != want {
 		t.Fatalf("managed environment = %q, want %q", got, want)
 	}
@@ -275,7 +276,7 @@ func TestRunnerManagedEnvironmentEscapesValuesAndRejectsLineInjection(t *testing
 		{name: "root nul", serverURL: "https://server", runnerRoot: "/runner\x00tail"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := runnerManagedEnvironment(test.serverURL, test.runnerRoot); err == nil {
+			if _, err := runnerManagedEnvironment(test.serverURL, "runner-1", test.runnerRoot); err == nil {
 				t.Fatal("expected invalid managed environment value")
 			}
 		})
@@ -292,7 +293,10 @@ func TestUpdateRunnerDelegatesScopeAndPreservesRuntimeEnvironment(t *testing.T) 
 	}}
 	wantEnvironment := files.values[environmentPath]
 	runtime := &recordingManagedUpdateRuntime{}
-	deps, _, errOut := testDeps(nil, map[string]string{})
+	deps, _, errOut := testDeps(nil, map[string]string{
+		"MOHIST_SERVER_URL": "http://server",
+		"MOHIST_TOKEN":      "operator-token",
+	})
 	deps.ManagedUpdate = runtime
 	deps.HomeDir = func() (string, error) { return home, nil }
 	deps.ReadFile = files.ReadFile
@@ -374,7 +378,10 @@ func TestUpdateRunnerPreservesCredentialFiles(t *testing.T) {
 		files.values[path] = value
 	}
 	runtime := &recordingManagedUpdateRuntime{}
-	deps, out, errOut := testDeps(nil, map[string]string{})
+	deps, out, errOut := testDeps(nil, map[string]string{
+		"MOHIST_SERVER_URL": "http://server",
+		"MOHIST_TOKEN":      "operator-token",
+	})
 	deps.ManagedUpdate = runtime
 	deps.HomeDir = func() (string, error) { return home, nil }
 	deps.ReadFile = files.ReadFile
@@ -422,6 +429,193 @@ func TestInstallHelpDocumentsRunnerRuntimeSelection(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "mo install runner [--enabled-agent-runtimes <list>]") {
 		t.Fatalf("help = %q", out.String())
+	}
+}
+
+func TestInstallServerWritesManagedUnitWithAbsoluteEntrypoint(t *testing.T) {
+	home := t.TempDir()
+	sourceRoot := t.TempDir()
+	files := map[string]string{}
+	modes := map[string]os.FileMode{}
+	var commands [][]string
+	deps, out, errOut := testDeps(nil, map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_OPERATOR_TOKEN": "operator-secret"})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.CurrentDirectory = func() string { return sourceRoot }
+	deps.WriteFile = func(path, value string, mode os.FileMode) error {
+		files[path] = value
+		modes[path] = mode
+		return nil
+	}
+	deps.Execute = func(_ context.Context, name string, args []string) error {
+		commands = append(commands, append([]string{name}, args...))
+		return nil
+	}
+
+	code := Run(context.Background(), []string{"install", "server", "--repo-root", sourceRoot}, deps)
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, stdout = %s, stderr = %s", code, out.String(), errOut.String())
+	}
+
+	unitPath := filepath.Join(home, ".config", "systemd", "user", "mohist.service")
+	if modes[unitPath] != 0o600 {
+		t.Fatalf("unit file mode = %o, want 0o600", modes[unitPath])
+	}
+	unit := files[unitPath]
+	if unit == "" {
+		t.Fatalf("unit file was not written")
+	}
+
+	var execStartValue string
+	for _, line := range strings.Split(unit, "\n") {
+		if strings.HasPrefix(line, "ExecStart=") {
+			execStartValue = strings.TrimPrefix(line, "ExecStart=")
+			break
+		}
+	}
+	if execStartValue == "" {
+		t.Fatalf("unit file does not contain an ExecStart= line: %q", unit)
+	}
+	if !strings.HasPrefix(execStartValue, "/") {
+		t.Fatalf("ExecStart value does not begin with an absolute path: %q", execStartValue)
+	}
+	if strings.Contains(execStartValue, "packages/server/src/Mohist.Server/Mohist.Server.csproj") && !strings.Contains(execStartValue, sourceRoot) {
+		t.Fatalf("ExecStart references the relative project path from the source checkout: %q", execStartValue)
+	}
+	if !strings.Contains(unit, sourceRoot) {
+		t.Fatalf("unit does not reference the resolved source root %q: %q", sourceRoot, unit)
+	}
+
+	wantCommands := [][]string{
+		{"systemctl", "--user", "daemon-reload"},
+		{"systemctl", "--user", "enable", "mohist.service"},
+		{"systemctl", "--user", "restart", "mohist.service"},
+	}
+	if len(commands) != len(wantCommands) {
+		t.Fatalf("commands = %#v, want %#v", commands, wantCommands)
+	}
+	for index, want := range wantCommands {
+		if strings.Join(commands[index], "\x00") != strings.Join(want, "\x00") {
+			t.Fatalf("command %d = %#v, want %#v", index, commands[index], want)
+		}
+	}
+
+	combined := out.String() + "\n" + errOut.String() + "\n" + unit + "\n"
+	for _, command := range commands {
+		combined += strings.Join(command, " ") + "\n"
+	}
+	for _, secret := range []string{"operator-secret", "enrollment-token"} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("output leaked %q: %s", secret, combined)
+		}
+	}
+	for _, marker := range []string{"MOHIST_OPERATOR_TOKEN_PATH", "MOHIST_TOKEN", "enrollment-token"} {
+		if strings.Contains(unit, marker) {
+			t.Fatalf("unit contains forbidden marker %q: %s", marker, unit)
+		}
+	}
+}
+
+func TestInstallSlackBuildsBinaryAndWritesManagedUnit(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skipf("go executable not available on PATH: %v", err)
+	}
+
+	home := t.TempDir()
+	sourceRoot := t.TempDir()
+	slackPackage := filepath.Join(sourceRoot, "packages", "go", "mohist-slack")
+	if err := os.MkdirAll(slackPackage, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(slackPackage, "go.mod"), []byte("module github.com/suraciii/mohist/packages/go/mohist-slack\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	files := map[string]string{}
+	modes := map[string]os.FileMode{}
+	var commands [][]string
+	var buildOutputPath string
+	deps, out, errOut := testDeps(nil, map[string]string{"MOHIST_SERVER_URL": "http://server", "MOHIST_OPERATOR_TOKEN": "operator-secret"})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.CurrentDirectory = func() string { return sourceRoot }
+	deps.WriteFile = func(path, value string, mode os.FileMode) error {
+		files[path] = value
+		modes[path] = mode
+		return nil
+	}
+	deps.Execute = func(_ context.Context, name string, args []string) error {
+		if name == "go" {
+			for i := 0; i+1 < len(args); i++ {
+				if args[i] == "-o" {
+					buildOutputPath = args[i+1]
+					if err := os.MkdirAll(filepath.Dir(args[i+1]), 0o700); err != nil {
+						return err
+					}
+					return os.WriteFile(args[i+1], []byte("x"), 0o700)
+				}
+			}
+		}
+		commands = append(commands, append([]string{name}, args...))
+		return nil
+	}
+
+	code := Run(context.Background(), []string{"install", "slack", "--repo-root", sourceRoot}, deps)
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, stdout = %s, stderr = %s", code, out.String(), errOut.String())
+	}
+
+	if buildOutputPath != slackBinaryPath(sourceRoot) {
+		t.Fatalf("go build was not invoked with the canonical slack binary path: got %q, want %q", buildOutputPath, slackBinaryPath(sourceRoot))
+	}
+
+	unitPath := filepath.Join(home, ".config", "systemd", "user", "mohist-slack.service")
+	if modes[unitPath] != 0o600 {
+		t.Fatalf("unit file mode = %o, want 0o600", modes[unitPath])
+	}
+	unit := files[unitPath]
+	if unit == "" {
+		t.Fatalf("unit file was not written")
+	}
+
+	var execStartValue string
+	for _, line := range strings.Split(unit, "\n") {
+		if strings.HasPrefix(line, "ExecStart=") {
+			execStartValue = strings.TrimPrefix(line, "ExecStart=")
+			break
+		}
+	}
+	if execStartValue == "" {
+		t.Fatalf("unit file does not contain an ExecStart= line: %q", unit)
+	}
+	expectedExecStart := slackBinaryPath(sourceRoot)
+	if execStartValue != expectedExecStart {
+		t.Fatalf("ExecStart value = %q, want %q", execStartValue, expectedExecStart)
+	}
+	if !strings.HasPrefix(execStartValue, "/") {
+		t.Fatalf("ExecStart value does not begin with an absolute path: %q", execStartValue)
+	}
+
+	wantCommands := [][]string{
+		{"systemctl", "--user", "daemon-reload"},
+		{"systemctl", "--user", "enable", "mohist-slack.service"},
+		{"systemctl", "--user", "restart", "mohist-slack.service"},
+	}
+	if len(commands) != len(wantCommands) {
+		t.Fatalf("commands = %#v, want %#v", commands, wantCommands)
+	}
+	for index, want := range wantCommands {
+		if strings.Join(commands[index], "\x00") != strings.Join(want, "\x00") {
+			t.Fatalf("command %d = %#v, want %#v", index, commands[index], want)
+		}
+	}
+
+	combined := out.String() + "\n" + errOut.String() + "\n" + unit + "\n"
+	for _, command := range commands {
+		combined += strings.Join(command, " ") + "\n"
+	}
+	for _, secret := range []string{"operator-secret", "enrollment-token", "MOHIST_OPERATOR_TOKEN"} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("output leaked %q: %s", secret, combined)
+		}
 	}
 }
 

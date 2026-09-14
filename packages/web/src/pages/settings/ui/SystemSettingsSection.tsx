@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Loader2Icon, RefreshCwIcon } from 'lucide-react'
+import { CheckIcon, ClipboardIcon, Loader2Icon } from 'lucide-react'
 import {
   isSupersededStatus,
   isTerminalUpdateStatus,
@@ -8,7 +8,6 @@ import {
   useLogLevel,
   useSetLogLevel,
   useSystemInfo,
-  useSystemUpdate,
   useSystemUpdateStatus,
 } from '../../../entities/settings'
 import type { SystemInfo, SystemUpdateStatusEnvelope } from '../../../entities/settings'
@@ -102,8 +101,6 @@ export interface SystemSettingsData {
   infoError: boolean
   infoErrorValue: Error | null
   refetchInfo: () => Promise<unknown>
-  startSystemUpdate: () => Promise<unknown>
-  systemUpdatePending: boolean
   updateStatusEnvelope: SystemUpdateStatusEnvelope | undefined
   refetchUpdateStatus: () => Promise<unknown>
 }
@@ -111,10 +108,20 @@ export interface SystemSettingsData {
 export type SystemSettingsDataHook = () => SystemSettingsData
 
 const useDefaultData: SystemSettingsDataHook = () => {
-  const { data: logLevelData, isLoading: logLevelLoading, isError: logLevelError, error: logLevelErrorValue } = useLogLevel()
+  const {
+    data: logLevelData,
+    isLoading: logLevelLoading,
+    isError: logLevelError,
+    error: logLevelErrorValue,
+  } = useLogLevel()
   const setLogLevelMutation = useSetLogLevel()
-  const { data: systemInfo, isLoading: infoLoading, isError: infoError, error: infoErrorValue, refetch: refetchInfo } = useSystemInfo()
-  const systemUpdate = useSystemUpdate()
+  const {
+    data: systemInfo,
+    isLoading: infoLoading,
+    isError: infoError,
+    error: infoErrorValue,
+    refetch: refetchInfo,
+  } = useSystemInfo()
   const { data: updateStatusEnvelope, refetch: refetchUpdateStatus } = useSystemUpdateStatus(true)
   return {
     logLevelData,
@@ -127,18 +134,12 @@ const useDefaultData: SystemSettingsDataHook = () => {
     infoError,
     infoErrorValue,
     refetchInfo,
-    startSystemUpdate: () => systemUpdate.mutateAsync(),
-    systemUpdatePending: systemUpdate.isPending,
     updateStatusEnvelope,
     refetchUpdateStatus,
   }
 }
 
-export function SystemSettingsSection({
-  dataHook = useDefaultData,
-}: {
-  dataHook?: SystemSettingsDataHook
-} = {}) {
+export function SystemSettingsSection({ dataHook = useDefaultData }: { dataHook?: SystemSettingsDataHook } = {}) {
   const {
     logLevelData,
     logLevelLoading,
@@ -150,12 +151,9 @@ export function SystemSettingsSection({
     infoError,
     infoErrorValue,
     refetchInfo,
-    startSystemUpdate,
-    systemUpdatePending,
     updateStatusEnvelope,
     refetchUpdateStatus,
   } = dataHook()
-  const [trackingUpdate, setTrackingUpdate] = useState(false)
   const [reconnectState, setReconnectState] = useState<string | null>(null)
   const updateStatus = updateStatusEnvelope?.job ?? null
   const { label: sectionLabel, description: sectionDescription } = getSectionMeta('system')
@@ -166,6 +164,7 @@ export function SystemSettingsSection({
   )
   const [saving, setSaving] = useState(false)
   const [logError, setLogError] = useState<string | null>(null)
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
 
   useEffect(() => {
     if (persistedLevel && isLogLevel(persistedLevel)) {
@@ -192,7 +191,6 @@ export function SystemSettingsSection({
 
   useEffect(() => {
     if (updateStatus && isTerminalUpdateStatus(updateStatus.status)) {
-      setTrackingUpdate(false)
       setReconnectState(null)
       refetchInfo()
       return
@@ -238,7 +236,11 @@ export function SystemSettingsSection({
 
   useEffect(() => {
     if (!updateStatus || !systemInfo) return
-    if (updateStatus.status === 'waiting-for-reconnect' && systemInfo.running.gitHash && systemInfo.running.gitHash === updateStatus.sourceHead) {
+    if (
+      updateStatus.status === 'waiting-for-reconnect' &&
+      systemInfo.running.gitHash &&
+      systemInfo.running.gitHash === updateStatus.sourceHead
+    ) {
       setReconnectState('Ready')
     }
   }, [updateStatus, systemInfo])
@@ -247,38 +249,33 @@ export function SystemSettingsSection({
   const sourceHead = systemInfo?.source.head ?? null
   const gitHash = systemInfo?.running.gitHash ?? null
   const superseded = isSupersededStatus(updateStatus?.status)
-  const updateReady = updateStatus?.status === 'succeeded'
-    || (updateStatus?.status === 'waiting-for-reconnect' && !!gitHash && gitHash === updateStatus.sourceHead)
+  const updateReady =
+    updateStatus?.status === 'succeeded' ||
+    (updateStatus?.status === 'waiting-for-reconnect' && !!gitHash && gitHash === updateStatus.sourceHead)
   const persistedUpdateActive = updateStatus?.status === 'running' || updateStatus?.status === 'waiting-for-reconnect'
-  const showUpdateButton = systemInfo?.install.mode === 'local-source'
-    && systemInfo.update.available
-    && systemInfo.update.status === 'update-available'
-    && !persistedUpdateActive
-    && !trackingUpdate
-  const showProgress = !superseded && (trackingUpdate || persistedUpdateActive || updateReady || reconnectState === 'Ready')
-  const showOutcome = updateStatus
-    && (isTerminalUpdateStatus(updateStatus.status) || updateStatus.outcome != null)
-  const progressLabel = updateReady ? 'Ready' : reconnectState ?? updateStatus?.stage ?? null
+  const showProgress = !superseded && (persistedUpdateActive || updateReady || reconnectState === 'Ready')
+  const showOutcome = updateStatus && (isTerminalUpdateStatus(updateStatus.status) || updateStatus.outcome != null)
+  const progressLabel = updateReady ? 'Ready' : (reconnectState ?? updateStatus?.stage ?? null)
   const updateMessage = updateStatus?.reason ?? systemInfo?.update.reason ?? null
   const recentUpdateLogs = updateStatus?.logs?.slice(-5).reverse() ?? []
 
-  const handleUpdate = async () => {
-    if (!systemInfo) return
-    if (systemInfo.source.dirty) return
-    setReconnectState(null)
-    await startSystemUpdate()
-    setTrackingUpdate(true)
+  const updateCommand = systemInfo?.source.path ? `mo update --repo-root ${systemInfo.source.path}` : null
+
+  const handleCopyCommand = async () => {
+    if (!updateCommand || !navigator.clipboard?.writeText) {
+      setCopyState('failed')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(updateCommand)
+      setCopyState('copied')
+    } catch {
+      setCopyState('failed')
+    }
   }
 
   if (isLoading) {
-    return (
-      <SectionState
-        variant="loading"
-        title={sectionLabel}
-        description={sectionDescription}
-        skeletonRows={6}
-      />
-    )
+    return <SectionState variant="loading" title={sectionLabel} description={sectionDescription} skeletonRows={6} />
   }
 
   return (
@@ -290,7 +287,9 @@ export function SystemSettingsSection({
           </p>
         ) : (
           <div className="space-y-1.5">
-            <label id="system-log-level-label" className="block text-xs font-medium text-muted-foreground">Log Level</label>
+            <label id="system-log-level-label" className="block text-xs font-medium text-muted-foreground">
+              Log Level
+            </label>
             <Select
               value={currentLevel}
               onValueChange={(value) => value && handleLogLevelChange(value)}
@@ -311,18 +310,11 @@ export function SystemSettingsSection({
           </div>
         )}
 
-        {logError && (
-          <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
-            {logError}
-          </div>
-        )}
+        {logError && <div className="mt-3 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{logError}</div>}
 
         <div className="mt-3 space-y-1">
           <span className="block text-xs font-medium text-muted-foreground">Log Path</span>
-          <p
-            data-testid="system-log-path"
-            className="text-xs text-foreground font-mono tabular-nums"
-          >
+          <p data-testid="system-log-path" className="text-xs text-foreground font-mono tabular-nums">
             {systemInfo?.paths.logs ?? '—'}
           </p>
         </div>
@@ -337,21 +329,14 @@ export function SystemSettingsSection({
         />
       ) : (
         <>
-          <CardSection
-            title="Identity"
-            titleAs="h3"
-            tone={superseded ? 'blue' : 'default'}
-          >
+          <CardSection title="Identity" titleAs="h3" tone={superseded ? 'blue' : 'default'}>
             <InfoRow label="Running version">{formatValue(systemInfo.running.version)}</InfoRow>
             <InfoRow label="Running git hash">
               <span title={gitHash ?? undefined}>{shortHash(gitHash)}</span>
             </InfoRow>
             <InfoRow label="Started at">{formatTimestamp(systemInfo.running.startedAt)}</InfoRow>
             {superseded && systemInfo.running.version && (
-              <p
-                data-testid="system-update-superseded-runtime"
-                className="mt-2 text-xs text-muted-foreground"
-              >
+              <p data-testid="system-update-superseded-runtime" className="mt-2 text-xs text-muted-foreground">
                 Current runtime: v{systemInfo.running.version}
                 {gitHash ? ` (${shortHash(gitHash)})` : ''}
               </p>
@@ -360,7 +345,11 @@ export function SystemSettingsSection({
 
           <CardSection title="Source" titleAs="h3" tone={systemInfo.source.dirty ? 'amber' : 'default'}>
             <InfoRow label="Path">
-              <span id="system-source-path" tabIndex={-1} className="rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+              <span
+                id="system-source-path"
+                tabIndex={-1}
+                className="rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
                 {formatValue(systemInfo.source.path)}
               </span>
             </InfoRow>
@@ -385,19 +374,11 @@ export function SystemSettingsSection({
             <CardSection
               title="Update"
               titleAs="h3"
-              tone={
-                superseded
-                  ? 'blue'
-                  : systemInfo.update.available
-                    ? (updateReady ? 'green' : 'amber')
-                    : 'default'
-              }
+              tone={superseded ? 'blue' : systemInfo.update.available ? (updateReady ? 'green' : 'amber') : 'default'}
             >
               <InfoRow label="Status">{formatValue(systemInfo.update.status)}</InfoRow>
 
-              {updateMessage && (
-                <p className="mt-2 text-xs text-muted-foreground">{updateMessage}</p>
-              )}
+              {updateMessage && <p className="mt-2 text-xs text-muted-foreground">{updateMessage}</p>}
 
               {systemInfo.source.dirty && (
                 <p
@@ -409,57 +390,93 @@ export function SystemSettingsSection({
               )}
 
               {showOutcome && updateStatus && (
-                <div
-                  data-testid="system-update-outcome-block"
-                  className="mt-3"
-                >
+                <div data-testid="system-update-outcome-block" className="mt-3">
                   <SystemUpdateOutcomeView job={updateStatus} />
                 </div>
               )}
 
-              {(showUpdateButton || showProgress) && (
+              {(updateCommand || showProgress) && (
                 <div className="mt-3">
-                  {showProgress ? (
-                    <div className="space-y-3">
-                      <span className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-600 bg-amber-50 rounded-md">
-                        {!updateReady && <Loader2Icon className="h-4 w-4 animate-spin" />}
-                        {progressLabel ?? 'Waiting for reconnect'}
-                      </span>
-                      <ProgressStages job={updateStatus} />
-                      {(updateStatus?.sourcePath || updateStatus?.serverUnit || updateStatus?.runnerUnit) && (
-                        <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
-                          {updateStatus.sourcePath && <div>Source: <span className="font-mono">{updateStatus.sourcePath}</span></div>}
-                          {updateStatus.serverUnit && <div>Server unit: <span className="font-mono">{updateStatus.serverUnit}</span></div>}
-                          {updateStatus.runnerUnit && <div>Runner unit: <span className="font-mono">{updateStatus.runnerUnit}</span></div>}
+                  <div className="space-y-3">
+                    {updateCommand && (
+                      <div className="space-y-2">
+                        <div className="text-xs text-muted-foreground">
+                          Run this command from a terminal to start the update.
                         </div>
-                      )}
-                      {recentUpdateLogs.length > 0 && (
-                        <div className="rounded-md border px-3 py-2">
-                          <div className="mb-2 text-xs font-medium text-muted-foreground">Update log</div>
-                          <div className="space-y-1">
-                            {recentUpdateLogs.map((log) => (
-                              <div
-                                key={`${log.at}-${log.stage}-${log.message}`}
-                                className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-[8rem_1fr]"
-                              >
-                                <span className="font-medium text-muted-foreground">{log.stage}</span>
-                                <span>{log.message}</span>
+                        <div className="flex items-center gap-2">
+                          <code
+                            data-testid="system-update-command"
+                            className="min-w-0 flex-1 break-all rounded-md border bg-muted/30 px-3 py-2 text-xs text-foreground"
+                          >
+                            {updateCommand}
+                          </code>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={handleCopyCommand}
+                            aria-label="Copy update command"
+                            title="Copy update command"
+                          >
+                            {copyState === 'copied' ? (
+                              <CheckIcon className="h-4 w-4" />
+                            ) : (
+                              <ClipboardIcon className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
+                        {copyState !== 'idle' && (
+                          <p className="text-xs text-muted-foreground">
+                            {copyState === 'copied' ? 'Copied' : 'Unable to copy'}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {showProgress && (
+                      <div className="space-y-3">
+                        <span className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-600 bg-amber-50 rounded-md">
+                          {!updateReady && <Loader2Icon className="h-4 w-4 animate-spin" />}
+                          {progressLabel ?? 'Waiting for reconnect'}
+                        </span>
+                        <ProgressStages job={updateStatus} />
+                        {(updateStatus?.sourcePath || updateStatus?.serverUnit || updateStatus?.runnerUnit) && (
+                          <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
+                            {updateStatus.sourcePath && (
+                              <div>
+                                Source: <span className="font-mono">{updateStatus.sourcePath}</span>
                               </div>
-                            ))}
+                            )}
+                            {updateStatus.serverUnit && (
+                              <div>
+                                Server unit: <span className="font-mono">{updateStatus.serverUnit}</span>
+                              </div>
+                            )}
+                            {updateStatus.runnerUnit && (
+                              <div>
+                                Runner unit: <span className="font-mono">{updateStatus.runnerUnit}</span>
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <Button
-                      onClick={handleUpdate}
-                      disabled={systemUpdatePending || systemInfo.source.dirty}
-                      className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-                    >
-                      <RefreshCwIcon className="h-4 w-4" />
-                      Update &amp; Restart
-                    </Button>
-                  )}
+                        )}
+                        {recentUpdateLogs.length > 0 && (
+                          <div className="rounded-md border px-3 py-2">
+                            <div className="mb-2 text-xs font-medium text-muted-foreground">Update log</div>
+                            <div className="space-y-1">
+                              {recentUpdateLogs.map((log) => (
+                                <div
+                                  key={`${log.at}-${log.stage}-${log.message}`}
+                                  className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-[8rem_1fr]"
+                                >
+                                  <span className="font-medium text-muted-foreground">{log.stage}</span>
+                                  <span>{log.message}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </CardSection>
