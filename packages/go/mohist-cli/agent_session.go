@@ -200,6 +200,11 @@ func parseAgentFlags(c command, action string, args []string) (command, error) {
 			}
 		}
 	}
+	if hasArg(c.args, "runtime") {
+		if err := validateAgentRuntimeValue(argValue(c.args, "runtime", "")); err != nil {
+			return command{}, usage(err.Error())
+		}
+	}
 	if action == "start" && !hasArg(c.args, "prompt") && !hasArg(c.args, "prompt-file") {
 		return command{}, usage("--prompt or --prompt-file is required")
 	}
@@ -395,7 +400,7 @@ func parseSchedule(args []string) (command, error) {
 }
 
 func agentHelp() string {
-	return "USAGE\n    mo agent <action> [flags]\n\nManage Agents, AgentJobs, and launches.\n\nActions: list, view, create, edit, archive, restore, start, launch, spawn, install, job, subscription, model"
+	return "USAGE\n    mo agent <action> [flags]\n\nManage Agents, AgentJobs, and launches.\n\nActions: list, view, create, edit, archive, restore, start, launch, spawn, install, job, subscription, model\n\nAgent Runtime values are pi, opencode, and codex."
 }
 func sessionHelp() string {
 	return "USAGE\n    mo session <action> [flags]\n\nManage AgentSessions by stable Session ID.\n\nActions: list, tree, view, transcript, followup, compact, reset, stop, detach, schedule"
@@ -669,6 +674,21 @@ func agentBody(args []string, currentConfig map[string]any) map[string]any {
 		}
 	}
 	return body
+}
+
+// validateAgentRuntimeValue enforces the canonical Agent Runtime value
+// space at the CLI boundary so an unsupported value cannot reach the
+// server. Callers must surface the returned error via the usage error path
+// (the existing parse flow already does so). Returns nil when the value is
+// one of the recognised Agent Runtimes; an empty string is treated as
+// "no override" and accepted.
+func validateAgentRuntimeValue(value string) error {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "pi", "opencode", "codex":
+		return nil
+	default:
+		return fmt.Errorf("--runtime %q is not supported; allowed values are pi, opencode, and codex", value)
+	}
 }
 
 func agentConfig(agent map[string]any) map[string]any {

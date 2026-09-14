@@ -47,6 +47,7 @@ public class AgentConfigSchemaTests
     [Theory]
     [InlineData("opencode")]
     [InlineData("pi")]
+    [InlineData("codex")]
     public void Validate_RuntimeAccepted(string runtime)
     {
         var element = JsonDocument.Parse($$"""{"model":"openai/gpt-5.5","runtime":"{{runtime}}"}""").RootElement;
@@ -69,6 +70,7 @@ public class AgentConfigSchemaTests
         Assert.Contains("agentConfig.runtime", error);
         Assert.Contains("opencode", error);
         Assert.Contains("pi", error);
+        Assert.Contains("codex", error);
     }
 
     [Theory]

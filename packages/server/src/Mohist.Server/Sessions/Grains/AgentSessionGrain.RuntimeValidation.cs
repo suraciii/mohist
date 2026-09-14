@@ -19,7 +19,8 @@ public sealed partial class AgentSessionGrain
 
     private static bool IsRuntimeRegistered(string runtime) =>
         string.Equals(runtime, OpenCodeRuntime, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(runtime, PiRuntime, StringComparison.OrdinalIgnoreCase);
+        || string.Equals(runtime, PiRuntime, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(runtime, CodexRuntime, StringComparison.OrdinalIgnoreCase);
 
     private static bool ValidateRuntimeEventAdmission(
         AgentSession session,

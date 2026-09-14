@@ -152,7 +152,7 @@ func maintenanceHelp(area string) string {
 		return "USAGE\n    mo skill <list|view|install|path|sync> [flags]\n\nManage coder agent skills."
 	}
 	if area == "install" {
-		return "USAGE\n    mo install <server|slack> [flags]\n    mo install runner [--enabled-agent-runtimes <list>] [flags]\n\nInstall Mohist components as user services. Runner Runtime values are pi and opencode."
+		return "USAGE\n    mo install <server|slack> [flags]\n    mo install runner [--enabled-agent-runtimes <list>] [flags]\n\nInstall Mohist components as user services. Runner Runtime values are pi, opencode, and codex."
 	}
 	return "USAGE\n    mo update [<cli|server|runner|slack>] [flags]\n\nUpdate the managed Server and Runner together, or select one component explicitly."
 }
@@ -162,15 +162,15 @@ func normalizeEnabledAgentRuntimes(value string) (string, error) {
 	for _, candidate := range strings.Split(value, ",") {
 		runtime := strings.ToLower(strings.TrimSpace(candidate))
 		if runtime == "" {
-			return "", errors.New("--enabled-agent-runtimes must be a non-empty comma-separated set of pi and opencode")
+			return "", errors.New("--enabled-agent-runtimes must be a non-empty comma-separated set of pi, opencode, and codex")
 		}
-		if runtime != "pi" && runtime != "opencode" {
-			return "", fmt.Errorf("--enabled-agent-runtimes contains unknown Runtime %q; allowed values are pi and opencode", candidate)
+		if runtime != "pi" && runtime != "opencode" && runtime != "codex" {
+			return "", fmt.Errorf("--enabled-agent-runtimes contains unknown Runtime %q; allowed values are pi, opencode, and codex", candidate)
 		}
 		enabled[runtime] = true
 	}
 	ordered := make([]string, 0, len(enabled))
-	for _, runtime := range []string{"pi", "opencode"} {
+	for _, runtime := range []string{"pi", "opencode", "codex"} {
 		if enabled[runtime] {
 			ordered = append(ordered, runtime)
 		}
