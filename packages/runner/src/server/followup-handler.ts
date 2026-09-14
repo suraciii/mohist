@@ -199,7 +199,11 @@ async function handleFollowup(
     }
   }
   let allowRuntimeReplacement = false
-  if (!handle && !managerContext && binding.runtime.toLowerCase() === 'opencode') {
+  if (
+    !managerContext &&
+    binding.runtime.toLowerCase() === 'opencode' &&
+    (!handle || !handle.runtime.ready())
+  ) {
     const pi = resolveAccessor(deps.piRuntime)
     if (pi) {
       handle = { kind: 'pi', runtime: pi }
