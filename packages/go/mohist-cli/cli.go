@@ -34,6 +34,7 @@ type EnvLookup func(string) (string, bool)
 type ReadFile func(string) (string, error)
 type WriteFile func(string, string, os.FileMode) error
 type Execute func(context.Context, string, []string) error
+type ExecuteOutput func(context.Context, string, []string) (string, error)
 type Wait func(context.Context, time.Duration) error
 type EventTail func(context.Context, string, []string, string, io.Writer) error
 type HealthProbe func(context.Context, string) error
@@ -49,6 +50,7 @@ type Dependencies struct {
 	WriteFile               WriteFile
 	HomeDir                 func() (string, error)
 	Execute                 Execute
+	ExecuteOutput           ExecuteOutput
 	OpenBrowser             Execute
 	Input                   io.Reader
 	Now                     func() time.Time
@@ -100,6 +102,11 @@ func defaultDependencies() Dependencies {
 			cmd := exec.CommandContext(ctx, name, args...)
 			return cmd.Run()
 		},
+		ExecuteOutput: func(ctx context.Context, name string, args []string) (string, error) {
+			cmd := exec.CommandContext(ctx, name, args...)
+			output, err := cmd.CombinedOutput()
+			return string(output), err
+		},
 		OpenBrowser: func(ctx context.Context, name string, args []string) error {
 			cmd := exec.CommandContext(ctx, name, args...)
 			return cmd.Run()
@@ -140,6 +147,9 @@ func ResolveConfig(deps Dependencies) (Config, error) {
 	}
 	if deps.Execute == nil {
 		deps.Execute = defaults.Execute
+	}
+	if deps.ExecuteOutput == nil {
+		deps.ExecuteOutput = defaults.ExecuteOutput
 	}
 	if deps.OpenBrowser == nil {
 		deps.OpenBrowser = defaults.OpenBrowser
@@ -318,6 +328,9 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if deps.Execute == nil {
 		deps.Execute = defaults.Execute
 	}
+	if deps.ExecuteOutput == nil {
+		deps.ExecuteOutput = defaults.ExecuteOutput
+	}
 	if deps.OpenBrowser == nil {
 		deps.OpenBrowser = defaults.OpenBrowser
 	}
@@ -442,6 +455,7 @@ type command struct {
 	fieldsOnly, help bool
 	helpText         string
 	args             []string
+	outcome          *updateOutcomeReporter
 }
 
 var diagnosisFields = []string{"workflowRunId", "status", "failure", "tasks", "dispatch", "events"}

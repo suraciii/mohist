@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -102,9 +103,12 @@ func parseInstallUpdate(area string, args []string) (command, error) {
 		switch args[i] {
 		case "--dry-run":
 			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), "true")
-		case "--repo-root", "--cli-path", "--server-url", "--runner-root", "--unit-dir":
+		case "--repo-root", "--cli-path", "--server-url", "--runner-id", "--runner-root", "--unit-dir":
 			if args[i] == "--cli-path" && (area != "update" || component != "cli") {
 				return command{}, usage("--cli-path is only valid with mo update cli")
+			}
+			if args[i] == "--runner-id" && (area != "install" || component != "runner") {
+				return command{}, usage("--runner-id is only valid with mo install runner")
 			}
 			if i+1 >= len(args) {
 				return command{}, usage(args[i] + " requires a value")
@@ -177,7 +181,7 @@ func runMaintenance(ctx context.Context, deps Dependencies, c command) int {
 	if strings.HasPrefix(c.kind, "skill-") {
 		return runSkill(ctx, deps, c)
 	}
-	return runInstallUpdate(ctx, deps, c)
+	return runInstallUpdateWithOutcome(ctx, deps, c)
 }
 
 func skillRoot(deps Dependencies) string {
@@ -668,7 +672,7 @@ func copyTree(ctx context.Context, source, target string, deps Dependencies) err
 	})
 }
 
-func runInstallUpdate(ctx context.Context, deps Dependencies, c command) int {
+func runInstallUpdateOriginal(ctx context.Context, deps Dependencies, c command) int {
 	component := argValue(c.args, "component", "")
 	enrollmentToken := ""
 	runnerServerURL := ""
@@ -703,7 +707,11 @@ func runInstallUpdate(ctx context.Context, deps Dependencies, c command) int {
 				UnitDir: argValue(c.args, "unit-dir", ""), DryRun: dryRun,
 			})
 		case "slack":
-			return executeMaintenance(ctx, deps, "go", "-C", "packages/go/mohist-slack", "build", "-o", "bin/build/mohist-slack")
+			root := argValue(c.args, "repo-root", "")
+			if root == "" {
+				root = deps.CurrentDirectory()
+			}
+			return buildSlackBinary(ctx, deps, root)
 		}
 	}
 	if c.kind == "install-component" {
@@ -809,7 +817,11 @@ func installComponent(
 		if runnerRoot == "" {
 			runnerRoot = filepath.Join(home, ".mohist", "projects")
 		}
-		managedEnvironment, err := runnerManagedEnvironment(runnerServerURL, runnerRoot)
+		runnerID := strings.TrimSpace(argValue(c.args, "runner-id", ""))
+		if runnerID == "" {
+			runnerID = defaultRunnerID()
+		}
+		managedEnvironment, err := runnerManagedEnvironment(runnerServerURL, runnerID, runnerRoot)
 		if err != nil {
 			writeError(deps.Stderr, err)
 			return ExitOperation
@@ -834,6 +846,20 @@ func installComponent(
 			}
 		}
 	}
+	if component == "server" {
+		dotnet, err := exec.LookPath("dotnet")
+		if err != nil {
+			dotnet = "/usr/bin/dotnet"
+		}
+		project := filepath.Join(root, "packages", "server", "src", "Mohist.Server", "Mohist.Server.csproj")
+		entry = dotnet + " run --project " + project
+	}
+	if component == "slack" {
+		if code := executeMaintenance(ctx, deps, "go", "-C", filepath.Join(root, "packages/go/mohist-slack"), "build", "-o", slackBinaryPath(root)); code != ExitOK {
+			return code
+		}
+		entry = slackBinaryPath(root)
+	}
 	unitText := "[Unit]\nDescription=Mohist " + component + "\n\n[Service]\nWorkingDirectory=" + root + "\n" + environmentFileLine + "ExecStart=" + entry + "\n\n[Install]\nWantedBy=default.target\n"
 	path := filepath.Join(unitDir, unit)
 	if err := deps.WriteFile(path, unitText, 0o600); err != nil {
@@ -850,8 +876,20 @@ func installComponent(
 	return ExitOK
 }
 
-func runnerManagedEnvironment(serverURL, runnerRoot string) (string, error) {
+func defaultRunnerID() string {
+	host, err := os.Hostname()
+	if err != nil || strings.TrimSpace(host) == "" {
+		return "runner-local"
+	}
+	return "runner-" + strings.TrimSpace(host)
+}
+
+func runnerManagedEnvironment(serverURL, runnerID, runnerRoot string) (string, error) {
 	server, err := systemdEnvironmentAssignment("SERVER_URL", serverURL)
+	if err != nil {
+		return "", err
+	}
+	id, err := systemdEnvironmentAssignment("RUNNER_ID", runnerID)
 	if err != nil {
 		return "", err
 	}
@@ -859,7 +897,7 @@ func runnerManagedEnvironment(serverURL, runnerRoot string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return server + root, nil
+	return server + id + root, nil
 }
 
 func systemdEnvironmentAssignment(name, value string) (string, error) {
@@ -876,6 +914,14 @@ func executeMaintenance(ctx context.Context, deps Dependencies, name string, arg
 		return ExitOperation
 	}
 	return ExitOK
+}
+
+func slackBinaryPath(root string) string {
+	return filepath.Join(root, "packages", "go", "mohist-slack", "bin", "build", "mohist-slack")
+}
+
+func buildSlackBinary(ctx context.Context, deps Dependencies, root string) int {
+	return executeMaintenance(ctx, deps, "go", "-C", filepath.Join(root, "packages/go/mohist-slack"), "build", "-o", slackBinaryPath(root))
 }
 
 func updateCLI(ctx context.Context, deps Dependencies, repoRoot, explicit string) int {

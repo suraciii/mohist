@@ -8,7 +8,12 @@ import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { useMswServer } from './support/msw'
 import React from 'react'
 
-let _opencodeRuntimeData: any = { mode: 'local-opencode', command: 'opencode', model: null, note: 'external coder agent' }
+let _opencodeRuntimeData: any = {
+  mode: 'local-opencode',
+  command: 'opencode',
+  model: null,
+  note: 'external coder agent',
+}
 let _opencodeRuntimeLoading = false
 let _opencodeRuntimeError: string | null = null
 
@@ -56,11 +61,11 @@ useMswServer(
       if (_setLogLevelError) {
         return HttpResponse.json({ success: false, error: _setLogLevelError }, { status: 400 })
       }
-      const body = await request.json() as { value: string }
+      const body = (await request.json()) as { value: string }
       _configData = { ..._configData, logLevel: body.value }
       return HttpResponse.json({ success: true, data: _configData })
     }
-    const body = await request.json() as { value: number | string }
+    const body = (await request.json()) as { value: number | string }
     _configData = { ..._configData, [key]: body.value }
     return HttpResponse.json({ success: true, data: _configData })
   }),
@@ -68,12 +73,18 @@ useMswServer(
     HttpResponse.json({ success: true, data: _workflowVariablesData }),
   ),
   http.patch('*/api/projects/:projectId/variables', async ({ request }) => {
-    const body = await request.json() as any
+    const body = (await request.json()) as any
     if (body.vars) {
-      _workflowVariablesData = { ..._workflowVariablesData, vars: { ...(_workflowVariablesData.vars || {}), ...body.vars } }
+      _workflowVariablesData = {
+        ..._workflowVariablesData,
+        vars: { ...(_workflowVariablesData.vars || {}), ...body.vars },
+      }
     }
     if (body.stages) {
-      _workflowVariablesData = { ..._workflowVariablesData, stages: { ...(_workflowVariablesData.stages || {}), ...body.stages } }
+      _workflowVariablesData = {
+        ..._workflowVariablesData,
+        stages: { ...(_workflowVariablesData.stages || {}), ...body.stages },
+      }
     }
     return HttpResponse.json({ success: true, data: _workflowVariablesData })
   }),
@@ -90,28 +101,23 @@ useMswServer(
     }
     return HttpResponse.json({ success: true, data: _systemInfoData })
   }),
-  http.post('*/api/system/update', () =>
-    HttpResponse.json({ success: true, data: { job: { jobId: 'job-1', status: 'waiting-for-reconnect' } } }),
-  ),
-  http.get('*/api/system/update/status', () =>
-    HttpResponse.json({ success: true, data: _systemUpdateStatusData }),
-  ),
-  http.get('*/api/templates/system', () =>
-    HttpResponse.json({ success: true, data: [] }),
-  ),
+  http.get('*/api/system/update/status', () => HttpResponse.json({ success: true, data: _systemUpdateStatusData })),
+  http.get('*/api/templates/system', () => HttpResponse.json({ success: true, data: [] })),
   http.get('*/api/projects/:projectId/workflow-profiles', ({ params }) =>
     HttpResponse.json({
       success: true,
-      data: [{
-        projectId: params.projectId,
-        profileId: 'mohist/local',
-        name: 'Default',
-        description: '',
-        sourceProvenance: 'BuiltIn',
-        isBuiltIn: true,
-        definitionSource: null,
-        agentRuntime: 'opencode',
-      }],
+      data: [
+        {
+          projectId: params.projectId,
+          profileId: 'mohist/local',
+          name: 'Default',
+          description: '',
+          sourceProvenance: 'BuiltIn',
+          isBuiltIn: true,
+          definitionSource: null,
+          agentRuntime: 'opencode',
+        },
+      ],
     }),
   ),
   http.get('*/api/projects/:projectId/workflow-profile/default', ({ params }) =>
@@ -130,7 +136,12 @@ function createSystemInfo(overrides: Partial<any> = {}) {
   return {
     running: { version: '1.2.3', gitHash: 'abcdef1234567890', startedAt: '2026-06-01T00:00:00Z' },
     source: { path: '/repo', branch: 'main', head: 'fedcba0987654321', dirty: false },
-    install: { mode: 'local-source', serviceManager: 'systemd-user', serverUnit: 'mohist.service', runnerUnit: 'mohist-runner.service' },
+    install: {
+      mode: 'local-source',
+      serviceManager: 'systemd-user',
+      serverUnit: 'mohist.service',
+      runnerUnit: 'mohist-runner.service',
+    },
     update: { status: 'update-available', available: true, reason: 'A newer source version is available' },
     services: { server: 'active', runner: 'active' },
     paths: { db: '/db', config: '/config', logs: '/logs', opencode: '/opencode' },
@@ -147,10 +158,7 @@ function createMockQueryClient() {
   })
 }
 
-function renderWithQueryClient(
-  ui: React.ReactElement,
-  initialEntries = ['/settings/ai'],
-) {
+function renderWithQueryClient(ui: React.ReactElement, initialEntries = ['/settings/ai']) {
   const queryClient = createMockQueryClient()
   return baseRender(
     <MemoryRouter initialEntries={initialEntries}>
@@ -166,10 +174,7 @@ function renderWithQueryClient(
   )
 }
 
-function renderWithoutProject(
-  ui: React.ReactElement,
-  initialEntries: string[] = ['/settings/repositories'],
-) {
+function renderWithoutProject(ui: React.ReactElement, initialEntries: string[] = ['/settings/repositories']) {
   const queryClient = createMockQueryClient()
   return baseRender(
     <MemoryRouter initialEntries={initialEntries}>
@@ -244,7 +249,10 @@ describe('SettingsPage', () => {
         models: ['openai/gpt-4', 'anthropic/claude-3-opus'],
         modelVariants: { 'anthropic/claude-3-opus': ['low', 'medium', 'high'] },
       }
-      _workflowVariablesData = { vars: { agent: { type: 'opencode', model: 'anthropic/claude-3-opus', variant: 'high' } }, stages: null }
+      _workflowVariablesData = {
+        vars: { agent: { type: 'opencode', model: 'anthropic/claude-3-opus', variant: 'high' } },
+        stages: null,
+      }
 
       renderWithQueryClient(<SettingsPage />)
 
@@ -261,7 +269,10 @@ describe('SettingsPage', () => {
         models: ['openai/gpt-4', 'anthropic/claude-3-opus'],
         modelVariants: { 'anthropic/claude-3-opus': [] },
       }
-      _workflowVariablesData = { vars: { agent: { type: 'opencode', model: 'anthropic/claude-3-opus', variant: 'high' } }, stages: null }
+      _workflowVariablesData = {
+        vars: { agent: { type: 'opencode', model: 'anthropic/claude-3-opus', variant: 'high' } },
+        stages: null,
+      }
 
       renderWithQueryClient(<SettingsPage />)
 
@@ -389,7 +400,8 @@ describe('SettingsPage', () => {
       expect(screen.getAllByText(/fedcba09 \(fedcba0987654321\)/i).length).toBeGreaterThan(0)
       expect(screen.getAllByText('Mode').length).toBeGreaterThan(0)
       expect(screen.getAllByText('local-source').length).toBeGreaterThan(0)
-      expect(screen.getAllByRole('button', { name: /Update & Restart/i }).length).toBeGreaterThan(0)
+      expect(screen.getAllByTestId('system-update-command').length).toBeGreaterThan(0)
+      expect(screen.getAllByTestId('system-update-command')[0]).toHaveTextContent('mo update --repo-root /repo')
       expect(screen.queryByText(/Rebuild & Restart/i)).not.toBeInTheDocument()
     })
 
@@ -397,7 +409,11 @@ describe('SettingsPage', () => {
       _systemInfoData = createSystemInfo({
         source: { path: null, branch: null, head: null, dirty: false },
         install: { mode: 'binary', serviceManager: null, serverUnit: null, runnerUnit: null },
-        update: { status: 'unsupported', available: false, reason: 'Web update is unsupported for the detected deployment' },
+        update: {
+          status: 'unsupported',
+          available: false,
+          reason: 'Web update is unsupported for the detected deployment',
+        },
         services: { server: null, runner: null },
       })
 
@@ -406,7 +422,7 @@ describe('SettingsPage', () => {
       await waitFor(() => {
         expect(screen.getAllByText(/Web update is unsupported/i).length).toBeGreaterThan(0)
       })
-      expect(screen.queryByRole('button', { name: /Update & Restart/i })).not.toBeInTheDocument()
+      expect(screen.queryByTestId('system-update-command')).not.toBeInTheDocument()
     })
 
     it('renders system info error state without placeholder runtime facts', async () => {
@@ -458,7 +474,7 @@ describe('SettingsPage', () => {
       await waitFor(() => {
         expect(screen.getAllByText(/Local source has uncommitted changes/i).length).toBeGreaterThan(0)
       })
-      expect(screen.queryByRole('button', { name: /Update & Restart/i })).not.toBeInTheDocument()
+      expect(screen.getByTestId('system-update-command')).toBeInTheDocument()
     })
 
     it('renders recovered persisted failure message from update status', async () => {
@@ -497,7 +513,7 @@ describe('SettingsPage', () => {
       await waitFor(() => {
         expect(screen.getAllByText(/Building/i).length).toBeGreaterThan(0)
       })
-      expect(screen.queryByRole('button', { name: /Update & Restart/i })).not.toBeInTheDocument()
+      expect(screen.getByTestId('system-update-command')).toBeInTheDocument()
     })
 
     it('renders explicit ready state after reconnect hash match', async () => {
@@ -545,7 +561,7 @@ describe('SettingsPage', () => {
       expect(screen.getByTestId('system-update-superseded-runtime')).toHaveTextContent('newsha98')
       expect(screen.queryByTestId('system-update-progress-stages')).not.toBeInTheDocument()
       expect(screen.queryByTestId('system-update-stage-Building')).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /Update & Restart/i })).toBeInTheDocument()
+      expect(screen.getByTestId('system-update-command')).toBeInTheDocument()
     })
 
     it('renders Succeeded outcome label for completed updates', async () => {

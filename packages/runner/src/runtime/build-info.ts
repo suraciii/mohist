@@ -41,7 +41,12 @@ const nodeBuildInfoFileSystem: BuildInfoFileSystem = {
 
 function candidatesForManifest() {
   const here = dirname(fileURLToPath(import.meta.url))
-  return [resolve(here, 'build-info.json'), resolve(here, '..', 'build-info.json')]
+  const managed = process.env.MOHIST_RUNTIME_IDENTITY_PATH
+  return [
+    ...(managed ? [resolve(managed)] : []),
+    resolve(here, 'build-info.json'),
+    resolve(here, '..', 'build-info.json'),
+  ]
 }
 
 export function loadBuildInfo(

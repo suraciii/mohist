@@ -56,8 +56,6 @@ const dataHook: SystemSettingsDataHook = () => ({
   infoError: systemInfoError,
   infoErrorValue: systemInfoError ? new Error('boom') : null,
   refetchInfo: async () => undefined,
-  startSystemUpdate: async () => undefined,
-  systemUpdatePending: false,
   updateStatusEnvelope: { hasJob: false, job: null },
   refetchUpdateStatus: async () => undefined,
 })

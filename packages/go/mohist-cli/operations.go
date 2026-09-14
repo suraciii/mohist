@@ -388,7 +388,70 @@ func runLocalService(ctx context.Context, deps Dependencies, cmd command) int {
 		fmt.Fprintf(deps.Stdout, "Dry run: %s %s\n", action, target)
 		return ExitOK
 	}
-	if err := deps.Execute(ctx, "mohist-service", []string{action, target}); err != nil {
+	units := map[string]string{"server": "mohist.service", "runner": "mohist-runner.service", "slack": "mohist-slack.service"}
+	unit := units[target]
+	if action == "status" {
+		output, err := deps.ExecuteOutput(ctx, "systemctl", []string{"--user", "show", "--no-pager", "--property=Id,ActiveState,SubState,Result,ExecMainStatus", unit})
+		if err != nil {
+			if output != "" {
+				fmt.Fprint(deps.Stderr, output)
+			}
+			return operationExit(deps, ctx, err)
+		}
+		fmt.Fprint(deps.Stdout, output)
+		return ExitOK
+	}
+	if action == "logs" {
+		args := []string{"--user", "-u", unit, "--no-pager"}
+		if lines := argValue(cmd.args, "lines", ""); lines != "" {
+			args = append(args, "-n", lines)
+		}
+		if hasArg(cmd.args, "follow") {
+			args = append(args, "-f")
+		}
+		output, err := deps.ExecuteOutput(ctx, "journalctl", args)
+		if err != nil {
+			if output != "" {
+				fmt.Fprint(deps.Stderr, output)
+			}
+			return operationExit(deps, ctx, err)
+		}
+		fmt.Fprint(deps.Stdout, output)
+		return ExitOK
+	}
+	if action == "uninstall" {
+		if err := deps.Execute(ctx, "systemctl", []string{"--user", "stop", unit}); err != nil {
+			return operationExit(deps, ctx, err)
+		}
+		if err := deps.Execute(ctx, "systemctl", []string{"--user", "disable", unit}); err != nil {
+			return operationExit(deps, ctx, err)
+		}
+		home, err := deps.HomeDir()
+		if err != nil {
+			return operationExit(deps, ctx, err)
+		}
+		unitDir := argValue(cmd.args, "unit-dir", "")
+		if unitDir == "" {
+			unitDir = filepath.Join(home, ".config", "systemd", "user")
+		}
+		paths := []string{filepath.Join(unitDir, unit)}
+		if target == "runner" {
+			paths = append(paths,
+				filepath.Join(home, ".config", "mohist", "runner.env"),
+				filepath.Join(home, ".config", "mohist", "runner-managed.env"))
+		}
+		for _, path := range paths {
+			if err := deps.RemoveAll(path); err != nil {
+				return operationExit(deps, ctx, fmt.Errorf("remove managed service file %s: %w", path, err))
+			}
+		}
+		if err := deps.Execute(ctx, "systemctl", []string{"--user", "daemon-reload"}); err != nil {
+			return operationExit(deps, ctx, err)
+		}
+		fmt.Fprintln(deps.Stdout, "OK")
+		return ExitOK
+	}
+	if err := deps.Execute(ctx, "systemctl", []string{"--user", action, unit}); err != nil {
 		return operationExit(deps, ctx, err)
 	}
 	fmt.Fprintln(deps.Stdout, "OK")

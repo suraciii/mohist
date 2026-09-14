@@ -48,7 +48,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionFollowupAcceptResult> AcceptFollowupAsync(AcceptFollowupCommand command);
     Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync();
     Task<AgentSessionFollowupDispatch?> BeginFollowupDispatchForTurnAsync(string turnId);
-    Task ReleaseFollowupDispatchAsync(string operationId);
+    Task ReleaseFollowupDispatchAsync(string operationId, bool scheduleRetry = true);
     Task MarkFollowupTurnExecutingAsync(string operationId);
     Task MarkFollowupTurnTerminalAsync(
         string operationId,
