@@ -943,12 +943,8 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
   })
 
   it('runtime-not-ready: AgentJob polls continue while the server admission fence rejects the claim', async (resources) => {
-    // Use a long rebuild delay so the negative witness stays present
-    // throughout the post-flip observation window. The poll mock returns the AgentJob dispatch
-    // exactly once followed by empty arrays so the dispatch loop
-    // can't tight-loop on the same work key (#410 T-001: the
-    // AgentJobExecutor closes the work within a few microtasks, so
-    // awaitingAck is empty before the next poll tick).
+    // Keep the negative readiness witness present while the AgentJob
+    // dispatch is returned once, then return empty polls.
     const installedHandles = installFakeOpenCodeRuntimeFactory(resources, { rebuildDelayMs: 60_000 })
     poll
       .mockResolvedValueOnce([
@@ -980,11 +976,8 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
       }
       const callsBeforeFlip = poll.mock.calls.length
       expect(callsBeforeFlip).toBeGreaterThan(0)
-      // Flip the runtime to not-ready. The server-side admission fence
-      // rejects runtime-specific claims while polling stays alive. The subscription lives on the fake
-      // handles returned by `installFakeOpenCodeRuntimeFactory` — not
-      // on the runtime instance itself, which only stores it as
-      // private state.
+      // The admission fence rejects runtime-specific claims while the
+      // control-plane poll remains active.
       installedHandles.subscription.emit({ type: 'server.disconnected', payload: {} })
       expect(installedHandles.lastRuntime?.ready()).toBe(false)
       // Drive timers for a few intervals; the poll mock continues to

@@ -230,6 +230,7 @@ describe('AgentJobExecutor transport metadata classification', () => {
       agentSessionId: 'session-1',
       initialInputId: 'input-1',
       initialTurnId: 'turn-1',
+      variables: { workspace: { path: workDir } },
       with: { prompt: 'PI_MIGRATION_SMOKE_OK', runtime: 'pi', executionSource: 'non-slack' },
     }
 
@@ -276,6 +277,7 @@ describe('AgentJobExecutor transport metadata classification', () => {
       agentSessionId: 'session-1',
       initialInputId: 'input-1',
       initialTurnId: 'turn-1',
+      variables: { workspace: { path: workDir } },
       with: {
         prompt: 'reply in thread',
         runtime: 'opencode',
@@ -328,6 +330,7 @@ describe('AgentJobExecutor transport metadata classification', () => {
       agentSessionId: 'session-1',
       initialInputId: 'input-1',
       initialTurnId: 'turn-1',
+      variables: { workspace: { path: workDir } },
       with: { prompt: 'hi', runtime: 'pi', executionSource: 'non-slack', rogueKey: 'x' },
     }
 
