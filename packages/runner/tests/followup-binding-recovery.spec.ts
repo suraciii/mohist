@@ -37,19 +37,35 @@ describe('follow-up Runtime binding recovery', () => {
     const order: string[] = []
     const openCode = {
       ready: () => false,
-      resolveSession: vi.fn(async () => ({ ok: false as const, error: { kind: 'unavailable-runtime', message: 'disabled' }, diagnostics: [] })),
+      resolveSession: vi.fn(async () => ({
+        ok: false as const,
+        error: { kind: 'unavailable-runtime', message: 'disabled' },
+        diagnostics: [],
+      })),
     }
     const pi = {
       ready: () => true,
       resolveSession: vi.fn(),
-      createSession: vi.fn(async () => ({ ok: true as const, value: { runtimeSessionId: 'pi-new', workDir: '/work' }, diagnostics: [] })),
+      createSession: vi.fn(async () => ({
+        ok: true as const,
+        value: { runtimeSessionId: 'pi-new', workDir: '/work' },
+        diagnostics: [],
+      })),
       followup: vi.fn(async (request: { target: { runtimeSessionId: string } }) => {
         order.push(`followup:${request.target.runtimeSessionId}`)
-        return { ok: true as const, value: { facts: { runtimeSessionId: request.target.runtimeSessionId } }, diagnostics: [] }
+        return {
+          ok: true as const,
+          value: { facts: { runtimeSessionId: request.target.runtimeSessionId } },
+          diagnostics: [],
+        }
       }),
     }
     const recover = vi.fn(async (_project: string, _session: string, body: Record<string, unknown>) => {
-      expect(body).toMatchObject({ expectedRuntime: 'opencode', replacementRuntime: 'pi', replacementRuntimeSessionId: 'pi-new' })
+      expect(body).toMatchObject({
+        expectedRuntime: 'opencode',
+        replacementRuntime: 'pi',
+        replacementRuntimeSessionId: 'pi-new',
+      })
     })
     const receive = createFollowupHandler({
       followupTargetResolver: () => ({ runtimeSessionId: 'runtime-old', workDir: '/work', projectId: 'project-1' }),

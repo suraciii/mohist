@@ -198,11 +198,7 @@ async function handleFollowup(
     }
   }
   let allowRuntimeReplacement = false
-  if (
-    !managerContext &&
-    binding.runtime.toLowerCase() === 'opencode' &&
-    (!handle || !handle.runtime.ready())
-  ) {
+  if (!managerContext && binding.runtime.toLowerCase() === 'opencode' && (!handle || !handle.runtime.ready())) {
     const pi = resolveAccessor(deps.piRuntime)
     if (pi) {
       handle = { kind: 'pi', runtime: pi }
@@ -238,9 +234,18 @@ async function handleFollowup(
           pi: deps.piRuntime,
         })
         if (!candidateHandle) return { ok: false, kind: 'unavailable-runtime', message: 'runtime is unavailable' }
-        const result = candidateHandle.kind === 'opencode'
-          ? await candidateHandle.runtime.resolveSession({ target: { runtime: 'opencode', runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
-          : await candidateHandle.runtime.resolveSession({ target: { runtime: 'pi', runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir } })
+        const result =
+          candidateHandle.kind === 'opencode'
+            ? await candidateHandle.runtime.resolveSession({
+                target: {
+                  runtime: 'opencode',
+                  runtimeSessionId: candidate.runtimeSessionId,
+                  workDir: candidate.workDir,
+                },
+              })
+            : await candidateHandle.runtime.resolveSession({
+                target: { runtime: 'pi', runtimeSessionId: candidate.runtimeSessionId, workDir: candidate.workDir },
+              })
         return result.ok
           ? { ok: true, activeTurn: result.value.activeTurn }
           : { ok: false, kind: result.error.kind, message: result.error.message }
