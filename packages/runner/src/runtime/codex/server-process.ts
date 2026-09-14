@@ -44,6 +44,14 @@ export interface CodexServerHandle {
    */
   send<P, R>(request: { readonly method: string; readonly params?: P; readonly id: number }): Promise<R>
   /**
+   * Send a JSON-RPC v2 notification (no id, no awaited response).
+   * Used by the initialization handshake for the `initialized`
+   * notification. Notification failures are surfaced synchronously
+   * via the returned boolean so callers can decide whether the
+   * failure blocks readiness.
+   */
+  notify<P>(notification: { readonly method: string; readonly params?: P }): boolean
+  /**
    * Push a server-initiated denial response for an approval /
    * permission / user-input / MCP elicitation / dynamic-tool request.
    * The runtime never auto-approves; this is the only path that
@@ -91,16 +99,12 @@ export function createSpawnedCodexServer(options: CodexServerFactoryOptions): Pr
   const shutdownTimeoutMs = boundedTimeoutMs(options.shutdownTimeoutMs, DEFAULT_CODEX_SHUTDOWN_TIMEOUT_MS)
 
   const env: NodeJS.ProcessEnv = { ...(options.environment ?? process.env), CODEX_HOME: options.codexHome }
-  const child = spawner(
-    'codex',
-    ['app-server', '--stdio'],
-    {
-      cwd: options.cwd,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: process.platform !== 'win32',
-    },
-  ) as ChildProcessWithoutNullStreams
+  const child = spawner('codex', ['app-server', '--stdio'], {
+    cwd: options.cwd,
+    env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32',
+  }) as ChildProcessWithoutNullStreams
 
   return buildCodexServerHandle({
     child,
@@ -135,39 +139,33 @@ async function buildCodexServerHandle(input: CodexServerHandleBuilder): Promise<
     }
   }
 
-  type Deliverable =
-  | CodexJsonRpcMessage
-  | { jsonrpc: '2.0'; method: string; params?: unknown; id?: number | string }
+  type Deliverable = CodexJsonRpcMessage | { jsonrpc: '2.0'; method: string; params?: unknown; id?: number | string }
 
-function deliver(message: Deliverable) {
-  const m = message as {
-    jsonrpc?: unknown
-    id?: number | string
-    method?: string
-    result?: unknown
-    error?: unknown
-    params?: unknown
-  }
-  if (
-    typeof m.id !== 'undefined' &&
-    typeof m.method !== 'string' &&
-    ('result' in m || 'error' in m)
-  ) {
-    const handlers = pending.get(m.id)
-    if (handlers) {
-      pending.delete(m.id)
-      if (seenResponseIds.has(m.id)) {
-        handlers.reject(new Error(`codex protocol failure: duplicate response id ${String(m.id)}`))
+  function deliver(message: Deliverable) {
+    const m = message as {
+      jsonrpc?: unknown
+      id?: number | string
+      method?: string
+      result?: unknown
+      error?: unknown
+      params?: unknown
+    }
+    if (typeof m.id !== 'undefined' && typeof m.method !== 'string' && ('result' in m || 'error' in m)) {
+      const handlers = pending.get(m.id)
+      if (handlers) {
+        pending.delete(m.id)
+        if (seenResponseIds.has(m.id)) {
+          handlers.reject(new Error(`codex protocol failure: duplicate response id ${String(m.id)}`))
+          return
+        }
+        seenResponseIds.add(m.id)
+        if ('result' in m) handlers.resolve(m.result)
+        else handlers.reject(m.error)
         return
       }
-      seenResponseIds.add(m.id)
-      if ('result' in m) handlers.resolve(m.result)
-      else handlers.reject(m.error)
-      return
     }
+    for (const listener of listeners) listener(message as CodexJsonRpcMessage)
   }
-  for (const listener of listeners) listener(message as CodexJsonRpcMessage)
-}
 
   child.stdout.setEncoding('utf8')
   child.stdout.on('data', (chunk: string) => {
@@ -184,7 +182,11 @@ function deliver(message: Deliverable) {
           exitCause = { kind: 'malformed-stdout' }
           rejectAllPending(new Error(`codex protocol failure: malformed JSON-RPC line: ${line.slice(0, 80)}`))
           for (const listener of listeners) {
-            listener({ jsonrpc: '2.0', method: 'protocol-failure', params: { reason: 'malformed-stdout', line: line.slice(0, 256) } })
+            listener({
+              jsonrpc: '2.0',
+              method: 'protocol-failure',
+              params: { reason: 'malformed-stdout', line: line.slice(0, 256) },
+            })
           }
           return
         }
@@ -239,6 +241,25 @@ function deliver(message: Deliverable) {
     child.stdin.write(`${envelope}\n`)
   }
 
+  function notify<P>(notification: { readonly method: string; readonly params?: P }): boolean {
+    if (exited) return false
+    if (!isCodexLockedMethod(notification.method)) return false
+    let written = true
+    try {
+      const envelope = JSON.stringify({
+        jsonrpc: '2.0',
+        method: notification.method,
+        params: notification.params ?? {},
+      })
+      child.stdin.write(`${envelope}\n`, (error) => {
+        if (error) written = false
+      })
+    } catch {
+      written = false
+    }
+    return written
+  }
+
   function subscribe(listener: (message: CodexJsonRpcMessage) => void): () => void {
     listeners.add(listener)
     return () => {
@@ -274,6 +295,7 @@ function deliver(message: Deliverable) {
   return {
     codexHome: input.codexHome,
     send,
+    notify,
     denyServerRequest,
     subscribe,
     close,

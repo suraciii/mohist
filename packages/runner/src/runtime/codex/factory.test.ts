@@ -7,6 +7,10 @@ import {
   getCodexServerFactory,
   type CodexRuntimeDeps,
   type CodexRuntimeFactory,
+  type CodexAuthenticationProbe,
+  type CodexCatalogLoader,
+  type CodexCliProbe,
+  type CodexReadinessProbe,
 } from './index.js'
 import type { CodexServerFactory, CodexServerHandle } from './server-process.js'
 
@@ -15,14 +19,73 @@ const BASE_DEPS: CodexRuntimeDeps = {
   cwd: '/work',
 }
 
-function fakeServerHandle(): CodexServerHandle {
+/**
+ * A fake server handle that emits the canonical `initialize` response
+ * and a one-model `model/list` response. Tests that need to assert
+ * the factory seam end-to-end supply this; tests that exercise the
+ * protocol-error boundaries supply their own (or use the
+ * `protocol-failure` listener).
+ */
+function fakeServerHandle(overrides: Partial<CodexServerHandle> = {}): CodexServerHandle {
   return {
     codexHome: '/runner/.mohist/codex',
-    send: <P, R>(): Promise<R> => Promise.resolve(undefined as unknown as R),
+    async send<P, R>(request: { readonly method: string; readonly params?: P; readonly id: number }): Promise<R> {
+      if (request.method === 'initialize') {
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: {
+            protocolVersion: 'v2',
+            codexHome: '/runner/.mohist/codex',
+            userAgent: 'codex/0.153.0',
+          },
+        } as unknown as R
+      }
+      if (request.method === 'model/list') {
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: { models: [{ id: 'gpt-5' }], complete: true },
+        } as unknown as R
+      }
+      throw new Error(`Unexpected method ${request.method}`)
+    },
+    notify: <P>(): boolean => true,
     denyServerRequest: () => {},
     subscribe: () => () => {},
     close: async () => {},
+    ...overrides,
   }
+}
+
+/**
+ * A minimal readiness probe that succeeds for every check. Tests that
+ * exercise readiness boundaries use a more specific probe.
+ */
+function passingReadinessProbe(): CodexReadinessProbe {
+  const cli: CodexCliProbe = {
+    async resolveCodexBinary() {
+      return '/usr/local/bin/codex'
+    },
+    async resolveCodexVersion() {
+      return '0.153.0'
+    },
+  }
+  const authentication: CodexAuthenticationProbe = {
+    async hasManagedAuthentication() {
+      return true
+    },
+  }
+  const catalog: CodexCatalogLoader = {
+    async loadCatalog() {
+      return null
+    },
+  }
+  return { cli, authentication, catalog }
+}
+
+function withPassingReadinessProbe(deps: CodexRuntimeDeps): CodexRuntimeDeps {
+  return { ...deps, readinessProbe: passingReadinessProbe() }
 }
 
 describe('CodexRuntime factory seam', () => {
@@ -57,7 +120,10 @@ describe('CodexRuntime factory seam', () => {
     const runtime = createDefaultCodexRuntime(BASE_DEPS)
     expect(runtime).toBeInstanceOf(CodexRuntime)
     // The default factory must not surface as a function with explicit deps either.
-    const explicit = createDefaultCodexRuntime({ ...BASE_DEPS, serverFactory: async () => fakeServerHandle() })
+    const explicit = createDefaultCodexRuntime({
+      ...BASE_DEPS,
+      serverFactory: async () => fakeServerHandle(),
+    })
     expect(explicit).toBeInstanceOf(CodexRuntime)
   })
 
@@ -68,7 +134,7 @@ describe('CodexRuntime factory seam', () => {
       return fakeServerHandle()
     }
     const runtimeFactory: CodexRuntimeFactory = (deps) =>
-      new CodexRuntime({ ...deps, serverFactory })
+      new CodexRuntime(withPassingReadinessProbe({ ...deps, serverFactory }))
     await withRunnerResources({ codexServerFactory: serverFactory, codexRuntimeFactory: runtimeFactory }, async () => {
       const factory = getCodexRuntimeFactory()
       const runtime = factory(BASE_DEPS)
@@ -81,7 +147,7 @@ describe('CodexRuntime factory seam', () => {
   })
 
   it('reports unavailable-runtime when the factory body is missing the spawned consumer', async () => {
-    const runtime = new CodexRuntime({ ...BASE_DEPS })
+    const runtime = new CodexRuntime(withPassingReadinessProbe(BASE_DEPS))
     const result = await runtime.start()
     expect(result).toMatchObject({
       ok: false,
@@ -100,7 +166,7 @@ describe('CodexRuntime factory seam', () => {
       starts += 1
       return fakeServerHandle()
     }
-    const runtime = new CodexRuntime({ ...BASE_DEPS, serverFactory })
+    const runtime = new CodexRuntime(withPassingReadinessProbe({ ...BASE_DEPS, serverFactory }))
     const first = await runtime.start()
     expect(first).toMatchObject({ ok: true })
     expect(starts).toBe(1)

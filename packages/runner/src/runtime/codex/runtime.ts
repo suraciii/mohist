@@ -2,22 +2,24 @@
  * `CodexRuntime` — Runner-side deep module for Codex execution.
  *
  * The runtime drives one long-lived `codex app-server --stdio` child
- * per Runner. The full implementation lands across T-003 (process +
+ * per Runner. The implementation lands across T-003 (process +
  * initialization + readiness), T-004 (model catalog + canonical effort
  * mapping), T-005 (Thread + Turn lifecycle, binding-before-effect,
  * no-replay), and T-006 (two-phase closeout + approval rejection).
  *
  * This file declares the public boundary surface: the constructor
- * shape, the entry points callers depend on, and the readiness check.
- * The internal state machine, the JSON-RPC consumer integration, and
- * the per-method server-call details land in their respective files.
+ * shape, the entry points callers depend on, the readiness check,
+ * and the initialization handshake. The internal state machine, the
+ * JSON-RPC consumer integration, and the per-method server-call
+ * details land in their respective files.
  *
  * Callers depend only on Mohist-owned request/result types from
  * `./types.js`. The app-server protocol is an implementation detail
  * contained inside this module.
  */
 
-import { boundedTimeoutMs } from '../bounded-wait.js'
+import { createHash } from 'node:crypto'
+import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
 import { CODEX_DEFAULT_TIMEOUTS } from './types.js'
 import type {
   CodexCatalog,
@@ -29,6 +31,7 @@ import type {
   CodexCancelResult,
   CodexCompactRequest,
   CodexCompactResult,
+  CodexModelDescriptor,
   CodexReadyState,
   CodexResetRequest,
   CodexResetResult,
@@ -37,8 +40,17 @@ import type {
   CodexTurnResult,
 } from './types.js'
 import { defaultCodexClock } from './runtime-clock.js'
-import type { CodexServerFactory } from './server-process.js'
+import type { CodexServerFactory, CodexServerHandle } from './server-process.js'
 import { normalizeUnavailableRuntimeCodex } from './errors.js'
+import {
+  type CodexAuthenticationProbe,
+  type CodexCatalogLoader,
+  type CodexCliProbe,
+  type CodexReadinessProbe,
+  evaluateCodexReadiness,
+} from './readiness.js'
+import { codexInitializationTransportFromHandle, performCodexInitialization } from './initialization.js'
+import { isCodexModelListResult } from './protocol-types.js'
 
 export interface CodexRuntimeDeps {
   readonly codexHome: string
@@ -47,6 +59,13 @@ export interface CodexRuntimeDeps {
   readonly startupTimeoutMs?: number
   readonly runtimeShutdownTimeoutMs?: number
   readonly clock?: CodexClock
+  /**
+   * Probe used by the readiness gate. The runtime never invokes a
+   * CLI on its own; the probe wires the actual filesystem / process
+   * access the gate needs. Tests inject a deterministic probe;
+   * production wires the real one through the resource context.
+   */
+  readonly readinessProbe?: CodexReadinessProbe
 }
 
 /**
@@ -67,8 +86,9 @@ export interface CodexRuntimeDeps {
  *   - `catalog()`: the published catalog snapshot.
  *   - `shutdown()`: bounded shutdown of the app-server child.
  *
- * The full implementations of each entry point land in T-003 to
- * T-006; this skeleton owns the boundary types and the readiness seam.
+ * The full implementations of each entry point land in T-004 to
+ * T-008; this file wires the boundary types and the readiness seam
+ * implemented in T-003.
  */
 export class CodexRuntime {
   private readonly deps: Required<Pick<CodexRuntimeDeps, 'codexHome' | 'cwd'>> & CodexRuntimeDeps
@@ -82,16 +102,18 @@ export class CodexRuntime {
     generation: number | null
     startInFlight: Promise<CodexResult<CodexReadyState>> | null
   }
-  private readonly server: { factory: CodexServerFactory | null }
+  private readonly server: {
+    factory: CodexServerFactory | null
+    handle: CodexServerHandle | null
+    closed: boolean
+  }
+  private readonly readinessProbe: CodexReadinessProbe | null
 
   constructor(deps: CodexRuntimeDeps) {
     this.deps = deps
     this.clock = deps.clock ?? defaultCodexClock
     this.startupTimeoutMs = boundedTimeoutMs(deps.startupTimeoutMs, CODEX_DEFAULT_TIMEOUTS.startupMs)
-    this.runtimeShutdownTimeoutMs = boundedTimeoutMs(
-      deps.runtimeShutdownTimeoutMs,
-      CODEX_DEFAULT_TIMEOUTS.shutdownMs,
-    )
+    this.runtimeShutdownTimeoutMs = boundedTimeoutMs(deps.runtimeShutdownTimeoutMs, CODEX_DEFAULT_TIMEOUTS.shutdownMs)
     this.state = {
       ready: false,
       diagnostic: null,
@@ -99,7 +121,8 @@ export class CodexRuntime {
       generation: null,
       startInFlight: null,
     }
-    this.server = { factory: deps.serverFactory ?? null }
+    this.server = { factory: deps.serverFactory ?? null, handle: null, closed: false }
+    this.readinessProbe = deps.readinessProbe ?? null
   }
 
   async start(): Promise<CodexResult<CodexReadyState>> {
@@ -262,14 +285,21 @@ export class CodexRuntime {
   }
 
   /**
-   * Shut the CodexRuntime down. Cancels the in-flight subscription
-   * and closes the shared app-server child within the configured
-   * deadline. The readiness diagnostic is preserved so callers can
-   * still inspect the last-known failure reason after shutdown.
+   * Shut the CodexRuntime down. Closes the shared app-server child
+   * within the configured deadline. The readiness diagnostic is
+   * preserved so callers can still inspect the last-known failure
+   * reason after shutdown unless `clearDiagnostic` is set.
    */
-  async shutdown(_options: { clearDiagnostic?: boolean } = {}): Promise<void> {
+  async shutdown(options: { clearDiagnostic?: boolean } = {}): Promise<void> {
     this.state.ready = false
     this.state.generation = null
+    if (options.clearDiagnostic) this.state.diagnostic = null
+    const handle = this.server.handle
+    if (handle && !this.server.closed) {
+      this.server.closed = true
+      await boundedWait(() => handle.close(), this.runtimeShutdownTimeoutMs)
+    }
+    this.server.handle = null
   }
 
   private readyState(): CodexReadyState {
@@ -282,11 +312,6 @@ export class CodexRuntime {
   }
 
   private async attemptStart(): Promise<CodexResult<CodexReadyState>> {
-    // The full readiness probe (CLI executable, version range,
-    // initialization, managed codexHome, authentication, model
-    // catalog) lands in T-003. The boundary surface is in place now;
-    // we exercise the factory seam so unit tests can prove the line-
-    // framed JSON-RPC consumer is wired.
     const factory = this.server.factory ?? this.deps.serverFactory
     if (!factory) {
       const diagnostic: CodexDiagnostic = {
@@ -294,12 +319,11 @@ export class CodexRuntime {
         code: 'server-spawn-failed',
         message: 'Codex server factory was not provided',
       }
-      this.state.diagnostic = diagnostic
-      const error = normalizeUnavailableRuntimeCodex([diagnostic])
-      return { ok: false, error, diagnostics: error.diagnostics }
+      return this.recordFailure(diagnostic)
     }
+    let handle: CodexServerHandle
     try {
-      await factory({
+      handle = await factory({
         codexHome: this.deps.codexHome,
         cwd: this.deps.cwd,
         startupTimeoutMs: this.startupTimeoutMs,
@@ -312,13 +336,143 @@ export class CodexRuntime {
         code: 'server-spawn-failed',
         message: cause instanceof Error ? cause.message : 'Codex app-server spawn failed',
       }
-      this.state.diagnostic = diagnostic
-      const error = normalizeUnavailableRuntimeCodex([diagnostic])
-      return { ok: false, error, diagnostics: error.diagnostics }
+      return this.recordFailure(diagnostic)
+    }
+    this.server.handle = handle
+
+    // Run the initialize → initialized handshake. The handshake
+    // rejects non-managed codexHome, malformed initialize responses,
+    // and any child exit before the response arrives.
+    const transport = codexInitializationTransportFromHandle(handle)
+    const initResult = await performCodexInitialization(transport, {
+      managedCodexHome: this.deps.codexHome,
+      startupTimeoutMs: this.startupTimeoutMs,
+      clock: this.clock,
+    })
+    if (!initResult.ok) {
+      await this.tearDownHandle(handle)
+      this.state.diagnostic = initResult.error.diagnostics[0] ?? {
+        severity: 'error',
+        code: 'initialize-failed',
+        message: 'Codex initialize handshake failed',
+      }
+      return { ok: false, error: initResult.error, diagnostics: initResult.diagnostics }
+    }
+
+    // Evaluate the readiness gate. The probe needs the spawned handle
+    // so the catalog loader can drive model/list on the just-initialized
+    // child.
+    if (!this.readinessProbe) {
+      await this.tearDownHandle(handle)
+      const diagnostic: CodexDiagnostic = {
+        severity: 'error',
+        code: 'readiness-probe-missing',
+        message: 'Codex readiness probe was not provided',
+      }
+      return this.recordFailure(diagnostic)
+    }
+    const catalogLoader = codexCatalogLoaderFromHandle(handle)
+    const readinessProbe: CodexReadinessProbe = {
+      cli: this.readinessProbe.cli,
+      authentication: this.readinessProbe.authentication,
+      catalog: catalogLoader,
+    }
+    const readinessResult = await evaluateCodexReadiness({
+      managedCodexHome: this.deps.codexHome,
+      startupTimeoutMs: this.startupTimeoutMs,
+      probe: readinessProbe,
+      clock: this.clock,
+    })
+    if (!readinessResult.ok) {
+      await this.tearDownHandle(handle)
+      this.state.diagnostic = readinessResult.error.diagnostics[0] ?? {
+        severity: 'error',
+        code: 'readiness-failed',
+        message: 'Codex readiness probe failed',
+      }
+      return { ok: false, error: readinessResult.error, diagnostics: readinessResult.diagnostics }
     }
     this.state.ready = true
     this.state.diagnostic = null
+    this.state.catalog = readinessResult.value.catalog
     this.state.generation = 1
     return { ok: true, value: this.readyState(), diagnostics: [] }
   }
+
+  private recordFailure(diagnostic: CodexDiagnostic): CodexResult<CodexReadyState> {
+    this.state.diagnostic = diagnostic
+    const error = normalizeUnavailableRuntimeCodex([diagnostic])
+    return { ok: false, error, diagnostics: error.diagnostics }
+  }
+
+  private async tearDownHandle(handle: CodexServerHandle): Promise<void> {
+    try {
+      await boundedWait(() => handle.close(), this.runtimeShutdownTimeoutMs)
+    } catch {
+      /* best effort */
+    }
+    this.server.closed = true
+    this.server.handle = null
+  }
+}
+
+/**
+ * Build a catalog loader that drives `model/list` on the supplied
+ * spawned handle. T-003 only requires that the catalog is non-empty;
+ * the canonical reasoning-effort mapping, the page-through, and the
+ * change-detection heartbeats land in T-004.
+ */
+function codexCatalogLoaderFromHandle(handle: CodexServerHandle): CodexCatalogLoader {
+  return {
+    async loadCatalog() {
+      let envelope: unknown
+      try {
+        envelope = await handle.send<{ readonly cursor?: string | null; readonly pageSize?: number }, unknown>({
+          id: 2,
+          method: 'model/list',
+          params: { pageSize: 256 },
+        })
+      } catch {
+        return null
+      }
+      if (!isCodexModelListResult(envelope)) return null
+      const native = envelope.result
+      if (!Array.isArray(native.models) || native.models.length === 0) return null
+      const models: CodexModelDescriptor[] = []
+      for (const candidate of native.models) {
+        if (!candidate || typeof candidate !== 'object') continue
+        const entry = candidate as { id?: unknown; displayName?: unknown }
+        if (typeof entry.id !== 'string') continue
+        models.push({
+          id: entry.id,
+          displayName: typeof entry.displayName === 'string' ? entry.displayName : null,
+          reasoningEfforts: [],
+          defaultReasoningEffort: null,
+          supportsReasoningEffort: true,
+        })
+      }
+      if (models.length === 0) return null
+      return {
+        models,
+        complete: native.complete === true,
+        capabilityRevision: capabilityRevisionForCodexCatalog(models),
+      }
+    },
+  }
+}
+
+/**
+ * Hash the catalog content (model ids + display names) so the Runner
+ * registration witness can detect changes between reloads. The
+ * canonical reasoning-effort mapping lands in T-004; this minimal
+ * revision is sufficient for T-003.
+ */
+function capabilityRevisionForCodexCatalog(models: readonly CodexModelDescriptor[]): string {
+  const canonical = JSON.stringify(
+    models.map((model) => ({
+      id: model.id,
+      displayName: model.displayName,
+    })),
+  )
+  return createHash('sha256').update(canonical).digest('hex')
 }

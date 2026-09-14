@@ -71,6 +71,40 @@ export {
 export type { CodexRuntimeFactory } from './factory.js'
 
 export {
+  performCodexInitialization,
+  codexInitializationTransportFromHandle,
+} from './initialization.js'
+export type {
+  CodexInitializationOptions,
+  CodexInitializationOutcome,
+  CodexInitializationTransport,
+} from './initialization.js'
+
+export {
+  evaluateCodexReadiness,
+  isCodexVersionSupported,
+} from './readiness.js'
+export type {
+  CodexAuthenticationProbe,
+  CodexCatalogLoader,
+  CodexCliProbe,
+  CodexReadinessOptions,
+  CodexReadinessOutcome,
+  CodexReadinessProbe,
+} from './readiness.js'
+
+export {
+  maskCodexCredentialString,
+  redactCodexCredentialString,
+  redactCodexCredentialEnvelope,
+  redactCodexCredentialDiagnostic,
+  redactCodexCredentialStringWithIndex,
+  codexCredentialSecretDigest,
+  CODEX_CREDENTIAL_MASK_PLACEHOLDER,
+} from './credential.js'
+export type { CodexCredentialSecretIndexEntry } from './credential.js'
+
+export {
   createSpawnedCodexServer,
   DEFAULT_CODEX_STARTUP_TIMEOUT_MS,
   DEFAULT_CODEX_SHUTDOWN_TIMEOUT_MS,
