@@ -165,6 +165,7 @@ describe('ServerConnection.report', () => {
         workId: 'work-1',
         actionAttemptId: 'task-1.1',
         workType: 'task',
+        ownerKind: 'workflow',
       },
       { status: 'completed', artifactUploadIds: ['artup_a', 'artup_b'] },
       new AbortController().signal,

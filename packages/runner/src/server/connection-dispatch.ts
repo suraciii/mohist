@@ -2,6 +2,7 @@ import { parseObject, isObject } from '../core/json.js'
 import { stringAt } from '../core/json-path.js'
 import { readExecutionSourceContext } from '../runtime/slack-execution-context.js'
 import type {
+  DispatchReportOwner,
   DispatchWorkItem,
   ManagerExecutionGrantResponse,
   PolledDispatch,
@@ -39,9 +40,11 @@ export function validateDispatchEnvelope(work: DispatchWorkItem): void | WorkIte
   if (ownerKind === 'agent-job') {
     const runtime = declaredAgentRuntime(work)
     if (runtime === null) return invalidDispatch('runtime', 'runtime must be opencode or pi')
-  } else if (isRuntimeDispatch(work) && runtimeForWorkflow(work) === null) {
-    return invalidDispatch('runtime', 'workflow dispatch must resolve a runtime from uses')
   }
+  // Workflow runtime Actions pin their runtime in the canonical `uses`
+  // token. Other Workflow actions, including the production mohist/* action
+  // catalog, are ordinary actions and must not be mistaken for runtime
+  // dispatches.
 
   const workspace = isObject(work.variables?.['workspace']) ? work.variables['workspace'] : null
   const managerDispatch = ownerKind === 'agent-job' && work.projectId === MANAGER_PROJECT_ID
@@ -72,11 +75,28 @@ export function validateDispatchEnvelope(work: DispatchWorkItem): void | WorkIte
 export function parsePolledDispatch(dispatch: WorkDispatchResponse): PolledDispatch {
   const work = parseDispatchWorkItem(dispatch)
   const metadata = parseManagerMetadata(work, dispatch)
+  const reportOwner = parseReportOwner(dispatch.reportOwner)
   return {
     work,
+    ...(reportOwner ? { reportOwner } : {}),
     ...(metadata.grant ? { managerExecutionGrant: metadata.grant } : {}),
     ...(metadata.originMarker !== undefined ? { originMarker: metadata.originMarker } : {}),
     ...(metadata.failure ? { validationFailure: metadata.failure } : {}),
+  }
+}
+
+function parseReportOwner(value: unknown): DispatchReportOwner | undefined {
+  if (!isObject(value)) return undefined
+  const ownerKind = value['ownerKind']
+  if (ownerKind !== 'workflow' && ownerKind !== 'agent-job') return undefined
+  const workflowRunId = value['workflowRunId']
+  const agentJobId = value['agentJobId']
+  const ownerId = ownerKind === 'agent-job' ? agentJobId : workflowRunId
+  if (!nonEmptyString(ownerId)) return undefined
+  return {
+    ownerKind,
+    ...(typeof workflowRunId === 'string' ? { workflowRunId } : {}),
+    ...(typeof agentJobId === 'string' ? { agentJobId } : {}),
   }
 }
 
@@ -142,17 +162,6 @@ function declaredAgentRuntime(work: DispatchWorkItem): 'opencode' | 'pi' | null 
   return value
 }
 
-function runtimeForWorkflow(work: DispatchWorkItem): 'opencode' | 'pi' | null {
-  const uses = work.uses?.trim().toLowerCase()
-  if (uses === 'mohist/opencode') return 'opencode'
-  if (uses === 'mohist/pi') return 'pi'
-  return null
-}
-
-function isRuntimeDispatch(work: DispatchWorkItem): boolean {
-  return !isChecksDispatch(work) && work.uses?.trim().toLowerCase().startsWith('mohist/') === true
-}
-
 export function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem {
   const work: DispatchWorkItem = {
     workflowRunId: dispatch.workflowRunId,
@@ -187,10 +196,6 @@ export function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchW
     work.initialTurnId = dispatch.initialTurnId ?? undefined
   if (dispatch.capabilityRevision != null) work.capabilityRevision = dispatch.capabilityRevision ?? undefined
   return work
-}
-
-function isChecksDispatch(work: DispatchWorkItem): boolean {
-  return work.workType.trim().toLowerCase() === 'checks'
 }
 
 function nonEmptyString(value: unknown): value is string {

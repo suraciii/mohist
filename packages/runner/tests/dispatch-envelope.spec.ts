@@ -4,6 +4,7 @@ import { validateDispatchEnvelope } from '../src/server/connection-dispatch.js'
 import type { ServerConnection } from '../src/server/connection.js'
 import { executeAndTransition, type HostExecutionContext } from '../src/runtime/host-execution.js'
 import type { WorkExecutor } from '../src/runtime/executor.js'
+import { workKey } from '../src/runtime/work-key.js'
 import type { HostTaskLogDeps } from '../src/runtime/host-task-log.js'
 
 const options: RunnerOptions = {
@@ -137,17 +138,6 @@ const vectors: Vector[] = [
     work: () => withoutField(validAgentJobWork(), 'runtime'),
   },
   {
-    name: 'workflow runtime',
-    field: 'runtime',
-    work: () => ({
-      ...validAgentJobWork(),
-      ownerKind: 'workflow',
-      agentJobId: null,
-      uses: 'mohist/unknown',
-      variables: { ...validAgentJobWork().variables, executionSource: 'non-slack' },
-    }),
-  },
-  {
     name: 'named workspace repository.name',
     field: 'repository.name',
     work: () => withoutField(validAgentJobWork(), 'name'),
@@ -181,6 +171,39 @@ describe('dispatch envelope validation', () => {
       error: { code: 'invalid-dispatch' },
       message: 'runtime must be opencode or pi',
     })
+  })
+
+  it('does not infer a workflow key for an invalid owner envelope', () => {
+    const work = validAgentJobWork()
+    delete work.ownerKind
+    expect(workKey(work)).toBe('invalid-owner:work-1')
+    expect(workKey(work, { ownerKind: 'agent-job', agentJobId: 'job-1' })).toBe('agent-job:job-1:work-1')
+  })
+
+  it.each([
+    'mohist/task-list',
+    'mohist/rebase',
+    'mohist/rebase-status',
+    'mohist/merge-ready',
+    'mohist/push',
+    'mohist/create-github-pr',
+    'mohist/mark-github-pr-ready',
+    'mohist/enable-github-pr-auto-merge',
+    'mohist/github-pr-checks',
+    'mohist/github-pr-status',
+    'mohist/workspace-prepare',
+  ])('accepts the production non-runtime Workflow action %s', (uses) => {
+    const source = validAgentJobWork()
+    const work: DispatchWorkItem = {
+      ...source,
+      ownerKind: 'workflow',
+      agentJobId: null,
+      uses,
+      with: { prompt: 'ordinary workflow action input' },
+      variables: { ...source.variables, executionSource: 'non-slack' },
+      agentDefinition: null,
+    }
+    expect(validateDispatchEnvelope(work)).toBeUndefined()
   })
 
   it.each(vectors)(

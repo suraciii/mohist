@@ -1,4 +1,4 @@
-import type { DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type { DispatchReportOwner, DispatchWorkItem, WorkItemResult } from '../core/types.js'
 
 /**
  * Shutdown bookkeeping carried on every in-flight entry while the
@@ -25,12 +25,15 @@ export interface InFlightEntry {
   done: Promise<void>
   readonly work: DispatchWorkItem
   readonly controller: AbortController
+  readonly reportOwner?: DispatchReportOwner
   shutdown?: ShutdownWorkState
   /** The Server deployment epoch invalidated this Manager execution. */
   managerInvalidated?: boolean
 }
 
 export interface AwaitingAckEntry {
+  /** The report-routing identity remains available after execution settles. */
+  readonly reportOwner?: DispatchReportOwner
   /** The result to (re-)report until the owner acks (Accepted or Stale). */
   result: WorkItemResult
   /** Monotonic attempt count for diagnostics. */

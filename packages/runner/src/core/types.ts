@@ -129,8 +129,20 @@ export interface ManagerExecutionGrantResponse {
   deploymentEpoch: string
 }
 
+/**
+ * Server-owned identity used only to route a report. It remains separate
+ * from the work item so an invalid owner envelope can still be settled
+ * without repairing or inferring the work's execution identity.
+ */
+export interface DispatchReportOwner {
+  readonly ownerKind: 'workflow' | 'agent-job'
+  readonly workflowRunId?: string | null
+  readonly agentJobId?: string | null
+}
+
 export interface PolledDispatch {
   readonly work: DispatchWorkItem
+  readonly reportOwner?: DispatchReportOwner
   readonly managerExecutionGrant?: ManagerExecutionGrantResponse
   readonly originMarker?: string | null
   /**
@@ -202,6 +214,11 @@ export type WorkDispatchResponse = {
    * semantics (issue-557 T-006).
    */
   capabilityRevision?: string | null
+  /**
+   * Canonical report-routing identity. It is kept outside DispatchWorkItem
+   * so invalid execution fields cannot erase the owning aggregate identity.
+   */
+  reportOwner?: DispatchReportOwner | null
   /** One-shot plaintext grant. It is consumed into the Runner wrapper and
    * is never copied onto DispatchWorkItem or a work report. */
   managerExecutionGrant?: ManagerExecutionGrantResponse | null

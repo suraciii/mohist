@@ -2,14 +2,22 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { ServerConnection } from '../src/server/connection.js'
+import { RunnerHost } from '../src/runtime/host.js'
 import { validateDispatchEnvelope } from '../src/server/connection-dispatch.js'
 import { executeAndTransition, reportOnce, type HostExecutionContext } from '../src/runtime/host-execution.js'
 import { AgentJobExecutor } from '../src/runtime/agent-job-executor.js'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import { PUBLISHED_SLACK_SKILL_NAME, PUBLISHED_SLACK_SKILL_VERSION } from '../src/runtime/slack-execution-context.js'
-import type { DispatchWorkItem, PolledDispatch, RunnerOptions, WorkDispatchResponse } from '../src/core/types.js'
+import type {
+  DispatchReportOwner,
+  DispatchWorkItem,
+  PolledDispatch,
+  RunnerOptions,
+  WorkDispatchResponse,
+} from '../src/core/types.js'
 import type { HostTaskLogDeps } from '../src/runtime/host-task-log.js'
 import type { AwaitingAckEntry, InFlightEntry } from '../src/runtime/host-state.js'
+import { deferred } from './support/deferred.js'
 import { transportFetch, withFakeTransport } from './support/fake-transport.js'
 import type {
   FollowupParams,
@@ -201,6 +209,7 @@ function agentJobDispatch(overrides: Partial<WorkDispatchResponse> = {}): WorkDi
     setVars: JSON.stringify({ result: 'done' }),
     ownerKind: 'agent-job',
     agentJobId: 'agent-job-1',
+    reportOwner: { ownerKind: 'agent-job', agentJobId: 'agent-job-1' },
     agentSessionId: 'session-1',
     recovery: JSON.stringify({ budget: 1 }),
     recoveryRemaining: 1,
@@ -242,6 +251,7 @@ function workflowDispatch(): WorkDispatchResponse {
     projectId: 'project-1',
     issueNumber: 685,
     ownerKind: 'workflow',
+    reportOwner: { ownerKind: 'workflow', workflowRunId: 'workflow-2' },
   }
 }
 
@@ -320,7 +330,11 @@ interface ExecutionHarness {
   readonly currentCatalogRevision: ReturnType<typeof vi.fn>
 }
 
-function executionHarness(connection: ServerConnection, work: DispatchWorkItem): ExecutionHarness {
+function executionHarness(
+  connection: ServerConnection,
+  work: DispatchWorkItem,
+  reportOwner?: DispatchReportOwner,
+): ExecutionHarness {
   const key = `${work.ownerKind ?? 'unknown'}:${work.agentJobId ?? work.workflowRunId}:${work.workId}`
   const inFlight = new Map<string, InFlightEntry>()
   const awaitingAck = new Map<string, { work: DispatchWorkItem; entry: AwaitingAckEntry }>()
@@ -328,6 +342,7 @@ function executionHarness(connection: ServerConnection, work: DispatchWorkItem):
     done: Promise.resolve(),
     work,
     controller: new AbortController(),
+    ...(reportOwner ? { reportOwner } : {}),
   }
   inFlight.set(key, entry)
 
@@ -503,6 +518,7 @@ describe('runner control strict envelope contract', () => {
         variables: { workspace: { path: '/virtual/workflow-2' } },
       })
       expect(validateDispatchEnvelope(workflow.work)).toBeUndefined()
+      expect(workflow.reportOwner).toEqual({ ownerKind: 'workflow', workflowRunId: 'workflow-2' })
       expect(workflow).not.toHaveProperty('managerExecutionGrant')
       expect(workflow).not.toHaveProperty('originMarker')
 
@@ -552,6 +568,7 @@ describe('runner control strict envelope contract', () => {
         spawnCommand: 'spawn-agent',
       })
       expect(validateDispatchEnvelope(agent.work)).toBeUndefined()
+      expect(agent.reportOwner).toEqual({ ownerKind: 'agent-job', agentJobId: 'agent-job-1' })
       expect(agent.managerExecutionGrant).toEqual(grant)
       expect(agent.originMarker).toBe('slack-manager')
       expect(agent.work).not.toHaveProperty('managerExecutionGrant')
@@ -588,7 +605,7 @@ describe('runner control strict envelope contract', () => {
       const connection = new ServerConnection(contractOptions)
       const [polled] = await poll(connection, [buildDispatch()])
       const work = polled!.work
-      const harness = executionHarness(connection, work)
+      const harness = executionHarness(connection, work, polled!.reportOwner)
 
       expect(polled!.validationFailure).toMatchObject({
         status: 'failed',
@@ -627,7 +644,7 @@ describe('runner control strict envelope contract', () => {
         const workDispatch = buildDispatch()
         const [polled] = await poll(connection, [workDispatch])
         const work = polled!.work
-        const harness = executionHarness(connection, work)
+        const harness = executionHarness(connection, work, polled!.reportOwner)
 
         const validation = validateDispatchEnvelope(work)
         expect(validation).toMatchObject({
@@ -698,12 +715,57 @@ describe('runner control strict envelope contract', () => {
   })
 
   contractIt(
+    'carries the HTTP poll envelope through RunnerHost admission and reports with canonical owner identity',
+    async () => {
+      const reported = deferred<Record<string, unknown>>()
+      const controller = new AbortController()
+      const host = new RunnerHost(contractOptions)
+      const invalidDispatch = agentJobDispatch({
+        workId: 'agent-work-invalid-owner',
+        ownerKind: null,
+        agentJobId: 'agent-job-1',
+      })
+      let pollCount = 0
+      transportFetch.mockImplementation(async (input, init) => {
+        const url = String(input)
+        if (url.endsWith('/poll')) {
+          if (pollCount++ === 0) return jsonResponse({ dispatches: [invalidDispatch] })
+          controller.abort()
+          return new Response(null, { status: 204 })
+        }
+        if (url.endsWith('/report')) {
+          const body = JSON.parse((init?.body ?? '{}') as string) as Record<string, unknown>
+          reported.resolve(body)
+          return jsonResponse({ verdict: 'accepted' })
+        }
+        throw new Error(`unexpected RunnerHost contract request: ${url}`)
+      })
+
+      const runWorkerPool = (host as unknown as { runWorkerPool(signal: AbortSignal): Promise<void> }).runWorkerPool
+      const run = runWorkerPool.call(host, controller.signal)
+      try {
+        const reportBody = await reported.promise
+        expect(reportBody.status).toBe('failed')
+        expect(reportBody.error).toMatchObject({ code: 'invalid-dispatch' })
+        expect(reportBody.ownerKind).toBe('agent-job')
+        expect(reportBody.agentJobId).toBe('agent-job-1')
+        expect(reportBody).not.toHaveProperty('workflowRunId')
+        controller.abort()
+        await run
+      } finally {
+        controller.abort()
+        await run.catch(() => undefined)
+      }
+    },
+  )
+
+  contractIt(
     'reports an invalid envelope once through awaitingAck and does not re-report it on the next poll',
     async () => {
       const connection = new ServerConnection(contractOptions)
       const [polled] = await poll(connection, [withoutAgentField('executionSource')])
       const work = polled!.work
-      const harness = executionHarness(connection, work)
+      const harness = executionHarness(connection, work, polled!.reportOwner)
 
       transportFetch.mockResolvedValueOnce(jsonResponse({ verdict: 'accepted' }))
       await executeAndTransition(

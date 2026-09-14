@@ -621,7 +621,7 @@ export class RunnerHost {
       for (const polled of works) {
         const work = polled.work
         if (signal.aborted) break
-        const key = workKey(work)
+        const key = workKey(work, polled.reportOwner)
         // Re-delivery is the normal recovery path under at-least-once:
         // skip a work the process already holds (inFlight or awaitingAck)
         // rather than execute it twice. The server may re-dispatch a
@@ -678,6 +678,7 @@ export class RunnerHost {
           done: Promise.resolve(),
           work,
           controller,
+          ...(polled.reportOwner ? { reportOwner: polled.reportOwner } : {}),
         }
         this.inFlight.set(key, entry)
         entry.done = executeAndTransition(this.executionContext, work, controller.signal, key, entry, validationFailure)
@@ -708,7 +709,9 @@ export class RunnerHost {
 
   private async prepareOpenCodeWork(works: readonly DispatchWorkItem[], signal: AbortSignal): Promise<void> {
     const runtime = this.openCodeRuntime
-    const owners = works.filter((work) => usesOpenCode(work) && !isManagerExecutionWork(work)).map(workKey)
+    const owners = works
+      .filter((work) => usesOpenCode(work) && !isManagerExecutionWork(work))
+      .map((work) => workKey(work))
     if (!runtime || owners.length === 0) return
     runtime.setWorkOwners([...openCodeOwnersForRuntime(this.inFlight.values(), this.awaitingAck.values()), ...owners])
     if (!runtime.ready()) {

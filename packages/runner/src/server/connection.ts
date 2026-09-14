@@ -2,6 +2,7 @@ import { hostname } from 'node:os'
 import type {
   AgentExecutionBinding,
   CleanupPolicy,
+  DispatchReportOwner,
   DispatchWorkItem,
   JsonObject,
   RunnerConfigResponse,
@@ -176,8 +177,17 @@ export class ServerConnection {
     result: WorkItemResult,
     signal: AbortSignal,
     binding?: AgentExecutionBinding,
+    reportOwner?: DispatchReportOwner,
   ): Promise<Record<string, unknown>> {
-    return await reportWork(this.fetchWithAuth.bind(this), this.url.bind(this), work, result, signal, binding)
+    return await reportWork(
+      this.fetchWithAuth.bind(this),
+      this.url.bind(this),
+      work,
+      result,
+      signal,
+      binding,
+      reportOwner,
+    )
   }
 
   /**

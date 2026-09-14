@@ -72,6 +72,7 @@ export async function reportOnce(
     held.entry.result,
     held.entry.result.agentBinding,
     signal,
+    held.entry.reportOwner,
   )
   context.awaitingAck.delete(key)
   context.syncOpenCodeWorkOwners()
@@ -189,7 +190,12 @@ async function executeAndTransitionCore(
   context.inFlight.delete(key)
   context.awaitingAck.set(key, {
     work,
-    entry: { result, attempts: 0, retryAt: null },
+    entry: {
+      result,
+      attempts: 0,
+      retryAt: null,
+      ...(entry.reportOwner ? { reportOwner: entry.reportOwner } : {}),
+    },
   })
   context.syncOpenCodeWorkOwners()
   try {
