@@ -707,7 +707,11 @@ func runInstallUpdateOriginal(ctx context.Context, deps Dependencies, c command)
 				UnitDir: argValue(c.args, "unit-dir", ""), DryRun: dryRun,
 			})
 		case "slack":
-			return executeMaintenance(ctx, deps, "go", "-C", "packages/go/mohist-slack", "build", "-o", "bin/build/mohist-slack")
+			root := argValue(c.args, "repo-root", "")
+			if root == "" {
+				root = deps.CurrentDirectory()
+			}
+			return buildSlackBinary(ctx, deps, root)
 		}
 	}
 	if c.kind == "install-component" {
@@ -850,6 +854,12 @@ func installComponent(
 		project := filepath.Join(root, "packages", "server", "src", "Mohist.Server", "Mohist.Server.csproj")
 		entry = dotnet + " run --project " + project
 	}
+	if component == "slack" {
+		if code := executeMaintenance(ctx, deps, "go", "-C", filepath.Join(root, "packages/go/mohist-slack"), "build", "-o", slackBinaryPath(root)); code != ExitOK {
+			return code
+		}
+		entry = slackBinaryPath(root)
+	}
 	unitText := "[Unit]\nDescription=Mohist " + component + "\n\n[Service]\nWorkingDirectory=" + root + "\n" + environmentFileLine + "ExecStart=" + entry + "\n\n[Install]\nWantedBy=default.target\n"
 	path := filepath.Join(unitDir, unit)
 	if err := deps.WriteFile(path, unitText, 0o600); err != nil {
@@ -904,6 +914,14 @@ func executeMaintenance(ctx context.Context, deps Dependencies, name string, arg
 		return ExitOperation
 	}
 	return ExitOK
+}
+
+func slackBinaryPath(root string) string {
+	return filepath.Join(root, "packages", "go", "mohist-slack", "bin", "build", "mohist-slack")
+}
+
+func buildSlackBinary(ctx context.Context, deps Dependencies, root string) int {
+	return executeMaintenance(ctx, deps, "go", "-C", filepath.Join(root, "packages/go/mohist-slack"), "build", "-o", slackBinaryPath(root))
 }
 
 func updateCLI(ctx context.Context, deps Dependencies, repoRoot, explicit string) int {
