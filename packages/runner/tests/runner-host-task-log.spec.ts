@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost, startTaskLogFlushTrigger } from '../src/runtime/host.js'
+import type { PolledDispatch } from '../src/core/types.js'
 import type { SessionTarget } from '../src/server/session-target.js'
 import type { GitRunner } from '../src/runtime/git-probe.js'
 import { deferred, type Deferred } from './support/deferred.js'
@@ -83,7 +84,7 @@ function createTaskLogMocks(): TaskLogMocks {
     connect: vi.fn(async () => undefined),
     heartbeat: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
-    poll: vi.fn(async () => []),
+    poll: vi.fn(async (): Promise<PolledDispatch[]> => []),
     report: vi.fn(async () => ({})),
     uploadTaskLog: vi.fn(async () => ({ status: 'changed', accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),
@@ -211,7 +212,7 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     startControl.mockResolvedValue(undefined)
     stopControl.mockResolvedValue(undefined)
     poll
-      .mockResolvedValueOnce([workWith({ workId: 'work-live', agentJobId: 'aj-live' })])
+      .mockResolvedValueOnce([{ work: workWith({ workId: 'work-live', agentJobId: 'aj-live' }) }])
       .mockImplementation(async () => [])
     const release = deferred()
     blockingAction.mockImplementationOnce(
@@ -277,8 +278,8 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     // the race between timer advancement and action microtasks.
     poll
       .mockResolvedValueOnce([
-        workWith({ workId: 'work-B', agentJobId: 'aj-B', actionWorkId: 'work-B' }),
-        workWith({ workId: 'work-A', agentJobId: 'aj-A', actionWorkId: 'work-A' }),
+        { work: workWith({ workId: 'work-B', agentJobId: 'aj-B', actionWorkId: 'work-B' }) },
+        { work: workWith({ workId: 'work-A', agentJobId: 'aj-A', actionWorkId: 'work-A' }) },
       ])
       .mockImplementation(async () => [])
     const releases = new Map<string, Deferred<void>>()
@@ -350,7 +351,7 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     })
     startControl.mockResolvedValue(undefined)
     stopControl.mockResolvedValue(undefined)
-    poll.mockResolvedValueOnce([workWith()]).mockImplementation(async () => [])
+    poll.mockResolvedValueOnce([{ work: workWith() }]).mockImplementation(async () => [])
 
     const controller = new AbortController()
     const host = buildHost()
@@ -392,7 +393,9 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     startControl.mockResolvedValue(undefined)
     stopControl.mockResolvedValue(undefined)
     poll
-      .mockResolvedValueOnce([workWith({ workflowRunId: 'wf-fail', workId: 'work-fail', agentJobId: 'aj-fail' })])
+      .mockResolvedValueOnce([
+        { work: workWith({ workflowRunId: 'wf-fail', workId: 'work-fail', agentJobId: 'aj-fail' }) },
+      ])
       .mockImplementation(async () => [])
 
     const controller = new AbortController()
@@ -444,7 +447,7 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     stopControl.mockResolvedValue(undefined)
     poll
       .mockResolvedValueOnce([
-        workWith({ workflowRunId: 'wf-pending', workId: 'work-pending', agentJobId: 'aj-pending' }),
+        { work: workWith({ workflowRunId: 'wf-pending', workId: 'work-pending', agentJobId: 'aj-pending' }) },
       ])
       .mockImplementation(async () => [])
 
@@ -483,7 +486,7 @@ describe('RunnerHost flushes task logs before reporting work', () => {
     )
     poll
       .mockResolvedValueOnce([
-        workWith({ workflowRunId: 'wf-verdict', workId: 'work-verdict', agentJobId: 'aj-verdict' }),
+        { work: workWith({ workflowRunId: 'wf-verdict', workId: 'work-verdict', agentJobId: 'aj-verdict' }) },
       ])
       .mockImplementation(async () => [])
 

@@ -1,11 +1,14 @@
 import { withTimeout } from './host-timing.js'
+import type { DispatchReportOwner } from '../core/types.js'
 import type { InFlightEntry } from './host-state.js'
 import type { RunnerHostShutdown } from './host-shutdown-types.js'
+import { workKey } from './work-key.js'
 
 export interface ShutdownInFlightEntry {
   work: InFlightEntry['work']
   controller: AbortController
   done: Promise<void>
+  reportOwner?: DispatchReportOwner
   shutdown?: InFlightEntry['shutdown']
 }
 
@@ -27,17 +30,11 @@ export function createHostShutdown(context: HostShutdownContext): RunnerHostShut
 
     await withTimeout(Promise.allSettled(entries.map((entry) => entry.done)), Math.max(0, deadline - Date.now()))
     for (const entry of entries) {
-      context.inFlight.delete(workKey(entry.work))
+      context.inFlight.delete(workKey(entry.work, entry.reportOwner))
     }
   }
 
   return { shutdownInFlight }
-}
-
-function workKey(work: InFlightEntry['work']): string {
-  const ownerKind = work.ownerKind === 'agent-job' ? 'agent-job' : 'workflow'
-  const ownerId = ownerKind === 'agent-job' ? (work.agentJobId ?? '') : work.workflowRunId
-  return `${ownerKind}:${ownerId}:${work.workId}`
 }
 
 export function positiveBudget(value: number | undefined, fallback: number): number {

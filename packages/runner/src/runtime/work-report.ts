@@ -1,4 +1,4 @@
-import type { DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type { DispatchReportOwner, DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import type { ServerConnection } from '../server/connection.js'
 import type { AgentExecutionBinding } from '../core/types.js'
 
@@ -10,6 +10,7 @@ export async function reportAndRequireDurableAck(
   result: WorkItemResult,
   binding?: AgentExecutionBinding,
   signal: AbortSignal = new AbortController().signal,
+  reportOwner?: DispatchReportOwner,
 ): Promise<void> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), REPORT_TIMEOUT_MS)
@@ -18,8 +19,10 @@ export async function reportAndRequireDurableAck(
   timeout.unref?.()
   try {
     const acknowledgement = binding
-      ? await connection.report(work, result, controller.signal, binding)
-      : await connection.report(work, result, controller.signal)
+      ? await connection.report(work, result, controller.signal, binding, reportOwner)
+      : reportOwner
+        ? await connection.report(work, result, controller.signal, undefined, reportOwner)
+        : await connection.report(work, result, controller.signal)
     if (acknowledgement.verdict !== 'accepted' && acknowledgement.verdict !== 'refused')
       throw new Error('work report remains outstanding')
   } finally {

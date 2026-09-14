@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
+import type { PolledDispatch } from '../src/core/types.js'
 import type { PiRuntime } from '../src/runtime/pi/index.js'
 import type { ActionDefinition } from '../src/actions/manifest.js'
 import { ActionRegistry } from '../src/actions/registry.js'
@@ -165,7 +166,7 @@ function createHostMocks(): HostMocks {
     connect: vi.fn(async () => undefined),
     heartbeat: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
-    poll: vi.fn(async () => []),
+    poll: vi.fn(async (): Promise<PolledDispatch[]> => []),
     report: vi.fn(async () => ({})),
     uploadTaskLog: vi.fn(async () => ({ status: 'changed', accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),
@@ -264,6 +265,7 @@ function hostWithFakeTerminalDelivery(): RunnerHost {
 
 function workflowVariables(): Record<string, unknown> {
   return {
+    executionSource: 'non-slack',
     repository: { gitUrl: 'https://example.com/repo.git', baseBranch: 'main' },
     issue: { number: 1 },
     workspace: { path: '/virtual/mohist-runner-host-opencode-runtime' },
@@ -712,12 +714,15 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
     poll
       .mockResolvedValueOnce([
         {
-          workflowRunId: 'wr-drain',
-          workId: 'work-drain',
-          workType: 'task',
-          uses: 'test/block',
-          ownerKind: 'workflow',
-          variables: workflowVariables(),
+          work: {
+            workflowRunId: 'wr-drain',
+            workId: 'work-drain',
+            workType: 'task',
+            uses: 'test/block',
+            ownerKind: 'workflow',
+            projectId: 'project-1',
+            variables: workflowVariables(),
+          },
         },
       ])
       .mockResolvedValue([])
@@ -768,12 +773,15 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
         firstPollDone.resolve()
         return [
           {
-            workflowRunId: 'wr-exit',
-            workId: 'work-exit',
-            workType: 'task',
-            uses: 'test/observe',
-            ownerKind: 'workflow',
-            variables: workflowVariables(),
+            work: {
+              workflowRunId: 'wr-exit',
+              workId: 'work-exit',
+              workType: 'task',
+              uses: 'test/observe',
+              ownerKind: 'workflow',
+              projectId: 'project-1',
+              variables: workflowVariables(),
+            },
           },
         ]
       }
@@ -836,12 +844,15 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
     poll
       .mockResolvedValueOnce([
         {
-          workflowRunId: 'wr-workflow',
-          workId: 'work-workflow',
-          workType: 'task',
-          uses: 'test/observe',
-          ownerKind: 'workflow',
-          variables: workflowVariables(),
+          work: {
+            workflowRunId: 'wr-workflow',
+            workId: 'work-workflow',
+            workType: 'task',
+            uses: 'test/observe',
+            ownerKind: 'workflow',
+            projectId: 'project-1',
+            variables: workflowVariables(),
+          },
         },
       ])
       .mockResolvedValue([])
@@ -923,7 +934,7 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
         workType: 'task',
         ownerKind: 'agent-job',
         agentJobId: 'aj-1',
-        with: { prompt: 'do the agent-job thing', runtime: 'opencode' },
+        with: { prompt: 'do the agent-job thing', runtime: 'opencode', executionSource: 'non-slack' },
         variables: { workspace: { path: '/virtual/agent-job', branch: null, changeDir: null } },
       },
       new AbortController().signal,
@@ -933,23 +944,23 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
   })
 
   it('runtime-not-ready: AgentJob polls continue while the server admission fence rejects the claim', async (resources) => {
-    // Use a long rebuild delay so the negative witness stays present
-    // throughout the post-flip observation window. The poll mock returns the AgentJob dispatch
-    // exactly once followed by empty arrays so the dispatch loop
-    // can't tight-loop on the same work key (#410 T-001: the
-    // AgentJobExecutor closes the work within a few microtasks, so
-    // awaitingAck is empty before the next poll tick).
+    // Keep the negative readiness witness present while the AgentJob
+    // dispatch is returned once, then return empty polls.
     const installedHandles = installFakeOpenCodeRuntimeFactory(resources, { rebuildDelayMs: 60_000 })
     poll
       .mockResolvedValueOnce([
         {
-          workflowRunId: '',
-          workId: 'work-agent-job',
-          workType: 'task',
-          uses: 'test/observe',
-          ownerKind: 'agent-job',
-          agentJobId: 'aj-1',
-          variables: { workspace: { path: '/virtual/mohist-runner-host-opencode-runtime' } },
+          work: {
+            workflowRunId: '',
+            workId: 'work-agent-job',
+            workType: 'task',
+            uses: 'test/observe',
+            ownerKind: 'agent-job',
+            agentJobId: 'aj-1',
+            projectId: 'project-1',
+            with: { prompt: 'agent job', runtime: 'opencode', executionSource: 'non-slack' },
+            variables: { workspace: { path: '/virtual/mohist-runner-host-opencode-runtime' } },
+          },
         },
       ])
       .mockResolvedValue([])
@@ -966,11 +977,8 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
       }
       const callsBeforeFlip = poll.mock.calls.length
       expect(callsBeforeFlip).toBeGreaterThan(0)
-      // Flip the runtime to not-ready. The server-side admission fence
-      // rejects runtime-specific claims while polling stays alive. The subscription lives on the fake
-      // handles returned by `installFakeOpenCodeRuntimeFactory` — not
-      // on the runtime instance itself, which only stores it as
-      // private state.
+      // The admission fence rejects runtime-specific claims while the
+      // control-plane poll remains active.
       installedHandles.subscription.emit({ type: 'server.disconnected', payload: {} })
       expect(installedHandles.lastRuntime?.ready()).toBe(false)
       // Drive timers for a few intervals; the poll mock continues to

@@ -89,7 +89,15 @@ describe('RunnerControlDispatcher', () => {
       ['workspace.remove', { query: validQuery() }, 'workspaceRemove'],
       [
         'session.followup',
-        { target, text: 'next', operationId: 'op-1', inputId: null, turnId: 'turn-1', attachments: [] },
+        {
+          target,
+          text: 'next',
+          operationId: 'op-1',
+          inputId: null,
+          turnId: 'turn-1',
+          attachments: [],
+          executionSource: 'non-slack',
+        },
         'sessionFollowup',
       ],
       ['session.stop', { target, sessionId: 'session-1', turnId: 'turn-1', operationId: 'op-2' }, 'sessionStop'],
@@ -173,7 +181,7 @@ describe('RunnerControlDispatcher', () => {
       jsonrpc: '2.0',
       id: 'followup',
       method: 'session.followup',
-      params: { target, text: 'next', operationId: 'op-1', turnId: 'turn-1' },
+      params: { target, text: 'next', operationId: 'op-1', turnId: 'turn-1', executionSource: 'non-slack' },
     })
     h.receive({
       jsonrpc: '2.0',

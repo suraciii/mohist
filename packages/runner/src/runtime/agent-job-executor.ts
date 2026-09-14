@@ -29,14 +29,11 @@ import {
   WorkspaceHomeClaimedError,
 } from './workspace-entity.js'
 import { executeOpenCodeTurn, executePiTurn, failureResult, type AgentJobTurnDeps } from './agent-job-turn.js'
-import { runnerLogger } from '../system/logger.js'
 import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
 import { renderTemplate, unresolvedReferences } from '../core/template.js'
 import { evaluateCompletion } from '../actions/expectations.js'
 import { captureAndUploadArtifactsForWork } from './artifact-side-effects.js'
 import { tryRecovery } from './recovery.js'
-
-const executionSourceLog = runnerLogger.child('execution-source')
 
 export { projectTurnToWorkItemResult } from './agent-job-turn.js'
 
@@ -51,8 +48,6 @@ export interface ManagerRuntimeSessionBinding {
 }
 
 export interface AgentJobExecutorOptions {
-  /** Source-less dispatches are accepted only during the bounded rollout window. */
-  readonly strictExecutionSourceValidation?: boolean
   readonly modelRetryInitialDelayMs?: number
   readonly modelRetryMaxDelayMs?: number
   readonly waitForModelRetry?: ModelRetryWaiter
@@ -94,7 +89,7 @@ export class AgentJobExecutor {
   constructor(
     private readonly connection: ServerConnection,
     private readonly runtimes: AgentJobRuntimeAccessors,
-    private readonly defaultWorkDir: string = process.cwd(),
+    private readonly defaultWorkDir: string | null = null,
     private readonly skillResolver: SkillResolver = new SkillResolver(),
     private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
     private readonly options: AgentJobExecutorOptions = {},
@@ -113,12 +108,8 @@ export class AgentJobExecutor {
     }
 
     const payload = work.with ?? null
-    const sourceContext = readExecutionSourceContext(payload, {
-      strict: this.options.strictExecutionSourceValidation === true,
-    })
+    const sourceContext = readExecutionSourceContext(payload)
     if (sourceContext.kind === 'invalid') return failureResult('invalid-input', sourceContext.message)
-    if (sourceContext.kind === 'legacy')
-      executionSourceLog.warn('accepted source-less AgentJob dispatch through the bounded legacy path')
     const slackContext = sourceContext.slackExecutionContext
     const prompt = readPrompt(payload)
     const attachmentDescriptors = readAttachmentDescriptors(payload)
@@ -153,7 +144,13 @@ export class AgentJobExecutor {
 
     let workspaceBinding: WorkspaceBindingResolution
     try {
-      workspaceBinding = await resolveWorkspaceBinding(work, signal, this.namedWorkspaceManager)
+      workspaceBinding = await resolveWorkspaceBinding(
+        work,
+        signal,
+        this.namedWorkspaceManager,
+        managerExecution,
+        this.defaultWorkDir,
+      )
     } catch (error) {
       if (error instanceof WorkspaceHomeClaimedError) {
         return failureResult(
@@ -163,19 +160,14 @@ export class AgentJobExecutor {
       }
       throw error
     }
-    if (workspaceBinding.kind === 'invalid') {
-      return failureResult(
-        'invalid-input',
-        "AgentJob requires 'workspace.name' or 'workspace.path' to be a non-empty string when 'workspace' is provided in dispatch variables",
-      )
-    }
+    if (workspaceBinding.kind === 'failure') return workspaceBinding.result
     if (workspaceBinding.kind === 'materialization-failed') {
       return failureResult(
         'workspace-materialization-failed',
         `AgentJob failed to materialize the named workspace: ${workspaceBinding.message}`,
       )
     }
-    const workDir = workspaceBinding.kind === 'default' ? this.defaultWorkDir : workspaceBinding.workDir
+    const workDir = workspaceBinding.workDir
 
     const resolvedSkills = await this.skillResolver.resolve(skillNames, workDir)
     if (!resolvedSkills.ok) return failureResult(resolvedSkills.code, resolvedSkills.message)
@@ -446,8 +438,7 @@ async function resolveBinding(
 }
 
 type WorkspaceBindingResolution =
-  | { kind: 'default' }
-  | { kind: 'invalid' }
+  | { kind: 'failure'; result: WorkItemResult }
   | { kind: 'path'; workDir: string }
   | { kind: 'named'; workDir: string; projectId: string; workspaceName: string; repositoryName?: string }
   | { kind: 'materialization-failed'; message: string }
@@ -460,19 +451,29 @@ type WorkspaceBindingResolution =
 //     so the job retries against the home runner);
 //   - `path` (legacy free-path binding, routed/workflow dimension):
 //     use the path verbatim;
-//   - absent: the runner's default working directory.
+//   - absent or malformed: reject the dispatch rather than choosing
+//     a directory owned by the runner process.
 async function resolveWorkspaceBinding(
   work: DispatchWorkItem,
   signal: AbortSignal,
   namedWorkspaceManager: NamedWorkspaceManager | null,
+  managerExecution: ManagerExecutionBoundary | null,
+  defaultWorkDir: string | null,
 ): Promise<WorkspaceBindingResolution> {
   const ws = work.variables?.['workspace']
-  if (ws === undefined) return { kind: 'default' }
-  if (!isObject(ws)) return { kind: 'invalid' }
+  if (!isObject(ws)) {
+    // Manager conversations are not bound to a Server-owned workspace. The
+    // execution boundary supplies the explicit Runner root used for that
+    // isolated turn; ordinary AgentJob work must carry its own binding.
+    if (managerExecution && work.projectId === '__mohist_slack_manager__' && defaultWorkDir) {
+      return { kind: 'path', workDir: defaultWorkDir }
+    }
+    return invalidWorkspaceBinding()
+  }
 
   const name = ws['name']
   if (typeof name === 'string' && name.trim().length > 0) {
-    if (!namedWorkspaceManager) return { kind: 'invalid' }
+    if (!namedWorkspaceManager) return invalidWorkspaceBinding()
     try {
       const projectId = work.projectId ?? ''
       const materialized = await namedWorkspaceManager.materialize(
@@ -524,7 +525,19 @@ async function resolveWorkspaceBinding(
   }
 
   const path = ws['path']
-  return typeof path === 'string' && path.trim().length > 0 ? { kind: 'path', workDir: path } : { kind: 'invalid' }
+  return typeof path === 'string' && path.trim().length > 0
+    ? { kind: 'path', workDir: path }
+    : invalidWorkspaceBinding()
+}
+
+function invalidWorkspaceBinding(): WorkspaceBindingResolution {
+  return {
+    kind: 'failure',
+    result: failureResult(
+      'invalid-dispatch',
+      "AgentJob requires 'workspace.name' or 'workspace.path' to be a non-empty string in dispatch variables",
+    ),
+  }
 }
 
 // The prompt anchor injected when the execution is bound to a named

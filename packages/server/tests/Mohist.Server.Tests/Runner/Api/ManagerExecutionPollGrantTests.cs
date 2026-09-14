@@ -45,6 +45,9 @@ public sealed class ManagerExecutionPollGrantTests
         Assert.DoesNotContain(response.ManagerExecutionGrant!.ManagementCredential, response.With, StringComparison.Ordinal);
         Assert.DoesNotContain(response.ManagerExecutionGrant.ReplyCredential, response.With, StringComparison.Ordinal);
         Assert.Equal(dispatch.With, response.With);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, response.ReportOwner?.OwnerKind);
+        Assert.Equal(dispatch.AgentJobId, response.ReportOwner?.AgentJobId);
+        Assert.Null(response.ReportOwner?.WorkflowRunId);
         Assert.Equal(2, issuer.RevokeExecution(response.ManagerExecutionGrant.ExecutionId));
     }
 }

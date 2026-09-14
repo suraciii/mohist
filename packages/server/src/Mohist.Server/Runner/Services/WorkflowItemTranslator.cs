@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Serialization;
@@ -113,6 +114,7 @@ public sealed class WorkflowItemTranslator : IScopedService
             WorkId: workId,
             Uses: item.Uses,
             Variables: JSON.Serialize(payload),
+            ProjectId: run.Metadata.ProjectId,
             WorkType: workType,
             Stage: item.Stage,
             Title: title);
@@ -407,6 +409,7 @@ public sealed class WorkflowItemTranslator : IScopedService
             Stage: item.Stage,
             Title: item.Title,
             Issue: WorkflowDispatchHelpers.BuildIssueRef(payload),
+            ProjectId: run.Metadata.ProjectId,
             Artifacts: item.Artifacts is not null && !item.Artifacts.IsEmpty ? JSON.Serialize(item.Artifacts) : null,
             SetVars: item.SetVars is not null && item.SetVars.Count > 0 ? JSON.Serialize(item.SetVars) : null,
             OwnerKind: WorkDispatchOwnerKinds.Workflow,
@@ -465,6 +468,7 @@ public sealed class WorkflowItemTranslator : IScopedService
             Stage: item.Stage,
             Title: "Stage checks",
             Issue: WorkflowDispatchHelpers.BuildIssueRef(payload),
+            ProjectId: run.Metadata.ProjectId,
             OwnerKind: WorkDispatchOwnerKinds.Workflow,
             AgentJobId: null,
             EpicNumber: ReadEpicNumber(run));
@@ -479,6 +483,10 @@ public sealed class WorkflowItemTranslator : IScopedService
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
         var effectiveVarsJson = resolved.Vars ?? JSON.DeserializeElement("{}");
 
+        // Workflow dispatches use the same explicit source/context boundary
+        // as AgentJob dispatches. Ordinary Workflow work is non-Slack; a
+        // Slack-originated AgentJob is dispatched through the AgentJob owner.
+        payload["executionSource"] = JSON.SerializeToElement(AgentExecutionSources.NonSlack);
         payload["vars"] = effectiveVarsJson;
         payload["workflow"] = JSON.SerializeToElement(new
         {

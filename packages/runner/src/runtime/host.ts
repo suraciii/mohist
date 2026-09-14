@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentRuntime, RunnerOptions, RunnerRegistration } from '../core/types.js'
 import { ServerConnection } from '../server/connection.js'
+import { validateDispatchEnvelope } from '../server/connection-dispatch.js'
 import { RunnerControlWebSocketClient } from '../server/runner-control-websocket.js'
 import { createRunnerControlHandlers } from '../server/runner-control-handlers.js'
 import { reportAndRequireDurableAck } from './work-report.js'
@@ -243,7 +244,6 @@ export class RunnerHost {
             managerExecutionRegistry: this.managerExecutionRegistry,
             onManagerExecutionFinished: (executionId) => this.revokeManagerExecution(executionId),
             skillResolver: this.skillResolver,
-            strictExecutionSourceValidation: options.strictExecutionSourceValidation === true,
           },
           cancel: {
             followupTargetResolver: (target) => resolveFollowupTarget(this.options, target),
@@ -266,7 +266,6 @@ export class RunnerHost {
         }),
         agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
         processGeneration: this.processGeneration,
-        strictExecutionSourceValidation: options.strictExecutionSourceValidation === true,
       },
       this.buildInfo,
     )
@@ -503,7 +502,7 @@ export class RunnerHost {
       this.actions,
       this.workspace,
       this.connection,
-      undefined,
+      this.options.runnerRoot,
       undefined,
       this.openCodeRuntime,
       new AgentJobExecutor(
@@ -512,11 +511,10 @@ export class RunnerHost {
           openCode: () => this.openCodeRuntime,
           pi: () => this.piRuntime,
         },
-        process.cwd(),
+        this.options.runnerRoot,
         this.skillResolver,
         this.namedWorkspaceManager,
         {
-          strictExecutionSourceValidation: this.options.strictExecutionSourceValidation === true,
           onManagerRuntimeSessionReady: ({ boundary, ...binding }) => {
             if (!this.managerExecutionRegistry.bindRuntime(boundary, binding)) {
               throw new Error('Manager runtime became ready after its execution boundary was released')
@@ -609,17 +607,21 @@ export class RunnerHost {
       }
 
       await this.prepareOpenCodeWork(
-        works.map((item) => item.work),
+        works
+          .filter((item) => item.validationFailure === undefined)
+          .map((item) => item.work)
+          .filter((work) => validateDispatchEnvelope(work) === undefined),
         signal,
       )
 
       // A single poll may return multiple dispatches (repair + new claims).
       // Execute each concurrently, skipping re-deliveries the process
-      // already holds.
+      // already holds. Admission is recorded before execution starts so a
+      // synchronous rejection cannot finish before it joins inFlight.
       for (const polled of works) {
         const work = polled.work
         if (signal.aborted) break
-        const key = workKey(work)
+        const key = workKey(work, polled.reportOwner)
         // Re-delivery is the normal recovery path under at-least-once:
         // skip a work the process already holds (inFlight or awaitingAck)
         // rather than execute it twice. The server may re-dispatch a
@@ -628,20 +630,39 @@ export class RunnerHost {
         if (this.inFlight.has(key) || this.awaitingAck.has(key)) continue
 
         const isManagerExecution = isManagerExecutionWork(work)
+        const envelopeFailure = validateDispatchEnvelope(work)
+        let validationFailure = polled.validationFailure ?? envelopeFailure ?? null
         let managerBoundary: ManagerExecutionBoundary | null = null
-        if (isManagerExecution) {
-          if (!supportsManagerExecution(this.registrationState()) || !polled.managerExecutionGrant) continue
-          managerBoundary = await createManagerExecutionBoundary(
-            polled.managerExecutionGrant,
-            this.options.runnerRoot,
-            {
-              workDir: this.options.runnerRoot,
-            },
-          )
-          if (!managerBoundary) continue
+        if (isManagerExecution && validationFailure === null) {
+          if (!supportsManagerExecution(this.registrationState())) continue
+          if (!polled.managerExecutionGrant) {
+            validationFailure = {
+              status: 'failed',
+              message: 'Manager dispatch requires a grant',
+              error: { code: 'invalid-dispatch', message: 'Manager dispatch requires a grant' },
+            }
+          } else {
+            managerBoundary = await createManagerExecutionBoundary(
+              polled.managerExecutionGrant,
+              this.options.runnerRoot,
+              {
+                workDir: this.options.runnerRoot,
+              },
+            )
+            if (!managerBoundary) {
+              validationFailure = {
+                status: 'failed',
+                message: 'Manager dispatch grant could not establish an execution boundary',
+                error: {
+                  code: 'invalid-dispatch',
+                  message: 'Manager dispatch grant could not establish an execution boundary',
+                },
+              }
+            }
+          }
         }
 
-        if (isManagerExecution && managerBoundary) {
+        if (isManagerExecution && validationFailure === null && managerBoundary) {
           this.managerExecutions.set(key, managerBoundary)
           this.managerExecutionRegistry.register({
             executionId: polled.managerExecutionGrant!.executionId,
@@ -657,9 +678,10 @@ export class RunnerHost {
           done: Promise.resolve(),
           work,
           controller,
+          ...(polled.reportOwner ? { reportOwner: polled.reportOwner } : {}),
         }
-        entry.done = executeAndTransition(this.executionContext, work, controller.signal, key, entry)
         this.inFlight.set(key, entry)
+        entry.done = executeAndTransition(this.executionContext, work, controller.signal, key, entry, validationFailure)
 
         this.syncOpenCodeWorkOwners()
       }
@@ -687,7 +709,9 @@ export class RunnerHost {
 
   private async prepareOpenCodeWork(works: readonly DispatchWorkItem[], signal: AbortSignal): Promise<void> {
     const runtime = this.openCodeRuntime
-    const owners = works.filter((work) => usesOpenCode(work) && !isManagerExecutionWork(work)).map(workKey)
+    const owners = works
+      .filter((work) => usesOpenCode(work) && !isManagerExecutionWork(work))
+      .map((work) => workKey(work))
     if (!runtime || owners.length === 0) return
     runtime.setWorkOwners([...openCodeOwnersForRuntime(this.inFlight.values(), this.awaitingAck.values()), ...owners])
     if (!runtime.ready()) {
@@ -702,13 +726,7 @@ export class RunnerHost {
   private async pollOnce(signal: AbortSignal): Promise<PolledDispatch[]> {
     const bounded = boundedSignal(signal, POLL_TIMEOUT_MS)
     try {
-      const workItems = await this.connection.poll(bounded.signal, this.pollReport())
-      const takeLast = (
-        this.connection as ServerConnection & {
-          takeLastPolledDispatches?: (items: readonly DispatchWorkItem[]) => PolledDispatch[]
-        }
-      ).takeLastPolledDispatches
-      const works = takeLast ? takeLast.call(this.connection, workItems) : workItems.map((work) => ({ work }))
+      const works = await this.connection.poll(bounded.signal, this.pollReport())
       await this.observeManagerDeploymentEpoch()
       return works
     } finally {

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentJobExecutor } from '../src/runtime/agent-job-executor.js'
 import type { DispatchWorkItem } from '../src/core/types.js'
@@ -19,6 +20,7 @@ import type {
   PiTurnRequest,
   PiTurnResult,
 } from '../src/runtime/pi/index.js'
+import { PUBLISHED_SLACK_SKILL_NAME, PUBLISHED_SLACK_SKILL_VERSION } from '../src/runtime/slack-execution-context.js'
 import { withDefaultRunnerTestResources } from './support/test-resources.js'
 
 const WORK_DIR = '/workspace/agent-job'
@@ -31,7 +33,13 @@ function test(name: string, body: () => Promise<void>): void {
 type FollowupMode = 'silent' | 'reply' | 'failure' | 'hang'
 
 function slackExecutionContext() {
-  const instructions = 'Speak for the Agent in Slack. Silence is valid when there is no useful conclusion.'
+  const instructions = readFileSync(
+    new URL(
+      '../../server/src/Mohist.Server/Agent/Services/Assets/mohist-slack-collaboration.skill.md',
+      import.meta.url,
+    ),
+    'utf8',
+  )
   return {
     version: 1,
     replyAnchor: {
@@ -45,8 +53,8 @@ function slackExecutionContext() {
       dispatchRef: 'dispatch-1',
     },
     collaborationSkill: {
-      name: 'mohist-slack-collaboration',
-      version: '1',
+      name: PUBLISHED_SLACK_SKILL_NAME,
+      version: PUBLISHED_SLACK_SKILL_VERSION,
       instructions,
       contentHash: createHash('sha256').update(instructions, 'utf8').digest('hex'),
     },
@@ -69,6 +77,7 @@ function buildWork(overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem 
       prompt: 'Inspect the change and report the result.',
       runtime: 'opencode',
       slackExecutionContext: slackExecutionContext(),
+      executionSource: 'slack',
     },
     ...overrides,
   }
@@ -252,7 +261,12 @@ test('guards an unpublished initial OpenCode turn with one bounded advisory and 
   const runtime = makeOpenCodeRuntime({ followupMode: 'silent' })
   const result = await new AgentJobExecutor(connection(), { openCode: runtime.runtime, pi: null }).execute(
     buildWork({
-      with: { prompt: 'Inspect the change.', runtime: 'opencode', slackExecutionContext: slackExecutionContext() },
+      with: {
+        prompt: 'Inspect the change.',
+        runtime: 'opencode',
+        slackExecutionContext: slackExecutionContext(),
+        executionSource: 'slack',
+      },
     }),
     new AbortController().signal,
   )
@@ -276,7 +290,12 @@ test('guards an unpublished initial Pi turn through the same follow-up path', as
   const runtime = makePiRuntime({ followupMode: 'silent' })
   const result = await new AgentJobExecutor(connection(), { openCode: null, pi: runtime.runtime }).execute(
     buildWork({
-      with: { prompt: 'Inspect the change.', runtime: 'pi', slackExecutionContext: slackExecutionContext() },
+      with: {
+        prompt: 'Inspect the change.',
+        runtime: 'pi',
+        slackExecutionContext: slackExecutionContext(),
+        executionSource: 'slack',
+      },
     }),
     new AbortController().signal,
   )
@@ -294,7 +313,12 @@ test('does not advise after an accepted or rejected reply action attempt', async
   })
   const result = await new AgentJobExecutor(connection(), { openCode: runtime.runtime, pi: null }).execute(
     buildWork({
-      with: { prompt: 'Publish the result.', runtime: 'opencode', slackExecutionContext: slackExecutionContext() },
+      with: {
+        prompt: 'Publish the result.',
+        runtime: 'opencode',
+        slackExecutionContext: slackExecutionContext(),
+        executionSource: 'slack',
+      },
     }),
     new AbortController().signal,
   )
@@ -307,7 +331,12 @@ test('does not advise after a Pi reply action attempt even when the action later
   const runtime = makePiRuntime({ turnEvents: [replyPiEvent()] })
   const result = await new AgentJobExecutor(connection(), { openCode: null, pi: runtime.runtime }).execute(
     buildWork({
-      with: { prompt: 'Publish the Pi result.', runtime: 'pi', slackExecutionContext: slackExecutionContext() },
+      with: {
+        prompt: 'Publish the Pi result.',
+        runtime: 'pi',
+        slackExecutionContext: slackExecutionContext(),
+        executionSource: 'slack',
+      },
     }),
     new AbortController().signal,
   )
@@ -368,7 +397,10 @@ test('preserves the original result and does not retry after an advisory timeout
 
 test('bypasses the guard for absent and malformed Slack contexts', async () => {
   const workItems = [
-    { work: buildWork({ with: { prompt: 'No Slack guard.', runtime: 'opencode' } }), status: 'completed' },
+    {
+      work: buildWork({ with: { prompt: 'No Slack guard.', runtime: 'opencode', executionSource: 'non-slack' } }),
+      status: 'completed',
+    },
     {
       work: buildWork({
         with: {
@@ -395,7 +427,14 @@ test('bypasses the guard for absent and malformed Slack contexts', async () => {
 test('does not treat final assistant output alone as a reply attempt on Pi', async () => {
   const runtime = makePiRuntime({ followupMode: 'silent' })
   const result = await new AgentJobExecutor(connection(), { openCode: null, pi: runtime.runtime }).execute(
-    buildWork({ with: { prompt: 'Text only.', runtime: 'pi', slackExecutionContext: slackExecutionContext() } }),
+    buildWork({
+      with: {
+        prompt: 'Text only.',
+        runtime: 'pi',
+        slackExecutionContext: slackExecutionContext(),
+        executionSource: 'slack',
+      },
+    }),
     new AbortController().signal,
   )
 

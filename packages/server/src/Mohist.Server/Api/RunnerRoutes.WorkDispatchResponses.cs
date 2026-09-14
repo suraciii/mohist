@@ -56,7 +56,19 @@ public static partial class RunnerRoutes
             AgentDefinition: work.AgentDefinition,
             AgentSessionStartup: work.AgentSessionStartup,
             ActionAttemptId: work.ActionAttemptId,
+            ReportOwner: ReportOwnerFor(work),
             ManagerExecutionGrant: managerCredentials?.IssueFor(work),
             OriginMarker: work.OriginMarker);
     }
+
+    private static WorkDispatchReportOwner ReportOwnerFor(WorkDispatch work) => work.OwnerKind switch
+    {
+        WorkDispatchOwnerKinds.AgentJob => new WorkDispatchReportOwner(
+            WorkDispatchOwnerKinds.AgentJob,
+            AgentJobId: work.AgentJobId),
+        WorkDispatchOwnerKinds.Workflow => new WorkDispatchReportOwner(
+            WorkDispatchOwnerKinds.Workflow,
+            WorkflowRunId: work.WorkflowRunId),
+        _ => throw new InvalidOperationException($"Unsupported dispatch owner kind '{work.OwnerKind}'."),
+    };
 }

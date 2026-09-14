@@ -214,12 +214,10 @@ public record WorkDispatch(
     [property: Id(13)] string? SetVars = null,
     [property: Id(14)] string? Recovery = null,
     /// <summary>
-    /// Project id for the dispatch envelope. For workflow dispatches the
-    /// project is carried on <see cref="Issue"/>; for agent-job
-    /// dispatches the grain sources it from the launch context. Null
-    /// for workflow dispatches (the runner continues to read it from
-    /// <c>Issue.ProjectId</c>). New field; older-field consumers
-    /// ignore it.
+    /// Project id for the dispatch envelope. It is emitted directly for
+    /// both workflow and agent-job dispatches; workflow dispatches also
+    /// carry the project on <see cref="Issue"/> when an issue is bound.
+    /// New field; older-field consumers ignore it.
     /// </summary>
     [property: Id(15)] string? ProjectId = null,
     /// <summary>

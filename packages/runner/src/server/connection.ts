@@ -2,6 +2,7 @@ import { hostname } from 'node:os'
 import type {
   AgentExecutionBinding,
   CleanupPolicy,
+  DispatchReportOwner,
   DispatchWorkItem,
   JsonObject,
   RunnerConfigResponse,
@@ -16,7 +17,7 @@ import type { BuildInfo } from '../runtime/build-info.js'
 import { parseObject } from '../core/json.js'
 import { getSegments } from '../core/json-path.js'
 import type { TaskLogBatch } from '../runtime/task-log.js'
-import { parseDispatchWorkItem } from './connection-dispatch.js'
+import { parsePolledDispatch } from './connection-dispatch.js'
 import { reportWork } from './connection-report.js'
 import { extractErrorMessage, RuntimeEventDeliveryError } from './connection-errors.js'
 export { RuntimeEventDeliveryError } from './connection-errors.js'
@@ -57,7 +58,6 @@ export class ServerConnection {
   private readonly credential: string | null
   readonly runnerId: string
   private managerDeploymentEpoch: string | null = null
-  private lastPolledDispatches: PolledDispatch[] = []
 
   constructor(
     private readonly options: RunnerOptions,
@@ -110,37 +110,13 @@ export class ServerConnection {
     return this.managerDeploymentEpoch
   }
 
-  /** Polls for work and retains the response-only grant view out of work items. */
-  async poll(
-    signal: AbortSignal,
-    report: {
-      processGeneration: string
-      inFlight: string[]
-      awaitingAck: string[]
-      runtimeReadiness?: RuntimeReadinessWitness[]
-      connectionId?: string | null
-      admissionReady?: boolean
-      deploymentEpoch?: string | null
-    },
-  ): Promise<DispatchWorkItem[]> {
-    const polled = await this.pollWithGrants(signal, report)
-    this.lastPolledDispatches = polled
-    return polled.map((item) => item.work)
-  }
-
   /**
-   * Returns the grant-bearing view produced by the immediately preceding
-   * `poll` call. This keeps the established poll seam usable by host fakes
-   * while the grant remains outside DispatchWorkItem.
+   * Polls for work and returns the grant-bearing view directly. The work
+   * item and its one-shot Manager grant/origin metadata travel together
+   * through the same wire response, so consumers cannot accidentally
+   * drop the grant by forgetting a follow-up getter call.
    */
-  takeLastPolledDispatches(work: readonly DispatchWorkItem[]): PolledDispatch[] {
-    if (this.lastPolledDispatches.length === 0) return work.map((item) => ({ work: item }))
-    const byKey = new Map(this.lastPolledDispatches.map((item) => [dispatchKey(item.work), item]))
-    this.lastPolledDispatches = []
-    return work.map((item) => byKey.get(dispatchKey(item)) ?? { work: item })
-  }
-
-  async pollWithGrants(
+  async poll(
     signal: AbortSignal,
     report: {
       processGeneration: string
@@ -164,11 +140,7 @@ export class ServerConnection {
     const payload = (await response.json()) as {
       dispatches?: WorkDispatchResponse[]
     }
-    return (payload.dispatches ?? []).map((dispatch) => ({
-      work: parseDispatchWorkItem(dispatch),
-      ...(dispatch.managerExecutionGrant ? { managerExecutionGrant: dispatch.managerExecutionGrant } : {}),
-      ...(dispatch.originMarker != null ? { originMarker: dispatch.originMarker } : {}),
-    }))
+    return (payload.dispatches ?? []).map((dispatch) => parsePolledDispatch(dispatch))
   }
 
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {
@@ -205,8 +177,17 @@ export class ServerConnection {
     result: WorkItemResult,
     signal: AbortSignal,
     binding?: AgentExecutionBinding,
+    reportOwner?: DispatchReportOwner,
   ): Promise<Record<string, unknown>> {
-    return await reportWork(this.fetchWithAuth.bind(this), this.url.bind(this), work, result, signal, binding)
+    return await reportWork(
+      this.fetchWithAuth.bind(this),
+      this.url.bind(this),
+      work,
+      result,
+      signal,
+      binding,
+      reportOwner,
+    )
   }
 
   /**
@@ -894,12 +875,6 @@ export class ServerConnection {
   private url(path: string) {
     return `${this.options.serverUrl.replace(/\/$/, '')}/api/runner/${encodeURIComponent(this.options.runnerId)}/${path}`
   }
-}
-
-function dispatchKey(work: DispatchWorkItem): string {
-  const ownerKind = work.ownerKind ?? 'workflow'
-  const ownerId = ownerKind === 'agent-job' ? (work.agentJobId ?? '') : work.workflowRunId
-  return `${ownerKind}:${ownerId}:${work.workId}`
 }
 
 async function parseRuntimeEventReceiptArray(

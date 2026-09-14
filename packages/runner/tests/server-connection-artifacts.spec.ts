@@ -165,6 +165,7 @@ describe('ServerConnection.report', () => {
         workId: 'work-1',
         actionAttemptId: 'task-1.1',
         workType: 'task',
+        ownerKind: 'workflow',
       },
       { status: 'completed', artifactUploadIds: ['artup_a', 'artup_b'] },
       new AbortController().signal,
@@ -299,7 +300,7 @@ describe('ServerConnection.poll', () => {
         awaitingAck: [],
         admissionReady: false,
       })
-    )[0]
+    )[0]?.work
 
     expect(item).not.toBeNull()
     expect(item!.ownerKind).toBe('agent-job')
@@ -341,7 +342,7 @@ describe('ServerConnection.poll', () => {
         awaitingAck: [],
         admissionReady: false,
       })
-    )[0]
+    )[0]?.work
 
     expect(item).not.toBeNull()
     expect(item!.ownerKind).toBe('agent-job')
@@ -382,7 +383,7 @@ describe('ServerConnection.poll', () => {
         awaitingAck: [],
         admissionReady: false,
       })
-    )[0]
+    )[0]?.work
 
     expect(item).not.toBeNull()
     expect(item!.ownerKind).toBe('workflow')
@@ -424,7 +425,7 @@ describe('ServerConnection.poll', () => {
         awaitingAck: [],
         admissionReady: false,
       })
-    )[0]
+    )[0]?.work
 
     expect(item).not.toBeNull()
     expect(item!.ownerKind).toBe('agent-job')

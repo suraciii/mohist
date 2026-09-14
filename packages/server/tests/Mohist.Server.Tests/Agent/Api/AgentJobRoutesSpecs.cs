@@ -487,6 +487,56 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
     }
 
     [Fact]
+    public async Task RunnerReportEndpoint_InvalidDispatchFailure_UsesCanonicalOwnerIdentity()
+    {
+        var projectId = await CreateProjectAsync("agent-route-invalid-dispatch-report-project");
+        var agentId = (await CreateAgentAsync(projectId, "validation-agent")).Id;
+        var runnerId = $"agent-route-invalid-dispatch-report-runner-{Guid.NewGuid():N}";
+        var jobKey = $"agent-job-invalid-dispatch-report-{Guid.NewGuid():N}";
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId, maxWorkflowSlots: 2);
+
+        try
+        {
+            var responseTask = _fixture.Client.PostAsJsonAsync(
+                AgentJobController.ValidatePath,
+                new
+                {
+                    prompt = "invalid dispatch report prompt",
+                    agentId,
+                    model = "openai/gpt-test",
+                    jobId = jobKey,
+                    workspace = new { path = "/tmp/agent-job-invalid-dispatch-report", projectId },
+                });
+
+            var claim = await ClaimPreparedAgentJobAsync(jobKey, runnerId, projectId, expectedSessionId: null);
+            using var reportResponse = await _fixture.Client.PostAsJsonAsync(
+                $"/api/runner/{runnerId}/report",
+                new
+                {
+                    workId = claim.WorkId,
+                    status = "failed",
+                    ownerKind = WorkDispatchOwnerKinds.AgentJob,
+                    agentJobId = jobKey,
+                    message = "invalid dispatch envelope",
+                    error = new { code = "invalid-dispatch", message = "owner identity was invalid" },
+                });
+
+            Assert.Equal(HttpStatusCode.OK, reportResponse.StatusCode);
+            var reportPayload = await reportResponse.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("accepted", reportPayload.GetProperty("verdict").GetString());
+
+            using var response = await responseTask;
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("failed", payload.GetProperty("data").GetProperty("status").GetString());
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
     public async Task RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId()
     {
         var projectId = await CreateProjectAsync("agent-route-http-poll-project");
