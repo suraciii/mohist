@@ -712,12 +712,14 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
     poll
       .mockResolvedValueOnce([
         {
-          workflowRunId: 'wr-drain',
-          workId: 'work-drain',
-          workType: 'task',
-          uses: 'test/block',
-          ownerKind: 'workflow',
-          variables: workflowVariables(),
+          work: {
+            workflowRunId: 'wr-drain',
+            workId: 'work-drain',
+            workType: 'task',
+            uses: 'test/block',
+            ownerKind: 'workflow',
+            variables: workflowVariables(),
+          },
         },
       ])
       .mockResolvedValue([])
@@ -768,12 +770,14 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
         firstPollDone.resolve()
         return [
           {
-            workflowRunId: 'wr-exit',
-            workId: 'work-exit',
-            workType: 'task',
-            uses: 'test/observe',
-            ownerKind: 'workflow',
-            variables: workflowVariables(),
+            work: {
+              workflowRunId: 'wr-exit',
+              workId: 'work-exit',
+              workType: 'task',
+              uses: 'test/observe',
+              ownerKind: 'workflow',
+              variables: workflowVariables(),
+            },
           },
         ]
       }
@@ -836,12 +840,14 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
     poll
       .mockResolvedValueOnce([
         {
-          workflowRunId: 'wr-workflow',
-          workId: 'work-workflow',
-          workType: 'task',
-          uses: 'test/observe',
-          ownerKind: 'workflow',
-          variables: workflowVariables(),
+          work: {
+            workflowRunId: 'wr-workflow',
+            workId: 'work-workflow',
+            workType: 'task',
+            uses: 'test/observe',
+            ownerKind: 'workflow',
+            variables: workflowVariables(),
+          },
         },
       ])
       .mockResolvedValue([])
@@ -943,13 +949,15 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
     poll
       .mockResolvedValueOnce([
         {
-          workflowRunId: '',
-          workId: 'work-agent-job',
-          workType: 'task',
-          uses: 'test/observe',
-          ownerKind: 'agent-job',
-          agentJobId: 'aj-1',
-          variables: { workspace: { path: '/virtual/mohist-runner-host-opencode-runtime' } },
+          work: {
+            workflowRunId: '',
+            workId: 'work-agent-job',
+            workType: 'task',
+            uses: 'test/observe',
+            ownerKind: 'agent-job',
+            agentJobId: 'aj-1',
+            variables: { workspace: { path: '/virtual/mohist-runner-host-opencode-runtime' } },
+          },
         },
       ])
       .mockResolvedValue([])

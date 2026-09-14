@@ -357,7 +357,7 @@ describe('RunnerHost', () => {
         controller.abort()
         return []
       }
-      return [work(String(pollIndex))]
+      return [{ work: work(String(pollIndex)) }]
     })
     const host = new RunnerHost({
       serverUrl: 'https://runner.test',
@@ -455,7 +455,7 @@ describe('RunnerHost', () => {
       if (reportedWork.workId === unaffected.workId) unaffectedReported.resolve()
       return { verdict: 'accepted' }
     })
-    poll.mockResolvedValueOnce([affected, unaffected]).mockResolvedValue([])
+    poll.mockResolvedValueOnce([{ work: affected }, { work: unaffected }]).mockResolvedValue([])
     const host = new RunnerHost(
       {
         serverUrl: 'https://runner.test',

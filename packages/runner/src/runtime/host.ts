@@ -702,13 +702,7 @@ export class RunnerHost {
   private async pollOnce(signal: AbortSignal): Promise<PolledDispatch[]> {
     const bounded = boundedSignal(signal, POLL_TIMEOUT_MS)
     try {
-      const workItems = await this.connection.poll(bounded.signal, this.pollReport())
-      const takeLast = (
-        this.connection as ServerConnection & {
-          takeLastPolledDispatches?: (items: readonly DispatchWorkItem[]) => PolledDispatch[]
-        }
-      ).takeLastPolledDispatches
-      const works = takeLast ? takeLast.call(this.connection, workItems) : workItems.map((work) => ({ work }))
+      const works = await this.connection.poll(bounded.signal, this.pollReport())
       await this.observeManagerDeploymentEpoch()
       return works
     } finally {
