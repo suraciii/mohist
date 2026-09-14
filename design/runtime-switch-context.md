@@ -28,7 +28,7 @@ until separately specified.
 ## Semantics
 
 When a bound runtime is unavailable, the Runner may select the configured
-fallback runtime (Pi for Slack agents), create an empty physical session, and
+fallback runtime (Pi), create an empty physical session, and
 atomically replace the binding. It then sends the original user input exactly
 once to the new runtime. It must not create a new logical Session, replay prior
 inputs, or emit a synthetic handoff user message.
@@ -58,4 +58,5 @@ new queue, or automatically repair a provider whose completion signal is broken.
 ## Status
 
 This specification replaces the earlier proposal for a one-time user-facing
-handoff prompt. Implementation and focused recovery tests are pending.
+handoff prompt. The runner fallback and focused recovery tests are implemented;
+full Server gate and live Slack runtime-switch acceptance remain pending.
