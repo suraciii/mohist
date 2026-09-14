@@ -243,7 +243,6 @@ export class RunnerHost {
             managerExecutionRegistry: this.managerExecutionRegistry,
             onManagerExecutionFinished: (executionId) => this.revokeManagerExecution(executionId),
             skillResolver: this.skillResolver,
-            strictExecutionSourceValidation: options.strictExecutionSourceValidation === true,
           },
           cancel: {
             followupTargetResolver: (target) => resolveFollowupTarget(this.options, target),
@@ -266,7 +265,6 @@ export class RunnerHost {
         }),
         agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
         processGeneration: this.processGeneration,
-        strictExecutionSourceValidation: options.strictExecutionSourceValidation === true,
       },
       this.buildInfo,
     )
@@ -516,7 +514,6 @@ export class RunnerHost {
         this.skillResolver,
         this.namedWorkspaceManager,
         {
-          strictExecutionSourceValidation: this.options.strictExecutionSourceValidation === true,
           onManagerRuntimeSessionReady: ({ boundary, ...binding }) => {
             if (!this.managerExecutionRegistry.bindRuntime(boundary, binding)) {
               throw new Error('Manager runtime became ready after its execution boundary was released')

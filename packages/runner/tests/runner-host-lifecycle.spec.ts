@@ -442,14 +442,14 @@ describe('RunnerHost', () => {
       workType: 'task',
       ownerKind: 'agent-job',
       agentJobId: 'job-affected',
-      with: { prompt: 'blocked execution', runtime: 'opencode' },
+      with: { prompt: 'blocked execution', runtime: 'opencode', executionSource: 'non-slack' },
       variables: { workspace: { path: '/virtual/mohist-runner-test' } },
     }
     const unaffected = {
       ...affected,
       workId: 'work-unaffected',
       agentJobId: 'job-unaffected',
-      with: { prompt: 'quick execution', runtime: 'opencode' },
+      with: { prompt: 'quick execution', runtime: 'opencode', executionSource: 'non-slack' },
     }
     report.mockImplementation(async (reportedWork: { workId: string }) => {
       if (reportedWork.workId === unaffected.workId) unaffectedReported.resolve()

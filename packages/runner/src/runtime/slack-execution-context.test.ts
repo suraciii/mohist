@@ -57,13 +57,10 @@ function validContext(overrides: ContextOverrides = {}): SlackExecutionContext {
 
 describe('Slack execution source/context validation', () => {
   it('accepts the published Slack context and exposes no mutable destination choice', () => {
-    const result = readExecutionSourceContext(
-      {
-        executionSource: SLACK_EXECUTION_SOURCE,
-        slackExecutionContext: validContext(),
-      },
-      { strict: true },
-    )
+    const result = readExecutionSourceContext({
+      executionSource: SLACK_EXECUTION_SOURCE,
+      slackExecutionContext: validContext(),
+    })
 
     expect(result).toMatchObject({ kind: 'resolved', source: SLACK_EXECUTION_SOURCE })
     if (result.kind !== 'resolved') throw new Error('expected a valid Slack context')
@@ -72,15 +69,12 @@ describe('Slack execution source/context validation', () => {
   })
 
   it('preserves explicit Manager project and owner anchor fields', () => {
-    const result = readExecutionSourceContext(
-      {
-        executionSource: SLACK_EXECUTION_SOURCE,
-        slackExecutionContext: validContext({
-          replyAnchor: { projectId: '__mohist_slack_manager__', ownerKind: 'manager' },
-        }),
-      },
-      { strict: true },
-    )
+    const result = readExecutionSourceContext({
+      executionSource: SLACK_EXECUTION_SOURCE,
+      slackExecutionContext: validContext({
+        replyAnchor: { projectId: '__mohist_slack_manager__', ownerKind: 'manager' },
+      }),
+    })
 
     expect(result.kind).toBe('resolved')
     if (result.kind !== 'resolved') throw new Error('expected a valid Slack context')
@@ -132,32 +126,35 @@ describe('Slack execution source/context validation', () => {
       },
     ],
   ])('rejects %s', (_name, payload) => {
-    expect(readExecutionSourceContext(payload, { strict: true }).kind).toBe('invalid')
+    expect(readExecutionSourceContext(payload).kind).toBe('invalid')
   })
 
-  it('rejects an explicit null source even while compatibility mode is enabled', () => {
+  it('rejects a payload with no executionSource field before any Slack context shape check', () => {
+    expect(readExecutionSourceContext({ slackExecutionContext: validContext() }).kind).toBe('invalid')
+    expect(readExecutionSourceContext({}).kind).toBe('invalid')
+    expect(readExecutionSourceContext(null).kind).toBe('invalid')
+  })
+
+  it('rejects an explicit null source without normalization', () => {
     expect(readExecutionSourceContext({ executionSource: null, slackExecutionContext: validContext() }).kind).toBe(
       'invalid',
     )
   })
 
-  it('accepts the actual pre-change source-less Slack snapshot through compatibility mode', () => {
+  it('rejects the pre-change source-less Slack snapshot once the discriminator is required', () => {
     const contentHash = createHash('sha256').update(preChangeInstructions, 'utf8').digest('hex')
     expect(contentHash).toBe('de3272639a1d390f3dcf915e65b6c057bf0b9eb91c51545572eb1e484c8c1a22')
 
-    const legacy = readExecutionSourceContext({
-      slackExecutionContext: validContext({
-        collaborationSkill: {
-          instructions: preChangeInstructions,
-          contentHash,
-        },
-      }),
-    })
-
-    expect(legacy).toMatchObject({
-      kind: 'legacy',
-      slackExecutionContext: { collaborationSkill: { instructions: preChangeInstructions, contentHash } },
-    })
+    expect(
+      readExecutionSourceContext({
+        slackExecutionContext: validContext({
+          collaborationSkill: {
+            instructions: preChangeInstructions,
+            contentHash,
+          },
+        }),
+      }).kind,
+    ).toBe('invalid')
     expect(
       readExecutionSourceContext({
         executionSource: SLACK_EXECUTION_SOURCE,
@@ -166,11 +163,5 @@ describe('Slack execution source/context validation', () => {
         }),
       }).kind,
     ).toBe('invalid')
-  })
-
-  it('accepts omitted source only through the bounded compatibility path without relabeling it', () => {
-    const legacy = readExecutionSourceContext({ slackExecutionContext: validContext() })
-    expect(legacy).toMatchObject({ kind: 'legacy', slackExecutionContext: validContext() })
-    expect(readExecutionSourceContext({}, { strict: true }).kind).toBe('invalid')
   })
 })

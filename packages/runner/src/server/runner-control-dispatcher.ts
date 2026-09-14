@@ -34,17 +34,12 @@ export interface RunnerControlDispatcherOutput {
 
 type ObjectValue = Record<string, unknown>
 
-export interface RunnerControlDispatcherOptions {
-  readonly strictExecutionSourceValidation?: boolean
-}
-
 export class RunnerControlDispatcher {
   private readonly live = new Set<string>()
 
   constructor(
     private readonly handlers: RunnerControlHandlers,
     private readonly output: RunnerControlDispatcherOutput,
-    private readonly options: RunnerControlDispatcherOptions = {},
   ) {}
 
   receive(text: string): void {
@@ -143,9 +138,7 @@ export class RunnerControlDispatcher {
           ? () => this.handlers.workspaceFileContent(params.query, params.path as string)
           : 'invalid'
       case 'session.followup':
-        return isFollowup(params, this.options.strictExecutionSourceValidation === true)
-          ? () => this.handlers.sessionFollowup(normalizeFollowup(params))
-          : 'invalid'
+        return isFollowup(params) ? () => this.handlers.sessionFollowup(normalizeFollowup(params)) : 'invalid'
       case 'session.stop':
         return isStop(params) ? () => this.handlers.sessionStop(normalizeStop(params)) : 'invalid'
       case 'session.command':
@@ -241,10 +234,7 @@ function isAttachment(value: unknown): boolean {
   )
 }
 
-function isFollowup(
-  value: ObjectValue,
-  strictExecutionSourceValidation: boolean,
-): value is ObjectValue & ReceiveFollowupPayload {
+function isFollowup(value: ObjectValue): value is ObjectValue & ReceiveFollowupPayload {
   const attachmentsValid =
     value.attachments === undefined ||
     value.attachments === null ||
@@ -257,7 +247,7 @@ function isFollowup(
     (value.inputId === undefined || value.inputId === null || nonempty(value.inputId)) &&
     nonempty(value.turnId) &&
     attachmentsValid &&
-    readExecutionSourceContext(value, { strict: strictExecutionSourceValidation }).kind !== 'invalid'
+    readExecutionSourceContext(value).kind !== 'invalid'
   )
 }
 

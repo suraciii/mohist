@@ -29,14 +29,11 @@ import {
   WorkspaceHomeClaimedError,
 } from './workspace-entity.js'
 import { executeOpenCodeTurn, executePiTurn, failureResult, type AgentJobTurnDeps } from './agent-job-turn.js'
-import { runnerLogger } from '../system/logger.js'
 import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
 import { renderTemplate, unresolvedReferences } from '../core/template.js'
 import { evaluateCompletion } from '../actions/expectations.js'
 import { captureAndUploadArtifactsForWork } from './artifact-side-effects.js'
 import { tryRecovery } from './recovery.js'
-
-const executionSourceLog = runnerLogger.child('execution-source')
 
 export { projectTurnToWorkItemResult } from './agent-job-turn.js'
 
@@ -51,8 +48,6 @@ export interface ManagerRuntimeSessionBinding {
 }
 
 export interface AgentJobExecutorOptions {
-  /** Source-less dispatches are accepted only during the bounded rollout window. */
-  readonly strictExecutionSourceValidation?: boolean
   readonly modelRetryInitialDelayMs?: number
   readonly modelRetryMaxDelayMs?: number
   readonly waitForModelRetry?: ModelRetryWaiter
@@ -113,12 +108,8 @@ export class AgentJobExecutor {
     }
 
     const payload = work.with ?? null
-    const sourceContext = readExecutionSourceContext(payload, {
-      strict: this.options.strictExecutionSourceValidation === true,
-    })
+    const sourceContext = readExecutionSourceContext(payload)
     if (sourceContext.kind === 'invalid') return failureResult('invalid-input', sourceContext.message)
-    if (sourceContext.kind === 'legacy')
-      executionSourceLog.warn('accepted source-less AgentJob dispatch through the bounded legacy path')
     const slackContext = sourceContext.slackExecutionContext
     const prompt = readPrompt(payload)
     const attachmentDescriptors = readAttachmentDescriptors(payload)

@@ -80,7 +80,6 @@ export interface FollowupHandlerDeps {
   createManagerExecutionBoundary?: typeof ManagerExecutionBoundary.create
   randomId?: () => string
   skillResolver?: SkillResolver
-  strictExecutionSourceValidation?: boolean
   bindingRecoveryCoordinator?: BindingRecoveryCoordinator | null
 }
 
@@ -121,11 +120,8 @@ async function handleFollowup(
   deps: FollowupHandlerDeps,
 ): Promise<FollowupDeliveryResult> {
   if (!payload) return unavailable()
-  const sourceContext = readExecutionSourceContext(payload, {
-    strict: deps.strictExecutionSourceValidation === true,
-  })
+  const sourceContext = readExecutionSourceContext(payload)
   if (sourceContext.kind === 'invalid') return unavailable()
-  if (sourceContext.kind === 'legacy') log.warn('accepted source-less follow-up through the bounded legacy path')
   const slackContext = sourceContext.slackExecutionContext
   const text = typeof payload.text === 'string' ? payload.text : ''
   const descriptors = parseAttachmentDescriptors(payload.attachments)
