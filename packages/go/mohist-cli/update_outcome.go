@@ -119,4 +119,3 @@ func runInstallUpdateWithOutcome(ctx context.Context, deps Dependencies, c comma
 func runInstallUpdateInternal(ctx context.Context, deps Dependencies, c command) int {
 	return runInstallUpdateOriginal(ctx, deps, c)
 }
-
