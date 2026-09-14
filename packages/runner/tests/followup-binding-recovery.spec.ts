@@ -18,6 +18,7 @@ function payload() {
     inputId: 'input-1',
     turnId: 'turn-1',
     operationId: 'operation-1',
+    executionSource: 'non-slack',
   } as const
 }
 

@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { join } from 'node:path'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
+import type { PolledDispatch } from '../src/core/types.js'
 import { defaultWorkspaceRegistryFilePath } from '../src/runtime/workspace-registry.js'
 import type { DefaultRunnerTestResources } from './support/test-resources.js'
 import { withDefaultRunnerTestResources } from './support/test-resources.js'
@@ -141,7 +142,7 @@ function createConvergenceMocks(): ConvergenceMocks {
     connect: vi.fn(async () => undefined),
     heartbeat: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
-    poll: vi.fn(async () => []),
+    poll: vi.fn(async (): Promise<PolledDispatch[]> => []),
     startControl: vi.fn(async () => undefined),
     stopControl: vi.fn(async () => undefined),
     getConnectionId: vi.fn(() => 'conn-1'),

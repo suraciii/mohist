@@ -24,7 +24,6 @@ export interface RunnerControlWebSocketClientOptions {
   onReconnected?: (connectionId: string) => void
   agentSessionRuntimeEventQueue?: AgentSessionRuntimeEventQueue | null
   processGeneration: string
-  strictExecutionSourceValidation?: boolean
 }
 
 interface Connection {
@@ -196,17 +195,11 @@ export class RunnerControlWebSocketClient {
       closePending: null,
       pingTimer: null,
       pongTimer: null,
-      dispatcher: new RunnerControlDispatcher(
-        this.options.handlers,
-        {
-          enqueue: (value, complete) => this.enqueue(connection, value, complete),
-          protocolError: () => this.protocolError(connection),
-          isCurrent: () => this.current === connection && !connection.fenced,
-        },
-        {
-          strictExecutionSourceValidation: this.options.strictExecutionSourceValidation === true,
-        },
-      ),
+      dispatcher: new RunnerControlDispatcher(this.options.handlers, {
+        enqueue: (value, complete) => this.enqueue(connection, value, complete),
+        protocolError: () => this.protocolError(connection),
+        isCurrent: () => this.current === connection && !connection.fenced,
+      }),
     })
     const socket = connection.socket
     this.candidate = connection

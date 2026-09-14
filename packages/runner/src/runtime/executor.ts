@@ -1,4 +1,4 @@
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { isAbsolute, relative, resolve } from 'node:path'
 import type { ActionError, ActionResult, JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import { isObject, stringInput } from '../core/json.js'
 import { errorMessage } from '../core/errors.js'
@@ -57,7 +57,7 @@ export class WorkExecutor {
     private readonly actions: ActionRegistry,
     private readonly workspaceManager: WorkspaceManager,
     private readonly connection: ServerConnection,
-    private readonly fallbackWorkDir = process.cwd(),
+    private readonly fallbackWorkDir: string | null = null,
     private readonly now: () => Date = () => new Date(),
     private openCodeRuntime: OpenCodeRuntime | null = null,
     private readonly agentJobExecutor: AgentJobExecutor | null = null,
@@ -118,7 +118,13 @@ export class WorkExecutor {
     log: TaskLogger,
   ): Promise<{ kind: 'ok'; workspace: ResolvedWorkspace } | { kind: 'failure'; result: WorkItemResult }> {
     try {
+      const workspaceRoot = this.workspaceRoot(work.variables ?? {})
       const wsName = readWorkspaceName(work)
+      if (!workspaceRoot && !wsName) {
+        throw new Error(
+          "Workflow dispatch requires an explicit non-empty 'variables.workspace.path' or 'variables.workspace.name'",
+        )
+      }
       if (wsName && this.namedWorkspaceManager && work.projectId) {
         const repositoryName = stringAt(work.variables ?? {}, ['repository', 'name'])
         const gitUrl = stringAt(work.variables ?? {}, ['repository', 'gitUrl'])
@@ -139,7 +145,10 @@ export class WorkExecutor {
         }
       }
       const info = await this.workspaceManager.prepare(work, signal, log)
-      return { kind: 'ok', workspace: infoToResolved(info) }
+      const workspace = infoToResolved(info)
+      if (!workspace.path.trim())
+        throw new Error('Workflow workspace preparation did not resolve a non-empty workspace path')
+      return { kind: 'ok', workspace }
     } catch (error) {
       return { kind: 'failure', result: workspaceSetupFailure(work, error) }
     }
@@ -198,6 +207,8 @@ export class WorkExecutor {
       const validatedWith = validation.input
       const renderedExpect = work.expect != null ? renderTemplate(work.expect, variables) : null
       const workspaceRoot = this.workspaceRoot(variables)
+      if (!workspaceRoot)
+        return workspaceSetupFailure(work, new Error('Workflow dispatch has no resolved workspace path'))
       const directories = await this.resolveExecutionDirectories(renderedWith, variables, workspaceRoot)
       try {
         const workDir = directories.action.path
@@ -339,6 +350,8 @@ export class WorkExecutor {
     const rawChecks: unknown[] = Array.isArray(work.with?.checks) ? work.with.checks : []
     const checks = rawChecks.filter(isCheck)
     const workspaceRoot = this.workspaceRoot(variables)
+    if (!workspaceRoot)
+      return workspaceSetupFailure(work, new Error('Workflow dispatch has no resolved workspace path'))
     const builder = this.buildCheckHost.bind(this)
     return await executeCheckDispatch(checks, variables, {
       actions: this.actions,
@@ -390,8 +403,9 @@ export class WorkExecutor {
     }
   }
 
-  private workspaceRoot(variables: JsonObject) {
-    return stringAt(variables, ['workspace', 'path']) ?? join(this.fallbackWorkDir, 'default')
+  private workspaceRoot(variables: JsonObject): string | null {
+    const path = stringAt(variables, ['workspace', 'path'])
+    return path && path.trim().length > 0 ? path : null
   }
 
   private async resolveWorkDir(withInput: JsonObject | null, workspaceRoot: string) {

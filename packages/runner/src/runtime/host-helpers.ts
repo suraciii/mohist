@@ -76,10 +76,10 @@ export function openCodeOwners(
   return [
     ...[...inFlight]
       .filter((entry) => usesOpenCode(entry.work) && !isManagerExecutionWork(entry.work))
-      .map((entry) => workKey(entry.work)),
+      .map((entry) => workKey(entry.work, entry.reportOwner)),
     ...[...awaitingAck]
       .filter((entry) => usesOpenCode(entry.work) && !isManagerExecutionWork(entry.work))
-      .map((entry) => workKey(entry.work)),
+      .map((entry) => workKey(entry.work, entry.entry.reportOwner)),
   ]
 }
 

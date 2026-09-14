@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRuntimeTurnEventProjector } from '../src/runtime/opencode/event-projection.js'
 import {
@@ -12,12 +13,22 @@ import {
   type ReplyGuardRuntimeHandle,
 } from '../src/runtime/reply-guard.js'
 import { createPiProjector } from '../src/runtime/pi/projector.js'
-import type { SlackExecutionContext } from '../src/runtime/slack-execution-context.js'
+import {
+  PUBLISHED_SLACK_SKILL_NAME,
+  PUBLISHED_SLACK_SKILL_VERSION,
+  type SlackExecutionContext,
+} from '../src/runtime/slack-execution-context.js'
 
 const runtime: ReplyGuardRuntimeHandle = { kind: 'pi', isAvailable: () => true }
 
 function slackContext(): SlackExecutionContext {
-  const instructions = 'You are the speaker in this Slack conversation. Silence is valid.'
+  const instructions = readFileSync(
+    new URL(
+      '../../server/src/Mohist.Server/Agent/Services/Assets/mohist-slack-collaboration.skill.md',
+      import.meta.url,
+    ),
+    'utf8',
+  )
   return {
     version: 1,
     replyAnchor: {
@@ -31,8 +42,8 @@ function slackContext(): SlackExecutionContext {
       dispatchRef: 'dispatch-1',
     },
     collaborationSkill: {
-      name: 'mohist-slack-collaboration',
-      version: '1',
+      name: PUBLISHED_SLACK_SKILL_NAME,
+      version: PUBLISHED_SLACK_SKILL_VERSION,
       instructions,
       contentHash: createHash('sha256').update(instructions, 'utf8').digest('hex'),
     },

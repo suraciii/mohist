@@ -117,7 +117,7 @@ describe('recovery round across poll -> execute -> report', () => {
       awaitingAck: [],
       admissionReady: false,
     })
-    const fresh = polled[0]!
+    const fresh = polled[0]!.work
     expect(Object.prototype.hasOwnProperty.call(fresh, 'recoveryRemaining')).toBe(true)
     expect(fresh.recoveryRemaining).toBeNull()
 
@@ -162,7 +162,7 @@ describe('recovery round across poll -> execute -> report', () => {
         awaitingAck: [],
         admissionReady: false,
       })
-    )[0]!
+    )[0]!.work
     expect(redispatched.recoveryRemaining).toBe(1)
 
     const nextExecutor = executor(workDir) as WorkExecutor & { invokedOptions: JsonObject[] }

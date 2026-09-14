@@ -99,7 +99,7 @@ public partial class WorkflowItemTranslatorSpecs
         using var doc = JsonDocument.Parse(dispatch.Variables!);
         var roots = doc.RootElement.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
         Assert.Subset(
-            new HashSet<string>(["workflow", "stage", "work", "issue", "repository", "workspace", "vars"], StringComparer.Ordinal),
+            new HashSet<string>(["executionSource", "workflow", "stage", "work", "issue", "repository", "workspace", "vars"], StringComparer.Ordinal),
             roots);
         Assert.DoesNotContain("custom", roots);
         Assert.DoesNotContain("mohist", roots);

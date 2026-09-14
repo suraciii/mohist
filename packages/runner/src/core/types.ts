@@ -129,10 +129,28 @@ export interface ManagerExecutionGrantResponse {
   deploymentEpoch: string
 }
 
+/**
+ * Server-owned identity used only to route a report. It remains separate
+ * from the work item so an invalid owner envelope can still be settled
+ * without repairing or inferring the work's execution identity.
+ */
+export interface DispatchReportOwner {
+  readonly ownerKind: 'workflow' | 'agent-job'
+  readonly workflowRunId?: string | null
+  readonly agentJobId?: string | null
+}
+
 export interface PolledDispatch {
   readonly work: DispatchWorkItem
+  readonly reportOwner?: DispatchReportOwner
   readonly managerExecutionGrant?: ManagerExecutionGrantResponse
   readonly originMarker?: string | null
+  /**
+   * A per-dispatch boundary failure. Poll keeps the work item in the
+   * reported set so the Host can settle malformed Manager metadata through
+   * the normal report/ack path instead of dropping the claim.
+   */
+  readonly validationFailure?: WorkItemResult
 }
 
 export type WorkDispatchResponse = {
@@ -196,6 +214,11 @@ export type WorkDispatchResponse = {
    * semantics (issue-557 T-006).
    */
   capabilityRevision?: string | null
+  /**
+   * Canonical report-routing identity. It is kept outside DispatchWorkItem
+   * so invalid execution fields cannot erase the owning aggregate identity.
+   */
+  reportOwner?: DispatchReportOwner | null
   /** One-shot plaintext grant. It is consumed into the Runner wrapper and
    * is never copied onto DispatchWorkItem or a work report. */
   managerExecutionGrant?: ManagerExecutionGrantResponse | null
@@ -414,12 +437,6 @@ export interface RunnerOptions {
   // large value to effectively disable the periodic tick. Used by tests
   // to drive ticks deterministically.
   cleanupLoopIntervalMs?: number
-
-  /**
-   * Reject source-less execution only after the bounded legacy drain gate.
-   * Explicit source/context pairs are always validated.
-   */
-  strictExecutionSourceValidation?: boolean
 
   /** Idle grace before an unowned shared Agent runtime is terminated. */
   runtimeIdleGraceMs?: number

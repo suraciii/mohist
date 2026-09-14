@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { createFollowupHandler } from './followup-handler.js'
@@ -371,7 +372,6 @@ describe('follow-up attachment delivery', () => {
         awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
       } as never,
       openCodeRuntime: (() => ({ ready: () => true })) as never,
-      strictExecutionSourceValidation: true,
     })
 
     const result = await receive({
@@ -589,6 +589,7 @@ describe('follow-up attachment delivery', () => {
       text: '',
       inputId: 'input-1',
       turnId: 'turn-1',
+      executionSource: 'non-slack',
       attachments: [{ id: 'attachment-1', name: 'notes.txt', contentType: 'text/plain', size: 20 }],
       callerTempUrl: 'https://provider.invalid/temp-token',
       providerToken: 'secret-token',
@@ -633,11 +634,18 @@ function genericFollowupPayload(runtime: 'opencode' | 'pi') {
     text: 'continue',
     operationId: 'operation-1',
     turnId: 'turn-1',
+    executionSource: 'non-slack',
   } as const
 }
 
 function managerFollowupPayload(runtime: 'opencode' | 'pi' = 'pi') {
-  const instructions = 'Manager collaboration instructions'
+  const instructions = readFileSync(
+    new URL(
+      '../../../server/src/Mohist.Server/Agent/Services/Assets/mohist-slack-collaboration.skill.md',
+      import.meta.url,
+    ),
+    'utf8',
+  )
   return {
     target: {
       kind: 'generic',
@@ -653,6 +661,7 @@ function managerFollowupPayload(runtime: 'opencode' | 'pi' = 'pi') {
     text: 'continue',
     operationId: 'operation-1',
     turnId: 'turn-1',
+    executionSource: 'slack',
     slackExecutionContext: {
       version: 1,
       replyAnchor: {
@@ -668,8 +677,8 @@ function managerFollowupPayload(runtime: 'opencode' | 'pi' = 'pi') {
         ownerKind: 'manager',
       },
       collaborationSkill: {
-        name: 'test-skill',
-        version: '1',
+        name: 'mohist-slack-collaboration',
+        version: '1.0.4',
         instructions,
         contentHash: createHash('sha256').update(instructions, 'utf8').digest('hex'),
       },

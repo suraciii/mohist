@@ -3,6 +3,7 @@ import { reportAndRequireDurableAck } from './work-report.js'
 import { isShutdownFailureResult, isSyntheticStopResult } from './host-update-shutdown.js'
 import { AWAITING_ACK_RETRY_INTERVAL_MS } from './host-timing.js'
 import { runnerLogger } from '../system/logger.js'
+import { validateDispatchEnvelope } from '../server/connection-dispatch.js'
 import type { AwaitingAckEntry, InFlightEntry } from './host-state.js'
 import type { DispatchWorkItem, RunnerOptions, WorkItemResult } from '../core/types.js'
 import type { ServerConnection } from '../server/connection.js'
@@ -71,6 +72,7 @@ export async function reportOnce(
     held.entry.result,
     held.entry.result.agentBinding,
     signal,
+    held.entry.reportOwner,
   )
   context.awaitingAck.delete(key)
   context.syncOpenCodeWorkOwners()
@@ -119,9 +121,10 @@ export async function executeAndTransition(
   signal: AbortSignal,
   key: string,
   entry: InFlightEntry,
+  validationFailure: WorkItemResult | null = null,
 ): Promise<void> {
   try {
-    await executeAndTransitionCore(context, work, signal, key, entry)
+    await executeAndTransitionCore(context, work, signal, key, entry, validationFailure)
   } finally {
     await context.releaseManagerExecution(key)
   }
@@ -133,26 +136,32 @@ async function executeAndTransitionCore(
   signal: AbortSignal,
   key: string,
   entry: InFlightEntry,
+  validationFailure: WorkItemResult | null,
 ): Promise<void> {
   let result: WorkItemResult
   try {
-    const runtime = workRuntime(work)
-    if (work.capabilityRevision && runtime && context.currentCatalogRevision(runtime) !== work.capabilityRevision) {
-      log.warn('rejecting stale capability snapshot before execution', {
-        work: work.workId,
-        runtime,
-        frozen: work.capabilityRevision,
-        current: context.currentCatalogRevision(runtime),
-      })
-      result = staleCapabilityResult(work)
+    const envelopeFailure = validationFailure ?? validateDispatchEnvelope(work)
+    if (envelopeFailure) {
+      result = envelopeFailure
     } else {
-      result = await executeWork(
-        context.taskLogDeps(),
-        context.workExecutorRef()!,
-        work,
-        signal,
-        context.managerExecutionFor(key),
-      )
+      const runtime = workRuntime(work)
+      if (work.capabilityRevision && runtime && context.currentCatalogRevision(runtime) !== work.capabilityRevision) {
+        log.warn('rejecting stale capability snapshot before execution', {
+          work: work.workId,
+          runtime,
+          frozen: work.capabilityRevision,
+          current: context.currentCatalogRevision(runtime),
+        })
+        result = staleCapabilityResult(work)
+      } else {
+        result = await executeWork(
+          context.taskLogDeps(),
+          context.workExecutorRef()!,
+          work,
+          signal,
+          context.managerExecutionFor(key),
+        )
+      }
     }
   } catch (error) {
     if (signal.aborted && !entry.managerInvalidated) return
@@ -181,7 +190,12 @@ async function executeAndTransitionCore(
   context.inFlight.delete(key)
   context.awaitingAck.set(key, {
     work,
-    entry: { result, attempts: 0, retryAt: null },
+    entry: {
+      result,
+      attempts: 0,
+      retryAt: null,
+      ...(entry.reportOwner ? { reportOwner: entry.reportOwner } : {}),
+    },
   })
   context.syncOpenCodeWorkOwners()
   try {

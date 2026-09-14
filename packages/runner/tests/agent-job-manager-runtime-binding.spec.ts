@@ -73,7 +73,7 @@ describe('Manager AgentJob runtime binding', () => {
         projectId: 'project-1',
         initialInputId: 'input-1',
         initialTurnId: 'turn-1',
-        with: { prompt: 'run', runtime: 'opencode' },
+        with: { prompt: 'run', runtime: 'opencode', executionSource: 'non-slack' },
         variables: { workspace: { path: '/work/manager' } },
       }
 

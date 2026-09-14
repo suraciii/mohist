@@ -5,6 +5,16 @@ using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Api;
 
+/// <summary>
+/// The owning aggregate identity is repeated outside the execution envelope
+/// so a malformed work owner cannot prevent the Runner from settling the
+/// dispatch through the report route.
+/// </summary>
+public record WorkDispatchReportOwner(
+    string OwnerKind,
+    string? WorkflowRunId = null,
+    string? AgentJobId = null);
+
 public record WorkDispatchResponse(
     string WorkflowRunId,
     string WorkId,
@@ -37,5 +47,6 @@ public record WorkDispatchResponse(
     AgentExecutionDefinition? AgentDefinition = null,
     AgentSessionStartup? AgentSessionStartup = null,
     string? ActionAttemptId = null,
+    WorkDispatchReportOwner? ReportOwner = null,
     ManagerExecutionGrant? ManagerExecutionGrant = null,
     string? OriginMarker = null);

@@ -294,7 +294,7 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     })
 
     const work = buildAgentJobWork({
-      with: { prompt: 'ship it', runtime: 'opencode' },
+      with: { prompt: 'ship it', runtime: 'opencode', executionSource: 'non-slack' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
@@ -334,7 +334,12 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     const commonWork = {
       agentSessionId: null,
       agentSessionStartup: startup,
-      with: { prompt: 'target task', instructions: 'follow the brief', runtime: 'opencode' },
+      with: {
+        prompt: 'target task',
+        instructions: 'follow the brief',
+        runtime: 'opencode',
+        executionSource: 'non-slack',
+      },
     } satisfies Partial<DispatchWorkItem>
     const openCodeResult = await executor.execute(buildAgentJobWork(commonWork), new AbortController().signal)
     const piResult = await executor.execute(
@@ -342,7 +347,7 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
         ...commonWork,
         workId: 'aj-pi',
         agentJobId: 'aj-pi',
-        with: { ...commonWork.with, runtime: 'pi' },
+        with: { ...commonWork.with, runtime: 'pi', executionSource: 'non-slack' },
       }),
       new AbortController().signal,
     )
@@ -382,7 +387,7 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     })
 
     const work = buildAgentJobWork({
-      with: { prompt: 'ship it on pi', runtime: 'pi' },
+      with: { prompt: 'ship it on pi', runtime: 'pi', executionSource: 'non-slack' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
@@ -407,7 +412,9 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     })
 
     const withPayload: JsonObject =
-      runtime === null ? { prompt: 'invalid dispatch' } : { prompt: 'invalid dispatch', runtime }
+      runtime === null
+        ? { prompt: 'invalid dispatch', executionSource: 'non-slack' }
+        : { prompt: 'invalid dispatch', runtime, executionSource: 'non-slack' }
     const work = buildAgentJobWork({ with: withPayload })
     const result = await executor.execute(work, new AbortController().signal)
 
@@ -436,7 +443,7 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
 
     const work = buildAgentJobWork({
       initialTurnId: 'turn-persisted',
-      with: { prompt: 'pi unavailable', runtime: 'pi' },
+      with: { prompt: 'pi unavailable', runtime: 'pi', executionSource: 'non-slack' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
@@ -467,7 +474,7 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
 
     const work = buildAgentJobWork({
       initialTurnId: 'turn-logical-only',
-      with: { prompt: 'pi unavailable', runtime: 'pi' },
+      with: { prompt: 'pi unavailable', runtime: 'pi', executionSource: 'non-slack' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
@@ -490,7 +497,7 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     })
 
     const work = buildAgentJobWork({
-      with: { prompt: 'opencode unavailable', runtime: 'opencode' },
+      with: { prompt: 'opencode unavailable', runtime: 'opencode', executionSource: 'non-slack' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
@@ -511,7 +518,7 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     })
 
     const work = buildAgentJobWork({
-      with: { prompt: 'pi accessor null', runtime: 'pi' },
+      with: { prompt: 'pi accessor null', runtime: 'pi', executionSource: 'non-slack' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
@@ -527,7 +534,7 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
-      with: { prompt: 'audit pi', runtime: 'pi' },
+      with: { prompt: 'audit pi', runtime: 'pi', executionSource: 'non-slack' },
     })
     await executor.execute(work, new AbortController().signal)
 
@@ -545,7 +552,13 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
 
     const work = buildAgentJobWork({
       initialTurnId: 'turn-created-success',
-      with: { prompt: 'execute on pi', runtime: 'pi', model: 'openai/gpt-5.5', reasoningEffort: 'high' },
+      with: {
+        prompt: 'execute on pi',
+        runtime: 'pi',
+        model: 'openai/gpt-5.5',
+        reasoningEffort: 'high',
+        executionSource: 'non-slack',
+      },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
@@ -578,7 +591,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     const result = await executor.execute(
       buildAgentJobWork({
         initialTurnId: 'turn-created-attach-failure',
-        with: { prompt: 'attach Pi session', runtime: 'pi' },
+        with: { prompt: 'attach Pi session', runtime: 'pi', executionSource: 'non-slack' },
       }),
       new AbortController().signal,
     )
@@ -601,7 +614,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
 
     const result = await executor.execute(
       buildAgentJobWork({
-        with: { prompt: 'do not alias', runtime: 'pi', variant: 'high' },
+        with: { prompt: 'do not alias', runtime: 'pi', variant: 'high', executionSource: 'non-slack' },
       }),
       new AbortController().signal,
     )
@@ -618,7 +631,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
 
     const result = await executor.execute(
       buildAgentJobWork({
-        with: { prompt: 'needs model', runtime: 'pi', reasoningEffort: 'high' },
+        with: { prompt: 'needs model', runtime: 'pi', reasoningEffort: 'high', executionSource: 'non-slack' },
       }),
       new AbortController().signal,
     )
@@ -656,7 +669,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const result = await executor.execute(
-      buildAgentJobWork({ with: { prompt: 'create a Pi session', runtime: 'pi' } }),
+      buildAgentJobWork({ with: { prompt: 'create a Pi session', runtime: 'pi', executionSource: 'non-slack' } }),
       new AbortController().signal,
     )
 
@@ -672,7 +685,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
-      with: { prompt: 'follow-up', runtime: 'pi' },
+      with: { prompt: 'follow-up', runtime: 'pi', executionSource: 'non-slack' },
     })
     await executor.execute(work, new AbortController().signal)
 
@@ -689,7 +702,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
 
     const work = buildAgentJobWork({
       initialTurnId: 'turn-final-projection',
-      with: { prompt: 'label me', runtime: 'pi', model: 'openai/gpt-5.5' },
+      with: { prompt: 'label me', runtime: 'pi', model: 'openai/gpt-5.5', executionSource: 'non-slack' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
@@ -714,7 +727,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
 
     const work = buildAgentJobWork({
       agentSessionId: 'session-pi',
-      with: { prompt: 'project pi facts', runtime: 'pi' },
+      with: { prompt: 'project pi facts', runtime: 'pi', executionSource: 'non-slack' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
@@ -763,7 +776,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
 
     const work = buildAgentJobWork({
       initialTurnId: 'turn-created-failure',
-      with: { prompt: 'no creds', runtime: 'pi', model: 'openai/gpt-uncredentialed' },
+      with: { prompt: 'no creds', runtime: 'pi', model: 'openai/gpt-uncredentialed', executionSource: 'non-slack' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
@@ -803,7 +816,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
-      with: { prompt: 'stale binding', runtime: 'pi' },
+      with: { prompt: 'stale binding', runtime: 'pi', executionSource: 'non-slack' },
     })
     const result = await executor.execute(work, new AbortController().signal)
 
@@ -820,7 +833,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     const executor = new AgentJobExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
-      with: { prompt: 'main task', instructions: 'be terse', runtime: 'pi' },
+      with: { prompt: 'main task', instructions: 'be terse', runtime: 'pi', executionSource: 'non-slack' },
     })
     await executor.execute(work, new AbortController().signal)
 

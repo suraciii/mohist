@@ -1,7 +1,7 @@
 import { buildExecutionEnvelope } from './execution-envelope.js'
 import {
   inlineSlackCollaborationSkill,
-  readExecutionSourceContext,
+  readSlackExecutionContext,
   type SlackExecutionContext,
 } from './slack-execution-context.js'
 import type { ResolvedSkill } from './skill-resolver.js'
@@ -171,9 +171,8 @@ export class ReplyGuardCoordinator {
   private activeAdvisoryAbort: (() => void) | null = null
 
   constructor(options: ReplyGuardCoordinatorOptions) {
-    const contextRead = readExecutionSourceContext({ slackExecutionContext: options.slackExecutionContext })
-    this.context =
-      contextRead.kind === 'resolved' || contextRead.kind === 'legacy' ? contextRead.slackExecutionContext : null
+    const contextRead = readSlackExecutionContext({ slackExecutionContext: options.slackExecutionContext })
+    this.context = contextRead.kind === 'resolved' ? contextRead.value : null
     this.runtime = options.runtime
     this.runtimeSessionId = nonEmptyString(options.runtimeSessionId) ? options.runtimeSessionId : null
     this.workDir = nonEmptyString(options.workDir) ? options.workDir : null

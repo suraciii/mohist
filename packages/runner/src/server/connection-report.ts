@@ -1,4 +1,4 @@
-import type { AgentExecutionBinding, DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type { AgentExecutionBinding, DispatchReportOwner, DispatchWorkItem, WorkItemResult } from '../core/types.js'
 
 type Fetcher = (input: string, init: RequestInit) => Promise<Response>
 type AgentReportBinding = AgentExecutionBinding
@@ -10,8 +10,11 @@ export async function reportWork(
   result: WorkItemResult,
   signal: AbortSignal,
   binding?: AgentReportBinding,
+  reportOwner?: DispatchReportOwner,
 ): Promise<{ verdict: 'accepted' | 'refused' | 'outstanding' | null }> {
-  const ownerKind = work.ownerKind?.trim().toLowerCase()
+  const ownerKind = reportOwner?.ownerKind ?? work.ownerKind?.trim().toLowerCase()
+  const workflowRunId = reportOwner ? reportOwner.workflowRunId : work.workflowRunId
+  const agentJobId = reportOwner ? reportOwner.agentJobId : work.agentJobId
   const body: Record<string, unknown> = {
     workId: work.workId,
     actionAttemptId: work.actionAttemptId ?? null,
@@ -33,8 +36,11 @@ export async function reportWork(
     body.runtime = binding.runtime
     body.runtimeSessionId = binding.runtimeSessionId
   }
-  if (work.agentJobId) body.agentJobId = work.agentJobId
-  if (ownerKind !== 'agent-job') body.workflowRunId = work.workflowRunId
+  if (ownerKind === 'agent-job') {
+    if (agentJobId) body.agentJobId = agentJobId
+  } else if (ownerKind === 'workflow' && workflowRunId) {
+    body.workflowRunId = workflowRunId
+  }
 
   const response = await fetcher(url('report'), {
     method: 'POST',

@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
+import type { PolledDispatch } from '../src/core/types.js'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import type { SessionTarget } from '../src/server/session-target.js'
 import { deferred } from './support/deferred.js'
@@ -90,7 +91,7 @@ function createReportingMocks(): ReportingMocks {
     connect: vi.fn(async () => undefined),
     heartbeat: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
-    poll: vi.fn(async () => []),
+    poll: vi.fn(async (): Promise<PolledDispatch[]> => []),
     report: vi.fn(async () => ({ verdict: 'accepted' as const })),
     uploadTaskLog: vi.fn(async () => ({
       status: 'changed',
@@ -220,6 +221,47 @@ function newRunnerHost(pollIntervalMs: number = QUIET_INTERVAL_MS): RunnerHost {
 }
 
 describe('RunnerHost', () => {
+  it('settles a synchronously invalid dispatch before the next poll reports it as in flight', async () => {
+    const reported = deferred<void>()
+    const secondPollStarted = deferred<void>()
+    const invalid = {
+      workflowRunId: 'wr-invalid-envelope',
+      workId: 'work-invalid-envelope',
+      workType: 'task',
+      ownerKind: 'agent-job',
+      agentJobId: 'aj-invalid-envelope',
+      projectId: 'project-1',
+      with: { prompt: 'must not execute', runtime: 'opencode' },
+      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+    }
+    let pollCount = 0
+    let secondPollBody: { inFlight: string[]; awaitingAck: string[] } | null = null
+    poll.mockImplementation(async (_signal: unknown, body: { inFlight: string[]; awaitingAck: string[] }) => {
+      pollCount += 1
+      if (pollCount === 1) return [{ work: invalid }]
+      secondPollBody = body
+      secondPollStarted.resolve()
+      return []
+    })
+    report.mockImplementation(async () => {
+      reported.resolve()
+      return { verdict: 'accepted' as const }
+    })
+    const controller = new AbortController()
+    const run = newRunnerHost(POLL_INTERVAL_MS).run(controller.signal)
+    try {
+      await reported.promise
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      await secondPollStarted.promise
+
+      expect(report).toHaveBeenCalledTimes(1)
+      expect(secondPollBody).toEqual(expect.objectContaining({ inFlight: [], awaitingAck: [] }))
+    } finally {
+      controller.abort()
+      await run.catch(() => undefined)
+    }
+  })
+
   it('Restart_IgnoresLegacyResultStateAndClaimsOnlyServerDispatchedWork', async () => {
     const legacyPath = '/virtual/mohist-runner-test/.mohist/runner-state/work-results.json'
     await currentReportingTestState().resources.fileSystem.writeText(
@@ -245,7 +287,8 @@ describe('RunnerHost', () => {
       workType: 'task',
       uses: 'test/block',
       ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      projectId: 'project-1',
+      variables: { executionSource: 'non-slack', workspace: { path: '/virtual/mohist-runner-test' } },
     }
     const reported = deferred<void>()
     const executeWithLog = vi
@@ -254,7 +297,7 @@ describe('RunnerHost', () => {
         result: { status: 'completed' },
         collector: collector!,
       }))
-    poll.mockResolvedValueOnce([newWork]).mockResolvedValue([])
+    poll.mockResolvedValueOnce([{ work: newWork }]).mockResolvedValue([])
     report.mockImplementation(async (work: { workId: string }) => {
       if (work.workId === newWork.workId) reported.resolve()
       return { verdict: 'accepted' as const }
@@ -285,13 +328,14 @@ describe('RunnerHost', () => {
       workType: 'task',
       uses: 'mohist/opencode',
       ownerKind: 'workflow',
+      projectId: 'project-1',
       capabilityRevision: 'revision-from-an-older-catalog',
-      variables: { workspace: { path: '/virtual/stale-capability' } },
+      variables: { executionSource: 'non-slack', workspace: { path: '/virtual/stale-capability' } },
     }
     let pollCount = 0
     poll.mockImplementation(async () => {
       pollCount += 1
-      return pollCount === 1 ? [work] : []
+      return pollCount === 1 ? [{ work }] : []
     })
     report.mockImplementation(
       async (_reportedWork: unknown, result: { requeue?: boolean; error?: { code?: string } }) => {
@@ -345,12 +389,13 @@ describe('RunnerHost', () => {
       workType: 'task',
       uses: 'test/block',
       ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      projectId: 'project-1',
+      variables: { executionSource: 'non-slack', workspace: { path: '/virtual/mohist-runner-test' } },
     }
     let pollIndex = 0
     poll.mockImplementation(async () => {
       pollIndex += 1
-      if (pollIndex === 1) return [held]
+      if (pollIndex === 1) return [{ work: held }]
       secondPollStarted.resolve()
       return []
     })
@@ -402,13 +447,14 @@ describe('RunnerHost', () => {
       workType: 'task',
       uses: 'test/block',
       ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      projectId: 'project-1',
+      variables: { executionSource: 'non-slack', workspace: { path: '/virtual/mohist-runner-test' } },
     }
     let pollIndex = 0
     poll.mockImplementation(async () => {
       pollCalls[pollIndex]?.resolve()
       pollIndex += 1
-      return pollIndex <= 3 ? [same] : []
+      return pollIndex <= 3 ? [{ work: same }] : []
     })
     const host = newRunnerHost(POLL_INTERVAL_MS)
     blockingAction.mockResolvedValue({
@@ -448,7 +494,8 @@ describe('RunnerHost', () => {
         workType: 'task',
         uses: 'test/block',
         ownerKind: 'workflow',
-        variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+        projectId: 'project-1',
+        variables: { executionSource: 'non-slack', workspace: { path: '/virtual/mohist-runner-test' } },
       },
       {
         workflowRunId: 'wr-binding-failure',
@@ -456,10 +503,11 @@ describe('RunnerHost', () => {
         workType: 'task',
         uses: 'test/block',
         ownerKind: 'workflow',
-        variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+        projectId: 'project-1',
+        variables: { executionSource: 'non-slack', workspace: { path: '/virtual/mohist-runner-test' } },
       },
     ]
-    poll.mockResolvedValueOnce(works).mockResolvedValue([])
+    poll.mockResolvedValueOnce(works.map((work) => ({ work }))).mockResolvedValue([])
     const executions = new Map<string, number>()
     const executeWithLog = vi
       .spyOn(WorkExecutor.prototype, 'executeWithLog')
@@ -552,9 +600,10 @@ describe('RunnerHost', () => {
       workType: 'task',
       uses: 'test/block',
       ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      projectId: 'project-1',
+      variables: { executionSource: 'non-slack', workspace: { path: '/virtual/mohist-runner-test' } },
     }
-    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
+    poll.mockResolvedValueOnce([{ work }]).mockResolvedValue([])
     const host = newRunnerHost()
     blockingAction.mockResolvedValue({ output: { message: 'ok' } })
     const stopLog = onCapturedLog((record) => {
@@ -636,9 +685,10 @@ describe('RunnerHost', () => {
       workType: 'task',
       uses: 'test/block',
       ownerKind: 'workflow',
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      projectId: 'project-1',
+      variables: { executionSource: 'non-slack', workspace: { path: '/virtual/mohist-runner-test' } },
     }
-    poll.mockResolvedValueOnce([work]).mockResolvedValue([])
+    poll.mockResolvedValueOnce([{ work }]).mockResolvedValue([])
     const executeWithLog = vi
       .spyOn(WorkExecutor.prototype, 'executeWithLog')
       .mockImplementation(async (_work, _signal, collector) => ({
