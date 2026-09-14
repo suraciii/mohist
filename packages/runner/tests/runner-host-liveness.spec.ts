@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
+import type { PolledDispatch } from '../src/core/types.js'
 import type { SessionTarget } from '../src/server/session-target.js'
 import { deferred } from './support/deferred.js'
 import { capturedLogs } from './support/logger-test.js'
@@ -146,7 +147,7 @@ function createLivenessMocks(): LivenessMocks {
     connect: vi.fn(async () => undefined),
     heartbeat: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
-    poll: vi.fn(async () => []),
+    poll: vi.fn(async (): Promise<PolledDispatch[]> => []),
     report: vi.fn(async () => undefined),
     uploadTaskLog: vi.fn(async () => ({ status: 'changed', accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),

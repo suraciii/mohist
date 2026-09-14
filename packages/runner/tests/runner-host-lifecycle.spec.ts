@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
+import type { PolledDispatch } from '../src/core/types.js'
 import { getOpenCodeRuntimeFactory } from '../src/runtime/opencode/index.js'
 import type { SessionTarget } from '../src/server/session-target.js'
 import type { FollowupTargetResolution } from '../src/server/session-target.js'
@@ -149,7 +150,7 @@ function createLifecycleMocks(): LifecycleMocks {
     connect: vi.fn(async () => undefined),
     heartbeat: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
-    poll: vi.fn(async () => []),
+    poll: vi.fn(async (): Promise<PolledDispatch[]> => []),
     report: vi.fn(async () => ({ verdict: 'accepted' })),
     uploadTaskLog: vi.fn(async () => ({ status: 'changed', accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),

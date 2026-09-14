@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost, startTaskLogFlushTrigger } from '../src/runtime/host.js'
+import type { PolledDispatch } from '../src/core/types.js'
 import type { SessionTarget } from '../src/server/session-target.js'
 import type { GitRunner } from '../src/runtime/git-probe.js'
 import { deferred, type Deferred } from './support/deferred.js'
@@ -83,7 +84,7 @@ function createTaskLogMocks(): TaskLogMocks {
     connect: vi.fn(async () => undefined),
     heartbeat: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
-    poll: vi.fn(async () => []),
+    poll: vi.fn(async (): Promise<PolledDispatch[]> => []),
     report: vi.fn(async () => ({})),
     uploadTaskLog: vi.fn(async () => ({ status: 'changed', accepted: 0, truncated: false })),
     fetchConfig: vi.fn(async () => null),

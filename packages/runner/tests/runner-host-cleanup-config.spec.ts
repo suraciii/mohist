@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { join } from 'node:path'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import type { CleanupLoopResult } from '../src/runtime/cleanup-loop.js'
-import type { CleanupPolicy } from '../src/core/types.js'
+import type { CleanupPolicy, PolledDispatch } from '../src/core/types.js'
 import { installReadyOpenCodeRuntimeFactory } from './support/opencode-runtime-factory.js'
 import type { FakeRuntimeHandles } from './support/opencode-runtime-factory.js'
 import { capturedLogs } from './support/logger-test.js'
@@ -108,7 +108,7 @@ vi.mock('../src/server/connection.js', () => ({
 
     async disconnect() {}
 
-    async poll() {
+    async poll(): Promise<PolledDispatch[]> {
       currentCleanupTestState().hostEvents?.polled.resolve()
       return []
     }
