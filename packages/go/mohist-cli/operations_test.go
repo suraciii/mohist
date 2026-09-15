@@ -382,3 +382,208 @@ func TestOperationsNotificationUsesInjectedProbeAndWritesLocalConfig(t *testing.
 		t.Fatalf("written=%q output=%q", written, out.String())
 	}
 }
+
+const runnerStatusListJSON = `{"success":true,"data":{"observedAt":"2026-08-01T12:00:00Z","inventory":{"state":"ready","nextActions":[]},"runners":[{"identity":{"id":"runner-1","hostname":"build-1","kind":"external","component":"mohist-runner","sourceRevision":"abc123","releaseId":"release-42","generation":7},"presence":{"state":"online","lastObservedAt":"2026-08-01T12:00:00Z"},"control":{"state":"connected","generation":"server-epoch:12"},"admission":{"state":"blocked","reasonCodes":["capacity-full"]},"capabilities":["spec/*"],"runtimes":[{"name":"pi","readiness":{"state":"ready","generation":3,"reasonCode":null},"catalog":{"complete":true,"capabilityRevision":"catalog-sha","modelCount":1,"models":["openai/gpt-5"],"variants":{},"supportsReasoningEffort":true,"reasoningEfforts":{"openai/gpt-5":["high"]}}}],"capacity":{"used":1,"total":1},"activeWorks":[{"workId":"workflow-work","ownerKind":"workflow","ownerId":"workflow-1","workType":"task","stage":"build","title":"Build"},{"workId":"agent-work","ownerKind":"agent-job","ownerId":"job-1","workType":"agent-job","stage":null,"title":null}],"drain":{"active":true,"kind":"update","updateInterruptId":"interrupt-1"},"nextActions":[{"code":"wait-for-capacity","message":"Wait for the active owner to release a Runner slot.","command":null}]}]}}`
+
+func TestRunnerCommandsUseGlobalRoutes(t *testing.T) {
+	tests := []struct {
+		name   string
+		args   []string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "list", args: []string{"runner", "list"}, method: http.MethodGet, path: "/api/runners", body: runnerStatusListJSON},
+		{name: "status", args: []string{"runner", "status"}, method: http.MethodGet, path: "/api/runners", body: runnerStatusListJSON},
+		{name: "view", args: []string{"runner", "view", "runner-1"}, method: http.MethodGet, path: "/api/runners/runner-1", body: `{"success":true,"data":{"observedAt":"2026-08-01T12:00:00Z","runner":{"identity":{"id":"runner-1"},"presence":{"state":"offline"},"control":{"state":"disconnected"},"admission":{"state":"blocked","reasonCodes":["presence-offline"]},"capabilities":[],"runtimes":[],"capacity":{"used":null,"total":1},"activeWorks":[],"drain":null,"nextActions":[{"code":"start-runner","message":"Start the Runner process.","command":"mo service start runner"}]}}}`},
+		{name: "revoke", args: []string{"runner", "revoke", "runner-1"}, method: http.MethodDelete, path: "/api/runners/runner-1/credentials", body: `{"success":true,"data":{"runnerId":"runner-1","revokedAt":"2026-08-01T12:00:00Z"}}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var request *http.Request
+			deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				request = r
+				return response(http.StatusOK, test.body), nil
+			}), map[string]string{"MOHIST_TOKEN": "token"})
+			if code := Run(context.Background(), test.args, deps); code != ExitOK {
+				t.Fatalf("code=%d stderr=%q", code, errOut.String())
+			}
+			if request == nil || request.Method != test.method || request.URL.Path != test.path {
+				t.Fatalf("request=%v", request)
+			}
+		})
+	}
+}
+
+func TestRunnerFieldDiscoveryAndSelectionUseCanonicalRows(t *testing.T) {
+	calls := 0
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.URL.Path != "/api/runners" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		return response(http.StatusOK, runnerStatusListJSON), nil
+	}), map[string]string{"MOHIST_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"runner", "list", "--json"}, deps); code != ExitOK || calls != 0 {
+		t.Fatalf("discovery code=%d calls=%d output=%q stderr=%q", code, calls, out.String(), errOut.String())
+	}
+	if out.String() != strings.Join(runnerFields, "\n")+"\n" {
+		t.Fatalf("fields=%q", out.String())
+	}
+	*out, *errOut = strings.Builder{}, strings.Builder{}
+	if code := Run(context.Background(), []string{"runner", "view", "--json"}, deps); code != ExitOK || calls != 0 || out.String() != strings.Join(runnerFields, "\n")+"\n" {
+		t.Fatalf("view discovery code=%d calls=%d output=%q stderr=%q", code, calls, out.String(), errOut.String())
+	}
+	*out, *errOut = strings.Builder{}, strings.Builder{}
+	if code := Run(context.Background(), []string{"runner", "list", "--json", "identity,activeWorks"}, deps); code != ExitOK {
+		t.Fatalf("selection code=%d output=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), `"identity"`) || !strings.Contains(out.String(), `"activeWorks"`) || !strings.Contains(out.String(), `"ownerKind":"workflow"`) || !strings.Contains(out.String(), `"ownerId":"job-1"`) || !strings.Contains(out.String(), `"workId":"agent-work"`) {
+		t.Fatalf("selection=%q", out.String())
+	}
+	if strings.Contains(out.String(), `"scope"`) || strings.Contains(out.String(), `"status"`) {
+		t.Fatalf("obsolete fields in selection=%q", out.String())
+	}
+}
+
+func TestRunnerStatusSelectionDecodesTheListEnvelope(t *testing.T) {
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/api/runners" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		return response(http.StatusOK, runnerStatusListJSON), nil
+	}), map[string]string{"MOHIST_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"runner", "status", "--json", "identity,activeWorks"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if !strings.HasPrefix(out.String(), "[{") || !strings.Contains(out.String(), `"identity"`) || !strings.Contains(out.String(), `"ownerKind":"agent-job"`) || !strings.Contains(out.String(), `"ownerId":"job-1"`) || !strings.Contains(out.String(), `"workId":"agent-work"`) {
+		t.Fatalf("selection=%q", out.String())
+	}
+}
+
+func TestRunnerViewSelectionReturnsTheCanonicalRow(t *testing.T) {
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/api/runners/runner-1" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"observedAt":"2026-08-01T12:00:00Z","runner":{"identity":{"id":"runner-1"},"activeWorks":[{"workId":"work-1","ownerKind":"agent-job","ownerId":"job-1"}]}}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"runner", "view", "runner-1", "--json", "identity,activeWorks"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if strings.Contains(out.String(), `"runner"`) || !strings.Contains(out.String(), `"identity"`) || !strings.Contains(out.String(), `"ownerKind":"agent-job"`) || !strings.Contains(out.String(), `"ownerId":"job-1"`) || !strings.Contains(out.String(), `"workId":"work-1"`) {
+		t.Fatalf("selection=%q", out.String())
+	}
+}
+
+func TestRunnerHumanOutputKeepsIndependentFactsAndOwnerKinds(t *testing.T) {
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, runnerStatusListJSON), nil
+	}), map[string]string{"MOHIST_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"runner", "status"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	for _, expected := range []string{"presence: online", "control: connected", "admission: blocked", "capacity-full", "readiness: ready", "catalog:", "modelCount: 1", "capacity:", "active works:", "workflow owner:", "agent-job owner:", "drain: active", "wait-for-capacity"} {
+		if !strings.Contains(out.String(), expected) {
+			t.Errorf("output missing %q: %s", expected, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "idle") || strings.Contains(out.String(), "busy") {
+		t.Fatalf("human output synthesized composite state: %q", out.String())
+	}
+}
+
+func TestRunnerEmptyAndOfflineOutputUsesServerActions(t *testing.T) {
+	t.Run("first install", func(t *testing.T) {
+		deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return response(http.StatusOK, `{"success":true,"data":{"observedAt":"2026-08-01T12:00:00Z","inventory":{"state":"first-install","nextActions":[{"code":"install-runner","message":"Install and start the first Runner.","command":"mo install runner --repo-root <path>"}]},"runners":[]}}`), nil
+		}), map[string]string{"MOHIST_TOKEN": "token"})
+		if code := Run(context.Background(), []string{"runner", "list"}, deps); code != ExitOK {
+			t.Fatalf("code=%d stderr=%q", code, errOut.String())
+		}
+		if out.String() != "next action: install-runner - Install and start the first Runner.\ncommand: mo install runner --repo-root <path>\n" {
+			t.Fatalf("output=%q", out.String())
+		}
+	})
+
+	t.Run("offline start", func(t *testing.T) {
+		deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return response(http.StatusOK, `{"success":true,"data":{"observedAt":"2026-08-01T12:00:00Z","inventory":{"state":"ready","nextActions":[]},"runners":[{"identity":{"id":"runner-offline"},"presence":{"state":"offline","lastObservedAt":null},"control":{"state":"disconnected","generation":null},"admission":{"state":"blocked","reasonCodes":["presence-offline","control-disconnected"]},"capabilities":[],"runtimes":[],"capacity":{"used":null,"total":1},"activeWorks":[],"drain":null,"nextActions":[{"code":"start-runner","message":"Start the Runner process.","command":"mo service start runner"}]}]}}`), nil
+		}), map[string]string{"MOHIST_TOKEN": "token"})
+		if code := Run(context.Background(), []string{"runner", "list"}, deps); code != ExitOK {
+			t.Fatalf("code=%d stderr=%q", code, errOut.String())
+		}
+		if !strings.Contains(out.String(), "start-runner") || !strings.Contains(out.String(), "mo service start runner") || strings.Contains(out.String(), "reenroll-runner") {
+			t.Fatalf("output=%q", out.String())
+		}
+	})
+
+	t.Run("confirmed re-enrollment", func(t *testing.T) {
+		deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return response(http.StatusOK, `{"success":true,"data":{"observedAt":"2026-08-01T12:00:00Z","inventory":{"state":"ready","nextActions":[]},"runners":[{"identity":{"id":"runner-revoked"},"presence":{"state":"offline","lastObservedAt":null},"control":{"state":"disconnected","generation":null},"admission":{"state":"blocked","reasonCodes":["presence-offline","credential-revoked"]},"capabilities":[],"runtimes":[],"capacity":{"used":null,"total":1},"activeWorks":[],"drain":null,"nextActions":[{"code":"reenroll-runner","message":"Re-enroll the Runner credential.","command":"mo install runner --repo-root <path> --runner-id runner-revoked"}]}]}}`), nil
+		}), map[string]string{"MOHIST_TOKEN": "token"})
+		if code := Run(context.Background(), []string{"runner", "list"}, deps); code != ExitOK {
+			t.Fatalf("code=%d stderr=%q", code, errOut.String())
+		}
+		if !strings.Contains(out.String(), "reenroll-runner") || !strings.Contains(out.String(), "--runner-id runner-revoked") || strings.Contains(out.String(), "start-runner") {
+			t.Fatalf("output=%q", out.String())
+		}
+	})
+}
+
+func TestRunnerResponseFailuresDoNotRenderGenericResults(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		body   string
+		status int
+		want   string
+	}{
+		{name: "server failure", body: `{"success":false,"error":"Runner status unavailable","code":"service_unavailable"}`, status: http.StatusServiceUnavailable, want: "service_unavailable"},
+		{name: "malformed success", body: `{"success":true,"data":{"runners":[]}}`, status: http.StatusOK, want: "invalid_response"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return response(test.status, test.body), nil
+			}), map[string]string{"MOHIST_TOKEN": "token"})
+			if code := Run(context.Background(), []string{"runner", "list"}, deps); code != ExitOperation || out.Len() != 0 || !strings.Contains(errOut.String(), test.want) || strings.Contains(errOut.String(), "No results") {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+		})
+	}
+}
+
+func TestRunnerRevokeRequiresAnIDBeforeHTTP(t *testing.T) {
+	calls := 0
+	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("must not call")
+	}), map[string]string{"MOHIST_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"runner", "revoke", "--json"}, deps); code != ExitUsage || calls != 0 || !strings.Contains(errOut.String(), "resource id is required") {
+		t.Fatalf("code=%d calls=%d stderr=%q", code, calls, errOut.String())
+	}
+}
+
+func TestRunnerRejectsProjectAndScopeLocallyAndHelpOmitsThem(t *testing.T) {
+	calls := 0
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("must not call")
+	}), map[string]string{"MOHIST_TOKEN": "token"})
+	for _, args := range [][]string{
+		{"runner", "list", "--project", "project-1"},
+		{"runner", "status", "--scope", "project"},
+		{"runner", "view", "runner-1", "--project", "project-1"},
+		{"runner", "revoke", "runner-1", "--scope", "project"},
+	} {
+		*out, *errOut = strings.Builder{}, strings.Builder{}
+		if code := Run(context.Background(), args, deps); code != ExitUsage || calls != 0 || !strings.Contains(errOut.String(), "not supported") {
+			t.Fatalf("args=%#v code=%d calls=%d stdout=%q stderr=%q", args, code, calls, out.String(), errOut.String())
+		}
+	}
+	for _, args := range [][]string{{"runner", "--help"}, {"runner", "list", "--help"}, {"runner", "view", "--help"}} {
+		*out, *errOut = strings.Builder{}, strings.Builder{}
+		if code := Run(context.Background(), args, deps); code != ExitOK || strings.Contains(out.String(), "--project") || strings.Contains(out.String(), "--scope") {
+			t.Fatalf("args=%#v code=%d help=%q stderr=%q", args, code, out.String(), errOut.String())
+		}
+	}
+}

@@ -66,7 +66,10 @@ original identity.
 
 ```bash
 mo runner status
-# Output includes Runner state
+# Reads the Server-global Runner projection: presence, control, admission,
+# Runtime readiness/catalogs, capacity, active owners, drain, and next actions.
+mo service status runner
+# Reads only the local service-manager unit; it performs no HTTP request.
 ```
 
 The Web UI shows the Runner-unavailable banner above the board, the Runners page,
