@@ -52,6 +52,13 @@ public sealed class AgentSessionQuerierAgentConnectionSpecs
         Assert.Equal(RunnerId, target.RunnerId);
         Assert.Equal("opencode", target.Runtime);
         Assert.Equal($"rt-{sessionId}", target.RuntimeSessionId);
+        Assert.NotNull(target.Definition);
+        Assert.Equal("Slack agent instructions", target.Definition!.Instructions);
+        Assert.Equal("opencode", target.Definition.Runtime);
+        Assert.Equal("openai/gpt-5.6", target.Definition.Model);
+        Assert.Equal("balanced", target.Definition.Variant);
+        Assert.Equal("high", target.Definition.ReasoningEffort);
+        Assert.Equal(["mohist", "slack"], target.Definition.Skills);
     }
 
     [Fact]
@@ -218,7 +225,19 @@ public sealed class AgentSessionQuerierAgentConnectionSpecs
             id = sessionId,
             metadata = new { labels },
             runtime = new { runnerId = RunnerId, workDir = (string?)null, runtime = "opencode" },
-            settings = new { model = "gpt-4o" },
+            settings = new
+            {
+                model = "gpt-4o",
+                definition = new
+                {
+                    instructions = "Slack agent instructions",
+                    runtime = "opencode",
+                    model = "openai/gpt-5.6",
+                    variant = "balanced",
+                    reasoningEffort = "high",
+                    skills = new[] { "mohist", "slack" },
+                },
+            },
             status = new
             {
                 agentRuntimeSessionId = runtimeSessionId,

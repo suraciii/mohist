@@ -41,7 +41,7 @@ public partial class AgentSessionQuerier
             session.Runtime.Runtime,
             session.Status.AgentRuntimeSessionId,
             session.Runtime.WorkDir,
-            string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal)
+            sourceKind is "agent-launch" or "agent-connection"
                 ? session.Settings.Definition
                 : null,
             record.Label(AgentSessionQueryMetadataKeys.ProjectId),
