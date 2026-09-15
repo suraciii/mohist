@@ -343,7 +343,7 @@ func parseEpic(args []string) (command, error) {
 		}
 		c.args = append(c.args, "title", args[1])
 		start = 2
-	} else {
+	} else if action != "list" {
 		if len(args) < 2 || isControlToken(args[1]) {
 			return command{}, usage("epic number is required")
 		}
