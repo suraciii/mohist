@@ -57,15 +57,24 @@ function makeWaiting(overrides: Partial<AgentActivityWaiting> = {}): AgentActivi
 
 function makeRunner(overrides: Partial<RunnerStatusRow> = {}): RunnerStatusRow {
   return {
-    id: 'runner-1',
-    kind: 'external',
-    hostname: 'host',
-    scope: { type: 'global' },
-    status: 'idle',
+    identity: {
+      id: 'runner-1',
+      hostname: 'host',
+      kind: 'external',
+      component: null,
+      sourceRevision: null,
+      releaseId: null,
+      generation: null,
+    },
+    presence: { state: 'online', lastObservedAt: '2026-01-01T00:00:00.000Z' },
+    control: { state: 'connected', generation: null },
+    admission: { state: 'ready', reasonCodes: [] },
     capabilities: [],
-    coderModels: [],
-    coderModelCount: 0,
+    runtimes: [],
+    capacity: { used: 0, total: 2 },
     activeWorks: [],
+    drain: null,
+    nextActions: [],
     ...overrides,
   }
 }
@@ -86,11 +95,26 @@ describe('buildActivityEvents', () => {
     expect(events).toHaveLength(3)
     expect(events.every((e) => e.type === 'issue-state')).toBe(true)
     expect(events.every((e) => e.attention === 'routine')).toBe(true)
-    const nullPayloadEvents = buildActivityEvents({ recordedEvents: [makeProjectEvent({ data: null })], sessions: [], waiting: [], runners: [] })
+    const nullPayloadEvents = buildActivityEvents({
+      recordedEvents: [makeProjectEvent({ data: null })],
+      sessions: [],
+      waiting: [],
+      runners: [],
+    })
     expect(nullPayloadEvents[0]).toMatchObject({ type: 'issue-state', title: 'Issue #1 created' })
 
-    const scalarPayloadEvents = buildActivityEvents({ recordedEvents: [makeProjectEvent({ data: 'created' })], sessions: [], waiting: [], runners: [] })
-    const arrayPayloadEvents = buildActivityEvents({ recordedEvents: [makeProjectEvent({ data: ['created'] })], sessions: [], waiting: [], runners: [] })
+    const scalarPayloadEvents = buildActivityEvents({
+      recordedEvents: [makeProjectEvent({ data: 'created' })],
+      sessions: [],
+      waiting: [],
+      runners: [],
+    })
+    const arrayPayloadEvents = buildActivityEvents({
+      recordedEvents: [makeProjectEvent({ data: ['created'] })],
+      sessions: [],
+      waiting: [],
+      runners: [],
+    })
     expect(scalarPayloadEvents[0]).toMatchObject({ type: 'issue-state', title: 'Issue #1 created' })
     expect(arrayPayloadEvents[0]).toMatchObject({ type: 'issue-state', title: 'Issue #1 created' })
   })
@@ -98,10 +122,37 @@ describe('buildActivityEvents', () => {
   it('classifies workflow stage events and promotes failures to failure type', () => {
     const events = buildActivityEvents({
       recordedEvents: [
-        makeProjectEvent({ origin: 'workflow-run', sourceAggregateKind: 'workflow-run', sourceAggregateId: 'wr-1', source: '/mohist/workflow-runs/wr-1', type: 'com.mohist.workflow.stage.started', data: { stage: 'Plan' } }),
-        makeProjectEvent({ origin: 'workflow-run', sourceAggregateKind: 'workflow-run', sourceAggregateId: 'wr-1', source: '/mohist/workflow-runs/wr-1', type: 'com.mohist.workflow.stage.failed', data: { stage: 'Build', reason: 'compile error' } }),
-        makeProjectEvent({ origin: 'workflow-run', sourceAggregateKind: 'workflow-run', sourceAggregateId: 'wr-1', source: '/mohist/workflow-runs/wr-1', type: 'com.mohist.workflow.stage.approval-requested', data: { stage: 'Review' } }),
-        makeProjectEvent({ origin: 'workflow-run', sourceAggregateKind: 'workflow-run', sourceAggregateId: 'wr-1', source: '/mohist/workflow-runs/wr-1', type: 'com.mohist.workflow.run.paused' }),
+        makeProjectEvent({
+          origin: 'workflow-run',
+          sourceAggregateKind: 'workflow-run',
+          sourceAggregateId: 'wr-1',
+          source: '/mohist/workflow-runs/wr-1',
+          type: 'com.mohist.workflow.stage.started',
+          data: { stage: 'Plan' },
+        }),
+        makeProjectEvent({
+          origin: 'workflow-run',
+          sourceAggregateKind: 'workflow-run',
+          sourceAggregateId: 'wr-1',
+          source: '/mohist/workflow-runs/wr-1',
+          type: 'com.mohist.workflow.stage.failed',
+          data: { stage: 'Build', reason: 'compile error' },
+        }),
+        makeProjectEvent({
+          origin: 'workflow-run',
+          sourceAggregateKind: 'workflow-run',
+          sourceAggregateId: 'wr-1',
+          source: '/mohist/workflow-runs/wr-1',
+          type: 'com.mohist.workflow.stage.approval-requested',
+          data: { stage: 'Review' },
+        }),
+        makeProjectEvent({
+          origin: 'workflow-run',
+          sourceAggregateKind: 'workflow-run',
+          sourceAggregateId: 'wr-1',
+          source: '/mohist/workflow-runs/wr-1',
+          type: 'com.mohist.workflow.run.paused',
+        }),
       ],
       sessions: [],
       waiting: [],
@@ -126,10 +177,24 @@ describe('buildActivityEvents', () => {
   it('classifies agent session lifecycle events and context exhaustion as failure', () => {
     const events = buildActivityEvents({
       recordedEvents: [
-        makeProjectEvent({ origin: 'agent-session', sourceAggregateKind: 'agent-session', sourceAggregateId: 'session-1', source: '/mohist/agent-session/session-1', type: 'com.mohist.agent-session.runtime-bound', data: { agentRuntimeSessionId: 'runtime-1' } }),
-        makeProjectEvent({ origin: 'agent-session', sourceAggregateKind: 'agent-session', sourceAggregateId: 'session-1', source: '/mohist/agent-session/session-1', type: 'com.mohist.agent-session.context-exhausted', data: { failureCategory: 'context exhaustion', contextUsagePercent: 96 } }),
+        makeProjectEvent({
+          origin: 'agent-session',
+          sourceAggregateKind: 'agent-session',
+          sourceAggregateId: 'session-1',
+          source: '/mohist/agent-session/session-1',
+          type: 'com.mohist.agent-session.runtime-bound',
+          data: { agentRuntimeSessionId: 'runtime-1' },
+        }),
+        makeProjectEvent({
+          origin: 'agent-session',
+          sourceAggregateKind: 'agent-session',
+          sourceAggregateId: 'session-1',
+          source: '/mohist/agent-session/session-1',
+          type: 'com.mohist.agent-session.context-exhausted',
+          data: { failureCategory: 'context exhaustion', contextUsagePercent: 96 },
+        }),
       ],
-      sessions: [makeSession({ sessionId: 'session-1', issueNumber: 42, })],
+      sessions: [makeSession({ sessionId: 'session-1', issueNumber: 42 })],
       waiting: [],
       runners: [],
     })
@@ -165,7 +230,7 @@ describe('buildActivityEvents', () => {
           time: '2026-01-01T02:00:00.000Z',
         }),
       ],
-      sessions: [makeSession({ sessionId: 'session-1', issueNumber: 42, })],
+      sessions: [makeSession({ sessionId: 'session-1', issueNumber: 42 })],
       waiting: [],
       runners: [],
     })
@@ -183,7 +248,14 @@ describe('buildActivityEvents', () => {
   it('classifies runner events as runner type with blocked attention for disconnected', () => {
     const events = buildActivityEvents({
       recordedEvents: [
-        makeProjectEvent({ origin: 'agent-session', sourceAggregateKind: 'agent-session', sourceAggregateId: 'session-1', source: '/mohist/agent-session/session-1', type: 'com.mohist.runner.disconnected', runnerId: 'runner-1' }),
+        makeProjectEvent({
+          origin: 'agent-session',
+          sourceAggregateKind: 'agent-session',
+          sourceAggregateId: 'session-1',
+          source: '/mohist/agent-session/session-1',
+          type: 'com.mohist.runner.disconnected',
+          runnerId: 'runner-1',
+        }),
       ],
       sessions: [],
       waiting: [],
@@ -198,31 +270,44 @@ describe('buildActivityEvents', () => {
     const events = buildActivityEvents({
       recordedEvents: [
         makeProjectEvent({ type: 'com.mohist.issue.renamed' }),
-        makeProjectEvent({ origin: 'workflow-run', sourceAggregateKind: 'workflow-run', type: 'com.mohist.workflow.run.noted' }),
-        makeProjectEvent({ origin: 'agent-session', sourceAggregateKind: 'agent-session', type: 'com.mohist.agent-session.checkpointed' }),
+        makeProjectEvent({
+          origin: 'workflow-run',
+          sourceAggregateKind: 'workflow-run',
+          type: 'com.mohist.workflow.run.noted',
+        }),
+        makeProjectEvent({
+          origin: 'agent-session',
+          sourceAggregateKind: 'agent-session',
+          type: 'com.mohist.agent-session.checkpointed',
+        }),
         makeProjectEvent({ type: 'com.mohist.runner.reconnected', runnerId: 'runner-1' }),
-      ], sessions: [], waiting: [], runners: [],
+      ],
+      sessions: [],
+      waiting: [],
+      runners: [],
     })
 
     expect(events.map((event) => event.type)).toEqual(['workflow-stage', 'issue-state', 'agent-session', 'runner'])
   })
-  it('generates runner snapshot evidence for busy and stale runners, omitting idle', () => {
+  it('generates blocked-admission evidence without inventing idle or busy states', () => {
     const events = buildActivityEvents({
       recordedEvents: [],
       sessions: [],
       waiting: [],
       runners: [
-        makeRunner({ id: 'r1', status: 'busy' }),
-        makeRunner({ id: 'r2', status: 'stale' }),
-        makeRunner({ id: 'r3', status: 'idle' }),
+        makeRunner({
+          identity: { ...makeRunner().identity, id: 'r1' },
+          admission: { state: 'blocked', reasonCodes: ['capacity-full'] },
+          capacity: { used: 2, total: 2 },
+        }),
+        makeRunner({ identity: { ...makeRunner().identity, id: 'r2' } }),
       ],
     })
 
-    const busy = events.find((e) => e.title === 'Runner r1 busy')
-    const stale = events.find((e) => e.title === 'Runner r2 stale/offline')
-    expect(busy?.attention).toBe('routine')
-    expect(stale?.attention).toBe('blocked')
-    expect(events.some((e) => e.title.includes('r3'))).toBe(false)
+    const blocked = events.find((e) => e.title.includes('r1'))
+    expect(blocked?.attention).toBe('blocked')
+    expect(blocked?.description).toContain('capacity-full')
+    expect(events.some((e) => e.title.includes('r2'))).toBe(false)
   })
   it('generates approval attention from waiting rows', () => {
     const events = buildActivityEvents({
@@ -254,11 +339,38 @@ describe('buildActivityEvents', () => {
   it('orders events by attention, then type, then time descending', () => {
     const events = buildActivityEvents({
       recordedEvents: [
-        makeProjectEvent({ id: 1, origin: 'workflow-run', sourceAggregateKind: 'workflow-run', sourceAggregateId: 'wr-1', source: '/mohist/workflow-runs/wr-1', type: 'com.mohist.workflow.stage.started', data: { stage: 'Plan' }, time: '2026-01-01T03:00:00.000Z' }),
-        makeProjectEvent({ id: 2, origin: 'workflow-run', sourceAggregateKind: 'workflow-run', sourceAggregateId: 'wr-1', source: '/mohist/workflow-runs/wr-1', type: 'com.mohist.workflow.stage.failed', data: { stage: 'Build' }, time: '2026-01-01T01:00:00.000Z' }),
-        makeProjectEvent({ id: 3, origin: 'agent-session', sourceAggregateKind: 'agent-session', sourceAggregateId: 'session-1', source: '/mohist/agent-session/session-1', type: 'com.mohist.agent-session.context-exhausted', data: { failureCategory: 'context' }, time: '2026-01-01T02:00:00.000Z' }),
+        makeProjectEvent({
+          id: 1,
+          origin: 'workflow-run',
+          sourceAggregateKind: 'workflow-run',
+          sourceAggregateId: 'wr-1',
+          source: '/mohist/workflow-runs/wr-1',
+          type: 'com.mohist.workflow.stage.started',
+          data: { stage: 'Plan' },
+          time: '2026-01-01T03:00:00.000Z',
+        }),
+        makeProjectEvent({
+          id: 2,
+          origin: 'workflow-run',
+          sourceAggregateKind: 'workflow-run',
+          sourceAggregateId: 'wr-1',
+          source: '/mohist/workflow-runs/wr-1',
+          type: 'com.mohist.workflow.stage.failed',
+          data: { stage: 'Build' },
+          time: '2026-01-01T01:00:00.000Z',
+        }),
+        makeProjectEvent({
+          id: 3,
+          origin: 'agent-session',
+          sourceAggregateKind: 'agent-session',
+          sourceAggregateId: 'session-1',
+          source: '/mohist/agent-session/session-1',
+          type: 'com.mohist.agent-session.context-exhausted',
+          data: { failureCategory: 'context' },
+          time: '2026-01-01T02:00:00.000Z',
+        }),
       ],
-      sessions: [makeSession({ sessionId: 'session-1', issueNumber: 42, })],
+      sessions: [makeSession({ sessionId: 'session-1', issueNumber: 42 })],
       waiting: [],
       runners: [],
     })
@@ -272,7 +384,14 @@ describe('buildActivityEvents', () => {
   it('merges duplicate evidence only once', () => {
     const events = buildActivityEvents({
       recordedEvents: [
-        makeProjectEvent({ id: 1, origin: 'agent-session', sourceAggregateKind: 'agent-session', sourceAggregateId: 'session-1', source: '/mohist/agent-session/session-1', type: 'com.mohist.agent-session.runtime-bound' }),
+        makeProjectEvent({
+          id: 1,
+          origin: 'agent-session',
+          sourceAggregateKind: 'agent-session',
+          sourceAggregateId: 'session-1',
+          source: '/mohist/agent-session/session-1',
+          type: 'com.mohist.agent-session.runtime-bound',
+        }),
       ],
       sessions: [makeSession({ sessionId: 'session-1' })],
       waiting: [],
@@ -282,5 +401,4 @@ describe('buildActivityEvents', () => {
     const ids = new Set(events.map((e) => e.id))
     expect(ids.size).toBe(events.length)
   })
-
 })

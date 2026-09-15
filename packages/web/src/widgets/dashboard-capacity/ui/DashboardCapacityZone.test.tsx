@@ -81,10 +81,10 @@ describe('DashboardCapacityZone', () => {
     })
   })
 
-  it('links to runner management using the project-scoped path', async () => {
+  it('links to the global Runner management path', async () => {
     renderZone(makeAgentStatus({ capacity: { active: 2, max: 4 } }))
 
     const link = await waitFor(() => screen.getByTestId('dashboard-zone-capacity-link'))
-    expect(link).toHaveAttribute('href', `/${encodeURIComponent(TEST_PROJECT.name)}/runners`)
+    expect(link).toHaveAttribute('href', '/runners')
   })
 })

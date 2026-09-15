@@ -6,24 +6,33 @@ import { MemoryRouter } from 'react-router-dom'
 import type { AgentStatus } from '../../../entities/agent'
 import { IssueStatus, IssueHealth, WorkflowStage, type ApprovalState } from '../../../entities/issue'
 import { ProjectProvider } from '../../../entities/project'
-import { useRunnerSummary } from '../../../entities/runner'
+import { useRunnerSummary, type RunnerStatusEntry } from '../../../entities/runner'
 import { makeIssue, makeIssues, mockAgentStatus } from './_kanbanBoardQueryTestUtils'
 
-const TEST_PROJECT = { id: 'test-project', name: 'test', createdAt: '2025-01-01T00:00:00Z', updatedAt: '2025-01-01T00:00:00Z', repositories: [] }
+const TEST_PROJECT = {
+  id: 'test-project',
+  name: 'test',
+  createdAt: '2025-01-01T00:00:00Z',
+  updatedAt: '2025-01-01T00:00:00Z',
+  repositories: [],
+}
 
-let _runners: unknown[] = []
+let _runners: RunnerStatusEntry[] = []
 let previousUrl = ''
 let previousHistoryState: unknown
 
 const runnerSummaryHook: typeof useRunnerSummary = () => {
-  const rows = _runners as ReturnType<typeof useRunnerSummary>['rows']
-  const connectedIdleCount = rows.filter((row) => row.status === 'idle').length
-  const connectedBusyCount = rows.filter((row) => row.status === 'busy').length
+  const rows = _runners
+  const readyCount = rows.filter((row) => row.admission.state === 'ready').length
   return {
-    connectedIdleCount,
-    connectedBusyCount,
-    hasConnectedCapacity: connectedIdleCount > 0 || connectedBusyCount > 0,
+    readyCount,
+    blockedCount: rows.length - readyCount,
+    activeWorkCount: rows.reduce((count, row) => count + row.activeWorks.length, 0),
+    hasAdmissibleCapacity: rows.some(
+      (row) => row.admission.state === 'ready' && row.capacity?.used != null && row.capacity.used < row.capacity.total,
+    ),
     rows,
+    inventory: null,
   }
 }
 
@@ -35,11 +44,7 @@ function renderBoard(issues: unknown[], agentStatus: unknown) {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
         <MemoryRouter>
-          <KanbanBoard
-            issues={issues as any}
-            agentStatus={agentStatus as any}
-            runnerSummaryHook={runnerSummaryHook}
-          />
+          <KanbanBoard issues={issues as any} agentStatus={agentStatus as any} runnerSummaryHook={runnerSummaryHook} />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -50,7 +55,28 @@ beforeEach(() => {
   previousUrl = window.location.href
   previousHistoryState = window.history.state
   window.history.replaceState(null, '', '/')
-  _runners = [{ id: 'r-default', kind: 'external', hostname: 'h', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [] }]
+  _runners = [
+    {
+      identity: {
+        id: 'r-default',
+        hostname: 'h',
+        kind: 'external',
+        component: null,
+        sourceRevision: null,
+        releaseId: null,
+        generation: null,
+      },
+      presence: { state: 'online', lastObservedAt: null },
+      control: { state: 'connected', generation: null },
+      admission: { state: 'ready', reasonCodes: [] },
+      capabilities: [],
+      runtimes: [],
+      capacity: { used: 0, total: 2 },
+      activeWorks: [],
+      drain: null,
+      nextActions: [],
+    },
+  ]
 })
 
 afterEach(() => {
@@ -91,7 +117,28 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
   })
 
   it('does not show runner unavailable banner when connected idle runner exists', async () => {
-    _runners = [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [] }]
+    _runners = [
+      {
+        identity: {
+          id: 'runner-1',
+          hostname: 'host1',
+          kind: 'external',
+          component: null,
+          sourceRevision: null,
+          releaseId: null,
+          generation: null,
+        },
+        presence: { state: 'online', lastObservedAt: null },
+        control: { state: 'connected', generation: null },
+        admission: { state: 'ready', reasonCodes: [] },
+        capabilities: [],
+        runtimes: [],
+        capacity: { used: 0, total: 2 },
+        activeWorks: [],
+        drain: null,
+        nextActions: [],
+      },
+    ]
 
     renderBoard(makeIssues(1), mockAgentStatus)
 
@@ -101,7 +148,38 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
   })
 
   it('does not show runner unavailable banner when connected busy runner exists', async () => {
-    _runners = [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'busy', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }] }]
+    _runners = [
+      {
+        identity: {
+          id: 'runner-1',
+          hostname: 'host1',
+          kind: 'external',
+          component: null,
+          sourceRevision: null,
+          releaseId: null,
+          generation: null,
+        },
+        presence: { state: 'online', lastObservedAt: null },
+        control: { state: 'connected', generation: null },
+        admission: { state: 'ready', reasonCodes: [] },
+        capabilities: [],
+        runtimes: [],
+        capacity: { used: 1, total: 2 },
+        activeWorks: [
+          {
+            workId: 'w1',
+            ownerKind: 'workflow',
+            ownerId: 'wf1',
+            workType: 'workflow',
+            stage: null,
+            title: null,
+            issue: null,
+          },
+        ],
+        drain: null,
+        nextActions: [],
+      },
+    ]
 
     renderBoard(makeIssues(1), mockAgentStatus)
 
@@ -111,7 +189,28 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
   })
 
   it('shows runner unavailable banner when only stale or offline runners exist', () => {
-    _runners = [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'stale', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: null, activeWorks: [] }]
+    _runners = [
+      {
+        identity: {
+          id: 'runner-1',
+          hostname: 'host1',
+          kind: 'external',
+          component: null,
+          sourceRevision: null,
+          releaseId: null,
+          generation: null,
+        },
+        presence: { state: 'stale', lastObservedAt: null },
+        control: { state: 'disconnected', generation: null },
+        admission: { state: 'blocked', reasonCodes: ['presence-stale'] },
+        capabilities: [],
+        runtimes: [],
+        capacity: { used: 0, total: 2 },
+        activeWorks: [],
+        drain: null,
+        nextActions: [],
+      },
+    ]
 
     renderBoard(makeIssues(1), mockAgentStatus)
 
@@ -131,7 +230,7 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
 
     renderBoard(makeIssues(1), agentStatus)
 
-    expect(screen.getByText('View runner status')).toBeInTheDocument()
+    expect(screen.getByText('View Runner status')).toBeInTheDocument()
   })
 
   it('displays filtered issue count after priority filter applied', () => {
@@ -147,8 +246,7 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
     renderBoard(issues, mockAgentStatus)
 
     const backlogElements = screen.getAllByText('Backlog')
-    const backlogCol = backlogElements[0].closest('[class*="flex-col"]')
-      || backlogElements[0].closest('div')
+    const backlogCol = backlogElements[0].closest('[class*="flex-col"]') || backlogElements[0].closest('div')
     expect(backlogCol?.textContent).toContain('1')
   })
 })
@@ -249,7 +347,6 @@ describe('Needs attention summary - user-action wording', () => {
     expect(within(summary as HTMLElement).queryByText(/Needs action/i)).not.toBeInTheDocument()
     expect(within(summary as HTMLElement).getByText(/#207/i)).toBeInTheDocument()
   })
-
 
   it('does not render attention summary item for completed workflow', () => {
     const doneUnmergedIssue = makeIssue({

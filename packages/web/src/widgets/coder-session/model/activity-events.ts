@@ -9,6 +9,7 @@ export type ActivityAttention = 'failure' | 'approval' | 'blocked' | 'routine'
 export interface ActivityEventTarget {
   path: string
   label: string
+  scope?: 'application' | 'project'
 }
 
 export interface ActivityEventTargets {
@@ -17,7 +18,7 @@ export interface ActivityEventTargets {
   workflow?: { issueNumber?: number; label: string; path?: string }
   session?: { sessionId: string; label: string; isGeneric: boolean; path?: string }
   agent?: { agentId: string; agentName: string | null; label: string; path?: string }
-  runner?: { runnerId: string; label: string; path?: string }
+  runner?: { runnerId: string; label: string; path?: string; scope?: 'application' | 'project' }
 }
 
 export interface ActivityEvent {
@@ -144,8 +145,7 @@ function readString(data: unknown, keys: string[]): string | null {
 
 function readIssueNumber(event: ProjectEventDto): number | null {
   if (event.issueNumber != null && Number.isFinite(event.issueNumber)) return event.issueNumber
-  const raw = readString(event.data, ['issueNumber'])
-    ?? event.subject
+  const raw = readString(event.data, ['issueNumber']) ?? event.subject
   if (!raw) return null
   const n = Number(raw)
   return Number.isFinite(n) ? n : null
@@ -200,6 +200,7 @@ function runnerTarget(runnerId: string) {
     runnerId,
     label: `Runner ${runnerId}`,
     path: fromActivity(`/runners/${encodeURIComponent(runnerId)}`),
+    scope: 'application' as const,
   }
 }
 
@@ -297,7 +298,12 @@ function buildAgentSessionEventEntry(
   } else if (issueNumber != null && issueNumber > 0) {
     title = `Issue #${issueNumber} session ${info.label}`
     targets.primary = { path: sessionPath(sessionId, issueNumber, false), label: 'Session' }
-    targets.session = { sessionId, label: 'Session', isGeneric: false, path: sessionPath(sessionId, issueNumber, false) }
+    targets.session = {
+      sessionId,
+      label: 'Session',
+      isGeneric: false,
+      path: sessionPath(sessionId, issueNumber, false),
+    }
   } else {
     targets.primary = { path: sessionPath(sessionId, null, false), label: 'Session' }
     targets.session = { sessionId, label: 'Session', isGeneric: false, path: sessionPath(sessionId, null, false) }
@@ -309,7 +315,14 @@ function buildAgentSessionEventEntry(
 
   const eventType: ActivityEventType = info.attention === 'failure' ? 'failure' : 'agent-session'
   const failureCategory = readString(event.data, ['failureCategory', 'FailureCategory'])
-  const failureReason = readString(event.data, ['failureReason', 'FailureReason', 'reason', 'Reason', 'message', 'Message'])
+  const failureReason = readString(event.data, [
+    'failureReason',
+    'FailureReason',
+    'reason',
+    'Reason',
+    'message',
+    'Message',
+  ])
   const status = readString(event.data, ['status', 'Status'])
   const description = failureReason ?? failureCategory ?? status ?? info.label
 
@@ -326,7 +339,10 @@ function buildAgentSessionEventEntry(
 }
 
 function agentSessionEventInfo(event: ProjectEventDto): EventTypeInfo | null {
-  const base: EventTypeInfo = AGENT_SESSION_EVENT_TYPES[event.type] ?? { label: 'activity recorded', attention: 'routine' }
+  const base: EventTypeInfo = AGENT_SESSION_EVENT_TYPES[event.type] ?? {
+    label: 'activity recorded',
+    attention: 'routine',
+  }
 
   const status = readString(event.data, ['status'])?.toLowerCase()
   if (status === 'failed' || status === 'timeout' || status === 'cancelled') {
@@ -345,15 +361,16 @@ function buildRunnerEventEntry(event: ProjectEventDto): ActivityEvent | null {
   if (!event.type.startsWith('com.mohist.runner.')) return null
   const info: EventTypeInfo = RUNNER_EVENT_TYPES[event.type] ?? { label: 'activity recorded', attention: 'routine' }
 
-  const runnerId = event.runnerId
-    ?? readString(event.data, ['runnerId', 'runner_id', 'runner'])
-    ?? (event.sourceAggregateKind === 'runner' ? event.sourceAggregateId : null)
+  const runnerId =
+    event.runnerId ??
+    readString(event.data, ['runnerId', 'runner_id', 'runner']) ??
+    (event.sourceAggregateKind === 'runner' ? event.sourceAggregateId : null)
   const title = runnerId ? `Runner ${runnerId} ${info.label}` : `Runner ${info.label}`
   const targets: ActivityEventTargets = {}
   if (runnerId) {
     const target = runnerTarget(runnerId)
     targets.runner = target
-    targets.primary = { path: target.path, label: `Runner ${runnerId}` }
+    targets.primary = { path: target.path, label: `Runner ${runnerId}`, scope: 'application' }
   }
 
   return {
@@ -373,21 +390,33 @@ function buildSessionSnapshotEntry(session: AgentActivitySession): ActivityEvent
   const status = session.status || 'unknown'
   const title = isGeneric
     ? `Agent ${session.agentName ?? session.agentId ?? 'session'} session ${status}`
-    : issueNumber != null ? `Issue #${issueNumber} session ${status}` : `Session ${session.sessionId} ${status}`
+    : issueNumber != null
+      ? `Issue #${issueNumber} session ${status}`
+      : `Session ${session.sessionId} ${status}`
 
   const targets: ActivityEventTargets = {}
   if (isGeneric) {
     targets.agent = agentTarget(session.agentId!, session.agentName ?? null)
     if (issueNumber != null) targets.issue = issueTarget(issueNumber)
     targets.primary = { path: sessionPath(session.sessionId, null, true), label: 'Session' }
-    targets.session = { sessionId: session.sessionId, label: 'Session', isGeneric: true, path: sessionPath(session.sessionId, null, true) }
+    targets.session = {
+      sessionId: session.sessionId,
+      label: 'Session',
+      isGeneric: true,
+      path: sessionPath(session.sessionId, null, true),
+    }
   } else if (issueNumber != null) {
     targets.issue = issueTarget(issueNumber)
     targets.primary = {
       path: sessionPath(session.sessionId, issueNumber, false),
       label: 'Session',
     }
-    targets.session = { sessionId: session.sessionId, label: 'Session', isGeneric: false, path: sessionPath(session.sessionId, issueNumber, false) }
+    targets.session = {
+      sessionId: session.sessionId,
+      label: 'Session',
+      isGeneric: false,
+      path: sessionPath(session.sessionId, issueNumber, false),
+    }
     targets.workflow = workflowTarget(issueNumber)
   }
 
@@ -421,22 +450,27 @@ function buildWaitingEntry(waiting: AgentActivityWaiting): ActivityEvent {
 }
 
 function buildRunnerSnapshotEntry(runner: RunnerStatusRow): ActivityEvent | null {
-  if (runner.status === 'idle') return null
+  const hasActiveWork = runner.activeWorks.length > 0
+  if (runner.admission.state === 'ready' && !hasActiveWork) return null
 
-  const attention: ActivityAttention = runner.status === 'busy' ? 'routine' : 'blocked'
-  const label = runner.status === 'busy' ? 'busy' : 'stale/offline'
+  const attention: ActivityAttention = runner.admission.state === 'blocked' ? 'blocked' : 'routine'
+  const label = runner.admission.state === 'blocked' ? 'admission blocked' : `${runner.activeWorks.length} active work`
+  const target = runnerTarget(runner.identity.id)
   const targets: ActivityEventTargets = {
-    runner: runnerTarget(runner.id),
-    primary: { path: runnerTarget(runner.id).path, label: `Runner ${runner.id}` },
+    runner: target,
+    primary: { path: target.path, label: `Runner ${runner.identity.id}`, scope: 'application' },
   }
 
   return {
-    id: `runner-snapshot-${runner.id}`,
+    id: `runner-snapshot-${runner.identity.id}`,
     type: 'runner',
     attention,
-    time: runner.lastHeartbeatAt ?? runner.registeredAt ?? FALLBACK_EVENT_TIME,
-    title: `Runner ${runner.id} ${label}`,
-    description: `Runner is ${label}`,
+    time: runner.presence.lastObservedAt ?? FALLBACK_EVENT_TIME,
+    title: `Runner ${runner.identity.id} ${label}`,
+    description:
+      runner.admission.reasonCodes.length > 0
+        ? runner.admission.reasonCodes.join(', ')
+        : `${runner.activeWorks.length} active work${runner.activeWorks.length === 1 ? '' : 's'}`,
     targets,
   }
 }
@@ -540,13 +574,31 @@ export interface ActivityEventsResult {
 }
 
 export function useActivityEvents(filters: ActivityEventFilters = {}): ActivityEventsResult {
-  const recordedTypes = filters.types?.filter((type): type is Exclude<ProjectEventTypeFilter, 'workspace'> => type !== 'runner')
-  const { data: recordedEvents = [], isLoading: eventsLoading, isError: eventsError, refetch: refetchEvents } = useProjectEvents({
+  const recordedTypes = filters.types?.filter(
+    (type): type is Exclude<ProjectEventTypeFilter, 'workspace'> => type !== 'runner',
+  )
+  const {
+    data: recordedEvents = [],
+    isLoading: eventsLoading,
+    isError: eventsError,
+    refetch: refetchEvents,
+  } = useProjectEvents({
     types: recordedTypes?.length ? recordedTypes : undefined,
     attentionOnly: filters.attentionOnly,
   })
-  const { data: activity, isLoading: activityLoading, isError: activityError, refetch: refetchActivity } = useAgentActivity()
-  const { data: runners = [], isLoading: runnersLoading, isError: runnersError, refetch: refetchRunners } = useRunners()
+  const {
+    data: activity,
+    isLoading: activityLoading,
+    isError: activityError,
+    refetch: refetchActivity,
+  } = useAgentActivity()
+  const {
+    data: runnerSnapshot,
+    isLoading: runnersLoading,
+    isError: runnersError,
+    refetch: refetchRunners,
+  } = useRunners()
+  const runners = runnerSnapshot?.runners ?? []
 
   const events = useMemo(() => {
     return buildActivityEvents({

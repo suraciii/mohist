@@ -1,5 +1,4 @@
 import { Link } from 'react-router-dom'
-import { useProjectPath } from '../../../entities/project'
 import { useAgentStatus, type AgentStatus } from '../../../entities/agent'
 import { cn } from '@/shared/lib/utils'
 import { GaugeIcon } from 'lucide-react'
@@ -31,8 +30,6 @@ export function DashboardCapacityZone({
 }: DashboardCapacityZoneProps = {}) {
   const { data: fetchedStatus } = agentStatusHook()
   const agentStatus = agentStatusOverride ?? fetchedStatus
-  const toProjectPath = useProjectPath()
-
   const capacity = agentStatus?.capacity
   if (!capacity || capacity.max <= 0) return null
 
@@ -69,32 +66,20 @@ export function DashboardCapacityZone({
       >
         Runner capacity
       </span>
-      <div
-        className="flex items-center gap-2 flex-1 min-w-[160px]"
-        data-testid="dashboard-zone-capacity-usage"
-      >
-        <div
-          className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden"
-          aria-hidden
-        >
+      <div className="flex items-center gap-2 flex-1 min-w-[160px]" data-testid="dashboard-zone-capacity-usage">
+        <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden" aria-hidden>
           <div
             data-testid="dashboard-zone-capacity-bar"
-            className={cn(
-              'h-full rounded-full transition-all duration-300',
-              saturated ? 'bg-warning' : 'bg-info',
-            )}
+            className={cn('h-full rounded-full transition-all duration-300', saturated ? 'bg-warning' : 'bg-info')}
             style={{ width: `${usedPercent}%` }}
           />
         </div>
-        <span
-          data-testid="dashboard-zone-capacity-count"
-          className="text-sm font-medium tabular-nums text-foreground"
-        >
+        <span data-testid="dashboard-zone-capacity-count" className="text-sm font-medium tabular-nums text-foreground">
           {active}/{max}
         </span>
       </div>
       <Link
-        to={toProjectPath('/runners')}
+        to="/runners"
         data-testid="dashboard-zone-capacity-link"
         className="text-xs text-muted-foreground hover:text-foreground hover:underline shrink-0"
       >

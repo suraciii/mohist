@@ -19,7 +19,7 @@ import {
   SparklesIcon,
 } from 'lucide-react'
 import { useProject, useProjectPath } from '../../../entities/project'
-import { useAgentStatus } from '../../../entities/agent'
+import { useRunnerSummary } from '../../../entities/runner'
 import { useDeleteProject } from '../../../entities/project'
 import { useUnreadInboxCount } from '../../../entities/inbox'
 import {
@@ -63,7 +63,7 @@ const primaryNav: readonly NavItem[] = [
   { key: 'agents', label: 'Agents', icon: BotIcon, to: '/agents', scope: 'project' },
   { key: 'inbox', label: 'Inbox', icon: InboxIcon, to: '/inbox', scope: 'project' },
   { key: 'activity', label: 'Activity', icon: ActivityIcon, to: '/activity', scope: 'project' },
-  { key: 'runners', label: 'Runners', icon: ServerIcon, to: '/runners', scope: 'project' },
+  { key: 'runners', label: 'Runners', icon: ServerIcon, to: '/runners', scope: 'application' },
   { key: 'epics', label: 'Epics', icon: ListTodoIcon, to: '/epics', scope: 'project' },
   { key: 'workspaces', label: 'Workspaces', icon: FolderGit2Icon, to: '/workspaces', scope: 'project' },
 ]
@@ -138,11 +138,7 @@ function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
   }
 
   if (projects.length === 0) {
-    return (
-      <div className="px-2 py-1.5 text-xs text-sidebar-foreground/60">
-        No projects
-      </div>
-    )
+    return <div className="px-2 py-1.5 text-xs text-sidebar-foreground/60">No projects</div>
   }
 
   return (
@@ -156,14 +152,10 @@ function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
         >
           <span className="flex items-center gap-2 min-w-0">
             <FolderIcon className="size-4 shrink-0" />
-            <span className="truncate">
-              {currentProject?.name ?? 'Select project'}
-            </span>
+            <span className="truncate">{currentProject?.name ?? 'Select project'}</span>
           </span>
           <ChevronDownIcon
-            className={`size-3.5 text-sidebar-foreground/60 transition-transform ${
-              open ? 'rotate-180' : ''
-            }`}
+            className={`size-3.5 text-sidebar-foreground/60 transition-transform ${open ? 'rotate-180' : ''}`}
           />
         </Button>
 
@@ -175,9 +167,7 @@ function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
                 type="button"
                 onClick={() => handleSelect(project)}
                 className={`w-full text-left px-3 py-2 text-sm hover:bg-muted ${
-                  project.id === projectId
-                    ? 'text-blue-600 bg-blue-50 font-medium'
-                    : 'text-popover-foreground'
+                  project.id === projectId ? 'text-blue-600 bg-blue-50 font-medium' : 'text-popover-foreground'
                 }`}
               >
                 <div className="font-medium truncate">{project.name}</div>
@@ -211,22 +201,14 @@ function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
         )}
       </div>
 
-      <CreateProjectDialog
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-      />
+      <CreateProjectDialog open={createOpen} onClose={() => setCreateOpen(false)} />
 
       {deleteConfirmOpen && currentProject && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 supports-backdrop-filter:backdrop-blur-xs">
           <div className="bg-popover rounded-xl border shadow-lg p-4 w-full max-w-sm mx-4">
-            <h3 className="font-heading text-base font-medium mb-2">
-              Delete Project
-            </h3>
+            <h3 className="font-heading text-base font-medium mb-2">Delete Project</h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Are you sure you want to delete{' '}
-              <span className="font-medium text-foreground">
-                {currentProject.name}
-              </span>
+              Are you sure you want to delete <span className="font-medium text-foreground">{currentProject.name}</span>
               ? This will also delete all associated issues.
             </p>
             {deleteProject.isError && (
@@ -235,17 +217,10 @@ function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
               </div>
             )}
             <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setDeleteConfirmOpen(false)}
-              >
+              <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
                 Cancel
               </Button>
-              <Button
-                variant="destructive"
-                onClick={handleDelete}
-                disabled={deleteProject.isPending}
-              >
+              <Button variant="destructive" onClick={handleDelete} disabled={deleteProject.isPending}>
                 {deleteProject.isPending ? 'Deleting...' : 'Delete'}
               </Button>
             </div>
@@ -257,36 +232,36 @@ function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 function AgentStatusFooter() {
-  const { data: agentStatus } = useAgentStatus()
-  const capacity = agentStatus?.capacity
-  const running = agentStatus?.running ?? false
-  const active = capacity?.active ?? 0
-  const max = capacity?.max ?? 8
-  const pct = max > 0 ? Math.min(100, Math.round((active / max) * 100)) : 0
+  const summary = useRunnerSummary()
+  const used = summary.rows.reduce((total, row) => total + (row.capacity?.used ?? 0), 0)
+  const total = summary.rows.reduce((sum, row) => sum + (row.capacity?.total ?? 0), 0)
+  const hasUnknownCapacity = summary.rows.some((row) => row.capacity?.used == null)
+  const pct = total > 0 && !hasUnknownCapacity ? Math.min(100, Math.round((used / total) * 100)) : 0
+  const label =
+    summary.rows.length === 0
+      ? 'No Runner definitions'
+      : summary.blockedCount > 0
+        ? 'Runner admission blocked'
+        : 'Runner admission ready'
 
   return (
-    <div className="rounded-md px-2 py-2 text-xs space-y-1.5">
+    <div className="rounded-md px-2 py-2 text-xs space-y-1.5" data-testid="runner-sidebar-summary">
       <div className="flex items-center gap-2">
-        {running ? (
-          <PowerIcon className="size-3.5 text-green-600" />
-        ) : (
+        {summary.blockedCount > 0 || summary.rows.length === 0 ? (
           <PowerOffIcon className="size-3.5 text-muted-foreground" />
+        ) : (
+          <PowerIcon className="size-3.5 text-green-600" />
         )}
-        <span className="font-medium text-sidebar-foreground">
-          {running ? 'Runner active' : 'Runner idle'}
-        </span>
+        <span className="font-medium text-sidebar-foreground">{label}</span>
       </div>
       <div className="flex items-center justify-between text-sidebar-foreground/70">
         <span>Capacity</span>
         <span className="font-mono">
-          {active} / {max}
+          {summary.rows.length === 0 || hasUnknownCapacity ? 'unknown' : `${used} / ${total}`}
         </span>
       </div>
       <div className="h-1 rounded-full bg-sidebar-accent overflow-hidden">
-        <div
-          className="h-full bg-blue-500 transition-all"
-          style={{ width: `${pct}%` }}
-        />
+        <div className="h-full bg-blue-500 transition-all" style={{ width: `${pct}%` }} />
       </div>
     </div>
   )
@@ -300,17 +275,12 @@ export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
 
   function renderNavItem(item: NavItem) {
     const to = item.scope === 'application' ? item.to : toProjectPath(item.to)
-    const active = item.key === 'settings'
-      ? isSettingsPathActive(location.pathname)
-      : isNavActive(location.pathname, to)
+    const active =
+      item.key === 'settings' ? isSettingsPathActive(location.pathname) : isNavActive(location.pathname, to)
     const Icon = item.icon
     return (
       <SidebarMenuItem key={item.key}>
-        <SidebarMenuButton
-          isActive={active}
-          onClick={() => navigate(to)}
-          data-testid={`nav-${item.key}`}
-        >
+        <SidebarMenuButton isActive={active} onClick={() => navigate(to)} data-testid={`nav-${item.key}`}>
           <Icon />
           <span>{item.label}</span>
         </SidebarMenuButton>
@@ -325,12 +295,8 @@ export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
     <Sidebar collapsible="icon" variant="sidebar">
       <SidebarHeader>
         <div className="flex items-center justify-between px-1 group-data-[collapsible=icon]:justify-center">
-          <span className="text-base font-bold tracking-tight group-data-[collapsible=icon]:hidden">
-            mohist
-          </span>
-          <span className="hidden group-data-[collapsible=icon]:block text-base font-bold tracking-tight">
-            m
-          </span>
+          <span className="text-base font-bold tracking-tight group-data-[collapsible=icon]:hidden">mohist</span>
+          <span className="hidden group-data-[collapsible=icon]:block text-base font-bold tracking-tight">m</span>
         </div>
         <div className="group-data-[collapsible=icon]:hidden">
           <ProjectSwitcher onNavigate={() => undefined} />
@@ -367,26 +333,20 @@ export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
         <SidebarGroup>
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
-              {primaryNav.map((item) => renderNavItem(item))}
-            </SidebarMenu>
+            <SidebarMenu>{primaryNav.map((item) => renderNavItem(item))}</SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
         <SidebarGroup>
           <SidebarGroupLabel>Configure</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
-              {configureNav.map((item) => renderNavItem(item))}
-            </SidebarMenu>
+            <SidebarMenu>{configureNav.map((item) => renderNavItem(item))}</SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
         <SidebarGroup>
           <SidebarGroupContent>
-            <SidebarMenu>
-              {archivedNav.map((item) => renderNavItem(item))}
-            </SidebarMenu>
+            <SidebarMenu>{archivedNav.map((item) => renderNavItem(item))}</SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>

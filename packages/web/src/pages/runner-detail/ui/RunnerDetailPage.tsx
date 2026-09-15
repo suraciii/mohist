@@ -1,127 +1,206 @@
 import { ArrowLeftIcon } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ApiError } from '../../../shared/api/client'
-import type { RunnerActiveWork, RunnerStatusRow } from '../../../entities/runner'
+import type { Project } from '../../../entities/project'
+import { projectPath, useProject } from '../../../entities/project'
+import type { RunnerActiveWork, RunnerRuntime, RunnerStatusEntry } from '../../../entities/runner'
 import { useRunner } from '../../../entities/runner'
-import { useProjectPath } from '../../../entities/project'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { Card } from '@/shared/ui/components/card'
 import { Button } from '@/shared/ui/components/button'
-import {
-  SlotsEditor,
-  type SlotsEditorMutationHook,
-} from '../../../widgets/runner-status'
+import { Badge } from '@/shared/ui/components/badge'
+import { RunnerNextActions, SlotsEditor, type SlotsEditorMutationHook } from '../../../widgets/runner-status'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+
+function displayValue(value: string | number | null | undefined) {
+  return value == null || value === '' ? 'unknown' : String(value)
+}
 
 function formatTimestamp(value: string | null | undefined): string {
   if (!value) return 'unknown'
   const ms = new Date(value).getTime()
-  if (!Number.isFinite(ms)) return value
-  return new Date(ms).toLocaleString()
+  return Number.isFinite(ms) ? new Date(ms).toLocaleString() : value
 }
 
-function formatRelative(value: string | null | undefined): string {
-  if (!value) return 'unknown'
-  const diff = Math.max(0, Date.now() - new Date(value).getTime())
-  const seconds = Math.floor(diff / 1000)
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
+function reasonLabel(code: string) {
+  return code.replaceAll('-', ' ')
 }
 
-function StatusBadge({ status }: { status: RunnerStatusRow['status'] }) {
-  const variants: Record<RunnerStatusRow['status'], string> = {
-    idle: 'bg-green-100 text-green-700',
-    busy: 'bg-blue-100 text-blue-700',
-    stale: 'bg-amber-100 text-amber-700',
-    offline: 'bg-gray-100 text-gray-500',
-  }
+function Fact({ label, children, testId }: { label: string; children: React.ReactNode; testId?: string }) {
   return (
-    <span
-      data-testid="runner-status-badge"
-      data-status={status}
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${variants[status]}`}
-    >
-      {status}
-    </span>
+    <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-border/50 py-2 last:border-0">
+      <dt className="shrink-0 text-xs text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 break-words text-right text-sm text-foreground" data-testid={testId}>
+        {children}
+      </dd>
+    </div>
   )
 }
 
-function ScopeBadge({ row }: { row: RunnerStatusRow }) {
-  if (row.scope.type === 'global') {
+function AdmissionReasons({ codes }: { codes: string[] }) {
+  if (codes.length === 0) return <span className="text-muted-foreground">none</span>
+  return (
+    <div className="flex max-w-full flex-wrap justify-end gap-1" data-testid="runner-detail-admission-reasons">
+      {codes.map((code) => (
+        <span key={code} className="rounded bg-warning-subtle px-1.5 py-0.5 text-[11px] text-warning">
+          {reasonLabel(code)}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function OwnerKind({ work }: { work: RunnerActiveWork }) {
+  const isAgentJob = work.ownerKind.toLowerCase() === 'agent-job' || work.ownerKind.toLowerCase() === 'agentjob'
+  return (
+    <Badge
+      variant={isAgentJob ? 'secondary' : 'outline'}
+      className={
+        isAgentJob
+          ? 'border-info-border bg-info-subtle text-info'
+          : 'border-warning-border bg-warning-subtle text-warning'
+      }
+    >
+      {isAgentJob ? 'AgentJob' : 'Workflow'}
+    </Badge>
+  )
+}
+
+function IssueReference({ work, projects }: { work: RunnerActiveWork; projects: Project[] }) {
+  if (!work.issue) return null
+  const project = projects.find((candidate) => candidate.id === work.issue?.projectId)
+  if (!project)
     return (
-      <span data-testid="runner-scope-badge" className="inline-flex items-center rounded-full bg-gray-100 text-gray-700 px-2 py-0.5 text-xs font-medium">
-        global
+      <span className="text-xs text-muted-foreground">
+        {work.issue.projectId} · #{work.issue.issueNumber}
       </span>
     )
-  }
   return (
-    <span
-      data-testid="runner-scope-badge"
-      data-project-id={row.scope.projectId ?? undefined}
-      data-project-name={row.scope.projectName ?? undefined}
-      className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium"
+    <Link
+      to={projectPath(project.name, `/issues/${work.issue.issueNumber}`)}
+      className="text-xs text-info hover:text-info-foreground hover:underline"
+      data-testid="active-work-issue-link"
+      data-issue-project-id={work.issue.projectId}
     >
-      {row.scope.projectName ?? row.scope.projectId ?? 'project'}
-    </span>
+      {project.name} · issue #{work.issue.issueNumber}
+    </Link>
   )
 }
 
-function ConnectionBadge({ state }: { state: string | null | undefined }) {
-  if (!state) return <span className="text-xs text-gray-400">connection unknown</span>
-  const tone = state === 'connected' ? 'text-green-600' : 'text-gray-400'
-  return (
-    <span data-testid="runner-connection-state" data-state={state} className={`text-xs ${tone}`}>
-      {state}
-    </span>
-  )
-}
-
-function ActiveWorkRow({
-  work,
-  toProjectPath,
-}: {
-  work: RunnerActiveWork
-  toProjectPath: (path: string) => string
-}) {
-  const label = work.title ?? work.workType ?? work.ownerKind
+function ActiveWorkRow({ work, projects }: { work: RunnerActiveWork; projects: Project[] }) {
   return (
     <div
-      className="flex flex-col gap-1 rounded-md border border-border/60 p-3"
+      className="min-w-0 rounded-md border border-border/60 p-3"
       data-testid="active-work-detail-row"
       data-work-id={work.workId}
       data-owner-kind={work.ownerKind}
     >
-      <div className="flex items-baseline gap-2 flex-wrap">
-        <span className="text-sm font-medium text-foreground">{label}</span>
-        {work.stage && (
-          <span className="text-xs text-muted-foreground">stage: {work.stage}</span>
-        )}
-        <span className="ml-auto text-xs text-muted-foreground font-mono">{work.ownerKind}</span>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <OwnerKind work={work} />
+        <span className="min-w-0 break-words text-sm font-medium text-foreground">{work.title ?? work.workType}</span>
+        {work.stage && <span className="text-xs text-muted-foreground">stage: {work.stage}</span>}
       </div>
-      <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
-        <span className="font-mono" data-testid="active-work-work-id">{work.workId}</span>
-        <span className="text-gray-300">·</span>
-        <span className="font-mono" data-testid="active-work-owner-id">{work.ownerId}</span>
-        {work.issue ? (
-          <>
-            <span className="text-gray-300">·</span>
-            <Link
-              to={toProjectPath(`/issues/${work.issue.issueNumber}`)}
-              className="text-blue-600 hover:text-blue-700 hover:underline"
-              data-testid="active-work-issue-link"
-              data-issue-number={work.issue.issueNumber}
-              data-issue-project-id={work.issue.projectId}
-            >
-              issue #{work.issue.issueNumber}
-            </Link>
-          </>
-        ) : null}
+      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <span className="break-all font-mono" data-testid="active-work-work-id">
+          {work.workId}
+        </span>
+        <span>owner</span>
+        <span className="break-all font-mono" data-testid="active-work-owner-id">
+          {work.ownerId}
+        </span>
+        <IssueReference work={work} projects={projects} />
       </div>
+    </div>
+  )
+}
+
+function RuntimeCatalog({ runtime }: { runtime: RunnerRuntime }) {
+  const catalog = runtime.catalog
+  return (
+    <div
+      className="mt-3 space-y-3 rounded-md border border-border/70 bg-muted/20 p-3"
+      data-testid={`runner-runtime-${runtime.name}`}
+    >
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h3 className="break-all text-sm font-semibold text-foreground">{runtime.name}</h3>
+          <p className="text-xs text-muted-foreground">
+            Runtime readiness and capability catalog are independent facts.
+          </p>
+        </div>
+        <Badge
+          variant={runtime.readiness.state === 'ready' ? 'secondary' : 'outline'}
+          data-testid="runner-runtime-readiness"
+        >
+          {runtime.readiness.state}
+        </Badge>
+      </div>
+      <dl className="grid min-w-0 gap-x-4 gap-y-2 sm:grid-cols-2">
+        <Fact label="Readiness generation">{displayValue(runtime.readiness.generation)}</Fact>
+        <Fact label="Readiness reason">
+          {runtime.readiness.reasonCode ? reasonLabel(runtime.readiness.reasonCode) : 'none'}
+        </Fact>
+        <Fact label="Catalog complete">{catalog?.complete == null ? 'unknown' : catalog.complete ? 'yes' : 'no'}</Fact>
+        <Fact label="Capability revision">{displayValue(catalog?.capabilityRevision)}</Fact>
+      </dl>
+      {catalog ? (
+        <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+          <div className="min-w-0">
+            <h4 className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Models ({catalog.modelCount})
+            </h4>
+            <div className="mt-1 flex min-w-0 flex-wrap gap-1" data-testid="runner-runtime-models">
+              {catalog.models.length === 0 ? (
+                <span className="text-xs text-muted-foreground">none</span>
+              ) : (
+                catalog.models.map((model) => (
+                  <code key={model} className="max-w-full break-all rounded bg-muted px-1.5 py-0.5 text-[11px]">
+                    {model}
+                  </code>
+                ))
+              )}
+            </div>
+          </div>
+          <div className="min-w-0">
+            <h4 className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Variants</h4>
+            <div className="mt-1 space-y-1" data-testid="runner-runtime-variants">
+              {Object.entries(catalog.variants).length === 0 ? (
+                <span className="text-xs text-muted-foreground">none</span>
+              ) : (
+                Object.entries(catalog.variants).map(([model, variants]) => (
+                  <div key={model} className="break-words text-xs">
+                    <span className="font-mono">{model}</span>: {variants.join(', ') || 'none'}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          <div className="min-w-0 lg:col-span-2">
+            <h4 className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Reasoning support</h4>
+            <div className="mt-1 text-xs text-foreground" data-testid="runner-runtime-reasoning-support">
+              {catalog.supportsReasoningEffort == null
+                ? 'unknown'
+                : catalog.supportsReasoningEffort
+                  ? 'supported'
+                  : 'not supported'}
+            </div>
+            {Object.entries(catalog.reasoningEfforts).length > 0 && (
+              <div
+                className="mt-1 space-y-1 text-xs text-muted-foreground"
+                data-testid="runner-runtime-reasoning-efforts"
+              >
+                {Object.entries(catalog.reasoningEfforts).map(([model, efforts]) => (
+                  <div key={model} className="break-words">
+                    <span className="font-mono">{model}</span>: {efforts.join(', ') || 'none'}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">No catalog reported. This does not change readiness.</p>
+      )}
     </div>
   )
 }
@@ -129,148 +208,142 @@ function ActiveWorkRow({
 function RunnerDetailContent({
   row,
   slotsMutationHook,
+  projects,
 }: {
-  row: RunnerStatusRow
+  row: RunnerStatusEntry
   slotsMutationHook?: SlotsEditorMutationHook
+  projects: Project[]
 }) {
-  const toProjectPath = useProjectPath()
   const activeWorks = row.activeWorks ?? []
-  const maxSlots = row.maxWorkflowSlots ?? row.capacity?.totalSlots ?? null
-
+  const capacity = row.capacity
   return (
     <>
       <div className="mb-6" data-testid="runner-detail-header">
-        <div className="flex flex-wrap items-center gap-2 mb-2">
-          <span className="font-mono text-sm font-medium text-foreground" data-testid="runner-detail-id">
-            {row.id}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span
+            className="max-w-full break-all font-mono text-sm font-medium text-foreground"
+            data-testid="runner-detail-id"
+          >
+            {row.identity.id}
           </span>
-          <span className="text-xs text-muted-foreground">{row.kind}</span>
-          <StatusBadge status={row.status} />
-          <ScopeBadge row={row} />
+          <Badge variant={row.presence.state === 'online' ? 'secondary' : 'outline'}>{row.presence.state}</Badge>
+          <Badge variant="outline">control {row.control.state}</Badge>
+          <Badge variant={row.admission.state === 'ready' ? 'secondary' : 'destructive'}>
+            admission {row.admission.state}
+          </Badge>
         </div>
-        <h1 className="text-2xl font-bold text-foreground">{row.id}</h1>
+        <h1 className="mt-2 break-all text-2xl font-bold text-foreground">{row.identity.id}</h1>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid min-w-0 gap-6 lg:grid-cols-2">
         <CardSection title="Identity">
-          <dl className="space-y-2 text-sm" data-testid="runner-detail-identity">
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Runner id</dt>
-              <dd className="font-mono text-foreground text-right break-all" data-testid="runner-detail-id-cell">{row.id}</dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Kind</dt>
-              <dd className="text-foreground" data-testid="runner-detail-kind">{row.kind}</dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Hostname</dt>
-              <dd className="text-foreground" data-testid="runner-detail-hostname">{row.hostname || '—'}</dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Scope</dt>
-              <dd><ScopeBadge row={row} /></dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Registered at</dt>
-              <dd className="text-foreground" data-testid="runner-detail-registered-at">{formatTimestamp(row.registeredAt)}</dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Build git hash</dt>
-              <dd className="font-mono text-foreground text-right break-all" data-testid="runner-detail-build-git-hash">
-                {row.buildGitHash ?? '—'}
-              </dd>
-            </div>
+          <dl data-testid="runner-detail-identity">
+            <Fact label="Runner id" testId="runner-detail-id-cell">
+              {row.identity.id}
+            </Fact>
+            <Fact label="Hostname" testId="runner-detail-hostname">
+              {displayValue(row.identity.hostname)}
+            </Fact>
+            <Fact label="Kind" testId="runner-detail-kind">
+              {displayValue(row.identity.kind)}
+            </Fact>
+            <Fact label="Component" testId="runner-detail-component">
+              {displayValue(row.identity.component)}
+            </Fact>
+            <Fact label="Source revision" testId="runner-detail-source-revision">
+              {displayValue(row.identity.sourceRevision)}
+            </Fact>
+            <Fact label="Release" testId="runner-detail-release-id">
+              {displayValue(row.identity.releaseId)}
+            </Fact>
+            <Fact label="Generation" testId="runner-detail-generation">
+              {displayValue(row.identity.generation)}
+            </Fact>
           </dl>
         </CardSection>
 
-        <CardSection title="Capabilities">
-          <div className="space-y-2 text-sm" data-testid="runner-detail-capabilities">
+        <CardSection title="Presence, control, and admission">
+          <dl data-testid="runner-detail-status-facts">
+            <Fact label="Presence">{row.presence.state}</Fact>
+            <Fact label="Last observed">{formatTimestamp(row.presence.lastObservedAt)}</Fact>
+            <Fact label="Control">{row.control.state}</Fact>
+            <Fact label="Control generation">{displayValue(row.control.generation)}</Fact>
+            <Fact label="Admission">{row.admission.state}</Fact>
+            <Fact label="Admission reasons">
+              <AdmissionReasons codes={row.admission.reasonCodes} />
+            </Fact>
+          </dl>
+        </CardSection>
+
+        <CardSection title="Capabilities and configured capacity">
+          <div className="space-y-3" data-testid="runner-detail-capabilities">
             <div>
-              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">Capabilities</div>
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Capabilities</div>
               {row.capabilities.length === 0 ? (
-                <div className="text-xs text-muted-foreground">none</div>
+                <div className="mt-1 text-xs text-muted-foreground">none</div>
               ) : (
-                <div className="flex flex-wrap gap-1" data-testid="runner-detail-capability-list">
-                  {row.capabilities.map((cap) => (
+                <div className="mt-1 flex flex-wrap gap-1" data-testid="runner-detail-capability-list">
+                  {row.capabilities.map((capability) => (
                     <span
-                      key={cap}
-                      className="inline-flex items-center rounded-full bg-gray-100 text-gray-700 px-2 py-0.5 text-xs"
+                      key={capability}
+                      className="break-all rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
                     >
-                      {cap}
+                      {capability}
                     </span>
                   ))}
                 </div>
               )}
             </div>
-            <div>
-              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">Coder models</div>
-              {row.coderModels.length === 0 ? (
-                <div className="text-xs text-muted-foreground">none</div>
-              ) : (
-                <div className="text-foreground" data-testid="runner-detail-coder-models">
-                  {row.coderModelCount} model{row.coderModelCount !== 1 ? 's' : ''}: {row.coderModels.join(', ')}
-                </div>
-              )}
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Max execution slots</dt>
-              <dd className="text-foreground" data-testid="runner-detail-max-slots">
-                {maxSlots != null ? (
-                  <SlotsEditor runnerId={row.id} value={maxSlots} mutationHook={slotsMutationHook} />
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 text-sm">
+              <span className="text-muted-foreground">Configured slots</span>
+              <span data-testid="runner-detail-max-slots">
+                {capacity ? (
+                  <SlotsEditor runnerId={row.identity.id} value={capacity.total} mutationHook={slotsMutationHook} />
                 ) : (
-                  '—'
+                  'unknown'
                 )}
-              </dd>
+              </span>
             </div>
-            <p className="text-[11px] text-muted-foreground mt-1">
-              Limits the combined Workflow work and AgentJobs on this Runner.
-            </p>
+            <p className="text-[11px] text-muted-foreground">Capacity combines active Workflow and AgentJob owners.</p>
           </div>
         </CardSection>
 
-        <CardSection title="Active Works" data-testid="runner-detail-active-works-section">
-          {activeWorks.length === 0 ? (
-            <div className="text-sm text-muted-foreground" data-testid="runner-detail-no-active-works">
-              No active works.
-            </div>
+        <CardSection title="Capacity and drain">
+          <dl data-testid="runner-detail-capacity-section">
+            <Fact label="Used / total" testId="runner-detail-capacity">
+              {capacity ? `${capacity.used == null ? 'unknown' : capacity.used}/${capacity.total} slots` : 'unknown'}
+            </Fact>
+            <Fact label="Drain">
+              {row.drain?.active
+                ? `${row.drain.kind}${row.drain.updateInterruptId ? ` · ${row.drain.updateInterruptId}` : ''}`
+                : 'not draining'}
+            </Fact>
+          </dl>
+          <div className="mt-3">
+            <RunnerNextActions actions={row.nextActions} />
+          </div>
+        </CardSection>
+
+        <CardSection title="Runtimes" data-testid="runner-detail-runtimes-section">
+          {row.runtimes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No Runtime witnesses or catalogs reported.</p>
           ) : (
-            <div
-              className="space-y-2"
-              data-testid="runner-detail-active-works-list"
-              data-count={activeWorks.length}
-            >
-              {activeWorks.map((work) => (
-                <ActiveWorkRow key={work.workId} work={work} toProjectPath={toProjectPath} />
-              ))}
-            </div>
+            row.runtimes.map((runtime) => <RuntimeCatalog key={runtime.name} runtime={runtime} />)
           )}
         </CardSection>
 
-        <CardSection title="Health">
-          <dl className="space-y-2 text-sm" data-testid="runner-detail-health">
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Status</dt>
-              <dd><StatusBadge status={row.status} /></dd>
+        <CardSection title="Active owners" data-testid="runner-detail-active-works-section">
+          {activeWorks.length === 0 ? (
+            <div className="text-sm text-muted-foreground" data-testid="runner-detail-no-active-works">
+              No active owners reported.
             </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Connection state</dt>
-              <dd><ConnectionBadge state={row.connectionState} /></dd>
+          ) : (
+            <div className="space-y-2" data-testid="runner-detail-active-works-list" data-count={activeWorks.length}>
+              {activeWorks.map((work) => (
+                <ActiveWorkRow key={work.workId} work={work} projects={projects} />
+              ))}
             </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Last heartbeat</dt>
-              <dd className="text-foreground" data-testid="runner-detail-last-heartbeat">
-                {row.lastHeartbeatAt ? `${formatTimestamp(row.lastHeartbeatAt)} (${formatRelative(row.lastHeartbeatAt)})` : 'unknown'}
-              </dd>
-            </div>
-            {row.capacity && (
-              <div className="flex justify-between gap-3">
-                <dt className="text-muted-foreground">Capacity</dt>
-                <dd className="text-foreground" data-testid="runner-detail-capacity">
-                  {row.capacity.usedSlots}/{row.capacity.totalSlots} slots
-                </dd>
-              </div>
-            )}
-          </dl>
+          )}
         </CardSection>
       </div>
     </>
@@ -282,90 +355,68 @@ export interface RunnerDetailPageDependencies {
   slotsMutationHook?: SlotsEditorMutationHook
 }
 
-export function RunnerDetailPage({
-  dependencies,
-}: {
-  dependencies?: RunnerDetailPageDependencies
-} = {}) {
+export function RunnerDetailPage({ dependencies }: { dependencies?: RunnerDetailPageDependencies } = {}) {
   const { runnerId } = useParams<{ runnerId: string }>()
   const navigate = useNavigate()
-  const toProjectPath = useProjectPath()
+  const { projects } = useProject()
   const runnerHook = dependencies?.runnerHook ?? useRunner
   const { data: runner, isLoading, error } = runnerHook(runnerId)
   useDocumentTitle(`Runner ${runnerId ?? ''} — Mohist`)
 
-  if (error && (error instanceof ApiError ? error.status === 404 : (error as { status?: number }).status === 404)) {
-    return (
-      <div className="flex-1 min-w-0 overflow-y-auto" data-testid="runner-detail-page">
-        <div className="mx-auto max-w-3xl px-4 sm:px-6 py-10">
-          <Card className="p-8 text-center" data-testid="runner-not-found">
-            <div className="text-lg font-medium text-foreground mb-2">Runner not found</div>
-            <div className="text-sm text-muted-foreground mb-4">
-              {`Runner '${runnerId}' is not registered to this project.`}
-            </div>
-            <div className="flex items-center justify-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => navigate(toProjectPath('/activity'))}
-                data-testid="runner-not-found-back"
-              >
-                Back to activity
-              </Button>
-              <Link
-                to={toProjectPath('/activity')}
-                className="text-sm text-blue-600 hover:text-blue-700"
-              >
-                Or via list
-              </Link>
-            </div>
-          </Card>
-        </div>
-      </div>
-    )
-  }
+  const backToList = () => navigate('/runners')
+  const isNotFound =
+    error && (error instanceof ApiError ? error.status === 404 : (error as { status?: number }).status === 404)
 
-  if (error) {
+  if (isNotFound) {
     return (
       <div className="flex-1 min-w-0 overflow-y-auto" data-testid="runner-detail-page">
-        <div className="mx-auto max-w-3xl px-4 sm:px-6 py-10">
-          <Card className="p-8 text-center" data-testid="runner-detail-error">
-            <div className="text-lg font-medium text-foreground mb-2">Failed to load runner</div>
-            <div className="text-sm text-muted-foreground mb-4">{error.message}</div>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => navigate(toProjectPath('/activity'))}
-            >
-              Back to activity
+        <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
+          <Card className="p-8 text-center" data-testid="runner-not-found">
+            <div className="mb-2 text-lg font-medium text-foreground">Runner not found</div>
+            <div className="mb-4 text-sm text-muted-foreground">{`Runner '${runnerId}' is not in the global Runner inventory.`}</div>
+            <Button type="button" variant="outline" onClick={backToList} data-testid="runner-not-found-back">
+              Back to Runners
             </Button>
           </Card>
         </div>
       </div>
     )
   }
-
-  if (isLoading || !runner) {
+  if (error) {
     return (
-      <div className="flex items-center justify-center flex-1" data-testid="runner-detail-loading">
-        <div className="text-gray-400">Loading...</div>
+      <div className="flex-1 min-w-0 overflow-y-auto" data-testid="runner-detail-page">
+        <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
+          <Card className="p-8 text-center" data-testid="runner-detail-error">
+            <div className="mb-2 text-lg font-medium text-foreground">Failed to load Runner</div>
+            <div className="mb-4 break-words text-sm text-muted-foreground">{error.message}</div>
+            <Button type="button" variant="outline" onClick={backToList}>
+              Back to Runners
+            </Button>
+          </Card>
+        </div>
       </div>
     )
   }
+  if (isLoading || !runner)
+    return (
+      <div className="flex flex-1 items-center justify-center" data-testid="runner-detail-loading">
+        <div className="text-sm text-muted-foreground">Loading…</div>
+      </div>
+    )
 
   return (
     <div className="flex-1 min-w-0 overflow-y-auto" data-testid="runner-detail-page">
-      <div className="mx-auto max-w-5xl px-4 sm:px-6 py-6">
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
         <button
           type="button"
-          onClick={() => navigate(toProjectPath('/activity'))}
-          className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          onClick={backToList}
+          className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
           data-testid="runner-detail-back"
         >
           <ArrowLeftIcon className="size-3.5" />
-          <span>Back to activity</span>
+          <span>Back to Runners</span>
         </button>
-        <RunnerDetailContent row={runner} slotsMutationHook={dependencies?.slotsMutationHook} />
+        <RunnerDetailContent row={runner} slotsMutationHook={dependencies?.slotsMutationHook} projects={projects} />
       </div>
     </div>
   )

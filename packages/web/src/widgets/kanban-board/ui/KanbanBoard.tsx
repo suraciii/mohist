@@ -492,15 +492,14 @@ function RunnerUnavailableBanner({
   agentStatus: AgentStatus
   runnerSummaryHook: typeof useRunnerSummary
 }) {
-  const { hasConnectedCapacity } = runnerSummaryHook()
-  const toProjectPath = useProjectPath()
-  if (hasConnectedCapacity) return null
+  const { hasAdmissibleCapacity } = runnerSummaryHook()
+  if (hasAdmissibleCapacity) return null
 
   return (
     <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
       {agentStatus.runnerMessage ?? 'No runner is connected.'}{' '}
-      <Link to={toProjectPath('/activity')} className="underline hover:no-underline">
-        View runner status
+      <Link to="/runners" className="underline hover:no-underline">
+        View Runner status
       </Link>{' '}
       or start a runner before starting workflow work.
     </div>
