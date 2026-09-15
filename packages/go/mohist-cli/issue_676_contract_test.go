@@ -12,24 +12,24 @@ import (
 )
 
 type discoveryProbe struct {
-	httpCalls       int
-	lookupCalls     int
-	readFileCalls   int
-	writeFileCalls  int
-	homeDirCalls    int
-	executeCalls    int
+	httpCalls        int
+	lookupCalls      int
+	readFileCalls    int
+	writeFileCalls   int
+	homeDirCalls     int
+	executeCalls     int
 	openBrowserCalls int
-	inputReads      int
-	nowCalls        int
-	waitCalls       int
-	executableCalls int
-	currentDirCalls int
-	eventTailCalls  int
+	inputReads       int
+	nowCalls         int
+	waitCalls        int
+	executableCalls  int
+	currentDirCalls  int
+	eventTailCalls   int
 	healthProbeCalls int
-	mkdirAllCalls   int
-	removeAllCalls  int
-	renameCalls     int
-	chmodCalls      int
+	mkdirAllCalls    int
+	removeAllCalls   int
+	renameCalls      int
+	chmodCalls       int
 }
 
 func (p *discoveryProbe) deps(out, errOut *strings.Builder) Dependencies {
@@ -133,6 +133,7 @@ func TestIssue676CrossFamilyDiscoveryIsLocal(t *testing.T) {
 		want []string
 	}{
 		{name: "project", args: []string{"project", "list", "--json"}, want: projectFields},
+		{name: "project workflow default", args: []string{"project", "workflow", "set-default", "--json"}, want: projectWorkflowFields},
 		{name: "repository", args: []string{"repo", "create", "--json"}, want: repoFields},
 		{name: "workspace", args: []string{"workspace", "create", "--json"}, want: workspaceFields},
 		{name: "issue without id", args: []string{"issue", "view", "--json"}, want: issueFields},
@@ -214,6 +215,68 @@ func TestIssue676UnsupportedDiscoveryIsLocalUsage(t *testing.T) {
 	}
 }
 
+func TestIssue676ProjectWorkflowDefaultSelectedJSONPreservesRequestAndProjection(t *testing.T) {
+	var got *http.Request
+	out, errOut := &strings.Builder{}, &strings.Builder{}
+	deps := Dependencies{
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			got = r
+			return response(http.StatusOK, `{"success":true,"data":{"projectId":"proj","profileId":"profile"}}`), nil
+		})},
+		Stdout: out,
+		Stderr: errOut,
+		Lookup: func(name string) (string, bool) {
+			if name == "MOHIST_TOKEN" {
+				return "token", true
+			}
+			return "", false
+		},
+	}
+	if code := Run(context.Background(), []string{"project", "workflow", "set-default", "profile", "--project", "proj", "--json", "projectId,profileId"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if got == nil || got.Method != http.MethodPut || got.URL.Path != "/api/projects/proj/workflow-profile/default" || out.String() != `{"profileId":"profile","projectId":"proj"}`+"\n" || errOut.Len() != 0 {
+		t.Fatalf("request=%v stdout=%q stderr=%q", got, out.String(), errOut.String())
+	}
+	body, err := io.ReadAll(got.Body)
+	if err != nil || string(body) != `{"profileId":"profile"}` {
+		t.Fatalf("request body=%q err=%v", body, err)
+	}
+}
+
+func TestIssue676IssueBodyValuesDoNotTriggerDiscovery(t *testing.T) {
+	for _, bodyValue := range []string{"--help", "--json"} {
+		t.Run(bodyValue, func(t *testing.T) {
+			var got *http.Request
+			out, errOut := &strings.Builder{}, &strings.Builder{}
+			deps := Dependencies{
+				HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					got = r
+					return response(http.StatusOK, `{"success":true,"data":{"number":1,"title":"Title","body":"`+bodyValue+`"}}`), nil
+				})},
+				Stdout: out,
+				Stderr: errOut,
+				Lookup: func(name string) (string, bool) {
+					if name == "MOHIST_TOKEN" {
+						return "token", true
+					}
+					return "", false
+				},
+			}
+			if code := Run(context.Background(), []string{"issue", "create", "Title", "--body", bodyValue, "--project", "proj"}, deps); code != ExitOK {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+			if got == nil || got.Method != http.MethodPost || got.URL.Path != "/api/projects/proj/issues" || !strings.Contains(out.String(), `"title":"Title"`) || errOut.Len() != 0 {
+				t.Fatalf("request=%v stdout=%q stderr=%q", got, out.String(), errOut.String())
+			}
+			requestBody, err := io.ReadAll(got.Body)
+			if err != nil || !strings.Contains(string(requestBody), `"body":"`+bodyValue+`"`) {
+				t.Fatalf("request body=%q err=%v", requestBody, err)
+			}
+		})
+	}
+}
+
 func TestIssue676SelectedJSONPreservesProjectRequestAndProjection(t *testing.T) {
 	var got *http.Request
 	out, errOut := &strings.Builder{}, &strings.Builder{}
@@ -251,7 +314,7 @@ func TestIssue676SelectedJSONPreservesOtelQuery(t *testing.T) {
 				return nil, err
 			}
 			gotBody = string(body)
-			return response(http.StatusOK, `{"columns":["value"],"rows":[[1]],"truncated":false,"truncate_reason":""}`), nil
+			return response(http.StatusOK, `{"success":true,"data":{"columns":["value"],"rows":[[1]],"truncated":false,"truncate_reason":""}}`), nil
 		})},
 		Stdout: out,
 		Stderr: errOut,

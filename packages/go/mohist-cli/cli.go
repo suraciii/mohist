@@ -584,11 +584,16 @@ func parseLeaf(kind string, args []string, path string, catalog []string, usage 
 func isControlToken(value string) bool { return strings.HasPrefix(value, "-") }
 
 func discoverLeaf(args []string, kind string, catalog []string, helpText string) (command, bool, error) {
-	for i, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		if arg == "--help" || arg == "-h" {
 			return command{help: true, helpText: helpText}, true, nil
 		}
-		if arg == "--json" && (i+1 >= len(args) || isControlToken(args[i+1])) {
+		if arg == "--json" {
+			if i+1 < len(args) && !isControlToken(args[i+1]) {
+				i++
+				continue
+			}
 			if i+1 < len(args) && (args[i+1] == "--help" || args[i+1] == "-h") {
 				return command{help: true, helpText: helpText}, true, nil
 			}
@@ -597,8 +602,31 @@ func discoverLeaf(args []string, kind string, catalog []string, helpText string)
 			}
 			return command{kind: kind, catalog: catalog, fieldsOnly: true}, true, nil
 		}
+		if leafValueOption(kind, arg) && i+1 < len(args) {
+			i++
+		}
 	}
 	return command{}, false, nil
+}
+
+func leafValueOption(kind, arg string) bool {
+	if !strings.HasPrefix(arg, "--") || arg == "--help" || arg == "-h" || arg == "--json" {
+		return false
+	}
+	if strings.HasPrefix(kind, "ops-") {
+		return arg != "--yes" && arg != "--follow"
+	}
+	switch arg {
+	case "--project", "--status", "--origin", "--git-url", "--base-branch", "--repo", "--body", "--body-file", "--stage", "--value-json",
+		"--file", "--id", "--name", "--description", "--issue", "--display-name", "--message", "--from-stage", "--interval", "--feedback", "--value",
+		"--limit", "--match", "--event", "--handler", "--service", "--target-url", "--secret", "--auth-type", "--auth-token", "--auth-user",
+		"--auth-password", "--auth-header", "--subscription-id", "--title", "--label", "--agent", "--response-prompt", "--before", "--after",
+		"--description-file", "--priority", "--supported-values", "--parent", "--model", "--model-variant", "--workflow-profile", "--stage-models",
+		"--stage-models-file", "--stage-model-variants", "--stage-model-variants-file":
+		return true
+	default:
+		return false
+	}
 }
 
 func contains(values []string, wanted string) bool {

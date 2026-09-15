@@ -193,8 +193,12 @@ func parseNamedSpace(kind string, args []string, catalog []string, noun string, 
 }
 
 func parseRepoMutation(kind string, args []string, action string) (command, error) {
-	c := command{kind: kind, catalog: repoFields}
-	if discovered, ok, err := discoverLeaf(args, kind, repoFields, leafHelp(kind, repoFields)); ok {
+	return parseRepoMutationWithCatalog(kind, args, action, repoFields)
+}
+
+func parseRepoMutationWithCatalog(kind string, args []string, action string, catalog []string) (command, error) {
+	c := command{kind: kind, catalog: catalog}
+	if discovered, ok, err := discoverLeaf(args, kind, catalog, leafHelp(kind, catalog)); ok {
 		return discovered, err
 	}
 	if action == "create" || action == "edit" || action == "delete" || action == "set-default" {
@@ -220,7 +224,7 @@ func parseRepoMutation(kind string, args []string, action string) (command, erro
 				return command{}, err
 			}
 		case "--help", "-h":
-			return command{help: true, helpText: leafHelp(kind, repoFields)}, nil
+			return command{help: true, helpText: leafHelp(kind, catalog)}, nil
 		default:
 			return command{}, usage("unknown option " + args[i])
 		}
@@ -231,7 +235,7 @@ func parseRepoMutation(kind string, args []string, action string) (command, erro
 	if action == "edit" && !hasArg(c.args, "git-url") && !hasArg(c.args, "base-branch") {
 		return command{}, usage("repository requires --git-url and/or --base-branch to update")
 	}
-	if err := validateFields(c.fields, repoFields, "mo repo "+action); err != nil {
+	if err := validateFields(c.fields, catalog, "mo repo "+action); err != nil {
 		return command{}, err
 	}
 	c.args = append(c.args, "project-required", "true", "action", action)
@@ -313,11 +317,10 @@ func parseProjectWorkflow(args []string) (command, error) {
 		return command{help: true, helpText: "USAGE\n    mo project workflow <set-default|verification|prompt> [flags]\n\nManage Project Workflow references and Prompts."}, nil
 	}
 	if args[0] == "set-default" {
-		c, err := parseRepoMutation("project-workflow-default", args[1:], "set-default")
+		c, err := parseRepoMutationWithCatalog("project-workflow-default", args[1:], "set-default", projectWorkflowFields)
 		if err != nil {
 			return command{}, err
 		}
-		c.catalog = projectWorkflowFields
 		if err := validateFields(c.fields, c.catalog, "mo project workflow set-default"); err != nil {
 			return command{}, err
 		}
