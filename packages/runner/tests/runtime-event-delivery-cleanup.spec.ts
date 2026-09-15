@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ServerConnection } from '../src/server/connection.js'
+import { RunnerTransportError, type ServerConnection } from '../src/server/connection.js'
 import { createServerRuntimeEventDelivery } from '../src/server/runtime-event-queue-delivery.js'
 import type { RuntimeEventRecord } from '../src/server/runtime-event-queue.js'
 
@@ -100,5 +100,48 @@ describe('createServerRuntimeEventDelivery - workflow cleanup', () => {
     } satisfies RuntimeEventRecord
 
     await expect(delivery.send(record, new AbortController().signal)).resolves.toEqual([])
+  })
+
+  it('passes cleanup transport failures through without reclassifying them', async () => {
+    const error = new RunnerTransportError({
+      operation: 'workflowAgentSessionCleanupTurn',
+      kind: 'http',
+      httpStatus: 400,
+      serverCode: 'workflow_runtime_binding_required',
+      safeMessage: 'cleanup refused',
+    })
+    const cleanupTurn = vi.fn(async () => {
+      throw error
+    })
+    const delivery = createServerRuntimeEventDelivery({
+      connection: { workflowAgentSessionCleanupTurn: cleanupTurn } as unknown as ServerConnection,
+    })
+    const record = {
+      id: 'workflow-cleanup:wf-1:task-1.1:work-1:1',
+      producerFamily: 'workflow-cleanup' as const,
+      target: { kind: 'workflow' as const, projectId: 'proj-1', workflowRunId: 'wf-1', sessionName: 'build' },
+      runtime: 'pi',
+      runtimeSessionId: 'runtime-1',
+      work: {
+        workId: 'work-1',
+        actionAttemptId: 'task-1.1',
+        runnerId: 'runner-1',
+        agentSessionId: 'agent-session-1',
+        inputDeliveryId: 'workflow-cleanup-input:workflow-cleanup:wf-1:task-1.1:work-1:1',
+        agentTurnId: null,
+        workType: 'task',
+        stage: 'build',
+      },
+      event: {
+        type: 'session.cleanup',
+        payload: {
+          text: 'clean the worktree',
+          cleanupOperationId: 'workflow-cleanup:wf-1:task-1.1:work-1:1',
+        },
+      },
+      acknowledgementPolicy: 'matching-receipt' as const,
+    } satisfies RuntimeEventRecord
+
+    await expect(delivery.send(record, new AbortController().signal)).rejects.toBe(error)
   })
 })

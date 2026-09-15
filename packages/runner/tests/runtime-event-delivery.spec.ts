@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { AgentSessionRuntimeEventReceipt, ServerConnection } from '../src/server/connection.js'
+import {
+  RunnerTransportError,
+  type AgentSessionRuntimeEventReceipt,
+  type ServerConnection,
+} from '../src/server/connection.js'
 import { createServerRuntimeEventDelivery } from '../src/server/runtime-event-queue-delivery.js'
 import type { RuntimeEventRecord } from '../src/server/runtime-event-queue.js'
 
@@ -79,6 +83,52 @@ describe('createServerRuntimeEventDelivery — sendBatch', () => {
 
     expect(sendSpy).toHaveBeenCalledTimes(1)
     expect(result).toEqual([{ type: 'reasoning.delta' }])
+  })
+
+  it.each([
+    [
+      'cancelled',
+      new RunnerTransportError({
+        operation: 'workflowAgentSessionRuntimeEvents',
+        kind: 'cancelled',
+        safeMessage: 'cancelled',
+      }),
+    ],
+    [
+      'network',
+      new RunnerTransportError({
+        operation: 'workflowAgentSessionRuntimeEvents',
+        kind: 'network',
+        safeMessage: 'network failure',
+      }),
+    ],
+    [
+      'http',
+      new RunnerTransportError({
+        operation: 'workflowAgentSessionRuntimeEvents',
+        kind: 'http',
+        httpStatus: 409,
+        serverCode: 'agent_session_changed',
+        safeMessage: 'HTTP failure',
+      }),
+    ],
+    [
+      'protocol',
+      new RunnerTransportError({
+        operation: 'workflowAgentSessionRuntimeEvents',
+        kind: 'protocol',
+        safeMessage: 'malformed response',
+      }),
+    ],
+  ] as const)('passes the canonical %s transport error through unchanged', async (_kind, error) => {
+    const connection = {
+      async workflowAgentSessionRuntimeEvents() {
+        throw error
+      },
+    } as unknown as ServerConnection
+    const delivery = createServerRuntimeEventDelivery({ connection })
+
+    await expect(delivery.send(workflowRecord('a'), new AbortController().signal)).rejects.toBe(error)
   })
 
   it('delivers follow-up facts with the exact Session and Agent turn identity', async () => {

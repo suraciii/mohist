@@ -1,4 +1,5 @@
 import type { ServerConnection } from '../server/connection.js'
+import { runnerTransportDiagnostics } from '../server/connection-errors.js'
 import type { WorkspaceRegistry } from './workspace-registry.js'
 import { isTerminalWorkflowStatus } from './workflow-terminal-status.js'
 import { runnerLogger } from '../system/logger.js'
@@ -59,7 +60,10 @@ export class ConvergenceBackstop {
     } catch (error) {
       // Convergence is best-effort. The next tick (or reconnect) will
       // retry. Push may still be working in parallel.
-      log.error('workspace cleanup convergence query failed', { exception: error })
+      log.error(
+        'workspace cleanup convergence query failed',
+        runnerTransportDiagnostics(error, { includeCredentialGuidance: true }),
+      )
       return { queried: workflowRunIds.length, transitioned: 0, dropped: 0 }
     }
 

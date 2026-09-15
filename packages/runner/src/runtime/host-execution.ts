@@ -3,6 +3,7 @@ import { reportAndRequireDurableAck } from './work-report.js'
 import { isShutdownFailureResult, isSyntheticStopResult } from './host-update-shutdown.js'
 import { AWAITING_ACK_RETRY_INTERVAL_MS } from './host-timing.js'
 import { runnerLogger } from '../system/logger.js'
+import { runnerTransportDiagnostics } from '../server/connection-errors.js'
 import { validateDispatchEnvelope } from '../server/connection-dispatch.js'
 import type { AwaitingAckEntry, InFlightEntry } from './host-state.js'
 import type { DispatchWorkItem, RunnerOptions, WorkItemResult } from '../core/types.js'
@@ -98,7 +99,7 @@ export async function retryDueReports(context: HostExecutionContext): Promise<vo
         log.warn('work report retry failed', {
           work: held.work.workId,
           attempt: held.entry.attempts,
-          exception: error,
+          ...runnerTransportDiagnostics(error, { includeCredentialGuidance: true }),
         })
       }
     }),
@@ -204,7 +205,7 @@ async function executeAndTransitionCore(
     scheduleReportRetry(context, key)
     log.warn('first work report failed; will retry', {
       work: work.workId,
-      exception: error,
+      ...runnerTransportDiagnostics(error, { includeCredentialGuidance: true }),
     })
   }
 }

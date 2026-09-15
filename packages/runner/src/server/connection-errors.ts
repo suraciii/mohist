@@ -1,34 +1,81 @@
-export function extractErrorMessage(payload: Record<string, unknown> | null, fallback: string): string | null {
-  if (!payload) return null
-  const data = readRecord(payload.data)
-  if (data && typeof data.message === 'string') return data.message
-  if (typeof payload.error === 'string') return payload.error
-  return null
+export type RunnerTransportErrorKind = 'cancelled' | 'network' | 'http' | 'protocol'
+
+export const RUNNER_REENROLL_ACTION = "re-run 'mo install runner'"
+
+const MAX_DIAGNOSTIC_MESSAGE_LENGTH = 512
+
+export interface RunnerTransportErrorOptions {
+  operation: string
+  kind: RunnerTransportErrorKind
+  httpStatus?: number
+  serverCode?: string
+  safeMessage: string
+  cause?: unknown
 }
 
-function readRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
-}
-export interface RuntimeEventDeliveryErrorMetadata {
-  readonly status: number
-  readonly code: string | null
-}
+export class RunnerTransportError extends Error {
+  readonly operation: string
+  readonly kind: RunnerTransportErrorKind
+  readonly httpStatus?: number
+  readonly serverCode?: string
+  readonly safeMessage: string
+  readonly cause?: unknown
 
-/**
- * HTTP failure returned by a runtime-event endpoint. The Server's structured
- * ApiResponse.Code is kept separate from the human-readable message so
- * delivery policy does not need to inspect exception text.
- */
-export class RuntimeEventDeliveryError extends Error implements RuntimeEventDeliveryErrorMetadata {
-  readonly status: number
-  readonly code: string | null
-
-  constructor(operation: string, status: number, code: string | null, responseBody: string) {
-    super(`${operation} failed: ${status}${responseBody ? ` ${responseBody}` : ''}`)
-    this.name = 'RuntimeEventDeliveryError'
-    this.status = status
-    this.code = code
+  constructor(options: RunnerTransportErrorOptions) {
+    super(options.safeMessage)
+    this.name = 'RunnerTransportError'
+    this.operation = options.operation
+    this.kind = options.kind
+    this.httpStatus = options.httpStatus
+    this.serverCode = options.serverCode
+    this.safeMessage = options.safeMessage
+    if (options.cause !== undefined) this.cause = options.cause
+    Object.freeze(this)
   }
+}
+
+export interface RunnerTransportDiagnosticOptions {
+  readonly includeCredentialGuidance?: boolean
+}
+
+export function runnerTransportDiagnostics(
+  error: unknown,
+  options: RunnerTransportDiagnosticOptions = {},
+): Record<string, unknown> {
+  if (!(error instanceof RunnerTransportError)) return { exception: error }
+  return {
+    operation: error.operation,
+    kind: error.kind,
+    ...(error.httpStatus === undefined ? {} : { httpStatus: error.httpStatus }),
+    ...(error.serverCode === undefined ? {} : { serverCode: error.serverCode }),
+    safeMessage: error.safeMessage,
+    ...(options.includeCredentialGuidance && isConfirmedRunnerCredentialRejection(error)
+      ? { nextAction: RUNNER_REENROLL_ACTION }
+      : {}),
+    exception: error,
+  }
+}
+
+export function isConfirmedRunnerCredentialRejection(error: unknown): error is RunnerTransportError {
+  return (
+    error instanceof RunnerTransportError &&
+    error.kind === 'http' &&
+    (error.httpStatus === 401 || error.httpStatus === 403)
+  )
+}
+
+export function withRunnerEnrollmentGuidance(error: RunnerTransportError): RunnerTransportError {
+  if (!isConfirmedRunnerCredentialRejection(error) || error.safeMessage.includes(RUNNER_REENROLL_ACTION)) return error
+  const suffix = `; ${RUNNER_REENROLL_ACTION}`
+  const available = MAX_DIAGNOSTIC_MESSAGE_LENGTH - suffix.length
+  const prefix =
+    error.safeMessage.length <= available ? error.safeMessage : `${error.safeMessage.slice(0, available - 3)}...`
+  return new RunnerTransportError({
+    operation: error.operation,
+    kind: error.kind,
+    ...(error.httpStatus === undefined ? {} : { httpStatus: error.httpStatus }),
+    ...(error.serverCode === undefined ? {} : { serverCode: error.serverCode }),
+    safeMessage: `${prefix}${suffix}`,
+    ...(error.cause === undefined ? {} : { cause: error.cause }),
+  })
 }

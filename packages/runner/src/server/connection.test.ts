@@ -1,5 +1,5 @@
 import { describe, expect, it as vitestIt } from 'vitest'
-import { ServerConnection } from './connection.js'
+import { RunnerTransportError, ServerConnection } from './connection.js'
 import { WorkspaceHomeClaimedError } from '../runtime/workspace-entity.js'
 import { transportFetch, withFakeTransport } from '../../tests/support/fake-transport.js'
 
@@ -65,6 +65,112 @@ describe('ServerConnection machine credential', () => {
     const [, init] = fetchSpy.mock.calls[0]!
     const headers = new Headers(init?.headers)
     expect(headers.get('authorization')).toBeNull()
+  })
+})
+
+describe('ServerConnection lifecycle transport', () => {
+  it('classifies registration HTTP failures without changing the request body', async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify({ code: 'runner_rejected', data: { message: 'registration rejected' } }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    const connection = new ServerConnection({ ...options, credential: 'runner-secret' })
+    const registration = {
+      processGeneration: 'generation-1',
+      capabilities: ['spec/*'],
+      actionCatalog: { actions: [], tombstones: [] },
+      projectId: 'project-1',
+    }
+
+    const error = await connection.connect(registration, signal).catch((value: unknown) => value)
+
+    expect(error).toBeInstanceOf(RunnerTransportError)
+    expect(error).toMatchObject({
+      operation: 'register',
+      kind: 'http',
+      httpStatus: 401,
+      serverCode: 'runner_rejected',
+    })
+    const [url, init] = fetchSpy.mock.calls[0]!
+    expect(url).toBe('https://runner.test/api/runner/runner-1/register')
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject(registration)
+  })
+
+  it('preserves the heartbeat deployment epoch while using the shared request seam', async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(null, {
+        status: 204,
+        headers: { 'x-mohist-manager-deployment-epoch': 'epoch-2' },
+      }),
+    )
+    const connection = new ServerConnection(options)
+
+    await connection.heartbeat(
+      {
+        processGeneration: 'generation-1',
+        capabilities: [],
+        actionCatalog: { actions: [], tombstones: [] },
+      },
+      signal,
+    )
+
+    expect(connection.deploymentEpoch).toBe('epoch-2')
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe('https://runner.test/api/runner/runner-1/heartbeat')
+  })
+
+  it('keeps unregister as a bodyless POST and classifies network failures', async () => {
+    const failure = new Error('ECONNREFUSED')
+    fetchSpy.mockRejectedValue(failure)
+    const connection = new ServerConnection(options)
+
+    const error = await connection.disconnect(signal).catch((value: unknown) => value)
+
+    expect(error).toBeInstanceOf(RunnerTransportError)
+    expect(error).toMatchObject({ operation: 'unregister', kind: 'network' })
+    expect((error as RunnerTransportError).safeMessage).not.toContain('ECONNREFUSED')
+    const [url, init] = fetchSpy.mock.calls[0]!
+    expect(url).toBe('https://runner.test/api/runner/runner-1/unregister')
+    expect((init as RequestInit).method).toBe('POST')
+    expect((init as RequestInit).body).toBeUndefined()
+  })
+
+  it('keeps poll 204 empty and observes its deployment epoch', async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(null, {
+        status: 204,
+        headers: { 'x-mohist-manager-deployment-epoch': 'epoch-poll' },
+      }),
+    )
+    const connection = new ServerConnection(options)
+
+    const result = await connection.poll(signal, {
+      processGeneration: 'generation-1',
+      inFlight: [],
+      awaitingAck: [],
+      admissionReady: true,
+    })
+
+    expect(result).toEqual([])
+    expect(connection.deploymentEpoch).toBe('epoch-poll')
+  })
+
+  it('classifies malformed poll JSON as a protocol transport failure', async () => {
+    fetchSpy.mockResolvedValue(new Response('{', { status: 200 }))
+    const connection = new ServerConnection(options)
+
+    const error = await connection
+      .poll(signal, {
+        processGeneration: 'generation-1',
+        inFlight: [],
+        awaitingAck: [],
+        admissionReady: true,
+      })
+      .catch((value: unknown) => value)
+
+    expect(error).toBeInstanceOf(RunnerTransportError)
+    expect(error).toMatchObject({ operation: 'poll', kind: 'protocol' })
   })
 })
 
@@ -145,7 +251,7 @@ describe('ServerConnection workflow runtime events', () => {
     ).resolves.toEqual([])
   })
 
-  it('surfaces malformed and count-mismatched acceptance responses', async () => {
+  it('surfaces malformed and count-mismatched acceptance responses as protocol transport failures', async () => {
     fetchSpy.mockResolvedValueOnce(new Response('not-json', { status: 200 }))
     await expect(
       new ServerConnection(options).workflowAgentSessionRuntimeEvents(
@@ -155,7 +261,18 @@ describe('ServerConnection workflow runtime events', () => {
         { runtimeEvents: [{ type: 'session.input' }] },
         signal,
       ),
-    ).rejects.toThrow('malformed JSON')
+    ).rejects.toMatchObject({ operation: 'workflowAgentSessionRuntimeEvents', kind: 'protocol' })
+
+    fetchSpy.mockResolvedValueOnce(new Response('[{}]', { status: 200 }))
+    await expect(
+      new ServerConnection(options).workflowAgentSessionRuntimeEvents(
+        'project',
+        'run',
+        'session',
+        { runtimeEvents: [{ type: 'session.input' }] },
+        signal,
+      ),
+    ).rejects.toMatchObject({ operation: 'workflowAgentSessionRuntimeEvents', kind: 'protocol' })
 
     fetchSpy.mockResolvedValueOnce(new Response('[{"type":"session.input"}]', { status: 200 }))
     await expect(
@@ -166,7 +283,28 @@ describe('ServerConnection workflow runtime events', () => {
         { runtimeEvents: [{ type: 'session.input' }, { type: 'message.delta' }] },
         signal,
       ),
-    ).rejects.toThrow('acceptance mismatch')
+    ).rejects.toMatchObject({ operation: 'workflowAgentSessionRuntimeEvents', kind: 'protocol' })
+  })
+
+  it('classifies runtime-event cancellation and network failures with stable fields', async () => {
+    const cancelled = new AbortController()
+    cancelled.abort('timeout')
+    const connection = new ServerConnection(options)
+
+    await expect(
+      connection.workflowAgentSessionRuntimeEvents(
+        'project',
+        'run',
+        'session',
+        { runtimeEvents: [] },
+        cancelled.signal,
+      ),
+    ).rejects.toMatchObject({ operation: 'workflowAgentSessionRuntimeEvents', kind: 'cancelled' })
+
+    fetchSpy.mockRejectedValueOnce(new Error('connection refused'))
+    await expect(
+      connection.workflowAgentSessionRuntimeEvents('project', 'run', 'session', { runtimeEvents: [] }, signal),
+    ).rejects.toMatchObject({ operation: 'workflowAgentSessionRuntimeEvents', kind: 'network' })
   })
 })
 
@@ -197,12 +335,35 @@ describe('ServerConnection agent-input attachments', () => {
     expect(JSON.stringify(fetchSpy.mock.calls[0]?.[1])).not.toContain('temp')
     expect(JSON.stringify(fetchSpy.mock.calls[0]?.[1])).not.toContain('token')
   })
+
+  it('preserves null for a missing attachment', async () => {
+    fetchSpy.mockResolvedValue(new Response('missing', { status: 404 }))
+
+    await expect(
+      new ServerConnection(options).openAgentInputAttachment('project', 'session', 'input', 'attachment', signal),
+    ).resolves.toBeNull()
+  })
+
+  it('classifies attachment HTTP failures without reading the response body into the error', async () => {
+    fetchSpy.mockResolvedValue(new Response('unsafe attachment body', { status: 500 }))
+
+    const error = await new ServerConnection(options)
+      .openAgentInputAttachment('project', 'session', 'input', 'attachment', signal)
+      .catch((value: unknown) => value)
+
+    expect(error).toMatchObject({
+      operation: 'openAgentInputAttachment',
+      kind: 'http',
+      httpStatus: 500,
+    } satisfies Partial<RunnerTransportError>)
+    expect((error as RunnerTransportError).safeMessage).not.toContain('unsafe attachment body')
+  })
 })
 
 describe('ServerConnection named workspace materialization report', () => {
   it('posts the materialized path and parses the recorded home', async () => {
     fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ runnerId: 'runner-1', path: '/virtual/ws/pay' }), {
+      new Response(JSON.stringify({ success: true, data: { runnerId: 'runner-1', path: '/virtual/ws/pay' } }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       }),
@@ -224,6 +385,17 @@ describe('ServerConnection named workspace materialization report', () => {
     expect(JSON.parse(String(init?.body))).toEqual({ path: '/virtual/ws/pay' })
   })
 
+  it('classifies malformed successful workspace reports as protocol', async () => {
+    fetchSpy.mockResolvedValue(new Response('not-json', { status: 200 }))
+
+    await expect(
+      new ServerConnection(options).reportWorkspaceMaterialized('project-1', 'pay', '/virtual/ws/pay', signal),
+    ).rejects.toMatchObject({
+      operation: 'reportWorkspaceMaterialized',
+      kind: 'protocol',
+    } satisfies Partial<RunnerTransportError>)
+  })
+
   it('throws WorkspaceHomeClaimedError on a 409 workspace_home_claimed answer', async () => {
     fetchSpy.mockResolvedValue(
       new Response(JSON.stringify({ ok: false, code: 'workspace_home_claimed', error: 'already materialized' }), {
@@ -237,11 +409,15 @@ describe('ServerConnection named workspace materialization report', () => {
     ).rejects.toBeInstanceOf(WorkspaceHomeClaimedError)
   })
 
-  it('throws a plain error on other non-2xx answers', async () => {
+  it('preserves typed transport failures for other non-2xx answers', async () => {
     fetchSpy.mockResolvedValue(new Response('bad', { status: 400 }))
     await expect(
       new ServerConnection(options).reportWorkspaceMaterialized('project-1', 'pay', '/virtual/ws/pay', signal),
-    ).rejects.toThrow('workspace materialization failed: 400')
+    ).rejects.toMatchObject({
+      operation: 'reportWorkspaceMaterialized',
+      kind: 'http',
+      httpStatus: 400,
+    } satisfies Partial<RunnerTransportError>)
   })
 })
 
@@ -273,11 +449,25 @@ describe('ServerConnection workspace reclaimability', () => {
     expect(init?.method).toBe('GET')
   })
 
-  it('throws on non-2xx', async () => {
+  it('preserves typed transport failures on non-2xx', async () => {
     fetchSpy.mockResolvedValue(new Response('gone', { status: 404 }))
-    await expect(new ServerConnection(options).getWorkspaceReclaimability('project-1', 'pay', signal)).rejects.toThrow(
-      'workspace reclaimability failed: 404',
-    )
+    await expect(
+      new ServerConnection(options).getWorkspaceReclaimability('project-1', 'pay', signal),
+    ).rejects.toMatchObject({
+      operation: 'getWorkspaceReclaimability',
+      kind: 'http',
+      httpStatus: 404,
+    } satisfies Partial<RunnerTransportError>)
+  })
+
+  it('classifies reclaimability network failures', async () => {
+    fetchSpy.mockRejectedValue(new Error('connection refused'))
+    await expect(
+      new ServerConnection(options).getWorkspaceReclaimability('project-1', 'pay', signal),
+    ).rejects.toMatchObject({
+      operation: 'getWorkspaceReclaimability',
+      kind: 'network',
+    } satisfies Partial<RunnerTransportError>)
   })
 
   itEach([

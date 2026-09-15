@@ -1,5 +1,7 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
-import { currentRunnerResources, currentRunnerTransport } from './filesystem.js'
+import { currentRunnerResources } from './filesystem.js'
+import { RunnerTransportError, withRunnerEnrollmentGuidance } from '../server/connection-errors.js'
+import { createRunnerProtocolError, RunnerTransport } from '../server/connection-transport.js'
 
 export const RUNNER_CREDENTIAL_FILE = 'credential'
 export const RUNNER_ENROLLMENT_TOKEN_FILE = 'enrollment-token'
@@ -77,23 +79,28 @@ export async function registerWithEnrollmentToken(
   enrollmentToken: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const response = await currentRunnerTransport()(`${serverUrl.replace(/\/$/, '')}/api/runners/register`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ token: enrollmentToken, runnerId, hostname }),
-    signal,
-  })
-  if (!response.ok) {
-    throw new Error(
-      `runner registration with enrollment token failed: ${response.status} ${await response.text()}; re-run 'mo install runner'`,
+  const transport = new RunnerTransport({ enrollmentToken })
+  try {
+    const response = await transport.request(
+      'registerWithEnrollmentToken',
+      `${serverUrl.replace(/\/$/, '')}/api/runners/register`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: enrollmentToken, runnerId, hostname }),
+        signal,
+      },
     )
+    const payload = await transport.readJson<{ data?: { token?: unknown } }>(response, 'registerWithEnrollmentToken')
+    const credential = payload?.data?.token
+    if (typeof credential !== 'string' || credential.length === 0) {
+      throw createRunnerProtocolError('registerWithEnrollmentToken', 'returned a malformed credential response')
+    }
+    return credential
+  } catch (error) {
+    if (error instanceof RunnerTransportError) throw withRunnerEnrollmentGuidance(error)
+    throw error
   }
-  const payload = (await response.json()) as { data?: { token?: unknown } }
-  const credential = payload.data?.token
-  if (typeof credential !== 'string' || credential.length === 0) {
-    throw new Error('runner registration returned a malformed response')
-  }
-  return credential
 }
 
 export interface RunnerCredentialResolution {

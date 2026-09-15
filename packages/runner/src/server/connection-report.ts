@@ -1,10 +1,10 @@
 import type { AgentExecutionBinding, DispatchReportOwner, DispatchWorkItem, WorkItemResult } from '../core/types.js'
+import type { RunnerRequestTransport } from './connection-transport.js'
 
-type Fetcher = (input: string, init: RequestInit) => Promise<Response>
 type AgentReportBinding = AgentExecutionBinding
 
 export async function reportWork(
-  fetcher: Fetcher,
+  transport: RunnerRequestTransport,
   url: (path: string) => string,
   work: DispatchWorkItem,
   result: WorkItemResult,
@@ -42,22 +42,19 @@ export async function reportWork(
     body.workflowRunId = workflowRunId
   }
 
-  const response = await fetcher(url('report'), {
+  const response = await transport.request('report', url('report'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
     signal,
   })
-  if (!response.ok) throw new Error(`report failed: ${response.status} ${await response.text()}`)
-  try {
-    const body = (await response.json()) as { verdict?: unknown }
-    return {
-      verdict:
-        body.verdict === 'accepted' || body.verdict === 'refused' || body.verdict === 'outstanding'
-          ? body.verdict
-          : null,
-    }
-  } catch {
-    return { verdict: null }
+  const acknowledgement = await transport.readJson<{ verdict?: unknown }>(response, 'report')
+  return {
+    verdict:
+      acknowledgement?.verdict === 'accepted' ||
+      acknowledgement?.verdict === 'refused' ||
+      acknowledgement?.verdict === 'outstanding'
+        ? acknowledgement.verdict
+        : null,
   }
 }

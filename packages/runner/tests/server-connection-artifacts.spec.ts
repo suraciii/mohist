@@ -1,5 +1,5 @@
 import { describe, expect, it as vitestIt } from 'vitest'
-import { ServerConnection } from '../src/server/connection.js'
+import { RunnerTransportError, ServerConnection } from '../src/server/connection.js'
 import { transportFetch, withFakeTransport } from './support/fake-transport.js'
 
 interface MockResponseInit {
@@ -102,10 +102,11 @@ describe('ServerConnection.uploadArtifact', () => {
         new AbortController().signal,
       ),
     ).rejects.toMatchObject({
-      code: 'artifact_upload_conflict',
-      uploadId: 'artup_first',
-      status: 409,
-    })
+      operation: 'uploadArtifact',
+      kind: 'http',
+      httpStatus: 409,
+      serverCode: 'artifact_upload_conflict',
+    } satisfies Partial<RunnerTransportError>)
   })
 
   it('throwsWithStatusOnServerError', async () => {
@@ -119,7 +120,45 @@ describe('ServerConnection.uploadArtifact', () => {
         { path: 'review.md', size: 1, content: new Uint8Array([0x01]) },
         new AbortController().signal,
       ),
-    ).rejects.toMatchObject({ status: 500 })
+    ).rejects.toMatchObject({
+      operation: 'uploadArtifact',
+      kind: 'http',
+      httpStatus: 500,
+    } satisfies Partial<RunnerTransportError>)
+  })
+
+  it('classifiesMalformedSuccessPayloadAsProtocol', async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: 'not-json' }))
+    const connection = new ServerConnection(options())
+
+    await expect(
+      connection.uploadArtifact(
+        'wf-1',
+        'work-1',
+        { path: 'review.md', size: 1, content: new Uint8Array([0x01]) },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      operation: 'uploadArtifact',
+      kind: 'protocol',
+    } satisfies Partial<RunnerTransportError>)
+  })
+
+  it('classifiesNetworkFailures', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('connection refused'))
+    const connection = new ServerConnection(options())
+
+    await expect(
+      connection.uploadArtifact(
+        'wf-1',
+        'work-1',
+        { path: 'review.md', size: 1, content: new Uint8Array([0x01]) },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      operation: 'uploadArtifact',
+      kind: 'network',
+    } satisfies Partial<RunnerTransportError>)
   })
 
   it('usesAgentJobArtifactEndpointWhenOwnerKindIsAgentJob', async () => {
