@@ -88,8 +88,8 @@ export class RunnerTransport implements RunnerRequestTransport {
 
     try {
       return JSON.parse(text) as T
-    } catch (cause) {
-      throw this.protocolFailure(operation, cause)
+    } catch {
+      throw this.protocolFailure(operation)
     }
   }
 
@@ -108,8 +108,10 @@ export class RunnerTransport implements RunnerRequestTransport {
     let text: string
     try {
       text = await response.text()
-    } catch (cause) {
-      throw this.bodyReadFailure(operation, response, cause)
+    } catch {
+      const signal = this.responseContexts.get(response)?.signal
+      if (signal?.aborted) throw this.cancelled(operation, signal)
+      return this.httpFailureWithoutBody(operation, response.status)
     }
     try {
       if (text.length <= MAX_ERROR_BODY_PARSE_LENGTH) {
@@ -122,15 +124,28 @@ export class RunnerTransport implements RunnerRequestTransport {
       // The HTTP status remains authoritative when the body is absent or invalid.
     }
 
+    return this.httpFailureWithMessage(operation, response.status, code, message)
+  }
+
+  private httpFailureWithoutBody(operation: string, httpStatus: number): RunnerTransportError {
+    return this.httpFailureWithMessage(operation, httpStatus)
+  }
+
+  private httpFailureWithMessage(
+    operation: string,
+    httpStatus: number,
+    code?: string,
+    message?: string,
+  ): RunnerTransportError {
     const safeOperation = this.safeOperation(operation)
     const safeCode = code ? this.safeText(code, MAX_SERVER_CODE_LENGTH) : undefined
     const safeMessage = message
-      ? `${safeOperation} failed with HTTP status ${response.status}: ${this.safeText(message)}`
-      : `${safeOperation} failed with HTTP status ${response.status}`
+      ? `${safeOperation} failed with HTTP status ${httpStatus}: ${this.safeText(message)}`
+      : `${safeOperation} failed with HTTP status ${httpStatus}`
     return new RunnerTransportError({
       operation: safeOperation,
       kind: 'http',
-      httpStatus: response.status,
+      httpStatus,
       ...(safeCode ? { serverCode: safeCode } : {}),
       safeMessage: this.safeText(safeMessage),
     })

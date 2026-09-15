@@ -247,6 +247,26 @@ describe('RunnerTransport', () => {
     expect(error.safeMessage).not.toContain('raw-response-body-marker')
   })
 
+  it('preserves HTTP classification when an error response stream terminates', async () => {
+    const rawBody = 'raw-terminated-error-body-marker'
+    const termination = new TypeError('terminated')
+    const body = new ReadableStream<Uint8Array>({
+      pull(stream) {
+        stream.enqueue(new TextEncoder().encode(rawBody))
+        stream.error(termination)
+      },
+    })
+    const error = await rejected(
+      transport(async () => new Response(body, { status: 503 })).request('poll', 'https://runner.test/poll', {}),
+    )
+
+    expect(error.kind).toBe('http')
+    expect(error.httpStatus).toBe(503)
+    expect(error.safeMessage).toBe('poll failed with HTTP status 503')
+    expect(error.cause).toBeUndefined()
+    expect(JSON.stringify(error)).not.toContain(rawBody)
+  })
+
   it('projects only safe transport facts into captured log output', async () => {
     const credential = 'moh_runner_log_secret'
     const enrollmentToken = 'moh_enroll_log_secret'
@@ -300,16 +320,18 @@ describe('RunnerTransport', () => {
   })
 
   it('classifies malformed successful JSON as protocol without retaining the body', async () => {
-    const body = '{"unsafe":"raw-success-body-marker"'
-    const runner = transport(async () => response(200, body))
+    const rawBody = 'SECRET-RAW-BODY not-json'
+    const runner = transport(async () => response(200, rawBody))
     const successfulResponse = await runner.request('fetchConfig', 'https://runner.test/config', {})
     const error = await rejected(runner.readJson(successfulResponse, 'fetchConfig'))
 
     expect(error.kind).toBe('protocol')
     expect(error.operation).toBe('fetchConfig')
     expect(error.safeMessage).toBe('fetchConfig returned malformed JSON')
-    expect(error.safeMessage).not.toContain('raw-success-body-marker')
-    expect(error.cause).toBeInstanceOf(SyntaxError)
+    expect(error.safeMessage).not.toContain(rawBody)
+    expect(error.cause).toBeUndefined()
+    expect(error.stack).not.toContain(rawBody)
+    expect(JSON.stringify(error)).not.toContain(rawBody)
   })
 
   it('reads valid success JSON through the shared seam and attaches authentication', async () => {
