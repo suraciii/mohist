@@ -14,13 +14,29 @@ import type {
   PolledDispatch,
 } from '../core/types.js'
 import type { BuildInfo } from '../runtime/build-info.js'
-import { parseObject } from '../core/json.js'
 import { getSegments } from '../core/json-path.js'
 import type { TaskLogBatch } from '../runtime/task-log.js'
 import { parsePolledDispatch } from './connection-dispatch.js'
 import { reportWork } from './connection-report.js'
-import { extractErrorMessage, RuntimeEventDeliveryError } from './connection-errors.js'
-export { RuntimeEventDeliveryError } from './connection-errors.js'
+import { RunnerTransportError } from './connection-errors.js'
+import { createRunnerProtocolError, RunnerTransport, type RunnerRequestTransport } from './connection-transport.js'
+export {
+  isConfirmedRunnerCredentialRejection,
+  runnerTransportDiagnostics,
+  RUNNER_REENROLL_ACTION,
+  withRunnerEnrollmentGuidance,
+  RunnerTransportError,
+  type RunnerTransportDiagnosticOptions,
+  type RunnerTransportErrorKind,
+  type RunnerTransportErrorOptions,
+} from './connection-errors.js'
+export {
+  createRunnerProtocolError,
+  RunnerTransport,
+  type RunnerRequestOptions,
+  type RunnerRequestTransport,
+  type RunnerTransportOptions,
+} from './connection-transport.js'
 import {
   getWorkspaceReclaimability as getWorkspaceReclaimabilityViaTransport,
   reportWorkspaceMaterialized as reportWorkspaceMaterializedViaTransport,
@@ -33,7 +49,6 @@ export {
   type WorkspaceMaterializedReport,
   type WorkspaceReclaimability,
 } from './connection-workspaces.js'
-import { currentRunnerTransport } from '../system/filesystem.js'
 import type {
   AgentInputAttachmentContent,
   AgentSession,
@@ -56,6 +71,7 @@ export class ServerConnection {
   private readonly buildGitHash: string | null
   private readonly buildInfo: BuildInfo | null
   private readonly credential: string | null
+  private readonly requestTransport: RunnerRequestTransport
   readonly runnerId: string
   private managerDeploymentEpoch: string | null = null
 
@@ -67,15 +83,8 @@ export class ServerConnection {
     this.buildGitHash = buildGitHash
     this.buildInfo = buildInfo
     this.credential = options.credential ?? null
+    this.requestTransport = new RunnerTransport({ credential: this.credential })
     this.runnerId = options.runnerId
-  }
-
-  private async fetchWithAuth(input: string, init: RequestInit): Promise<Response> {
-    const headers = new Headers(init.headers)
-    if (this.credential) {
-      headers.set('authorization', `Bearer ${this.credential}`)
-    }
-    return currentRunnerTransport()(input, { ...init, headers })
   }
 
   async connect(registration: RunnerRegistration, signal: AbortSignal) {
@@ -128,7 +137,7 @@ export class ServerConnection {
       deploymentEpoch?: string | null
     },
   ): Promise<PolledDispatch[]> {
-    const response = await this.fetchWithAuth(this.url('poll'), {
+    const response = await this.requestTransport.request('poll', this.url('poll'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(report),
@@ -136,33 +145,36 @@ export class ServerConnection {
     })
     this.observeDeploymentEpoch(response.headers.get('x-mohist-manager-deployment-epoch'))
     if (response.status === 204) return []
-    if (!response.ok) throw new Error(`poll failed: ${response.status} ${await response.text()}`)
-    const payload = (await response.json()) as {
-      dispatches?: WorkDispatchResponse[]
+    const payload = await this.requestTransport.readJson<unknown>(response, 'poll')
+    if (!isObjectRecord(payload) || !Array.isArray(payload.dispatches)) {
+      throw createRunnerProtocolError('poll', 'returned a malformed dispatch envelope')
     }
-    return (payload.dispatches ?? []).map((dispatch) => parsePolledDispatch(dispatch))
+    try {
+      return payload.dispatches.map((dispatch) => parsePolledDispatch(dispatch as WorkDispatchResponse))
+    } catch (cause) {
+      if (cause instanceof RunnerTransportError) throw cause
+      throw createRunnerProtocolError('poll', 'returned a malformed dispatch envelope')
+    }
   }
 
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {
-    const response = await this.fetchWithAuth(this.url('config'), {
+    const response = await this.requestTransport.request('fetchConfig', this.url('config'), {
       method: 'GET',
       signal,
     })
-    if (!response.ok) throw new Error(`fetchConfig failed: ${response.status} ${await response.text()}`)
-    const payload = (await response.json()) as RunnerConfigResponse
-    return payload.cleanupPolicy ?? null
+    const payload = await this.requestTransport.readJson<RunnerConfigResponse>(response, 'fetchConfig')
+    return payload?.cleanupPolicy ?? null
   }
 
   async workflowRunsStatus(workflowRunIds: string[], signal: AbortSignal): Promise<Record<string, string>> {
     if (workflowRunIds.length === 0) return {}
-    const response = await this.fetchWithAuth(this.url('workflow-runs/status'), {
+    const response = await this.requestTransport.request('workflowRunsStatus', this.url('workflow-runs/status'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ workflowRunIds }),
       signal,
     })
-    if (!response.ok) throw new Error(`workflowRunsStatus failed: ${response.status} ${await response.text()}`)
-    const payload = (await response.json()) as unknown
+    const payload = await this.requestTransport.readJson<unknown>(response, 'workflowRunsStatus')
     const statuses = readObject(payload, ['statuses'])
     if (!statuses) return {}
     const result: Record<string, string> = {}
@@ -179,15 +191,7 @@ export class ServerConnection {
     binding?: AgentExecutionBinding,
     reportOwner?: DispatchReportOwner,
   ): Promise<Record<string, unknown>> {
-    return await reportWork(
-      this.fetchWithAuth.bind(this),
-      this.url.bind(this),
-      work,
-      result,
-      signal,
-      binding,
-      reportOwner,
-    )
+    return await reportWork(this.requestTransport, this.url.bind(this), work, result, signal, binding, reportOwner)
   }
 
   /**
@@ -219,42 +223,22 @@ export class ServerConnection {
       type: upload.contentType ?? 'application/octet-stream',
     })
     form.set('content', blob, upload.filename ?? 'artifact')
-    const response = await this.fetchWithAuth(this.artifactUrl(ownerId, workId, ownerKind), {
-      method: 'POST',
-      body: form,
-      signal,
-    })
-    const text = await response.text()
-    let payload: Record<string, unknown> | null = null
-    if (text) {
-      try {
-        payload = JSON.parse(text) as Record<string, unknown>
-      } catch {
-        payload = null
-      }
-    }
-    if (!response.ok) {
-      const errorMessage = extractErrorMessage(payload, text) ?? `artifact upload failed: ${response.status}`
-      const error = new Error(errorMessage) as Error & {
-        code?: string
-        uploadId?: string
-        status: number
-      }
-      error.status = response.status
-      if (payload) {
-        const code = readString(payload, ['code'])
-        if (code) error.code = code
-        const uploadId =
-          readString(payload, ['details', 'existingUploadId']) ??
-          readString(payload, ['data', 'uploadId']) ??
-          readString(payload, ['uploadId'])
-        if (uploadId) error.uploadId = uploadId
-      }
-      throw error
-    }
-    const data = readObject(payload, ['data']) ?? payload ?? {}
+    const response = await this.requestTransport.request(
+      'uploadArtifact',
+      this.artifactUrl(ownerId, workId, ownerKind),
+      {
+        method: 'POST',
+        body: form,
+        signal,
+      },
+    )
+    const payload = await this.requestTransport.readJson<Record<string, unknown>>(response, 'uploadArtifact')
+    const data = readObject(payload, ['data']) ?? (isObjectRecord(payload) ? payload : null)
+    if (!data) throw createRunnerProtocolError('uploadArtifact', 'returned a malformed response')
+    const uploadId = readString(data, ['uploadId'])
+    if (!uploadId) throw createRunnerProtocolError('uploadArtifact', 'returned a response without an upload id')
     return {
-      uploadId: readString(data, ['uploadId']) ?? '',
+      uploadId,
       workflowRunId: readString(data, ['workflowRunId']) ?? ownerId,
       workId: readString(data, ['workId']) ?? workId,
       actionAttemptId: readString(data, ['actionAttemptId']) ?? null,
@@ -307,7 +291,7 @@ export class ServerConnection {
       truncated: batch.truncated,
       terminal,
     }
-    const response = await this.fetchWithAuth(this.taskLogUrl(ownerId, workId, ownerKind), {
+    const response = await this.requestTransport.request('uploadTaskLog', this.taskLogUrl(ownerId, workId, ownerKind), {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -316,36 +300,17 @@ export class ServerConnection {
       body: JSON.stringify(body),
       signal,
     })
-    const text = await response.text()
-    let payload: Record<string, unknown> | null = null
-    if (text) {
-      try {
-        payload = JSON.parse(text) as Record<string, unknown>
-      } catch {
-        payload = null
-      }
-    }
-    if (!response.ok) {
-      const errorMessage = extractErrorMessage(payload, text) ?? `task-log upload failed: ${response.status}`
-      const error = new Error(errorMessage) as Error & {
-        code?: string
-        status: number
-      }
-      error.status = response.status
-      const code = readString(payload ?? {}, ['code'])
-      if (code) error.code = code
-      throw error
-    }
-    const data = readObject(payload, ['data']) ?? payload ?? {}
+    const payload = await this.requestTransport.readJson<Record<string, unknown>>(response, 'uploadTaskLog')
+    const data = readObject(payload, ['data']) ?? (isObjectRecord(payload) ? payload : null)
+    if (!data) throw createRunnerProtocolError('uploadTaskLog', 'returned a malformed response')
     const status = readString(data, ['status'])
     if (status !== 'changed' && status !== 'duplicate') {
-      const error = new Error('task-log upload returned no terminal acknowledgement') as Error & {
-        code?: string
-        status: number
-      }
-      error.code = 'terminal_ack_missing'
-      error.status = response.status
-      throw error
+      throw createRunnerProtocolError(
+        'uploadTaskLog',
+        'returned no terminal acknowledgement',
+        undefined,
+        'terminal_ack_missing',
+      )
     }
     return {
       status,
@@ -368,15 +333,19 @@ export class ServerConnection {
     sessionName: string,
     signal: AbortSignal,
   ): Promise<WorkflowAgentSession | null> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'getWorkflowAgentSession',
       this.url(
         `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}`,
       ),
       { method: 'GET', signal },
+      { allowedStatuses: [404] },
     )
     if (response.status === 404) return null
-    if (!response.ok) throw new Error(`session lookup failed: ${response.status} ${await response.text()}`)
-    return response.json() as Promise<WorkflowAgentSession>
+    return requireWorkflowSessionPayload(
+      await this.requestTransport.readJson<unknown>(response, 'getWorkflowAgentSession'),
+      'getWorkflowAgentSession',
+    )
   }
 
   async openWorkflowAgentSession(
@@ -386,7 +355,8 @@ export class ServerConnection {
     body: unknown,
     signal: AbortSignal,
   ): Promise<WorkflowAgentSession> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'openWorkflowAgentSession',
       this.url(
         `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/open`,
       ),
@@ -397,8 +367,10 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok) throw new Error(`session open failed: ${response.status} ${await response.text()}`)
-    return response.json() as Promise<WorkflowAgentSession>
+    return requireWorkflowSessionPayload(
+      await this.requestTransport.readJson<unknown>(response, 'openWorkflowAgentSession'),
+      'openWorkflowAgentSession',
+    )
   }
 
   async addTasks(
@@ -411,7 +383,8 @@ export class ServerConnection {
       expect?: JsonObject | null
     }>,
   ) {
-    const response = await this.fetchWithAuth(
+    await this.requestTransport.request(
+      'addTasks',
       `${this.options.serverUrl.replace(/\/$/, '')}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/tasks/batch`,
       {
         method: 'POST',
@@ -419,11 +392,11 @@ export class ServerConnection {
         body: JSON.stringify({ tasks }),
       },
     )
-    if (!response.ok) throw new Error(`addTasks failed: ${response.status} ${await response.text()}`)
   }
 
   async patchRunVars(workflowRunId: string, vars: JsonObject, signal: AbortSignal) {
-    const response = await this.fetchWithAuth(
+    await this.requestTransport.request(
+      'patchRunVars',
       `${this.options.serverUrl.replace(/\/$/, '')}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/variables`,
       {
         method: 'PATCH',
@@ -432,7 +405,6 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok) throw new Error(`patchRunVars failed: ${response.status} ${await response.text()}`)
   }
 
   async attachWorkflowAgentSession(
@@ -442,7 +414,8 @@ export class ServerConnection {
     body: unknown,
     signal: AbortSignal,
   ): Promise<WorkflowAgentSession> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'attachWorkflowAgentSession',
       this.url(
         `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/attach`,
       ),
@@ -453,8 +426,10 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok) throw new Error(`session attach failed: ${response.status} ${await response.text()}`)
-    return response.json() as Promise<WorkflowAgentSession>
+    return requireWorkflowSessionPayload(
+      await this.requestTransport.readJson<unknown>(response, 'attachWorkflowAgentSession'),
+      'attachWorkflowAgentSession',
+    )
   }
 
   async recoverMissingWorkflowAgentSession(
@@ -464,7 +439,8 @@ export class ServerConnection {
     body: unknown,
     signal: AbortSignal,
   ): Promise<WorkflowAgentSession> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'recoverMissingWorkflowAgentSession',
       this.url(
         `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/recover-missing`,
       ),
@@ -475,8 +451,10 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok) throw new Error(`session missing recovery failed: ${response.status} ${await response.text()}`)
-    return response.json() as Promise<WorkflowAgentSession>
+    return requireWorkflowSessionPayload(
+      await this.requestTransport.readJson<unknown>(response, 'recoverMissingWorkflowAgentSession'),
+      'recoverMissingWorkflowAgentSession',
+    )
   }
 
   async resetWorkflowAgentSession(
@@ -486,7 +464,8 @@ export class ServerConnection {
     body: unknown,
     signal: AbortSignal,
   ): Promise<WorkflowAgentSession> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'resetWorkflowAgentSession',
       this.url(
         `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/reset`,
       ),
@@ -497,8 +476,10 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok) throw new Error(`session retry reset failed: ${response.status} ${await response.text()}`)
-    return response.json() as Promise<WorkflowAgentSession>
+    return requireWorkflowSessionPayload(
+      await this.requestTransport.readJson<unknown>(response, 'resetWorkflowAgentSession'),
+      'resetWorkflowAgentSession',
+    )
   }
 
   async workflowAgentSessionCleanupTurn(
@@ -508,7 +489,8 @@ export class ServerConnection {
     body: unknown,
     signal: AbortSignal,
   ): Promise<AgentSessionRuntimeEventReceipt[]> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'workflowAgentSessionCleanupTurn',
       this.url(
         `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/cleanup-turn`,
       ),
@@ -519,14 +501,10 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok) throw await this.runtimeEventDeliveryError('workflow cleanup turn', response)
-    let payload: unknown
-    try {
-      payload = await response.json()
-    } catch {
-      throw new Error('workflow cleanup turn returned malformed JSON')
+    const payload = await this.requestTransport.readJson<unknown>(response, 'workflowAgentSessionCleanupTurn')
+    if (!Array.isArray(payload)) {
+      throw createRunnerProtocolError('workflowAgentSessionCleanupTurn', 'returned a malformed receipt array')
     }
-    if (!Array.isArray(payload)) throw new Error('workflow cleanup turn returned a malformed receipt array')
     return payload.map((value) => {
       if (
         !isObjectRecord(value) ||
@@ -541,12 +519,15 @@ export class ServerConnection {
         typeof value.agentSessionId !== 'string' ||
         value.agentSessionId.length === 0
       ) {
-        throw new Error('workflow cleanup turn returned a malformed receipt')
+        throw createRunnerProtocolError('workflowAgentSessionCleanupTurn', 'returned a malformed receipt')
       }
-      if (value.type !== 'session.cleanup') throw new Error('workflow cleanup turn returned an unexpected receipt type')
+      if (value.type !== 'session.cleanup') {
+        throw createRunnerProtocolError('workflowAgentSessionCleanupTurn', 'returned an unexpected receipt type')
+      }
       const requestedOperationId = isObjectRecord(body) ? body.cleanupOperationId : null
-      if (typeof requestedOperationId !== 'string' || requestedOperationId !== value.cleanupOperationId)
-        throw new Error('workflow cleanup turn returned a mismatched operation identity')
+      if (typeof requestedOperationId !== 'string' || requestedOperationId !== value.cleanupOperationId) {
+        throw createRunnerProtocolError('workflowAgentSessionCleanupTurn', 'returned a mismatched operation identity')
+      }
       return {
         type: value.type,
         cleanupOperationId: value.cleanupOperationId,
@@ -564,7 +545,8 @@ export class ServerConnection {
     body: unknown,
     signal: AbortSignal,
   ): Promise<AgentSessionRuntimeEventAcceptance[]> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'workflowAgentSessionRuntimeEvents',
       this.url(
         `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/runtime-events`,
       ),
@@ -575,46 +557,32 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok) throw await this.runtimeEventDeliveryError('session runtime events', response)
-    let payload: unknown
-    try {
-      payload = await response.json()
-    } catch {
-      throw new Error('session runtime events returned malformed JSON')
-    }
-    if (!Array.isArray(payload)) throw new Error('session runtime events returned a malformed acceptance response')
+    const payload = await parseRuntimeEventReceiptArray(
+      this.requestTransport,
+      response,
+      'workflowAgentSessionRuntimeEvents',
+    )
     const submitted = isObjectRecord(body) && Array.isArray(body.runtimeEvents) ? body.runtimeEvents.length : 0
-    if (submitted > 0 && payload.length > 0 && payload.length !== submitted)
-      throw new Error(`session runtime events acceptance mismatch: submitted ${submitted}, accepted ${payload.length}`)
+    if (submitted > 0 && payload.length > 0 && payload.length !== submitted) {
+      throw createRunnerProtocolError(
+        'workflowAgentSessionRuntimeEvents',
+        `returned an acceptance mismatch: submitted ${submitted}, accepted ${payload.length}`,
+      )
+    }
     return payload as AgentSessionRuntimeEventAcceptance[]
   }
 
   async listAgentSessionsForReconcile(signal: AbortSignal): Promise<AgentSessionReconcileBinding[]> {
-    const response = await this.fetchWithAuth(this.url('agent-sessions/reconcile'), { method: 'GET', signal })
-    if (!response.ok)
-      throw new Error(`agent session reconcile list failed: ${response.status} ${await response.text()}`)
-    const payload = (await response.json()) as unknown
-    if (!Array.isArray(payload)) throw new Error('agent session reconcile list returned a malformed response')
-    return payload.map((value) => {
-      if (
-        !isObjectRecord(value) ||
-        typeof value.sessionId !== 'string' ||
-        value.sessionId.length === 0 ||
-        (value.runtime !== 'opencode' && value.runtime !== 'pi') ||
-        typeof value.runtimeSessionId !== 'string' ||
-        value.runtimeSessionId.length === 0 ||
-        typeof value.workDir !== 'string' ||
-        value.workDir.length === 0
-      ) {
-        throw new Error('agent session reconcile list returned a malformed binding')
-      }
-      return {
-        sessionId: value.sessionId,
-        runtime: value.runtime,
-        runtimeSessionId: value.runtimeSessionId,
-        workDir: value.workDir,
-      }
-    })
+    const response = await this.requestTransport.request(
+      'listAgentSessionsForReconcile',
+      this.url('agent-sessions/reconcile'),
+      { method: 'GET', signal },
+    )
+    const payload = await this.requestTransport.readJson<unknown>(response, 'listAgentSessionsForReconcile')
+    if (!Array.isArray(payload)) {
+      throw createRunnerProtocolError('listAgentSessionsForReconcile', 'returned a malformed response')
+    }
+    return payload.map((value) => parseAgentSessionReconcileBinding(value, 'listAgentSessionsForReconcile'))
   }
 
   async reconcileMissingAgentSession(
@@ -622,7 +590,8 @@ export class ServerConnection {
     body: unknown,
     signal: AbortSignal,
   ): Promise<AgentSessionReconcileBinding> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'reconcileMissingAgentSession',
       this.url(`agent-sessions/${encodeURIComponent(sessionId)}/reconcile-missing`),
       {
         method: 'POST',
@@ -631,9 +600,10 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok)
-      throw new Error(`agent session reconcile missing failed: ${response.status} ${await response.text()}`)
-    return response.json() as Promise<AgentSessionReconcileBinding>
+    return parseAgentSessionReconcileBinding(
+      await this.requestTransport.readJson<unknown>(response, 'reconcileMissingAgentSession'),
+      'reconcileMissingAgentSession',
+    )
   }
 
   async reconcileAgentSessionRuntimeEvents(
@@ -641,7 +611,8 @@ export class ServerConnection {
     body: unknown,
     signal: AbortSignal,
   ): Promise<AgentSessionRuntimeEventReceipt[]> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'reconcileAgentSessionRuntimeEvents',
       this.url(`agent-sessions/${encodeURIComponent(sessionId)}/runtime-events`),
       {
         method: 'POST',
@@ -650,18 +621,21 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok) throw await this.runtimeEventDeliveryError('agent session reconcile runtime events', response)
-    return await parseRuntimeEventReceiptArray(response, 'agent session reconcile runtime events')
+    return await parseRuntimeEventReceiptArray(this.requestTransport, response, 'reconcileAgentSessionRuntimeEvents')
   }
 
   async getAgentSession(projectId: string, sessionId: string, signal: AbortSignal): Promise<AgentSession | null> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'getAgentSession',
       this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`),
       { method: 'GET', signal },
+      { allowedStatuses: [404] },
     )
     if (response.status === 404) return null
-    if (!response.ok) throw new Error(`agent session lookup failed: ${response.status} ${await response.text()}`)
-    return response.json() as Promise<AgentSession>
+    return requireGenericSessionPayload(
+      await this.requestTransport.readJson<unknown>(response, 'getAgentSession'),
+      'getAgentSession',
+    )
   }
 
   /**
@@ -702,7 +676,8 @@ export class ServerConnection {
     body: unknown,
     signal: AbortSignal,
   ): Promise<AgentSession> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'openAgentSession',
       this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/open`),
       {
         method: 'POST',
@@ -711,8 +686,10 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok) throw new Error(`agent session open failed: ${response.status} ${await response.text()}`)
-    return response.json() as Promise<AgentSession>
+    return requireGenericSessionPayload(
+      await this.requestTransport.readJson<unknown>(response, 'openAgentSession'),
+      'openAgentSession',
+    )
   }
 
   async attachAgentSession(
@@ -721,7 +698,8 @@ export class ServerConnection {
     body: unknown,
     signal: AbortSignal,
   ): Promise<AgentSession | null> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'attachAgentSession',
       this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/attach`),
       {
         method: 'POST',
@@ -730,9 +708,8 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok) throw new Error(`agent session attach failed: ${response.status} ${await response.text()}`)
-    const text = await response.text()
-    return text.length > 0 ? (JSON.parse(text) as AgentSession) : null
+    const payload = await this.requestTransport.readJson<unknown>(response, 'attachAgentSession', true)
+    return payload === null ? null : requireGenericSessionPayload(payload, 'attachAgentSession')
   }
 
   async recoverMissingAgentSession(
@@ -741,7 +718,8 @@ export class ServerConnection {
     body: unknown,
     signal: AbortSignal,
   ): Promise<AgentSession> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'recoverMissingAgentSession',
       this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/recover-missing`),
       {
         method: 'POST',
@@ -750,9 +728,10 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok)
-      throw new Error(`agent session missing recovery failed: ${response.status} ${await response.text()}`)
-    return response.json() as Promise<AgentSession>
+    return requireGenericSessionPayload(
+      await this.requestTransport.readJson<unknown>(response, 'recoverMissingAgentSession'),
+      'recoverMissingAgentSession',
+    )
   }
 
   async agentSessionRuntimeEvents(
@@ -761,7 +740,8 @@ export class ServerConnection {
     body: unknown,
     signal: AbortSignal,
   ): Promise<AgentSessionRuntimeEventReceipt[]> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'agentSessionRuntimeEvents',
       this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/runtime-events`),
       {
         method: 'POST',
@@ -770,12 +750,7 @@ export class ServerConnection {
         signal,
       },
     )
-    if (!response.ok)
-      throw await this.runtimeEventDeliveryError(
-        `agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/runtime-events`,
-        response,
-      )
-    return await parseRuntimeEventReceiptArray(response, 'agent session runtime events')
+    return await parseRuntimeEventReceiptArray(this.requestTransport, response, 'agentSessionRuntimeEvents')
   }
 
   /**
@@ -800,17 +775,14 @@ export class ServerConnection {
     attachmentId: string,
     signal: AbortSignal,
   ): Promise<AgentInputAttachmentContent | null> {
-    const response = await this.fetchWithAuth(
+    const response = await this.requestTransport.request(
+      'openAgentInputAttachment',
       this.agentInputAttachmentContentUrl(projectId, agentSessionId, inputId, attachmentId),
-      {
-        method: 'GET',
-        signal,
-      },
+      { method: 'GET', signal },
+      { allowedStatuses: [404] },
     )
     if (response.status === 404) return null
-    if (!response.ok)
-      throw new Error(`agent-input attachment content failed: ${response.status} ${await response.text()}`)
-    const bytes = new Uint8Array(await response.arrayBuffer())
+    const bytes = await this.requestTransport.readBytes(response, 'openAgentInputAttachment')
     const contentType = response.headers.get('content-type')
     const contentDisposition = response.headers.get('content-disposition')
     return {
@@ -835,39 +807,26 @@ export class ServerConnection {
 
   async revokeManagerExecution(executionId: string, signal: AbortSignal): Promise<void> {
     if (!executionId) return
-    const response = await this.fetchWithAuth(
+    await this.requestTransport.request(
+      'revokeManagerExecution',
       this.url(`manager-executions/${encodeURIComponent(executionId)}/revoke`),
       { method: 'POST', signal },
     )
-    if (!response.ok) throw new Error(`Manager execution revocation failed: ${response.status}`)
   }
 
   private async post(path: string, body: unknown, signal: AbortSignal): Promise<Response> {
-    const response = await this.fetchWithAuth(this.url(path), {
+    return await this.requestTransport.request(path, this.url(path), {
       method: 'POST',
       headers: body === undefined ? undefined : { 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal,
     })
-    if (!response.ok) throw new Error(`${path} failed: ${response.status} ${await response.text()}`)
-    return response
-  }
-
-  private async runtimeEventDeliveryError(operation: string, response: Response): Promise<RuntimeEventDeliveryError> {
-    const body = await response.text()
-    let code: string | null = null
-    try {
-      const payload = JSON.parse(body) as unknown
-      if (isObjectRecord(payload) && typeof payload.code === 'string') code = payload.code
-    } catch {
-      // The status remains useful when the Server did not return JSON.
-    }
-    return new RuntimeEventDeliveryError(operation, response.status, code, body)
   }
 
   private transport(): WorkspaceReportTransport {
     return {
-      fetchWithAuth: (input, init) => this.fetchWithAuth(input, init),
+      request: this.requestTransport.request.bind(this.requestTransport),
+      readJson: this.requestTransport.readJson.bind(this.requestTransport),
       url: (path) => this.url(path),
     }
   }
@@ -878,16 +837,17 @@ export class ServerConnection {
 }
 
 async function parseRuntimeEventReceiptArray(
+  transport: RunnerRequestTransport,
   response: Response,
   operation: string,
 ): Promise<AgentSessionRuntimeEventReceipt[]> {
-  let payload: unknown
-  try {
-    payload = await response.json()
-  } catch {
-    throw new Error(`${operation} returned malformed JSON`)
+  const payload = await transport.readJson<unknown>(response, operation)
+  if (!Array.isArray(payload)) throw createRunnerProtocolError(operation, 'returned a malformed receipt array')
+  for (const receipt of payload) {
+    if (!isObjectRecord(receipt) || typeof receipt.type !== 'string' || receipt.type.length === 0) {
+      throw createRunnerProtocolError(operation, 'returned a malformed receipt')
+    }
   }
-  if (!Array.isArray(payload)) throw new Error(`${operation} returned a malformed receipt array`)
   return payload as AgentSessionRuntimeEventReceipt[]
 }
 export interface ArtifactUploadRequest {
@@ -917,6 +877,49 @@ export interface TaskLogUploadResult {
   status: 'changed' | 'duplicate'
   accepted: number
   truncated: boolean
+}
+
+function requireWorkflowSessionPayload(value: unknown, operation: string): WorkflowAgentSession {
+  if (!isObjectRecord(value) || !nonEmptyString(value.sessionId)) {
+    throw createRunnerProtocolError(operation, 'returned a malformed session payload')
+  }
+  return value as unknown as WorkflowAgentSession
+}
+
+function requireGenericSessionPayload(value: unknown, operation: string): AgentSession {
+  if (!isObjectRecord(value)) throw createRunnerProtocolError(operation, 'returned a malformed session payload')
+  if ('sessionId' in value && !nonEmptyString(value.sessionId)) {
+    throw createRunnerProtocolError(operation, 'returned a malformed session payload')
+  }
+  if (!nonEmptyString(value.sessionId) && !nonEmptyString(value.runtimeSessionId) && !nonEmptyString(value.status)) {
+    throw createRunnerProtocolError(operation, 'returned a malformed session payload')
+  }
+  return value as unknown as AgentSession
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function parseAgentSessionReconcileBinding(value: unknown, operation: string): AgentSessionReconcileBinding {
+  if (
+    !isObjectRecord(value) ||
+    typeof value.sessionId !== 'string' ||
+    value.sessionId.length === 0 ||
+    (value.runtime !== 'opencode' && value.runtime !== 'pi') ||
+    typeof value.runtimeSessionId !== 'string' ||
+    value.runtimeSessionId.length === 0 ||
+    typeof value.workDir !== 'string' ||
+    value.workDir.length === 0
+  ) {
+    throw createRunnerProtocolError(operation, 'returned a malformed binding')
+  }
+  return {
+    sessionId: value.sessionId,
+    runtime: value.runtime,
+    runtimeSessionId: value.runtimeSessionId,
+    workDir: value.workDir,
+  }
 }
 
 function readObject(value: unknown, path: string[]): Record<string, unknown> | null {

@@ -9,6 +9,7 @@ import type { CleanupLoop } from './cleanup-loop.js'
 import type { OpenCodeRuntime } from './opencode/index.js'
 import { formatDirectoryReclaimSummary } from './opencode/reclaim-summary.js'
 import { runnerLogger } from '../system/logger.js'
+import { runnerTransportDiagnostics } from '../server/connection-errors.js'
 import { deleteDirectory, exists } from '../system/process.js'
 
 const log = runnerLogger.child('host')
@@ -35,9 +36,10 @@ export function createHostCleanup(deps: HostCleanupDeps) {
       await deps.convergence.runOnce(signal)
     } catch (error) {
       // Convergence is best-effort; the next tick or reconnect retries.
-      cleanupLog.error('workspace cleanup convergence pass failed', {
-        exception: error,
-      })
+      cleanupLog.error(
+        'workspace cleanup convergence pass failed',
+        runnerTransportDiagnostics(error, { includeCredentialGuidance: true }),
+      )
     }
   }
 
@@ -66,9 +68,10 @@ export function createHostCleanup(deps: HostCleanupDeps) {
             return entry?.phase === 'eligible' || entry?.phase === 'stuck'
           })
         } catch (error) {
-          cleanupLog.error('workspace cleanup runtime reclamation failed', {
-            exception: error,
-          })
+          cleanupLog.error(
+            'workspace cleanup runtime reclamation failed',
+            runnerTransportDiagnostics(error, { includeCredentialGuidance: true }),
+          )
           return
         }
         if (reclaim.candidates > 0)
@@ -93,9 +96,10 @@ export function createHostCleanup(deps: HostCleanupDeps) {
           })
         }
       } catch (error) {
-        cleanupLog.warn('named workspace reclaim probe failed', {
-          exception: error,
-        })
+        cleanupLog.warn(
+          'named workspace reclaim probe failed',
+          runnerTransportDiagnostics(error, { includeCredentialGuidance: true }),
+        )
       }
       if (deps.namedWorkspaceRegistry.list().some((entry) => entry.phase === 'eligible')) {
         const namedResult = await deps.namedCleanupLoop.runOnce(policy, signal, blockedPaths)
@@ -125,7 +129,10 @@ export function createHostCleanup(deps: HostCleanupDeps) {
       // Cleanup is best-effort; the next tick retries. fetchConfig failures
       // (network blip, server restart) flow through this same catch so the
       // loop stays resilient without a stale-policy fallback.
-      cleanupLog.error('workspace cleanup loop failed', { exception: error })
+      cleanupLog.error(
+        'workspace cleanup loop failed',
+        runnerTransportDiagnostics(error, { includeCredentialGuidance: true }),
+      )
     }
   }
 
@@ -141,7 +148,7 @@ export function createHostCleanup(deps: HostCleanupDeps) {
       await deps.control.forceReconnect(signal)
     } catch (error) {
       log.error('forceReconnect failed', {
-        exception: error,
+        ...runnerTransportDiagnostics(error, { includeCredentialGuidance: true }),
         reason: 'reconnect',
       })
     }

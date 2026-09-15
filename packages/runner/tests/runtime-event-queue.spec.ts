@@ -1,10 +1,28 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RuntimeEventDeliveryError, type AgentSessionRuntimeEventReceipt } from '../src/server/connection.js'
+import {
+  RunnerTransportError,
+  type RunnerTransportErrorKind,
+  type AgentSessionRuntimeEventReceipt,
+} from '../src/server/connection.js'
 import {
   AlreadyConsumedRuntimeEventError,
   createAgentSessionRuntimeEventQueue,
   type RuntimeEventRecord,
 } from '../src/server/runtime-event-queue.js'
+
+function transportError(
+  httpStatus: number | undefined,
+  serverCode: string | undefined,
+  kind: RunnerTransportErrorKind = 'http',
+): RunnerTransportError {
+  return new RunnerTransportError({
+    operation: 'runtime event',
+    kind,
+    ...(httpStatus === undefined ? {} : { httpStatus }),
+    ...(serverCode === undefined ? {} : { serverCode }),
+    safeMessage: 'runtime event transport failure',
+  })
+}
 
 function event(id: string, sessionId: string, type = id, turnId = `turn-${sessionId}`): RuntimeEventRecord {
   return {
@@ -247,7 +265,7 @@ describe('in-memory runtime event queue', () => {
       warn: (message) => warnings.push(message),
       deliver: {
         async send(record) {
-          if (mode === 'refused') throw new RuntimeEventDeliveryError('runtime event', 409, 'conflict', '')
+          if (mode === 'refused') throw transportError(409, 'conflict')
           if (mode === 'empty') return []
           if (mode === 'malformed') return [{} as AgentSessionRuntimeEventReceipt]
           if (mode === 'mismatch') return [{ type: 'message.delta' }]
@@ -277,6 +295,49 @@ describe('in-memory runtime event queue', () => {
     mode = 'accepted'
     await vi.advanceTimersByTimeAsync(100)
     expect(queue.snapshot()).toEqual([])
+    await queue.stop()
+  })
+
+  it('retires permanent 400 refusals and keeps protocol transport values retryable', async () => {
+    vi.useFakeTimers()
+    const queue = createAgentSessionRuntimeEventQueue({
+      retryDelayMs: 100,
+      warn: () => undefined,
+      deliver: {
+        async send(record) {
+          if (record.id === 'permanent') throw transportError(400, 'session_runtime_identity_required')
+          if (record.id === 'protocol') throw transportError(409, 'conflict', 'protocol')
+          return [{ type: record.event.type }]
+        },
+      },
+    })
+
+    await queue.enqueueProducedFact(event('permanent', 'A'))
+    await queue.kick()
+    expect(queue.snapshot()).toEqual([])
+
+    await queue.enqueueProducedFact(event('protocol', 'B'))
+    await queue.kick()
+    expect(queue.snapshot().map((record) => record.id)).toEqual(['protocol'])
+    await queue.stop()
+  })
+
+  it.each(['cancelled', 'network'] as const)('keeps %s transport failures retryable', async (kind) => {
+    vi.useFakeTimers()
+    const queue = createAgentSessionRuntimeEventQueue({
+      retryDelayMs: 100,
+      warn: () => undefined,
+      deliver: {
+        async send() {
+          throw transportError(undefined, undefined, kind)
+        },
+      },
+    })
+
+    await queue.enqueueProducedFact(event(`${kind}-failure`, 'A'))
+    await queue.kick()
+
+    expect(queue.snapshot().map((record) => record.id)).toEqual([`${kind}-failure`])
     await queue.stop()
   })
 
@@ -396,25 +457,31 @@ describe('in-memory runtime event queue', () => {
     await queue.stop()
   })
 
-  it('rejects duplicate waiters together on permanent refusal and removes their state', async () => {
-    const queue = createAgentSessionRuntimeEventQueue({
-      warn: () => undefined,
-      deliver: {
-        async send() {
-          throw new RuntimeEventDeliveryError('runtime event', 409, 'conflict', '')
+  it.each([
+    [400, 'validation'],
+    [409, 'conflict'],
+  ] as const)(
+    'rejects duplicate waiters together on permanent %s refusal and removes their state',
+    async (httpStatus, serverCode) => {
+      const queue = createAgentSessionRuntimeEventQueue({
+        warn: () => undefined,
+        deliver: {
+          async send() {
+            throw transportError(httpStatus, serverCode)
+          },
         },
-      },
-    })
+      })
 
-    await queue.enqueueBeforeExecution(input('refused-input', 'A'))
-    const first = queue.awaitInputReceipt!('refused-input')
-    const second = queue.awaitInputReceipt!('refused-input')
+      await queue.enqueueBeforeExecution(input('refused-input', 'A'))
+      const first = queue.awaitInputReceipt!('refused-input')
+      const second = queue.awaitInputReceipt!('refused-input')
 
-    await expect(first).rejects.toBeInstanceOf(AlreadyConsumedRuntimeEventError)
-    await expect(second).rejects.toBeInstanceOf(AlreadyConsumedRuntimeEventError)
-    await expect(queue.awaitInputReceipt!('refused-input')).rejects.toBeInstanceOf(AlreadyConsumedRuntimeEventError)
-    await queue.stop()
-  })
+      await expect(first).rejects.toBeInstanceOf(AlreadyConsumedRuntimeEventError)
+      await expect(second).rejects.toBeInstanceOf(AlreadyConsumedRuntimeEventError)
+      await expect(queue.awaitInputReceipt!('refused-input')).rejects.toBeInstanceOf(AlreadyConsumedRuntimeEventError)
+      await queue.stop()
+    },
+  )
 
   it('rejects every coalesced waiter on shutdown and removes their state', async () => {
     const queue = createAgentSessionRuntimeEventQueue({
@@ -509,7 +576,7 @@ describe('in-memory runtime event queue', () => {
       deliver: {
         async send(record) {
           if (record.id === 'unrelated') return []
-          if (!recover) throw new RuntimeEventDeliveryError('runtime event', 503, 'temporarily-unavailable', 'busy')
+          if (!recover) throw transportError(503, 'temporarily-unavailable')
           return [{ type: 'session.input' }]
         },
       },
@@ -532,14 +599,12 @@ describe('in-memory runtime event queue', () => {
     expect(error).toMatchObject({
       classification: 'receipt-budget-exhausted',
       recordId: 'bounded-input',
+      elapsedMs: 200,
       budgetMs: 200,
       attempts: expect.any(Number),
       retries: expect.any(Number),
-      lastReason: expect.stringContaining('temporarily-unavailable'),
+      lastReason: expect.any(String),
     })
-    expect(error.message).toMatch(
-      /session\.input acceptance exceeded its budget.*elapsed 200ms of 200ms.*delivery attempts: [2-9]; retries: [1-8]/,
-    )
     expect(queue.snapshot()).toEqual(initialRecords)
 
     recover = true

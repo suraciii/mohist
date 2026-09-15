@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentRuntime, RunnerOptions, RunnerRegistration } from '../core/types.js'
 import { ServerConnection } from '../server/connection.js'
+import { runnerTransportDiagnostics } from '../server/connection-errors.js'
 import { validateDispatchEnvelope } from '../server/connection-dispatch.js'
 import { RunnerControlWebSocketClient } from '../server/runner-control-websocket.js'
 import { createRunnerControlHandlers } from '../server/runner-control-handlers.js'
@@ -409,7 +410,7 @@ export class RunnerHost {
       await this.connection.heartbeat(this.registrationState(), signal)
       await this.observeManagerDeploymentEpoch()
     } catch (error) {
-      log.error('runner heartbeat failed', { exception: error })
+      log.error('runner heartbeat failed', runnerTransportDiagnostics(error, { includeCredentialGuidance: true }))
     }
   }
 
@@ -600,7 +601,7 @@ export class RunnerHost {
         if (signal.aborted) break
         log.warn('runner poll failed; retrying', {
           reason: `in ${this.options.pollIntervalMs}ms`,
-          exception: error,
+          ...runnerTransportDiagnostics(error, { includeCredentialGuidance: true }),
         })
         await raceInterval(nextReconciliationInterval(this.executionContext), signal, [])
         continue
@@ -835,7 +836,7 @@ export class RunnerHost {
       } catch (error) {
         log.error('runner connection failed; retrying', {
           reason: `in ${this.options.pollIntervalMs}ms`,
-          exception: error,
+          ...runnerTransportDiagnostics(error, { includeCredentialGuidance: true }),
         })
         await this.disconnectForReconnect()
         await this.waitForConnectionRetry(this.options.pollIntervalMs, signal)
