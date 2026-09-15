@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
 import {
+  AGENT_RUNTIMES,
+  DEFAULT_AGENT_RUNTIME,
   agentRuntimeToConfigKey,
   configToAgentRuntime,
   getActionCatalog,
@@ -49,6 +51,11 @@ function errorResponse(error: string, status: number, code: string) {
 }
 
 describe('settings client agent runtime adapter', () => {
+  it('accepts Codex in the runtime allowlist without changing the OpenCode default', () => {
+    expect(AGENT_RUNTIMES).toEqual(['opencode', 'pi', 'codex'])
+    expect(DEFAULT_AGENT_RUNTIME).toBe('opencode')
+  })
+
   it('reads runtime config from /api/config instead of the missing /api/agent-runtime endpoint', async () => {
     const requests: CapturedRequest[] = []
     server.use(
