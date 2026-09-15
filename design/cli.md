@@ -42,7 +42,8 @@ from presentation.
 - The Server read model is the field authority. `ResourceOutputCatalog` is only
   its CLI projection.
 - Help is local and side-effect free. Remote operations begin only after local
-  parsing, validation, and Project resolution.
+  parsing and validation. Project-scoped operations resolve a Project; global
+  Runner operations do not.
 - A renderer cannot change request parameters, resource selection, or state
   transitions.
 - Slack reply construction is one typed mapping boundary. It validates the
@@ -72,9 +73,12 @@ that users start directly:
   resources.
 - `session`: stable AgentSession, independent of origin.
 - `activity`: read-only Project activity feed across domains.
-- `runner`: Runner registration, presence, and capacity.
+- `runner`: Server-global Runner identity, presence, control, admission, Runtime,
+  capacity, active-owner, drain, and next-action facts.
 - `server`: connected Mohist Server status, health, and application logs.
 - `service`: local lifecycle for a Server, Runner, or optional `mohist-slack`.
+  `mo service status runner` reads the local service manager and does not use
+  the remote Runner status resource.
 - `event`: event stream and dead-letter recovery operations.
 - `label`: Project label vocabulary referenced by Issues and Epics.
 - `routing`: ordered Project event-routing rules and dry-run evaluation.

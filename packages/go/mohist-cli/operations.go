@@ -858,15 +858,16 @@ func runRemoteRunnerOperations(ctx context.Context, deps Dependencies, c *client
 		return remoteOperation(ctx, deps, c, method, path, nil, cmd, false)
 	}
 
-	data, err := c.request(ctx, method, path, nil)
-	if err != nil {
-		return operationExit(deps, ctx, err)
-	}
 	if cmd.fieldsOnly {
 		for _, field := range cmd.catalog {
 			fmt.Fprintln(deps.Stdout, field)
 		}
 		return ExitOK
+	}
+
+	data, err := c.request(ctx, method, path, nil)
+	if err != nil {
+		return operationExit(deps, ctx, err)
 	}
 	if len(cmd.fields) > 0 {
 		var selected json.RawMessage
@@ -944,7 +945,15 @@ func renderRunnerResponse(out io.Writer, data json.RawMessage, action string) er
 		return err
 	}
 	if len(response.Runners) == 0 {
-		return renderRunnerActions(out, response.Inventory.NextActions)
+		if response.Inventory.State != "first-install" {
+			return runnerResponseError()
+		}
+		for _, action := range response.Inventory.NextActions {
+			if action.Code == "install-runner" {
+				return renderRunnerActions(out, []runnerNextActionResponse{action})
+			}
+		}
+		return runnerResponseError()
 	}
 	fmt.Fprintln(out, "observed at: "+response.ObservedAt)
 	for index, rawRow := range response.Runners {

@@ -27,6 +27,26 @@ func TestOperationsLocalServiceDoesNotUseHTTP(t *testing.T) {
 	}
 }
 
+func TestRunnerServiceStatusIsLocalAndHTTPFree(t *testing.T) {
+	calls := 0
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("HTTP must not be used")
+	}), map[string]string{})
+	deps.ExecuteOutput = func(_ context.Context, name string, args []string) (string, error) {
+		if name != "systemctl" || strings.Join(args, " ") != "--user show --no-pager --property=Id,ActiveState,SubState,Result,ExecMainStatus mohist-runner.service" {
+			t.Fatalf("command=%s %#v", name, args)
+		}
+		return "ActiveState=active\n", nil
+	}
+	if code := Run(context.Background(), []string{"service", "status", "runner"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if calls != 0 || out.String() != "ActiveState=active\n" || errOut.Len() != 0 {
+		t.Fatalf("calls=%d stdout=%q stderr=%q", calls, out.String(), errOut.String())
+	}
+}
+
 func TestServiceCommandsUseUserSystemdAndJournalctl(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -529,6 +549,18 @@ func TestRunnerEmptyAndOfflineOutputUsesServerActions(t *testing.T) {
 			t.Fatalf("output=%q", out.String())
 		}
 	})
+}
+
+func TestRunnerEmptyOutputOnlyUsesTheServerInstallAction(t *testing.T) {
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"success":true,"data":{"observedAt":"2026-08-01T12:00:00Z","inventory":{"state":"first-install","nextActions":[{"code":"install-runner","message":"Install and start the first Runner.","command":"mo install runner --repo-root <path>"},{"code":"wait-for-capacity","message":"must not render","command":null}]},"runners":[]}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"runner", "list"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if strings.Contains(out.String(), "wait-for-capacity") || !strings.Contains(out.String(), "install-runner") {
+		t.Fatalf("output=%q", out.String())
+	}
 }
 
 func TestRunnerResponseFailuresDoNotRenderGenericResults(t *testing.T) {
