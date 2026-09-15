@@ -146,6 +146,33 @@ public sealed class RunnerEnrollmentStoreTests
     }
 
     [Fact]
+    public async Task GetStatusAsync_DistinguishesActiveRevokedMissingAndExpiredCredentials()
+    {
+        using var activeSetup = CreateStore();
+        await activeSetup.Store.CreateRunnerCredentialAsync("admin", "runner-active");
+        Assert.Equal(RunnerCredentialStatus.Active, await activeSetup.Store.GetStatusAsync("runner-active"));
+
+        await activeSetup.Store.RevokeRunnerCredentialAsync("runner-active", activeSetup.Time.GetUtcNow());
+        Assert.Equal(RunnerCredentialStatus.Revoked, await activeSetup.Store.GetStatusAsync("runner-active"));
+        Assert.Equal(RunnerCredentialStatus.Missing, await activeSetup.Store.GetStatusAsync("runner-missing"));
+
+        await activeSetup.Store.CreateAsync(new Credential(
+            "runner_expired",
+            "admin",
+            CredentialKind.Runner,
+            CredentialToken.Hash("expired"),
+            [Scope.Runner],
+            "runner-expired",
+            null,
+            null,
+            null,
+            activeSetup.Time.GetUtcNow().AddMinutes(-1),
+            null,
+            activeSetup.Time.GetUtcNow().AddMinutes(-2)));
+        Assert.Equal(RunnerCredentialStatus.Missing, await activeSetup.Store.GetStatusAsync("runner-expired"));
+    }
+
+    [Fact]
     public async Task RevokeRunnerCredential_UnknownRunner_ReturnsFalse()
     {
         using var setup = CreateStore();

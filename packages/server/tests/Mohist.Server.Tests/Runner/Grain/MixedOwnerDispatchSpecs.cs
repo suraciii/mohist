@@ -183,6 +183,13 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
         Assert.Equal(2, response.Dispatches.Count);
         Assert.Equal(first.AgentJobId, response.Dispatches[0].AgentJobId);
         Assert.Equal(workflowId, response.Dispatches[1].WorkflowRunId);
+
+        var runtime = await Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync();
+        Assert.Equal(2, runtime.ActiveWorks.Count);
+        Assert.Contains(runtime.ActiveWorks, work =>
+            work.OwnerKind == WorkDispatchOwnerKinds.AgentJob && work.OwnerId == jobId);
+        Assert.Contains(runtime.ActiveWorks, work =>
+            work.OwnerKind == WorkDispatchOwnerKinds.Workflow && work.OwnerId == workflowId);
     }
 
     [Fact]
@@ -317,6 +324,11 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
         Assert.Single(response.Dispatches);
         Assert.Equal(workflowId, response.Dispatches[0].WorkflowRunId);
         Assert.Equal(AgentJobStatus.Pending, await job.GetStatusAsync());
+
+        var runtime = await Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync();
+        Assert.Single(runtime.ActiveWorks);
+        Assert.Equal(WorkDispatchOwnerKinds.Workflow, runtime.ActiveWorks[0].OwnerKind);
+        Assert.Equal(workflowId, runtime.ActiveWorks[0].OwnerId);
     }
 
     [Fact]

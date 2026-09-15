@@ -5,7 +5,7 @@ using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Infrastructure.Data.Auth;
 
-public sealed class CredentialStore : ICredentialStore, IScopedService
+public sealed class CredentialStore : ICredentialStore, IRunnerCredentialStatusReader, IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly TimeProvider _time;
@@ -235,6 +235,33 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
         }
 
         return new RunnerCredentialCreateResult(token, ToCredential(row, CredentialKind.Runner));
+    }
+
+    public async Task<RunnerCredentialStatus> GetStatusAsync(
+        string runnerId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(runnerId))
+            return RunnerCredentialStatus.Missing;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var rows = await db.Credentials
+            .AsNoTracking()
+            .Where(candidate => candidate.Kind.ToLower() == "runner" && candidate.Name == runnerId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var row = rows
+            .OrderByDescending(candidate => candidate.CreatedAt)
+            .ThenByDescending(candidate => candidate.Id, StringComparer.Ordinal)
+            .FirstOrDefault();
+
+        if (row is null)
+            return RunnerCredentialStatus.Missing;
+        if (row.RevokedAt is not null)
+            return RunnerCredentialStatus.Revoked;
+        if (row.ExpiresAt is not null && row.ExpiresAt.Value <= _time.GetUtcNow())
+            return RunnerCredentialStatus.Missing;
+        return RunnerCredentialStatus.Active;
     }
 
     public async Task<bool> RevokeRunnerCredentialAsync(

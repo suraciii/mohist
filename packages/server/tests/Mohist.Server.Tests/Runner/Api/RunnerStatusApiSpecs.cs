@@ -102,7 +102,7 @@ public class RunnerStatusApiSpecs
     }
 
     [Fact]
-    public async Task GetRunners_NoRunnersForProject_ReturnsEmptyList()
+    public async Task GetRunners_GlobalInventoryIncludesDurableDefinitions()
     {
         var projectId = await CreateProjectIdAsync($"proj-empty-{Guid.NewGuid():N}");
 
@@ -111,18 +111,19 @@ public class RunnerStatusApiSpecs
         foreach (var id in existingIds)
             await registry.UnregisterAsync(id);
 
-        var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
+        var response = await _fixture.Client.GetAsync("/api/runners");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-        var runners = payload.GetProperty("data").GetProperty("runners");
-        Assert.Empty(runners.EnumerateArray());
+        var data = payload.GetProperty("data");
+        Assert.Equal("ready", data.GetProperty("inventory").GetProperty("state").GetString());
+        Assert.Equal(global::System.Text.Json.JsonValueKind.Array, data.GetProperty("runners").ValueKind);
     }
 
     [Fact]
-    public async Task GetRunners_OnLegacyRoute_ReturnsNotFound()
+    public async Task GetRunners_ProjectScopedRoute_IsRemoved()
     {
-        var response = await _fixture.Client.GetAsync("/api/runners");
+        var response = await _fixture.Client.GetAsync("/api/projects/does-not-exist/runners");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -144,24 +145,22 @@ public class RunnerStatusApiSpecs
 
         try
         {
-            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
+            var response = await _fixture.Client.GetAsync("/api/runners");
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
             var runners = payload.GetProperty("data").GetProperty("runners");
-            var runner = runners.EnumerateArray().FirstOrDefault(r => r.GetProperty("id").GetString() == runnerId);
+            var runner = runners.EnumerateArray().Single(r => r.GetProperty("identity").GetProperty("id").GetString() == runnerId);
 
-            // Runners are global execution resources; the ProjectId field on
-            // the registration request is preserved on the wire for
-            // runner-line compatibility but does not bind the runner.
-            Assert.Equal("global", runner.GetProperty("scope").GetProperty("type").GetString());
-            Assert.Contains("connectionState", runner.ToString());
-            Assert.Contains("lastHeartbeatAt", runner.ToString());
+            Assert.Equal("ready", payload.GetProperty("data").GetProperty("inventory").GetProperty("state").GetString());
+            Assert.Equal("terms-host", runner.GetProperty("identity").GetProperty("hostname").GetString());
+            Assert.Equal("online", runner.GetProperty("presence").GetProperty("state").GetString());
+            Assert.Equal("disconnected", runner.GetProperty("control").GetProperty("state").GetString());
             Assert.Contains("capabilities", runner.ToString());
-            Assert.Contains("coderModels", runner.ToString());
+            Assert.Contains("runtimes", runner.ToString());
             Assert.Contains("activeWorks", runner.ToString());
-
-            Assert.DoesNotContain(runner.ToString(), "agent");
+            Assert.DoesNotContain("coderModels", runner.ToString());
+            Assert.DoesNotContain("idle", runner.ToString(), StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -183,6 +182,10 @@ public class RunnerStatusApiSpecs
             projectId,
             CoderModels: new[] { "openai/gpt-4" },
             BuildGitHash: hash,
+            Component: "mohist-runner",
+            SourceRevision: hash,
+            ReleaseId: "release-detail",
+            Generation: 7,
             ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration),
             TestRunnerGenerationExtensions.ProcessGeneration);
 
@@ -192,23 +195,25 @@ public class RunnerStatusApiSpecs
 
         try
         {
-            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners/{runnerId}");
+            var response = await _fixture.Client.GetAsync($"/api/runners/{runnerId}");
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
             Assert.True(payload.GetProperty("success").GetBoolean());
             var detail = payload.GetProperty("data").GetProperty("runner");
 
-            Assert.Equal(runnerId, detail.GetProperty("id").GetString());
-            Assert.Equal("external", detail.GetProperty("kind").GetString());
-            Assert.Equal("detail-host", detail.GetProperty("hostname").GetString());
-            // Runners are global execution resources; the ProjectId field on
-            // the registration request is preserved on the wire but does not
-            // bind the runner to a project.
-            Assert.Equal("global", detail.GetProperty("scope").GetProperty("type").GetString());
-            Assert.Equal(hash, detail.GetProperty("buildGitHash").GetString());
-            Assert.Equal("busy", detail.GetProperty("status").GetString());
-            Assert.Equal("openai/gpt-4", detail.GetProperty("coderModels")[0].GetString());
+            Assert.Equal(runnerId, detail.GetProperty("identity").GetProperty("id").GetString());
+            Assert.Equal("external", detail.GetProperty("identity").GetProperty("kind").GetString());
+            Assert.Equal("detail-host", detail.GetProperty("identity").GetProperty("hostname").GetString());
+            Assert.Equal("mohist-runner", detail.GetProperty("identity").GetProperty("component").GetString());
+            Assert.Equal(hash, detail.GetProperty("identity").GetProperty("sourceRevision").GetString());
+            Assert.Equal("release-detail", detail.GetProperty("identity").GetProperty("releaseId").GetString());
+            Assert.Equal(7, detail.GetProperty("identity").GetProperty("generation").GetInt64());
+            Assert.Equal("online", detail.GetProperty("presence").GetProperty("state").GetString());
+            Assert.Equal(1, detail.GetProperty("capacity").GetProperty("used").GetInt32());
+            Assert.Equal(1, detail.GetProperty("capacity").GetProperty("total").GetInt32());
+            Assert.DoesNotContain("buildGitHash", detail.ToString());
+            Assert.DoesNotContain("coderModels", detail.ToString());
 
             var activeWorks = detail.GetProperty("activeWorks");
             Assert.Equal(global::System.Text.Json.JsonValueKind.Array, activeWorks.ValueKind);
@@ -234,7 +239,7 @@ public class RunnerStatusApiSpecs
 
         var unknownRunnerId = $"runner-unknown-{Guid.NewGuid():N}";
 
-        var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners/{unknownRunnerId}");
+        var response = await _fixture.Client.GetAsync($"/api/runners/{unknownRunnerId}");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
