@@ -363,7 +363,7 @@ describe('ServerConnection agent-input attachments', () => {
 describe('ServerConnection named workspace materialization report', () => {
   it('posts the materialized path and parses the recorded home', async () => {
     fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ runnerId: 'runner-1', path: '/virtual/ws/pay' }), {
+      new Response(JSON.stringify({ success: true, data: { runnerId: 'runner-1', path: '/virtual/ws/pay' } }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       }),

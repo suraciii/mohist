@@ -24,10 +24,15 @@ export interface RunnerTransportOptions {
   fetcher?: RunnerTransportFetcher
 }
 
+interface RunnerResponseContext {
+  readonly signal: AbortSignal | null | undefined
+}
+
 export class RunnerTransport implements RunnerRequestTransport {
   private readonly credential: string | null
   private readonly secrets: readonly string[]
   private readonly fetcher: RunnerTransportFetcher
+  private readonly responseContexts = new WeakMap<Response, RunnerResponseContext>()
 
   constructor(options: RunnerTransportOptions = {}) {
     this.credential = options.credential ?? null
@@ -49,6 +54,7 @@ export class RunnerTransport implements RunnerRequestTransport {
       const headers = new Headers(init.headers)
       if (this.credential) headers.set('authorization', `Bearer ${this.credential}`)
       const response = await this.fetcher(input, { ...init, headers })
+      this.responseContexts.set(response, { signal })
       if (signal?.aborted) throw this.cancelled(operation, signal)
       if (!response.ok && !options.allowedStatuses?.includes(response.status)) {
         throw await this.httpFailure(operation, response)
@@ -73,7 +79,7 @@ export class RunnerTransport implements RunnerRequestTransport {
     try {
       text = await response.text()
     } catch (cause) {
-      throw this.protocolFailure(operation, cause)
+      throw this.bodyReadFailure(operation, response, cause)
     }
     if (text.trim().length === 0) {
       if (allowEmpty) return null
@@ -92,15 +98,20 @@ export class RunnerTransport implements RunnerRequestTransport {
     try {
       return new Uint8Array(await response.arrayBuffer())
     } catch (cause) {
-      throw this.protocolFailure(operation, cause)
+      throw this.bodyReadFailure(operation, response, cause)
     }
   }
 
   private async httpFailure(operation: string, response: Response): Promise<RunnerTransportError> {
     let code: string | undefined
     let message: string | undefined
+    let text: string
     try {
-      const text = await response.text()
+      text = await response.text()
+    } catch (cause) {
+      throw this.bodyReadFailure(operation, response, cause)
+    }
+    try {
       if (text.length <= MAX_ERROR_BODY_PARSE_LENGTH) {
         const payload = JSON.parse(text) as unknown
         const fields = readServerFields(payload)
@@ -112,6 +123,7 @@ export class RunnerTransport implements RunnerRequestTransport {
     }
 
     const safeOperation = this.safeOperation(operation)
+    const safeCode = code ? this.safeText(code, MAX_SERVER_CODE_LENGTH) : undefined
     const safeMessage = message
       ? `${safeOperation} failed with HTTP status ${response.status}: ${this.safeText(message)}`
       : `${safeOperation} failed with HTTP status ${response.status}`
@@ -119,8 +131,20 @@ export class RunnerTransport implements RunnerRequestTransport {
       operation: safeOperation,
       kind: 'http',
       httpStatus: response.status,
-      ...(code ? { serverCode: this.safeText(code, MAX_SERVER_CODE_LENGTH) } : {}),
+      ...(safeCode ? { serverCode: safeCode } : {}),
       safeMessage: this.safeText(safeMessage),
+    })
+  }
+
+  private bodyReadFailure(operation: string, response: Response, cause: unknown): RunnerTransportError {
+    const signal = this.responseContexts.get(response)?.signal
+    if (signal?.aborted) return this.cancelled(operation, signal)
+    const safeOperation = this.safeOperation(operation)
+    return new RunnerTransportError({
+      operation: safeOperation,
+      kind: 'network',
+      safeMessage: `${safeOperation} failed due to a network error while reading the response`,
+      cause,
     })
   }
 
@@ -178,8 +202,8 @@ function readServerFields(value: unknown): { code?: string; message?: string } {
   const code = firstString(value.code, data?.code, error?.code)
   const message = firstString(data?.message, value.error, value.message, error?.message, data?.error)
   return {
-    ...(code ? { code: boundedString(code, MAX_SERVER_CODE_LENGTH) } : {}),
-    ...(message ? { message: boundedString(message, MAX_SAFE_MESSAGE_LENGTH) } : {}),
+    ...(code ? { code } : {}),
+    ...(message ? { message } : {}),
   }
 }
 
@@ -188,11 +212,6 @@ function firstString(...values: unknown[]): string | undefined {
     if (typeof value === 'string' && value.trim().length > 0) return value
   }
   return undefined
-}
-
-function boundedString(value: string | undefined, limit: number): string | undefined {
-  if (!value) return undefined
-  return value.length <= limit ? value : `${value.slice(0, Math.max(0, limit - 3))}...`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

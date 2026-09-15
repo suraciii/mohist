@@ -144,6 +144,18 @@ describe('ServerConnection.openAgentSession (generic)', () => {
       kind: 'protocol',
     } satisfies Partial<RunnerTransportError>)
   })
+
+  it('OpenAgentSession_RejectsAnEmptySuccessPayload', async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '{}' }))
+    const connection = new ServerConnection(options())
+
+    await expect(
+      connection.openAgentSession('project-1', 'session-abc', {}, new AbortController().signal),
+    ).rejects.toMatchObject({
+      operation: 'openAgentSession',
+      kind: 'protocol',
+    } satisfies Partial<RunnerTransportError>)
+  })
 })
 
 describe('ServerConnection.attachAgentSession (generic)', () => {
@@ -181,11 +193,30 @@ describe('ServerConnection.attachAgentSession (generic)', () => {
 })
 
 describe('ServerConnection.resetWorkflowAgentSession', () => {
+  it('ResetWorkflowAgentSession_RejectsAResponseWithoutSessionId', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({ status: 200, body: JSON.stringify({ runtimeSessionId: 'runtime-1' }) }),
+    )
+    const connection = new ServerConnection(options())
+
+    await expect(
+      connection.resetWorkflowAgentSession('project-1', 'wf-1', 'plan', {}, new AbortController().signal),
+    ).rejects.toMatchObject({
+      operation: 'resetWorkflowAgentSession',
+      kind: 'protocol',
+    } satisfies Partial<RunnerTransportError>)
+  })
+
   it('ResetWorkflowAgentSession_PostsTheExpectedBindingCasToTheWorkflowResetUrl', async () => {
     fetchMock.mockResolvedValueOnce(
       mockResponse({
         status: 200,
-        body: JSON.stringify({ runtimeSessionId: 'runtime-new', runtime: 'opencode', workDir: '/workspace' }),
+        body: JSON.stringify({
+          sessionId: 'session-1',
+          runtimeSessionId: 'runtime-new',
+          runtime: 'opencode',
+          workDir: '/workspace',
+        }),
       }),
     )
     const connection = new ServerConnection(options())
@@ -205,7 +236,12 @@ describe('ServerConnection.resetWorkflowAgentSession', () => {
       new AbortController().signal,
     )
 
-    expect(result).toEqual({ runtimeSessionId: 'runtime-new', runtime: 'opencode', workDir: '/workspace' })
+    expect(result).toEqual({
+      sessionId: 'session-1',
+      runtimeSessionId: 'runtime-new',
+      runtime: 'opencode',
+      workDir: '/workspace',
+    })
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toMatch(/\/api\/runner\/runner-1\/sessions\/project-1\/wf-1\/plan\/reset$/)
     expect(init.method).toBe('POST')
@@ -362,11 +398,15 @@ describe('ServerConnection runtime-event failure metadata', () => {
 
 describe('ServerConnection generic vs workflow URL segregation', () => {
   it('GenericUrls_AreDistinctFrom_WorkflowUrls', async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '{}' }))
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({ status: 200, body: JSON.stringify({ status: 'idle', runtimeSessionId: null }) }),
+    )
     await new ServerConnection(options()).getAgentSession('project-1', 'session-abc', new AbortController().signal)
     const genericGet = (fetchMock.mock.calls[0] as [string, RequestInit])[0]
 
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '{}' }))
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({ status: 200, body: JSON.stringify({ sessionId: 'agent-session-1' }) }),
+    )
     await new ServerConnection(options()).getWorkflowAgentSession(
       'project-1',
       'wf-1',
@@ -381,11 +421,15 @@ describe('ServerConnection generic vs workflow URL segregation', () => {
   })
 
   it('GenericOpenUrl_ContainsSlashOpen_WorkflowOpenUrl_AlsoContainsSlashOpen', async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '{}' }))
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({ status: 200, body: JSON.stringify({ status: 'idle', runtimeSessionId: 'runtime-1' }) }),
+    )
     await new ServerConnection(options()).openAgentSession('project-1', 'session-abc', {}, new AbortController().signal)
     const genericOpen = (fetchMock.mock.calls[0] as [string, RequestInit])[0]
 
-    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '{}' }))
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({ status: 200, body: JSON.stringify({ sessionId: 'agent-session-1' }) }),
+    )
     await new ServerConnection(options()).openWorkflowAgentSession(
       'project-1',
       'wf-1',

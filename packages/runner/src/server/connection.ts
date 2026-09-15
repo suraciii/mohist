@@ -342,10 +342,10 @@ export class ServerConnection {
       { allowedStatuses: [404] },
     )
     if (response.status === 404) return null
-    return requireObjectPayload(
+    return requireWorkflowSessionPayload(
       await this.requestTransport.readJson<unknown>(response, 'getWorkflowAgentSession'),
       'getWorkflowAgentSession',
-    ) as WorkflowAgentSession
+    )
   }
 
   async openWorkflowAgentSession(
@@ -367,10 +367,10 @@ export class ServerConnection {
         signal,
       },
     )
-    return requireObjectPayload(
+    return requireWorkflowSessionPayload(
       await this.requestTransport.readJson<unknown>(response, 'openWorkflowAgentSession'),
       'openWorkflowAgentSession',
-    ) as WorkflowAgentSession
+    )
   }
 
   async addTasks(
@@ -426,10 +426,10 @@ export class ServerConnection {
         signal,
       },
     )
-    return requireObjectPayload(
+    return requireWorkflowSessionPayload(
       await this.requestTransport.readJson<unknown>(response, 'attachWorkflowAgentSession'),
       'attachWorkflowAgentSession',
-    ) as WorkflowAgentSession
+    )
   }
 
   async recoverMissingWorkflowAgentSession(
@@ -451,10 +451,10 @@ export class ServerConnection {
         signal,
       },
     )
-    return requireObjectPayload(
+    return requireWorkflowSessionPayload(
       await this.requestTransport.readJson<unknown>(response, 'recoverMissingWorkflowAgentSession'),
       'recoverMissingWorkflowAgentSession',
-    ) as WorkflowAgentSession
+    )
   }
 
   async resetWorkflowAgentSession(
@@ -476,10 +476,10 @@ export class ServerConnection {
         signal,
       },
     )
-    return requireObjectPayload(
+    return requireWorkflowSessionPayload(
       await this.requestTransport.readJson<unknown>(response, 'resetWorkflowAgentSession'),
       'resetWorkflowAgentSession',
-    ) as WorkflowAgentSession
+    )
   }
 
   async workflowAgentSessionCleanupTurn(
@@ -632,10 +632,10 @@ export class ServerConnection {
       { allowedStatuses: [404] },
     )
     if (response.status === 404) return null
-    return requireObjectPayload(
+    return requireGenericSessionPayload(
       await this.requestTransport.readJson<unknown>(response, 'getAgentSession'),
       'getAgentSession',
-    ) as AgentSession
+    )
   }
 
   /**
@@ -686,10 +686,10 @@ export class ServerConnection {
         signal,
       },
     )
-    return requireObjectPayload(
+    return requireGenericSessionPayload(
       await this.requestTransport.readJson<unknown>(response, 'openAgentSession'),
       'openAgentSession',
-    ) as AgentSession
+    )
   }
 
   async attachAgentSession(
@@ -709,7 +709,7 @@ export class ServerConnection {
       },
     )
     const payload = await this.requestTransport.readJson<unknown>(response, 'attachAgentSession', true)
-    return payload === null ? null : (requireObjectPayload(payload, 'attachAgentSession') as AgentSession)
+    return payload === null ? null : requireGenericSessionPayload(payload, 'attachAgentSession')
   }
 
   async recoverMissingAgentSession(
@@ -728,10 +728,10 @@ export class ServerConnection {
         signal,
       },
     )
-    return requireObjectPayload(
+    return requireGenericSessionPayload(
       await this.requestTransport.readJson<unknown>(response, 'recoverMissingAgentSession'),
       'recoverMissingAgentSession',
-    ) as AgentSession
+    )
   }
 
   async agentSessionRuntimeEvents(
@@ -879,9 +879,26 @@ export interface TaskLogUploadResult {
   truncated: boolean
 }
 
-function requireObjectPayload(value: unknown, operation: string): unknown {
-  if (!isObjectRecord(value)) throw createRunnerProtocolError(operation, 'returned a malformed response')
-  return value
+function requireWorkflowSessionPayload(value: unknown, operation: string): WorkflowAgentSession {
+  if (!isObjectRecord(value) || !nonEmptyString(value.sessionId)) {
+    throw createRunnerProtocolError(operation, 'returned a malformed session payload')
+  }
+  return value as unknown as WorkflowAgentSession
+}
+
+function requireGenericSessionPayload(value: unknown, operation: string): AgentSession {
+  if (!isObjectRecord(value)) throw createRunnerProtocolError(operation, 'returned a malformed session payload')
+  if ('sessionId' in value && !nonEmptyString(value.sessionId)) {
+    throw createRunnerProtocolError(operation, 'returned a malformed session payload')
+  }
+  if (!nonEmptyString(value.sessionId) && !nonEmptyString(value.runtimeSessionId) && !nonEmptyString(value.status)) {
+    throw createRunnerProtocolError(operation, 'returned a malformed session payload')
+  }
+  return value as unknown as AgentSession
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
 }
 
 function parseAgentSessionReconcileBinding(value: unknown, operation: string): AgentSessionReconcileBinding {

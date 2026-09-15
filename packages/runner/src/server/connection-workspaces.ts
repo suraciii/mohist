@@ -60,10 +60,11 @@ export async function reportWorkspaceMaterialized(
     throw error
   }
   const payload = await transport.readJson<unknown>(response, 'reportWorkspaceMaterialized')
-  if (!isObjectRecord(payload) || !nonEmptyString(payload.runnerId) || !nonEmptyString(payload.path)) {
+  const data = isSuccessfulApiResponse(payload) ? payload.data : null
+  if (!isObjectRecord(data) || !nonEmptyString(data.runnerId) || !nonEmptyString(data.path)) {
     throw createRunnerProtocolError('reportWorkspaceMaterialized', 'returned a malformed response')
   }
-  return { runnerId: payload.runnerId, path: payload.path }
+  return { runnerId: data.runnerId, path: data.path }
 }
 
 export async function getWorkspaceReclaimability(
@@ -107,6 +108,10 @@ function readObject(value: unknown, path: string[]): Record<string, unknown> | n
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isSuccessfulApiResponse(value: unknown): value is { success: true; data: unknown } {
+  return isObjectRecord(value) && value.success === true && 'data' in value
 }
 
 function nonEmptyString(value: unknown): value is string {

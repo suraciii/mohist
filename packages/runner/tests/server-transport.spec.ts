@@ -120,6 +120,86 @@ describe('RunnerTransport', () => {
     expect(error.safeMessage).not.toContain('runner.test')
   })
 
+  it('classifies abort after response headers as cancellation for JSON reads', async () => {
+    const controller = new AbortController()
+    const body = new ReadableStream<Uint8Array>({
+      start(stream) {
+        controller.signal.addEventListener('abort', () => stream.error(new DOMException('aborted', 'AbortError')), {
+          once: true,
+        })
+      },
+      pull: () => new Promise<void>(() => {}),
+    })
+    const runner = transport(async () => new Response(body, { status: 200 }))
+    const successfulResponse = await runner.request('poll', 'https://runner.test/poll', { signal: controller.signal })
+    const pending = rejected(runner.readJson(successfulResponse, 'poll'))
+
+    controller.abort('body timeout')
+    const error = await pending
+
+    expect(error.kind).toBe('cancelled')
+    expect(error.operation).toBe('poll')
+    expect(error.cause).toBe('body timeout')
+  })
+
+  it('classifies a terminated JSON response stream as network', async () => {
+    const termination = new TypeError('terminated')
+    const body = new ReadableStream<Uint8Array>({
+      pull(stream) {
+        stream.enqueue(new TextEncoder().encode('{"partial":'))
+        stream.error(termination)
+      },
+    })
+    const runner = transport(async () => new Response(body, { status: 200 }))
+    const successfulResponse = await runner.request('poll', 'https://runner.test/poll', {})
+    const error = await rejected(runner.readJson(successfulResponse, 'poll'))
+
+    expect(error.kind).toBe('network')
+    expect(error.operation).toBe('poll')
+    expect(error.cause).toBe(termination)
+  })
+
+  it('classifies abort after response headers as cancellation for binary reads', async () => {
+    const controller = new AbortController()
+    const body = new ReadableStream<Uint8Array>({
+      start(stream) {
+        controller.signal.addEventListener('abort', () => stream.error(new DOMException('aborted', 'AbortError')), {
+          once: true,
+        })
+      },
+      pull: () => new Promise<void>(() => {}),
+    })
+    const runner = transport(async () => new Response(body, { status: 200 }))
+    const successfulResponse = await runner.request('openAgentInputAttachment', 'https://runner.test/content', {
+      signal: controller.signal,
+    })
+    const pending = rejected(runner.readBytes(successfulResponse, 'openAgentInputAttachment'))
+
+    controller.abort('body timeout')
+    const error = await pending
+
+    expect(error.kind).toBe('cancelled')
+    expect(error.operation).toBe('openAgentInputAttachment')
+    expect(error.cause).toBe('body timeout')
+  })
+
+  it('classifies a terminated binary response stream as network', async () => {
+    const termination = new TypeError('terminated')
+    const body = new ReadableStream<Uint8Array>({
+      pull(stream) {
+        stream.enqueue(new Uint8Array([1, 2, 3]))
+        stream.error(termination)
+      },
+    })
+    const runner = transport(async () => new Response(body, { status: 200 }))
+    const successfulResponse = await runner.request('openAgentInputAttachment', 'https://runner.test/content', {})
+    const error = await rejected(runner.readBytes(successfulResponse, 'openAgentInputAttachment'))
+
+    expect(error.kind).toBe('network')
+    expect(error.operation).toBe('openAgentInputAttachment')
+    expect(error.cause).toBe(termination)
+  })
+
   it('classifies structured HTTP failures and redacts transport secrets and known token patterns', async () => {
     const credential = 'moh_runner_secret_123'
     const enrollmentToken = 'moh_enroll_secret_456'
@@ -171,13 +251,14 @@ describe('RunnerTransport', () => {
     const credential = 'moh_runner_log_secret'
     const enrollmentToken = 'moh_enroll_log_secret'
     const rawBody = 'unsafe-response-body-marker'
+    const longCode = `${'x'.repeat(120)}${credential}suffix`
     const error = await rejected(
       transport(
         async () =>
           response(
             401,
             JSON.stringify({
-              code: 'runner_rejected',
+              code: longCode,
               data: {
                 message: `Bearer ${credential}; enrollment_token=${enrollmentToken}`,
               },
@@ -208,7 +289,9 @@ describe('RunnerTransport', () => {
     expect(captured).toContain('operation=heartbeat')
     expect(captured).toContain('kind=http')
     expect(captured).toContain('httpStatus=401')
-    expect(captured).toContain('serverCode=runner_rejected')
+    expect(captured).toContain('serverCode=')
+    expect((error as RunnerTransportError).serverCode).toContain('***')
+    expect((error as RunnerTransportError).serverCode?.length).toBeLessThanOrEqual(128)
     expect(captured).toContain('safeMessage=')
     expect(captured).toContain('nextAction="re-run \'mo install runner\'"')
     expect(captured).not.toContain(credential)
@@ -386,7 +469,10 @@ describe('ServerConnection transport contract', () => {
 
   serverTest('accepts valid Workspace materialization reports', async () => {
     transportFetch.mockResolvedValueOnce(
-      serverResponse(200, JSON.stringify({ runnerId: 'runner-1', path: '/virtual/workspace' })),
+      serverResponse(
+        200,
+        JSON.stringify({ success: true, data: { runnerId: 'runner-1', path: '/virtual/workspace' } }),
+      ),
     )
 
     await expect(
