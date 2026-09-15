@@ -117,9 +117,13 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
                         ["openai/gpt-5.5"] = ["high"],
                     }),
             }));
-        await runner.ObserveRuntimeReadinessAsync(
-            "connection-1",
-            [new RuntimeReadinessWitness("pi", Ready: true, Generation: 1)]);
+        await runner.ObserveDispatchObservationAsync(
+            TestRunnerGenerationExtensions.ProcessGeneration,
+            new RunnerDispatchObservation(
+                "connection-1",
+                AdmissionReady: true,
+                AdmissionReasonCodes: [],
+                RuntimeReadiness: [new RuntimeReadinessWitness("pi", Ready: true, Generation: 1)]));
 
         var instructions = "Always respond in formal English; refuse non-code tasks.";
         var configElement = JsonDocument.Parse("{\"type\":\"pi\",\"model\":\"openai/gpt-5.5\",\"reasoningEffort\":\"high\",\"variant\":\"balanced\"}").RootElement.Clone();
@@ -146,7 +150,10 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
                 [],
                 [],
                 RuntimeReadiness: [new RuntimeReadinessWitness("pi", Ready: true, Generation: 1)],
-                ConnectionGeneration: "connection-1", ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
+                ConnectionGeneration: "connection-1",
+                AdmissionReady: true,
+                AdmissionReasonCodes: [],
+                ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
 
         var polled = await Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Cluster.GetSiloServiceProvider(null));
 

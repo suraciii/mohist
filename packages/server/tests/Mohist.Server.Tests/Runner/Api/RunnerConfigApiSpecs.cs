@@ -552,6 +552,8 @@ public class RunnerConfigFixture : IAsyncLifetime
             RuntimeReadiness: [new RuntimeReadinessWitness(runtime, Ready: true, Generation: 1)],
             ConnectionId: ConnectionId(runnerId),
             ConnectionGeneration: connectionGeneration,
+            AdmissionReady: true,
+            AdmissionReasonCodes: [],
             ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration);
     }
 

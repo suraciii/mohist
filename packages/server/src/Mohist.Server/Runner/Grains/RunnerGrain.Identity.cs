@@ -66,6 +66,10 @@ public partial class RunnerGrain
             if (IsStaleConnectionGeneration(_info.ConnectionGeneration, normalizedConnectionGeneration))
                 return;
 
+            var connectionGenerationChanged = !string.Equals(
+                _info.ConnectionGeneration,
+                normalizedConnectionGeneration,
+                StringComparison.Ordinal);
             var next = _info with
             {
                 BuildGitHash = NormalizeIdentity(buildGitHash) ?? _info.BuildGitHash,
@@ -82,6 +86,8 @@ public partial class RunnerGrain
                 return;
 
             SetRunnerInfo(next);
+            if (connectionGenerationChanged)
+                _dispatchObservation = null;
             await PersistAsync();
             if (_status == RunnerStatus.Online)
                 await UpsertRegistryAsync();

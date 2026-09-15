@@ -138,7 +138,8 @@ public class RunnerStatusApiSpecs
             ["spec/*"],
             "terms-host",
             projectId,
-            CoderModels: new[] { "openai/gpt-4" }),
+            CoderModels: new[] { "openai/gpt-4" },
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration),
             TestRunnerGenerationExtensions.ProcessGeneration);
 
         try
@@ -181,7 +182,8 @@ public class RunnerStatusApiSpecs
             "detail-host",
             projectId,
             CoderModels: new[] { "openai/gpt-4" },
-            BuildGitHash: hash),
+            BuildGitHash: hash,
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration),
             TestRunnerGenerationExtensions.ProcessGeneration);
 
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);

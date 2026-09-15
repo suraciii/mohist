@@ -276,6 +276,13 @@ public class RuntimeEntrySpecs
         {
             await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new {
             processGeneration = TestRunnerGenerationExtensions.ProcessGeneration, capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+            await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
+                runnerId,
+                [],
+                "test-host",
+                project.Id,
+                ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration),
+                TestRunnerGenerationExtensions.ProcessGeneration);
             await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 4 });
 
             var workflowA = $"wf-div-a-{Guid.NewGuid():N}";

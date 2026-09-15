@@ -108,6 +108,29 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task Unregister_RetainsLatestPresenceObservationAfterClearingLease()
+    {
+        var runnerId = $"runner-presence-observation-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var storage = _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<IGrainStorage>();
+        var registeredAt = _fixture.TimeProvider.GetUtcNow();
+
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "presence-host", "test-project"));
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(30));
+        await runner.HeartbeatAsync();
+        var observedAt = _fixture.TimeProvider.GetUtcNow();
+
+        await runner.UnregisterAsync();
+
+        var stored = new GrainState<RunnerState>();
+        await storage.ReadStateAsync("runner", runner.GetGrainId(), stored);
+        Assert.Equal(observedAt, stored.State.LastPresenceAt);
+        Assert.Null(stored.State.PresenceLeaseExpiresAt);
+        Assert.Equal(observedAt, (await runner.GetRuntimeStateAsync()).LastHeartbeatAt);
+        Assert.NotEqual(registeredAt, observedAt);
+    }
+
+    [Fact]
     public async Task ExpiredRegistryIndex_IsExcludedFromEligibilityBeforeCleanup()
     {
         var runnerId = $"runner-expired-index-{Guid.NewGuid():N}";

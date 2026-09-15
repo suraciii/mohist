@@ -263,7 +263,12 @@ public class WorkflowArtifactUploadRouteSpecs
 
         var runnerId = $"upload-test-{Guid.NewGuid():N}";
         await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(
-            new RunnerInfo(runnerId, ["spec/task", "spec/check"], "test-host", projectId),
+            new RunnerInfo(
+                runnerId,
+                ["spec/task", "spec/check"],
+                "test-host",
+                projectId,
+                ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration),
             TestRunnerGenerationExtensions.ProcessGeneration);
 
         var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);

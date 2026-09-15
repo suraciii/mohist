@@ -496,9 +496,39 @@ public sealed class RunnerPollRecoveryStateApiSpecs
 
     private async Task<JsonElement> PollAsync(string runnerId, RunnerPollRequest? request = null)
     {
-        using var response = await _fixture.Client.PostRunnerPollAsync(runnerId, request);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        return await response.ReadFirstDispatchElementAsync()
-            ?? throw new InvalidOperationException("Expected a dispatch from /poll");
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var connectionId = $"{runnerId}-test-connection";
+        var connectionGeneration = tracker.Register(runnerId, connectionId);
+        try
+        {
+            await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).UpdateRuntimeIdentityAsync(
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                connectionGeneration);
+            var normalized = (request ?? new RunnerPollRequest(
+                [],
+                [],
+                ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration)) with
+            {
+                ConnectionId = connectionId,
+                ConnectionGeneration = connectionGeneration,
+                AdmissionReady = request?.AdmissionReady ?? true,
+                AdmissionReasonCodes = request?.AdmissionReasonCodes ?? [],
+            };
+            using var response = await _fixture.Client.PostRunnerPollAsync(runnerId, normalized);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return await response.ReadFirstDispatchElementAsync()
+                ?? throw new InvalidOperationException("Expected a dispatch from /poll");
+        }
+        finally
+        {
+            tracker.Unregister(runnerId, connectionId);
+        }
     }
 }

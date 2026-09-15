@@ -51,9 +51,13 @@ public sealed class AgentJobManagerRuntimeAdmissionSpecs : AgentJobGrainTestSupp
     public async Task Manager_agent_job_claim_rechecks_readiness_after_expectation_snapshot()
     {
         var (runnerId, runner, job, info) = await PrepareManagerJobAsync("pi", includeOpenCodeIsolation: false);
-        await runner.ObserveRuntimeReadinessAsync(
-            CapabilityFenceConnection,
-            [new RuntimeReadinessWitness("pi", Ready: true, Generation: 1)]);
+        await runner.ObserveDispatchObservationAsync(
+            TestRunnerGenerationExtensions.ProcessGeneration,
+            new RunnerDispatchObservation(
+                CapabilityFenceConnection,
+                AdmissionReady: true,
+                AdmissionReasonCodes: [],
+                RuntimeReadiness: [new RuntimeReadinessWitness("pi", Ready: true, Generation: 1)]));
         var pending = await job.GetRuntimeSnapshotAsync();
         var definition = Assert.IsType<AgentExecutionDefinition>(pending.ExecutionDefinition);
         var expectation = new CapabilityClaimExpectation(

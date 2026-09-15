@@ -89,9 +89,13 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
                         ["openai/model"] = ["high"],
                     }),
             }));
-        await runner.ObserveRuntimeReadinessAsync(
-            "connection-1",
-            [new RuntimeReadinessWitness("pi", Ready: true, Generation: 1)]);
+        await runner.ObserveDispatchObservationAsync(
+            TestRunnerGenerationExtensions.ProcessGeneration,
+            new RunnerDispatchObservation(
+                "connection-1",
+                AdmissionReady: true,
+                AdmissionReasonCodes: [],
+                RuntimeReadiness: [new RuntimeReadinessWitness("pi", Ready: true, Generation: 1)]));
 
         var job = Grains.GetGrain<IAgentJobGrain>(jobId);
         await job.SubmitAsync(new AgentJobInput(

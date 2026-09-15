@@ -374,6 +374,8 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
                 ConnectionId: ConnectionId(runnerId),
                 ConnectionGeneration: _fixture.Services.GetRequiredService<RunnerConnectionTracker>()
                     .GetConnectionGeneration(runnerId),
+                AdmissionReady: true,
+                AdmissionReasonCodes: [],
                 ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
         var dispatch = Assert.Single(await poll.ReadDispatchElementsAsync());
         var assignment = await job.GetRuntimeSnapshotAsync();

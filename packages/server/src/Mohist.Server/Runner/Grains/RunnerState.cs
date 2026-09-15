@@ -14,6 +14,8 @@ public sealed class RunnerState
     /// legacy state is offline until real runner traffic renews presence.
     /// </summary>
     [Id(6)] public DateTimeOffset? PresenceLeaseExpiresAt { get; set; }
+    /// <summary>Latest presence touch; retained after the lease is cleared.</summary>
+    [Id(7)] public DateTimeOffset? LastPresenceAt { get; set; }
 }
 
 /// <summary>

@@ -21,6 +21,7 @@ using Orleans;
 using Xunit;
 using Xunit.Sdk;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Grains;
 namespace Mohist.Server.Tests.Agent.Api;
 
@@ -185,7 +186,9 @@ public abstract class AgentSessionLaunchRoutesTestSupport
     {
         for (var i = 0; i < 30; i++)
         {
-            using var poll = await _fixture.Client.PostRunnerPollAsync(runnerId);
+            using var poll = await _fixture.Client.PostRunnerPollAsync(
+                runnerId,
+                ReadyPollRequest(runnerId));
             var dispatches = await poll.ReadDispatchElementsAsync();
             if (dispatches.Count == 0) return;
             foreach (var data in dispatches)
@@ -402,14 +405,34 @@ public abstract class AgentSessionLaunchRoutesTestSupport
     {
         // Launch route specs need authoritative runner state, not a second HTTP route workflow.
         var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        var connectionId = $"{runnerId}-test-connection";
+        var connectionGeneration = _fixture.Services.GetRequiredService<RunnerConnectionTracker>()
+            .Register(runnerId, connectionId);
         await runnerGrain.RegisterAsync(new RunnerInfo(
             runnerId,
             ["spec/*"],
             $"{runnerId}-host",
             projectId,
-            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create(),
+            ConnectionGeneration: connectionGeneration));
         await runnerGrain.UpdateAsync(2);
     }
+
+    protected RunnerPollRequest ReadyPollRequest(string runnerId) =>
+        new(
+            [],
+            [],
+            RuntimeReadiness:
+            [
+                new RuntimeReadinessWitness("pi", Ready: true, Generation: 1),
+                new RuntimeReadinessWitness("opencode", Ready: true, Generation: 1),
+            ],
+            ConnectionId: $"{runnerId}-test-connection",
+            ConnectionGeneration: _fixture.Services.GetRequiredService<RunnerConnectionTracker>()
+                .GetConnectionGeneration(runnerId),
+            AdmissionReady: true,
+            AdmissionReasonCodes: [],
+            ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration);
 
     protected async Task<int> CountAgentLaunchSessionsAsync(string projectId)
     {

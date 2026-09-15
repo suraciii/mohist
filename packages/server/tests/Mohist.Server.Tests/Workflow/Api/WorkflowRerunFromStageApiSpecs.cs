@@ -217,7 +217,12 @@ public class WorkflowRerunFromStageApiSpecs : IAsyncLifetime
     {
         var runnerId = $"rerun-stage-runner-{Guid.NewGuid():N}";
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId));
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "test-host",
+            projectId,
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration));
         _runnerIds.Add(runnerId);
         return runnerId;
     }

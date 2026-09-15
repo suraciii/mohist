@@ -48,8 +48,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private bool _supersededGenerationRetryPending;
     private DateTimeOffset _lastPresenceAt;
     private IDisposable? _presenceTimer;
-    private string? _readinessConnectionGeneration;
-    private readonly Dictionary<string, RuntimeReadinessWitness> _runtimeReadiness = new(StringComparer.OrdinalIgnoreCase);
+    private RunnerDispatchObservation? _dispatchObservation;
 
     // Authoritative source for dispatch capacity. Loaded from the persisted
     // definition state in OnActivateAsync / RegisterAsync and updated via
@@ -141,9 +140,12 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
 
         var now = _timeProvider.GetUtcNow();
+        _lastPresenceAt = state.LastPresenceAt
+            ?? (state.PresenceLeaseExpiresAt is { } legacyExpiry
+                ? legacyExpiry - PresenceTimeout
+                : default);
         if (state.PresenceLeaseExpiresAt is { } expiry)
         {
-            _lastPresenceAt = expiry - PresenceTimeout;
             if (expiry > now && _info is not null)
             {
                 _status = RunnerStatus.Online;
@@ -244,9 +246,9 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             // same process may register again after reconnecting and must not
             // reopen admission across a durable update fence.
             var updateInterruptFence = UpdateInterruptFence();
-            _readinessConnectionGeneration = null;
-            _runtimeReadiness.Clear();
+            _dispatchObservation = null;
             _lastPresenceAt = now;
+            state.LastPresenceAt = now;
             _pendingBuildGitHash = null;
             _pendingRuntimeIdentity = null;
             _slots = await _definitions.GetOrInitAsync(RunnerId);
@@ -285,6 +287,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _log.LogInformation("Runner {Id} unregistered", RunnerId);
             _pollAdmissionToken = null;
             _status = RunnerStatus.Offline;
+            _dispatchObservation = null;
             SetRunnerInfo(null);
             var state = _state.State ??= new RunnerState();
             state.PresenceLeaseExpiresAt = null;
@@ -345,7 +348,9 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
         var now = _timeProvider.GetUtcNow();
         _lastPresenceAt = now;
-        (_state.State ??= new RunnerState()).PresenceLeaseExpiresAt = now + PresenceTimeout;
+        var state = _state.State ??= new RunnerState();
+        state.LastPresenceAt = now;
+        state.PresenceLeaseExpiresAt = now + PresenceTimeout;
         var wasOnline = _status == RunnerStatus.Online;
         await PersistAsync();
         EnsurePresenceTimer();
@@ -412,54 +417,6 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         {
             return !string.IsNullOrEmpty(processGeneration)
                 && string.Equals(_state.State?.CurrentProcessGeneration, processGeneration, StringComparison.Ordinal);
-        }
-        finally
-        {
-            _lifecycleGate.Release();
-        }
-    }
-
-    public async Task<RunnerRuntimeReadinessSnapshot> ObserveRuntimeReadinessAsync(
-        string? connectionGeneration,
-        List<RuntimeReadinessWitness> witnesses)
-    {
-        await _lifecycleGate.WaitAsync();
-        try
-        {
-            if (_status != RunnerStatus.Online
-                || _info is null
-                || string.IsNullOrWhiteSpace(connectionGeneration))
-                return RunnerRuntimeReadinessSnapshot.Empty;
-
-            var normalizedConnectionGeneration = connectionGeneration.Trim();
-            if (_info.ConnectionGeneration is { } registered
-                && !string.Equals(registered, normalizedConnectionGeneration, StringComparison.Ordinal))
-                return new RunnerRuntimeReadinessSnapshot(normalizedConnectionGeneration, []);
-
-            if (!string.Equals(_readinessConnectionGeneration, normalizedConnectionGeneration, StringComparison.Ordinal))
-            {
-                _readinessConnectionGeneration = normalizedConnectionGeneration;
-                _runtimeReadiness.Clear();
-            }
-
-            foreach (var witness in witnesses ?? [])
-            {
-                var runtime = witness.Runtime?.Trim();
-                if (string.IsNullOrWhiteSpace(runtime) || witness.Generation is not > 0)
-                    continue;
-
-                if (_runtimeReadiness.TryGetValue(runtime, out var previous)
-                    && previous.Generation is { } previousGeneration
-                    && witness.Generation is { } incomingGeneration
-                    && previousGeneration > incomingGeneration)
-                    continue;
-
-                _runtimeReadiness[runtime] = witness with { Runtime = runtime };
-            }
-
-            return new RunnerRuntimeReadinessSnapshot(
-                _readinessConnectionGeneration,
-                _runtimeReadiness.Values.ToList());
         }
         finally
         {
@@ -641,7 +598,11 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
             if (expectation is not null
                 && (!string.Equals(expectation.OwnerId, agentJobId, StringComparison.Ordinal)
-                    || !RunnerCapabilityGate.Matches(_info, _readinessConnectionGeneration, _runtimeReadiness, expectation)))
+                    || !RunnerCapabilityGate.Matches(
+                        _info,
+                        _dispatchObservation?.ConnectionGeneration,
+                        RuntimeReadinessByName(),
+                        expectation)))
                 return null;
 
             var activeWorkflowCount = await _workflowRuns.CountRunningAssignedToAsync(RunnerId);
@@ -747,7 +708,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             activeWorks,
             _draining,
             _state.State?.UpdateInterruptFence?.PendingId,
-            _info?.ConnectionGeneration);
+            _info?.ConnectionGeneration,
+            CloneDispatchObservation(_dispatchObservation));
     }
 
     private async Task UpsertRegistryAsync()
@@ -824,6 +786,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
             _pollAdmissionToken = null;
             _status = RunnerStatus.Offline;
+            state.LastPresenceAt ??= _lastPresenceAt;
             state.PresenceLeaseExpiresAt = null;
             BeginDurableCloseout();
             await PersistAsync();
