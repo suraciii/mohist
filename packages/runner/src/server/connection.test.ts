@@ -303,6 +303,29 @@ describe('ServerConnection agent-input attachments', () => {
     expect(JSON.stringify(fetchSpy.mock.calls[0]?.[1])).not.toContain('temp')
     expect(JSON.stringify(fetchSpy.mock.calls[0]?.[1])).not.toContain('token')
   })
+
+  it('preserves null for a missing attachment', async () => {
+    fetchSpy.mockResolvedValue(new Response('missing', { status: 404 }))
+
+    await expect(
+      new ServerConnection(options).openAgentInputAttachment('project', 'session', 'input', 'attachment', signal),
+    ).resolves.toBeNull()
+  })
+
+  it('classifies attachment HTTP failures without reading the response body into the error', async () => {
+    fetchSpy.mockResolvedValue(new Response('unsafe attachment body', { status: 500 }))
+
+    const error = await new ServerConnection(options)
+      .openAgentInputAttachment('project', 'session', 'input', 'attachment', signal)
+      .catch((value: unknown) => value)
+
+    expect(error).toMatchObject({
+      operation: 'openAgentInputAttachment',
+      kind: 'http',
+      httpStatus: 500,
+    } satisfies Partial<RunnerTransportError>)
+    expect((error as RunnerTransportError).safeMessage).not.toContain('unsafe attachment body')
+  })
 })
 
 describe('ServerConnection named workspace materialization report', () => {
@@ -330,6 +353,17 @@ describe('ServerConnection named workspace materialization report', () => {
     expect(JSON.parse(String(init?.body))).toEqual({ path: '/virtual/ws/pay' })
   })
 
+  it('classifies malformed successful workspace reports as protocol', async () => {
+    fetchSpy.mockResolvedValue(new Response('not-json', { status: 200 }))
+
+    await expect(
+      new ServerConnection(options).reportWorkspaceMaterialized('project-1', 'pay', '/virtual/ws/pay', signal),
+    ).rejects.toMatchObject({
+      operation: 'reportWorkspaceMaterialized',
+      kind: 'protocol',
+    } satisfies Partial<RunnerTransportError>)
+  })
+
   it('throws WorkspaceHomeClaimedError on a 409 workspace_home_claimed answer', async () => {
     fetchSpy.mockResolvedValue(
       new Response(JSON.stringify({ ok: false, code: 'workspace_home_claimed', error: 'already materialized' }), {
@@ -343,11 +377,15 @@ describe('ServerConnection named workspace materialization report', () => {
     ).rejects.toBeInstanceOf(WorkspaceHomeClaimedError)
   })
 
-  it('throws a plain error on other non-2xx answers', async () => {
+  it('preserves typed transport failures for other non-2xx answers', async () => {
     fetchSpy.mockResolvedValue(new Response('bad', { status: 400 }))
     await expect(
       new ServerConnection(options).reportWorkspaceMaterialized('project-1', 'pay', '/virtual/ws/pay', signal),
-    ).rejects.toThrow('workspace materialization failed: 400')
+    ).rejects.toMatchObject({
+      operation: 'reportWorkspaceMaterialized',
+      kind: 'http',
+      httpStatus: 400,
+    } satisfies Partial<RunnerTransportError>)
   })
 })
 
@@ -379,11 +417,25 @@ describe('ServerConnection workspace reclaimability', () => {
     expect(init?.method).toBe('GET')
   })
 
-  it('throws on non-2xx', async () => {
+  it('preserves typed transport failures on non-2xx', async () => {
     fetchSpy.mockResolvedValue(new Response('gone', { status: 404 }))
-    await expect(new ServerConnection(options).getWorkspaceReclaimability('project-1', 'pay', signal)).rejects.toThrow(
-      'workspace reclaimability failed: 404',
-    )
+    await expect(
+      new ServerConnection(options).getWorkspaceReclaimability('project-1', 'pay', signal),
+    ).rejects.toMatchObject({
+      operation: 'getWorkspaceReclaimability',
+      kind: 'http',
+      httpStatus: 404,
+    } satisfies Partial<RunnerTransportError>)
+  })
+
+  it('classifies reclaimability network failures', async () => {
+    fetchSpy.mockRejectedValue(new Error('connection refused'))
+    await expect(
+      new ServerConnection(options).getWorkspaceReclaimability('project-1', 'pay', signal),
+    ).rejects.toMatchObject({
+      operation: 'getWorkspaceReclaimability',
+      kind: 'network',
+    } satisfies Partial<RunnerTransportError>)
   })
 
   itEach([

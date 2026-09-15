@@ -1,5 +1,5 @@
 import { describe, expect, it as vitestIt } from 'vitest'
-import { RuntimeEventDeliveryError, ServerConnection } from '../src/server/connection.js'
+import { RunnerTransportError, ServerConnection } from '../src/server/connection.js'
 import { transportFetch, withFakeTransport } from './support/fake-transport.js'
 
 const fetchMock = transportFetch
@@ -63,9 +63,25 @@ describe('ServerConnection.getAgentSession (generic)', () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 500, body: 'boom' }))
     const connection = new ServerConnection(options())
 
-    await expect(connection.getAgentSession('project-1', 'session-1', new AbortController().signal)).rejects.toThrow(
-      /agent session lookup failed/,
-    )
+    await expect(
+      connection.getAgentSession('project-1', 'session-1', new AbortController().signal),
+    ).rejects.toMatchObject({
+      operation: 'getAgentSession',
+      kind: 'http',
+      httpStatus: 500,
+    } satisfies Partial<RunnerTransportError>)
+  })
+
+  it('GetAgentSession_ClassifiesNetworkFailures', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('connection refused'))
+    const connection = new ServerConnection(options())
+
+    await expect(
+      connection.getAgentSession('project-1', 'session-1', new AbortController().signal),
+    ).rejects.toMatchObject({
+      operation: 'getAgentSession',
+      kind: 'network',
+    } satisfies Partial<RunnerTransportError>)
   })
 })
 
@@ -110,7 +126,23 @@ describe('ServerConnection.openAgentSession (generic)', () => {
 
     await expect(
       connection.openAgentSession('project-1', 'session-abc', {}, new AbortController().signal),
-    ).rejects.toThrow(/agent session open failed/)
+    ).rejects.toMatchObject({
+      operation: 'openAgentSession',
+      kind: 'http',
+      httpStatus: 500,
+    } satisfies Partial<RunnerTransportError>)
+  })
+
+  it('OpenAgentSession_ClassifiesMalformedSuccessPayloads', async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: 'not-json' }))
+    const connection = new ServerConnection(options())
+
+    await expect(
+      connection.openAgentSession('project-1', 'session-abc', {}, new AbortController().signal),
+    ).rejects.toMatchObject({
+      operation: 'openAgentSession',
+      kind: 'protocol',
+    } satisfies Partial<RunnerTransportError>)
   })
 })
 
@@ -131,6 +163,20 @@ describe('ServerConnection.attachAgentSession (generic)', () => {
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({ runtimeSessionId: 'runtime-1', workDir: 'D:/work' })
     expect(url).not.toMatch(/\/api\/runner\/runner-1\/sessions\/project-1\//)
+  })
+
+  it('AttachAgentSession_ClassifiesAbortBeforeFetching', async () => {
+    const controller = new AbortController()
+    controller.abort('timeout')
+    const connection = new ServerConnection(options())
+
+    await expect(
+      connection.attachAgentSession('project-1', 'session-abc', {}, controller.signal),
+    ).rejects.toMatchObject({
+      operation: 'attachAgentSession',
+      kind: 'cancelled',
+    } satisfies Partial<RunnerTransportError>)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 
@@ -288,10 +334,12 @@ describe('ServerConnection runtime-event failure metadata', () => {
         new AbortController().signal,
       ),
     ).rejects.toMatchObject({
-      name: 'RuntimeEventDeliveryError',
-      status: 409,
-      code: 'agent_session_changed',
-    } satisfies Partial<RuntimeEventDeliveryError>)
+      name: 'RunnerTransportError',
+      operation: 'reconcileAgentSessionRuntimeEvents',
+      kind: 'http',
+      httpStatus: 409,
+      serverCode: 'agent_session_changed',
+    } satisfies Partial<RunnerTransportError>)
   })
 })
 

@@ -3,6 +3,8 @@
 // connection's authenticated fetch surface; the behavior is unchanged.
 import { getSegments } from '../core/json-path.js'
 import { WorkspaceHomeClaimedError } from '../runtime/workspace-entity.js'
+import { RunnerTransportError } from './connection-errors.js'
+import { createRunnerProtocolError, type RunnerRequestTransport } from './connection-transport.js'
 
 /**
  * Answer shape for
@@ -26,7 +28,8 @@ export interface WorkspaceReclaimability {
 }
 
 export interface WorkspaceReportTransport {
-  fetchWithAuth(input: string, init: RequestInit): Promise<Response>
+  request: RunnerRequestTransport['request']
+  readJson: RunnerRequestTransport['readJson']
   url(path: string): string
 }
 
@@ -37,30 +40,26 @@ export async function reportWorkspaceMaterialized(
   path: string,
   signal: AbortSignal,
 ): Promise<WorkspaceMaterializedReport> {
-  const response = await transport.fetchWithAuth(
-    transport.url(`workspaces/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceName)}/materialized`),
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }), signal },
-  )
-  if (!response.ok) {
-    const text = await response.text()
-    let code: string | null = null
-    try {
-      const payload = JSON.parse(text) as unknown
-      if (payload && typeof payload === 'object') {
-        const candidate = (payload as { code?: unknown }).code
-        if (typeof candidate === 'string') code = candidate
-      }
-    } catch {
-      // non-JSON error body; the status still explains the failure
-    }
-    if (code === 'workspace_home_claimed') {
+  let response: Response
+  try {
+    response = await transport.request(
+      'reportWorkspaceMaterialized',
+      transport.url(`workspaces/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceName)}/materialized`),
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }), signal },
+    )
+  } catch (error) {
+    if (error instanceof RunnerTransportError && error.serverCode === 'workspace_home_claimed') {
       throw new WorkspaceHomeClaimedError(
-        `workspace materialization rejected: workspace is already materialized on another runner (${response.status})`,
+        `workspace materialization rejected: workspace is already materialized on another runner (${error.httpStatus ?? 'unknown status'})`,
       )
     }
-    throw new Error(`workspace materialization failed: ${response.status} ${text}`)
+    throw error
   }
-  return response.json() as Promise<WorkspaceMaterializedReport>
+  const payload = await transport.readJson<unknown>(response, 'reportWorkspaceMaterialized')
+  if (!isObjectRecord(payload) || !nonEmptyString(payload.runnerId) || !nonEmptyString(payload.path)) {
+    throw createRunnerProtocolError('reportWorkspaceMaterialized', 'returned a malformed response')
+  }
+  return { runnerId: payload.runnerId, path: payload.path }
 }
 
 export async function getWorkspaceReclaimability(
@@ -69,18 +68,19 @@ export async function getWorkspaceReclaimability(
   workspaceName: string,
   signal: AbortSignal,
 ): Promise<WorkspaceReclaimability> {
-  const response = await transport.fetchWithAuth(
+  const response = await transport.request(
+    'getWorkspaceReclaimability',
     transport.url(`workspaces/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceName)}/reclaimable`),
     { method: 'GET', signal },
   )
-  if (!response.ok) throw new Error(`workspace reclaimability failed: ${response.status} ${await response.text()}`)
-  let payload: unknown
+  const payload = await transport.readJson<unknown>(response, 'getWorkspaceReclaimability')
   try {
-    payload = await response.json()
-  } catch {
-    throw new Error('workspace reclaimability returned malformed JSON')
+    return parseWorkspaceReclaimability(readObject(payload, ['data']))
+  } catch (cause) {
+    const detail =
+      cause instanceof Error ? cause.message.replace(/^workspace reclaimability /, '') : 'returned a malformed response'
+    throw createRunnerProtocolError('getWorkspaceReclaimability', detail, cause)
   }
-  return parseWorkspaceReclaimability(readObject(payload, ['data']))
 }
 
 export function parseWorkspaceReclaimability(payload: unknown): WorkspaceReclaimability {
@@ -103,6 +103,10 @@ function readObject(value: unknown, path: string[]): Record<string, unknown> | n
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
 }
 
 function readString(value: unknown, path: string[]): string | null {

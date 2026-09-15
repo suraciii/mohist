@@ -8,9 +8,14 @@ const REDACTED = '***'
 
 type RunnerTransportFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
+export interface RunnerRequestOptions {
+  readonly allowedStatuses?: readonly number[]
+}
+
 export interface RunnerRequestTransport {
-  request(operation: string, input: string, init: RequestInit): Promise<Response>
+  request(operation: string, input: string, init: RequestInit, options?: RunnerRequestOptions): Promise<Response>
   readJson<T>(response: Response, operation: string, allowEmpty?: boolean): Promise<T | null>
+  readBytes(response: Response, operation: string): Promise<Uint8Array>
 }
 
 export interface RunnerTransportOptions {
@@ -32,7 +37,12 @@ export class RunnerTransport implements RunnerRequestTransport {
     this.fetcher = options.fetcher ?? ((input, init) => currentRunnerTransport()(input, init))
   }
 
-  async request(operation: string, input: string, init: RequestInit): Promise<Response> {
+  async request(
+    operation: string,
+    input: string,
+    init: RequestInit,
+    options: RunnerRequestOptions = {},
+  ): Promise<Response> {
     const signal = init.signal
     try {
       if (signal?.aborted) throw this.cancelled(operation, signal)
@@ -40,7 +50,9 @@ export class RunnerTransport implements RunnerRequestTransport {
       if (this.credential) headers.set('authorization', `Bearer ${this.credential}`)
       const response = await this.fetcher(input, { ...init, headers })
       if (signal?.aborted) throw this.cancelled(operation, signal)
-      if (!response.ok) throw await this.httpFailure(operation, response)
+      if (!response.ok && !options.allowedStatuses?.includes(response.status)) {
+        throw await this.httpFailure(operation, response)
+      }
       return response
     } catch (cause) {
       if (cause instanceof RunnerTransportError) throw cause
@@ -75,6 +87,15 @@ export class RunnerTransport implements RunnerRequestTransport {
     }
   }
 
+  async readBytes(response: Response, operation: string): Promise<Uint8Array> {
+    if (!response.ok) throw await this.httpFailure(operation, response)
+    try {
+      return new Uint8Array(await response.arrayBuffer())
+    } catch (cause) {
+      throw this.protocolFailure(operation, cause)
+    }
+  }
+
   private async httpFailure(operation: string, response: Response): Promise<RunnerTransportError> {
     let code: string | undefined
     let message: string | undefined
@@ -104,13 +125,7 @@ export class RunnerTransport implements RunnerRequestTransport {
   }
 
   private protocolFailure(operation: string, cause?: unknown): RunnerTransportError {
-    const options: RunnerTransportErrorOptions = {
-      operation: this.safeOperation(operation),
-      kind: 'protocol',
-      safeMessage: `${this.safeOperation(operation)} returned malformed JSON`,
-    }
-    if (cause !== undefined) options.cause = cause
-    return new RunnerTransportError(options)
+    return createRunnerProtocolError(this.safeOperation(operation), 'returned malformed JSON', cause)
   }
 
   private cancelled(operation: string, signal: RequestInit['signal']): RunnerTransportError {
@@ -134,6 +149,26 @@ export class RunnerTransport implements RunnerRequestTransport {
     if (result.length <= limit) return result
     return `${result.slice(0, Math.max(0, limit - 3))}...`
   }
+}
+
+export function createRunnerProtocolError(
+  operation: string,
+  detail = 'returned malformed response',
+  cause?: unknown,
+  serverCode?: string,
+): RunnerTransportError {
+  const safeMessage = `${operation} ${detail}`
+  const options: RunnerTransportErrorOptions = {
+    operation,
+    kind: 'protocol',
+    safeMessage:
+      safeMessage.length <= MAX_SAFE_MESSAGE_LENGTH
+        ? safeMessage
+        : `${safeMessage.slice(0, MAX_SAFE_MESSAGE_LENGTH - 3)}...`,
+  }
+  if (cause !== undefined) options.cause = cause
+  if (serverCode) options.serverCode = serverCode
+  return new RunnerTransportError(options)
 }
 
 function readServerFields(value: unknown): { code?: string; message?: string } {

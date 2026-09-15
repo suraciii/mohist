@@ -1,5 +1,5 @@
 import type { AgentSessionRuntimeEventReceipt } from './connection.js'
-import { RuntimeEventDeliveryError } from './connection-errors.js'
+import { RunnerTransportError } from './connection-errors.js'
 import { runtimeEventDeliveryKey, runtimeEventSchedulingKey } from './runtime-event-queue-identity.js'
 import {
   InputReceiptWaitCancelledError,
@@ -467,8 +467,8 @@ class InMemoryRuntimeEventQueue implements AgentSessionRuntimeEventQueue {
           this.warn('runtime-event evidence permanently refused and dropped', {
             recordId: record.id,
             eventType: record.event.type,
-            status: error.status,
-            code: error.code,
+            httpStatus: error.httpStatus,
+            serverCode: error.serverCode,
           })
         }
         return records.map(() => ({ kind: 'refused' }) as const)
@@ -676,10 +676,10 @@ function requiresInputReceipt(record: RuntimeEventRecord): boolean {
   return record.event.type === 'session.input' || record.event.type === 'session.cleanup'
 }
 
-function isPermanentRefusal(error: unknown): error is RuntimeEventDeliveryError {
-  if (!(error instanceof RuntimeEventDeliveryError)) return false
-  if (error.status === 409) return PERMANENT_409_CODES.has(error.code ?? '')
-  if (error.status === 400) return PERMANENT_400_CODES.has(error.code ?? '')
+function isPermanentRefusal(error: unknown): error is RunnerTransportError {
+  if (!(error instanceof RunnerTransportError)) return false
+  if (error.httpStatus === 409) return PERMANENT_409_CODES.has(error.serverCode ?? '')
+  if (error.httpStatus === 400) return PERMANENT_400_CODES.has(error.serverCode ?? '')
   return false
 }
 

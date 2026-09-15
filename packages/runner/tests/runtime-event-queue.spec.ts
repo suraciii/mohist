@@ -1,10 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RuntimeEventDeliveryError, type AgentSessionRuntimeEventReceipt } from '../src/server/connection.js'
+import { RunnerTransportError, type AgentSessionRuntimeEventReceipt } from '../src/server/connection.js'
 import {
   AlreadyConsumedRuntimeEventError,
   createAgentSessionRuntimeEventQueue,
   type RuntimeEventRecord,
 } from '../src/server/runtime-event-queue.js'
+
+function transportError(httpStatus: number, serverCode: string): RunnerTransportError {
+  return new RunnerTransportError({
+    operation: 'runtime event',
+    kind: 'http',
+    httpStatus,
+    serverCode,
+    safeMessage: `runtime event failed with HTTP status ${httpStatus}`,
+  })
+}
 
 function event(id: string, sessionId: string, type = id, turnId = `turn-${sessionId}`): RuntimeEventRecord {
   return {
@@ -247,7 +257,7 @@ describe('in-memory runtime event queue', () => {
       warn: (message) => warnings.push(message),
       deliver: {
         async send(record) {
-          if (mode === 'refused') throw new RuntimeEventDeliveryError('runtime event', 409, 'conflict', '')
+          if (mode === 'refused') throw transportError(409, 'conflict')
           if (mode === 'empty') return []
           if (mode === 'malformed') return [{} as AgentSessionRuntimeEventReceipt]
           if (mode === 'mismatch') return [{ type: 'message.delta' }]
@@ -401,7 +411,7 @@ describe('in-memory runtime event queue', () => {
       warn: () => undefined,
       deliver: {
         async send() {
-          throw new RuntimeEventDeliveryError('runtime event', 409, 'conflict', '')
+          throw transportError(409, 'conflict')
         },
       },
     })
@@ -509,7 +519,7 @@ describe('in-memory runtime event queue', () => {
       deliver: {
         async send(record) {
           if (record.id === 'unrelated') return []
-          if (!recover) throw new RuntimeEventDeliveryError('runtime event', 503, 'temporarily-unavailable', 'busy')
+          if (!recover) throw transportError(503, 'temporarily-unavailable')
           return [{ type: 'session.input' }]
         },
       },
@@ -535,7 +545,7 @@ describe('in-memory runtime event queue', () => {
       budgetMs: 200,
       attempts: expect.any(Number),
       retries: expect.any(Number),
-      lastReason: expect.stringContaining('temporarily-unavailable'),
+      lastReason: expect.stringContaining('HTTP status 503'),
     })
     expect(error.message).toMatch(
       /session\.input acceptance exceeded its budget.*elapsed 200ms of 200ms.*delivery attempts: [2-9]; retries: [1-8]/,

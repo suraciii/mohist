@@ -383,4 +383,42 @@ describe('ServerConnection.patchRunVars', () => {
       },
     })
   })
+
+  it('classifiesPatchFailuresThroughTheSharedTransport', async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 409, body: JSON.stringify({ code: 'vars_conflict' }) }))
+    const connection = new ServerConnection(options())
+
+    await expect(connection.patchRunVars('wf-1', {}, new AbortController().signal)).rejects.toMatchObject({
+      operation: 'patchRunVars',
+      kind: 'http',
+      httpStatus: 409,
+      serverCode: 'vars_conflict',
+    } satisfies Partial<RunnerTransportError>)
+  })
+})
+
+describe('ServerConnection.addTasks and revokeManagerExecution', () => {
+  it('postsTasksThroughTheSharedTransport', async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '' }))
+    const connection = new ServerConnection(options())
+    const tasks = [{ id: 'build', title: 'Build', uses: 'mohist/pi' }]
+
+    await connection.addTasks('wf-1', tasks)
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://runner.test/api/workflow-runs/wf-1/tasks/batch')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ tasks })
+  })
+
+  it('classifiesManagerRevocationFailuresThroughTheSharedTransport', async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 503, body: 'unavailable' }))
+    const connection = new ServerConnection(options())
+
+    await expect(connection.revokeManagerExecution('execution-1', new AbortController().signal)).rejects.toMatchObject({
+      operation: 'revokeManagerExecution',
+      kind: 'http',
+      httpStatus: 503,
+    } satisfies Partial<RunnerTransportError>)
+  })
 })
