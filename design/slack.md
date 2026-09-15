@@ -143,6 +143,13 @@ Each entry states one decision; the body below carries the rules.
 - **Runner** owns execution from the resolved Agent definition. Not: Slack
   identity, access policy, thread routing.
 
+An `agent-connection` Session follows the same Agent definition as the Agent
+it references. When Server builds a follow-up target, it reads the Session's
+durable execution definition and carries it through the Runner target. A
+runtime replacement changes only the physical binding; Instructions, Model,
+Reasoning Effort, Variant, and Skills remain unchanged. The Connection never
+overrides or snapshots these fields.
+
 One `mohist-slack` process per Server carries the Socket connections for the
 Mohist App and every Agent App; each App keeps independent credentials. Once
 an App is ready, the adapter obtains a short lease and runtime credentials,
