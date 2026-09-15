@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { RunnerTransport, RunnerTransportError, runnerTransportDiagnostics } from '../src/server/connection.js'
+import {
+  RunnerTransport,
+  RunnerTransportError,
+  ServerConnection,
+  runnerTransportDiagnostics,
+} from '../src/server/connection.js'
 import { createRunnerLogger } from '../src/system/logger.js'
+import { transportFetch, withFakeTransport } from './support/fake-transport.js'
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
@@ -10,6 +16,33 @@ function response(status: number, body: string, contentType = 'application/json'
 
 function transport(fetcher: Fetcher, options: { credential?: string; enrollmentToken?: string } = {}): RunnerTransport {
   return new RunnerTransport({ ...options, fetcher })
+}
+
+const serverConnectionOptions = {
+  serverUrl: 'https://runner.test',
+  runnerId: 'runner-1',
+  runnerRoot: '/virtual/runner',
+  pollIntervalMs: 100,
+  heartbeatIntervalMs: 60_000,
+  dispatchLivenessProbeIntervalMs: 60_000,
+}
+
+function serverResponse(status: number, body = '', contentType = 'application/json'): Response {
+  return new Response(status === 204 ? null : body, {
+    status,
+    headers: { 'content-type': contentType },
+  })
+}
+
+function serverConnection(credential?: string): ServerConnection {
+  return new ServerConnection({
+    ...serverConnectionOptions,
+    ...(credential === undefined ? {} : { credential }),
+  })
+}
+
+function serverTest(name: string, body: () => Promise<void>): void {
+  it(name, async () => await withFakeTransport(async () => await body()))
 }
 
 async function rejected<T>(promise: Promise<T>): Promise<RunnerTransportError> {
@@ -213,5 +246,199 @@ describe('RunnerTransport', () => {
     expect(result).toEqual({ data: { ready: true } })
     expect(calls).toBe(1)
     expect(new Headers(requestInit?.headers).get('authorization')).toBe('Bearer moh_runner_abc')
+  })
+})
+
+describe('ServerConnection transport contract', () => {
+  it('classifies a pre-aborted poll through the canonical value', async () => {
+    await withFakeTransport(async () => {
+      const controller = new AbortController()
+      controller.abort('timeout')
+
+      await expect(
+        serverConnection().poll(controller.signal, {
+          processGeneration: 'generation-1',
+          inFlight: [],
+          awaitingAck: [],
+          admissionReady: true,
+        }),
+      ).rejects.toMatchObject({ operation: 'poll', kind: 'cancelled' } satisfies Partial<RunnerTransportError>)
+      expect(transportFetch).not.toHaveBeenCalled()
+    })
+  })
+
+  serverTest('classifies registration network failures without exposing the fetch error', async () => {
+    transportFetch.mockRejectedValueOnce(new Error('ECONNREFUSED https://runner.test'))
+
+    const error = await serverConnection()
+      .connect(
+        {
+          processGeneration: 'generation-1',
+          capabilities: [],
+          actionCatalog: { actions: [], tombstones: [] },
+          projectId: 'project-1',
+        },
+        new AbortController().signal,
+      )
+      .catch((value: unknown) => value)
+
+    expect(error).toBeInstanceOf(RunnerTransportError)
+    expect(error).toMatchObject({ operation: 'register', kind: 'network' })
+    expect((error as RunnerTransportError).safeMessage).not.toContain('ECONNREFUSED')
+    expect((error as RunnerTransportError).safeMessage).not.toContain('runner.test')
+  })
+
+  serverTest('classifies session mutation HTTP failures from status and structured code', async () => {
+    const credential = 'moh_runner_contract_secret'
+    const rawBody = 'unsafe-session-response-body'
+    transportFetch.mockResolvedValueOnce(
+      serverResponse(
+        503,
+        JSON.stringify({
+          code: 'session_unavailable',
+          data: { message: `Session unavailable; Bearer ${credential}` },
+          raw: rawBody,
+        }),
+      ),
+    )
+
+    const error = await serverConnection(credential)
+      .openAgentSession('project-1', 'session-1', {}, new AbortController().signal)
+      .catch((value: unknown) => value)
+
+    expect(error).toBeInstanceOf(RunnerTransportError)
+    expect(error).toMatchObject({
+      operation: 'openAgentSession',
+      kind: 'http',
+      httpStatus: 503,
+      serverCode: 'session_unavailable',
+    } satisfies Partial<RunnerTransportError>)
+    expect((error as RunnerTransportError).safeMessage).not.toContain(credential)
+    expect((error as RunnerTransportError).safeMessage).not.toContain(rawBody)
+  })
+
+  serverTest('classifies malformed runtime-event success as protocol', async () => {
+    const rawBody = '{"unsafe":"runtime-event-body"'
+    transportFetch.mockResolvedValueOnce(serverResponse(200, rawBody))
+
+    await expect(
+      serverConnection().agentSessionRuntimeEvents(
+        'project-1',
+        'session-1',
+        { runtimeSessionId: 'runtime-1', runtimeEvents: [] },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      operation: 'agentSessionRuntimeEvents',
+      kind: 'protocol',
+    } satisfies Partial<RunnerTransportError>)
+  })
+
+  serverTest('accepts valid poll dispatches through ServerConnection', async () => {
+    transportFetch.mockResolvedValueOnce(
+      serverResponse(
+        200,
+        JSON.stringify({
+          dispatches: [
+            {
+              workflowRunId: 'workflow-1',
+              workId: 'work-1',
+              workType: 'task',
+              projectId: 'project-1',
+              ownerKind: 'workflow',
+              uses: 'mohist/rebase',
+              variables: JSON.stringify({ workspace: { path: '/virtual/workspace' } }),
+            },
+          ],
+        }),
+      ),
+    )
+
+    const result = await serverConnection().poll(new AbortController().signal, {
+      processGeneration: 'generation-1',
+      inFlight: [],
+      awaitingAck: [],
+      admissionReady: true,
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.work.workId).toBe('work-1')
+  })
+
+  serverTest('accepts registration and an empty successful session attachment', async () => {
+    transportFetch.mockResolvedValueOnce(serverResponse(204))
+    transportFetch.mockResolvedValueOnce(serverResponse(200))
+    const connection = serverConnection()
+
+    await connection.connect(
+      {
+        processGeneration: 'generation-1',
+        capabilities: ['spec/*'],
+        actionCatalog: { actions: [], tombstones: [] },
+        projectId: 'project-1',
+      },
+      new AbortController().signal,
+    )
+    await expect(
+      connection.attachAgentSession('project-1', 'session-1', {}, new AbortController().signal),
+    ).resolves.toBeNull()
+  })
+
+  serverTest('accepts valid Workspace materialization reports', async () => {
+    transportFetch.mockResolvedValueOnce(
+      serverResponse(200, JSON.stringify({ runnerId: 'runner-1', path: '/virtual/workspace' })),
+    )
+
+    await expect(
+      serverConnection().reportWorkspaceMaterialized(
+        'project-1',
+        'workspace-1',
+        '/virtual/workspace',
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual({ runnerId: 'runner-1', path: '/virtual/workspace' })
+  })
+
+  serverTest('accepts valid artifact and task-log acknowledgements', async () => {
+    transportFetch.mockResolvedValueOnce(
+      serverResponse(200, JSON.stringify({ data: { uploadId: 'upload-1', path: 'artifact.txt', size: 3 } })),
+    )
+    transportFetch.mockResolvedValueOnce(
+      serverResponse(200, JSON.stringify({ data: { status: 'changed', accepted: 1, truncated: false } })),
+    )
+    const connection = serverConnection()
+
+    await expect(
+      connection.uploadArtifact(
+        'workflow-1',
+        'work-1',
+        { path: 'artifact.txt', size: 3, content: new TextEncoder().encode('abc') },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ uploadId: 'upload-1', path: 'artifact.txt' })
+    await expect(
+      connection.uploadTaskLog(
+        'workflow-1',
+        'work-1',
+        {
+          entries: [{ seq: 1, timestamp: new Date('2026-07-01T00:00:00.000Z'), source: 'action', text: 'ok' }],
+          truncated: false,
+        },
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual({ status: 'changed', accepted: 1, truncated: false })
+  })
+
+  serverTest('accepts valid runtime-event acknowledgements', async () => {
+    transportFetch.mockResolvedValueOnce(serverResponse(200, JSON.stringify([{ type: 'message.delta' }])))
+
+    await expect(
+      serverConnection().agentSessionRuntimeEvents(
+        'project-1',
+        'session-1',
+        { runtimeSessionId: 'runtime-1', runtimeEvents: [{ type: 'message.delta', payload: {} }] },
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual([{ type: 'message.delta' }])
   })
 })
