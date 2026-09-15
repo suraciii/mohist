@@ -508,6 +508,10 @@ audit and presentation record, not a command source.
   generation. It requires idle, ready admission.
 - `recovery` replaces a confirmed-missing Session on the same Runner and Runtime
   and increments the generation. It requires deterministic missing evidence.
+- An idle Slack follow-up may use the `runtime-change` operation to replace an
+  unavailable Runtime on the same Runner with the configured fallback Runtime.
+  It keeps the logical Session, uses Binding CAS, and sends the original input
+  once; it is not inferred for active work or generic reconnects.
 - `rebind` replaces Binding on the same Runner and may change Runtime. It is
   explicit and never inferred from reconnect.
 - `handoff` replaces Binding on a different Runner and increments the generation.

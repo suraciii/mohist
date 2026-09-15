@@ -58,6 +58,13 @@ Runner may lose its Server connection without losing Server-owned work:
   guessed filesystem result.
 - A mutating retry keeps its original operation identity.
 
+For an idle Slack follow-up, an unavailable configured runtime may be replaced
+by the configured fallback runtime (currently Pi). This is a runtime-change
+recovery operation, not confirmed-missing same-runtime recovery: it keeps the
+logical Session and binding CAS, and sends the original input once. A timeout,
+disconnect, or not-ready signal alone never rebinds an active Session or
+replays input.
+
 A transport timeout does not prove success, failure, or a missing Runtime
 Session. Retry only through the operation-specific recovery path with the
 original identity.
