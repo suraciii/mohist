@@ -256,7 +256,12 @@ async function handleFollowup(
           expectedQueuedTurnId: payload.turnId,
         }
         const signal = new AbortController().signal
-        await connection.recoverMissingAgentSession(sessionTarget.projectId, sessionTargetId(sessionTarget), body, signal)
+        await connection.recoverMissingAgentSession(
+          sessionTarget.projectId,
+          sessionTargetId(sessionTarget),
+          body,
+          signal,
+        )
       },
       recoveryKey: `${sessionTargetId(sessionTarget)}:${expected.runtimeSessionId ?? 'unbound'}`,
       coordinator: deps.bindingRecoveryCoordinator ?? undefined,
