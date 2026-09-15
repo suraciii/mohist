@@ -251,7 +251,7 @@ describe('ServerConnection workflow runtime events', () => {
     ).resolves.toEqual([])
   })
 
-  it('surfaces malformed and count-mismatched acceptance responses', async () => {
+  it('surfaces malformed and count-mismatched acceptance responses as protocol transport failures', async () => {
     fetchSpy.mockResolvedValueOnce(new Response('not-json', { status: 200 }))
     await expect(
       new ServerConnection(options).workflowAgentSessionRuntimeEvents(
@@ -261,7 +261,18 @@ describe('ServerConnection workflow runtime events', () => {
         { runtimeEvents: [{ type: 'session.input' }] },
         signal,
       ),
-    ).rejects.toThrow('malformed JSON')
+    ).rejects.toMatchObject({ operation: 'workflowAgentSessionRuntimeEvents', kind: 'protocol' })
+
+    fetchSpy.mockResolvedValueOnce(new Response('[{}]', { status: 200 }))
+    await expect(
+      new ServerConnection(options).workflowAgentSessionRuntimeEvents(
+        'project',
+        'run',
+        'session',
+        { runtimeEvents: [{ type: 'session.input' }] },
+        signal,
+      ),
+    ).rejects.toMatchObject({ operation: 'workflowAgentSessionRuntimeEvents', kind: 'protocol' })
 
     fetchSpy.mockResolvedValueOnce(new Response('[{"type":"session.input"}]', { status: 200 }))
     await expect(
@@ -272,7 +283,28 @@ describe('ServerConnection workflow runtime events', () => {
         { runtimeEvents: [{ type: 'session.input' }, { type: 'message.delta' }] },
         signal,
       ),
-    ).rejects.toThrow('acceptance mismatch')
+    ).rejects.toMatchObject({ operation: 'workflowAgentSessionRuntimeEvents', kind: 'protocol' })
+  })
+
+  it('classifies runtime-event cancellation and network failures with stable fields', async () => {
+    const cancelled = new AbortController()
+    cancelled.abort('timeout')
+    const connection = new ServerConnection(options)
+
+    await expect(
+      connection.workflowAgentSessionRuntimeEvents(
+        'project',
+        'run',
+        'session',
+        { runtimeEvents: [] },
+        cancelled.signal,
+      ),
+    ).rejects.toMatchObject({ operation: 'workflowAgentSessionRuntimeEvents', kind: 'cancelled' })
+
+    fetchSpy.mockRejectedValueOnce(new Error('connection refused'))
+    await expect(
+      connection.workflowAgentSessionRuntimeEvents('project', 'run', 'session', { runtimeEvents: [] }, signal),
+    ).rejects.toMatchObject({ operation: 'workflowAgentSessionRuntimeEvents', kind: 'network' })
   })
 })
 

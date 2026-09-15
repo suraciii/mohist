@@ -48,7 +48,11 @@ export async function reportWorkspaceMaterialized(
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }), signal },
     )
   } catch (error) {
-    if (error instanceof RunnerTransportError && error.serverCode === 'workspace_home_claimed') {
+    if (
+      error instanceof RunnerTransportError &&
+      error.kind === 'http' &&
+      error.serverCode === 'workspace_home_claimed'
+    ) {
       throw new WorkspaceHomeClaimedError(
         `workspace materialization rejected: workspace is already materialized on another runner (${error.httpStatus ?? 'unknown status'})`,
       )

@@ -677,7 +677,7 @@ function requiresInputReceipt(record: RuntimeEventRecord): boolean {
 }
 
 function isPermanentRefusal(error: unknown): error is RunnerTransportError {
-  if (!(error instanceof RunnerTransportError)) return false
+  if (!(error instanceof RunnerTransportError) || error.kind !== 'http') return false
   if (error.httpStatus === 409) return PERMANENT_409_CODES.has(error.serverCode ?? '')
   if (error.httpStatus === 400) return PERMANENT_400_CODES.has(error.serverCode ?? '')
   return false

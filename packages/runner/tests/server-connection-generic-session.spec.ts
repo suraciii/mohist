@@ -315,6 +315,23 @@ describe('ServerConnection.agentSessionRuntimeEvents (generic)', () => {
 
     expect(receipts).toEqual([{ type: 'session.input' }, { type: 'message.delta' }])
   })
+
+  it('AgentSessionRuntimeEvents_ClassifiesMalformedReceiptsAsProtocol', async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '[{}]' }))
+    const connection = new ServerConnection(options())
+
+    await expect(
+      connection.agentSessionRuntimeEvents(
+        'project-1',
+        'session-abc',
+        { runtimeSessionId: 'runtime-1', runtimeEvents: [{ type: 'session.input', payload: {} }] },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      operation: 'agentSessionRuntimeEvents',
+      kind: 'protocol',
+    } satisfies Partial<RunnerTransportError>)
+  })
 })
 
 describe('ServerConnection runtime-event failure metadata', () => {

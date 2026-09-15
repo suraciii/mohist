@@ -99,6 +99,29 @@ describe('ServerConnection.report', () => {
     })
   })
 
+  it('classifies report network and cancellation failures without message parsing', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('connection refused'))
+    const connection = new ServerConnection(options())
+
+    await expect(
+      connection.report(
+        { workflowRunId: 'wf-1', workId: 'work-1', workType: 'task' },
+        { status: 'completed' },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ operation: 'report', kind: 'network' } satisfies Partial<RunnerTransportError>)
+
+    const controller = new AbortController()
+    controller.abort('timeout')
+    await expect(
+      connection.report(
+        { workflowRunId: 'wf-1', workId: 'work-1', workType: 'task' },
+        { status: 'completed' },
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ operation: 'report', kind: 'cancelled' } satisfies Partial<RunnerTransportError>)
+  })
+
   it('forwardsCleanupAttemptsToServerWhenResultIncludesThem', async () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: '{}' }))
     const connection = new ServerConnection(options())

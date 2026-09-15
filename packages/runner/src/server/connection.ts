@@ -552,10 +552,11 @@ export class ServerConnection {
         signal,
       },
     )
-    const payload = await this.requestTransport.readJson<unknown>(response, 'workflowAgentSessionRuntimeEvents')
-    if (!Array.isArray(payload)) {
-      throw createRunnerProtocolError('workflowAgentSessionRuntimeEvents', 'returned a malformed acceptance response')
-    }
+    const payload = await parseRuntimeEventReceiptArray(
+      this.requestTransport,
+      response,
+      'workflowAgentSessionRuntimeEvents',
+    )
     const submitted = isObjectRecord(body) && Array.isArray(body.runtimeEvents) ? body.runtimeEvents.length : 0
     if (submitted > 0 && payload.length > 0 && payload.length !== submitted) {
       throw createRunnerProtocolError(
@@ -837,6 +838,11 @@ async function parseRuntimeEventReceiptArray(
 ): Promise<AgentSessionRuntimeEventReceipt[]> {
   const payload = await transport.readJson<unknown>(response, operation)
   if (!Array.isArray(payload)) throw createRunnerProtocolError(operation, 'returned a malformed receipt array')
+  for (const receipt of payload) {
+    if (!isObjectRecord(receipt) || typeof receipt.type !== 'string' || receipt.type.length === 0) {
+      throw createRunnerProtocolError(operation, 'returned a malformed receipt')
+    }
+  }
   return payload as AgentSessionRuntimeEventReceipt[]
 }
 export interface ArtifactUploadRequest {
