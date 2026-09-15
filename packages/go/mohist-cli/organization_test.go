@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 )
@@ -56,6 +57,21 @@ func TestIssueInvalidFlagsDoNotCallHTTP(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("calls=%d", calls)
+	}
+}
+
+func TestIssueEditWithoutProjectResolutionFailsClosed(t *testing.T) {
+	calls := 0
+	deps, _, errOut := organizationDeps(roundTripFunc(func(*http.Request) (*http.Response, error) { calls++; return nil, errors.New("called") }))
+	// No cli-state.json anywhere: the absent default-project path must fail
+	// closed with the actionable usage error, never panic or call the server.
+	deps.ReadFile = func(string) (string, error) { return "", os.ErrNotExist }
+	deps.CurrentDirectory = func() string { return "/nowhere" }
+	if code := Run(context.Background(), []string{"issue", "edit", "42", "--ready"}, deps); code != ExitOperation {
+		t.Fatalf("code=%d", code)
+	}
+	if calls != 0 || !strings.Contains(errOut.String(), "mo project use") {
+		t.Fatalf("calls=%d err=%q", calls, errOut.String())
 	}
 }
 
