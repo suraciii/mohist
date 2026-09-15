@@ -21,7 +21,12 @@ import { reportWork } from './connection-report.js'
 import { RunnerTransportError } from './connection-errors.js'
 import { createRunnerProtocolError, RunnerTransport, type RunnerRequestTransport } from './connection-transport.js'
 export {
+  isConfirmedRunnerCredentialRejection,
+  runnerTransportDiagnostics,
+  RUNNER_REENROLL_ACTION,
+  withRunnerEnrollmentGuidance,
   RunnerTransportError,
+  type RunnerTransportDiagnosticOptions,
   type RunnerTransportErrorKind,
   type RunnerTransportErrorOptions,
 } from './connection-errors.js'

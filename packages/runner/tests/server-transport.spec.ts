@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { RunnerTransport, RunnerTransportError } from '../src/server/connection.js'
+import { RunnerTransport, RunnerTransportError, runnerTransportDiagnostics } from '../src/server/connection.js'
+import { createRunnerLogger } from '../src/system/logger.js'
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
@@ -131,6 +132,55 @@ describe('RunnerTransport', () => {
     expect(error.httpStatus).toBe(502)
     expect(error.safeMessage).toBe('poll failed with HTTP status 502')
     expect(error.safeMessage).not.toContain('raw-response-body-marker')
+  })
+
+  it('projects only safe transport facts into captured log output', async () => {
+    const credential = 'moh_runner_log_secret'
+    const enrollmentToken = 'moh_enroll_log_secret'
+    const rawBody = 'unsafe-response-body-marker'
+    const error = await rejected(
+      transport(
+        async () =>
+          response(
+            401,
+            JSON.stringify({
+              code: 'runner_rejected',
+              data: {
+                message: `Bearer ${credential}; enrollment_token=${enrollmentToken}`,
+              },
+              raw: rawBody,
+            }),
+          ),
+        { credential, enrollmentToken },
+      ).request('heartbeat', 'https://runner.test/heartbeat', {}),
+    )
+    const output: string[] = []
+    const logger = createRunnerLogger({
+      logsPath: '/virtual/logs',
+      fileWriter: {
+        ensureDirectory: async () => {},
+        size: async () => 0,
+        append: async (_path, content) => {
+          output.push(content)
+        },
+        rename: async () => false,
+      },
+      terminal: { write: (line) => output.push(line) },
+    })
+
+    logger.error('runner transport failed', runnerTransportDiagnostics(error, { includeCredentialGuidance: true }))
+    await logger.flush()
+
+    const captured = output.join('')
+    expect(captured).toContain('operation=heartbeat')
+    expect(captured).toContain('kind=http')
+    expect(captured).toContain('httpStatus=401')
+    expect(captured).toContain('serverCode=runner_rejected')
+    expect(captured).toContain('safeMessage=')
+    expect(captured).toContain('nextAction="re-run \'mo install runner\'"')
+    expect(captured).not.toContain(credential)
+    expect(captured).not.toContain(enrollmentToken)
+    expect(captured).not.toContain(rawBody)
   })
 
   it('classifies malformed successful JSON as protocol without retaining the body', async () => {

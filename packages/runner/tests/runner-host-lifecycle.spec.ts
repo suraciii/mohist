@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
+import { RunnerTransportError, RUNNER_REENROLL_ACTION } from '../src/server/connection-errors.js'
 import type { PolledDispatch } from '../src/core/types.js'
 import { getOpenCodeRuntimeFactory } from '../src/runtime/opencode/index.js'
 import type { SessionTarget } from '../src/server/session-target.js'
@@ -571,6 +572,81 @@ describe('RunnerHost', () => {
       controller.abort()
       await run.catch(() => undefined)
       stopLog()
+    }
+  })
+
+  it('WorkerPool_TransportDiagnostics_GuidesOnlyConfirmedCredentialRejections', async () => {
+    const errors = [
+      new RunnerTransportError({
+        operation: 'poll',
+        kind: 'http',
+        httpStatus: 401,
+        serverCode: 'runner_rejected',
+        safeMessage: 'poll failed safely',
+      }),
+      new RunnerTransportError({
+        operation: 'poll',
+        kind: 'http',
+        httpStatus: 403,
+        serverCode: 'runner_forbidden',
+        safeMessage: 'poll failed safely',
+      }),
+      new RunnerTransportError({ operation: 'poll', kind: 'network', safeMessage: 'poll network failure' }),
+      new RunnerTransportError({ operation: 'poll', kind: 'cancelled', safeMessage: 'poll was cancelled' }),
+      new RunnerTransportError({ operation: 'poll', kind: 'protocol', safeMessage: 'poll response was malformed' }),
+    ]
+    const logged = errors.map(() => deferred<void>())
+    let pollIndex = 0
+    let logIndex = 0
+    poll.mockImplementation(async () => {
+      throw errors[pollIndex++]!
+    })
+    const stopLog = onCapturedLog((record) => {
+      if (record.message !== 'runner poll failed; retrying') return
+      logged[logIndex]?.resolve()
+      logIndex += 1
+    })
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: 'https://runner.test',
+      runnerId: 'runner-test',
+      projectId: 'project-1',
+      runnerRoot: '/virtual/mohist-runner-test',
+      pollIntervalMs: POLL_INTERVAL_MS,
+      heartbeatIntervalMs: QUIET_INTERVAL_MS,
+      dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    })
+    const run = host.run(controller.signal)
+
+    try {
+      for (let index = 0; index < errors.length; index += 1) {
+        await logged[index]!.promise
+        const record = capturedLogs()
+          .filter((entry) => entry.message === 'runner poll failed; retrying')
+          .at(-1)
+        expect(record?.fields).toMatchObject({
+          operation: 'poll',
+          kind: errors[index]!.kind,
+          safeMessage: errors[index]!.safeMessage,
+        })
+        if (errors[index]!.httpStatus === undefined) {
+          expect(record?.fields).not.toHaveProperty('httpStatus')
+        } else {
+          expect(record?.fields.httpStatus).toBe(errors[index]!.httpStatus)
+        }
+        if (errors[index]!.httpStatus === 401 || errors[index]!.httpStatus === 403) {
+          expect(record?.fields.nextAction).toBe(RUNNER_REENROLL_ACTION)
+        } else {
+          expect(record?.fields).not.toHaveProperty('nextAction')
+        }
+        if (index < errors.length - 1) await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+      }
+      controller.abort()
+      await expect(run).resolves.toBeUndefined()
+    } finally {
+      stopLog()
+      controller.abort()
+      await run.catch(() => undefined)
     }
   })
 

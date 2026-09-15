@@ -5,6 +5,7 @@ import { defaultRunnerRoot } from './runtime/workspace.js'
 import { configureRunnerLogger } from './system/logger.js'
 import { requireRunnerCredential } from './system/runner-credential.js'
 import { parseEnabledAgentRuntimes } from './runtime/enabled-agent-runtimes.js'
+import { runnerTransportDiagnostics } from './server/connection-errors.js'
 
 const controller = new AbortController()
 process.on('SIGINT', () => controller.abort())
@@ -20,13 +21,19 @@ try {
   // Install registration: a fresh runner exchanges the one-time bootstrap
   // for its own machine credential; afterwards the persisted credential is
   // used. Missing authentication is fatal for managed service startup.
-  const credential = await requireRunnerCredential({
-    serverUrl,
-    runnerId,
-    runnerRoot,
-    hostname: hostnameValue,
-    signal: controller.signal,
-  })
+  let credential: string
+  try {
+    credential = await requireRunnerCredential({
+      serverUrl,
+      runnerId,
+      runnerRoot,
+      hostname: hostnameValue,
+      signal: controller.signal,
+    })
+  } catch (error) {
+    logger.error('runner enrollment failed', runnerTransportDiagnostics(error, { includeCredentialGuidance: true }))
+    throw error
+  }
   await new RunnerHost({
     serverUrl,
     runnerId,

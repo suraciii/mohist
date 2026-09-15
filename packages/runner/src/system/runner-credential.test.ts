@@ -9,6 +9,7 @@ import {
   runnerEnrollmentTokenPath,
   writeRunnerCredential,
 } from './runner-credential.js'
+import { RunnerTransportError, RUNNER_REENROLL_ACTION } from '../server/connection-errors.js'
 import { withFakeTransport, type FakeTransport } from '../../tests/support/fake-transport.js'
 
 const serverUrl = 'https://runner.test'
@@ -95,12 +96,46 @@ describe('registerWithEnrollmentToken', () => {
     })
   })
 
-  it('throws when the server rejects the token', async ({ fetch }) => {
-    fetch.mockResolvedValue(new Response('expired', { status: 401 }))
+  it('reports confirmed credential rejection safely and retains re-enrollment guidance', async ({ fetch }) => {
+    const enrollmentToken = 'moh_enroll_xyz'
+    const rawBody = 'unsafe-enrollment-response-marker'
+    fetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: 'enrollment_rejected',
+          data: { message: `Bearer moh_runner_secret; token=${enrollmentToken}` },
+          raw: rawBody,
+        }),
+        { status: 401 },
+      ),
+    )
 
-    await expect(
-      registerWithEnrollmentToken(serverUrl, 'runner-1', 'host-1', 'moh_enroll_xyz', signal),
-    ).rejects.toThrow(/registration with enrollment token failed: 401/)
+    const error = await registerWithEnrollmentToken(serverUrl, 'runner-1', 'host-1', enrollmentToken, signal).catch(
+      (value: unknown) => value,
+    )
+
+    expect(error).toBeInstanceOf(RunnerTransportError)
+    expect(error).toMatchObject({
+      operation: 'registerWithEnrollmentToken',
+      kind: 'http',
+      httpStatus: 401,
+      serverCode: 'enrollment_rejected',
+    })
+    expect((error as RunnerTransportError).message).toContain(RUNNER_REENROLL_ACTION)
+    expect((error as RunnerTransportError).message).not.toContain(enrollmentToken)
+    expect((error as RunnerTransportError).message).not.toContain(rawBody)
+  })
+
+  it('does not add re-enrollment guidance to network failures', async ({ fetch }) => {
+    fetch.mockRejectedValue(new Error('connect ECONNREFUSED https://runner.test'))
+
+    const error = await registerWithEnrollmentToken(serverUrl, 'runner-1', 'host-1', 'moh_enroll_xyz', signal).catch(
+      (value: unknown) => value,
+    )
+
+    expect(error).toMatchObject({ operation: 'registerWithEnrollmentToken', kind: 'network' })
+    expect((error as Error).message).not.toContain(RUNNER_REENROLL_ACTION)
+    expect((error as Error).message).not.toContain('ECONNREFUSED')
   })
 
   it('throws on a malformed response', async ({ fetch }) => {
@@ -179,7 +214,7 @@ describe('resolveRunnerCredential', () => {
         hostname: 'host-1',
         signal,
       }),
-    ).rejects.toThrow(/registration with enrollment token failed: 503/)
+    ).rejects.toThrow(/registerWithEnrollmentToken failed with HTTP status 503/)
 
     expect(files.get(runnerEnrollmentTokenPath('/runner'))?.content).toBe('moh_enroll_retry\n')
     expect(files.has(runnerCredentialPath('/runner'))).toBe(false)
