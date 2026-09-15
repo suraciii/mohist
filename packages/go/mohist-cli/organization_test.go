@@ -247,9 +247,9 @@ func TestIssueViewBareJSONListsLocalCatalogWithoutHTTP(t *testing.T) {
 
 func TestOrganizationDiscoveryPrecedesRequiredPositionals(t *testing.T) {
 	for _, test := range []struct {
-		name string
-		args []string
-		want string
+		name  string
+		args  []string
+		want  string
 		exact bool
 	}{
 		{name: "issue view", args: []string{"issue", "view", "--json"}, want: strings.Join(issueFields, "\n") + "\n", exact: true},
