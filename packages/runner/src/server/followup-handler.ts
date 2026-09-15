@@ -256,17 +256,7 @@ async function handleFollowup(
           expectedQueuedTurnId: payload.turnId,
         }
         const signal = new AbortController().signal
-        if (sessionTarget.kind === 'workflow') {
-          await connection.recoverMissingWorkflowAgentSession(
-            sessionTarget.projectId,
-            sessionTarget.workflowRunId,
-            sessionTarget.sessionName,
-            body,
-            signal,
-          )
-        } else {
-          await connection.recoverMissingAgentSession(sessionTarget.projectId, sessionTarget.sessionId, body, signal)
-        }
+        await connection.recoverMissingAgentSession(sessionTarget.projectId, sessionTargetId(sessionTarget), body, signal)
       },
       recoveryKey: `${sessionTargetId(sessionTarget)}:${expected.runtimeSessionId ?? 'unbound'}`,
       coordinator: deps.bindingRecoveryCoordinator ?? undefined,

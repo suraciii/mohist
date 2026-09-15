@@ -61,7 +61,6 @@ function fakeConnection(overrides: Record<string, unknown> = {}) {
       return { sessionId: 'agent-session-1', runtimeSessionId: 'runtime-1', workDir }
     },
     async attachWorkflowAgentSession() {},
-    async recoverMissingWorkflowAgentSession() {},
     ...overrides,
   } as never
 }
