@@ -12,7 +12,6 @@ import type {
   RuntimeTurnResult,
 } from '../src/runtime/opencode/index.js'
 import type {
-  PiRuntime,
   PiResult,
   PiRuntimeEvent,
   PiTurnFacts,
@@ -20,6 +19,12 @@ import type {
   PiTurnRequest,
   PiTurnResult,
 } from '../src/runtime/pi/index.js'
+import { PiRuntime } from '../src/runtime/pi/index.js'
+import { CANCEL_CONFIRMATION_TIMEOUT_MS } from '../src/runtime/pi/runtime-clock.js'
+import { reportAndRequireDurableAck } from '../src/runtime/work-report.js'
+import { CredentialMasker } from '../src/runtime/task-log.js'
+import { ControlledPiSession, controlledPiSdk } from './support/pi-turn-session.js'
+import { deferred } from './support/deferred.js'
 
 interface FakeOpenCodeRuntimeHandles {
   runtime: OpenCodeRuntime
@@ -839,5 +844,119 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
 
     expect(pi.runTurnCalls).toHaveLength(1)
     expect(pi.runTurnCalls[0].prompt).toBe('be terse\n\nmain task')
+  })
+})
+
+describe('AgentJobExecutor reports bounded Pi failures', () => {
+  it('reports the idle terminal answer and Luna model while the SDK prompt remains pending', async () => {
+    vi.useFakeTimers()
+    const session = new ControlledPiSession()
+    const runtime = new PiRuntime({ agentDir: '/agent', sdkFactory: controlledPiSdk(session) })
+    expect((await runtime.start()).ok).toBe(true)
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, { openCode: null, pi: runtime })
+    const work = buildAgentJobWork({
+      initialTurnId: 'turn-idle-pi',
+      initialInputId: 'input-idle-pi',
+      with: { prompt: 'ship it', runtime: 'pi', model: 'test/luna', executionSource: 'non-slack' },
+    })
+    const execution = executor.execute(work, new AbortController().signal)
+    await session.promptEntered.promise
+    session.messages.push({ role: 'assistant', content: [{ type: 'text', text: 'shipped' }], stopReason: 'stop' })
+    session.isStreaming = false
+    session.emit({ type: 'agent_settled' })
+    const result = await execution
+    const report = vi.fn(async () => ({ verdict: 'accepted' as const }))
+    await reportAndRequireDurableAck({ report }, work, result, result.agentBinding)
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      output: { kind: 'pi', model: 'test/luna', text: 'shipped', runtimeSessionId: session.sessionFile },
+    })
+    expect(report).toHaveBeenCalledTimes(1)
+    expect(session.listeners.size).toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
+    session.promptCompletion.reject(new Error('late prompt rejection'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(report).toHaveBeenCalledTimes(1)
+    expect(session.prompt).toHaveBeenCalledTimes(1)
+    expect(session.abort).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['stream rejection', 'pending', 'turn-failed'],
+    ['stream rejection', 'rejected', 'turn-failed'],
+    ['interruption', 'pending', 'interrupted'],
+  ] as const)('reports and acknowledges %s when abort is %s', async (failure, abortOutcome, expectedCode) => {
+    vi.useFakeTimers()
+    const session = new ControlledPiSession()
+    const abortCompletion = deferred()
+    if (abortOutcome === 'pending') session.abort.mockImplementation(() => abortCompletion.promise)
+    else session.abort.mockRejectedValue(new Error('provider-secret abort rejected'))
+    const masker = new CredentialMasker()
+    masker.registerSecret('provider-secret')
+    const runtime = new PiRuntime({ agentDir: '/agent', sdkFactory: controlledPiSdk(session), masker })
+    expect((await runtime.start()).ok).toBe(true)
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, { openCode: null, pi: runtime })
+    const controller = new AbortController()
+    const work = buildAgentJobWork({
+      initialTurnId: 'turn-bounded-pi',
+      initialInputId: 'input-bounded-pi',
+      with: {
+        prompt: 'ship it',
+        runtime: 'pi',
+        model: 'test/luna',
+        reasoningEffort: 'high',
+        executionSource: 'non-slack',
+      },
+    })
+    const execution = executor.execute(work, controller.signal)
+    await session.promptEntered.promise
+    if (failure === 'stream rejection') session.promptCompletion.reject(new Error('provider-secret SSE disconnected'))
+    else controller.abort()
+    await vi.advanceTimersByTimeAsync(CANCEL_CONFIRMATION_TIMEOUT_MS)
+
+    const result = await execution
+    const report = vi.fn(async () => ({ verdict: 'accepted' as const }))
+    await reportAndRequireDurableAck({ report }, work, result, result.agentBinding)
+
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe(expectedCode)
+    expect(result.output).toMatchObject({
+      kind: 'pi',
+      status: 'failure',
+      model: 'test/luna',
+      diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'abort-unconfirmed' })]),
+    })
+    if (failure === 'stream rejection') expect(JSON.stringify(result.output)).toContain('SSE disconnected')
+    expect(JSON.stringify(result)).not.toContain('provider-secret')
+    expect(session.setModel).toHaveBeenCalledExactlyOnceWith({ provider: 'test', id: 'luna' })
+    expect(session.setThinkingLevel).toHaveBeenCalledExactlyOnceWith('high')
+    expect(result.agentBinding).toEqual({
+      agentSessionId: 'session-1',
+      agentTurnId: 'turn-bounded-pi',
+      runtime: 'pi',
+      runtimeSessionId: session.sessionFile,
+    })
+    expect(report).toHaveBeenCalledExactlyOnceWith(
+      work,
+      result,
+      expect.any(AbortSignal),
+      result.agentBinding,
+      undefined,
+    )
+    expect(session.listeners.size).toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
+    const reported = JSON.stringify(result)
+    if (abortOutcome === 'pending') abortCompletion.reject(new Error('late abort rejection'))
+    session.promptCompletion.resolve()
+    session.emit({ type: 'agent_settled' })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(JSON.stringify(result)).toBe(reported)
+    expect(report).toHaveBeenCalledTimes(1)
+    expect(session.prompt).toHaveBeenCalledTimes(1)
+    expect(session.abort).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

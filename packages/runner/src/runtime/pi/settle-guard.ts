@@ -1,128 +1,60 @@
-import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs'
+import type { PiClock } from './runtime-clock.js'
+import type { PiSdkMessage, PiSdkSession } from './sdk.js'
 
-const SETTLE_POLL_MS = 5_000
-const SETTLE_POLLS_REQUIRED = 3
+const SETTLE_OBSERVATION_DELAY_MS = 5_000
 
-/** Minimal timer surface; PiClock satisfies this structurally. */
-interface SettleClock {
-  setTimeout(handler: () => void, ms: number): unknown
-  clearTimeout(handle: unknown): void
-}
-
-interface SettleGuardDeps {
-  clock: SettleClock
-  sessionFile: string
-  messages: () => readonly { role?: string; stopReason?: string }[]
-  initialMessageCount: number
-  isSettled: () => boolean
-  onSettle: (fileTerminal: string | null) => void
-}
-
-/**
- * Watches a pi turn that may never return from `prompt()`. The guard polls
- * two terminal-state sources and settles after a consecutive-poll streak
- * from either:
- *
- * 1. In-memory agent state — a terminal assistant message produced after
- *    this turn started. The streak (rather than a wall-clock comparison)
- *    keeps the guard independent of the injected clock's now().
- * 2. The persisted session file of the turn this process still owns.
- *    Agent state can diverge from it (overflow recovery removes the last
- *    assistant message from memory while the file keeps it, and the
- *    follow-up continue can hang before any event reaches memory). The
- *    file is evidence only for this process's own turn — never an
- *    authority for work left by an earlier Runner process.
- */
-export function startSettleGuard(deps: SettleGuardDeps): () => void {
-  let settleTimer: unknown = null
-  let terminalStreak = 0
-  let fileQuietTerminalStreak = 0
-  // A reused session file already ends in the previous turn's terminal
-  // message when this turn starts; only a file that has grown since then
-  // counts as evidence for THIS turn.
-  const initialFileSize = fileSizeOf(deps.sessionFile)
-  const stop = () => {
-    if (settleTimer !== null) {
-      deps.clock.clearTimeout(settleTimer)
-      settleTimer = null
-    }
+/** Observes only the prompt whose pre-existing messages were captured by its owner. */
+export function startSettleGuard(deps: {
+  readonly clock: PiClock
+  readonly session: PiSdkSession
+  readonly onSettle: (message: PiSdkMessage) => void
+}): { readonly observe: (event: unknown) => void; readonly dispose: () => void } {
+  const previousMessages = new Set(deps.session.messages)
+  let timer: unknown | null = null
+  let stopped = false
+  const dispose = () => {
+    stopped = true
+    if (timer !== null) deps.clock.clearTimeout(timer)
+    timer = null
   }
-  const poll = () => {
-    if (deps.isSettled()) return
-    const messages = deps.messages()
-    // Only a message produced after this turn started counts; a terminal
-    // assistant message from an earlier turn on a reused session must not
-    // trigger a settle while the new turn is still in flight.
-    const terminal = messages.length > deps.initialMessageCount && lastMessageTerminal(messages)
-    terminalStreak = terminal ? terminalStreak + 1 : 0
-    if (terminalStreak >= SETTLE_POLLS_REQUIRED) {
-      stop()
-      deps.onSettle(null)
+  const check = () => {
+    if (stopped || deps.session.isStreaming) return
+    const message = deps.session.messages.at(-1)
+    if (
+      !message ||
+      previousMessages.has(message) ||
+      message.role !== 'assistant' ||
+      !['stop', 'length', 'error', 'aborted'].includes(message.stopReason ?? '')
+    )
       return
-    }
-    const fileTerminal = fileSizeOf(deps.sessionFile) > initialFileSize ? readTerminalFromFile(deps.sessionFile) : null
-    fileQuietTerminalStreak = fileTerminal !== null ? fileQuietTerminalStreak + 1 : 0
-    if (fileQuietTerminalStreak >= SETTLE_POLLS_REQUIRED) {
-      stop()
-      deps.onSettle(fileTerminal)
-      return
-    }
-    settleTimer = deps.clock.setTimeout(poll, SETTLE_POLL_MS)
+    dispose()
+    deps.onSettle(message)
   }
-  settleTimer = deps.clock.setTimeout(poll, SETTLE_POLL_MS)
-  return stop
-}
-
-function lastMessageTerminal(messages: readonly { role?: string; stopReason?: string }[]): boolean {
-  const item = [...messages].reverse().find((entry) => entry.role === 'assistant')
-  return item?.stopReason === 'stop' || item?.stopReason === 'error' || item?.stopReason === 'aborted'
-}
-
-// For the turn this process still owns, the persisted jsonl file can hold
-// terminal facts that diverged from agent memory (overflow recovery removes
-// the last assistant message from memory while the file keeps it). It never
-// speaks for work left by an earlier Runner process. Reads the tail of the
-// jsonl file and
-// reports the stopReason of the last message entry when it is a terminal
-// assistant message.
-function readTerminalFromFile(filePath: string): string | null {
-  try {
-    const fd = openSync(filePath, 'r')
-    try {
-      const size = fstatSync(fd).size
-      const start = Math.max(0, size - 65_536)
-      const length = size - start
-      if (length <= 0) return null
-      const buffer = Buffer.alloc(length)
-      readSync(fd, buffer, 0, length, start)
-      const lines = buffer.toString('utf8').split('\n')
-      for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i].trim()
-        if (!line) continue
-        try {
-          const entry: unknown = JSON.parse(line)
-          if (!(entry instanceof Object) || (entry as { type?: string }).type !== 'message') continue
-          const message = (entry as { message?: { role?: string; stopReason?: string } }).message
-          if (message?.role !== 'assistant') return null
-          const stop = message.stopReason
-          return stop === 'stop' || stop === 'error' || stop === 'aborted' ? stop : null
-        } catch {
-          continue
-        }
-      }
-      return null
-    } finally {
-      closeSync(fd)
-    }
-  } catch {
-    return null
+  const deferCheck = () => {
+    if (stopped) return
+    if (timer !== null) deps.clock.clearTimeout(timer)
+    // Lifecycle events can precede the SDK's idle transition while its
+    // awaited extension callbacks are still completing.
+    timer = deps.clock.setTimeout(() => {
+      timer = null
+      check()
+    }, SETTLE_OBSERVATION_DELAY_MS)
   }
-}
-
-function fileSizeOf(filePath: string): number {
-  try {
-    return statSync(filePath).size
-  } catch {
-    return -1
+  deferCheck()
+  return {
+    observe: (event) => {
+      if (stopped || !event || typeof event !== 'object') return
+      const type = (event as { type?: unknown }).type
+      if (type === 'agent_settled') check()
+      if (
+        type === 'message_end' ||
+        type === 'agent_end' ||
+        type === 'agent_settled' ||
+        type === 'auto_retry_end' ||
+        type === 'compaction_end'
+      )
+        deferCheck()
+    },
+    dispose,
   }
 }
