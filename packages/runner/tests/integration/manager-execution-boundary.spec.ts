@@ -515,8 +515,7 @@ describe.sequential('ManagerExecutionBoundary', () => {
         ['slack', 'status'],
         boundary.environment().MOHIST_MANAGER_LAUNCHER!,
       )
-      expect(result.stdout).toBe('***')
-      expect(result.stderr).toBe('***')
+      expect(result).toMatchObject({ exitCode: 0, stdout: '***', stderr: '***' })
       expect(JSON.stringify(result)).not.toContain(grant.managementCredential)
       expect(JSON.stringify(result)).not.toContain(grant.replyCredential)
     } finally {
@@ -570,13 +569,15 @@ const reply = ${JSON.stringify(grant.replyCredential)}
 const split = (value) => [value.slice(0, Math.ceil(value.length / 2)), value.slice(Math.ceil(value.length / 2))]
 const [managementFirst, managementSecond] = split(management)
 const [replyFirst, replySecond] = split(reply)
-process.stdout.write(managementFirst)
-process.stderr.write(replyFirst)
-setTimeout(() => {
-  process.stdout.write(managementSecond)
-  process.stderr.write(replySecond)
-  setTimeout(() => process.exit(0), 10)
-}, 10)
+// Let pending pipe writes drain before natural exit; a timer cannot prove that.
+process.stdout.write(managementFirst, () => {
+  process.stderr.write(replyFirst, () => {
+    setImmediate(() => {
+      process.stdout.write(managementSecond)
+      process.stderr.write(replySecond)
+    })
+  })
+})
 `
   await writeFile(executable, script, { encoding: 'utf8', mode: 0o700 })
   await chmod(executable, 0o700)
