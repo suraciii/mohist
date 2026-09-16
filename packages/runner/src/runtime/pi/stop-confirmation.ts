@@ -1,5 +1,4 @@
-import { boundedWait } from '../bounded-wait.js'
-import { diagnostic } from './errors.js'
+import { diagnostic, failureDiagnostic } from './errors.js'
 import { CANCEL_CONFIRMATION_TIMEOUT_MS, type PiClock } from './runtime-clock.js'
 import type { PiSdkSession } from './sdk.js'
 import type { PiDiagnostic } from './types.js'
@@ -40,22 +39,49 @@ export function watchPiStop(
 
 export async function abortAndDiagnose(
   session: PiSdkSession,
-  diagnostics: PiDiagnostic[],
+  clock: PiClock,
   mask: (text: string) => string,
-): Promise<void> {
+): Promise<readonly PiDiagnostic[]> {
+  let timer: unknown | null = null
+  const aborted = Promise.resolve()
+    .then(() => session.abort())
+    .then(
+      () =>
+        session.isStreaming
+          ? [
+              diagnostic('abort-unconfirmed', 'Pi did not confirm that the turn stopped', 'error', {
+                phase: 'abort',
+                outcome: 'streaming',
+              }),
+            ]
+          : [],
+      (cause: unknown) => [
+        failureDiagnostic('abort-unconfirmed', cause, mask, {
+          phase: 'abort',
+          outcome: 'rejected',
+        }),
+      ],
+    )
+  const expired = new Promise<readonly PiDiagnostic[]>((resolve) => {
+    timer = clock.setTimeout(
+      () =>
+        resolve([
+          diagnostic('abort-unconfirmed', 'Pi abort did not complete within its confirmation deadline', 'error', {
+            phase: 'abort',
+            outcome: 'timeout',
+            timeoutMs: CANCEL_CONFIRMATION_TIMEOUT_MS,
+          }),
+        ]),
+      CANCEL_CONFIRMATION_TIMEOUT_MS,
+    )
+  })
   try {
-    const completed = await boundedWait(() => session.abort(), CANCEL_CONFIRMATION_TIMEOUT_MS)
-    if (!completed || session.isStreaming)
-      diagnostics.push(diagnostic('abort-unconfirmed', mask('Pi did not confirm that the turn stopped')))
-  } catch (cause) {
-    diagnostics.push(diagnostic('abort-unconfirmed', mask(message(cause))))
+    return await Promise.race([aborted, expired])
+  } finally {
+    if (timer !== null) clock.clearTimeout(timer)
   }
 }
 
 function isPiStopEvent(event: unknown): boolean {
   return Boolean(event && typeof event === 'object' && (event as { type?: unknown }).type === 'agent_settled')
-}
-
-function message(cause: unknown): string {
-  return cause instanceof Error ? cause.message || 'Pi operation failed' : String(cause)
 }

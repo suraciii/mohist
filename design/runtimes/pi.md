@@ -7,8 +7,9 @@ remains authoritative for AgentJob, AgentSession, and shared binding rules.
 
 ## Design Drivers
 
-- The awaited Prompt result is the completion authority. Events are observations,
-  not an acceptance-only completion protocol.
+- Prompt completion and the current live Session's idle terminal assistant
+  message establish turn completion. Events are observations, not an
+  acceptance-only completion protocol.
 - In-process execution avoids a child process per Session but couples active Pi
   Prompts to Runner process failure. Persisted Session files survive; uncertain
   work is not replayed.
@@ -181,10 +182,20 @@ Prepare the binding and report Input identity before the execution deadline
 starts. Submit no Prompt through an unpersisted or stale binding.
 
 Resolution of the awaited Prompt means the Agent run, including tool loops and
-provider retries, ended. It is the sole completion decision. Events such as
-`agent_end` project observations; they cannot decide the result. Reconcile final
-assistant text from Session messages. Workflow expectation and AgentJob success
-remain with their work owners.
+provider retries, ended. If that Promise remains pending, one bounded observer
+may settle the live turn when `isStreaming` is false and the Session ends with a
+terminal assistant message produced by that turn. `stop` and `length` preserve
+normal Prompt success; `error` and `aborted` fail with the redacted underlying
+reason. A previous turn's message,
+a still-streaming Session, or a persisted transcript cannot establish completion.
+Events such as `agent_end` project observations; they cannot alone decide the
+result. Reconcile final assistant text from Session messages. Workflow expectation
+and AgentJob success remain with their work owners.
+
+The observer checks confirmed idle settlement immediately. Other lifecycle
+boundaries schedule one check five seconds later so Pi can finish its idle
+transition. Later boundaries restart that window; there is no recurring poll.
+If Pi remains active, the execution deadline still bounds the turn.
 
 Workflow execution supplies a fixed 60-minute duration through Runner-private
 context; AgentJob execution supplies its own deadline. Immediately before
@@ -205,9 +216,9 @@ The deadline protocol has two phases:
    deadline is shorter than five minutes, call it at execution start. The
    message reaches the current execution at an iteration boundary after the
    current model call and tool calls.
-2. At the deadline, fix `deadline-exceeded`, call `await session.abort()`, and
-   confirm stop through Session events and `isStreaming`. A late Prompt result
-   cannot change the timeout result.
+2. At the deadline, fix `deadline-exceeded`, request `session.abort()`, and
+   bound stop confirmation to five seconds. A late Prompt result cannot change
+   the timeout result.
 
 The warning says to stop new work, commit current changes, leave a progress
 record, and end. It does not expose the deadline, name a marker or file, or
@@ -221,6 +232,14 @@ interruption-unconfirmed diagnostic without claiming safe termination. Do not
 commit or roll back residual work automatically or replace the binding after
 termination. Only explicit Reset replaces it. Housekeeping Follow-ups use the
 same warning.
+
+Stream rejection, interruption, and deadline failures retain their original
+redacted reason while abort rejection or timeout adds a structured diagnostic.
+Cleanup must finish within its bound before returning the final diagnostic
+snapshot; it cannot hold reporting or acknowledgement indefinitely. Settlement
+happens once, removes the turn's listeners and timers, and never retries a Prompt.
+Runner process loss remains the work owner's `runner-lost` failure: no in-process
+observer survives that exit or recovers a result from disk.
 
 ### Events and Reconciliation
 

@@ -2,16 +2,16 @@ import { createCredentialMaskerFromEnvironment, CredentialMasker } from '../task
 import { NON_RECOVERABLE_PROVIDER_ERROR_CODE } from '../../core/types.js'
 import { resolve } from 'node:path'
 import { startSettleGuard } from './settle-guard.js'
-import { finalText, lastMessageError, lastMessageFailed } from './session-state.js'
+import { finalText } from './session-state.js'
 import { SessionMutexes } from './session-locks.js'
 import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
-import { diagnostic, piError, resetDiagnostic } from './errors.js'
+import { diagnostic, failureDiagnostic, piError, resetDiagnostic } from './errors.js'
 import { classifyRetryFailure, DEFAULT_PI_PROVIDER_ERROR_POLICY } from './policy.js'
 import { createPiProjector } from './projector.js'
 import { defaultClock, type PiClock } from './runtime-clock.js'
 import { abortAndDiagnose, watchPiStop } from './stop-confirmation.js'
 import type { ManagerExecutionBoundary } from '../manager-execution-boundary.js'
-import { realPiSdkFactory, type PiSdkFactory, type PiSdkServices, type PiSdkSession } from './sdk.js'
+import { realPiSdkFactory, type PiSdkFactory, type PiSdkServices, type PiSdkSession, type PiSdkMessage } from './sdk.js'
 import type {
   PiCancelFacts,
   PiCancelRequest,
@@ -138,6 +138,7 @@ export class PiRuntime {
     if (!this.state.ready || !this.state.services) return this.unavailable()
     if (!request.prompt || request.prompt.trim().length === 0)
       return this.failure('invalid-input', 'Pi prompt must be non-empty')
+    if (signal.aborted) return this.failure('interrupted', 'Pi turn was interrupted')
     const runtimeSessionId = request.target.runtimeSessionId
     if (!runtimeSessionId)
       return this.failure('missing-session', 'Pi turn requires a bound Session', [resetDiagnostic()])
@@ -158,8 +159,37 @@ export class PiRuntime {
       ])
     }
 
+    return new Promise((resolve, reject) => {
+      let acquired = false
+      const cancelQueued = () => {
+        if (acquired) return
+        signal.removeEventListener('abort', cancelQueued)
+        resolve(this.failure('interrupted', 'Pi turn was interrupted'))
+      }
+      signal.addEventListener('abort', cancelQueued, { once: true })
+      void this.sessionLocks
+        .run(path, () => {
+          acquired = true
+          signal.removeEventListener('abort', cancelQueued)
+          return this.runOwnedTurn(request, path, session, signal, observer)
+        })
+        .then(resolve, reject)
+      if (signal.aborted) cancelQueued()
+    })
+  }
+
+  private async runOwnedTurn(
+    request: PiTurnRequest,
+    path: string,
+    session: PiSdkSession,
+    signal: AbortSignal,
+    observer?: PiTurnObserver,
+  ): Promise<PiResult<PiTurnResult>> {
+    if (signal.aborted) return this.failure('interrupted', 'Pi turn was interrupted')
+    const masker = request.managerExecution?.masker ?? this.deps.masker ?? createCredentialMaskerFromEnvironment()
+    const mask = (text: string) => masker.mask(text)
     const diagnostics: PiDiagnostic[] = []
-    if (request.options?.unknownKeys && request.options.unknownKeys.length > 0) {
+    if (request.options?.unknownKeys?.length) {
       diagnostics.push(
         diagnostic(
           'options-unknown-keys',
@@ -168,36 +198,88 @@ export class PiRuntime {
         ),
       )
     }
-    const projector = createPiProjector(
-      path,
-      request.target.workDir,
-      request.managerExecution?.masker ?? this.deps.masker ?? createCredentialMaskerFromEnvironment(),
-    )
-    const report = (events: readonly PiRuntimeEvent[]) => events.forEach((event) => observer?.onEvent?.(event))
+    const projector = createPiProjector(path, request.target.workDir, masker)
+    const report = (events: readonly PiRuntimeEvent[]) =>
+      events.forEach((event) => {
+        const pending = observer?.onEvent?.(event)
+        if (pending)
+          void pending.catch((cause: unknown) => {
+            fail('turn-failed', 'Pi turn failed', [
+              failureDiagnostic('turn-failed', cause, mask, { phase: 'projection' }),
+            ])
+          })
+      })
+    const clock = this.deps.clock ?? defaultClock
     let fixed: PiResult<PiTurnResult> | null = null
-    let resolveFixed!: () => void
-    const fixedSignal = new Promise<void>((resolve) => {
+    let resolveFixed!: (result: PiResult<PiTurnResult>) => void
+    const result = new Promise<PiResult<PiTurnResult>>((resolve) => {
       resolveFixed = resolve
     })
-    const fixAndAbort = (result: PiResult<PiTurnResult>) => {
+    const settle = (outcome: PiResult<PiTurnResult>) => {
       if (fixed) return
-      fixed = result
-      // The outcome is already decided (deadline exceeded, interrupted, or
-      // provider failure). Resolve the race first so the turn returns even if
-      // the abort below never completes; abort is diagnostic-only and must
-      // never gate settlement on a dead/ended SDK session.
-      resolveFixed()
-      void abortAndDiagnose(session, diagnostics, this.mask.bind(this))
+      fixed = outcome
+      resolveFixed(outcome)
     }
+    const fail = (
+      kind: 'deadline-exceeded' | 'interrupted' | 'turn-failed',
+      text: string,
+      extra: PiDiagnostic[] = [],
+    ) => {
+      if (fixed) return
+      diagnostics.push(...extra)
+      settle(this.finishFailure(kind, mask(text), diagnostics))
+    }
+    const complete = (terminal?: PiSdkMessage) => {
+      if (fixed) return
+      try {
+        report(projector.reconcile(session.messages))
+        const assistant = terminal ?? [...session.messages].reverse().find((item) => item.role === 'assistant')
+        if (assistant?.stopReason === 'error' || assistant?.stopReason === 'aborted') {
+          const kind = assistant.stopReason === 'aborted' ? 'interrupted' : 'turn-failed'
+          fail(kind, kind === 'interrupted' ? 'Pi turn was interrupted' : 'Pi turn failed', [
+            diagnostic(kind, mask(assistant.errorMessage ?? 'Pi reported ' + assistant.stopReason), 'error', {
+              phase: 'prompt',
+              stopReason: assistant.stopReason,
+            }),
+          ])
+          return
+        }
+        settle({
+          ok: true,
+          value: {
+            facts: {
+              finalAssistantText: finalText(session.messages),
+              runtimeSessionId: path,
+              workDir: request.target.workDir,
+            },
+            diagnostics,
+          },
+          diagnostics,
+        })
+      } catch (cause) {
+        fail('turn-failed', 'Pi turn failed', [failureDiagnostic('turn-failed', cause, mask, { phase: 'projection' })])
+      }
+    }
+    let guard: ReturnType<typeof startSettleGuard> | null = null
     const unsubscribe = session.subscribe((event) => {
-      const facts = projector.project(event)
-      report(facts)
-      const retryFailure = classifyRetryFailure(event, this.policy())
-      if (retryFailure && !fixed) {
-        const failureDiagnostics = retryFailure.provider
-          ? [diagnostic(NON_RECOVERABLE_PROVIDER_ERROR_CODE, retryFailure.message)]
-          : []
-        fixAndAbort(this.finishFailure('turn-failed', retryFailure.message, failureDiagnostics))
+      if (fixed) return
+      try {
+        report(projector.project(event))
+        const retryFailure = classifyRetryFailure(event, this.policy())
+        if (retryFailure) {
+          const source = event as { errorMessage?: string }
+          fail('turn-failed', retryFailure.message, [
+            diagnostic(
+              retryFailure.provider ? NON_RECOVERABLE_PROVIDER_ERROR_CODE : 'provider-retries-exhausted',
+              mask(source.errorMessage ?? retryFailure.message),
+              'error',
+              { phase: 'prompt' },
+            ),
+          ])
+        }
+        guard?.observe(event)
+      } catch (cause) {
+        fail('turn-failed', 'Pi turn failed', [failureDiagnostic('turn-failed', cause, mask, { phase: 'projection' })])
       }
     })
     const model = request.options?.model
@@ -208,132 +290,95 @@ export class PiRuntime {
         return this.failure('invalid-input', 'options.model must use provider/model syntax')
       }
       try {
-        await session.setModel(this.state.services.model(parsed.provider, parsed.id))
+        await session.setModel(this.state.services!.model(parsed.provider, parsed.id))
       } catch (cause) {
         unsubscribe()
         return this.failure('turn-failed', 'Pi rejected the selected model', [
-          diagnostic('model-rejected', this.mask(message(cause))),
+          failureDiagnostic('model-rejected', cause, mask),
         ])
       }
     }
-    if (request.options?.reasoningEffort) session.setThinkingLevel(request.options.reasoningEffort)
-    const clock = this.deps.clock ?? defaultClock
+    if (signal.aborted) {
+      unsubscribe()
+      return this.failure('interrupted', 'Pi turn was interrupted')
+    }
+    try {
+      if (request.options?.reasoningEffort) session.setThinkingLevel(request.options.reasoningEffort)
+    } catch (cause) {
+      unsubscribe()
+      return this.failure('turn-failed', 'Pi rejected the selected reasoning effort', [
+        failureDiagnostic('reasoning-effort-rejected', cause, mask),
+      ])
+    }
+    guard = startSettleGuard({ clock, session, onSettle: complete })
     const duration = request.durationMs ?? null
     const deadline =
       duration !== null && duration >= 0
-        ? clock.setTimeout(() => {
-            fixAndAbort(this.finishFailure('deadline-exceeded', 'Pi turn deadline exceeded', diagnostics))
-          }, duration)
+        ? clock.setTimeout(() => fail('deadline-exceeded', 'Pi turn deadline exceeded'), duration)
         : null
-    const warningDelay = duration !== null && duration >= 0 ? Math.max(0, duration - 5 * 60_000) : null
     const warning =
-      warningDelay === null
-        ? null
-        : clock.setTimeout(() => {
-            if (!fixed)
-              void session.steer(
-                'This turn is nearing its execution deadline; wrap up the current work and return the final answer.',
-              )
-          }, warningDelay)
-    const cancel = () => {
-      if (!fixed) fixAndAbort(this.finishFailure('interrupted', 'Pi turn was interrupted', diagnostics))
-    }
-    signal.addEventListener('abort', cancel, { once: true })
-    // pi's prompt() promise can fail to resolve even after the session has
-    // reached a terminal state (an SSE body that never ends, or a settlement
-    // step stuck after the final message). The session stays streaming while
-    // the agent loop is blocked, so detect the terminal assistant message
-    // itself rather than waiting on isStreaming or the stuck prompt.
-
-    // The settle guard covers only the prompt this live process owns. It
-    // never adopts work left behind by an earlier Runner process.
-    const initialMessageCount = session.messages.length
-    const settleFromTerminalState = (fileTerminal: string | null = null) => {
-      if (fixed) return
-      report(projector.reconcile(session.messages))
-      diagnostics.push(...projector.diagnostics().map((item) => diagnostic(item.code, this.mask(item.message), 'info')))
-      const failed = lastMessageFailed(session.messages) || fileTerminal === 'error'
-      fixed = failed
-        ? this.finishFailure('turn-failed', 'Pi turn failed', [
-            diagnostic('turn-failed', this.mask(lastMessageError(session.messages) ?? 'Pi reported an error')),
-          ])
-        : {
-            ok: true as const,
-            value: {
-              facts: {
-                finalAssistantText: finalText(session.messages),
-                runtimeSessionId: path,
-                workDir: request.target.workDir,
-              },
-              diagnostics,
+      duration !== null && duration >= 0
+        ? clock.setTimeout(
+            () => {
+              if (fixed) return
+              void Promise.resolve()
+                .then(() =>
+                  session.steer(
+                    'This turn is nearing its execution deadline; wrap up the current work and return the final answer.',
+                  ),
+                )
+                .catch((cause: unknown) => {
+                  if (!fixed)
+                    diagnostics.push(failureDiagnostic('deadline-warning-failed', cause, mask, { phase: 'warning' }))
+                })
             },
-            diagnostics,
-          }
-      resolveFixed()
-      // The stuck prompt() still holds the per-session mutex; release it so
-      // later turns on this session do not queue behind a promise that never
-      // settles. The orphaned promise is already caught by the mutex chain.
-      this.sessionLocks.release(path)
-    }
-    const stopSettleGuard = startSettleGuard({
-      clock,
-      sessionFile: path,
-      messages: () => session.messages,
-      initialMessageCount,
-      isSettled: () => fixed !== null,
-      onSettle: settleFromTerminalState,
-    })
-    let promptSettled = false
+            Math.max(0, duration - 5 * 60_000),
+          )
+        : null
+    const cancel = () => fail('interrupted', 'Pi turn was interrupted')
+    signal.addEventListener('abort', cancel, { once: true })
+    if (signal.aborted) cancel()
+    let promptStarted = false
+    let outcome: PiResult<PiTurnResult>
     try {
-      const promptOperation = this.sessionLocks
-        .run(path, () =>
-          session.prompt(request.prompt, { expandPromptTemplates: false }).then(() => 'completed' as const),
-        )
-        .then(
-          (value) => {
-            promptSettled = true
-            return value
-          },
-          (error) => {
-            promptSettled = true
-            throw error
-          },
-        )
-      const promptOutcome = await Promise.race([promptOperation, fixedSignal.then(() => 'fixed' as const)])
-      if (fixed) return fixed
-      if (lastMessageFailed(session.messages))
-        return this.failure('turn-failed', 'Pi turn failed', [
-          diagnostic('turn-failed', this.mask(lastMessageError(session.messages) ?? 'Pi reported an error')),
-        ])
-      report(projector.reconcile(session.messages))
-      diagnostics.push(...projector.diagnostics().map((item) => diagnostic(item.code, this.mask(item.message), 'info')))
-      return {
-        ok: true,
-        value: {
-          facts: {
-            finalAssistantText: finalText(session.messages),
-            runtimeSessionId: path,
-            workDir: request.target.workDir,
-          },
-          diagnostics,
-        },
-        diagnostics,
+      if (!fixed) {
+        // Both branches stay observed after settlement so a late SDK result
+        // cannot change the result or become an unhandled rejection.
+        void Promise.resolve()
+          .then(() => {
+            if (fixed) return
+            promptStarted = true
+            return session.prompt(request.prompt, { expandPromptTemplates: false })
+          })
+          .then(
+            () => complete(),
+            (cause: unknown) =>
+              fail('turn-failed', 'Pi turn failed', [
+                failureDiagnostic('turn-failed', cause, mask, { phase: 'prompt' }),
+              ]),
+          )
       }
-    } catch (cause) {
-      if (fixed) return fixed
-      return this.failure('turn-failed', 'Pi turn failed', [diagnostic('turn-failed', this.mask(message(cause)))])
+      outcome = await result
     } finally {
       signal.removeEventListener('abort', cancel)
       if (deadline !== null) clock.clearTimeout(deadline)
       if (warning !== null) clock.clearTimeout(warning)
-      stopSettleGuard()
+      guard?.dispose()
       unsubscribe()
-      // A prompt that never settles keeps holding the per-session mutex; every
-      // later session operation on this path would queue behind it forever.
-      // The orphaned lock entry is harmless: the next run replaces it on
-      // the next acquisition.
-      if (!promptSettled) this.sessionLocks.release(path)
     }
+    if (!outcome.ok && promptStarted) diagnostics.push(...(await abortAndDiagnose(session, clock, mask)))
+    diagnostics.push(...projector.diagnostics().map((item) => diagnostic(item.code, mask(item.message), 'info')))
+    const snapshot = Object.freeze(
+      diagnostics.map((item) =>
+        Object.freeze({
+          ...item,
+          ...(item.details ? { details: Object.freeze({ ...item.details }) } : {}),
+        }),
+      ),
+    )
+    return outcome.ok
+      ? { ok: true, value: { ...outcome.value, diagnostics: snapshot }, diagnostics: snapshot }
+      : { ok: false, error: { ...outcome.error, diagnostics: snapshot }, diagnostics: snapshot }
   }
 
   /**
