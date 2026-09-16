@@ -204,6 +204,53 @@ describe('evaluateCodexReadiness', () => {
     expect(result.error.diagnostics[0]?.code).toBe('catalog-empty')
   })
 
+  it('rejects an incomplete catalog even when it contains models', async () => {
+    const result = await evaluateCodexReadiness({
+      managedCodexHome: MANAGED_CODEX_HOME,
+      startupTimeoutMs: 5_000,
+      probe: buildProbe({
+        catalog: {
+          models: [
+            {
+              id: 'gpt-5',
+              displayName: null,
+              reasoningEfforts: [],
+              defaultReasoningEffort: null,
+              supportsReasoningEffort: true,
+            },
+          ],
+          complete: false,
+          capabilityRevision: 'rev',
+        },
+      }),
+    })
+    expect(result).toMatchObject({ ok: false, error: { kind: 'unavailable-runtime' } })
+    if (result.ok) throw new Error('expected failure')
+    expect(result.error.diagnostics[0]?.code).toBe('catalog-empty')
+  })
+
+  it('turns probe exceptions into actionable runtime-unavailable diagnostics', async () => {
+    const result = await evaluateCodexReadiness({
+      managedCodexHome: MANAGED_CODEX_HOME,
+      startupTimeoutMs: 5_000,
+      probe: {
+        ...buildProbe({}),
+        cli: {
+          async resolveCodexBinary() {
+            throw new Error('probe failed with token=sk-secret-value-123456789')
+          },
+          async resolveCodexVersion() {
+            return null
+          },
+        },
+      },
+    })
+    expect(result).toMatchObject({ ok: false, error: { kind: 'unavailable-runtime' } })
+    if (result.ok) throw new Error('expected failure')
+    expect(result.error.diagnostics[0]?.code).toBe('cli-probe-failed')
+    expect(result.error.diagnostics[0]?.message).not.toContain('sk-secret-value-123456789')
+  })
+
   it('short-circuits before catalog when an earlier probe fails', async () => {
     let catalogCalls = 0
     const probe: CodexReadinessProbe = {

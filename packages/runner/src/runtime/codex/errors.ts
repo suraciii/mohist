@@ -16,6 +16,7 @@
  */
 
 import type { CodexDiagnostic, CodexError, CodexErrorKind } from './types.js'
+import { redactCodexCredentialString, redactCodexCredentialValue } from './credential.js'
 
 /**
  * Raw app-server error captured from a JSON-RPC error envelope or a
@@ -154,7 +155,7 @@ export function normalizeTurnFailedCodex(
   raw: RawCodexError | string,
   diagnostics: readonly CodexDiagnostic[] = [],
 ): CodexError {
-  const message = typeof raw === 'string' ? raw : raw.message || 'Codex turn failed'
+  const message = redactCodexCredentialString(typeof raw === 'string' ? raw : raw.message || 'Codex turn failed')
   return {
     kind: 'turn-failed',
     message,
@@ -164,7 +165,13 @@ export function normalizeTurnFailedCodex(
         severity: 'error',
         code: 'turn-failed',
         message,
-        details: typeof raw === 'string' ? undefined : { code: raw.code, data: raw.data, method: raw.method },
+        details:
+          typeof raw === 'string'
+            ? undefined
+            : (redactCodexCredentialValue({ code: raw.code, data: raw.data, method: raw.method }) as Record<
+                string,
+                unknown
+              >),
       },
     ],
   }
@@ -246,7 +253,7 @@ export function normalizeUnknownCodex(
   raw: RawCodexError | string,
   diagnostics: readonly CodexDiagnostic[] = [],
 ): CodexError {
-  const message = typeof raw === 'string' ? raw : raw.message || 'Codex effect is unknown'
+  const message = redactCodexCredentialString(typeof raw === 'string' ? raw : raw.message || 'Codex effect is unknown')
   return {
     kind: 'unknown',
     message,
@@ -256,7 +263,13 @@ export function normalizeUnknownCodex(
         severity: 'error',
         code: 'unknown',
         message,
-        details: typeof raw === 'string' ? undefined : { code: raw.code, data: raw.data, method: raw.method },
+        details:
+          typeof raw === 'string'
+            ? undefined
+            : (redactCodexCredentialValue({ code: raw.code, data: raw.data, method: raw.method }) as Record<
+                string,
+                unknown
+              >),
       },
     ],
   }

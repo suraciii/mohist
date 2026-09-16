@@ -161,6 +161,45 @@ describe('performCodexInitialization', () => {
     expect(transport.sentCalls).toHaveLength(0)
   })
 
+  it('bounds a server that never answers initialize', async () => {
+    vi.useFakeTimers()
+    try {
+      const transport = buildTransport({ send: async () => await new Promise<unknown>(() => {}) })
+      const resultPromise = performCodexInitialization(transport, {
+        managedCodexHome: '/runner/.mohist/codex',
+        startupTimeoutMs: 25,
+      })
+      await vi.advanceTimersByTimeAsync(25)
+      await expect(resultPromise).resolves.toMatchObject({
+        ok: false,
+        error: { kind: 'unavailable-runtime' },
+      })
+      const result = await resultPromise
+      if (!result.ok) expect(result.error.diagnostics[0]?.code).toBe('startup-timeout')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects an initialize response that advertises experimental APIs', async () => {
+    const transport = buildTransport({
+      send: async (request) => ({
+        jsonrpc: '2.0',
+        id: request.id,
+        result: {
+          protocolVersion: 'v2',
+          codexHome: '/runner/.mohist/codex',
+          experimentalApis: ['apps'],
+        },
+      }),
+    })
+    const result = await performCodexInitialization(transport, {
+      managedCodexHome: '/runner/.mohist/codex',
+      startupTimeoutMs: 5_000,
+    })
+    expect(result).toMatchObject({ ok: false, error: { kind: 'incompatible-runtime' } })
+  })
+
   it('preserves the user-agent when the server advertises it', async () => {
     const transport = buildTransport()
     const result = await performCodexInitialization(transport, {

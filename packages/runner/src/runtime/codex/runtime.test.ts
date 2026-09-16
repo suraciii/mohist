@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CodexRuntime } from './runtime.js'
 import type { CodexServerHandle } from './server-process.js'
 import type { CodexAuthenticationProbe, CodexCatalogLoader, CodexCliProbe, CodexReadinessProbe } from './readiness.js'
@@ -282,6 +282,56 @@ describe('CodexRuntime readiness gate', () => {
     })
     if (result.ok) throw new Error('expected failure')
     expect(result.error.diagnostics.some((diagnostic) => diagnostic.code === 'catalog-empty')).toBe(true)
+  })
+
+  it('bounds a server factory that never produces a child handle', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new CodexRuntime({
+        codexHome: MANAGED_CODEX_HOME,
+        cwd: '/work',
+        startupTimeoutMs: 25,
+        serverFactory: async () => await new Promise<never>(() => {}),
+        readinessProbe: passingProbe(),
+      })
+      const resultPromise = runtime.start()
+      await vi.advanceTimersByTimeAsync(25)
+      await expect(resultPromise).resolves.toMatchObject({
+        ok: false,
+        error: { kind: 'unavailable-runtime' },
+      })
+      expect(runtime.ready()).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears readiness after a protocol-failure notification from the child', async () => {
+    let notifyFailure: ((message: unknown) => void) | null = null
+    const handle = fakeHandle()
+    ;(handle as { subscribe: (listener: (message: unknown) => void) => () => void }).subscribe = (listener) => {
+      notifyFailure = listener
+      return () => {
+        notifyFailure = null
+      }
+    }
+    const wiredRuntime = new CodexRuntime({
+      codexHome: MANAGED_CODEX_HOME,
+      cwd: '/work',
+      serverFactory: async () => handle,
+      readinessProbe: passingProbe(),
+    })
+    await expect(wiredRuntime.start()).resolves.toMatchObject({ ok: true })
+    expect(wiredRuntime.ready()).toBe(true)
+    const failureListener = notifyFailure as ((message: unknown) => void) | null
+    failureListener?.({
+      jsonrpc: '2.0',
+      method: 'protocol-failure',
+      params: { reason: 'malformed-stdout', message: 'bad response' },
+    })
+    expect(wiredRuntime.ready()).toBe(false)
+    expect(wiredRuntime.diagnostic()).toMatchObject({ code: 'protocol-failure' })
+    await wiredRuntime.shutdown({ clearDiagnostic: true })
   })
 })
 

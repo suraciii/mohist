@@ -12,6 +12,7 @@
  */
 
 import { createHash as createSha256 } from 'node:crypto'
+import { redactCodexCredentialString } from './credential.js'
 import type {
   CodexCanonicalReasoningEffort,
   CodexCatalog,
@@ -532,15 +533,15 @@ function modelListResult(value: unknown): CodexModelListResult | null {
 }
 
 function catalogDiagnostic(code: string, message: string): CodexDiagnostic {
-  return { severity: 'error', code, message }
+  return { severity: 'error', code, message: redactCodexCredentialString(message) }
 }
 
 function errorMessage(cause: unknown): string {
-  if (cause instanceof Error) return cause.message
-  if (typeof cause === 'string') return cause
+  if (cause instanceof Error) return redactCodexCredentialString(cause.message)
+  if (typeof cause === 'string') return redactCodexCredentialString(cause)
   if (cause && typeof cause === 'object') {
     const message = (cause as { readonly message?: unknown }).message
-    if (typeof message === 'string' && message.length > 0) return message
+    if (typeof message === 'string' && message.length > 0) return redactCodexCredentialString(message)
   }
   return 'unknown transport failure'
 }

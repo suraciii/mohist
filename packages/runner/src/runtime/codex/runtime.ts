@@ -40,6 +40,7 @@ import type {
 import { defaultCodexClock } from './runtime-clock.js'
 import type { CodexServerFactory, CodexServerHandle } from './server-process.js'
 import { normalizeUnavailableRuntimeCodex } from './errors.js'
+import { redactCodexCredentialString } from './credential.js'
 import {
   createCodexModelCatalogLoader,
   type CodexCatalogManager,
@@ -101,8 +102,10 @@ export class CodexRuntime {
   private readonly server: {
     factory: CodexServerFactory | null
     handle: CodexServerHandle | null
+    unsubscribe: (() => void) | null
     closed: boolean
   }
+  private generationCounter = 0
   private readonly readinessProbe: CodexReadinessProbe | null
   private catalogManager: CodexCatalogManager | null = null
 
@@ -118,7 +121,7 @@ export class CodexRuntime {
       generation: null,
       startInFlight: null,
     }
-    this.server = { factory: deps.serverFactory ?? null, handle: null, closed: false }
+    this.server = { factory: deps.serverFactory ?? null, handle: null, unsubscribe: null, closed: false }
     this.readinessProbe = deps.readinessProbe ?? null
   }
 
@@ -331,8 +334,11 @@ export class CodexRuntime {
   async shutdown(options: { clearDiagnostic?: boolean } = {}): Promise<void> {
     this.state.ready = false
     this.state.generation = null
+    this.catalogManager = null
     if (options.clearDiagnostic) this.state.diagnostic = null
     const handle = this.server.handle
+    this.server.unsubscribe?.()
+    this.server.unsubscribe = null
     if (handle && !this.server.closed) {
       this.server.closed = true
       await boundedWait(() => handle.close(), this.runtimeShutdownTimeoutMs)
@@ -350,6 +356,13 @@ export class CodexRuntime {
   }
 
   private async attemptStart(): Promise<CodexResult<CodexReadyState>> {
+    this.state.ready = false
+    this.state.diagnostic = null
+    this.state.catalog = null
+    if (this.server.handle && !this.server.closed) {
+      await this.tearDownHandle(this.server.handle)
+    }
+    const startupStartedAt = this.clock.now()
     const factory = this.server.factory ?? this.deps.serverFactory
     if (!factory) {
       const diagnostic: CodexDiagnostic = {
@@ -360,31 +373,43 @@ export class CodexRuntime {
       return this.recordFailure(diagnostic)
     }
     let handle: CodexServerHandle
+    let factoryOperation: Promise<CodexServerHandle> | null = null
     try {
-      handle = await factory({
+      factoryOperation = factory({
         codexHome: this.deps.codexHome,
         cwd: this.deps.cwd,
         startupTimeoutMs: this.startupTimeoutMs,
         shutdownTimeoutMs: this.runtimeShutdownTimeoutMs,
         clock: this.clock,
       })
+      handle = await this.withStartupTimeout(factoryOperation, this.startupTimeoutMs)
     } catch (cause) {
+      const timedOut = cause instanceof Error && cause.message.includes('startup exceeded')
+      if (timedOut && factoryOperation) {
+        void factoryOperation.then(
+          (lateHandle) => boundedWait(() => lateHandle.close(), this.runtimeShutdownTimeoutMs),
+          () => undefined,
+        )
+      }
       const diagnostic: CodexDiagnostic = {
         severity: 'error',
-        code: 'server-spawn-failed',
-        message: cause instanceof Error ? cause.message : 'Codex app-server spawn failed',
+        code: timedOut ? 'startup-timeout' : 'server-spawn-failed',
+        message: redactCodexCredentialString(cause instanceof Error ? cause.message : 'Codex app-server spawn failed'),
       }
       return this.recordFailure(diagnostic)
     }
     this.server.handle = handle
+    this.server.closed = false
+    this.server.unsubscribe = handle.subscribe((message) => this.observeServerMessage(message))
 
     // Run the initialize → initialized handshake. The handshake
     // rejects non-managed codexHome, malformed initialize responses,
     // and any child exit before the response arrives.
     const transport = codexInitializationTransportFromHandle(handle)
+    const initBudget = Math.max(0, this.startupTimeoutMs - (this.clock.now() - startupStartedAt))
     const initResult = await performCodexInitialization(transport, {
       managedCodexHome: this.deps.codexHome,
-      startupTimeoutMs: this.startupTimeoutMs,
+      startupTimeoutMs: initBudget,
       clock: this.clock,
     })
     if (!initResult.ok) {
@@ -415,12 +440,28 @@ export class CodexRuntime {
       authentication: this.readinessProbe.authentication,
       catalog: catalogLoader,
     }
-    const readinessResult = await evaluateCodexReadiness({
-      managedCodexHome: this.deps.codexHome,
-      startupTimeoutMs: this.startupTimeoutMs,
-      probe: readinessProbe,
-      clock: this.clock,
-    })
+    let readinessResult: Awaited<ReturnType<typeof evaluateCodexReadiness>>
+    try {
+      readinessResult = await evaluateCodexReadiness({
+        managedCodexHome: this.deps.codexHome,
+        startupTimeoutMs: this.startupTimeoutMs,
+        probe: readinessProbe,
+        appServer: {
+          started: !handle.hasExited?.(),
+          initialized: initResult.value.handshakeComplete,
+          startupElapsedMs: this.clock.now() - startupStartedAt,
+        },
+        clock: this.clock,
+      })
+    } catch (cause) {
+      const diagnostic: CodexDiagnostic = {
+        severity: 'error',
+        code: 'readiness-failed',
+        message: redactCodexCredentialString(cause instanceof Error ? cause.message : 'Codex readiness probe failed'),
+      }
+      await this.tearDownHandle(handle)
+      return this.recordFailure(diagnostic)
+    }
     if (!readinessResult.ok) {
       await this.tearDownHandle(handle)
       this.state.diagnostic = readinessResult.error.diagnostics[0] ?? {
@@ -430,11 +471,22 @@ export class CodexRuntime {
       }
       return { ok: false, error: readinessResult.error, diagnostics: readinessResult.diagnostics }
     }
+    const protocolFailureDiagnostic = this.state.diagnostic as CodexDiagnostic | null
+    if (handle.hasExited?.() || protocolFailureDiagnostic?.code === 'protocol-failure') {
+      const diagnostic = protocolFailureDiagnostic ?? {
+        severity: 'error' as const,
+        code: 'protocol-failure',
+        message: 'Codex app-server failed during readiness; refusing to claim work',
+      }
+      await this.tearDownHandle(handle)
+      return this.recordFailure(diagnostic)
+    }
     this.state.ready = true
     this.state.diagnostic = readinessResult.diagnostics[0] ?? null
     this.state.catalog = readinessResult.value.catalog
     this.catalogManager = catalogLoader
-    this.state.generation = 1
+    this.generationCounter += 1
+    this.state.generation = this.generationCounter
     return { ok: true, value: this.readyState(), diagnostics: readinessResult.diagnostics }
   }
 
@@ -445,6 +497,8 @@ export class CodexRuntime {
   }
 
   private async tearDownHandle(handle: CodexServerHandle): Promise<void> {
+    this.server.unsubscribe?.()
+    this.server.unsubscribe = null
     try {
       await boundedWait(() => handle.close(), this.runtimeShutdownTimeoutMs)
     } catch {
@@ -452,6 +506,44 @@ export class CodexRuntime {
     }
     this.server.closed = true
     this.server.handle = null
+  }
+
+  private observeServerMessage(message: unknown): void {
+    if (!message || typeof message !== 'object') return
+    const candidate = message as { method?: unknown; params?: unknown }
+    if (candidate.method !== 'protocol-failure') return
+    const params = candidate.params && typeof candidate.params === 'object' ? candidate.params : null
+    const reason =
+      params && typeof (params as { reason?: unknown }).reason === 'string'
+        ? (params as { reason: string }).reason
+        : 'protocol-failure'
+    const detail =
+      params && typeof (params as { message?: unknown }).message === 'string'
+        ? (params as { message: string }).message
+        : 'Codex app-server protocol failure'
+    this.state.ready = false
+    this.state.generation = null
+    this.state.catalog = null
+    this.state.diagnostic = {
+      severity: 'error',
+      code: 'protocol-failure',
+      message: redactCodexCredentialString(`Codex app-server ${reason}: ${detail}`),
+    }
+  }
+
+  private async withStartupTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+    let timer: unknown
+    const timeout = new Promise<never>((_, reject) => {
+      timer = this.clock.setTimeout(
+        () => reject(new Error(`Codex app-server startup exceeded ${timeoutMs}ms`)),
+        timeoutMs,
+      )
+    })
+    try {
+      return await Promise.race([operation, timeout])
+    } finally {
+      if (timer !== undefined) this.clock.clearTimeout(timer)
+    }
   }
 }
 

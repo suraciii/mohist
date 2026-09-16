@@ -41,6 +41,7 @@ import {
 import { getOpenCodeRuntimeFactory, type OpenCodeRuntime } from './opencode/index.js'
 import { getPiRuntimeFactory, parseProviderErrorPolicy, type PiRuntime } from './pi/index.js'
 import { getCodexRuntimeFactory, type CodexRuntime } from './codex/index.js'
+import { createDefaultCodexReadinessProbe } from './codex/readiness.js'
 import { workKey } from './work-key.js'
 import { loadBuildInfo } from './build-info.js'
 import {
@@ -482,9 +483,14 @@ export class RunnerHost {
     }
     if (this.enabledAgentRuntimes.has('codex')) {
       const factory = getCodexRuntimeFactory()
+      const codexHome = join(this.options.runnerRoot, '.mohist', 'codex')
       this.codexRuntime = factory({
-        codexHome: join(this.options.runnerRoot, '.mohist', 'codex'),
+        codexHome,
         cwd: process.cwd(),
+        readinessProbe: createDefaultCodexReadinessProbe({
+          managedCodexHome: codexHome,
+          cwd: process.cwd(),
+        }),
         ...(this.options.runtimeShutdownTimeoutMs !== undefined
           ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs }
           : {}),

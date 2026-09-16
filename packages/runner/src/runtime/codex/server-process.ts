@@ -24,6 +24,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { CODEX_LOCKED_METHODS, isCodexLockedMethod, type CodexJsonRpcMessage } from './protocol-types.js'
 import { boundedTimeoutMs, boundedWait } from '../bounded-wait.js'
+import { redactCodexCredentialString } from './credential.js'
 import type { CodexClock } from './types.js'
 import { defaultClock } from './runtime-clock.js'
 
@@ -63,6 +64,8 @@ export interface CodexServerHandle {
    * and unmatched responses (anything that is not the awaited reply).
    */
   subscribe(listener: (message: unknown) => void): () => void
+  /** True after the child has emitted its exit event. */
+  hasExited?: () => boolean
   /**
    * Shut the app-server child down within the configured deadline.
    */
@@ -103,6 +106,7 @@ export function createSpawnedCodexServer(options: CodexServerFactoryOptions): Pr
     cwd: options.cwd,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
+    shell: false,
     detached: process.platform !== 'win32',
   }) as ChildProcessWithoutNullStreams
 
@@ -127,16 +131,36 @@ async function buildCodexServerHandle(input: CodexServerHandleBuilder): Promise<
   const seenResponseIds = new Set<number | string>()
   let buffer = ''
   let exited = false
-  let exitCause: { kind: 'child-exit'; code: number | null } | { kind: 'malformed-stdout' } | null = null
-  let nextId = 1
+  let closed = false
+  let protocolError: Error | null = null
+  let failureNotified = false
 
   const child = input.child
 
   function rejectAllPending(cause: unknown) {
     for (const [id, handlers] of pending) {
-      handlers.reject(cause)
       pending.delete(id)
+      handlers.reject(cause)
     }
+  }
+
+  function notifyProtocolFailure(reason: string, message: string): Error {
+    const error = protocolError ?? new Error(`codex protocol failure: ${message}`)
+    protocolError = error
+    rejectAllPending(error)
+    if (!failureNotified && !closed) {
+      failureNotified = true
+      const payload = {
+        jsonrpc: '2.0' as const,
+        method: 'protocol-failure',
+        params: {
+          reason,
+          message: redactCodexCredentialString(message).slice(0, 256),
+        },
+      }
+      for (const listener of listeners) listener(payload)
+    }
+    return error
   }
 
   type Deliverable = CodexJsonRpcMessage | { jsonrpc: '2.0'; method: string; params?: unknown; id?: number | string }
@@ -144,25 +168,33 @@ async function buildCodexServerHandle(input: CodexServerHandleBuilder): Promise<
   function deliver(message: Deliverable) {
     const m = message as {
       jsonrpc?: unknown
-      id?: number | string
+      id?: number | string | null
       method?: string
       result?: unknown
       error?: unknown
       params?: unknown
     }
-    if (typeof m.id !== 'undefined' && typeof m.method !== 'string' && ('result' in m || 'error' in m)) {
-      const handlers = pending.get(m.id)
-      if (handlers) {
-        pending.delete(m.id)
-        if (seenResponseIds.has(m.id)) {
-          handlers.reject(new Error(`codex protocol failure: duplicate response id ${String(m.id)}`))
-          return
-        }
-        seenResponseIds.add(m.id)
-        if ('result' in m) handlers.resolve(m.result)
-        else handlers.reject(m.error)
+    const hasId = typeof m.id !== 'undefined'
+    const isResponse = hasId && typeof m.method !== 'string' && ('result' in m || 'error' in m)
+    if (isResponse) {
+      if (seenResponseIds.has(m.id!)) {
+        notifyProtocolFailure('duplicate-response-id', `duplicate response id ${String(m.id)}`)
         return
       }
+      const handlers = pending.get(m.id!)
+      if (!handlers) {
+        notifyProtocolFailure('unexpected-response-id', `response for unknown request id ${String(m.id)}`)
+        return
+      }
+      pending.delete(m.id!)
+      seenResponseIds.add(m.id!)
+      if ('result' in m && 'error' in m) {
+        notifyProtocolFailure('invalid-response', `response id ${String(m.id)} contained both result and error`)
+        return
+      }
+      if ('result' in m) handlers.resolve(m.result)
+      else handlers.reject(m.error)
+      return
     }
     for (const listener of listeners) listener(message as CodexJsonRpcMessage)
   }
@@ -179,18 +211,18 @@ async function buildCodexServerHandle(input: CodexServerHandleBuilder): Promise<
         try {
           parsed = JSON.parse(line)
         } catch {
-          exitCause = { kind: 'malformed-stdout' }
-          rejectAllPending(new Error(`codex protocol failure: malformed JSON-RPC line: ${line.slice(0, 80)}`))
-          for (const listener of listeners) {
-            listener({
-              jsonrpc: '2.0',
-              method: 'protocol-failure',
-              params: { reason: 'malformed-stdout', line: line.slice(0, 256) },
-            })
-          }
+          notifyProtocolFailure(
+            'malformed-stdout',
+            `malformed JSON-RPC line: ${redactCodexCredentialString(line).slice(0, 80)}`,
+          )
+          return
+        }
+        if (!isJsonRpcEnvelope(parsed)) {
+          notifyProtocolFailure('invalid-stdout-envelope', 'stdout line was not a JSON-RPC 2.0 envelope')
           return
         }
         deliver(parsed as Deliverable)
+        if (protocolError) return
       }
       newlineIndex = buffer.indexOf('\n')
     }
@@ -198,18 +230,26 @@ async function buildCodexServerHandle(input: CodexServerHandleBuilder): Promise<
 
   child.stderr.setEncoding('utf8')
   child.stderr.on('data', () => {
-    /* stderr is diagnostic-only; we never surface its content */
+    /* stderr is diagnostic-only; it is never parsed as JSON-RPC or forwarded. */
+  })
+
+  child.on('error', (cause) => {
+    if (closed) return
+    notifyProtocolFailure('child-error', `codex app-server process error: ${errorMessage(cause)}`)
   })
 
   child.on('exit', (code) => {
     exited = true
-    exitCause = exitCause ?? { kind: 'child-exit', code }
-    rejectAllPending(new Error(`codex app-server exited (code=${code ?? 'null'}) before response`))
+    const message = `codex app-server exited (code=${code ?? 'null'}) before response`
+    if (!closed) notifyProtocolFailure('child-exit', message)
+    else rejectAllPending(new Error(message))
   })
 
   function send<P, R>(request: { readonly method: string; readonly params?: P; readonly id: number }): Promise<R> {
-    if (exited) {
-      return Promise.reject(new Error(`codex app-server exited before request ${request.method} could be sent`))
+    if (closed || exited || protocolError) {
+      return Promise.reject(
+        protocolError ?? new Error(`codex app-server exited before request ${request.method} could be sent`),
+      )
     }
     if (!isCodexLockedMethod(request.method)) {
       return Promise.reject(
@@ -219,45 +259,67 @@ async function buildCodexServerHandle(input: CodexServerHandleBuilder): Promise<
       )
     }
     const id = request.id
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return Promise.reject(
+        notifyProtocolFailure('invalid-request-id', `request id ${String(id)} is not a positive integer`),
+      )
+    }
+    if (pending.has(id) || seenResponseIds.has(id)) {
+      return Promise.reject(
+        notifyProtocolFailure('duplicate-request-id', `duplicate response id ${String(id)}: request id was reused`),
+      )
+    }
     return new Promise<R>((resolve, reject) => {
       pending.set(id, { resolve: (value) => resolve(value as R), reject })
       const envelope = JSON.stringify({ jsonrpc: '2.0', id, method: request.method, params: request.params ?? {} })
-      child.stdin.write(`${envelope}\n`, (error) => {
-        if (error) {
-          pending.delete(id)
-          reject(error)
-        }
-      })
+      try {
+        child.stdin.write(`${envelope}\n`, (error) => {
+          if (error) {
+            pending.delete(id)
+            reject(
+              notifyProtocolFailure('stdin-write', `codex app-server request write failed: ${errorMessage(error)}`),
+            )
+          }
+        })
+      } catch (cause) {
+        pending.delete(id)
+        reject(notifyProtocolFailure('stdin-write', `codex app-server request write failed: ${errorMessage(cause)}`))
+      }
     })
   }
 
   function denyServerRequest(id: number | string, reason: string): void {
-    if (exited) return
+    if (closed || exited || protocolError) return
     const envelope = JSON.stringify({
       jsonrpc: '2.0',
       id,
-      result: { ok: false, denied: true, reason },
+      result: { ok: false, denied: true, reason: redactCodexCredentialString(reason) },
     })
-    child.stdin.write(`${envelope}\n`)
+    try {
+      child.stdin.write(`${envelope}\n`)
+    } catch (cause) {
+      notifyProtocolFailure('stdin-write', `codex app-server denial write failed: ${errorMessage(cause)}`)
+    }
   }
 
   function notify<P>(notification: { readonly method: string; readonly params?: P }): boolean {
-    if (exited) return false
+    if (closed || exited || protocolError) return false
     if (!isCodexLockedMethod(notification.method)) return false
-    let written = true
     try {
       const envelope = JSON.stringify({
         jsonrpc: '2.0',
         method: notification.method,
         params: notification.params ?? {},
       })
-      child.stdin.write(`${envelope}\n`, (error) => {
-        if (error) written = false
+      const accepted = child.stdin.write(`${envelope}\n`, (error) => {
+        if (error)
+          notifyProtocolFailure('stdin-write', `codex app-server notification write failed: ${errorMessage(error)}`)
       })
-    } catch {
-      written = false
+      return accepted
+    } catch (cause) {
+      notifyProtocolFailure('stdin-write', `codex app-server notification write failed: ${errorMessage(cause)}`)
+      return false
     }
-    return written
   }
 
   function subscribe(listener: (message: unknown) => void): () => void {
@@ -268,12 +330,20 @@ async function buildCodexServerHandle(input: CodexServerHandleBuilder): Promise<
   }
 
   async function close(): Promise<void> {
-    if (exited) return
-    child.stdin.end()
+    if (closed) return
+    closed = true
+    rejectAllPending(new Error('codex app-server handle closed'))
     try {
-      child.kill('SIGTERM')
+      child.stdin.end()
     } catch {
       /* best effort */
+    }
+    if (!exited) {
+      try {
+        child.kill('SIGTERM')
+      } catch {
+        /* best effort */
+      }
     }
     await boundedWait(
       () =>
@@ -298,9 +368,35 @@ async function buildCodexServerHandle(input: CodexServerHandleBuilder): Promise<
     notify,
     denyServerRequest,
     subscribe,
+    hasExited: () => exited,
     close,
     pid: child.pid,
   }
+}
+
+function isJsonRpcEnvelope(value: unknown): value is CodexJsonRpcMessage {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as {
+    jsonrpc?: unknown
+    id?: unknown
+    method?: unknown
+    result?: unknown
+    error?: unknown
+  }
+  if (candidate.jsonrpc !== '2.0') return false
+  if (candidate.method !== undefined) {
+    if (typeof candidate.method !== 'string') return false
+    if (candidate.id !== undefined && typeof candidate.id !== 'string' && typeof candidate.id !== 'number') return false
+    return true
+  }
+  if (typeof candidate.id !== 'string' && typeof candidate.id !== 'number') return false
+  return 'result' in candidate !== 'error' in candidate
+}
+
+function errorMessage(cause: unknown): string {
+  if (cause instanceof Error) return cause.message || 'unknown process failure'
+  if (typeof cause === 'string') return cause
+  return 'unknown process failure'
 }
 
 export function nextCodexRequestId(): number {

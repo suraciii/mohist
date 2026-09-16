@@ -83,15 +83,19 @@ const CREDENTIAL_PATTERNS: ReadonlyArray<{
  */
 const SENSITIVE_FIELD_NAMES = new Set<string>([
   'apiKey',
+  'apikey',
   'api_key',
   'token',
   'accessToken',
+  'accesstoken',
   'access_token',
   'refreshToken',
+  'refreshtoken',
   'refresh_token',
   'bearer',
   'authorization',
   'sessionToken',
+  'sessiontoken',
   'session_token',
   'password',
   'secret',
@@ -142,7 +146,8 @@ export function redactCodexCredentialEnvelope(value: unknown): string {
   return JSON.stringify(redactCodexCredentialValue(value))
 }
 
-function redactCodexCredentialValue(value: unknown): unknown {
+/** Redact a structured value while preserving its JSON-compatible shape. */
+export function redactCodexCredentialValue(value: unknown): unknown {
   if (value === null || value === undefined) return value
   if (typeof value === 'string') {
     const masked = maskCodexCredentialString(value)
@@ -154,7 +159,7 @@ function redactCodexCredentialValue(value: unknown): unknown {
     const source = value as Record<string, unknown>
     const next: Record<string, unknown> = {}
     for (const [key, entry] of Object.entries(source)) {
-      if (SENSITIVE_FIELD_NAMES.has(key)) {
+      if (SENSITIVE_FIELD_NAMES.has(key) || SENSITIVE_FIELD_NAMES.has(key.toLowerCase())) {
         next[key] = REDACTED
         continue
       }

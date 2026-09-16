@@ -19,6 +19,7 @@
 import type { CodexDiagnostic, CodexResult } from './types.js'
 import { isCodexInitializeResult, type CodexInitializeResult } from './protocol-types.js'
 import { normalizeIncompatibleRuntimeCodex, normalizeUnavailableRuntimeCodex } from './errors.js'
+import { redactCodexCredentialString } from './credential.js'
 
 /**
  * The narrow shape of an app-server child that the handshake drives.
@@ -45,7 +46,10 @@ export interface CodexInitializationTransport {
 export interface CodexInitializationOptions {
   readonly managedCodexHome: string
   readonly startupTimeoutMs: number
-  readonly clock?: { readonly now: () => number }
+  readonly clock?: {
+    readonly setTimeout: (callback: () => void, delayMs: number) => unknown
+    readonly clearTimeout: (handle: unknown) => void
+  }
 }
 
 export interface CodexInitializationOutcome {
@@ -90,25 +94,51 @@ export async function performCodexInitialization(
     return { ok: false, error, diagnostics: error.diagnostics }
   }
   let response: unknown
+  let timeoutHandle: unknown
+  const startupTimeout = new Promise<never>((_, reject) => {
+    const callback = () => reject(new Error(`Codex app-server initialization exceeded ${options.startupTimeoutMs}ms`))
+    timeoutHandle = options.clock
+      ? options.clock.setTimeout(callback, options.startupTimeoutMs)
+      : setTimeout(callback, options.startupTimeoutMs)
+  })
   try {
-    response = await transport.send({ id: 1, method: 'initialize', params: {} })
+    response = await Promise.race([transport.send({ id: 1, method: 'initialize', params: {} }), startupTimeout])
   } catch (cause) {
-    const message = cause instanceof Error ? cause.message : 'initialize request rejected'
+    const message = cause instanceof Error ? redactCodexCredentialString(cause.message) : 'initialize request rejected'
+    const timedOut = message.includes('initialization exceeded')
     const diagnostic: CodexDiagnostic = {
       severity: 'error',
-      code: 'initialize-failed',
+      code: timedOut ? 'startup-timeout' : 'initialize-failed',
       message,
     }
     diagnostics.push(diagnostic)
     const error = normalizeUnavailableRuntimeCodex(diagnostics)
     return { ok: false, error, diagnostics: error.diagnostics }
+  } finally {
+    if (timeoutHandle !== undefined) {
+      if (options.clock) options.clock.clearTimeout(timeoutHandle)
+      else clearTimeout(timeoutHandle as ReturnType<typeof setTimeout>)
+    }
   }
   const result = initializeResult(response)
-  if (result === null) {
+  if (result === null || result.protocolVersion !== 'v2') {
     const diagnostic: CodexDiagnostic = {
       severity: 'error',
       code: 'incompatible-runtime',
-      message: 'Codex initialize response did not match the locked v2 subset; refusing to admit the protocol',
+      message:
+        result === null
+          ? 'Codex initialize response did not match the locked v2 subset; refusing to admit the protocol'
+          : `Codex app-server protocol version ${result.protocolVersion} is outside the locked v2 protocol`,
+    }
+    diagnostics.push(diagnostic)
+    const error = normalizeIncompatibleRuntimeCodex(diagnostics)
+    return { ok: false, error, diagnostics: error.diagnostics }
+  }
+  if (containsExperimentalApi(result)) {
+    const diagnostic: CodexDiagnostic = {
+      severity: 'error',
+      code: 'experimental-api-rejected',
+      message: 'Codex app-server advertised experimental APIs; refusing to admit the protocol',
     }
     diagnostics.push(diagnostic)
     const error = normalizeIncompatibleRuntimeCodex(diagnostics)
@@ -118,7 +148,9 @@ export async function performCodexInitialization(
     const diagnostic: CodexDiagnostic = {
       severity: 'error',
       code: 'incompatible-runtime',
-      message: `Codex app-server responded with codexHome=${result.codexHome}; expected the managed ${options.managedCodexHome}`,
+      message: redactCodexCredentialString(
+        `Codex app-server responded with codexHome=${result.codexHome}; expected the managed ${options.managedCodexHome}`,
+      ),
     }
     diagnostics.push(diagnostic)
     const error = normalizeIncompatibleRuntimeCodex(diagnostics)
@@ -170,6 +202,7 @@ function initializeResult(value: unknown): CodexInitializeResult | null {
 export function codexInitializationTransportFromHandle(handle: {
   send<P, R>(request: { readonly method: string; readonly params?: P; readonly id: number }): Promise<R>
   notify?: (envelope: { readonly method: string; readonly params?: unknown }) => boolean
+  hasExited?: () => boolean
 }): CodexInitializationTransport {
   return {
     async send(request) {
@@ -180,11 +213,20 @@ export function codexInitializationTransportFromHandle(handle: {
       return handle.notify(notification)
     },
     hasExited() {
-      // The handle does not currently surface an exited state — the
-      // send() rejection path is the canonical exit signal. We rely
-      // on the runtime's attemptStart to fence the spawned handle
-      // after spawn failures.
-      return false
+      return handle.hasExited?.() ?? false
     },
   }
+}
+
+function containsExperimentalApi(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  if (Array.isArray(value)) return value.some(containsExperimentalApi)
+  for (const [key, entry] of Object.entries(value)) {
+    const normalized = key.toLowerCase()
+    if (normalized.includes('experimental') || normalized === 'capabilities' || normalized === 'clientcapabilities') {
+      return true
+    }
+    if (containsExperimentalApi(entry)) return true
+  }
+  return false
 }

@@ -30,9 +30,13 @@
  * production code wires the real implementations.
  */
 
+import { join } from 'node:path'
 import type { CodexCatalog, CodexClock, CodexDiagnostic, CodexResult } from './types.js'
 import { CODEX_SUPPORTED_VERSION_RANGE } from './types.js'
 import { normalizeIncompatibleRuntimeCodex, normalizeUnavailableRuntimeCodex } from './errors.js'
+import { redactCodexCredentialDiagnostic, redactCodexCredentialString } from './credential.js'
+import { currentRunnerFileSystem, currentRunnerResources } from '../../system/filesystem.js'
+import { runCommand } from '../../system/process.js'
 
 export interface CodexCliProbe {
   /**
@@ -74,11 +78,24 @@ export interface CodexReadinessProbe {
   readonly catalog: CodexCatalogLoader
 }
 
+export interface CodexAppServerReadiness {
+  readonly started: boolean
+  readonly initialized: boolean
+  readonly startupElapsedMs?: number
+}
+
 export interface CodexReadinessOptions {
   readonly managedCodexHome: string
   readonly startupTimeoutMs: number
   readonly probe: CodexReadinessProbe
+  readonly appServer?: CodexAppServerReadiness
   readonly clock?: CodexClock
+}
+
+export interface DefaultCodexReadinessProbeOptions {
+  readonly managedCodexHome: string
+  readonly cwd: string
+  readonly startupTimeoutMs?: number
 }
 
 export interface CodexReadinessOutcome {
@@ -102,7 +119,34 @@ export async function evaluateCodexReadiness(
   options: CodexReadinessOptions,
 ): Promise<CodexResult<CodexReadinessOutcome>> {
   const diagnostics: CodexDiagnostic[] = []
-  const binaryPath = await options.probe.cli.resolveCodexBinary()
+  const appServer = options.appServer
+  if (
+    appServer &&
+    (!appServer.started ||
+      !appServer.initialized ||
+      (appServer.startupElapsedMs !== undefined && appServer.startupElapsedMs > options.startupTimeoutMs))
+  ) {
+    const diagnostic: CodexDiagnostic = {
+      severity: 'error',
+      code: !appServer.started || !appServer.initialized ? 'app-server-not-initialized' : 'startup-timeout',
+      message: !appServer.started
+        ? 'Codex app-server did not start within the startup budget; inspect the process diagnostic and CLI installation'
+        : !appServer.initialized
+          ? 'Codex app-server did not complete the initialize handshake within the startup budget'
+          : `Codex app-server startup exceeded the ${options.startupTimeoutMs}ms budget`,
+    }
+    const error = normalizeUnavailableRuntimeCodex([diagnostic])
+    return { ok: false, error, diagnostics: error.diagnostics }
+  }
+
+  let binaryPath: string | null
+  try {
+    binaryPath = await options.probe.cli.resolveCodexBinary()
+  } catch (cause) {
+    const diagnostic = redactedDiagnostic('cli-probe-failed', 'Could not resolve the Codex CLI executable', cause)
+    const error = normalizeUnavailableRuntimeCodex([diagnostic])
+    return { ok: false, error, diagnostics: error.diagnostics }
+  }
   if (!binaryPath) {
     const diagnostic: CodexDiagnostic = {
       severity: 'error',
@@ -114,12 +158,25 @@ export async function evaluateCodexReadiness(
     const error = normalizeUnavailableRuntimeCodex(diagnostics)
     return { ok: false, error, diagnostics: error.diagnostics }
   }
-  const version = await options.probe.cli.resolveCodexVersion(binaryPath)
+  let version: string | null
+  try {
+    version = await options.probe.cli.resolveCodexVersion(binaryPath)
+  } catch (cause) {
+    const diagnostic = redactedDiagnostic(
+      'cli-version-probe-failed',
+      'Could not determine the Codex CLI version',
+      cause,
+    )
+    const error = normalizeUnavailableRuntimeCodex([diagnostic])
+    return { ok: false, error, diagnostics: error.diagnostics }
+  }
   if (!version) {
     const diagnostic: CodexDiagnostic = {
       severity: 'error',
       code: 'cli-version-unknown',
-      message: `Could not determine the Codex CLI version at ${binaryPath}; refusing to claim Codex work`,
+      message: redactCodexCredentialString(
+        `Could not determine the Codex CLI version at ${binaryPath}; refusing to claim Codex work`,
+      ),
     }
     diagnostics.push(diagnostic)
     const error = normalizeUnavailableRuntimeCodex(diagnostics)
@@ -129,18 +186,33 @@ export async function evaluateCodexReadiness(
     const diagnostic: CodexDiagnostic = {
       severity: 'error',
       code: 'cli-version-incompatible',
-      message: `Codex CLI version ${version} is outside the supported range ${CODEX_SUPPORTED_VERSION_RANGE.min} (exclusive of ${CODEX_SUPPORTED_VERSION_RANGE.max})`,
+      message: redactCodexCredentialString(
+        `Codex CLI version ${version} is outside the supported range ${CODEX_SUPPORTED_VERSION_RANGE.min} (exclusive of ${CODEX_SUPPORTED_VERSION_RANGE.max})`,
+      ),
     }
     diagnostics.push(diagnostic)
     const error = normalizeIncompatibleRuntimeCodex(diagnostics)
     return { ok: false, error, diagnostics: error.diagnostics }
   }
-  const authenticated = await options.probe.authentication.hasManagedAuthentication(options.managedCodexHome)
+  let authenticated: boolean
+  try {
+    authenticated = await options.probe.authentication.hasManagedAuthentication(options.managedCodexHome)
+  } catch (cause) {
+    const diagnostic = redactedDiagnostic(
+      'managed-auth-probe-failed',
+      'Could not inspect managed Codex authentication; refusing to claim Codex work',
+      cause,
+    )
+    const error = normalizeUnavailableRuntimeCodex([diagnostic])
+    return { ok: false, error, diagnostics: error.diagnostics }
+  }
   if (!authenticated) {
     const diagnostic: CodexDiagnostic = {
       severity: 'error',
       code: 'managed-auth-missing',
-      message: `No managed Codex authentication found at ${options.managedCodexHome}/auth.json; authenticate the operator before claiming Codex work`,
+      message: redactCodexCredentialString(
+        `No managed Codex authentication found at ${options.managedCodexHome}/auth.json; authenticate the operator before claiming Codex work`,
+      ),
     }
     diagnostics.push(diagnostic)
     const error = normalizeUnavailableRuntimeCodex(diagnostics)
@@ -150,22 +222,28 @@ export async function evaluateCodexReadiness(
   try {
     catalog = await options.probe.catalog.loadCatalog()
   } catch (cause) {
-    const diagnostic: CodexDiagnostic = {
-      severity: 'error',
-      code: 'catalog-refresh-failed',
-      message: `Codex model catalog refresh failed: ${cause instanceof Error ? cause.message : 'unknown catalog failure'}`,
-    }
+    const diagnostic = redactedDiagnostic('catalog-refresh-failed', 'Codex model catalog refresh failed', cause)
     diagnostics.push(diagnostic)
     const error = normalizeUnavailableRuntimeCodex(diagnostics)
     return { ok: false, error, diagnostics: error.diagnostics }
   }
-  const catalogDiagnostic = options.probe.catalog.diagnostic?.() ?? null
+  const rawCatalogDiagnostic = options.probe.catalog.diagnostic?.() ?? null
+  const catalogDiagnostic = rawCatalogDiagnostic
+    ? (() => {
+        const redacted = redactCodexCredentialDiagnostic(rawCatalogDiagnostic)
+        return {
+          ...rawCatalogDiagnostic,
+          message: redacted.message,
+          ...(redacted.details === undefined ? {} : { details: redacted.details as Record<string, unknown> }),
+        }
+      })()
+    : null
   if (catalogDiagnostic) diagnostics.push(catalogDiagnostic)
-  if (!catalog || catalog.models.length === 0) {
+  if (!catalog || !catalog.complete || catalog.models.length === 0) {
     const diagnostic: CodexDiagnostic = catalogDiagnostic ?? {
       severity: 'error',
       code: 'catalog-empty',
-      message: 'Codex model catalog loaded empty or failed to load; refusing to claim Codex work',
+      message: 'Codex model catalog loaded empty, incomplete, or failed to load; refusing to claim Codex work',
     }
     if (!catalogDiagnostic) diagnostics.push(diagnostic)
     const error = normalizeUnavailableRuntimeCodex(diagnostics)
@@ -182,6 +260,71 @@ export async function evaluateCodexReadiness(
     },
     diagnostics,
   }
+}
+
+/**
+ * Build the production probes used by RunnerHost. The process probe uses
+ * the managed CODEX_HOME and never reads or forwards a personal Codex home;
+ * the authentication probe inspects only the managed auth file.
+ */
+export function createDefaultCodexReadinessProbe(options: DefaultCodexReadinessProbeOptions): CodexReadinessProbe {
+  const timeoutMs = options.startupTimeoutMs ?? 10_000
+  const environment = {
+    ...(currentRunnerResources()?.environment ?? process.env),
+    CODEX_HOME: options.managedCodexHome,
+  }
+  const runVersionCommand = async (binary: string) => {
+    const result = await runCommand(binary, ['--version'], options.cwd, new AbortController().signal, environment, {
+      timeoutMs,
+    })
+    return result
+  }
+  const parseVersion = (output: string): string | null => {
+    const match = output.match(/\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b/)
+    return match?.[0] ?? null
+  }
+  return {
+    cli: {
+      async resolveCodexBinary() {
+        try {
+          const result = await runVersionCommand('codex')
+          return result.exitCode === 0 && parseVersion(`${result.stdout}\n${result.stderr}`) !== null ? 'codex' : null
+        } catch {
+          return null
+        }
+      },
+      async resolveCodexVersion(binaryPath) {
+        try {
+          const result = await runVersionCommand(binaryPath)
+          return result.exitCode === 0 ? parseVersion(`${result.stdout}\n${result.stderr}`) : null
+        } catch {
+          return null
+        }
+      },
+    },
+    authentication: {
+      async hasManagedAuthentication(codexHome) {
+        const authPath = join(codexHome, 'auth.json')
+        if (!currentRunnerFileSystem().exists(authPath)) return false
+        try {
+          return (await currentRunnerFileSystem().readText(authPath)).trim().length > 0
+        } catch {
+          return false
+        }
+      },
+    },
+    catalog: {
+      async loadCatalog() {
+        return null
+      },
+    },
+  }
+}
+
+function redactedDiagnostic(code: string, prefix: string, cause: unknown): CodexDiagnostic {
+  const raw = cause instanceof Error ? cause.message : String(cause)
+  const redacted = redactCodexCredentialDiagnostic({ message: `${prefix}: ${raw}` })
+  return { severity: 'error', code, message: redacted.message }
 }
 
 /**
