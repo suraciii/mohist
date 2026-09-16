@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useAgentActivity, type AgentActivitySession, type AgentActivityWaiting } from '../../../entities/agent'
 import { useProjectEvents, type ProjectEventDto, type ProjectEventTypeFilter } from '../../../entities/project'
-import { useRunners, type RunnerStatusRow } from '../../../entities/runner'
+import { runnerStatusLabels, useRunners, type RunnerStatusRow } from '../../../entities/runner'
 
 export type ActivityEventType = 'issue-state' | 'workflow-stage' | 'agent-session' | 'runner' | 'failure'
 export type ActivityAttention = 'failure' | 'approval' | 'blocked' | 'routine'
@@ -18,7 +18,7 @@ export interface ActivityEventTargets {
   workflow?: { issueNumber?: number; label: string; path?: string }
   session?: { sessionId: string; label: string; isGeneric: boolean; path?: string }
   agent?: { agentId: string; agentName: string | null; label: string; path?: string }
-  runner?: { runnerId: string; label: string; path?: string; scope?: 'application' | 'project' }
+  runner?: { runnerId: string; label: string; path?: string }
 }
 
 export interface ActivityEvent {
@@ -200,7 +200,6 @@ function runnerTarget(runnerId: string) {
     runnerId,
     label: `Runner ${runnerId}`,
     path: fromActivity(`/runners/${encodeURIComponent(runnerId)}`),
-    scope: 'application' as const,
   }
 }
 
@@ -450,27 +449,28 @@ function buildWaitingEntry(waiting: AgentActivityWaiting): ActivityEvent {
 }
 
 function buildRunnerSnapshotEntry(runner: RunnerStatusRow): ActivityEvent | null {
+  const labels = runnerStatusLabels(runner)
+  const hasAttention =
+    runner.admission.state === 'blocked' || runner.presence.state !== 'online' || runner.control.state !== 'connected'
   const hasActiveWork = runner.activeWorks.length > 0
-  if (runner.admission.state === 'ready' && !hasActiveWork) return null
+  if (!hasAttention && !hasActiveWork) return null
 
-  const attention: ActivityAttention = runner.admission.state === 'blocked' ? 'blocked' : 'routine'
-  const label = runner.admission.state === 'blocked' ? 'admission blocked' : `${runner.activeWorks.length} active work`
   const target = runnerTarget(runner.identity.id)
   const targets: ActivityEventTargets = {
     runner: target,
     primary: { path: target.path, label: `Runner ${runner.identity.id}`, scope: 'application' },
   }
+  const reasonCodes = runner.admission.reasonCodes
+  const details = [...labels, ...reasonCodes]
+  if (details.length === 0) details.push('admission ready')
 
   return {
     id: `runner-snapshot-${runner.identity.id}`,
     type: 'runner',
-    attention,
+    attention: hasAttention ? 'blocked' : 'routine',
     time: runner.presence.lastObservedAt ?? FALLBACK_EVENT_TIME,
-    title: `Runner ${runner.identity.id} ${label}`,
-    description:
-      runner.admission.reasonCodes.length > 0
-        ? runner.admission.reasonCodes.join(', ')
-        : `${runner.activeWorks.length} active work${runner.activeWorks.length === 1 ? '' : 's'}`,
+    title: `Runner ${runner.identity.id} ${labels[0]}`,
+    description: details.join(' · '),
     targets,
   }
 }

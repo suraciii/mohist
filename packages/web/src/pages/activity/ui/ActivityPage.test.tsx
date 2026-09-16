@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import { RunnerSummary } from '../../../widgets/runner-status'
 import { ActivityPage, type ActivityPageDependencies } from './ActivityPage'
-import type { RunnerStatusEntry } from '../../../entities/runner'
+import { deriveRunnerSummary, type RunnerStatusEntry } from '../../../entities/runner'
 
 const PROJECT = { id: 'project-1', name: 'Payments', createdAt: '', updatedAt: '', repositories: [] }
 
@@ -55,11 +55,7 @@ const dependencies: ActivityPageDependencies = {
   RunnerSummaryBadge: ({ targetPath }) => (
     <RunnerSummary
       summary={{
-        readyCount: 1,
-        blockedCount: 0,
-        activeWorkCount: 0,
-        hasAdmissibleCapacity: true,
-        rows: [makeRunner()],
+        ...deriveRunnerSummary([makeRunner()]),
         inventory: { state: 'ready', nextActions: [] },
       }}
       targetPath={targetPath}

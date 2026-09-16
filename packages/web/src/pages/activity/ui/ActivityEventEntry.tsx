@@ -52,8 +52,6 @@ const typePresentation: Record<ActivityEvent['type'], { label: string; chip: str
 
 function SecondaryTargets({ targets }: { targets: ActivityEventTargets }) {
   const toProjectPath = useProjectPath()
-  const targetPath = (path: string, scope?: 'application' | 'project') =>
-    scope === 'application' ? path : toProjectPath(path)
   const chips: ReactNode[] = []
 
   if (targets.issue?.path && targets.issue.path !== targets.primary?.path) {
@@ -109,10 +107,7 @@ function SecondaryTargets({ targets }: { targets: ActivityEventTargets }) {
     chips.push(
       <Link
         key="runner"
-        to={targetPath(
-          targets.runner.path ?? `/runners/${encodeURIComponent(targets.runner.runnerId)}?from=activity`,
-          targets.runner.scope ?? 'application',
-        )}
+        to={targets.runner.path ?? `/runners/${encodeURIComponent(targets.runner.runnerId)}?from=activity`}
         data-testid="activity-event-runner-link"
         className="inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
       >

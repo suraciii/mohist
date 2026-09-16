@@ -79,8 +79,9 @@ facts. Detailed domain contracts are indexed by [`domain-analysis.md`](domain-an
 - Agent identity, Instructions, configuration, Skills, and AgentJobs belong to
   Agent. Agent Connection binding and access policy are separate from Agent
   definition.
-- Runner registration, presence, and capacity belong to Server. Web and CLI do
-  not arbitrate them.
+- Runner registration, presence, capacity, and the global status projection
+  belong to Server. Web and CLI consume the projection and do not arbitrate or
+  Project-scope Runner facts.
 - Workspace preparation and cleanup belong to Runner. Workspace identity and
   lifecycle belong to Workspace.
 - Mohist daemon self-management belongs to Server. Runner manages only the user
@@ -117,7 +118,8 @@ dispatcher is the sole notifier. The UI reconciles after disconnect; Workflow
 progress never depends on UI push.
 
 - Logs, metrics, traces, notifications, and status pages are not business
-  authorities. Core work continues if they fail.
+  authorities. Core work continues if they fail. A Runner status page is an
+  observational snapshot and never reserves capacity or changes work.
 - Background tasks, queues, and diagnostic data have resource limits. Supporting
   capabilities degrade before resources required for business work.
 - Polling and status-query cost grows with current relevant data, not unrelated

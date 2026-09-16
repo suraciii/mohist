@@ -309,6 +309,47 @@ describe('buildActivityEvents', () => {
     expect(blocked?.description).toContain('capacity-full')
     expect(events.some((e) => e.title.includes('r2'))).toBe(false)
   })
+  it('keeps offline, disconnected, draining, full, and active-work facts visible in Runner evidence', () => {
+    const events = buildActivityEvents({
+      recordedEvents: [],
+      sessions: [],
+      waiting: [],
+      runners: [
+        makeRunner({
+          presence: { state: 'offline', lastObservedAt: null },
+          control: { state: 'disconnected', generation: null },
+          admission: {
+            state: 'blocked',
+            reasonCodes: ['presence-offline', 'control-disconnected', 'draining', 'capacity-full'],
+          },
+          drain: { active: true, kind: 'generic', updateInterruptId: null },
+          capacity: { used: 2, total: 2 },
+          activeWorks: [
+            {
+              workId: 'work-1',
+              ownerKind: 'workflow',
+              ownerId: 'workflow-1',
+              workType: 'workflow',
+              stage: 'Build',
+              title: 'Build',
+              issue: null,
+            },
+          ],
+        }),
+      ],
+    })
+
+    const runner = events.find((event) => event.type === 'runner')
+    expect(runner?.attention).toBe('blocked')
+    expect(runner?.title).toContain('offline')
+    expect(runner?.description).toContain('control disconnected')
+    expect(runner?.description).toContain('draining')
+    expect(runner?.description).toContain('capacity full')
+    expect(runner?.description).toContain('1 active work')
+    expect(runner?.description).toContain('capacity-full')
+    expect(runner?.targets.runner?.path).toBe('/runners/runner-1?from=activity')
+  })
+
   it('generates approval attention from waiting rows', () => {
     const events = buildActivityEvents({
       recordedEvents: [],

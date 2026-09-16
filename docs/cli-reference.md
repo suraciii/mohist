@@ -709,6 +709,17 @@ the Server-provided first-install action. Known offline or revoked rows use only
 the Server-provided start or re-enrollment action; the CLI does not invent a
 Runner recovery command.
 
+Runner status exposes stable admission reason codes such as
+`presence-offline`, `presence-stale`, `credential-revoked`,
+`credential-missing`, `control-disconnected`, `draining`,
+`admission-observation-missing`, `capacity-full`,
+`provider-policy-invalid`, and `runtime-event-queue-unavailable`. Presence,
+control, admission, drain, capacity, active owners, and Runtime readiness are
+separate fields; zero active owners does not mean `idle` or healthy readiness.
+Every list or view response includes `observedAt`, captured at the start of one
+observational read. Definitions and ledgers may change during assembly, so the
+snapshot is not a reservation and a later claim remains authoritative.
+
 `server` represents only the connected Mohist Server application. Use `mo service <action> <server|runner|slack>` to start, stop, inspect status, or read logs from a managed local process. In particular, `mo service status runner`
 reads the local service manager and performs no HTTP request; it is distinct
 from the remote `mo runner status` command. `slack` is the optional

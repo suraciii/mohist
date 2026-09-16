@@ -37,16 +37,8 @@ const approveIssueFn: NonNullable<AttentionHeroProps['approveIssueFn']> = async 
   return { issue: makeIssue({ number: issueNumber }), context: null, message: 'approved' }
 }
 
-function AttentionHero(
-  props: Omit<AttentionHeroProps, 'dataHook' | 'approveIssueFn'>,
-) {
-  return (
-    <DefaultAttentionHero
-      {...props}
-      dataHook={dataHook}
-      approveIssueFn={approveIssueFn}
-    />
-  )
+function AttentionHero(props: Omit<AttentionHeroProps, 'dataHook' | 'approveIssueFn'>) {
+  return <DefaultAttentionHero {...props} dataHook={dataHook} approveIssueFn={approveIssueFn} />
 }
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
@@ -118,7 +110,6 @@ beforeEach(() => {
   _issues = []
   _agentStatus = makeAgentStatus({ runnerAvailable: true })
   _approvalWait = null
-
 })
 
 afterEach(() => {
@@ -227,9 +218,9 @@ describe('AttentionHero - has-attention state', () => {
 
     const shared = deriveAttentionItems(issues, agentStatus)
     expect(shared).toHaveLength(3)
-    expect(shared[0]).toMatchObject({ label: 'Approval needed', issueNumber: 10, })
-    expect(shared[1]).toMatchObject({ label: 'Needs action', issueNumber: 20, })
-    expect(shared[2]).toMatchObject({ label: 'Integration failed', issueNumber: 30, })
+    expect(shared[0]).toMatchObject({ label: 'Approval needed', issueNumber: 10 })
+    expect(shared[1]).toMatchObject({ label: 'Needs action', issueNumber: 20 })
+    expect(shared[2]).toMatchObject({ label: 'Integration failed', issueNumber: 30 })
 
     const rendered = screen.getAllByTestId('attention-item')
     expect(rendered).toHaveLength(shared.length)
@@ -389,11 +380,13 @@ describe('AttentionHero - per-item actions', () => {
 
 describe('AttentionHero - runner-down entry', () => {
   it('renders a Runner-down entry when an active workflow is affected', async () => {
-    _issues = [makeIssue({
-      status: IssueStatus.InProgress,
-      health: IssueHealth.Active,
-      workflowStage: WorkflowStage.Build,
-    })]
+    _issues = [
+      makeIssue({
+        status: IssueStatus.InProgress,
+        health: IssueHealth.Active,
+        workflowStage: WorkflowStage.Build,
+      }),
+    ]
     _agentStatus = makeAgentStatus({
       runnerAvailable: false,
       runnerMessage: 'Embedded runner is offline',
@@ -406,7 +399,7 @@ describe('AttentionHero - runner-down entry', () => {
     })
 
     expect(screen.getByTestId('runner-down-message')).toHaveTextContent('Embedded runner is offline')
-    expect(screen.getByTestId('runner-down-link')).toHaveAttribute('href', '/demo/activity')
+    expect(screen.getByTestId('runner-down-link')).toHaveAttribute('href', '/runners')
 
     expect(screen.queryByText('All clear')).not.toBeInTheDocument()
   })
@@ -443,11 +436,13 @@ describe('AttentionHero - runner-down entry', () => {
   })
 
   it('renders Runner-down entry with the default message when runnerMessage is null', async () => {
-    _issues = [makeIssue({
-      status: IssueStatus.InProgress,
-      health: IssueHealth.Active,
-      workflowStage: WorkflowStage.Build,
-    })]
+    _issues = [
+      makeIssue({
+        status: IssueStatus.InProgress,
+        health: IssueHealth.Active,
+        workflowStage: WorkflowStage.Build,
+      }),
+    ]
     _agentStatus = makeAgentStatus({ runnerAvailable: false, runnerMessage: null })
 
     renderHero()
@@ -460,11 +455,13 @@ describe('AttentionHero - runner-down entry', () => {
   })
 
   it('renders Runner-down entry with default message when runnerMessage is undefined', async () => {
-    _issues = [makeIssue({
-      status: IssueStatus.InProgress,
-      health: IssueHealth.Active,
-      workflowStage: WorkflowStage.Build,
-    })]
+    _issues = [
+      makeIssue({
+        status: IssueStatus.InProgress,
+        health: IssueHealth.Active,
+        workflowStage: WorkflowStage.Build,
+      }),
+    ]
     const status = { ...makeAgentStatus({ runnerAvailable: false }) }
     delete (status as Partial<AgentStatus>).runnerMessage
     _agentStatus = status
@@ -543,7 +540,7 @@ describe('AttentionHero - runner-capacity-limited entry', () => {
     expect(entry).toHaveAttribute('data-kind', 'runner-capacity-limited')
     expect(entry).toHaveAttribute('data-family', 'warning')
     expect(screen.getByTestId('runner-capacity-detail')).toHaveTextContent('4 of 4 slots in use')
-    expect(screen.getByTestId('runner-capacity-link')).toHaveAttribute('href', '/demo/activity')
+    expect(screen.getByTestId('runner-capacity-link')).toHaveAttribute('href', '/runners')
   })
 
   it('surfaces a runner-capacity-limited attention item alongside issue items', async () => {

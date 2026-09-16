@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentCostMetricDto, AgentStatus } from '../../../entities/agent'
+import type { AgentCostMetricDto } from '../../../entities/agent'
 import { IssueHealth, IssueStatus, type Issue } from '../../../entities/issue'
 import { deriveFactoryStatus, isTodayLocal } from './factory-status'
 
@@ -16,16 +16,6 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     isDraft: false,
     canStart: true,
     blocker: null,
-    ...overrides,
-  }
-}
-
-function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
-  return {
-    running: false,
-    issueNumber: null,
-    activeAgents: [],
-    capacity: { active: 0, max: 1 },
     ...overrides,
   }
 }
@@ -76,20 +66,13 @@ describe('deriveFactoryStatus', () => {
     vi.useRealTimers()
   })
 
-  it('returns zero counts and unavailable runner when inputs are undefined', () => {
-    expect(deriveFactoryStatus(undefined, undefined)).toEqual({
-      runnerAvailable: false,
+  it('returns zero counts when inputs are undefined', () => {
+    expect(deriveFactoryStatus(undefined)).toEqual({
       inFlight: 0,
       awaitingApproval: 0,
       shippedToday: 0,
       todayCost: undefined,
     })
-  })
-
-  it('treats runnerAvailable===true as available and any other value as unavailable', () => {
-    expect(deriveFactoryStatus([], makeAgentStatus({ runnerAvailable: true })).runnerAvailable).toBe(true)
-    expect(deriveFactoryStatus([], makeAgentStatus({ runnerAvailable: false })).runnerAvailable).toBe(false)
-    expect(deriveFactoryStatus([], makeAgentStatus({ runnerAvailable: undefined })).runnerAvailable).toBe(false)
   })
 
   it('counts in-flight issues using the spec rule', () => {
@@ -101,7 +84,7 @@ describe('deriveFactoryStatus', () => {
       makeIssue({ status: IssueStatus.InProgress, health: IssueHealth.Blocked }),
     ]
 
-    expect(deriveFactoryStatus(issues, makeAgentStatus()).inFlight).toBe(2)
+    expect(deriveFactoryStatus(issues).inFlight).toBe(2)
   })
 
   it('counts awaiting-approval issues', () => {
@@ -111,36 +94,32 @@ describe('deriveFactoryStatus', () => {
       makeIssue({}),
     ]
 
-    expect(deriveFactoryStatus(issues, makeAgentStatus()).awaitingApproval).toBe(1)
+    expect(deriveFactoryStatus(issues).awaitingApproval).toBe(1)
   })
 
   it('counts only done issues completed today as shippedToday', () => {
     const issues: Issue[] = [
       makeIssue({ status: IssueStatus.Done, health: IssueHealth.Done, completedAt: todayIso, updatedAt: todayIso }),
-      makeIssue({ status: IssueStatus.Done, health: IssueHealth.Done, completedAt: yesterdayIso, updatedAt: yesterdayIso }),
+      makeIssue({
+        status: IssueStatus.Done,
+        health: IssueHealth.Done,
+        completedAt: yesterdayIso,
+        updatedAt: yesterdayIso,
+      }),
       makeIssue({ status: IssueStatus.InProgress, health: IssueHealth.Active, updatedAt: todayIso }),
     ]
 
-    expect(deriveFactoryStatus(issues, makeAgentStatus()).shippedToday).toBe(1)
+    expect(deriveFactoryStatus(issues).shippedToday).toBe(1)
   })
 
-  it('does not count a done issue without completedAt as shippedToday (null guard)', () => {
-    const issues: Issue[] = [
-      makeIssue({ status: IssueStatus.Done, health: IssueHealth.Done, updatedAt: todayIso }),
-    ]
-
-    expect(deriveFactoryStatus(issues, makeAgentStatus()).shippedToday).toBe(0)
+  it('does not count a done issue without completedAt as shippedToday', () => {
+    expect(
+      deriveFactoryStatus([makeIssue({ status: IssueStatus.Done, health: IssueHealth.Done, updatedAt: todayIso })])
+        .shippedToday,
+    ).toBe(0)
   })
 
-  it('does not count a done issue completed on a prior day whose updatedAt is today', () => {
-    const issues: Issue[] = [
-      makeIssue({ status: IssueStatus.Done, health: IssueHealth.Done, completedAt: yesterdayIso, updatedAt: todayIso }),
-    ]
-
-    expect(deriveFactoryStatus(issues, makeAgentStatus()).shippedToday).toBe(0)
-  })
-
-  it('returns all fields together for a mixed input', () => {
+  it('returns all issue and cost fields together for a mixed input', () => {
     const issues: Issue[] = [
       makeIssue({ status: IssueStatus.InProgress, health: IssueHealth.Active }),
       makeIssue({ status: IssueStatus.InProgress, health: IssueHealth.Active }),
@@ -148,11 +127,15 @@ describe('deriveFactoryStatus', () => {
       makeIssue({ approvalState: { status: 'awaiting', requestedAt: todayIso } }),
       makeIssue({ status: IssueStatus.Done, health: IssueHealth.Done, completedAt: todayIso, updatedAt: todayIso }),
       makeIssue({ status: IssueStatus.Done, health: IssueHealth.Done, completedAt: todayIso, updatedAt: todayIso }),
-      makeIssue({ status: IssueStatus.Done, health: IssueHealth.Done, completedAt: yesterdayIso, updatedAt: yesterdayIso }),
+      makeIssue({
+        status: IssueStatus.Done,
+        health: IssueHealth.Done,
+        completedAt: yesterdayIso,
+        updatedAt: yesterdayIso,
+      }),
     ]
 
-    expect(deriveFactoryStatus(issues, makeAgentStatus({ runnerAvailable: true }))).toEqual({
-      runnerAvailable: true,
+    expect(deriveFactoryStatus(issues)).toEqual({
       inFlight: 2,
       awaitingApproval: 2,
       shippedToday: 2,
@@ -160,28 +143,18 @@ describe('deriveFactoryStatus', () => {
     })
   })
 
-  it('leaves todayCost undefined when no metric is supplied', () => {
-    expect(deriveFactoryStatus([], makeAgentStatus()).todayCost).toBeUndefined()
-  })
-
   it('threads a populated todayCost metric through without collapsing sampleCount', () => {
-    const metric = makeTodayCost({ amount: 4.20, currency: 'USD', sampleCount: 7 })
-    const fields = deriveFactoryStatus([], makeAgentStatus(), metric)
-
-    expect(fields.todayCost).toEqual({ amount: 4.20, currency: 'USD', sampleCount: 7 })
+    const metric = makeTodayCost({ amount: 4.2, currency: 'USD', sampleCount: 7 })
+    expect(deriveFactoryStatus([], metric).todayCost).toEqual({ amount: 4.2, currency: 'USD', sampleCount: 7 })
   })
 
-  it('preserves a real zero todayCost (sampleCount > 0, amount === 0)', () => {
+  it('preserves a real zero todayCost', () => {
     const metric = makeTodayCost({ amount: 0, currency: 'USD', sampleCount: 3 })
-    const fields = deriveFactoryStatus([], makeAgentStatus(), metric)
-
-    expect(fields.todayCost).toEqual({ amount: 0, currency: 'USD', sampleCount: 3 })
+    expect(deriveFactoryStatus([], metric).todayCost).toEqual({ amount: 0, currency: 'USD', sampleCount: 3 })
   })
 
-  it('threads an empty todayCost metric (sampleCount === 0) distinct from a real zero', () => {
+  it('keeps an empty todayCost metric distinct from a real zero', () => {
     const metric = makeTodayCost({ amount: null, currency: null, sampleCount: 0 })
-    const fields = deriveFactoryStatus([], makeAgentStatus(), metric)
-
-    expect(fields.todayCost).toEqual({ amount: null, currency: null, sampleCount: 0 })
+    expect(deriveFactoryStatus([], metric).todayCost).toEqual({ amount: null, currency: null, sampleCount: 0 })
   })
 })

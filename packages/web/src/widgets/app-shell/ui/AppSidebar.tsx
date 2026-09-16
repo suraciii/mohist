@@ -19,7 +19,7 @@ import {
   SparklesIcon,
 } from 'lucide-react'
 import { useProject, useProjectPath } from '../../../entities/project'
-import { useRunnerSummary } from '../../../entities/runner'
+import { runnerSummaryText, useRunnerSummary } from '../../../entities/runner'
 import { useDeleteProject } from '../../../entities/project'
 import { useUnreadInboxCount } from '../../../entities/inbox'
 import {
@@ -233,31 +233,40 @@ function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
 
 function AgentStatusFooter() {
   const summary = useRunnerSummary()
-  const used = summary.rows.reduce((total, row) => total + (row.capacity?.used ?? 0), 0)
-  const total = summary.rows.reduce((sum, row) => sum + (row.capacity?.total ?? 0), 0)
-  const hasUnknownCapacity = summary.rows.some((row) => row.capacity?.used == null)
-  const pct = total > 0 && !hasUnknownCapacity ? Math.min(100, Math.round((used / total) * 100)) : 0
-  const label =
-    summary.rows.length === 0
+  const hasRows = summary.rows.length > 0
+  const label = summary.isLoading
+    ? 'Checking Runner status'
+    : !hasRows && summary.inventory?.state === 'first-install'
       ? 'No Runner definitions'
-      : summary.blockedCount > 0
-        ? 'Runner admission blocked'
-        : 'Runner admission ready'
+      : !hasRows || summary.isError
+        ? 'Runner status unavailable'
+        : summary.blockedCount > 0
+          ? 'Runner admission blocked'
+          : 'Runner admission ready'
+  const pct =
+    summary.capacityTotal > 0 && !summary.hasUnknownCapacity
+      ? Math.min(100, Math.round(((summary.capacityUsed ?? 0) / summary.capacityTotal) * 100))
+      : 0
 
   return (
     <div className="rounded-md px-2 py-2 text-xs space-y-1.5" data-testid="runner-sidebar-summary">
       <div className="flex items-center gap-2">
-        {summary.blockedCount > 0 || summary.rows.length === 0 ? (
-          <PowerOffIcon className="size-3.5 text-muted-foreground" />
-        ) : (
+        {hasRows && !summary.isLoading && !summary.isError && summary.blockedCount === 0 ? (
           <PowerIcon className="size-3.5 text-green-600" />
+        ) : (
+          <PowerOffIcon className="size-3.5 text-muted-foreground" />
         )}
         <span className="font-medium text-sidebar-foreground">{label}</span>
+      </div>
+      <div className="text-[10px] leading-4 text-sidebar-foreground/70" data-testid="runner-sidebar-status-facts">
+        {hasRows ? runnerSummaryText(summary) : 'No Runner snapshot available'}
       </div>
       <div className="flex items-center justify-between text-sidebar-foreground/70">
         <span>Capacity</span>
         <span className="font-mono">
-          {summary.rows.length === 0 || hasUnknownCapacity ? 'unknown' : `${used} / ${total}`}
+          {hasRows && !summary.hasUnknownCapacity
+            ? `${summary.capacityUsed ?? 0} / ${summary.capacityTotal}`
+            : 'unknown'}
         </span>
       </div>
       <div className="h-1 rounded-full bg-sidebar-accent overflow-hidden">

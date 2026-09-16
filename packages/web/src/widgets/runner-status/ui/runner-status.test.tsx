@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
-import type { RunnerStatusEntry } from '../../../entities/runner'
+import { deriveRunnerSummary, type RunnerStatusEntry } from '../../../entities/runner'
 import { RunnerList } from './RunnerList'
 import { RunnerSummary } from './RunnerSummary'
 import type { RunnerStatusSummary } from '../../../entities/runner'
@@ -32,15 +32,11 @@ function makeRow(overrides: Partial<RunnerStatusEntry> = {}): RunnerStatusEntry 
   }
 }
 
-function makeSummary(rows: RunnerStatusEntry[], inventory = { state: 'ready', nextActions: [] }): RunnerStatusSummary {
-  return {
-    readyCount: rows.filter((row) => row.admission.state === 'ready').length,
-    blockedCount: rows.filter((row) => row.admission.state === 'blocked').length,
-    activeWorkCount: rows.reduce((count, row) => count + row.activeWorks.length, 0),
-    hasAdmissibleCapacity: true,
-    rows,
-    inventory,
-  }
+function makeSummary(
+  rows: RunnerStatusEntry[],
+  inventory = { state: 'ready' as const, nextActions: [] },
+): RunnerStatusSummary {
+  return { ...deriveRunnerSummary(rows), inventory }
 }
 
 describe('RunnerSummary', () => {
@@ -64,11 +60,7 @@ describe('RunnerSummary', () => {
       <MemoryRouter>
         <RunnerSummary
           summary={{
-            readyCount: 0,
-            blockedCount: 0,
-            activeWorkCount: 0,
-            hasAdmissibleCapacity: false,
-            rows: [],
+            ...deriveRunnerSummary([]),
             inventory: {
               state: 'first-install',
               nextActions: [

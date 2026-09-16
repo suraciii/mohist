@@ -3,42 +3,49 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { type AgentStatus } from '../../../entities/agent'
-import { ProjectProvider } from '../../../entities/project'
-import { TEST_PROJECT } from '../../../../tests/test-utils'
+import { deriveRunnerSummary, type RunnerStatusEntry, type RunnerStatusSummary } from '../../../entities/runner'
 import { DashboardCapacityZone } from './DashboardCapacityZone'
 
-function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
+function makeRunner(overrides: Partial<RunnerStatusEntry> = {}): RunnerStatusEntry {
   return {
-    running: false,
-    issueNumber: null,
-    activeAgents: [],
-    capacity: { active: 0, max: 8 },
-    runnerAvailable: true,
+    identity: {
+      id: 'runner-1',
+      hostname: 'host-1',
+      kind: 'external',
+      component: null,
+      sourceRevision: null,
+      releaseId: null,
+      generation: null,
+    },
+    presence: { state: 'online', lastObservedAt: null },
+    control: { state: 'connected', generation: null },
+    admission: { state: 'ready', reasonCodes: [] },
+    capabilities: [],
+    runtimes: [],
+    capacity: { used: 0, total: 8 },
+    activeWorks: [],
+    drain: null,
+    nextActions: [],
     ...overrides,
   }
 }
 
-function renderZone(agentStatus?: AgentStatus) {
+function renderZone(summary?: RunnerStatusSummary) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
-        <MemoryRouter initialEntries={[`/${TEST_PROJECT.name}`]}>
-          <DashboardCapacityZone agentStatusHook={() => ({ data: agentStatus }) as never} />
-        </MemoryRouter>
-      </ProjectProvider>
+      <MemoryRouter>
+        <DashboardCapacityZone runnerSummaryHook={() => summary ?? deriveRunnerSummary([])} />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
 
-afterEach(() => {
-  cleanup()
-})
+afterEach(cleanup)
 
 describe('DashboardCapacityZone', () => {
-  it('renders the dashboard-zone-capacity strip with usage and link when capacity data is present', async () => {
-    renderZone(makeAgentStatus({ capacity: { active: 4, max: 8 } }))
+  it('renders global Runner capacity with usage and link', async () => {
+    renderZone(deriveRunnerSummary([makeRunner({ capacity: { used: 4, total: 8 } })]))
 
     await waitFor(() => {
       expect(screen.getByTestId('dashboard-zone-capacity')).toBeInTheDocument()
@@ -53,11 +60,11 @@ describe('DashboardCapacityZone', () => {
     expect(screen.getByTestId('dashboard-zone-capacity-count')).toHaveTextContent('4/8')
     expect(screen.getByTestId('dashboard-zone-capacity-bar')).toBeInTheDocument()
     expect(screen.getByTestId('dashboard-zone-capacity-usage')).toBeInTheDocument()
-    expect(screen.getByTestId('dashboard-zone-capacity-link')).toBeInTheDocument()
+    expect(screen.getByTestId('dashboard-zone-capacity-link')).toHaveAttribute('href', '/runners')
   })
 
-  it('marks the strip as saturated when active equals or exceeds max', async () => {
-    renderZone(makeAgentStatus({ capacity: { active: 8, max: 8 } }))
+  it('marks the strip as saturated when global capacity is full', async () => {
+    renderZone(deriveRunnerSummary([makeRunner({ capacity: { used: 8, total: 8 } })]))
 
     await waitFor(() => {
       expect(screen.getByTestId('dashboard-zone-capacity')).toHaveAttribute('data-state', 'saturated')
@@ -65,26 +72,20 @@ describe('DashboardCapacityZone', () => {
     expect(screen.getByTestId('dashboard-zone-capacity-count')).toHaveTextContent('8/8')
   })
 
-  it('collapses (renders nothing) when capacity data is absent', async () => {
+  it('preserves unknown used capacity instead of implying free slots', async () => {
+    renderZone(deriveRunnerSummary([makeRunner({ capacity: { used: null, total: 8 } })]))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dashboard-zone-capacity')).toHaveAttribute('data-state', 'unknown')
+    })
+    expect(screen.getByTestId('dashboard-zone-capacity-count')).toHaveTextContent('unknown/8')
+  })
+
+  it('renders nothing when there are no Runner definitions or configured slots', async () => {
     const { container } = renderZone()
 
     await waitFor(() => {
       expect(container.firstChild).toBeNull()
     })
-  })
-
-  it('collapses (renders nothing) when capacity.max is zero (unconfigured runner)', async () => {
-    const { container } = renderZone(makeAgentStatus({ capacity: { active: 0, max: 0 } }))
-
-    await waitFor(() => {
-      expect(container.firstChild).toBeNull()
-    })
-  })
-
-  it('links to the global Runner management path', async () => {
-    renderZone(makeAgentStatus({ capacity: { active: 2, max: 4 } }))
-
-    const link = await waitFor(() => screen.getByTestId('dashboard-zone-capacity-link'))
-    expect(link).toHaveAttribute('href', '/runners')
   })
 })

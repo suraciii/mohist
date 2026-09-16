@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 import type { AgentStatus } from '../../../entities/agent'
 import { IssueStatus, IssueHealth, WorkflowStage, type ApprovalState } from '../../../entities/issue'
 import { ProjectProvider } from '../../../entities/project'
-import { useRunnerSummary, type RunnerStatusEntry } from '../../../entities/runner'
+import { deriveRunnerSummary, useRunnerSummary, type RunnerStatusEntry } from '../../../entities/runner'
 import { makeIssue, makeIssues, mockAgentStatus } from './_kanbanBoardQueryTestUtils'
 
 const TEST_PROJECT = {
@@ -21,20 +21,7 @@ let _runners: RunnerStatusEntry[] = []
 let previousUrl = ''
 let previousHistoryState: unknown
 
-const runnerSummaryHook: typeof useRunnerSummary = () => {
-  const rows = _runners
-  const readyCount = rows.filter((row) => row.admission.state === 'ready').length
-  return {
-    readyCount,
-    blockedCount: rows.length - readyCount,
-    activeWorkCount: rows.reduce((count, row) => count + row.activeWorks.length, 0),
-    hasAdmissibleCapacity: rows.some(
-      (row) => row.admission.state === 'ready' && row.capacity?.used != null && row.capacity.used < row.capacity.total,
-    ),
-    rows,
-    inventory: null,
-  }
-}
+const runnerSummaryHook: typeof useRunnerSummary = () => deriveRunnerSummary(_runners)
 
 import { KanbanBoard } from './KanbanBoard'
 
@@ -100,7 +87,7 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
     expect(screen.getAllByText('In Progress').length).toBeGreaterThan(0)
   })
 
-  it('shows runner unavailable banner when no runner is connected', () => {
+  it('shows the global Runner inventory action when no Runner is defined', () => {
     _runners = []
 
     const agentStatus: AgentStatus = {
@@ -113,7 +100,8 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
 
     renderBoard(makeIssues(1), agentStatus)
 
-    expect(screen.getByText(/No runner is connected/i)).toBeInTheDocument()
+    expect(screen.getByText(/No Runner definitions/i)).toBeInTheDocument()
+    expect(screen.getByTestId('runner-status-banner')).toHaveAttribute('data-testid', 'runner-status-banner')
   })
 
   it('does not show runner unavailable banner when connected idle runner exists', async () => {
@@ -188,7 +176,7 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
     })
   })
 
-  it('shows runner unavailable banner when only stale or offline runners exist', () => {
+  it('distinguishes stale and disconnected global Runner facts in the banner', () => {
     _runners = [
       {
         identity: {
@@ -214,7 +202,9 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
 
     renderBoard(makeIssues(1), mockAgentStatus)
 
-    expect(screen.getByText(/No runner is connected/i)).toBeInTheDocument()
+    expect(screen.getByText(/No Runner has admissible capacity/i)).toBeInTheDocument()
+    expect(screen.getByTestId('runner-status-banner')).toHaveTextContent('stale')
+    expect(screen.getByTestId('runner-status-banner')).toHaveTextContent('control disconnected')
   })
 
   it('shows link to runner status in the banner', () => {

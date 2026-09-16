@@ -110,8 +110,9 @@ trailing slash.
   `/projects/{projectId}/epics/{epicNumber}`.
 - WorkflowRun: identity and GrainKey `workflowRunId`; ResourceKey
   `/workflow-runs/{workflowRunId}`.
-- Runner: identity and GrainKey `runnerId`; ResourceKey
-  `/projects/{projectId}/runners/{runnerId}`.
+- Runner: identity and GrainKey `runnerId`; ResourceKey `/runners/{runnerId}`.
+  Runner status is application-scoped and is assembled by Server from current
+  observations and owner ledgers; it has no Project scope.
 - WorkflowBacklog: no own identity; GrainKey `projectId`; ResourceKey
   `/projects/{projectId}/workflow-backlog`.
 - StageLock: no own identity; GrainKey is internal; ResourceKey

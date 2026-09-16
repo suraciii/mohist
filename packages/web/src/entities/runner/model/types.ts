@@ -119,8 +119,19 @@ export interface RunnerStatusDetailResponse {
 export interface RunnerStatusSummary {
   readyCount: number
   blockedCount: number
+  onlineCount: number
+  staleCount: number
+  offlineCount: number
+  disconnectedCount: number
+  drainingCount: number
+  fullCount: number
   activeWorkCount: number
+  capacityUsed: number | null
+  capacityTotal: number
+  hasUnknownCapacity: boolean
   hasAdmissibleCapacity: boolean
   rows: RunnerStatusEntry[]
   inventory: RunnerInventory | null
+  isLoading?: boolean
+  isError?: boolean
 }

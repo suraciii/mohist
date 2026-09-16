@@ -72,8 +72,49 @@ mo service status runner
 # Reads only the local service-manager unit; it performs no HTTP request.
 ```
 
-The Web UI shows the Runner-unavailable banner above the board, the Runners page,
-each Runner detail page, and heartbeat events on the Activity page.
+The Web UI reads the same Server-global projection on the dashboard headline,
+board warning, sidebar, `/runners`, `/runners/<runnerId>`, and Activity evidence.
+These surfaces use admission, presence, control, drain, capacity, and active-work
+facts independently. They do not infer `idle`, `busy`, or healthy readiness from
+zero active work.
+
+### Runner status projection
+
+The status read is application-scoped, not Project-scoped. `mo runner status`,
+`/runners`, and `/runners/<runnerId>` read the Server projection assembled from
+known Runner definitions, current presence and control observations, credential
+state, drain fences, and active Workflow and AgentJob owner ledgers. A known
+offline Runner remains visible with its configured slots; unknown live details
+are shown as unavailable rather than guessed.
+
+The projection keeps these facts separate:
+
+- presence: `online`, `stale`, or `offline`;
+- control: `connected` or `disconnected`;
+- admission: `ready` or `blocked`, with ordered stable reason codes;
+- drain: inactive or active, including update identity when known;
+- capacity: used and configured total slots, with used nullable when the active
+  owner snapshot is unavailable;
+- active work: distinct Workflow and AgentJob owner rows;
+- Runtime readiness and catalog capability, which are not interchangeable.
+
+Server-owned admission reason codes include `presence-offline`,
+`presence-stale`, `credential-revoked`, `credential-missing`,
+`control-disconnected`, `draining`, `admission-observation-missing`, and
+`capacity-full`. Runner-local blockers retain their stable codes, including
+`provider-policy-invalid` and `runtime-event-queue-unavailable`.
+
+Recovery guidance is also Server-owned. It can request installation, start or
+re-enrollment, waiting for drain or capacity, waiting for Runtime readiness, or
+a code-specific local correction. A status read never invents a command.
+`mo service status runner` is different: it reads only the local service-manager
+unit and does not query this projection.
+
+Every list or detail response has one `observedAt` timestamp captured at read
+start. The response is an observational snapshot: definitions, leases, claims,
+and ledgers may change while it is assembled, and a later claim remains the
+final authority. Status rendering must not mutate work or treat the snapshot as
+a reservation.
 
 ## Concurrent Capacity
 
@@ -164,9 +205,18 @@ mo session list --issue <number>     # AgentSessions for the Issue
 
 ### Common Runner Problems
 
-- **No runner is connected:** Run `mo service start runner`.
-- **An Issue waits after starting:** Runner has no capacity. Start Runner; the
-  Workflow continues automatically.
+- **Presence is offline or stale:** Read `mo runner status` and follow its
+  Server-provided start or re-enrollment action. Do not infer process state from
+  a disconnected control channel alone.
+- **Control is disconnected:** The Runner process may still be present while
+  the current control lease is unavailable. Restore the connection using the
+  reported action; do not collapse this into an offline claim.
+- **Admission is blocked, draining, or capacity is full:** Read the reason
+  codes, drain identity, configured slots, and active owners. Wait for the
+  Server-provided action; do not cancel work from a status read.
+- **An Issue waits after starting:** It may be waiting for eligible global
+  Runner capacity or Runtime readiness. The status projection identifies which
+  fact blocks fresh work.
 - **A task produces no output:** OpenCode may be stuck. Run
   `mo run pause --issue <number>` and inspect logs.
 - **Workspace identity error:** Preserve required commits, remove the Workspace,

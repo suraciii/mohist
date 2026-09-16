@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import type { RunnerStatusSummary } from '../../../entities/runner'
+import { runnerSummaryText, type RunnerStatusSummary } from '../../../entities/runner'
 import { useRunnerSummary } from '../../../entities/runner'
 
 interface RunnerSummaryProps {
@@ -29,6 +29,13 @@ export function RunnerSummary({ summary, targetPath = '/runners' }: RunnerSummar
   const goToRunners = () => navigate(targetPath)
 
   if (rows.length === 0) {
+    const label = summary.isLoading
+      ? 'Checking Runner status'
+      : summary.inventory?.state === 'first-install'
+        ? 'No Runner definitions'
+        : summary.isError
+          ? 'Runner status unavailable'
+          : 'Runner inventory'
     return (
       <button
         type="button"
@@ -37,7 +44,7 @@ export function RunnerSummary({ summary, targetPath = '/runners' }: RunnerSummar
         className="flex min-w-0 flex-wrap items-center gap-2 text-left text-xs hover:underline"
       >
         <span className="inline-flex shrink-0 items-center rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
-          {summary.inventory?.state === 'first-install' ? 'No Runner definitions' : 'Runner inventory'}
+          {label}
         </span>
         <SummaryAction summary={summary} />
       </button>
@@ -46,7 +53,7 @@ export function RunnerSummary({ summary, targetPath = '/runners' }: RunnerSummar
 
   const label = summary.blockedCount > 0 ? 'Runner admission blocked' : 'Runner admission ready'
   const tone = summary.blockedCount > 0 ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success'
-  const counts = `${summary.readyCount} ready · ${summary.blockedCount} blocked · ${summary.activeWorkCount} active work${summary.activeWorkCount === 1 ? '' : 's'}`
+  const counts = runnerSummaryText(summary)
 
   return (
     <button

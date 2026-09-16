@@ -14,6 +14,7 @@ import {
 import { deriveAttentionItems, isIssueAttentionItem, type AttentionItem } from '../../../entities/agent-ops'
 import { formatDuration } from '@/shared/lib/format-duration'
 import { useAgentStatus, type AgentStatus } from '../../../entities/agent'
+import { useRunnerSummary, type RunnerStatusSummary } from '../../../entities/runner'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { cn } from '@/shared/lib/utils'
 
@@ -46,7 +47,7 @@ function isApprovalItem(item: AttentionItem): boolean {
 }
 
 function attentionTreatment(item: AttentionItem): AttentionTreatment {
-  return item.kind === 'approval-needed' || item.kind === 'runner-capacity-limited' ? warningTreatment : dangerTreatment
+  return item.kind === 'approval-needed' || !isIssueAttentionItem(item) ? warningTreatment : dangerTreatment
 }
 
 function attentionSummaryTreatment(items: AttentionItem[]): AttentionTreatment {
@@ -56,6 +57,7 @@ function attentionSummaryTreatment(items: AttentionItem[]): AttentionTreatment {
 export interface AttentionHeroProps {
   issues?: Issue[]
   agentStatus?: AgentStatus
+  runnerSummary?: RunnerStatusSummary
   approvalWait?: ApprovalWaitMetricsResponse
   dataHook?: AttentionHeroDataHook
   approveIssueFn?: typeof approveIssue
@@ -64,6 +66,7 @@ export interface AttentionHeroProps {
 export interface AttentionHeroData {
   issues: Issue[] | undefined
   agentStatus: AgentStatus | undefined
+  runnerSummary?: RunnerStatusSummary
   approvalWait: ApprovalWaitMetricsResponse | null | undefined
   issuesResolved: boolean
 }
@@ -74,10 +77,12 @@ const useDefaultData: AttentionHeroDataHook = () => {
   const { projectId } = useProject()
   const issuesQuery = useIssues(projectId ? { projectId } : undefined)
   const agentStatusQuery = useAgentStatus()
+  const runnerSummaryQuery = useRunnerSummary()
   const approvalWaitQuery = useApprovalWait()
   return {
     issues: issuesQuery.data,
     agentStatus: agentStatusQuery.data,
+    runnerSummary: runnerSummaryQuery,
     approvalWait: approvalWaitQuery.data,
     issuesResolved: issuesQuery.data !== undefined,
   }
@@ -86,6 +91,7 @@ const useDefaultData: AttentionHeroDataHook = () => {
 export function AttentionHero({
   issues: issuesOverride,
   agentStatus: agentStatusOverride,
+  runnerSummary: runnerSummaryOverride,
   approvalWait: approvalWaitOverride,
   dataHook = useDefaultData,
   approveIssueFn = approveIssue,
@@ -97,12 +103,13 @@ export function AttentionHero({
   const data = dataHook()
   const issues = issuesOverride ?? data.issues
   const agentStatus = agentStatusOverride ?? data.agentStatus
+  const runnerSummary = runnerSummaryOverride ?? data.runnerSummary
   const approvalWait = approvalWaitOverride ?? data.approvalWait ?? undefined
   const issuesResolved = issuesOverride !== undefined || data.issuesResolved
 
   const items = useMemo(
-    () => deriveAttentionItems(issues ?? [], agentStatus ?? defaultAgentStatus),
-    [issues, agentStatus],
+    () => deriveAttentionItems(issues ?? [], agentStatus ?? defaultAgentStatus, runnerSummary),
+    [issues, agentStatus, runnerSummary],
   )
 
   const hasAttention = items.length > 0
@@ -183,7 +190,7 @@ interface AttentionItemRowProps {
 
 function AttentionItemRow({ item, isPending, onApprove, toProjectPath }: AttentionItemRowProps) {
   if (!isIssueAttentionItem(item)) {
-    return <RunnerAttentionRow item={item} toProjectPath={toProjectPath} />
+    return <RunnerAttentionRow item={item} />
   }
 
   const showApprove = isApprovalItem(item)
@@ -234,37 +241,14 @@ function AttentionItemRow({ item, isPending, onApprove, toProjectPath }: Attenti
   )
 }
 
-function RunnerAttentionRow({ item, toProjectPath }: { item: AttentionItem; toProjectPath: (path: string) => string }) {
+function RunnerAttentionRow({ item }: { item: AttentionItem }) {
   const treatment = attentionTreatment(item)
-
-  if (item.kind === 'runner-unavailable') {
-    return (
-      <li
-        data-testid="runner-down-entry"
-        data-family={treatment.family}
-        className={cn('flex items-center gap-3 rounded-md px-3 py-2 border', treatment.container)}
-      >
-        <span className="inline-flex items-center justify-center size-5 rounded-full text-danger-foreground shrink-0 bg-danger">
-          <ShieldOffIcon className="size-3" />
-        </span>
-        <span className={cn('font-medium text-sm', treatment.text)}>{item.label}</span>
-        <span data-testid="runner-down-message" className={cn('text-sm truncate min-w-0 flex-1', treatment.text)}>
-          {item.detail ?? 'No runner is connected.'}
-        </span>
-        <Link
-          to={toProjectPath('/activity')}
-          data-testid="runner-down-link"
-          className="shrink-0 text-xs text-danger hover:underline hover:opacity-80"
-        >
-          View runner status
-        </Link>
-      </li>
-    )
-  }
+  const isUnavailable = item.kind === 'runner-unavailable'
+  const isCapacity = item.kind === 'runner-capacity-limited'
 
   return (
     <li
-      data-testid="runner-capacity-entry"
+      data-testid={isUnavailable ? 'runner-down-entry' : isCapacity ? 'runner-capacity-entry' : 'runner-status-entry'}
       data-family={treatment.family}
       data-kind={item.kind}
       className={cn('flex items-center gap-3 rounded-md px-3 py-2 border', treatment.container)}
@@ -275,20 +259,25 @@ function RunnerAttentionRow({ item, toProjectPath }: { item: AttentionItem; toPr
           treatment.dot,
         )}
       >
-        <GaugeIcon className="size-3" />
+        {isCapacity ? <GaugeIcon className="size-3" /> : <ShieldOffIcon className="size-3" />}
       </span>
-      <span className="font-medium text-sm text-foreground">{item.label}</span>
+      <span className={cn('font-medium text-sm', treatment.text)}>{item.label}</span>
       {item.detail && (
-        <span data-testid="runner-capacity-detail" className="text-muted-foreground text-sm truncate min-w-0 flex-1">
+        <span
+          data-testid={
+            isUnavailable ? 'runner-down-message' : isCapacity ? 'runner-capacity-detail' : 'runner-status-detail'
+          }
+          className={cn('text-sm truncate min-w-0 flex-1', treatment.text)}
+        >
           {item.detail}
         </span>
       )}
       <Link
-        to={toProjectPath('/activity')}
-        data-testid="runner-capacity-link"
-        className="shrink-0 text-xs hover:underline hover:opacity-80 text-muted-foreground"
+        to="/runners"
+        data-testid={isUnavailable ? 'runner-down-link' : isCapacity ? 'runner-capacity-link' : 'runner-status-link'}
+        className="shrink-0 text-xs text-muted-foreground hover:underline hover:opacity-80"
       >
-        View runner status
+        View Runner status
       </Link>
     </li>
   )
