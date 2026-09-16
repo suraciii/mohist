@@ -33,7 +33,7 @@ func resolveTextInput(deps Dependencies, cmd command, valueFlag, fileFlag string
 		return "", nil
 	}
 	raw := argValue(cmd.args, fileFlag, "")
-	if raw == "" {
+	if !hasArg(cmd.args, fileFlag) {
 		return "", nil
 	}
 	flag := "--" + fileFlag
