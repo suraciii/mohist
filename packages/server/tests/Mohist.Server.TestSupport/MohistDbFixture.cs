@@ -254,8 +254,8 @@ public sealed class MohistDbFixture : IAsyncLifetime
     public sealed class NoopRunnerStatusService : Mohist.Server.Runner.Services.RunnerStatusService
     {
         private readonly object _gate = new();
-        private IReadOnlyList<Mohist.Server.Runner.Services.RunnerStatusView> _runners =
-            Array.Empty<Mohist.Server.Runner.Services.RunnerStatusView>();
+        private IReadOnlyList<Mohist.Server.Runner.Services.RunnerStatusEntry> _runners =
+            Array.Empty<Mohist.Server.Runner.Services.RunnerStatusEntry>();
 
         public NoopRunnerStatusService()
             : base(
@@ -265,7 +265,7 @@ public sealed class MohistDbFixture : IAsyncLifetime
         {
         }
 
-        public void SetRunners(IEnumerable<Mohist.Server.Runner.Services.RunnerStatusView> runners)
+        public void SetRunners(IEnumerable<Mohist.Server.Runner.Services.RunnerStatusEntry> runners)
         {
             lock (_gate)
             {
@@ -273,11 +273,14 @@ public sealed class MohistDbFixture : IAsyncLifetime
             }
         }
 
-        public override Task<IReadOnlyList<Mohist.Server.Runner.Services.RunnerStatusView>> GetRunnersAsync(string projectId)
+        public override Task<Mohist.Server.Runner.Services.RunnerStatusListSnapshot> GetGlobalRunnersAsync(
+            CancellationToken ct = default)
         {
             lock (_gate)
             {
-                return Task.FromResult<IReadOnlyList<Mohist.Server.Runner.Services.RunnerStatusView>>(_runners.ToArray());
+                return Task.FromResult(new Mohist.Server.Runner.Services.RunnerStatusListSnapshot(
+                    Mohist.Server.TestSupport.TestTime.UtcNow,
+                    _runners.ToArray()));
             }
         }
     }

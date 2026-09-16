@@ -57,7 +57,7 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
     /// method reads capacity; RunnerGrain remains the authoritative claim
     /// boundary and this read never reserves a slot.
     /// </summary>
-    public async Task<RunnerStatusListSnapshot> GetGlobalRunnersAsync(CancellationToken ct = default)
+    public virtual async Task<RunnerStatusListSnapshot> GetGlobalRunnersAsync(CancellationToken ct = default)
     {
         if (_definitions is null || _observations is null || _activeWorks is null)
             throw new InvalidOperationException("Global Runner status requires the read projection stores.");
