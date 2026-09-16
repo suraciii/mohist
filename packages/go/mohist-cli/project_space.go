@@ -545,6 +545,9 @@ func leafHelp(kind string, fields []string) string {
 	return "USAGE\n    mo " + strings.ReplaceAll(kind, "-", " ") + " [flags]\n\nJSON FIELDS\n" + strings.Join(fields, "\n")
 }
 func usage(message string) error { return &usageError{message: "error: " + message} }
+func usageWithLeaf(message, leafUsage string) error {
+	return &usageError{message: "error: " + message + "\n" + leafUsage}
+}
 func removeArg(args []string, name string) []string {
 	out := args[:0]
 	for i := 0; i < len(args); i += 2 {

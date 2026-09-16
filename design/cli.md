@@ -150,6 +150,11 @@ operations.
 - Keep one action category consistent across areas. Shared implementation does
   not make different semantics one action.
 - Use a flag only when variants share semantics, validation, and results.
+- Operations flags are admitted only on leaves that consume them. Runner listing
+  uses Project scope and has no `--scope` switch. Service `--lines`/`--follow`
+  belong to logs, and `--unit-dir` belongs to uninstall. Dead-letter filters
+  belong to list; OpenTelemetry filters belong to traces. Unsupported flags
+  fail locally with exit 2 and usage for the addressed leaf.
   Different behavior remains a separate action.
 
 Rejected choices remain concise decisions:

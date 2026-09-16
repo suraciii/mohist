@@ -526,14 +526,14 @@ instead of selecting the tree again. See
 a bot identity in one Slack workspace, and installation of the workspace-level
 Mohist App.
 
-- `mo slack setup [--workspace-team <team-id>] [--configuration-token-file <path>] [--credentials-file <path>]`
+- `mo slack setup [--workspace-team <team-id>] [--configuration-token-file <path>] [--credentials-file <path>]`[^go-slack-provisioning]
   installs the workspace-level Mohist App in Slack and connects local Socket
   Mode. It creates or restores one workspace installation record, creates and
   configures the App, and guides the user through Slack installation and
   App-level token generation. On first installation, Configuration token
   validation determines the workspace. Use the flag when multiple workspaces
   are connected.
-- `mo slack install-agent <agent> [--workspace-team <team-id>] [--credentials-file <path>]`
+- `mo slack install-agent <agent> [--workspace-team <team-id>] [--credentials-file <path>]`[^go-slack-provisioning]
   installs an existing Mohist Agent in Slack. It creates or restores the Agent
   integration and dedicated Agent App. It guides App configuration,
   installation, identity and credential validation, connection startup, and
@@ -558,6 +558,8 @@ Mohist App.
   accept token literals. The CLI reads only the fields needed for the current
   step. Mohist encrypts them after validation and never includes them in output,
   errors, JSON, or logs.
+[^go-slack-provisioning]: The Go CLI currently rejects the workspace and credential-file options on these two provisioning commands. It accepts `mo slack setup` without options and `mo slack install-agent <agent> --project <project>`. The guided provisioning contract above still requires implementation; passing these unsupported options exits 2 before any request.
+
 - `mo slack status --workspace-team <team-id>` shows the current Mohist App, Agent integrations, local
   connection state, and one next action. Missing provisioning credentials point
   to `setup`. An incomplete Agent installation points to the same
@@ -606,12 +608,20 @@ for the complete product semantics.
 Project Repository: the mirror of Issues, the `/mohist` command entry, and
 review-based Approval Point decisions.
 
-- `mo github connect owner/repo [--repo <name>] [--approver <login> ...]`
+- `mo github connect owner/repo [--approver <login> ...]`
   connects a GitHub repository through the deployment's GitHub App. Mohist
   verifies the App installation and Repository scope, or returns an installation
   URL and a retry action. It then prints the webhook address, content type,
   secret, and event subscriptions. One GitHub repository connects to one
   Project Repository; reconnecting an existing App binding is idempotent.
+- `mo github update <connection> [--approver <login> ... | --clear-approvers]`
+  replaces or clears the approver list: `--approver` sends the supplied logins
+  as the new list and `--clear-approvers` sends an empty list. The two forms
+  are mutually exclusive. Supplying neither flag is a LOCAL ERROR (exit 2);
+  omitting `--approver` does not silently preserve the existing list. Use
+  `--clear-approvers` to send an empty approvers list. Each `--approver` value
+  must be non-blank. The Server trims and deduplicates logins and matches them
+  case-insensitively against review authors; it does not check account existence.
 - `mo github list` shows every Repository of the current Project and its
   connection state, including repositories without a connection.
 - `mo github view <connection>` and `mo github enable|disable <connection>`
@@ -791,6 +801,10 @@ Exit codes are small and stable:
 - `1`: operation failure, disallowed state, or unavailable service.
 - `2`: command or argument usage error.
 - `130`: user interruption.
+
+Unknown flags for any Operations or notification leaf produce exit 2 and a
+leaf-specific USAGE block; no request is sent. Slack credential options instead
+receive the protected-file diagnostic.
 
 `--json` does not change errors to another envelope. The caller always uses the
 exit code for success or failure and reads the same diagnostic from stderr.
