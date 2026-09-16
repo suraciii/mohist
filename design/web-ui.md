@@ -15,7 +15,10 @@ whether a person must act, and which actions are safe now.
 - Web owns rendering, view state, drafts, and user intent. The Server owns
   state and domain rules.
 - Web, CLI, and the Slack adapter use the same Agent API. Web adds no launch
-  configuration override because the Agent editor owns configuration.
+  configuration override because the Agent editor owns configuration, and the
+  Agents surface is the only place to configure a model. Workflow and Issue
+  surfaces show the named Agents responsible for execution with their effective
+  configuration and route to the Agents page; they add no model selector.
 - Push is observation. The UI reconciles authoritative queries after reconnect.
 - A Web action must use the same Server-owned intent as every other client.
 - The UI emphasizes Project attention, Issue and Epic progress, Workflow state,
@@ -96,34 +99,42 @@ offers Retry, Resume, Rerun, and Stop. Done offers Close and Archive.
 
 ## Agent Product Surface
 
-Agent list and detail are management and test surfaces. Before a Session starts,
-they expose avatar, name, description, active or archived state, `ready`,
-`needs-setup`, or `unknown` Readiness, Runtime, model, stored Reasoning Effort,
-true Variant, active and queued work, and Connection health. Runner
-availability is not Agent Readiness. An offline Runner must not appear as
-`needs-setup`.
+Agent list and detail are management and test surfaces. The list shows the
+Project's effective named Agents: stored Project Agents plus unshadowed built-in
+Workflow Agents, each with its origin. A Project Agent that shadows a built-in
+name is marked as overriding it; the application-owned `mohist-slack` manager
+never appears. Before a Session starts, the list exposes avatar, name,
+description, origin, active or archived state, `ready`, `needs-setup`, or
+`unknown` Readiness, Runtime, model, stored Reasoning Effort, true Variant,
+active and queued work, and Connection health. Runner availability is not Agent
+Readiness. An offline Runner must not appear as `needs-setup`.
+
+A built-in Agent's detail shows its Mohist-owned definition and effective
+execution configuration. Customize runs one Server operation that materializes a
+same-name Project Agent from the built-in definition and applies the caller's
+edits; the client never copies built-in text. An active same-name Agent is a
+conflict and is edited directly. An archived shadow remains visible as the
+shadowing entry and never falls back to the built-in.
 
 The task-first composer at
 `/<projectName>/agent-sessions/new` accepts Prompt, attachments, and context
 references before Agent selection. Agent fields are edited before launch. New
-Agent for this task creates and launches one Agent. An existing Agent uses its
-stored definition. Runtime, Model, and Skills are not launch overrides. The
-request uses the same Agent API as CLI and Slack, with authenticated actor and
-source metadata.
-
-A Project `defaultExecutionConfig` is the Recommended execution configuration
-and requires no extra question. Adjust submits catalog-backed values as hints.
-Without a Project default, a new Agent requires Runtime and Model inline.
+Agent for this task creates and launches one Agent through creation hints. An
+existing Agent uses its stored definition and accepts no launch override.
+Runtime, Model, Reasoning Effort, and Variant are chosen inline for a new Agent.
+Runtime defaults to `pi`; Model defaults to unset, presented as Runtime default.
 Models, Reasoning Efforts, and true Variants come from the selected Runtime
-catalog. Agent edits affect new Jobs;
-an in-flight Session keeps its launch snapshot.
+catalog, and a value the catalog cannot verify is saved as not yet verified.
+The request uses the same Agent API as CLI and Slack, with authenticated actor
+and source metadata. Agent edits affect new Jobs; an in-flight Session keeps its
+launch snapshot.
 
 A successful launch opens the returned AgentSession URL. Conflicts identify the
 earlier idempotency attempt. Pending launches instruct the user to retry with
-the same key. Unresolved configuration identifies both repairs: choose Runtime
-and Model or configure the Project default. The composer keeps the task and
-context after these rejections. An empty Agent list leads with Start with a
-Task; Configure an Agent remains the secondary definition-first path.
+the same key. Unresolved configuration names the Agent field or Runtime gap that
+blocks launch. The composer keeps the task and context after these rejections.
+An empty Agent list leads with Start with a Task; Configure an Agent remains the
+secondary definition-first path.
 
 Agent details provide these concerns:
 
@@ -197,4 +208,8 @@ Runner, Workspace, Logs, Settings, and Archive surfaces. Session rendering is
 still a conversational message view without the TimelineItem derivation layer,
 salience policy, or raw event view. Agent avatar configuration, a separate
 AgentJob result view, and several Slack Connection management actions remain
-unavailable.
+unavailable. The Agent surface does not yet show built-in Workflow Agents or
+materialize a Project override; the composer still prefills from a Project-level
+execution default; and the Coder Agent page, the Issue model selector, and Stage
+model overrides still exist while the Runtime settings section is not yet named
+Scheduling.

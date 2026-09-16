@@ -85,7 +85,8 @@ mo session list --issue <n>   # Inspect the Agent execution
 **Action:**
 
 - Confirm that `opencode --help` works.
-- Inspect model configuration under Settings > OpenCode in the Web UI.
+- Inspect the Agent's model configuration on the Agents page, or run
+  `mo agent view <agent>`.
 - Make the Issue body more specific, then retry.
 
 ### 2. Build Does Not Produce Code
