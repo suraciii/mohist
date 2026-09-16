@@ -611,99 +611,152 @@ func TestIssueEditWithLabelsStdinConsumedOnceOnSuccess(t *testing.T) {
 		t.Fatalf("body=%s", patchBody)
 	}
 	// The transport admitted one GET (pre-flight) and one PATCH (mutation);
-	// stdin must have been consumed exactly once.
+	// stdin must have been consumed exactly once and fully drained so a
+	// second resolver call would observe EOF and return "". This guards
+	// against an accidental second read that would split the body across
+	// pre-flight and mutation paths.
 	if reader.calls == 0 {
 		t.Fatalf("stdin was not consumed")
+	}
+	if leftover, err := io.ReadAll(reader.reader); err != nil || len(leftover) != 0 {
+		t.Fatalf("stdin not drained: leftover=%q err=%v", leftover, err)
 	}
 }
 
 // TestRequestBodyIdentityAcrossFileAndStdin asserts that file and stdin
-// with the same UTF-8 content (including trailing newlines) produce
-// identical request payloads. This guards against reintroducing
-// carrier-specific normalization such as file-only newline trimming.
+// with the same UTF-8 content produce identical request payloads. The
+// variants cover empty content, multiple trailing newlines, UTF-8
+// without a trailing newline, and whitespace-only content so that
+// carrier-specific normalization such as file-only newline trimming is
+// observed to fail rather than pass. Each variant runs through the full
+// Run pipeline with both --body-file ./path and --body-file -, the
+// transport capturing the exact JSON body for comparison.
 func TestRequestBodyIdentityAcrossFileAndStdin(t *testing.T) {
-	body := "héllo\nworld\n"
-	// Issue create via file
 	state := map[string]string{"/work/tree/.mohist/cli-state.json": `{"activeProjectId":"proj"}`}
-	var fileBody, stdinBody string
-	var fileRead, stdinRead bool
-	read := func(path string) (string, error) {
-		if path == "./body.md" {
-			fileRead = true
-			return body, nil
-		}
-		if v, ok := state[path]; ok {
-			return v, nil
-		}
-		return "", os.ErrNotExist
+	variants := []struct {
+		name, body, bodyJSON string
+	}{
+		{
+			name:     "utf8-with-trailing-newline",
+			body:     "héllo\nworld\n",
+			bodyJSON: `"body":"héllo\nworld\n"`,
+		},
+		{
+			name:     "empty-content",
+			body:     "",
+			bodyJSON: `"body":""`,
+		},
+		{
+			name:     "multiple-trailing-newlines",
+			body:     "hello\n\n\n",
+			bodyJSON: `"body":"hello\n\n\n"`,
+		},
+		{
+			name:     "utf8-without-trailing-newline",
+			body:     "héllo ☃",
+			bodyJSON: `"body":"héllo ☃"`,
+		},
+		{
+			name:     "leading-and-trailing-whitespace",
+			body:     "  \n\t value \n\t\n",
+			bodyJSON: `"body":"  \n\t value \n\t\n"`,
+		},
+		{
+			name:     "only-newlines",
+			body:     "\n\n\n",
+			bodyJSON: `"body":"\n\n\n"`,
+		},
+		{
+			name:     "only-whitespace",
+			body:     "   \t  ",
+			bodyJSON: `"body":"   \t  "`,
+		},
 	}
-	calls := 0
-	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		b, _ := io.ReadAll(r.Body)
-		calls++
-		switch calls {
-		case 1:
-			fileBody = string(b)
-		case 2:
-			stdinBody = string(b)
-		}
-		return response(http.StatusOK, `{"success":true,"data":{"number":1}}`), nil
-	})
-	makeDeps := func() Dependencies {
-		return Dependencies{
-			HTTPClient: &http.Client{Transport: transport},
-			Stdout:     &strings.Builder{},
-			Stderr:     &strings.Builder{},
-			Lookup: func(name string) (string, bool) {
-				if name == "MOHIST_TOKEN" {
-					return "token", true
+	for _, variant := range variants {
+		t.Run(variant.name, func(t *testing.T) {
+			body := variant.body
+			var fileBody, stdinBody string
+			var fileRead, stdinRead bool
+			read := func(path string) (string, error) {
+				if path == "./body.md" {
+					fileRead = true
+					return body, nil
 				}
-				if name == "MOHIST_SERVER_URL" {
-					return "http://server", true
+				if v, ok := state[path]; ok {
+					return v, nil
 				}
-				return "", false
-			},
-			ReadFile:          read,
-			HomeDir:           func() (string, error) { return "/home/test", nil },
-			CurrentDirectory:  func() string { return "/work/tree" },
-			Input:             &countingReader{reader: strings.NewReader(body)},
-			OpenManagedLock:   func(string) (io.Closer, error) { return io.NopCloser(strings.NewReader("")), nil },
-			ManagedPathExists: func(string) bool { return false },
-		}
-	}
-	fileDeps := makeDeps()
-	if code := Run(context.Background(), []string{"issue", "create", "Title", "--body-file", "./body.md"}, fileDeps); code != ExitOK {
-		t.Fatalf("file code=%d", code)
-	}
-	stdinDeps := makeDeps()
-	counter := &countingReader{reader: strings.NewReader(body)}
-	stdinDeps.Input = counter
-	// Replace ReadFile so stdin path is used: any non-state read returns an
-	// error so file reads are never confused with stdin reads.
-	stdinDeps.ReadFile = func(path string) (string, error) {
-		if v, ok := state[path]; ok {
-			return v, nil
-		}
-		return "", os.ErrNotExist
-	}
-	if code := Run(context.Background(), []string{"issue", "create", "Title", "--body-file", "-"}, stdinDeps); code != ExitOK {
-		t.Fatalf("stdin code=%d", code)
-	}
-	stdinRead = counter.calls > 0
-	if !fileRead {
-		t.Fatalf("file was never read")
-	}
-	if !stdinRead {
-		t.Fatalf("stdin was never consumed")
-	}
-	if fileBody == "" || stdinBody == "" {
-		t.Fatalf("file=%q stdin=%q", fileBody, stdinBody)
-	}
-	if fileBody != stdinBody {
-		t.Fatalf("file=%q stdin=%q", fileBody, stdinBody)
-	}
-	if !strings.Contains(fileBody, `"body":"héllo\nworld\n"`) {
-		t.Fatalf("body did not preserve UTF-8 and trailing newlines: %s", fileBody)
+				return "", os.ErrNotExist
+			}
+			calls := 0
+			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				b, _ := io.ReadAll(r.Body)
+				calls++
+				switch calls {
+				case 1:
+					fileBody = string(b)
+				case 2:
+					stdinBody = string(b)
+				}
+				return response(http.StatusOK, `{"success":true,"data":{"number":1}}`), nil
+			})
+			makeDeps := func() Dependencies {
+				return Dependencies{
+					HTTPClient: &http.Client{Transport: transport},
+					Stdout:     &strings.Builder{},
+					Stderr:     &strings.Builder{},
+					Lookup: func(name string) (string, bool) {
+						if name == "MOHIST_TOKEN" {
+							return "token", true
+						}
+						if name == "MOHIST_SERVER_URL" {
+							return "http://server", true
+						}
+						return "", false
+					},
+					ReadFile:          read,
+					HomeDir:           func() (string, error) { return "/home/test", nil },
+					CurrentDirectory:  func() string { return "/work/tree" },
+					Input:             &countingReader{reader: strings.NewReader(body)},
+					OpenManagedLock:   func(string) (io.Closer, error) { return io.NopCloser(strings.NewReader("")), nil },
+					ManagedPathExists: func(string) bool { return false },
+				}
+			}
+			fileDeps := makeDeps()
+			if code := Run(context.Background(), []string{"issue", "create", "Title", "--body-file", "./body.md"}, fileDeps); code != ExitOK {
+				t.Fatalf("file code=%d", code)
+			}
+			stdinDeps := makeDeps()
+			counter := &countingReader{reader: strings.NewReader(body)}
+			stdinDeps.Input = counter
+			// Replace ReadFile so stdin path is used: any non-state read
+			// returns an error so file reads are never confused with stdin
+			// reads.
+			stdinDeps.ReadFile = func(path string) (string, error) {
+				if v, ok := state[path]; ok {
+					return v, nil
+				}
+				return "", os.ErrNotExist
+			}
+			if code := Run(context.Background(), []string{"issue", "create", "Title", "--body-file", "-"}, stdinDeps); code != ExitOK {
+				t.Fatalf("stdin code=%d", code)
+			}
+			stdinRead = counter.calls > 0
+			if !fileRead {
+				t.Fatalf("file was never read")
+			}
+			if !stdinRead {
+				t.Fatalf("stdin was never consumed")
+			}
+			if fileBody == "" || stdinBody == "" {
+				t.Fatalf("file=%q stdin=%q", fileBody, stdinBody)
+			}
+			if fileBody != stdinBody {
+				t.Fatalf("file=%q stdin=%q", fileBody, stdinBody)
+			}
+			if !strings.Contains(fileBody, variant.bodyJSON) {
+				t.Fatalf("body did not preserve exact bytes for %q: %s", variant.name, fileBody)
+			}
+		})
 	}
 }
 
@@ -860,5 +913,583 @@ func TestBlankRequiredCommandsRejectWithoutHTTP(t *testing.T) {
 				t.Fatalf("stderr=%q want=%q", f.stderr.String(), tc.want)
 			}
 		})
+	}
+}
+
+// TestRequestBodyIdentityAcrossCarriersForAllClearableCommands extends
+// the file/stdin identity guarantee to every clearable command family.
+// Each family member must produce an identical JSON body for the same
+// UTF-8 input across the file and stdin carriers so carriers are not
+// observably different to the Server.
+func TestRequestBodyIdentityAcrossCarriersForAllClearableCommands(t *testing.T) {
+	state := map[string]string{"/work/tree/.mohist/cli-state.json": `{"activeProjectId":"proj"}`}
+	body := "line one\nline two\nline three\n"
+	cases := []struct {
+		name      string
+		args      []string
+		wantPath  string
+		wantField string
+	}{
+		{
+			name:      "issue-create",
+			args:      []string{"issue", "create", "Title"},
+			wantPath:  "/api/projects/proj/issues",
+			wantField: "body",
+		},
+		{
+			name:      "issue-edit",
+			args:      []string{"issue", "edit", "42"},
+			wantPath:  "/api/projects/proj/issues/42",
+			wantField: "body",
+		},
+		{
+			name:      "issue-comment-create",
+			args:      []string{"issue", "comment", "create", "42"},
+			wantPath:  "/api/projects/proj/issues/42/comments",
+			wantField: "body",
+		},
+		{
+			name:      "epic-create",
+			args:      []string{"epic", "create", "Title"},
+			wantPath:  "/api/projects/proj/epics/",
+			wantField: "description",
+		},
+		{
+			name:      "epic-edit",
+			args:      []string{"epic", "edit", "1"},
+			wantPath:  "/api/projects/proj/epics/1",
+			wantField: "description",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var fileBody, stdinBody string
+			calls := 0
+			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				b, _ := io.ReadAll(r.Body)
+				if r.URL.EscapedPath() != tc.wantPath {
+					t.Fatalf("unexpected path %s want %s", r.URL.EscapedPath(), tc.wantPath)
+				}
+				calls++
+				switch calls {
+				case 1:
+					fileBody = string(b)
+				case 2:
+					stdinBody = string(b)
+				}
+				if tc.wantField == "description" {
+					return response(http.StatusOK, `{"success":true,"data":{"number":1,"description":""}}`), nil
+				}
+				return response(http.StatusOK, `{"success":true,"data":{"number":1,"body":""}}`), nil
+			})
+			makeDeps := func() Dependencies {
+				return Dependencies{
+					HTTPClient: &http.Client{Transport: transport},
+					Stdout:     &strings.Builder{},
+					Stderr:     &strings.Builder{},
+					Lookup: func(name string) (string, bool) {
+						if name == "MOHIST_TOKEN" {
+							return "token", true
+						}
+						if name == "MOHIST_SERVER_URL" {
+							return "http://server", true
+						}
+						return "", false
+					},
+					ReadFile: func(path string) (string, error) {
+						if path == "./body.md" {
+							return body, nil
+						}
+						if v, ok := state[path]; ok {
+							return v, nil
+						}
+						return "", os.ErrNotExist
+					},
+					HomeDir:           func() (string, error) { return "/home/test", nil },
+					CurrentDirectory:  func() string { return "/work/tree" },
+					Input:             &countingReader{reader: strings.NewReader(body)},
+					OpenManagedLock:   func(string) (io.Closer, error) { return io.NopCloser(strings.NewReader("")), nil },
+					ManagedPathExists: func(string) bool { return false },
+				}
+			}
+			fileDeps := makeDeps()
+			fileArgs := append([]string{}, tc.args...)
+			fileArgs = append(fileArgs, "--"+tc.wantField+"-file", "./body.md")
+			if code := Run(context.Background(), fileArgs, fileDeps); code != ExitOK {
+				t.Fatalf("file code=%d", code)
+			}
+			stdinDeps := makeDeps()
+			counter := &countingReader{reader: strings.NewReader(body)}
+			stdinDeps.Input = counter
+			stdinDeps.ReadFile = func(path string) (string, error) {
+				if v, ok := state[path]; ok {
+					return v, nil
+				}
+				return "", os.ErrNotExist
+			}
+			stdinArgs := append([]string{}, tc.args...)
+			stdinArgs = append(stdinArgs, "--"+tc.wantField+"-file", "-")
+			if code := Run(context.Background(), stdinArgs, stdinDeps); code != ExitOK {
+				t.Fatalf("stdin code=%d", code)
+			}
+			if counter.calls == 0 {
+				t.Fatalf("stdin was never consumed")
+			}
+			if fileBody == "" || stdinBody == "" {
+				t.Fatalf("file=%q stdin=%q", fileBody, stdinBody)
+			}
+			if fileBody != stdinBody {
+				t.Fatalf("file=%q stdin=%q", fileBody, stdinBody)
+			}
+			wantSub := `"` + tc.wantField + `":"line one\nline two\nline three\n"`
+			if !strings.Contains(fileBody, wantSub) {
+				t.Fatalf("body did not preserve exact bytes: %s", fileBody)
+			}
+		})
+	}
+}
+
+// TestDirectEmptyStringForClearableCommands proves that --body "" and
+// --description "" are accepted as legitimate clear operations by the
+// parser and the body builder. The empty string is sent verbatim, not
+// coerced, and never treated as a read failure.
+func TestDirectEmptyStringForClearableCommands(t *testing.T) {
+	state := map[string]string{"/work/tree/.mohist/cli-state.json": `{"activeProjectId":"proj"}`}
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		switch {
+		case r.URL.Path == "/api/projects/proj/issues":
+			if !strings.Contains(string(body), `"body":""`) {
+				t.Fatalf("issue create body=%s", body)
+			}
+			return response(http.StatusOK, `{"success":true,"data":{"number":1,"body":""}}`), nil
+		case r.URL.Path == "/api/projects/proj/issues/1":
+			if !strings.Contains(string(body), `"body":""`) {
+				t.Fatalf("issue edit body=%s", body)
+			}
+			return response(http.StatusOK, `{"success":true,"data":{"number":1,"body":""}}`), nil
+		case r.URL.Path == "/api/projects/proj/issues/1/comments":
+			if !strings.Contains(string(body), `"body":""`) {
+				t.Fatalf("issue comment body=%s", body)
+			}
+			return response(http.StatusOK, `{"success":true,"data":{"id":1,"body":""}}`), nil
+		case r.URL.Path == "/api/projects/proj/epics/":
+			if !strings.Contains(string(body), `"description":""`) {
+				t.Fatalf("epic create body=%s", body)
+			}
+			return response(http.StatusOK, `{"success":true,"data":{"number":1,"description":""}}`), nil
+		case r.URL.Path == "/api/projects/proj/epics/1":
+			if !strings.Contains(string(body), `"description":""`) {
+				t.Fatalf("epic edit body=%s", body)
+			}
+			return response(http.StatusOK, `{"success":true,"data":{"number":1,"description":""}}`), nil
+		}
+		return response(http.StatusOK, `{"success":true,"data":{}}`), nil
+	})
+	deps := Dependencies{
+		HTTPClient: &http.Client{Transport: transport},
+		Stdout:     &strings.Builder{},
+		Stderr:     &strings.Builder{},
+		Lookup: func(name string) (string, bool) {
+			if name == "MOHIST_TOKEN" {
+				return "token", true
+			}
+			if name == "MOHIST_SERVER_URL" {
+				return "http://server", true
+			}
+			return "", false
+		},
+		ReadFile: func(path string) (string, error) {
+			if v, ok := state[path]; ok {
+				return v, nil
+			}
+			return "", os.ErrNotExist
+		},
+		HomeDir:           func() (string, error) { return "/home/test", nil },
+		CurrentDirectory:  func() string { return "/work/tree" },
+		Input:             strings.NewReader(""),
+		OpenManagedLock:   func(string) (io.Closer, error) { return io.NopCloser(strings.NewReader("")), nil },
+		ManagedPathExists: func(string) bool { return false },
+	}
+	cases := [][]string{
+		{"issue", "create", "Title", "--body", ""},
+		{"issue", "edit", "1", "--body", ""},
+		{"issue", "comment", "create", "1", "--body", ""},
+		{"epic", "create", "Title", "--description", ""},
+		{"epic", "edit", "1", "--description", ""},
+	}
+	for _, args := range cases {
+		t.Run(args[0]+"-"+args[1], func(t *testing.T) {
+			if code := Run(context.Background(), args, deps); code != ExitOK {
+				t.Fatalf("code=%d", code)
+			}
+		})
+	}
+}
+
+// TestEmptyStdinForClearableCommands proves that --body-file - with empty
+// stdin is treated as a successful read whose value is "". The empty
+// carrier is sent verbatim as the field value rather than reclassified
+// as a read failure.
+func TestEmptyStdinForClearableCommands(t *testing.T) {
+	state := map[string]string{"/work/tree/.mohist/cli-state.json": `{"activeProjectId":"proj"}`}
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		switch r.URL.Path {
+		case "/api/projects/proj/issues":
+			if !strings.Contains(string(body), `"body":""`) {
+				t.Fatalf("issue create body=%s", body)
+			}
+			return response(http.StatusOK, `{"success":true,"data":{"number":1,"body":""}}`), nil
+		case "/api/projects/proj/issues/1":
+			if !strings.Contains(string(body), `"body":""`) {
+				t.Fatalf("issue edit body=%s", body)
+			}
+			return response(http.StatusOK, `{"success":true,"data":{"number":1,"body":""}}`), nil
+		case "/api/projects/proj/issues/1/comments":
+			if !strings.Contains(string(body), `"body":""`) {
+				t.Fatalf("issue comment body=%s", body)
+			}
+			return response(http.StatusOK, `{"success":true,"data":{"id":1,"body":""}}`), nil
+		case "/api/projects/proj/epics/":
+			if !strings.Contains(string(body), `"description":""`) {
+				t.Fatalf("epic create body=%s", body)
+			}
+			return response(http.StatusOK, `{"success":true,"data":{"number":1,"description":""}}`), nil
+		case "/api/projects/proj/epics/1":
+			if !strings.Contains(string(body), `"description":""`) {
+				t.Fatalf("epic edit body=%s", body)
+			}
+			return response(http.StatusOK, `{"success":true,"data":{"number":1,"description":""}}`), nil
+		}
+		return response(http.StatusOK, `{"success":true,"data":{}}`), nil
+	})
+	cases := [][]string{
+		{"issue", "create", "Title", "--body-file", "-"},
+		{"issue", "edit", "1", "--body-file", "-"},
+		{"issue", "comment", "create", "1", "--body-file", "-"},
+		{"epic", "create", "Title", "--description-file", "-"},
+		{"epic", "edit", "1", "--description-file", "-"},
+	}
+	for _, args := range cases {
+		t.Run(args[0]+"-"+args[1], func(t *testing.T) {
+			deps := Dependencies{
+				HTTPClient: &http.Client{Transport: transport},
+				Stdout:     &strings.Builder{},
+				Stderr:     &strings.Builder{},
+				Lookup: func(name string) (string, bool) {
+					if name == "MOHIST_TOKEN" {
+						return "token", true
+					}
+					if name == "MOHIST_SERVER_URL" {
+						return "http://server", true
+					}
+					return "", false
+				},
+				ReadFile: func(path string) (string, error) {
+					if v, ok := state[path]; ok {
+						return v, nil
+					}
+					return "", os.ErrNotExist
+				},
+				HomeDir:           func() (string, error) { return "/home/test", nil },
+				CurrentDirectory:  func() string { return "/work/tree" },
+				Input:             strings.NewReader(""),
+				OpenManagedLock:   func(string) (io.Closer, error) { return io.NopCloser(strings.NewReader("")), nil },
+				ManagedPathExists: func(string) bool { return false },
+			}
+			if code := Run(context.Background(), args, deps); code != ExitOK {
+				t.Fatalf("code=%d", code)
+			}
+		})
+	}
+}
+
+// TestSessionFollowupAcceptsBlankWithAttachment proves the Session
+// follow-up command allows blank text when --attach is supplied. The
+// attachment-capable contract is owned by the Session command: the
+// resolver returns the empty value, the command-owned blank check
+// accepts it because attachments are present, and the carrier content is
+// sent verbatim.
+func TestSessionFollowupAcceptsBlankWithAttachment(t *testing.T) {
+	state := map[string]string{"/work/tree/.mohist/cli-state.json": `{"activeProjectId":"proj"}`}
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "explicit-empty-with-attach",
+			args: []string{"session", "followup", "sess-1", "--text", "", "--attach", "log.txt"},
+		},
+		{
+			name: "empty-file-with-attach",
+			args: []string{"session", "followup", "sess-1", "--text-file", "./empty.md", "--attach", "log.txt"},
+		},
+		{
+			name: "empty-stdin-with-attach",
+			args: []string{"session", "followup", "sess-1", "--text-file", "-", "--attach", "log.txt"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sentBody string
+			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path != "/api/projects/proj/agent-sessions/sess-1/followup" {
+					t.Fatalf("path=%s", r.URL.Path)
+				}
+				b, _ := io.ReadAll(r.Body)
+				sentBody = string(b)
+				return response(http.StatusOK, `{"success":true,"data":{"sessionId":"sess-1","inputId":"input-1","turnId":"turn-1","status":"accepted"}}`), nil
+			})
+			deps := Dependencies{
+				HTTPClient: &http.Client{Transport: transport},
+				Stdout:     &strings.Builder{},
+				Stderr:     &strings.Builder{},
+				Lookup: func(name string) (string, bool) {
+					if name == "MOHIST_TOKEN" {
+						return "token", true
+					}
+					if name == "MOHIST_SERVER_URL" {
+						return "http://server", true
+					}
+					return "", false
+				},
+				ReadFile: func(path string) (string, error) {
+					if path == "./empty.md" {
+						return "", nil
+					}
+					if v, ok := state[path]; ok {
+						return v, nil
+					}
+					return "", os.ErrNotExist
+				},
+				HomeDir:           func() (string, error) { return "/home/test", nil },
+				CurrentDirectory:  func() string { return "/work/tree" },
+				Input:             strings.NewReader(""),
+				OpenManagedLock:   func(string) (io.Closer, error) { return io.NopCloser(strings.NewReader("")), nil },
+				ManagedPathExists: func(string) bool { return false },
+			}
+			if code := Run(context.Background(), tc.args, deps); code != ExitOK {
+				t.Fatalf("code=%d stderr=%q", code, deps.Stderr.(*strings.Builder).String())
+			}
+			if !strings.Contains(sentBody, `"text":""`) {
+				t.Fatalf("body did not include empty text verbatim: %s", sentBody)
+			}
+		})
+	}
+}
+
+// TestNonblankValuesAreSentUntrimmed guards against a regression where
+// the blank check or any other intermediate step replaces the resolved
+// value with a trimmed variant. Nonblank content with significant
+// leading, trailing, and interior whitespace must be sent exactly as
+// resolved for every command that accepts a text carrier.
+func TestNonblankValuesAreSentUntrimmed(t *testing.T) {
+	state := map[string]string{"/work/tree/.mohist/cli-state.json": `{"activeProjectId":"proj"}`}
+	body := "  leading  \n\tinterior\n  trailing  \n"
+	cases := []struct {
+		name      string
+		args      []string
+		wantPath  string
+		flag      string
+		key       string
+	}{
+		{
+			name:     "issue-create",
+			args:     []string{"issue", "create", "Title"},
+			wantPath: "/api/projects/proj/issues",
+			flag:     "--body-file",
+			key:      "body",
+		},
+		{
+			name:     "issue-edit",
+			args:     []string{"issue", "edit", "1"},
+			wantPath: "/api/projects/proj/issues/1",
+			flag:     "--body-file",
+			key:      "body",
+		},
+		{
+			name:     "issue-comment",
+			args:     []string{"issue", "comment", "create", "1"},
+			wantPath: "/api/projects/proj/issues/1/comments",
+			flag:     "--body-file",
+			key:      "body",
+		},
+		{
+			name:     "epic-create",
+			args:     []string{"epic", "create", "Title"},
+			wantPath: "/api/projects/proj/epics/",
+			flag:     "--description-file",
+			key:      "description",
+		},
+		{
+			name:     "epic-edit",
+			args:     []string{"epic", "edit", "1"},
+			wantPath: "/api/projects/proj/epics/1",
+			flag:     "--description-file",
+			key:      "description",
+		},
+		{
+			name:     "workflow-create",
+			args:     []string{"workflow", "create"},
+			wantPath: "/api/projects/proj/workflow-profiles",
+			flag:     "--file",
+			key:      "definitionSource",
+		},
+		{
+			name:     "workflow-edit",
+			args:     []string{"workflow", "edit", "p-1"},
+			wantPath: "/api/projects/proj/workflow-profiles/p-1",
+			flag:     "--file",
+			key:      "definitionSource",
+		},
+		{
+			name:     "project-verification-set",
+			args:     []string{"project", "workflow", "verification", "set"},
+			wantPath: "/api/projects/proj/verification-command",
+			flag:     "--command-file",
+			key:      "command",
+		},
+		{
+			name:     "project-prompt-set",
+			args:     []string{"project", "workflow", "prompt", "set", "intro"},
+			wantPath: "/api/projects/proj/workflow-profile/prompts/intro",
+			flag:     "--body-file",
+			key:      "body",
+		},
+		{
+			name:     "agent-start",
+			args:     []string{"agent", "start"},
+			wantPath: "/api/projects/proj/agent-tasks",
+			flag:     "--prompt-file",
+			key:      "prompt",
+		},
+		{
+			name:     "agent-launch",
+			args:     []string{"agent", "launch", "agent_1"},
+			wantPath: "/api/projects/proj/agents/agent_1/sessions",
+			flag:     "--prompt-file",
+			key:      "prompt",
+		},
+		{
+			name:     "session-followup",
+			args:     []string{"session", "followup", "sess-1"},
+			wantPath: "/api/projects/proj/agent-sessions/sess-1/followup",
+			flag:     "--text-file",
+			key:      "text",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got string
+			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.EscapedPath() != tc.wantPath {
+					t.Fatalf("path=%s want=%s", r.URL.EscapedPath(), tc.wantPath)
+				}
+				b, _ := io.ReadAll(r.Body)
+				got = string(b)
+				return response(http.StatusOK, `{"success":true,"data":{}}`), nil
+			})
+			deps := Dependencies{
+				HTTPClient: &http.Client{Transport: transport},
+				Stdout:     &strings.Builder{},
+				Stderr:     &strings.Builder{},
+				Lookup: func(name string) (string, bool) {
+					if name == "MOHIST_TOKEN" {
+						return "token", true
+					}
+					if name == "MOHIST_SERVER_URL" {
+						return "http://server", true
+					}
+					return "", false
+				},
+				ReadFile: func(path string) (string, error) {
+					if path == "./source.txt" {
+						return body, nil
+					}
+					if v, ok := state[path]; ok {
+						return v, nil
+					}
+					return "", os.ErrNotExist
+				},
+				HomeDir:           func() (string, error) { return "/home/test", nil },
+				CurrentDirectory:  func() string { return "/work/tree" },
+				Input:             strings.NewReader(""),
+				OpenManagedLock:   func(string) (io.Closer, error) { return io.NopCloser(strings.NewReader("")), nil },
+				ManagedPathExists: func(string) bool { return false },
+			}
+			args := append([]string{}, tc.args...)
+			args = append(args, tc.flag, "./source.txt")
+			if code := Run(context.Background(), args, deps); code != ExitOK {
+				t.Fatalf("code=%d stderr=%q", code, deps.Stderr.(*strings.Builder).String())
+			}
+			wantSub := `"` + tc.key + `":"  leading  \n\tinterior\n  trailing  \n"`
+			if !strings.Contains(got, wantSub) {
+				t.Fatalf("body did not preserve whitespace verbatim: %s", got)
+			}
+		})
+	}
+}
+
+// TestCarrierDiagnosticDistinctionForSameCommand proves that the two
+// distinct failure modes share ExitUsage=2 but produce different
+// diagnostics. A read failure of a blank-required carrier returns the
+// "could not read" message while a successfully read blank value
+// returns the "must not be blank" message so callers can distinguish
+// them despite the shared exit code.
+func TestCarrierDiagnosticDistinctionForSameCommand(t *testing.T) {
+	state := map[string]string{"/work/tree/.mohist/cli-state.json": `{"activeProjectId":"proj"}`}
+
+	// Read failure path: missing --prompt-file returns "could not read".
+	failFixture := newCommandFixture(state)
+	failFixture.deps.ReadFile = func(path string) (string, error) {
+		failFixture.readPaths.add(path)
+		if v, ok := state[path]; ok {
+			return v, nil
+		}
+		return "", os.ErrNotExist
+	}
+	failCode := Run(context.Background(), []string{"agent", "start", "--prompt-file", "./missing.md"}, failFixture.deps)
+	if failCode != ExitUsage {
+		t.Fatalf("read-fail code=%d stderr=%q", failCode, failFixture.stderr.String())
+	}
+	if !strings.Contains(failFixture.stderr.String(), "could not read --prompt-file") {
+		t.Fatalf("read-fail stderr missing 'could not read': %q", failFixture.stderr.String())
+	}
+
+	// Blank-success path: --prompt-file present but content is blank
+	// (whitespace only) returns "must not be blank".
+	blankFixture := newCommandFixture(state)
+	blankFixture.deps.ReadFile = func(path string) (string, error) {
+		blankFixture.readPaths.add(path)
+		if v, ok := state[path]; ok {
+			return v, nil
+		}
+		return "   \t\n   ", nil
+	}
+	blankCode := Run(context.Background(), []string{"agent", "start", "--prompt-file", "./blank.md"}, blankFixture.deps)
+	if blankCode != ExitUsage {
+		t.Fatalf("blank-success code=%d stderr=%q", blankCode, blankFixture.stderr.String())
+	}
+	if !strings.Contains(blankFixture.stderr.String(), "--prompt must not be blank") {
+		t.Fatalf("blank-success stderr missing 'must not be blank': %q", blankFixture.stderr.String())
+	}
+	// The two diagnostics must be distinct even though both return
+	// ExitUsage=2.
+	if failFixture.stderr.String() == blankFixture.stderr.String() {
+		t.Fatalf("diagnostics were identical for distinct failures")
+	}
+	if strings.Contains(blankFixture.stderr.String(), "could not read") {
+		t.Fatalf("blank-success path leaked 'could not read': %q", blankFixture.stderr.String())
+	}
+	if strings.Contains(failFixture.stderr.String(), "must not be blank") {
+		t.Fatalf("read-fail path leaked 'must not be blank': %q", failFixture.stderr.String())
+	}
+	// Neither path must issue any HTTP request or write to disk.
+	if failFixture.transport.calls != 0 || blankFixture.transport.calls != 0 {
+		t.Fatalf("HTTP calls fail=%d blank=%d", failFixture.transport.calls, blankFixture.transport.calls)
+	}
+	if len(failFixture.writtenPaths.paths) != 0 || len(blankFixture.writtenPaths.paths) != 0 {
+		t.Fatalf("writes fail=%v blank=%v", failFixture.writtenPaths.paths, blankFixture.writtenPaths.paths)
 	}
 }

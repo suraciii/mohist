@@ -689,7 +689,10 @@ cannot start new work; the error identifies this command and the Project Setting
   newlines, and never substitutes an empty value or another fallback when a
   read fails. An empty file or empty stdin is a successful read whose value
   is `""`; the command that owns the field decides whether to accept an
-  empty carrier.
+  empty carrier. Read failures and successful blank-value rejections share
+  exit code `2` but use distinct diagnostics: `could not read --<flag>` for
+  an unreadable carrier and `--<flag> must not be blank` for a successful
+  read that the command's empty-text contract rejects.
 - In a TTY, some install, setup, and create commands may prompt when optional
   input is missing.
 - Outside a TTY, commands never prompt. Missing required input fails

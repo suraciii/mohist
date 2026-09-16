@@ -293,7 +293,11 @@ such as the Issue GET that `issue edit --label` uses for label diffing.
 stdin is consumed at most once per command so the resolved value can be
 reused for pre-flight and mutation paths. Empty-text validation lives on the
 command that owns the field and runs only after a successful read; a missing
-file cannot be misclassified as a successful empty value.
+file cannot be misclassified as a successful empty value. Read failures and
+blank-required rejections share `ExitUsage=2` but use distinct diagnostics
+(`could not read --<flag>` versus `--<flag> must not be blank`) so callers
+can distinguish an unreadable carrier from a successful read that the
+command's empty-text contract rejected.
 
 ### Output and Fields
 
