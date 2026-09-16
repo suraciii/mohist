@@ -8,7 +8,6 @@ import {
   type CodexTurnEventObserver,
   type CodexTurnTransport,
 } from './turn.js'
-import { CODEX_INTERRUPT_CONFIRMATION_BUDGET_MS } from './closeout.js'
 import { isCodexTurnStartRequest } from './protocol-types.js'
 import { normalizeDeadlineExceededCodex, normalizeInterruptedCodex, normalizeTurnFailedCodex } from './errors.js'
 import type { CodexNativeReasoningEffort, CodexTurnResult } from './types.js'
@@ -865,87 +864,13 @@ void _surface
 // ---------------------------------------------------------------------------
 // Closeout integration — driveTurnToCompletion wires the closeout
 // helpers from `./closeout.js` for both the two-phase closeout and
-// the permission / user-input rejection discipline.
+// the permission / user-input rejection discipline. The exhaustive
+// unit-test surface for the helpers themselves lives in
+// `closeout.test.ts`; the tests below exercise the lifecycle
+// integration only.
 // ---------------------------------------------------------------------------
 
 describe('Codex turn closeout integration', () => {
-  it('fires the closeout warning on the exact active Turn with task-independent text', async () => {
-    const transport = buildTransport()
-    transport.setResponse('turn/steer', {
-      jsonrpc: '2.0',
-      id: 99,
-      result: { threadId: THREAD_ID, turnId: TURN_ID, accepted: true },
-    })
-    transport.setResponse('turn/interrupt', {
-      jsonrpc: '2.0',
-      id: 100,
-      result: { threadId: THREAD_ID, turnId: TURN_ID, accepted: true },
-    })
-    const clock = buildFakeClock()
-    // Use a deadline shorter than the 5-minute lead so the warning
-    // fires at execution start.
-    const completion = driveTurnToCompletion(driveArgs(transport, undefined, { deadlineMs: 60_000, clock }))
-    // Advance the fake clock past the warning delay (0ms — the
-    // lead is longer than the deadline, so the warning fires at
-    // execution start) and drain the microtask queue so the async
-    // `transport.send` records the call.
-    clock.advance(0)
-    for (let i = 0; i < 5; i += 1) await Promise.resolve()
-    const steerCall = transport.calls.find((c) => c.method === 'turn/steer')
-    expect(steerCall).toBeDefined()
-    expect(steerCall?.params).toEqual({
-      threadId: THREAD_ID,
-      turnId: TURN_ID,
-      input: [
-        {
-          type: 'text',
-          text: 'Mohist runner deadline approaching; wrap up the current work and return the final answer.',
-        },
-      ],
-    })
-    // Complete the Turn cleanly so the lifecycle resolves.
-    transport.emit({
-      type: 'turn/completed',
-      threadId: THREAD_ID,
-      turnId: TURN_ID,
-      status: 'completed',
-    })
-    const result = await completion
-    expect(result).toMatchObject({ ok: true })
-    // The warning is single fired exactly once; no second steer
-    // call should appear.
-    expect(transport.calls.filter((c) => c.method === 'turn/steer')).toHaveLength(1)
-  })
-
-  it('the closeout warning is task-independent and never names a marker or repeats task-specific contracts', async () => {
-    const transport = buildTransport()
-    transport.setResponse('turn/steer', {
-      jsonrpc: '2.0',
-      id: 99,
-      result: { threadId: THREAD_ID, turnId: TURN_ID, accepted: true },
-    })
-    const clock = buildFakeClock()
-    const completion = driveTurnToCompletion(driveArgs(transport, undefined, { deadlineMs: 60_000, clock }))
-    clock.advance(0)
-    for (let i = 0; i < 5; i += 1) await Promise.resolve()
-    const steerCall = transport.calls.find((c) => c.method === 'turn/steer')
-    expect(steerCall).toBeDefined()
-    const text = (steerCall?.params as { input: Array<{ text: string }> }).input[0].text
-    // The text MUST be the locked, task-independent warning.
-    expect(text).toBe('Mohist runner deadline approaching; wrap up the current work and return the final answer.')
-    // And it MUST NOT contain marker names or task-specific
-    // contract language.
-    expect(text).not.toMatch(/marker/i)
-    expect(text).not.toMatch(/reset|rebind|approve|permission|user[_\s-]?input/i)
-    transport.emit({
-      type: 'turn/completed',
-      threadId: THREAD_ID,
-      turnId: TURN_ID,
-      status: 'completed',
-    })
-    await completion
-  })
-
   it('deadline interrupt fixes the result as deadline-exceeded before bounded confirmation', async () => {
     const transport = buildTransport()
     transport.setResponse('turn/interrupt', {
@@ -965,83 +890,6 @@ describe('Codex turn closeout integration', () => {
       threadId: THREAD_ID,
       turnId: TURN_ID,
       status: 'completed',
-    })
-    const again = await completion
-    expect(again).toBe(result)
-  })
-
-  it('denial + interrupt returns permission-required after the matching terminal event', async () => {
-    const transport = buildTransport()
-    transport.setResponse('turn/interrupt', {
-      jsonrpc: '2.0',
-      id: 5,
-      result: { threadId: THREAD_ID, turnId: TURN_ID, accepted: true },
-    })
-    const completion = driveTurnToCompletion(driveArgs(transport))
-    transport.emit({
-      jsonrpc: '2.0',
-      id: 99,
-      method: 'item/tool/requestApproval',
-      params: { threadId: THREAD_ID, turnId: TURN_ID },
-    })
-    expect(transport.denied).toEqual([
-      {
-        id: 99,
-        reason: 'Codex headless runtime denies approval / permission / user-input requests',
-      },
-    ])
-    const interruptCall = transport.calls.find((c) => c.method === 'turn/interrupt')
-    expect(interruptCall).toBeDefined()
-    expect(interruptCall?.params).toEqual({ threadId: THREAD_ID, turnId: TURN_ID })
-    // The runtime awaits the matching terminal event before
-    // surfacing `permission-required`.
-    transport.emit({
-      type: 'turn/completed',
-      threadId: THREAD_ID,
-      turnId: TURN_ID,
-      status: 'interrupted',
-    })
-    const result = await completion
-    expect(result).toMatchObject({ ok: false, error: { kind: 'permission-required' } })
-  })
-
-  it('an unconfirmed denial keeps the AgentSession binding unchanged and surfaces interruption-unconfirmed', async () => {
-    const transport = buildTransport()
-    transport.setResponse('turn/interrupt', {
-      jsonrpc: '2.0',
-      id: 5,
-      result: { threadId: THREAD_ID, turnId: TURN_ID, accepted: true },
-    })
-    const clock = buildFakeClock()
-    const options = driveArgs(transport, undefined, { deadlineMs: 60_000 })
-    const completion = driveTurnToCompletion({
-      ...options,
-      clock,
-    })
-    // Trigger a server-initiated request — the lifecycle denies
-    // and interrupts the active Turn.
-    transport.emit({
-      jsonrpc: '2.0',
-      id: 99,
-      method: 'item/tool/requestApproval',
-      params: { threadId: THREAD_ID, turnId: TURN_ID },
-    })
-    // Advance the fake clock past the bounded confirmation
-    // budget. The lifecycle surfaces `unknown` /
-    // `interruption-unconfirmed` and the AgentSession binding is
-    // unchanged.
-    clock.advance(CODEX_INTERRUPT_CONFIRMATION_BUDGET_MS + 1)
-    const result = await completion
-    expect(result).toMatchObject({ ok: false, error: { kind: 'unknown' } })
-    if (result.ok) throw new Error('expected failure')
-    expect(result.diagnostics.some((d) => d.code === 'interruption-unconfirmed')).toBe(true)
-    // A late terminal event does NOT retroactively change the
-    // binding; the session was already resolved with `unknown`.
-    transport.emit({
-      type: 'turn/completed',
-      threadId: THREAD_ID,
-      turnId: TURN_ID,
-      status: 'interrupted',
     })
     const again = await completion
     expect(again).toBe(result)
@@ -1078,45 +926,3 @@ describe('Codex turn closeout integration', () => {
     expect(result).toMatchObject({ ok: false, error: { kind: 'permission-required' } })
   })
 })
-
-// ---------------------------------------------------------------------------
-// Helper used by the unconfirmed-denial test above. The closeout
-// helpers expose a deterministic clock seam; the lifecycle receives
-// the same clock seam through `CodexTurnCompletionOptions.clock`.
-// ---------------------------------------------------------------------------
-
-interface FakeClock {
-  now(): number
-  setTimeout(callback: () => void, delayMs: number): unknown
-  clearTimeout(handle: unknown): void
-  advance(ms: number): void
-}
-
-function buildFakeClock(initial = 0): FakeClock {
-  let now = initial
-  const scheduled: { id: number; delayMs: number; callback: () => void }[] = []
-  let nextId = 1
-  return {
-    now: () => now,
-    setTimeout(callback, delayMs) {
-      const id = nextId++
-      scheduled.push({ id, delayMs, callback })
-      return id
-    },
-    clearTimeout(handle) {
-      const index = scheduled.findIndex((t) => t.id === handle)
-      if (index >= 0) scheduled.splice(index, 1)
-    },
-    advance(ms) {
-      now += ms
-      let safety = scheduled.length + 1
-      while (safety > 0) {
-        safety -= 1
-        const index = scheduled.findIndex((t) => now >= t.delayMs)
-        if (index < 0) break
-        const [timer] = scheduled.splice(index, 1)
-        timer.callback()
-      }
-    },
-  }
-}
