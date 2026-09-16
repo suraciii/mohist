@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -14,7 +15,7 @@ import (
 
 var issueListFields = []string{"number", "title", "status", "stage", "priority", "risk", "labels", "prereq", "epic", "github", "createdAt", "updatedAt"}
 var issueFields = []string{"number", "title", "body", "status", "health", "projectId", "projectName", "labels", "priority", "risk", "model", "modelVariant", "agentConfig", "stageModels", "stageModelVariants", "createdAt", "updatedAt", "archivedAt", "completedAt", "approvalState", "blockedReason", "attention", "workflowRunId", "workflowStage", "workflowStatus", "workflowStageProgress", "workflowProfileId", "workflowProfileMode", "noWorkflow", "prerequisiteNumbers", "comments", "attachments", "prereq", "isDraft", "canStart", "canBeParent", "blocker", "repositoryName", "repository", "repositoryProblem", "github", "epic", "parentIssueRef", "childIssuesSummary", "children", "feedback", "watching", "muted"}
-var issueResultFields = []string{"number", "title", "status", "stage", "priority", "risk", "labels", "body", "repository", "repositoryName", "prereq", "epic", "github", "workflowRunId", "createdAt", "updatedAt"}
+var issueResultFields = []string{"number", "title", "status", "stage", "priority", "risk", "workflowProfileId", "noWorkflow", "isDraft", "labels", "body", "repository", "repositoryName", "prereq", "epic", "github", "workflowRunId", "createdAt", "updatedAt"}
 var archiveFields = []string{"archived", "skipped", "skippedNumbers", "message"}
 var epicListFields = []string{"projectId", "number", "title", "description", "priority", "status", "createdAt", "updatedAt", "progress", "pauseReason"}
 var epicFields = []string{"projectId", "number", "title", "description", "priority", "status", "createdAt", "updatedAt", "linkedIssues", "progress", "nextIssueNumber", "nextIssueReason", "pauseReason"}
@@ -153,6 +154,12 @@ func parseIssueOptions(c command, args []string, action string) (command, error)
 		}
 		if hasArg(c.args, "body") && hasArg(c.args, "body-file") {
 			return command{}, usage("--body and --body-file are mutually exclusive")
+		}
+		if hasArg(c.args, "inherit-workflow-profile") {
+			return command{}, usage("--inherit-workflow-profile is not supported for issue create")
+		}
+		if hasArg(c.args, "workflow-profile") && hasArg(c.args, "no-workflow") {
+			return command{}, usage("--workflow-profile and --no-workflow are mutually exclusive")
 		}
 	}
 	if action == "edit" {
@@ -739,6 +746,80 @@ func emptyMessage(kind string) string {
 	}
 }
 
+// applyIssueCreateFrontmatter resolves an Issue-create payload body, risk,
+// workflowProfileId, and noWorkflow from the partitioned frontmatter plus the
+// explicit flags. It writes the resolved values straight into the existing
+// request payload and emits override notes and malformed warnings to stderr.
+func applyIssueCreateFrontmatter(
+	stderr io.Writer,
+	payload map[string]any,
+	fm issueFrontmatter,
+	bodyFile string,
+	workflowFlag string, workflowFlagSet bool,
+	riskFlag string, riskFlagSet bool,
+	noWorkflow bool,
+) {
+	payload["body"] = fm.body
+
+	workflowFromFrontmatter := ""
+	riskFromFrontmatter := ""
+	switch fm.kind {
+	case issueFrontmatterParsed:
+		workflowFromFrontmatter = fm.recommendedWorkflow
+		riskFromFrontmatter = fm.risk
+	case issueFrontmatterMalformed:
+		if bodyFile != "" {
+			fmt.Fprintf(stderr, "warning: malformed YAML frontmatter in '%s'; sending full body text without parsing metadata\n", bodyFile)
+		} else {
+			fmt.Fprintln(stderr, "warning: malformed YAML frontmatter; sending full body text without parsing metadata")
+		}
+	}
+
+	// --no-workflow suppresses any frontmatter recommendation before the flag
+	// overrides are applied, mirroring the legacy caller that passes a null
+	// workflow flag when the switch is set.
+	effectiveWorkflow := workflowFromFrontmatter
+	if noWorkflow {
+		effectiveWorkflow = ""
+	}
+	if workflowFlagSet && !noWorkflow {
+		if workflowFromFrontmatter != "" && workflowFromFrontmatter != workflowFlag {
+			fmt.Fprintf(stderr, "note: --workflow-profile '%s' overrides frontmatter recommended_workflow '%s'\n", workflowFlag, workflowFromFrontmatter)
+		}
+		effectiveWorkflow = workflowFlag
+	}
+
+	risk := riskFromFrontmatter
+	if riskFlagSet {
+		if riskFromFrontmatter != "" && riskFromFrontmatter != riskFlag {
+			fmt.Fprintf(stderr, "note: --risk '%s' overrides frontmatter risk '%s'\n", riskFlag, riskFromFrontmatter)
+		}
+		risk = riskFlag
+	}
+	payload["risk"] = risk
+
+	if noWorkflow {
+		if workflowFromFrontmatter != "" {
+			fmt.Fprintf(stderr, "note: --no-workflow overrides frontmatter recommended_workflow '%s'\n", workflowFromFrontmatter)
+		}
+		payload["noWorkflow"] = true
+		return
+	}
+
+	if workflowFlagSet {
+		if effectiveWorkflow == "" {
+			payload["workflowProfileId"] = nil
+		} else {
+			payload["workflowProfileId"] = effectiveWorkflow
+		}
+		return
+	}
+
+	if effectiveWorkflow != "" {
+		payload["workflowProfileId"] = effectiveWorkflow
+	}
+}
+
 func organizationRequest(cmd command, base string, deps Dependencies) (string, string, any, bool, error) {
 	n := url.PathEscape(argValue(cmd.args, "number", ""))
 	issue := base + "/issues/" + n
@@ -769,7 +850,7 @@ func organizationRequest(cmd command, base string, deps Dependencies) (string, s
 	case "issue-view":
 		return issue, http.MethodGet, nil, false, nil
 	case "issue-create":
-		b := map[string]any{"title": argValue(cmd.args, "title", ""), "body": cmd.preflightedInput, "labels": labelMap(valuesFor(cmd.args, "label")), "priority": argValue(cmd.args, "priority", ""), "model": argValue(cmd.args, "model", ""), "modelVariant": argValue(cmd.args, "model-variant", ""), "risk": argValue(cmd.args, "risk", ""), "isDraft": true}
+		b := map[string]any{"title": argValue(cmd.args, "title", ""), "labels": labelMap(valuesFor(cmd.args, "label")), "priority": argValue(cmd.args, "priority", ""), "model": argValue(cmd.args, "model", ""), "modelVariant": argValue(cmd.args, "model-variant", ""), "isDraft": true}
 		if hasArg(cmd.args, "ready") {
 			b["isDraft"] = false
 		}
@@ -780,15 +861,25 @@ func organizationRequest(cmd command, base string, deps Dependencies) (string, s
 				b["parentIssueNumber"] = numberValue(argValue(cmd.args, "parent", ""))
 			}
 		}
-		for _, k := range []string{"workflow-profile", "repo", "stage-models", "stage-model-variants"} {
+		for _, k := range []string{"repo", "stage-models", "stage-model-variants"} {
 			if v := argValue(cmd.args, k, ""); v != "" {
-				target := map[string]string{"workflow-profile": "workflowProfileId", "repo": "repositoryName", "stage-models": "stageModels", "stage-model-variants": "stageModelVariants"}[k]
+				target := map[string]string{"repo": "repositoryName", "stage-models": "stageModels", "stage-model-variants": "stageModelVariants"}[k]
 				b[target] = v
 			}
 		}
-		if hasArg(cmd.args, "no-workflow") {
-			b["noWorkflow"] = true
+		bodyFile := ""
+		if hasArg(cmd.args, "body-file") {
+			bodyFile = argValue(cmd.args, "body-file", "")
 		}
+		applyIssueCreateFrontmatter(
+			deps.Stderr,
+			b,
+			partitionIssueFrontmatter(cmd.preflightedInput),
+			bodyFile,
+			argValue(cmd.args, "workflow-profile", ""), hasArg(cmd.args, "workflow-profile"),
+			argValue(cmd.args, "risk", ""), hasArg(cmd.args, "risk"),
+			hasArg(cmd.args, "no-workflow"),
+		)
 		return base + "/issues", http.MethodPost, b, false, nil
 	case "issue-edit":
 		b := map[string]any{}
