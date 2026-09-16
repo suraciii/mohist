@@ -620,7 +620,8 @@ review-based Approval Point decisions.
   are mutually exclusive. Supplying neither flag is a LOCAL ERROR (exit 2);
   omitting `--approver` does not silently preserve the existing list. Use
   `--clear-approvers` to send an empty approvers list. Each `--approver` value
-  must be non-blank; GitHub login format and existence remain Server-validated.
+  must be non-blank. The Server trims and deduplicates logins and matches them
+  case-insensitively against review authors; it does not check account existence.
 - `mo github list` shows every Repository of the current Project and its
   connection state, including repositories without a connection.
 - `mo github view <connection>` and `mo github enable|disable <connection>`
@@ -802,7 +803,8 @@ Exit codes are small and stable:
 - `130`: user interruption.
 
 Unknown flags for any Operations or notification leaf produce exit 2 and a
-leaf-specific USAGE block; no request is sent.
+leaf-specific USAGE block; no request is sent. Slack credential options instead
+receive the protected-file diagnostic.
 
 `--json` does not change errors to another envelope. The caller always uses the
 exit code for success or failure and reads the same diagnostic from stderr.
