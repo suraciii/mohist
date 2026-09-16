@@ -214,6 +214,21 @@ func parseOperations(area string, args []string) (command, error) {
 		c.args = append(c.args, name, args[i+1])
 		i++
 	}
+	if area == "github" && action == "update" {
+		approvers := valuesFor(c.args, "approver")
+		for _, approver := range approvers {
+			if strings.TrimSpace(approver) == "" {
+				return command{}, usageWithLeaf("--approver values must be non-blank", leafUsage)
+			}
+		}
+		clear := hasArg(c.args, "clear-approvers")
+		if clear && len(approvers) > 0 {
+			return command{}, usageWithLeaf("--approver and --clear-approvers are mutually exclusive", leafUsage)
+		}
+		if !clear && len(approvers) == 0 {
+			return command{}, usageWithLeaf("github update requires --approver or --clear-approvers", leafUsage)
+		}
+	}
 	if area == "runner" && action == "list" {
 		scope := argValue(c.args, "scope", "all")
 		if !contains([]string{"all", "global", "project"}, scope) {
@@ -693,7 +708,11 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 				method = http.MethodPost
 			} else if action == "update" {
 				method = http.MethodPatch
-				body = map[string]any{"approvers": valuesFor(cmd.args, "approver")}
+				if hasArg(cmd.args, "clear-approvers") {
+					body = map[string]any{"approvers": []string{}}
+				} else {
+					body = map[string]any{"approvers": valuesFor(cmd.args, "approver")}
+				}
 			}
 		}
 	} else if area == "slack" {

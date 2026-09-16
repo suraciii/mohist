@@ -612,6 +612,13 @@ review-based Approval Point decisions.
   URL and a retry action. It then prints the webhook address, content type,
   secret, and event subscriptions. One GitHub repository connects to one
   Project Repository; reconnecting an existing App binding is idempotent.
+- `mo github update <connection> [--approver <login> ... | --clear-approvers]`
+  replaces or clears the approver list: `--approver` sends the supplied logins
+  as the new list and `--clear-approvers` sends an empty list. The two forms
+  are mutually exclusive. Supplying neither flag is a LOCAL ERROR (exit 2);
+  omitting `--approver` does not silently preserve the existing list. Use
+  `--clear-approvers` to send an empty approvers list. Each `--approver` value
+  must be non-blank; GitHub login format and existence remain Server-validated.
 - `mo github list` shows every Repository of the current Project and its
   connection state, including repositories without a connection.
 - `mo github view <connection>` and `mo github enable|disable <connection>`
@@ -791,6 +798,9 @@ Exit codes are small and stable:
 - `1`: operation failure, disallowed state, or unavailable service.
 - `2`: command or argument usage error.
 - `130`: user interruption.
+
+Unknown flags for any Operations or notification leaf produce exit 2 and a
+leaf-specific USAGE block; no request is sent.
 
 `--json` does not change errors to another envelope. The caller always uses the
 exit code for success or failure and reads the same diagnostic from stderr.

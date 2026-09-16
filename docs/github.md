@@ -79,6 +79,11 @@ mo github list
 ```
 
 An optional approver list enables [Pull Request Review at an Approval Point](#pull-request-review-at-an-approval-point).
+`mo github update <connection>` manages that list: update requires `--approver`
+or `--clear-approvers`; both are accepted via the PATCH body key `approvers`.
+`--clear-approvers` is the only way to send an empty approvers array; omitting
+both flags is a local error. Login format and existence remain Server-validated;
+the CLI only enforces non-blank on `--approver` values.
 
 ## Connection Lifecycle
 

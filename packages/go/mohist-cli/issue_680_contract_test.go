@@ -161,6 +161,9 @@ func TestIssue680OperationsLeavesRejectUnknownFlags(t *testing.T) {
 				{name: "unknown-bogus", args: append(append([]string{}, leaf.base...), "--bogus")},
 				{name: "wrong-leaf-boolean", args: append(append([]string{}, leaf.base...), wrongLeafBoolean)},
 			}
+			if !(leaf.area == "github" && leaf.action == "update") && wrongLeafBoolean != "--clear-approvers" {
+				cases = append(cases, reject{name: "clear-approvers", args: append(append([]string{}, leaf.base...), "--clear-approvers")})
+			}
 			if leaf.area == "github" && leaf.action == "connect" {
 				cases = append(cases, reject{name: "no-op-repo", args: append(append([]string{}, leaf.base...), "--repo", "name")})
 			}
@@ -197,6 +200,7 @@ func TestIssue680NotificationSetupRejectsUnknownFlags(t *testing.T) {
 	}{
 		{name: "legacy-platform", args: []string{"notification", "setup", "--platform", "telegram"}, flag: "--platform"},
 		{name: "unknown-bogus", args: []string{"notification", "setup", "--bogus"}, flag: "--bogus"},
+		{name: "wrong-leaf-clear-approvers", args: []string{"notification", "setup", "--clear-approvers"}, flag: "--clear-approvers"},
 		{name: "wrong-leaf-boolean", args: []string{"notification", "setup", "--yes"}, flag: "--yes"},
 	}
 	for _, tc := range cases {
@@ -358,4 +362,157 @@ func TestIssue680GithubUpdateClearRefusesTrailingValue(t *testing.T) {
 		t.Fatalf("stderr=%q, want leaf USAGE block", errOut.String())
 	}
 	probe.assertUnused(t)
+}
+
+func TestIssue680GithubUpdateRequiresApproverOrClear(t *testing.T) {
+	probe := discoveryProbe{}
+	out, errOut := &strings.Builder{}, &strings.Builder{}
+	args := []string{"github", "update", "gh-1", "--project", "proj"}
+	if code := Run(context.Background(), args, probe.deps(out, errOut)); code != ExitUsage {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout=%q, want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "github update requires --approver or --clear-approvers") {
+		t.Fatalf("stderr=%q, want requires diagnostic", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "USAGE") {
+		t.Fatalf("stderr=%q, want leaf USAGE block", errOut.String())
+	}
+	probe.assertUnused(t)
+}
+
+func TestIssue680GithubUpdateApproverValuesAreNonBlank(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "empty", args: []string{"github", "update", "gh-1", "--project", "proj", "--approver", ""}},
+		{name: "whitespace", args: []string{"github", "update", "gh-1", "--project", "proj", "--approver", "   "}},
+		{name: "mixed", args: []string{"github", "update", "gh-1", "--project", "proj", "--approver", "alice", "--approver", ""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			probe := discoveryProbe{}
+			out, errOut := &strings.Builder{}, &strings.Builder{}
+			if code := Run(context.Background(), tc.args, probe.deps(out, errOut)); code != ExitUsage {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+			if out.Len() != 0 {
+				t.Fatalf("stdout=%q, want empty", out.String())
+			}
+			if !strings.Contains(errOut.String(), "--approver values must be non-blank") {
+				t.Fatalf("stderr=%q, want non-blank diagnostic", errOut.String())
+			}
+			if !strings.Contains(errOut.String(), "USAGE") {
+				t.Fatalf("stderr=%q, want leaf USAGE block", errOut.String())
+			}
+			probe.assertUnused(t)
+		})
+	}
+}
+
+func TestIssue680GithubUpdateApproverAndClearAreMutuallyExclusive(t *testing.T) {
+	probe := discoveryProbe{}
+	out, errOut := &strings.Builder{}, &strings.Builder{}
+	args := []string{"github", "update", "gh-1", "--project", "proj", "--approver", "alice", "--clear-approvers"}
+	if code := Run(context.Background(), args, probe.deps(out, errOut)); code != ExitUsage {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout=%q, want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "--approver and --clear-approvers are mutually exclusive") {
+		t.Fatalf("stderr=%q, want mutual exclusion diagnostic", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "USAGE") {
+		t.Fatalf("stderr=%q, want leaf USAGE block", errOut.String())
+	}
+	probe.assertUnused(t)
+}
+
+func TestIssue680GithubUpdateTypoIsLocalUsage(t *testing.T) {
+	probe := discoveryProbe{}
+	out, errOut := &strings.Builder{}, &strings.Builder{}
+	args := []string{"github", "update", "gh-1", "--apprvoers", "alice", "--project", "proj"}
+	if code := Run(context.Background(), args, probe.deps(out, errOut)); code != ExitUsage {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout=%q, want empty", out.String())
+	}
+	if !strings.Contains(errOut.String(), "unknown option --apprvoers") {
+		t.Fatalf("stderr=%q, want unknown option --apprvoers", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "alice") || strings.Contains(errOut.String(), "--clear-approvers") {
+		t.Fatalf("stderr=%q must not mention the value or --clear-approvers", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "USAGE") {
+		t.Fatalf("stderr=%q, want leaf USAGE block", errOut.String())
+	}
+	probe.assertUnused(t)
+}
+
+func TestIssue680GithubUpdateReplaceSendsApproversArray(t *testing.T) {
+	var got *http.Request
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r
+		return response(http.StatusOK, `{"success":true,"data":{"id":"gh-1","approvers":["alice","bob"]}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "operator-token"})
+	args := []string{"github", "update", "gh-1", "--project", "proj", "--approver", "alice", "--approver", "bob"}
+	if code := Run(context.Background(), args, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if got == nil || got.Method != http.MethodPatch || got.URL.Path != "/api/projects/proj/github-connections/gh-1" {
+		t.Fatalf("request=%v, want PATCH /api/projects/proj/github-connections/gh-1", got)
+	}
+	if got.Header.Get("Authorization") == "" {
+		t.Fatalf("request headers=%v, want Authorization", got.Header)
+	}
+	data, err := io.ReadAll(got.Body)
+	if err != nil || string(data) != `{"approvers":["alice","bob"]}` {
+		t.Fatalf("body=%q err=%v, want %q", data, err, `{"approvers":["alice","bob"]}`)
+	}
+}
+
+func TestIssue680GithubUpdateClearSendsEmptyApprovers(t *testing.T) {
+	var got *http.Request
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r
+		return response(http.StatusOK, `{"success":true,"data":{"id":"gh-1","approvers":[]}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "operator-token"})
+	args := []string{"github", "update", "gh-1", "--project", "proj", "--clear-approvers"}
+	if code := Run(context.Background(), args, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if got == nil || got.Method != http.MethodPatch || got.URL.Path != "/api/projects/proj/github-connections/gh-1" {
+		t.Fatalf("request=%v, want PATCH /api/projects/proj/github-connections/gh-1", got)
+	}
+	if got.Header.Get("Authorization") == "" {
+		t.Fatalf("request headers=%v, want Authorization", got.Header)
+	}
+	data, err := io.ReadAll(got.Body)
+	if err != nil || string(data) != `{"approvers":[]}` {
+		t.Fatalf("body=%q err=%v, want %q", data, err, `{"approvers":[]}`)
+	}
+}
+
+func TestIssue680GithubConnectKeepsBodyShapeContract(t *testing.T) {
+	var got *http.Request
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r
+		return response(http.StatusCreated, `{"success":true,"data":{"id":"gh-1"}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "operator-token"})
+	args := []string{"github", "connect", "octocat/demo", "--project", "proj", "--approver", "alice", "--approver", "bob"}
+	if code := Run(context.Background(), args, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if got == nil || got.Method != http.MethodPost || got.URL.Path != "/api/projects/proj/github-connections" {
+		t.Fatalf("request=%v, want POST /api/projects/proj/github-connections", got)
+	}
+	data, err := io.ReadAll(got.Body)
+	if err != nil || string(data) != `{"approvers":["alice","bob"],"owner":"octocat","repo":"demo"}` {
+		t.Fatalf("body=%q err=%v, want connect body shape", data, err)
+	}
 }
