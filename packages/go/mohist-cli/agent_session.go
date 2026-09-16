@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var agentFields = []string{"id", "projectId", "name", "avatar", "purpose", "description", "instructions", "agentConfig", "effectiveExecutionConfig", "skills", "permissions", "allowedSubagentAgentIds", "maxConcurrentRuns", "status", "createdAt", "updatedAt", "executability"}
+var agentFields = []string{"id", "projectId", "name", "avatar", "purpose", "description", "instructions", "agentConfig", "effectiveExecutionConfig", "skills", "permissions", "allowedSubagentAgentIds", "maxConcurrentRuns", "status", "createdAt", "updatedAt", "executability", "origin", "overridesBuiltIn"}
 var agentLaunchFields = []string{"jobId", "sessionId", "inputId", "turnId", "agentId", "agentName", "workspaceId", "targetId", "origin", "status", "attachments", "rejectedAttachments", "sessionUrl", "transcriptUrl", "jobUrl", "observationUrl"}
 var agentSpawnFields = []string{"jobId", "sessionId", "turnId", "parentSessionId", "edgeId"}
 var agentJobListFields = []string{"jobId", "agentId", "agentName", "status", "submittedAt", "terminalAt", "failureReason", "recoveryDeadlineAt"}
@@ -31,6 +31,11 @@ var detachFields = []string{"state", "childSessionId", "parentSessionId", "edgeI
 var scheduleFields = []string{"scheduleId", "status", "dueAt", "text", "inputId", "createdAt", "idempotencyKey", "cancelledAt"}
 var recoveryFields = []string{"id", "status", "contextWindowSize", "contextWindowUsed", "contextUsagePercent", "contextWindowUsedBefore", "operation", "wasCompacted"}
 var modelFields = []string{"models", "modelVariants", "reasoningEfforts"}
+
+// canonicalReasoningEfforts is the Server's write-surface vocabulary for
+// reasoningEffort. A task-first launch validates it locally so a typo cannot
+// be accepted as Runtime behavior.
+var canonicalReasoningEfforts = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 func parseAgent(args []string) (command, error) {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
@@ -197,6 +202,9 @@ func parseAgentFlags(c command, action string, args []string) (command, error) {
 	}
 	if action == "start" && !hasArg(c.args, "prompt") && !hasArg(c.args, "prompt-file") {
 		return command{}, usage("--prompt or --prompt-file is required")
+	}
+	if action == "start" && hasArg(c.args, "reasoning-effort") && !contains(canonicalReasoningEfforts, argValue(c.args, "reasoning-effort", "")) {
+		return command{}, usage("--reasoning-effort must be one of " + strings.Join(canonicalReasoningEfforts, ", "))
 	}
 	if action == "launch" && !hasArg(c.args, "prompt") && !hasArg(c.args, "prompt-file") {
 		return command{}, usage("--prompt or --prompt-file is required")
@@ -493,7 +501,7 @@ func runAgent(ctx context.Context, deps Dependencies, c *client, cmd command) in
 		if len(q) > 0 {
 			path += "?" + strings.Join(q, "&")
 		}
-		return resourceRequest(ctx, deps, c, http.MethodGet, path, nil, cmd, true)
+		return agentResourceRequest(ctx, deps, c, path, cmd, true)
 	}
 	if action == "create" {
 		body := agentBody(cmd.args, nil)
@@ -505,10 +513,32 @@ func runAgent(ctx context.Context, deps Dependencies, c *client, cmd command) in
 			return code
 		}
 		id, _ := agent["id"].(string)
-		path := agentPath(project, "/"+url.PathEscape(id))
-		if action == "view" {
-			return resourceRequest(ctx, deps, c, http.MethodGet, path, nil, cmd, false)
+		name, _ := agent["name"].(string)
+		if id == "" || name == "" {
+			writeError(deps.Stderr, errors.New("error: invalid agent response [invalid_response]"))
+			return ExitOperation
 		}
+		if action == "view" {
+			// The by-name read already returned the effective definition, so a
+			// built-in view needs no stored id and no second request.
+			data, marshalErr := json.Marshal(agent)
+			if marshalErr != nil {
+				writeError(deps.Stderr, errors.New("error: invalid agent response [invalid_response]"))
+				return ExitOperation
+			}
+			return renderAgentPayload(deps, cmd, data, false)
+		}
+		if agent["origin"] == "built-in" {
+			// A built-in has no stored definition: edit materializes the
+			// same-name Project override, and the other mutations have nothing
+			// to act on.
+			if action == "edit" {
+				return runBuiltInAgentEdit(ctx, deps, c, project, name, cmd)
+			}
+			writeError(deps.Stderr, fmt.Errorf("error: built-in Agent %q has no stored definition; create a Project override with 'mo agent edit %s' first", name, name))
+			return ExitOperation
+		}
+		path := agentPath(project, "/"+url.PathEscape(id))
 		if action == "archive" {
 			return resourceRequest(ctx, deps, c, http.MethodDelete, path, nil, cmd, false)
 		}
@@ -653,6 +683,147 @@ func agentJSONNameOrSelf(name string) string {
 	return name
 }
 
+// agentResourceRequest reads one Agent resource and renders it. Agent list and
+// view own a human presentation in addition to the selected-JSON contract, so
+// they cannot go through the shared resourceRequest renderer.
+func agentResourceRequest(ctx context.Context, deps Dependencies, c *client, path string, cmd command, collection bool) int {
+	data, err := c.request(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		writeError(deps.Stderr, err)
+		return ExitOperation
+	}
+	return renderAgentPayload(deps, cmd, data, collection)
+}
+
+func renderAgentPayload(deps Dependencies, cmd command, data json.RawMessage, collection bool) int {
+	if cmd.fieldsOnly {
+		for _, field := range cmd.catalog {
+			fmt.Fprintln(deps.Stdout, field)
+		}
+		return ExitOK
+	}
+	if len(cmd.fields) > 0 {
+		selected, err := SelectFields(data, cmd.fields, collection)
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitOperation
+		}
+		return writeJSON(deps.Stdout, json.RawMessage(selected))
+	}
+	if renderAgentHuman(deps.Stdout, cmd.kind, data) {
+		return ExitOK
+	}
+	return writeJSON(deps.Stdout, json.RawMessage(data))
+}
+
+// renderAgentHuman renders the Agent list and detail views for people. It
+// reports false on a shape it does not own so the caller falls back to raw
+// JSON instead of inventing a value.
+func renderAgentHuman(out io.Writer, kind string, data json.RawMessage) bool {
+	switch kind {
+	case "agent-list":
+		var agents []map[string]json.RawMessage
+		if json.Unmarshal(data, &agents) != nil || agents == nil {
+			return false
+		}
+		if len(agents) == 0 {
+			fmt.Fprintln(out, "No Agents")
+			return true
+		}
+		fmt.Fprintln(out, "name  origin  runtime  model  status")
+		for _, agent := range agents {
+			runtime, model := agentEffectiveConfig(agent)
+			fmt.Fprintf(out, "%s  %s  %s  %s  %s\n",
+				rawString(agent["name"]), agentOrigin(agent), runtime, model, rawString(agent["status"]))
+		}
+		return true
+	case "agent-view":
+		var agent map[string]json.RawMessage
+		if json.Unmarshal(data, &agent) != nil || agent == nil {
+			return false
+		}
+		runtime, model := agentEffectiveConfig(agent)
+		fmt.Fprintln(out, "name: "+rawString(agent["name"]))
+		fmt.Fprintln(out, "origin: "+agentOrigin(agent))
+		fmt.Fprintln(out, "status: "+rawString(agent["status"]))
+		fmt.Fprintln(out, "runtime: "+runtime)
+		fmt.Fprintln(out, "model: "+model)
+		fmt.Fprintln(out, "variant: "+agentEffectiveVariant(agent))
+		renderAgentReadiness(out, agent)
+		return true
+	}
+	return false
+}
+
+func agentOrigin(agent map[string]json.RawMessage) string {
+	origin := rawString(agent["origin"])
+	if origin == "" {
+		return "-"
+	}
+	if rawBool(agent["overridesBuiltIn"]) {
+		return origin + " (overrides built-in)"
+	}
+	return origin
+}
+
+func agentEffectiveConfig(agent map[string]json.RawMessage) (string, string) {
+	runtime := agentEffectiveField(agent, "runtime")
+	if runtime == "" {
+		runtime = "-"
+	}
+	model := agentEffectiveField(agent, "model")
+	if model == "" {
+		// An unset Model is the Runtime's own choice, never a borrowed value.
+		model = "Runtime default"
+	}
+	return runtime, model
+}
+
+func agentEffectiveVariant(agent map[string]json.RawMessage) string {
+	if variant := agentEffectiveField(agent, "variant"); variant != "" {
+		return variant
+	}
+	return "-"
+}
+
+func agentEffectiveField(agent map[string]json.RawMessage, name string) string {
+	var effective map[string]json.RawMessage
+	if json.Unmarshal(agent["effectiveExecutionConfig"], &effective) != nil {
+		return ""
+	}
+	return rawString(effective[name])
+}
+
+func renderAgentReadiness(out io.Writer, agent map[string]json.RawMessage) {
+	var executability map[string]json.RawMessage
+	if json.Unmarshal(agent["executability"], &executability) != nil || executability == nil {
+		return
+	}
+	if state := rawString(executability["state"]); state != "" {
+		fmt.Fprintln(out, "readiness: "+state)
+	}
+	var gaps []map[string]json.RawMessage
+	if json.Unmarshal(executability["gaps"], &gaps) != nil {
+		return
+	}
+	for _, gap := range gaps {
+		if message := rawString(gap["message"]); message != "" {
+			fmt.Fprintln(out, "gap: "+message)
+		}
+		if nextAction := rawString(gap["nextAction"]); nextAction != "" {
+			fmt.Fprintln(out, "next action: "+nextAction)
+		}
+	}
+	if note := rawString(executability["pendingLaunchNote"]); note != "" {
+		fmt.Fprintln(out, "pending launch: "+note)
+	}
+}
+
+func rawBool(raw json.RawMessage) bool {
+	var value bool
+	return json.Unmarshal(raw, &value) == nil && value
+}
+
 func resolveAgent(ctx context.Context, deps Dependencies, c *client, project, ref string) (string, int) {
 	agent, code := resolveAgentRecord(ctx, deps, c, project, ref)
 	if code != ExitOK {
@@ -663,42 +834,129 @@ func resolveAgent(ctx context.Context, deps Dependencies, c *client, project, re
 }
 
 func resolveAgentRecord(ctx context.Context, deps Dependencies, c *client, project, ref string) (map[string]any, int) {
-	if strings.HasPrefix(ref, "agent_") {
-		data, err := c.request(ctx, http.MethodGet, agentPath(project, "/"+url.PathEscape(ref)), nil)
-		if err != nil {
-			writeError(deps.Stderr, err)
-			return nil, ExitOperation
-		}
-		var agent map[string]any
-		if json.Unmarshal(data, &agent) != nil {
-			writeError(deps.Stderr, errors.New("error: invalid agent response [invalid_response]"))
-			return nil, ExitOperation
-		}
-		if id, ok := agent["id"].(string); !ok || id != ref {
-			writeError(deps.Stderr, errors.New("error: invalid agent response [invalid_response]"))
-			return nil, ExitOperation
-		}
-		return agent, ExitOK
+	path := agentPath(project, "/"+url.PathEscape(ref))
+	byID := strings.HasPrefix(ref, "agent_")
+	if !byID {
+		// Names resolve through the catch-all by-name route, which applies the
+		// same case-insensitive resolution as launch: a stored Project Agent
+		// shadows a built-in of the same name, and built-in names contain a
+		// path separator that the id route cannot carry.
+		path = agentPath(project, "/by-name/"+agentNamePath(ref))
 	}
-	data, err := c.request(ctx, http.MethodGet, agentPath(project, "?all=true"), nil)
+	data, err := c.request(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, operationExit(deps, ctx, err)
 	}
-	var list []map[string]any
-	if json.Unmarshal(data, &list) != nil {
+	var agent map[string]any
+	if json.Unmarshal(data, &agent) != nil || agent == nil {
 		writeError(deps.Stderr, errors.New("error: invalid agent response [invalid_response]"))
 		return nil, ExitOperation
 	}
-	for _, item := range list {
-		if item["name"] == ref {
-			if id, ok := item["id"].(string); ok {
-				item["id"] = id
-				return item, ExitOK
-			}
+	id, _ := agent["id"].(string)
+	if id == "" || (byID && id != ref) {
+		writeError(deps.Stderr, errors.New("error: invalid agent response [invalid_response]"))
+		return nil, ExitOperation
+	}
+	return agent, ExitOK
+}
+
+// agentNamePath encodes one Agent name for the by-name route. Built-in names
+// contain '/', which is a path separator, so each segment is escaped
+// separately and the separators stay literal.
+func agentNamePath(name string) string {
+	segments := strings.Split(name, "/")
+	for i, segment := range segments {
+		segments[i] = url.PathEscape(segment)
+	}
+	return strings.Join(segments, "/")
+}
+
+// runBuiltInAgentEdit materializes a built-in Workflow Agent as a same-name
+// Project Agent through the Server's override operation. The Server copies the
+// built-in definition; the CLI sends only the caller's changes.
+func runBuiltInAgentEdit(ctx context.Context, deps Dependencies, c *client, project, name string, cmd command) int {
+	if flag := builtInOverrideUnsupportedFlag(cmd.args); flag != "" {
+		if strings.HasPrefix(flag, "--clear-") {
+			writeError(deps.Stderr, fmt.Errorf("error: %s cannot be used when editing built-in Agent %q; an override starts from the built-in definition, so there is nothing to clear", flag, name))
+		} else {
+			writeError(deps.Stderr, fmt.Errorf("error: %s is not supported when editing built-in Agent %q; an override carries execution configuration, --description, and --skills", flag, name))
+		}
+		return ExitUsage
+	}
+	body := agentBody(cmd.args, nil)
+	if len(body) == 0 {
+		writeError(deps.Stderr, errors.New("error: at least one editable option is required"))
+		return ExitUsage
+	}
+	body["name"] = name
+	data, err := c.request(ctx, http.MethodPost, agentPath(project, "/overrides"), body)
+	if err != nil {
+		return builtInOverrideFailure(deps, ctx, name, err)
+	}
+	created := map[string]any{}
+	if json.Unmarshal(data, &created) != nil {
+		created = nil
+	}
+	if id, _ := created["id"].(string); id != "" {
+		fmt.Fprintf(deps.Stderr, "Override created: built-in Agent %q is now overridden by Project Agent %s.\n", name, id)
+	} else {
+		fmt.Fprintf(deps.Stderr, "Override created: built-in Agent %q now has a Project override.\n", name)
+	}
+	return renderAgentPayload(deps, cmd, data, false)
+}
+
+// builtInOverrideUnsupportedFlag returns the first caller flag an override
+// cannot carry. The override request accepts only name, description,
+// agentConfig, and skills, so a flag outside that set is rejected locally
+// instead of being dropped or flattened by the Server boundary.
+func builtInOverrideUnsupportedFlag(args []string) string {
+	for _, key := range []string{"name", "purpose", "instructions", "instructions-file", "avatar-file", "permissions", "max-concurrent-runs", "allowed-subagent"} {
+		if hasArg(args, key) {
+			return "--" + key
 		}
 	}
-	writeError(deps.Stderr, fmt.Errorf("Agent %q not found", ref))
-	return nil, ExitOperation
+	for i := 0; i+1 < len(args); i += 2 {
+		if strings.HasPrefix(args[i], "clear-") {
+			return "--" + args[i]
+		}
+	}
+	return ""
+}
+
+// builtInOverrideFailure renders the override operation's named repair cases
+// from the Server envelope. Anything else keeps the standard error envelope.
+func builtInOverrideFailure(deps Dependencies, ctx context.Context, name string, err error) int {
+	var opErr *operationError
+	if errors.As(err, &opErr) {
+		switch opErr.code {
+		case "agent_override_conflict":
+			existing := overrideAgentLabel(name, errorDetailString(opErr.details, "agentId"))
+			writeError(deps.Stderr, fmt.Errorf("error: %s already overrides the built-in Agent; edit it instead with 'mo agent edit %s' [agent_override_conflict]", existing, name))
+			return ExitOperation
+		case "agent_override_archived":
+			archived := overrideAgentLabel(name, errorDetailString(opErr.details, "agentId"))
+			writeError(deps.Stderr, fmt.Errorf("error: %s is archived and shadows the built-in Agent; restore or rename it before creating an override [agent_override_archived]", archived))
+			return ExitOperation
+		}
+	}
+	return operationExit(deps, ctx, err)
+}
+
+func overrideAgentLabel(name, id string) string {
+	label := fmt.Sprintf("Project Agent %q", name)
+	if id != "" {
+		label += " (" + id + ")"
+	}
+	return label
+}
+
+func errorDetailString(details json.RawMessage, name string) string {
+	var values map[string]any
+	if len(details) == 0 || json.Unmarshal(details, &values) != nil {
+		return ""
+	}
+	value, _ := values[name].(string)
+	return value
 }
 func runAgentJob(ctx context.Context, deps Dependencies, c *client, project string, cmd command) int {
 	action := strings.TrimPrefix(cmd.kind, "agent-job-")
@@ -801,6 +1059,12 @@ func runLaunch(ctx context.Context, deps Dependencies, c *client, project string
 	body := map[string]any{"prompt": prompt}
 	if hasArg(cmd.args, "workspace") || hasArg(cmd.args, "issue") || hasArg(cmd.args, "epic") || hasArg(cmd.args, "repo") {
 		body["context"] = map[string]any{"workspace": argValue(cmd.args, "workspace", ""), "issueNumber": argValue(cmd.args, "issue", ""), "epicNumber": argValue(cmd.args, "epic", ""), "repository": argValue(cmd.args, "repo", "")}
+	}
+	// Task-first creation accepts the effort hint and freezes it on the
+	// created Agent definition. Definition-first launch takes no execution
+	// hint, so the flag stays task-first only.
+	if action == "start" && hasArg(cmd.args, "reasoning-effort") {
+		body["reasoningEffort"] = argValue(cmd.args, "reasoning-effort", "")
 	}
 	path := agentPath(project, "/"+url.PathEscape(argValue(cmd.args, "agent", ""))+"/sessions")
 	if action == "start" {
@@ -1005,7 +1269,7 @@ func (c *client) requestHeaders(ctx context.Context, method, path string, body a
 			if message == "" {
 				message = "Mohist Server request failed"
 			}
-			return nil, &operationError{message: "error: " + message + " [" + code + "]"}
+			return nil, &operationError{message: "error: " + message + " [" + code + "]", code: code, details: env.Details}
 		}
 		return env.Data, nil
 	}
