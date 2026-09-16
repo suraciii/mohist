@@ -428,6 +428,7 @@ public static class MohistServiceRegistration
         services.AddScoped<ISessionCommandDispatcher, RunnerSessionCommandDispatcher>();
         services.AddScoped<IActionCatalogSource>(sp => sp.GetRequiredService<RunnerRegistryCatalogSource>());
         services.AddScoped<IRunnerStatusSource>(sp => sp.GetRequiredService<RunnerStatusService>());
+        services.AddScoped<IRunnerActiveWorkReader>(sp => sp.GetRequiredService<RunnerActiveWorkReader>());
         services.AddSingleton<IRunnerWorkflowStatusRouter, RunnerWorkflowStatusRouter>();
         services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
         {

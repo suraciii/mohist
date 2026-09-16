@@ -136,17 +136,18 @@ public sealed record AgentStatusResponse(
 {
     public static AgentStatusResponse Create(
         IReadOnlyList<ActiveAgentDto> activeAgents,
-        IReadOnlyList<RunnerStatusView> runners,
-        RunnerCapacityView capacity,
+        IReadOnlyList<RunnerStatusEntry> runners,
+        RunnerAvailabilitySnapshot availability,
         AgentAmplificationDto amplification)
     {
-        var runnerAvailable = runners.Count > 0;
+        var runnerAvailable = availability.CanAcceptWork;
         var runnerResponses = runners
+            .Where(r => string.Equals(r.Presence.State, "online", StringComparison.Ordinal))
             .Select(r => new RunnerStatusResponse(
-                r.Id,
-                r.Kind,
-                Active: r.Capacity?.UsedSlots ?? 0,
-                Max: r.Capacity?.TotalSlots ?? 0))
+                r.Identity.Id,
+                r.Identity.Kind ?? "external",
+                Active: r.Capacity?.Used ?? 0,
+                Max: r.Capacity?.Total ?? 0))
             .ToArray();
         // Both the per-runner list and the top-level Capacity are derived from the
         // same RunnerStatusService projection so the two views are guaranteed to
@@ -156,12 +157,25 @@ public sealed record AgentStatusResponse(
             Running: activeAgents.Count > 0,
             IssueNumber: activeAgents.FirstOrDefault()?.IssueNumber,
             ActiveAgents: activeAgents,
-            Capacity: new AgentCapacityResponse(capacity.UsedSlots, capacity.TotalSlots),
+            Capacity: new AgentCapacityResponse(
+                availability.Capacity.UsedSlots,
+                availability.Capacity.TotalSlots),
             RunnerAvailable: runnerAvailable,
             EmbeddedRunnerEnabled: false,
-            RunnerMessage: runnerAvailable ? null : "No runner is connected. Start the Mohist runner process.",
+            RunnerMessage: DeriveRunnerMessage(availability),
             Runners: runnerResponses,
             Amplification: amplification);
+    }
+
+    private static string? DeriveRunnerMessage(RunnerAvailabilitySnapshot availability)
+    {
+        if (availability.CanAcceptWork)
+            return null;
+        if (!availability.HasOnlineRunner)
+            return "No runner is connected. Start the Mohist runner process.";
+        return string.Equals(availability.BlockingReason, "capacity-full", StringComparison.Ordinal)
+            ? "Runner capacity is full."
+            : $"Runner admission is blocked ({availability.BlockingReason ?? "unknown"}).";
     }
 }
 

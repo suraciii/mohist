@@ -110,3 +110,10 @@ public sealed record RunnerStatusListSnapshot(
 public sealed record RunnerStatusDetailSnapshot(
     DateTimeOffset ObservedAt,
     RunnerStatusEntry Runner);
+
+public sealed record RunnerAvailabilitySnapshot(
+    RunnerCapacityView Capacity,
+    bool HasOnlineRunner,
+    bool CanAcceptWork,
+    string? BlockingReason,
+    DateTimeOffset ObservedAt);

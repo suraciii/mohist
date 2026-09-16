@@ -70,6 +70,7 @@ public partial class RunnerGrain
                 observation.AdmissionReady,
                 [.. knownReasons],
                 [.. witnesses.Values]);
+            PublishStatusObservation();
 
             return CloneDispatchObservation(_dispatchObservation);
         }

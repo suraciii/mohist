@@ -22,6 +22,7 @@ public partial class RunnerGrain
 
             SetRunnerInfo(_info with { BuildGitHash = normalized });
             await PersistAsync();
+            PublishStatusObservation();
             _log.LogInformation("Runner {Id} reported buildGitHash {Hash}", RunnerId, normalized ?? "<null>");
             if (_status == RunnerStatus.Online)
                 await UpsertRegistryAsync();
@@ -89,6 +90,7 @@ public partial class RunnerGrain
             if (connectionGenerationChanged)
                 _dispatchObservation = null;
             await PersistAsync();
+            PublishStatusObservation();
             if (_status == RunnerStatus.Online)
                 await UpsertRegistryAsync();
         }

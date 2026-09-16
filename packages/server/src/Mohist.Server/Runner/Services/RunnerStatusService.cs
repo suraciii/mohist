@@ -12,13 +12,15 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
     private readonly TimeProvider _timeProvider;
     private readonly RunnerDefinitionStore? _definitions;
     private readonly IRunnerCredentialStatusReader? _credentials;
+    private readonly RunnerStatusObservationStore? _observations;
+    private readonly IRunnerActiveWorkReader? _activeWorks;
     private static readonly TimeSpan StaleThreshold = TimeSpan.FromMinutes(2);
 
     public RunnerStatusService(
         IGrainFactory grainFactory,
         RunnerConnectionTracker connectionTracker,
         TimeProvider timeProvider)
-        : this(grainFactory, connectionTracker, timeProvider, null, null)
+        : this(grainFactory, connectionTracker, timeProvider, null, null, null, null)
     {
     }
 
@@ -28,12 +30,26 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
         TimeProvider timeProvider,
         RunnerDefinitionStore? definitions,
         IRunnerCredentialStatusReader? credentials)
+        : this(grainFactory, connectionTracker, timeProvider, definitions, credentials, null, null)
+    {
+    }
+
+    public RunnerStatusService(
+        IGrainFactory grainFactory,
+        RunnerConnectionTracker connectionTracker,
+        TimeProvider timeProvider,
+        RunnerDefinitionStore? definitions,
+        IRunnerCredentialStatusReader? credentials,
+        RunnerStatusObservationStore? observations,
+        IRunnerActiveWorkReader? activeWorks)
     {
         _grainFactory = grainFactory;
         _connectionTracker = connectionTracker;
         _timeProvider = timeProvider;
         _definitions = definitions;
         _credentials = credentials;
+        _observations = observations;
+        _activeWorks = activeWorks;
     }
 
     /// <summary>
@@ -43,8 +59,8 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
     /// </summary>
     public async Task<RunnerStatusListSnapshot> GetGlobalRunnersAsync(CancellationToken ct = default)
     {
-        if (_definitions is null)
-            throw new InvalidOperationException("Global Runner status requires the definition store.");
+        if (_definitions is null || _observations is null || _activeWorks is null)
+            throw new InvalidOperationException("Global Runner status requires the read projection stores.");
 
         var observedAt = _timeProvider.GetUtcNow();
         var definitions = await _definitions.ListAsync(ct);
@@ -55,12 +71,48 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
         return new RunnerStatusListSnapshot(observedAt, rows);
     }
 
+    public async Task<RunnerAvailabilitySnapshot> GetAvailabilityAsync(CancellationToken ct = default) =>
+        ProjectAvailability(await GetGlobalRunnersAsync(ct));
+
+    public static RunnerAvailabilitySnapshot ProjectAvailability(RunnerStatusListSnapshot snapshot)
+    {
+        var online = snapshot.Runners
+            .Where(row => string.Equals(row.Presence.State, "online", StringComparison.Ordinal))
+            .ToList();
+        var capacity = new RunnerCapacityView(
+            online.Sum(row => row.Capacity?.Used ?? 0),
+            online.Sum(row => row.Capacity?.Total ?? 0));
+        var canAcceptWork = online.Any(row =>
+            string.Equals(row.Admission.State, "ready", StringComparison.Ordinal)
+            && row.Capacity?.Used is { } used
+            && used < row.Capacity.Total);
+
+        string? blockingReason = null;
+        if (online.Count > 0 && !canAcceptWork)
+        {
+            blockingReason = online
+                .Where(row => row.Capacity?.Used is not { } used || used < row.Capacity.Total)
+                .SelectMany(row => row.Admission.ReasonCodes)
+                .FirstOrDefault(reason => !string.Equals(reason, "capacity-full", StringComparison.Ordinal))
+                ?? "capacity-full";
+        }
+
+        return new RunnerAvailabilitySnapshot(
+            capacity,
+            online.Count > 0,
+            canAcceptWork,
+            blockingReason,
+            snapshot.ObservedAt);
+    }
+
     public async Task<RunnerStatusDetailSnapshot?> GetGlobalRunnerAsync(
         string runnerId,
         CancellationToken ct = default)
     {
         if (_definitions is null || string.IsNullOrWhiteSpace(runnerId))
             return null;
+        if (_observations is null || _activeWorks is null)
+            throw new InvalidOperationException("Global Runner status requires the read projection stores.");
 
         var observedAt = _timeProvider.GetUtcNow();
         var definition = await _definitions.GetAsync(runnerId, ct);
@@ -155,29 +207,29 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var grain = _grainFactory.GetGrain<IRunnerGrain>(definition.Id);
-        RunnerRuntimeState? runtime = null;
-        RunnerInfo? info = null;
-
+        var status = _observations!.Get(definition.Id);
+        IReadOnlyList<RunnerActiveWorkItem>? ownerWorks = null;
         try
         {
-            runtime = await grain.GetRuntimeStateAsync();
+            ownerWorks = await _activeWorks!.ListAsync(definition.Id, ct);
         }
         catch
         {
-            // The durable definition remains visible when Runner authority is
-            // unavailable. Unknown runtime facts stay unknown in the row.
+            // Owner-ledger read failures leave usage unknown; status does not
+            // activate lifecycle authority to reconstruct the value.
         }
 
-        try
-        {
-            info = await grain.GetInfoAsync();
-        }
-        catch
-        {
-            // Build and capability details are optional observations.
-        }
-
+        var runtime = status is null
+            ? null
+            : new RunnerRuntimeState(
+                status.Status,
+                status.LastPresenceAt,
+                ownerWorks ?? [],
+                status.Draining,
+                status.UpdateInterruptId,
+                status.Info?.ConnectionGeneration,
+                status.DispatchObservation);
+        var info = status?.Info;
         var connectionId = _connectionTracker.GetConnectionId(definition.Id);
         var connectionGeneration = _connectionTracker.GetConnectionGeneration(definition.Id);
         var connected = connectionId is not null;
@@ -186,12 +238,12 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
             && heartbeat != default
                 ? heartbeat
                 : null;
-        var capacity = runtime is null
-            ? new RunnerStatusCapacityView(null, definition.Slots)
-            : new RunnerStatusCapacityView(runtime.ActiveWorks.Count, definition.Slots);
-        var activeWorks = runtime is null
-            ? []
-            : ProjectActiveWorks(runtime.ActiveWorks);
+        int? knownUsage = ownerWorks is null
+            || (status is null && ownerWorks.Count == 0)
+                ? null
+                : ownerWorks.Count;
+        var capacity = new RunnerStatusCapacityView(knownUsage, definition.Slots);
+        var activeWorks = ProjectActiveWorks(ownerWorks);
         var observation = CurrentObservation(runtime?.DispatchObservation, connectionGeneration);
         var credentialStatus = await ReadCredentialStatusAsync(definition.Id, ct);
         var reasonCodes = DeriveAdmissionReasons(
@@ -313,8 +365,15 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
                 reasons.AddRange(observation.AdmissionReasonCodes);
         }
 
-        if (capacity.Used is { } used && used >= capacity.Total)
+        if (capacity.Used is null)
+        {
+            if (!reasons.Contains("admission-observation-missing", StringComparer.Ordinal))
+                reasons.Add("admission-observation-missing");
+        }
+        else if (capacity.Used is { } used && used >= capacity.Total)
+        {
             reasons.Add("capacity-full");
+        }
 
         return reasons;
     }
@@ -347,11 +406,12 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
             {
                 catalogs.TryGetValue(name, out var catalog);
                 witnesses.TryGetValue(name, out var witness);
-                var ready = witness is { Ready: true, Generation: > 0 };
+                var hasCurrentWitness = witness is { Generation: > 0 };
+                var ready = hasCurrentWitness && witness!.Ready;
                 var readiness = new RunnerRuntimeReadinessStatusView(
                     ready ? "ready" : "not-ready",
-                    ready ? witness!.Generation : null,
-                    ready ? null : witness is { Generation: > 0 }
+                    hasCurrentWitness ? witness!.Generation : null,
+                    ready ? null : hasCurrentWitness
                         ? "runtime-reported-not-ready"
                         : "runtime-witness-missing");
                 return new RunnerRuntimeStatusView(
@@ -402,7 +462,7 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
             return [new RunnerNextActionView(
                 "reenroll-runner",
                 "Re-enroll the Runner credential.",
-                $"mo install runner --repo-root <path> --runner-id {runnerId}")];
+                $"mo install runner --repo-root <path> --runner-id {QuoteShellArgument(runnerId)}")];
         }
 
         if (credentialStatus == RunnerCredentialStatus.Active
@@ -467,6 +527,9 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
 
         return actions;
     }
+
+    private static string QuoteShellArgument(string value) =>
+        $"'{value.Replace("'", "'\"'\"'", StringComparison.Ordinal)}'";
 
     private async Task<bool> IsRunnerOnlineAsync(string runnerId)
     {

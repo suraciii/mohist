@@ -60,8 +60,8 @@ public sealed class AgentAvailabilityService : IScopedService
         AgentInfo agent,
         CancellationToken ct = default)
     {
-        var runners = await _runnerStatus.GetOnlineRunnersAsync(projectId, ct);
-        var capacity = SumCapacity(runners);
+        var runnerAvailability = await _runnerStatus.GetAvailabilityAsync(ct);
+        var capacity = runnerAvailability.Capacity;
         var snapshot = await _grains
             .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agent.Id))
             .GetSnapshotAsync();
@@ -72,8 +72,9 @@ public sealed class AgentAvailabilityService : IScopedService
             activeRuns,
             agent.MaxConcurrentRuns,
             _timeProvider.GetUtcNow(),
-            runners.Count > 0,
-            GateWaitingCount(snapshot));
+            runnerAvailability.HasOnlineRunner,
+            GateWaitingCount(snapshot),
+            runnerAvailability.BlockingReason);
         return result;
     }
 
@@ -86,9 +87,9 @@ public sealed class AgentAvailabilityService : IScopedService
         // summary's core cost-control guarantee. Per-Agent active counts
         // are cheap in-process grain calls; pending-job counts come from
         // a single batched query grouped by Agent.
-        var runners = await _runnerStatus.GetOnlineRunnersAsync(projectId, ct);
-        var capacity = SumCapacity(runners);
-        var hasOnlineRunner = runners.Count > 0;
+        var runnerAvailability = await _runnerStatus.GetAvailabilityAsync(ct);
+        var capacity = runnerAvailability.Capacity;
+        var hasOnlineRunner = runnerAvailability.HasOnlineRunner;
         var pendingCounts = agents.Count == 0
             ? new Dictionary<string, int>(StringComparer.Ordinal)
             : await _jobs.CountPendingByAgentAsync(projectId, ct);
@@ -113,7 +114,8 @@ public sealed class AgentAvailabilityService : IScopedService
                 queuedCount,
                 hasOnlineRunner,
                 observedAt,
-                GateWaitingCount(snapshot));
+                GateWaitingCount(snapshot),
+                runnerAvailability.BlockingReason);
         }
 
         return entries;
@@ -126,7 +128,8 @@ public sealed class AgentAvailabilityService : IScopedService
         int queuedCount,
         bool hasOnlineRunner,
         DateTimeOffset observedAt,
-        int gateWaiterCount = 0)
+        int gateWaiterCount = 0,
+        string? runnerBlockingReason = null)
     {
         var availability = Compute(
             capacity,
@@ -134,7 +137,8 @@ public sealed class AgentAvailabilityService : IScopedService
             agent.MaxConcurrentRuns,
             observedAt,
             hasOnlineRunner,
-            gateWaiterCount);
+            gateWaiterCount,
+            runnerBlockingReason);
         return new AgentAvailabilityListEntry(
             agent.Id,
             availability.CanStartNow,
@@ -206,13 +210,16 @@ public sealed class AgentAvailabilityService : IScopedService
         int? maxConcurrentRuns,
         DateTimeOffset observedAt,
         bool hasOnlineRunner,
-        int gateWaiterCount)
+        int gateWaiterCount,
+        string? runnerBlockingReason = null)
     {
         string? reason = !hasOnlineRunner
             ? AgentAvailabilityWaitReasons.NoOnlineRunner
-            : capacity.UsedSlots >= capacity.TotalSlots
-                ? AgentAvailabilityWaitReasons.CapacityFull
-                : gateWaiterCount > 0
+            : runnerBlockingReason is not null
+                ? runnerBlockingReason
+                : capacity.UsedSlots >= capacity.TotalSlots
+                    ? AgentAvailabilityWaitReasons.CapacityFull
+                    : gateWaiterCount > 0
                     ? AgentAvailabilityWaitReasons.CapacityFull
                 : maxConcurrentRuns is not null && activeRuns >= maxConcurrentRuns.Value
                     ? AgentAvailabilityWaitReasons.ConcurrencyLimit
@@ -244,17 +251,4 @@ public sealed class AgentAvailabilityService : IScopedService
     private static int GateWaitingCount(AgentConcurrencySnapshot snapshot) =>
         snapshot.Waiters.Count + snapshot.PendingNotifications.Count;
 
-    private static RunnerCapacityView SumCapacity(IReadOnlyList<RunnerStatusView> runners)
-    {
-        var used = 0;
-        var total = 0;
-        foreach (var runner in runners)
-        {
-            if (runner.Capacity is not { } runnerCapacity)
-                continue;
-            used += runnerCapacity.UsedSlots;
-            total += runnerCapacity.TotalSlots;
-        }
-        return new RunnerCapacityView(used, total);
-    }
 }
