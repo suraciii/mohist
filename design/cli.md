@@ -314,6 +314,15 @@ metadata or a missing closing delimiter warns on stderr and sends the exact
 original body with no partial metadata, while a body without a leading `---`
 stays byte-exact and silent. The rule is CLI-local and does not change the
 Server DTO, the packaged Skill, or any other body carrier.
+Structured string-map flags such as `--stage-models` and
+`--stage-model-variants` accept a JSON object whose members are all strings,
+with a `-file` twin that reads a file or `-` for stdin. Inline and file forms
+of one field are mutually exclusive, and at most one stdin carrier is allowed
+per command. Every member is validated before any Project-state lookup or HTTP
+request: malformed JSON, a non-object root, and `null`, boolean, number, array,
+or object members are local `ExitUsage=2` errors that name the originating
+flag. A nil-able map tracks presence so an explicit empty object is sent while
+an absent flag is omitted.
 
 ### Output and Fields
 

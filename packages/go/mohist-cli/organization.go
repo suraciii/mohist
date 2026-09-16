@@ -173,8 +173,22 @@ func parseIssueOptions(c command, args []string, action string) (command, error)
 			return command{}, usage("--ready and --draft are mutually exclusive")
 		}
 	}
-	if (action == "create" || action == "edit") && hasArg(c.args, "stage-models") && hasArg(c.args, "stage-models-file") {
-		return command{}, usage("stage model options are mutually exclusive")
+	if action == "create" || action == "edit" {
+		if hasArg(c.args, "stage-models") && hasArg(c.args, "stage-models-file") {
+			return command{}, usage("--stage-models and --stage-models-file are mutually exclusive")
+		}
+		if hasArg(c.args, "stage-model-variants") && hasArg(c.args, "stage-model-variants-file") {
+			return command{}, usage("--stage-model-variants and --stage-model-variants-file are mutually exclusive")
+		}
+		stdinCarriers := 0
+		for _, flag := range []string{"body-file", "stage-models-file", "stage-model-variants-file"} {
+			if argValue(c.args, flag, "") == "-" {
+				stdinCarriers++
+			}
+		}
+		if stdinCarriers > 1 {
+			return command{}, usage("at most one of --body-file, --stage-models-file, --stage-model-variants-file may read from stdin")
+		}
 	}
 	if err := validateFields(c.fields, c.catalog, "mo issue "+action); err != nil {
 		return command{}, err
@@ -486,6 +500,20 @@ func runOrganization(ctx context.Context, deps Dependencies, c *client, cmd comm
 			return ExitUsage
 		}
 		cmd.preflightedInput = value
+		if cmd.kind == "issue-create" || cmd.kind == "issue-edit" {
+			models, err := resolveStageModelMap(deps, cmd, "stage-models", "stage-models-file")
+			if err != nil {
+				writeError(deps.Stderr, err)
+				return ExitUsage
+			}
+			cmd.stageModels = models
+			variants, err := resolveStageModelMap(deps, cmd, "stage-model-variants", "stage-model-variants-file")
+			if err != nil {
+				writeError(deps.Stderr, err)
+				return ExitUsage
+			}
+			cmd.stageModelVariants = variants
+		}
 	case "epic-create", "epic-edit":
 		value, err := resolveTextInput(deps, cmd, "description", "description-file")
 		if err != nil {
@@ -861,11 +889,14 @@ func organizationRequest(cmd command, base string, deps Dependencies) (string, s
 				b["parentIssueNumber"] = numberValue(argValue(cmd.args, "parent", ""))
 			}
 		}
-		for _, k := range []string{"repo", "stage-models", "stage-model-variants"} {
-			if v := argValue(cmd.args, k, ""); v != "" {
-				target := map[string]string{"repo": "repositoryName", "stage-models": "stageModels", "stage-model-variants": "stageModelVariants"}[k]
-				b[target] = v
-			}
+		if v := argValue(cmd.args, "repo", ""); v != "" {
+			b["repositoryName"] = v
+		}
+		if cmd.stageModels != nil {
+			b["stageModels"] = cmd.stageModels
+		}
+		if cmd.stageModelVariants != nil {
+			b["stageModelVariants"] = cmd.stageModelVariants
 		}
 		bodyFile := ""
 		if hasArg(cmd.args, "body-file") {
@@ -918,6 +949,12 @@ func organizationRequest(cmd command, base string, deps Dependencies) (string, s
 		if hasArg(cmd.args, "inherit-workflow-profile") {
 			b["workflowProfileId"] = nil
 			b["noWorkflow"] = false
+		}
+		if cmd.stageModels != nil {
+			b["stageModels"] = cmd.stageModels
+		}
+		if cmd.stageModelVariants != nil {
+			b["stageModelVariants"] = cmd.stageModelVariants
 		}
 		if hasArg(cmd.args, "label") {
 			return issue, http.MethodGet, nil, false, errors.New("label edits require current Issue resolution")
@@ -1074,6 +1111,12 @@ func issueEditWithLabels(ctx context.Context, deps Dependencies, c *client, cmd 
 		} else {
 			b["parentIssueNumber"] = numberValue(v)
 		}
+	}
+	if cmd.stageModels != nil {
+		b["stageModels"] = cmd.stageModels
+	}
+	if cmd.stageModelVariants != nil {
+		b["stageModelVariants"] = cmd.stageModelVariants
 	}
 	data, err = c.request(ctx, http.MethodPatch, base+"/issues/"+number, b)
 	if err != nil {

@@ -267,6 +267,17 @@ and `risk` fill the Issue's structured metadata, and
 report the override on stderr. Malformed metadata or an unclosed envelope warns
 and sends the full original body without applying partial metadata. A body with
 no leading `---` is stored unchanged.
+`--stage-models` and `--stage-model-variants` accept a JSON object whose values
+are all strings, for example `--stage-models '{"plan":"m"}'`. Each has a
+`-file` twin: `--stage-models-file <path>` and
+`--stage-model-variants-file <path>`, where `-` reads from stdin. The inline
+and `-file` forms of one field are mutually exclusive, and at most one of
+`--body-file`, `--stage-models-file`, and `--stage-model-variants-file` may be
+`-`. Invalid JSON, a top-level null, array, or scalar, and any object member
+that is null, boolean, number, array, or object are local usage errors: the
+command exits with `ExitUsage=2`, names the originating flag, and issues no
+request. An explicit empty object (`--stage-models '{}'`) sends an empty
+object; omitting the flag sends nothing.
 
 When the target repository is connected to GitHub, every non-Draft Issue has a
 GitHub mirror. `issue view` and `issue list` expose its repository, number, URL,
