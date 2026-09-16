@@ -421,10 +421,11 @@ Job completion as a closed conversation or a delivered user goal.
   have work but do not need a preconfigured Agent. It creates the Agent and
   launches its first AgentJob, AgentSession, SessionInput, and AgentTurn in one
   accepted request. Use `--prompt-file` instead of `--prompt`, and optionally
-  pass `--attach`, `--name`, `--runtime`, `--model`, `--variant`, `--issue`,
-  `--epic`, `--repo`, and `--workspace`. A Project default execution
-  configuration supplies omitted execution hints; without one, pass the
-  execution hints explicitly. `--runtime` accepts `opencode`, `pi`, or `codex`.
+  pass `--attach`, `--name`, `--runtime`, `--model`, `--reasoning-effort`,
+  `--variant`, `--issue`, `--epic`, `--repo`, and `--workspace`. Omitted
+  execution hints stay unset and fall to Runtime behavior: Runtime resolves to
+  `pi` and Model to the Runtime's own default. `--runtime` accepts `opencode`,
+  `pi`, or `codex`.
   `--model` uses the exact ID returned by `mo agent model list --runtime
   <runtime>`; OpenCode and Pi IDs use `provider/model`, while Codex IDs remain
   opaque. The command sends the CLI launch origin and returns the Agent, Job,
@@ -449,7 +450,9 @@ Job completion as a closed conversation or a delivered user goal.
   `--max-concurrent-runs` flags. `--avatar-file`
   supplies the avatar. Mutually exclusive `--instructions` or
   `--instructions-file` supplies Instructions. `--runtime` accepts only
-  `opencode`, `pi`, or `codex`. `--skills` must contain at least one nonempty
+  `opencode`, `pi`, or `codex`. An omitted `--runtime` resolves to `pi`; an
+  omitted `--model` stays unset and the Runtime chooses the model at dispatch.
+  `--skills` must contain at least one nonempty
   Skill name.
   An empty string does not clear Skills; `edit` must use `--clear-skills`
   explicitly. `--avatar-file` reads a UTF-8 avatar URL or data URI. The caller
@@ -461,17 +464,25 @@ Job completion as a closed conversation or a delivered user goal.
   mutually exclusive. Execution-config edits preserve typed fields that were
   not set or cleared; clearing the final typed field restores the implicit
   `agentConfig: null` state.
-  `mo agent view` shows unified Readiness, configuration gaps, and current
-  execution availability. The concurrency limit constrains launch and
-  follow-up immediately but does not stop an execution that is already running.
+  `mo agent list` includes the stored Project Agents and the unshadowed built-in
+  Workflow Agents, each with its origin. A same-name Project Agent is marked as
+  overriding the built-in. `mo agent view <agent>` resolves a built-in name and
+  shows origin, unified Readiness, configuration gaps, and current execution
+  availability.
+  `mo agent edit <built-in>` materializes a same-name Project Agent from the
+  built-in definition and applies the given flags in one step; the output states
+  that an override was created. An active same-name Agent is a named conflict
+  and is edited directly; an archived same-name Agent is a named repair case.
+  The concurrency limit constrains launch and follow-up immediately but does not
+  stop an execution that is already running.
 - `mo agent install <name>` installs a built-in Agent preset, such as
   `supervisor`, which contains a supervising Agent and routing rules for
   Approval and failure. The operation is idempotent and does not overwrite
   existing content. It produces a normal Agent and RoutingRule.
 - `mo agent job list <agent>` and `mo agent job view <job-id>` read work state
   and results.
-- `mo agent model list --runtime <runtime>` reads the models available for Agent
-  and Issue configuration. Runtime is a configuration dimension, not an
+- `mo agent model list --runtime <runtime>` reads the models available for
+  Agent configuration. Runtime is a configuration dimension, not an
   independent command resource.
 - `mo session list --agent <agent>` lists Sessions started by that Agent.
 - `mo session list --issue <number>` lists Sessions created by that Issue's
@@ -670,8 +681,8 @@ cannot start new work; the error identifies this command and the Project Setting
 - Short text uses `--body`, `--message`, or another argument declared by the
   command.
 - Long text and structured values use a file flag with the same name as the
-  short-text flag, such as `--body-file`, `--prompt-file`, `--text-file`, or
-  `--stage-models-file`. Pass `-` to read from stdin.
+  short-text flag, such as `--body-file`, `--prompt-file`, or `--text-file`.
+  Pass `-` to read from stdin.
 - Complete documents such as a Workflow Definition use `--file <path>`. Pass
   `-` to read from stdin.
 - Files and stdin have only two channels: `--<name>-file` and `--file`. The

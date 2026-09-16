@@ -13,6 +13,9 @@ operate Mohist and is not a Mohist resource.
 - The Agent owns its identity, Instructions, Runtime, Model, Reasoning Effort,
   Variant, Skills, and concurrency limit. Entry points do not copy or override
   that definition for one request.
+- The Agents surface is the only place to configure an Agent's Runtime, Model,
+  Reasoning Effort, Variant, and Skills. No Project setting supplies, inherits,
+  or recommends these values.
 - A new delegation creates one AgentJob, AgentSession, first SessionInput, and
   first AgentTurn. A Follow-up adds an Input to an existing Session and does not
   create another AgentJob.
@@ -80,10 +83,12 @@ A Mohist Agent is a first-class Project resource. It stores:
   Instructions.
 - **Instructions** define the Agent's role, behavior, and stopping conditions.
   They are fixed when an AgentJob starts.
-- **Runtime** selects the execution backend and belongs to the Agent.
-- **Model, Reasoning Effort, and Variant** select model behavior. Model and
-  Variant use Project defaults when absent. Reasoning Effort is independent and
-  uses Runtime behavior when absent.
+- **Runtime** selects the execution backend and belongs to the Agent. An unset
+  Runtime selects `pi`.
+- **Model, Reasoning Effort, and Variant** select model behavior on the Agent
+  definition. An unset Model uses the Runtime's own default, chosen at dispatch
+  and recorded in the AgentJob snapshot as Runtime-chosen. Unset Reasoning
+  Effort uses Runtime behavior. An unset Variant selects no variant.
 - **Skills** load at AgentJob startup and cannot be added or removed for one
   request.
 - **Max concurrent runs** limits launches and follow-ups. Lowering the limit
@@ -94,40 +99,69 @@ A Mohist Agent is a first-class Project resource. It stores:
 Runtime credentials belong in protected Runtime settings. They do not belong in
 Instructions, Agent records, or Agent Connections. Reasoning Effort uses `off`,
 `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; it is never encoded as a
-Variant. OpenCode does not support explicit Reasoning Effort. Choose Pi or
-Codex, or leave it unset for OpenCode.
+Variant and has no `none` value. OpenCode does not support explicit Reasoning
+Effort. Choose Pi or Codex, or leave it unset for OpenCode.
 
 An ordinary launch accepts task text and context references. Context is not Agent
 configuration. The Agent definition is fixed when the AgentJob starts, as are
 its Skills and Workspace identity. Later Agent edits affect later AgentJobs only.
 Follow-ups in an existing Session keep the Session's established configuration.
 
-### Project Default Execution Configuration
+### Execution Resolution
 
-A Project can hold one default Runtime, Model, and optional Variant. It applies
-when an entry point does not supply an accepted value and the Agent definition
-leaves that field unset. Resolution order is:
+Execution resolution has exactly three terms:
 
-1. An accepted caller value, where the entry point allows one.
+1. An accepted caller hint, where the entry point allows one. Task-first
+   creation accepts Runtime, Model, Reasoning Effort, and Variant hints; other
+   launches accept no execution hint.
 2. The Agent definition.
-3. The Project default.
+3. Runtime behavior for unset fields. An unset Runtime selects `pi`; an unset
+   Model uses the Runtime's own default; unset Reasoning Effort uses Runtime
+   behavior; an unset Variant selects no variant.
 
-A Runtime with no value defaults to `pi`. An explicitly malformed Runtime or
-Model remains a configuration gap; a lower-precedence value cannot hide it.
-The Server snapshots the resolved Runtime onto every new AgentJob dispatch. A
-Runner rejects a dispatch whose Runtime is missing or unknown instead of
+No Project value participates in resolution, and nothing is inherited from
+another resource. An explicitly malformed Runtime or Model remains a
+configuration gap; no other value hides it. The Server snapshots the resolved
+tuple onto every new AgentJob dispatch. A null Model means the Runtime chooses
+the model at dispatch, and the AgentJob snapshot records that the Runtime chose
+it. A Runner rejects a dispatch whose Runtime is missing or unknown instead of
 guessing a backend.
 
-Changing the default affects later launches. Each AgentJob stores the resolved
-configuration at launch. An Agent without a Model can be ready when the Project
-default supplies one. Removing that default can restore `needs-setup`. A
-Readiness conclusion confirmed by a completed execution is not changed by a
-default edit alone. Existing AgentJobs and Sessions keep their stored Runtime;
-changing the default never reinterprets a historical binding.
+An Agent with an unset Model is ready when its Runtime is usable. An Agent edit
+affects later launches only: each AgentJob stores its resolved configuration at
+launch, and no edit reinterprets an existing AgentJob, queued Job, or Session
+follow-up. A Readiness conclusion confirmed by a completed execution is not
+changed by an Agent edit alone.
 
-Configure the default through Project settings. The route contract is in
-[External Agent API](agent-api.md#project-default-execution-configuration).
-An invalid default is rejected without changing the previous value.
+### Built-in Agents
+
+Built-in Workflow Agents (`mohist/planner`, `mohist/builder`, `mohist/reviewer`)
+are complete Mohist-owned definitions with Runtime `pi` and no Model. They
+appear in the Project's Agent list and detail reads with their origin:
+`built-in` for a built-in definition and `project` for a stored Project Agent.
+The Project's effective named Agents are its stored Project Agents plus the
+unshadowed built-in Workflow Agents. A Project Agent with the same name shadows
+the built-in, is marked as overriding it, and the built-in no longer appears
+separately. An archived shadow remains the shadowing entry with its state and
+never silently falls back to the built-in. The application-owned `mohist-slack`
+manager never appears in Project Agent lists.
+
+**Customize** materializes an override: one Server operation copies the
+built-in's Instructions, description, Runtime, and Skills into a new same-name
+Project Agent and applies the caller's changes in the same request. Clients
+never copy built-in text themselves. The operation fails with a named conflict
+when an active same-name Agent already exists; that Agent is edited instead. An
+archived same-name Agent is a named repair case.
+
+### Model, Effort, and Variant Selection
+
+Model, Reasoning Effort, and Variant pickers are catalog-backed for the
+selected Runtime. When the catalog is unavailable, a syntactically valid value
+may be saved and is shown as **not yet verified**. A complete catalog that
+proves a model, effort, or variant incompatible rejects the write. An empty
+OpenCode catalog is advisory: it never proves a model invalid and never means
+that OpenCode is offline. No state silently substitutes another Runtime, model,
+effort, or variant.
 
 ## Readiness and Availability
 
@@ -176,9 +210,11 @@ old Input might have reached Codex, Mohist never replays it automatically.
 ### Configure and Test in the Web UI
 
 In **Agents**, create or open an Agent and enter its identity and Instructions.
-Select a Runtime, then choose only the Model, catalog-backed Reasoning Effort,
-Variant, and Skills that it supports. Set a concurrency limit. The page shows
-Readiness and each repair gap. When Readiness is `ready`, use **Start session**
+The list shows stored Project Agents and unshadowed built-in Workflow Agents with
+their origin; **Customize** on a built-in materializes a same-name Project
+Agent. Select a Runtime, then choose only the Model, catalog-backed Reasoning
+Effort, Variant, and Skills that it supports. Set a concurrency limit. The page
+shows Readiness and each repair gap. When Readiness is `ready`, use **Start session**
 to submit a task. You may submit when it is `unknown`, but the task waits for
 Runner validation. After a successful launch, open the AgentSession to inspect
 replies and send a follow-up.
@@ -203,9 +239,11 @@ its record. Observe `accepted`, `queued`, and `running`; read the result at
 
 A task-first launch is available when the caller has a task but does not yet
 need to configure an Agent. The [External Agent API](agent-api.md#task-first-launch)
-defines its route and replay contract. The Server derives missing definition
-fields, creates the Agent, and uses the same AgentJob and AgentSession launch
-path.
+defines its route and replay contract. The request accepts Runtime, Model,
+Reasoning Effort, and Variant hints. The Server derives missing definition
+fields, creates the Agent carrying only the supplied execution values, and uses
+the same AgentJob and AgentSession launch path. Unset fields stay unset and mean
+Runtime behavior.
 
 - Web and CLI task-first launches create a derived Agent and return the same
   Job, Session, Input, and Turn identities.
@@ -413,6 +451,12 @@ concurrent runs applies to launches and Follow-ups. See
   and Session commands are specified but not implemented.
 - Not every entry point exposes acceptance, dispatch, and Turn result as
   separate resumable facts after disconnection.
+- Built-in Workflow Agents are not yet visible in Agent lists or detail reads,
+  and no operation materializes a Project override from a built-in definition.
+  Overriding one still requires creating a complete same-name Project Agent.
+- Task-first creation does not yet accept a Reasoning Effort hint.
+- The Project-level default execution configuration, its routes, and its
+  resolution term remain implemented.
 - The unified invocation interface lacks caller-owned duplicate-request
   protection on every operation and a uniform resumable read model for general
   external clients. See [`design/agent-api.md`](../design/agent-api.md).

@@ -36,8 +36,10 @@ authorization confirmation page (`/device`) are outside this prefix.
 - **Issue files:** `/<projectName>/issues/<number>/files` shows changed files
   and the diff for one Issue.
 - **Agents:** `/<projectName>/agents` and
-  `/<projectName>/agents/<agentId>` configure, test, and start Mohist Agents,
-  and show Jobs, Sessions, and external Connections.
+  `/<projectName>/agents/<agentId>` list the Project's effective named Agents:
+  stored Project Agents plus unshadowed built-in Workflow Agents, each with an
+  origin marker. The pages configure, test, and start them, and show Jobs,
+  Sessions, and external Connections.
 - **New AgentSession:** `/<projectName>/agent-sessions/new` starts a task-first
   Session.
 - **Connection:** `/<projectName>/connections/<connectionId>` diagnoses one
@@ -81,7 +83,9 @@ Issue details keeps these decisions together:
 - **Intent and ownership:** Issue description, Project, Repository, Epic,
   labels, priority, and prerequisites.
 - **Execution position:** Workflow stage, Task progress, selected Workflow
-  Profile, health, and current Activity.
+  Profile, the named Agents responsible for execution with their effective
+  configuration, health, and current Activity. Model configuration routes to the
+  Agents page; the Issue page has no model selector.
 - **Change evidence:** Definition, artifacts, commits, diff summary, and branch
   drift.
 - **Diagnosis:** blocked cause, convergence information, and the recommended
@@ -113,31 +117,50 @@ This page lists every file changed by one Issue and includes a diff view.
 ## Agents
 
 The Agent list and detail page are the Project's management and test surface.
-Before a Session starts, the list shows avatar, name, description, active or
-archived state, Readiness, Runtime, model, Reasoning Effort, true Variant,
-Skills, active and queued work counts, and external Connection health. Runner
-availability and capacity remain separate from Agent Readiness.
+The list shows the Project's effective named Agents: stored Project Agents plus
+the unshadowed built-in Workflow Agents (`mohist/planner`, `mohist/builder`,
+`mohist/reviewer`). Each entry carries its origin, `built-in` or `project`; a
+Project Agent that shadows a built-in name is marked as overriding it. The
+application-owned `mohist-slack` manager never appears in this list.
 
-For a Project without Agents, the primary entry point is
+Before a Session starts, the list shows avatar, name, description, origin,
+active or archived state, Readiness, Runtime, model, Reasoning Effort, true
+Variant, Skills, active and queued work counts, and external Connection health.
+An unset Model is presented as **Runtime default**. Runner availability and
+capacity remain separate from Agent Readiness.
+
+A built-in Agent's detail shows its Mohist-owned definition and its effective
+execution configuration. **Customize** materializes a same-name Project Agent
+from the built-in definition in one Server operation and opens it for editing;
+the client never copies built-in text. Customize fails with a named conflict
+when an active same-name Agent already exists; that Agent is edited directly.
+An archived same-name Agent appears as the shadowing entry with its state and an
+explicit repair path; it never silently falls back to the built-in.
+
+For a Project without stored Agents, the primary entry point is
 `/<projectName>/agent-sessions/new`. Enter the prompt, attachments, and context
 references first. The Agent field defaults to **New Agent for this task**. Leave
 it unchanged to create and launch a new Agent through one task-first request.
-Select an existing Agent to use its stored execution definition.
+Select an existing Agent to use its stored execution definition. A new Agent
+selects Runtime, Model, Reasoning Effort, and Variant inline. The Runtime control
+starts at `pi` and the Model control at **Runtime default** (unset). Models,
+Reasoning Efforts, and true Variants come from the selected Runtime catalog. No
+Project value prefills these controls.
 
-A Project `defaultExecutionConfig` appears as the **Recommended execution
-configuration**. It needs no extra question. **Adjust** opens the catalog-backed
-Runtime and Model selectors and submits adjusted values as hints. Without a
-Project default, the create-new path asks for Runtime and Model inline. Models,
-Reasoning Efforts, and true Variants come from the selected Runtime catalog.
+A task-first Agent carries only the values the user supplies; unset fields fall
+to Runtime behavior. A value the catalog cannot verify is saved and shown as
+**not yet verified**; a complete catalog that proves incompatibility rejects the
+write. No state silently substitutes another Runtime, model, effort, or variant.
+See
+[Agents and AgentSessions](agent-sessions.md#model-effort-and-variant-selection).
 
 A successful launch opens the returned AgentSession URL. The Session header
 links to the Agent detail page, where name, description, Instructions, and
 Skills can be refined for later AgentJobs. An in-flight Session keeps its
 launch snapshot. Conflicts identify the earlier idempotency attempt. Pending
 launches ask the user to retry with the same key. Unresolved execution
-configuration names the repair: choose Runtime and Model or configure the
-Project default. The composer keeps the task and context while showing these
-rejections.
+configuration names the repair on the Agent definition. The composer keeps the
+task and context while showing these rejections.
 
 The Agents empty state leads with **Start with a task**. **Configure an Agent**
 remains the secondary definition-first entry point.
@@ -274,16 +297,17 @@ URL: `/settings/<section>` for application sections and
 
 Application sections:
 
-- **Coder Agent:** the coder-agent model, with per-stage overrides.
-- **Runtime:** how Mohist schedules external coder Agent Sessions.
+- **Scheduling:** timeouts and concurrency for Agent execution.
 - **System:** logging, Runtime identity, and local-source update status.
 - **Preferences:** user preferences and read-only reference information.
 
 Project sections:
 
 - **Repositories:** Git Repositories associated with the Project.
-- **Workflows:** the Workflow new Issues inherit, the Project verification
-  command used by built-in Profiles, and the read-only system catalog.
+- **Workflows:** the Workflow new Issues inherit, the named Agents its Tasks use
+  with their effective configuration, the Project verification command used by
+  built-in Profiles, and the read-only system catalog. Model configuration
+  routes to the Agents page.
 - **Templates:** Project Prompt templates, which can override system templates
   or add Project-unique keys.
 - **Label catalog:** labels the Project suggests for Issues. The catalog is
@@ -311,6 +335,13 @@ Implementation source: `packages/web/`.
 The implementation currently has these gaps:
 
 - Agent definitions have no avatar setting or avatar display.
+- Built-in Workflow Agents are not shown in the Agent list or detail page, and
+  Customize does not yet materialize a Project override. Project Workflows and
+  Issue details do not yet show the named Agents responsible for execution.
+- The application Coder Agent page, the Issue model selector, and Stage model
+  overrides still exist, and the application **Runtime** settings section is not
+  yet named **Scheduling**. The new-Agent path still prefills and explains a
+  Project-level execution default.
 - AgentJob has no result view separate from its continuing AgentSession.
 - The Web UI does not expose Slack Connection owner transfer, credential
   rotation or revalidation, Enable, Disable, or Delete.

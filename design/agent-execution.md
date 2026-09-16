@@ -63,12 +63,14 @@ Runtime, and Workspace for the accepted launch. A missing, archived, or
 not-ready Agent fails launch instead of using a Runtime-specific Workflow path.
 AgentJob retry preserves that snapshot unless the caller creates a new launch.
 
-Runtime resolution is caller value, then Agent definition, then Project default,
-and finally `pi`. The Server writes the resolved Runtime explicitly into every
-new AgentJob and AgentSession execution snapshot. Runner accepts only the
-canonical `pi` and `opencode` values and fails a missing or unknown dispatch
-Runtime; it does not own default selection. Existing AgentJobs and Sessions keep
-their persisted Runtime and are never reinterpreted when the default changes.
+Execution resolution is an accepted caller hint where the entry point allows
+one, then the Agent definition, then Runtime behavior for unset fields: an unset
+Runtime resolves to `pi`, and the Runtime chooses the model at dispatch for an
+unset Model. The Server writes the resolved Runtime explicitly into every new
+AgentJob and AgentSession execution snapshot. Runner accepts only the canonical
+`pi` and `opencode` values and fails a missing or unknown dispatch Runtime; it
+does not own default selection. Existing AgentJobs and Sessions keep their
+persisted configuration and are never reinterpreted by a later Agent edit.
 
 A provider adapter may translate ingress and delivery, but it cannot snapshot an
 Agent, own a Runtime Session, or decide a work result. Workflow cannot select a
