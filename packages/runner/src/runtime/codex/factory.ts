@@ -38,7 +38,8 @@ export function getCodexRuntimeFactory(): CodexRuntimeFactory {
  *   outside that subset and rejects malformed envelopes).
  */
 export function createDefaultCodexRuntime(deps: CodexRuntimeDeps): CodexRuntime {
-  const serverFactory: CodexServerFactory = deps.serverFactory ?? createSpawnedCodexServer
+  const serverFactory: CodexServerFactory =
+    deps.serverFactory ?? currentRunnerResources()?.codexServerFactory ?? createSpawnedCodexServer
   return new CodexRuntime({
     ...deps,
     serverFactory,

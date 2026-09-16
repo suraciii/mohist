@@ -62,7 +62,7 @@ export interface CodexServerHandle {
    * Subscribe to JSON-RPC notifications, server-initiated requests,
    * and unmatched responses (anything that is not the awaited reply).
    */
-  subscribe(listener: (message: CodexJsonRpcMessage) => void): () => void
+  subscribe(listener: (message: unknown) => void): () => void
   /**
    * Shut the app-server child down within the configured deadline.
    */
@@ -123,7 +123,7 @@ interface CodexServerHandleBuilder {
 
 async function buildCodexServerHandle(input: CodexServerHandleBuilder): Promise<CodexServerHandle> {
   const pending = new Map<number | string, { resolve: (value: unknown) => void; reject: (cause: unknown) => void }>()
-  const listeners = new Set<(message: CodexJsonRpcMessage) => void>()
+  const listeners = new Set<(message: unknown) => void>()
   const seenResponseIds = new Set<number | string>()
   let buffer = ''
   let exited = false
@@ -260,7 +260,7 @@ async function buildCodexServerHandle(input: CodexServerHandleBuilder): Promise<
     return written
   }
 
-  function subscribe(listener: (message: CodexJsonRpcMessage) => void): () => void {
+  function subscribe(listener: (message: unknown) => void): () => void {
     listeners.add(listener)
     return () => {
       listeners.delete(listener)

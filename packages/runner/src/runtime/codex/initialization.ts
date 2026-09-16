@@ -17,7 +17,7 @@
  */
 
 import type { CodexDiagnostic, CodexResult } from './types.js'
-import { isCodexInitializeResult, type CodexInitializeResult, type CodexJsonRpcMessage } from './protocol-types.js'
+import { isCodexInitializeResult, type CodexInitializeResult } from './protocol-types.js'
 import { normalizeIncompatibleRuntimeCodex, normalizeUnavailableRuntimeCodex } from './errors.js'
 
 /**
@@ -170,7 +170,6 @@ function initializeResult(value: unknown): CodexInitializeResult | null {
 export function codexInitializationTransportFromHandle(handle: {
   send<P, R>(request: { readonly method: string; readonly params?: P; readonly id: number }): Promise<R>
   notify?: (envelope: { readonly method: string; readonly params?: unknown }) => boolean
-  subscribe?: (listener: (message: CodexJsonRpcMessage) => void) => () => void
 }): CodexInitializationTransport {
   return {
     async send(request) {

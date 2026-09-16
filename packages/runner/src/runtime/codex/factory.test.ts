@@ -4,15 +4,13 @@ import {
   CodexRuntime,
   createDefaultCodexRuntime,
   getCodexRuntimeFactory,
-  getCodexServerFactory,
   type CodexRuntimeDeps,
   type CodexRuntimeFactory,
-  type CodexAuthenticationProbe,
-  type CodexCatalogLoader,
-  type CodexCliProbe,
-  type CodexReadinessProbe,
 } from './index.js'
+import { getCodexServerFactory } from './factory.js'
+import type { CodexAuthenticationProbe, CodexCatalogLoader, CodexCliProbe, CodexReadinessProbe } from './readiness.js'
 import type { CodexServerFactory, CodexServerHandle } from './server-process.js'
+import * as codexPublicSurface from './index.js'
 
 const BASE_DEPS: CodexRuntimeDeps = {
   codexHome: '/runner/.mohist/codex',
@@ -144,6 +142,34 @@ describe('CodexRuntime factory seam', () => {
       expect(calledWith).toEqual({ codexHome: '/runner/.mohist/codex', cwd: '/work' })
       expect(getCodexServerFactory()).toBe(serverFactory)
     })
+  })
+
+  it('uses the resource-context server factory from the default factory seam', async () => {
+    let starts = 0
+    const serverFactory: CodexServerFactory = async () => {
+      starts += 1
+      return fakeServerHandle()
+    }
+
+    await withRunnerResources({ codexServerFactory: serverFactory }, async () => {
+      const runtime = createDefaultCodexRuntime(withPassingReadinessProbe(BASE_DEPS))
+      const result = await runtime.start()
+      expect(result).toMatchObject({ ok: true })
+      await runtime.shutdown()
+    })
+
+    expect(starts).toBe(1)
+  })
+
+  it('keeps Codex JSON-RPC shapes out of the public barrel', () => {
+    for (const protocolExport of [
+      'CODEX_LOCKED_METHODS',
+      'isCodexLockedMethod',
+      'isCodexInitializeRequest',
+      'isCodexTurnCompletedEvent',
+    ]) {
+      expect(codexPublicSurface).not.toHaveProperty(protocolExport)
+    }
   })
 
   it('reports unavailable-runtime when the factory body is missing the spawned consumer', async () => {
