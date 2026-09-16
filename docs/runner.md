@@ -122,6 +122,9 @@ Do not manually delete or change its branch, marker, or origin while work runs.
 
 - Workflow work that has not begun waits for an eligible Runner.
 - Executing Workflow work and AgentJobs fail with `runner-lost`.
+- Pausing keeps the executing Action running, so paused work still belongs to
+  the Runner process generation that owns it and fails with `runner-lost` when
+  a replacement process generation is admitted.
 - Mohist does not claim that an unconfirmed external effect continued safely.
 - Retry or rerun blocked Workflow work explicitly after Runner returns. A later
   AgentJob is a new work intent, not an automatic replay.

@@ -227,10 +227,13 @@ public static class GrainTestConfig
         siloBuilder.AddMemoryGrainStorageAsDefault();
         siloBuilder.AddIncomingGrainCallFilter<RequestWorkIncomingGrainCallFilter>();
         siloBuilder.AddOutgoingGrainCallFilter<RequestWorkOutgoingGrainCallFilter>();
+        var workflowRunReadFailures = new WorkflowRunReadFailureProbe();
+        siloBuilder.Services.AddSingleton(workflowRunReadFailures);
         siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options =>
         {
             options.UseSqlite(connectionString);
             options.AddInterceptors(new RequestWorkDbCommandInterceptor());
+            options.AddInterceptors(new WorkflowRunReadFailureInterceptor(workflowRunReadFailures));
             // Issue-318 T-002 + T-004: the DbContext model now declares
             // the WorkflowRuns STORED status computed column and the
             // IX_WorkflowRuns_Status index. T-004

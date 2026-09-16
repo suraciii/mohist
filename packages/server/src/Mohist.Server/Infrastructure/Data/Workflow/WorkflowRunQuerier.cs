@@ -270,6 +270,36 @@ public sealed class WorkflowRunQuerier
     }
 
     /// <summary>
+    /// Returns the ids of workflow runs that own active work for
+    /// <paramref name="workerId"/>, whatever the run's own status is. Runner
+    /// closeout needs exactly this set: the claim generation decides whether
+    /// the work is still owned by a live process, and the enclosing run status
+    /// does not — a paused run keeps its executing Action on purpose. The
+    /// <c>Running</c>-scoped queries above stay the dispatch and capacity
+    /// boundary; this one is not a redelivery or slot source. Durable blocked
+    /// settlements are excluded here too, because they are already released by
+    /// their own boundary. Filters at the DB layer; never deserializes
+    /// <c>State</c>.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> FindActiveWorkOwnersAssignedToAsync(
+        string workerId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workerId))
+            return [];
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.WorkflowRuns
+            .AsNoTracking()
+            .Where(row => row.AssignedWorkerId == workerId
+                && row.ActiveWorkId != null
+                && row.ActiveWorkerId == workerId
+                && row.AttentionStatus != BlockedAttentionStatus)
+            .Select(row => row.WorkflowRunId)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
     /// Returns nonterminal runs whose authoritative Agent settlement reached
     /// blocked. The indexed row projection is rebuilt with the WorkflowRun and
     /// intentionally does not become a second state-machine authority.

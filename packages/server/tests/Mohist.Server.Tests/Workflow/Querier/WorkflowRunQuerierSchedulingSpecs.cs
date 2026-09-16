@@ -470,15 +470,17 @@ public class WorkflowRunQuerierSchedulingSpecs
         run.Assignment = assignedWorkerId is null
             ? null
             : new WorkflowAssignment(assignedWorkerId, TestTime.UtcNow);
-        if (status == "Running" && assignedWorkerId is not null)
+        if (status is "Running" or "Paused" && assignedWorkerId is not null)
         {
-            // A Running row that owns a slot carries a running task bound to
-            // the assigned worker; that is what materializes the active-work
-            // projection the capacity queries filter.
+            // A row that owns a slot (or, while paused, still owns the
+            // executing Action the pause deliberately left running) carries a
+            // bound task; that is what materializes the active-work projection
+            // the capacity and closeout queries filter.
             var task = run.Stages.Single().Tasks.Single();
             task.Status = WorkflowActionAttemptStatus.Running;
             task.WorkId = "task-work";
             task.WorkerId = assignedWorkerId;
+            task.ProcessGeneration = "generation-1";
         }
         return JSON.Serialize(run);
     }
@@ -490,6 +492,41 @@ public class WorkflowRunQuerierSchedulingSpecs
                 "build",
                 [new Mohist.Workflow.Definition.TaskDefinition("task-1", "Build task", "spec/task")],
                 [])]);
+    }
+
+    [Fact]
+    public async Task FindActiveWorkOwnersAssignedToAsync_ReturnsEveryRunStatusOwningActiveWork()
+    {
+        // Runner closeout membership is active-work ownership, not the run's
+        // own status. A paused run keeps its executing Action, so its claim
+        // still needs closeout when the owning process generation is lost.
+        // Dispatch redelivery and capacity keep their Running-scoped queries,
+        // which is what this spec pins alongside the new query.
+        var prefix = NewPrefix("sched-active-owners");
+        var runnerId = $"{prefix}-runner";
+        var otherRunnerId = $"{prefix}-other-runner";
+
+        await InsertAttentionRowAsync($"{prefix}-paused-this", "Paused", runnerId, attentionStatus: null, activeWork: true);
+        await InsertAttentionRowAsync($"{prefix}-running-this", "Running", runnerId, attentionStatus: null, activeWork: true);
+        await InsertAttentionRowAsync($"{prefix}-paused-blocked-this", "Paused", runnerId, attentionStatus: "blocked", activeWork: true);
+        await InsertAttentionRowAsync($"{prefix}-paused-other", "Paused", otherRunnerId, attentionStatus: null, activeWork: true);
+        await InsertAttentionRowAsync($"{prefix}-ready-this", "Ready", runnerId, attentionStatus: null);
+
+        using var scope = _fixture.Services.CreateScope();
+        var querier = scope.ServiceProvider.GetRequiredService<WorkflowRunQuerier>();
+
+        var owners = await querier.FindActiveWorkOwnersAssignedToAsync(runnerId);
+
+        Assert.Equal(2, owners.Count);
+        Assert.Contains($"{prefix}-paused-this", owners);
+        Assert.Contains($"{prefix}-running-this", owners);
+        Assert.DoesNotContain($"{prefix}-paused-blocked-this", owners);
+        Assert.DoesNotContain($"{prefix}-paused-other", owners);
+        Assert.DoesNotContain($"{prefix}-ready-this", owners);
+
+        Assert.DoesNotContain($"{prefix}-paused-this", await querier.FindRunningAssignedToAsync(runnerId));
+        Assert.Equal(1, await querier.CountRunningAssignedToAsync(runnerId));
+        Assert.Empty(await querier.FindActiveWorkOwnersAssignedToAsync(""));
     }
 
     [Fact]
