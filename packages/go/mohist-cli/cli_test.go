@@ -180,7 +180,7 @@ func TestRunnerStatusUsesGlobalRouteWithoutProjectResolution(t *testing.T) {
 	currentDirectoryCalls := 0
 	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		gotPath = r.URL.Path
-		return response(http.StatusOK, `{"success":true,"data":{"observedAt":"2026-08-01T12:00:00Z","inventory":{"state":"ready","nextActions":[]},"runners":[]}}`), nil
+		return response(http.StatusOK, `{"success":true,"data":{"observedAt":"2026-08-01T12:00:00Z","inventory":{"state":"first-install","nextActions":[{"code":"install-runner","message":"Install and start the first Runner.","command":"mo install runner --repo-root <path>"}]},"runners":[]}}`), nil
 	}), map[string]string{"MOHIST_TOKEN": "token"})
 	deps.CurrentDirectory = func() string {
 		currentDirectoryCalls++
