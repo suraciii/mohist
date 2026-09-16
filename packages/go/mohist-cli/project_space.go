@@ -787,7 +787,7 @@ func (c *client) request(ctx context.Context, method, path string, body any) (js
 		if message == "" {
 			message = "Mohist Server request failed"
 		}
-		return nil, &operationError{message: "error: " + message + " [" + code + "]"}
+		return nil, &operationError{message: "error: " + message + " [" + code + "]", code: code, details: env.Details}
 	}
 	return env.Data, nil
 }

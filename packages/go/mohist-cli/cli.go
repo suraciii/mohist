@@ -282,7 +282,14 @@ type usageError struct{ message string }
 
 func (e *usageError) Error() string { return e.message }
 
-type operationError struct{ message string }
+type operationError struct {
+	message string
+	// code and details preserve the Server error envelope so a caller can
+	// distinguish a named conflict and read its structured repair details
+	// instead of parsing the rendered message.
+	code    string
+	details json.RawMessage
+}
 
 func (e *operationError) Error() string { return e.message }
 
@@ -745,6 +752,7 @@ type envelope struct {
 	Data    json.RawMessage `json:"data"`
 	Error   string          `json:"error"`
 	Code    string          `json:"code"`
+	Details json.RawMessage `json:"details"`
 }
 
 func (c *client) get(ctx context.Context, path string) (json.RawMessage, error) {
@@ -800,7 +808,7 @@ func (c *client) get(ctx context.Context, path string) (json.RawMessage, error) 
 		if message == "" {
 			message = "Mohist Server request failed"
 		}
-		return nil, &operationError{message: "error: " + message + " [" + code + "]"}
+		return nil, &operationError{message: "error: " + message + " [" + code + "]", code: code, details: result.Details}
 	}
 	if len(result.Data) == 0 || string(result.Data) == "null" {
 		return nil, &operationError{message: "error: Mohist Server returned no data [invalid_response]"}
