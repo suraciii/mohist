@@ -324,6 +324,16 @@ or object members are local `ExitUsage=2` errors that name the originating
 flag. A nil-able map tracks presence so an explicit empty object is sent while
 an absent flag is omitted.
 
+`issue edit` composes one atomic patch. A single pre-flight GET reads the
+current labels only to merge them; the validated `key=value` and `-key` tokens
+are applied to that snapshot, and the merged labels plus every other explicit
+field are emitted by one shared builder into exactly one PATCH. The pre-read
+never mutates, so the edit cannot diverge field by field from a non-label edit.
+An `issue edit` with no editable field is a local `ExitUsage=2` error: it would
+otherwise serialize an empty patch. `--project` and a `--json` field selection
+do not count as editable fields, and bare `--json`/`--help` remain local
+discovery with no request.
+
 ### Output and Fields
 
 A command computes a semantic result before selecting a renderer. The reference

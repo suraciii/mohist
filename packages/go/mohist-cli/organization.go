@@ -172,6 +172,12 @@ func parseIssueOptions(c command, args []string, action string) (command, error)
 		if hasArg(c.args, "ready") && hasArg(c.args, "draft") {
 			return command{}, usage("--ready and --draft are mutually exclusive")
 		}
+		if !hasIssueEditableField(c) {
+			return command{}, usage("at least one field is required to edit an issue")
+		}
+	}
+	if action != "list" && hasArg(c.args, "stage") {
+		return command{}, usage("--stage is only valid for issue list")
 	}
 	if action == "create" || action == "edit" {
 		if hasArg(c.args, "stage-models") && hasArg(c.args, "stage-models-file") {
@@ -522,6 +528,12 @@ func runOrganization(ctx context.Context, deps Dependencies, c *client, cmd comm
 		}
 		cmd.preflightedInput = value
 	}
+	if cmd.kind == "issue-create" || cmd.kind == "issue-edit" {
+		if err := validateIssueLabelTokens(cmd, cmd.kind == "issue-edit"); err != nil {
+			writeError(deps.Stderr, err)
+			return ExitUsage
+		}
+	}
 	project, ok := resolveProject(deps, argValue(cmd.args, "project", ""))
 	if !ok {
 		writeError(deps.Stderr, errors.New("Run 'mo project use <name-or-id>' or pass --project <name-or-id>"))
@@ -529,7 +541,11 @@ func runOrganization(ctx context.Context, deps Dependencies, c *client, cmd comm
 	}
 	base := "/api/projects/" + url.PathEscape(project)
 	if cmd.kind == "issue-edit" && hasArg(cmd.args, "label") {
-		return issueEditWithLabels(ctx, deps, c, cmd, base)
+		merged, err := mergedIssueLabels(ctx, c, cmd, base)
+		if err != nil {
+			return operationExit(deps, ctx, err)
+		}
+		cmd.mergedLabels = merged
 	}
 	path, method, body, collection, err := organizationRequest(cmd, base, deps)
 	if err != nil {
@@ -913,53 +929,7 @@ func organizationRequest(cmd command, base string, deps Dependencies) (string, s
 		)
 		return base + "/issues", http.MethodPost, b, false, nil
 	case "issue-edit":
-		b := map[string]any{}
-		for _, k := range []string{"title", "priority", "risk", "model", "model-variant", "repo"} {
-			if hasArg(cmd.args, k) {
-				target := map[string]string{"model-variant": "modelVariant", "repo": "repositoryName"}[k]
-				if target == "" {
-					target = k
-				}
-				b[target] = argValue(cmd.args, k, "")
-			}
-		}
-		if hasArg(cmd.args, "body") || hasArg(cmd.args, "body-file") {
-			b["body"] = cmd.preflightedInput
-		}
-		if hasArg(cmd.args, "parent") {
-			v := argValue(cmd.args, "parent", "")
-			if v == "none" {
-				b["parentIssueNumber"] = nil
-			} else {
-				b["parentIssueNumber"] = numberValue(v)
-			}
-		}
-		if hasArg(cmd.args, "ready") {
-			b["isDraft"] = false
-		}
-		if hasArg(cmd.args, "draft") {
-			b["isDraft"] = true
-		}
-		if hasArg(cmd.args, "no-workflow") {
-			b["noWorkflow"] = true
-		}
-		if hasArg(cmd.args, "workflow-profile") {
-			b["workflowProfileId"] = argValue(cmd.args, "workflow-profile", "")
-		}
-		if hasArg(cmd.args, "inherit-workflow-profile") {
-			b["workflowProfileId"] = nil
-			b["noWorkflow"] = false
-		}
-		if cmd.stageModels != nil {
-			b["stageModels"] = cmd.stageModels
-		}
-		if cmd.stageModelVariants != nil {
-			b["stageModelVariants"] = cmd.stageModelVariants
-		}
-		if hasArg(cmd.args, "label") {
-			return issue, http.MethodGet, nil, false, errors.New("label edits require current Issue resolution")
-		}
-		return issue, http.MethodPatch, b, false, nil
+		return issue, http.MethodPatch, buildIssueEditBody(cmd), false, nil
 	case "issue-start", "issue-done", "issue-close", "issue-reopen", "issue-restore":
 		return issue + "/" + strings.TrimPrefix(action, "issue-"), http.MethodPost, map[string]any{}, false, nil
 	case "issue-archive":
@@ -1067,42 +1037,22 @@ func organizationRequest(cmd command, base string, deps Dependencies) (string, s
 	}
 }
 
-func issueEditWithLabels(ctx context.Context, deps Dependencies, c *client, cmd command, base string) int {
-	number := url.PathEscape(argValue(cmd.args, "number", ""))
-	data, err := c.request(ctx, http.MethodGet, base+"/issues/"+number, nil)
-	if err != nil {
-		return operationExit(deps, ctx, err)
-	}
-	var current map[string]json.RawMessage
-	if json.Unmarshal(data, &current) != nil {
-		return operationExit(deps, ctx, errors.New("error: issue response has an invalid shape [invalid_response]"))
-	}
-	labels := map[string]any{}
-	if raw, ok := current["labels"]; ok {
-		_ = json.Unmarshal(raw, &labels)
-	}
-	for _, value := range valuesFor(cmd.args, "label") {
-		if strings.HasPrefix(value, "-") {
-			delete(labels, strings.TrimPrefix(value, "-"))
-		} else {
-			parts := strings.SplitN(value, "=", 2)
-			if len(parts) == 2 {
-				labels[parts[0]] = parts[1]
+// buildIssueEditBody composes the single atomic PATCH body for issue edit. It
+// emits one JSON member for every explicitly supplied flag so a label edit and
+// a non-label edit share one builder and cannot diverge field by field.
+func buildIssueEditBody(cmd command) map[string]any {
+	b := map[string]any{}
+	for _, k := range []string{"title", "priority", "risk", "model", "model-variant", "repo"} {
+		if hasArg(cmd.args, k) {
+			target := map[string]string{"model-variant": "modelVariant", "repo": "repositoryName"}[k]
+			if target == "" {
+				target = k
 			}
+			b[target] = argValue(cmd.args, k, "")
 		}
-	}
-	b := map[string]any{"labels": labels}
-	if hasArg(cmd.args, "title") {
-		b["title"] = argValue(cmd.args, "title", "")
 	}
 	if hasArg(cmd.args, "body") || hasArg(cmd.args, "body-file") {
 		b["body"] = cmd.preflightedInput
-	}
-	if hasArg(cmd.args, "priority") {
-		b["priority"] = argValue(cmd.args, "priority", "")
-	}
-	if hasArg(cmd.args, "risk") {
-		b["risk"] = argValue(cmd.args, "risk", "")
 	}
 	if hasArg(cmd.args, "parent") {
 		v := argValue(cmd.args, "parent", "")
@@ -1112,25 +1062,68 @@ func issueEditWithLabels(ctx context.Context, deps Dependencies, c *client, cmd 
 			b["parentIssueNumber"] = numberValue(v)
 		}
 	}
+	if hasArg(cmd.args, "ready") {
+		b["isDraft"] = false
+	}
+	if hasArg(cmd.args, "draft") {
+		b["isDraft"] = true
+	}
+	if hasArg(cmd.args, "no-workflow") {
+		b["noWorkflow"] = true
+	}
+	if hasArg(cmd.args, "workflow-profile") {
+		b["workflowProfileId"] = argValue(cmd.args, "workflow-profile", "")
+	}
+	if hasArg(cmd.args, "inherit-workflow-profile") {
+		b["workflowProfileId"] = nil
+		b["noWorkflow"] = false
+	}
 	if cmd.stageModels != nil {
 		b["stageModels"] = cmd.stageModels
 	}
 	if cmd.stageModelVariants != nil {
 		b["stageModelVariants"] = cmd.stageModelVariants
 	}
-	data, err = c.request(ctx, http.MethodPatch, base+"/issues/"+number, b)
+	if hasArg(cmd.args, "label") {
+		b["labels"] = cmd.mergedLabels
+	}
+	return b
+}
+
+// mergedIssueLabels performs the only read a label edit needs: one pre-flight
+// GET of the current Issue. The validated set/remove tokens are applied in
+// order on top of the current labels (last write wins) so labels the edit does
+// not mention survive. It never mutates; buildIssueEditBody turns the merged
+// map into the single PATCH.
+func mergedIssueLabels(ctx context.Context, c *client, cmd command, base string) (map[string]string, error) {
+	number := url.PathEscape(argValue(cmd.args, "number", ""))
+	data, err := c.request(ctx, http.MethodGet, base+"/issues/"+number, nil)
 	if err != nil {
-		return operationExit(deps, ctx, err)
+		return nil, err
 	}
-	if len(cmd.fields) > 0 {
-		selected, e := SelectFields(data, cmd.fields, false)
-		if e != nil {
-			writeError(deps.Stderr, e)
-			return ExitOperation
+	var current map[string]json.RawMessage
+	if json.Unmarshal(data, &current) != nil || current == nil {
+		return nil, errors.New("error: issue response has an invalid shape [invalid_response]")
+	}
+	labels := map[string]string{}
+	if raw, ok := current["labels"]; ok {
+		_ = json.Unmarshal(raw, &labels)
+	}
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	tokens, err := parseIssueLabelTokens(valuesFor(cmd.args, "label"), true)
+	if err != nil {
+		return nil, err
+	}
+	for _, token := range tokens {
+		if token.remove {
+			delete(labels, token.key)
+			continue
 		}
-		return writeJSON(deps.Stdout, json.RawMessage(selected))
+		labels[token.key] = token.value
 	}
-	return writeJSON(deps.Stdout, json.RawMessage(data))
+	return labels, nil
 }
 
 func runWatch(ctx context.Context, deps Dependencies, c *client, cmd command, base, method, path string, body any) int {
@@ -1199,6 +1192,77 @@ func csvValues(v string) any {
 	}
 	return out
 }
+
+// issueLabelToken is one validated --label input. A set token carries a
+// non-empty value; a remove token is only legal on issue edit.
+type issueLabelToken struct {
+	key    string
+	value  string
+	remove bool
+}
+
+// parseIssueLabelTokens validates every --label token against the grammar the
+// Server enforces (Issue.ValidateLabelKey / ValidateLabelValue). A token must
+// be key=value with a non-empty, non-whitespace value and a key matching
+// labelKeyPattern; issue edit additionally accepts -key removes. Malformed
+// tokens are local usage errors so they fail before any Project lookup or HTTP
+// request instead of round-tripping a Server 400.
+func parseIssueLabelTokens(values []string, allowRemove bool) ([]issueLabelToken, error) {
+	tokens := make([]issueLabelToken, 0, len(values))
+	for _, raw := range values {
+		if strings.HasPrefix(raw, "-") {
+			if !allowRemove {
+				return nil, usage("--label remove token is only valid on issue edit")
+			}
+			key := strings.TrimPrefix(raw, "-")
+			if !labelKeyPattern.MatchString(key) {
+				return nil, usage("label key must contain lowercase letters, numbers, and hyphens")
+			}
+			tokens = append(tokens, issueLabelToken{key: key, remove: true})
+			continue
+		}
+		parts := strings.SplitN(raw, "=", 2)
+		if len(parts) != 2 {
+			return nil, usage("label must be key=value")
+		}
+		key, value := parts[0], parts[1]
+		if !labelKeyPattern.MatchString(key) {
+			return nil, usage("label key must contain lowercase letters, numbers, and hyphens")
+		}
+		if strings.TrimSpace(value) == "" {
+			return nil, usage("label value must be a non-empty, non-whitespace string")
+		}
+		tokens = append(tokens, issueLabelToken{key: key, value: value})
+	}
+	return tokens, nil
+}
+
+// validateIssueLabelTokens is the pre-request gate for issue create/edit. It
+// runs after carrier resolution but before Project lookup and any HTTP so a
+// malformed token fails locally while an unreadable --body-file still reports
+// the carrier error first.
+func validateIssueLabelTokens(cmd command, allowRemove bool) error {
+	_, err := parseIssueLabelTokens(valuesFor(cmd.args, "label"), allowRemove)
+	return err
+}
+
+// hasIssueEditableField reports whether an issue edit carries at least one flag
+// that maps to a writable field. --project and a --json field selection do not
+// count, so an edit that would serialize to an empty PATCH is rejected before
+// any request.
+func hasIssueEditableField(cmd command) bool {
+	for _, field := range []string{
+		"title", "body", "body-file", "priority", "risk", "model", "model-variant", "repo",
+		"parent", "ready", "draft", "no-workflow", "workflow-profile", "inherit-workflow-profile",
+		"label", "stage-models", "stage-models-file", "stage-model-variants", "stage-model-variants-file",
+	} {
+		if hasArg(cmd.args, field) {
+			return true
+		}
+	}
+	return false
+}
+
 func labelMap(values []string) map[string]string {
 	result := map[string]string{}
 	for _, value := range values {

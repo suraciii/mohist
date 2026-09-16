@@ -477,6 +477,11 @@ type command struct {
 	// bind them instead of receiving a dropped JSON string.
 	stageModels        map[string]string
 	stageModelVariants map[string]string
+	// mergedLabels holds the result of the issue-edit label pre-read: the
+	// current Issue labels with every --label set/remove token applied. It is
+	// only populated for an edit that carries --label, and buildIssueEditBody
+	// emits it as the labels member of the one atomic PATCH.
+	mergedLabels map[string]string
 }
 
 var diagnosisFields = []string{"workflowRunId", "status", "failure", "tasks", "dispatch", "events"}

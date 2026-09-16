@@ -279,6 +279,20 @@ command exits with `ExitUsage=2`, names the originating flag, and issues no
 request. An explicit empty object (`--stage-models '{}'`) sends an empty
 object; omitting the flag sends nothing.
 
+`--label` takes a `key=value` set token, where the key matches
+`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` and the value is non-empty and
+non-whitespace. `issue edit` additionally accepts a `-key` remove token that
+deletes the named label and leaves every unmentioned label untouched. `-key`
+is rejected by `issue create`, which only sets labels. A token missing `=`, an
+empty or invalid key, or an empty or whitespace value is a local usage error:
+the command exits with `ExitUsage=2` and issues no request. `issue edit`
+composes one atomic PATCH: a single pre-flight GET reads the current labels
+for merging, and every explicit field (including the merged labels and the
+stage-model objects) travels in that one request. An `issue edit` with no
+editable field (for example `mo issue edit 42 --project proj`, or a selected
+`--json` field list such as `--json number`) is a usage error; bare `--json`
+and `--help` still return the local field catalog or help.
+
 When the target repository is connected to GitHub, every non-Draft Issue has a
 GitHub mirror. `issue view` and `issue list` expose its repository, number, URL,
 and sync health as first-class fields; callers never derive them from labels.
