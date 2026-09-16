@@ -342,11 +342,12 @@ Each failure condition has exactly one owner:
 - Work hangs or escapes control: the Runner process applies a progress-aware
   timeout, kills the work, and reports FAILED.
 - Runner disappears: RunnerGrain lets poll freshness expire, marks the Runner
-  offline, queries both owner types for `Running assigned=me`, and reports
-  `FAILED("runner-lost")` for each.
-- Runner restarts: register presents a new `processGeneration`; the old
-  generation's Running work is closed out as `FAILED("runner-lost")`. See
-  [Restart and Crash Semantics](#restart-and-crash-semantics).
+  offline, and closes out the work that Runner owns: Workflow work by
+  active-work ownership and AgentJobs by their ledger, each reported
+  `FAILED("runner-lost")`.
+- Runner restarts: register presents a new `processGeneration`; every active
+  claim that is not that generation is closed out as `FAILED("runner-lost")`.
+  See [Restart and Crash Semantics](#restart-and-crash-semantics).
 - No Server-side timer times out work. Reported in-flight work is alive; only
   the process judges progress. Owner timers, including AgentJob execution and
   dispatch timeouts, are decided by owner reminders and are unrelated to
@@ -402,12 +403,36 @@ two processes under one Runner identity must never share a generation. The
 Server records the claiming generation with every claim.
 
 Register establishes a new generation. Before the new process's first poll is
-served, the Server closes out every Running work item assigned to this Runner
-under an older generation as `FAILED("runner-lost")`. Work claimed by one
-generation is never redelivered for execution to another. This is
-presence-expiry closeout moved to the earliest provable moment; presence
-expiry remains the backstop for a process that never returns. Both triggers
-produce the same ordinary failure code.
+served, the Server closes out every active claim this Runner holds under any
+other generation as `FAILED("runner-lost")`. The claim generation is the
+ownership authority; the enclosing WorkflowRun status never exempts a claim
+from closeout, and pausing deliberately leaves an executing Action running, so
+paused work is closed out too. Work claimed by one generation is never
+redelivered for execution to another. This is presence-expiry closeout moved to
+the earliest provable moment; presence expiry remains the backstop for a
+process that never returns. Both triggers produce the same ordinary failure
+code.
+
+Closeout membership comes from active-work ownership, not from the
+`Running`-scoped query that dispatch redelivery and capacity share. Only claims
+whose generation differs from the authoritative one settle: a claim from the
+current generation belongs to a live execution and keeps its ordinary report
+path, and a claim with no recorded generation — an Agent task, whose AgentJob
+ledger holds the claim instead — is not decidable from the run.
+
+That arbitration also runs at the boundaries where the Server (re)establishes
+the authority: Runner grain activation and the registration that admits a
+generation. This is what makes Workflow work orphaned by an earlier closeout
+decidable after its closing marker was cleared: the claim is failed through the
+same `runner-lost` path, which exposes the owner's ordinary retry. AgentJob
+claims keep their ledger as the owner record instead: they settle under a
+recorded generation closeout, and one whose record outlives its generation is
+bounded by that AgentJob's own recovery deadline. Race safety stays with the
+owner: a stale identity, a claim that the current generation owns, a report or
+retry that landed first, or a blocked settlement is refused and changes
+nothing. A lost claim that this pass cannot settle stays recorded as the
+pending closeout obligation, so the presence reminder retries it instead of
+dropping it.
 
 A managed Runner update uses the same boundary. Update interrupt closes claim
 admission and records only a minimal drain-fence identity record: the pending
@@ -475,8 +500,8 @@ before claiming work, the Runner terminates stale groups left by earlier
 processes under the same Runner root. A crashed process cannot kill its own
 tree, so the sweep makes the old execution dead instead of assuming it.
 
-Every Running work item must reach a terminal state without Runner memory:
-report verdict, generation closeout, presence-expiry closeout, or a deadline.
+Every active claim must reach a terminal state without Runner memory: report
+verdict, generation closeout, presence-expiry closeout, or a deadline.
 Work that can be closed out by none of these is closed out at its deadline as
 failed or unknown. Silence is made decidable by leases: an expiry is a fact,
 not a guess about the peer

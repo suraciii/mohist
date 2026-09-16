@@ -163,6 +163,11 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             await EnsurePresenceReminderAsync();
             await ReconcileClosingGenerationAsync();
         }
+
+        // Activation is where the Server re-establishes the authoritative
+        // generation for this Runner, so work left behind by an earlier
+        // closeout is settled here instead of waiting for the next register.
+        await ReconcileSupersededGenerationAsync();
     }
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -214,7 +219,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
             if (!string.IsNullOrWhiteSpace(closingGeneration))
             {
-                await ReconcileClosingGenerationAsync();
+                await ReconcileClosingGenerationAsync(processGeneration);
                 if (!string.IsNullOrWhiteSpace(state.ClosingProcessGeneration))
                     throw new InvalidOperationException(
                         $"Runner {RunnerId} closeout for process generation {closingGeneration} is still pending.");
@@ -250,6 +255,9 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 await PersistAsync();
             }
             _draining = !string.IsNullOrWhiteSpace(updateInterruptFence.PendingId);
+            // The generation is now current: any claim that is not this one
+            // belongs to a process that can no longer report or receive it.
+            await ReconcileSupersededGenerationAsync();
             await EnsurePresenceReminderAsync();
             EnsurePresenceTimer();
             await UpsertRegistryAsync();

@@ -153,7 +153,9 @@ If it also conflicts:
 with `runner-lost`.
 
 **Cause:** Runner is stopped or disconnected. Executing work fails explicitly
-with `runner-lost`; it is not replayed automatically.
+with `runner-lost`; it is not replayed automatically. A paused run keeps its
+executing Action, so it fails the same way when the owning Runner process
+generation is replaced.
 
 **Action:** Verify Runner state:
 
