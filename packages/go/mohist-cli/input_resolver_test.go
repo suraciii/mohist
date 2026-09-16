@@ -171,7 +171,7 @@ func TestResolveTextInputConsumesStdinExactlyOnce(t *testing.T) {
 	// across pre-flight and mutation paths. After a single call, the reader
 	// must be fully consumed so a second call would observe EOF and return
 	// an empty value rather than partial bytes that diverge from the first.
-	counter := &countingReader{reader: strings.NewReader("hello world")}
+	counter := &stdinCountingReader{reader: strings.NewReader("hello world")}
 	deps, _, _ := resolveTestDeps(func(string) (string, error) { return "", nil }, counter)
 	cmd := command{args: []string{"body-file", "-"}}
 	first, err := resolveTextInput(deps, cmd, "body", "body-file")
@@ -241,13 +241,15 @@ func (r *partialReader) Read(p []byte) (int, error) {
 	return n, r.err
 }
 
-// countingReader wraps an io.Reader and counts Read invocations.
-type countingReader struct {
+// stdinCountingReader wraps an io.Reader and counts Read invocations. The
+// name avoids collision with the unrelated countingReader declared in
+// issue_676_contract_test.go, which exists to track dependency accesses.
+type stdinCountingReader struct {
 	reader io.Reader
 	calls  int
 }
 
-func (r *countingReader) Read(p []byte) (int, error) {
+func (r *stdinCountingReader) Read(p []byte) (int, error) {
 	r.calls++
 	return r.reader.Read(p)
 }

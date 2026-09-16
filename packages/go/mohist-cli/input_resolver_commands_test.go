@@ -22,7 +22,7 @@ type commandFixture struct {
 	transport    *transportTrap
 	readPaths    *pathRecorder
 	writtenPaths *pathRecorder
-	input        *countingReader
+	input        *stdinCountingReader
 }
 
 func newCommandFixture(stateFiles map[string]string) *commandFixture {
@@ -58,7 +58,7 @@ func newCommandFixture(stateFiles map[string]string) *commandFixture {
 		OpenManagedLock:   func(string) (io.Closer, error) { return io.NopCloser(strings.NewReader("")), nil },
 		ManagedPathExists: func(string) bool { return false },
 	}
-	input := &countingReader{reader: strings.NewReader("stdin content\n")}
+	input := &stdinCountingReader{reader: strings.NewReader("stdin content\n")}
 	deps.Input = input
 	return &commandFixture{
 		deps:         deps,
@@ -578,7 +578,7 @@ func TestIssueEditWithLabelsStdinConsumedOnceOnSuccess(t *testing.T) {
 	var patchBody string
 	patched := 0
 	read := false
-	reader := &countingReader{reader: strings.NewReader("hello world\n")}
+	reader := &stdinCountingReader{reader: strings.NewReader("hello world\n")}
 	f.deps.Input = reader
 	// Replace the transport to admit the pre-flight GET and the PATCH but
 	// reject any other call.
@@ -716,7 +716,7 @@ func TestRequestBodyIdentityAcrossFileAndStdin(t *testing.T) {
 					ReadFile:          read,
 					HomeDir:           func() (string, error) { return "/home/test", nil },
 					CurrentDirectory:  func() string { return "/work/tree" },
-					Input:             &countingReader{reader: strings.NewReader(body)},
+					Input:             &stdinCountingReader{reader: strings.NewReader(body)},
 					OpenManagedLock:   func(string) (io.Closer, error) { return io.NopCloser(strings.NewReader("")), nil },
 					ManagedPathExists: func(string) bool { return false },
 				}
@@ -726,7 +726,7 @@ func TestRequestBodyIdentityAcrossFileAndStdin(t *testing.T) {
 				t.Fatalf("file code=%d", code)
 			}
 			stdinDeps := makeDeps()
-			counter := &countingReader{reader: strings.NewReader(body)}
+			counter := &stdinCountingReader{reader: strings.NewReader(body)}
 			stdinDeps.Input = counter
 			// Replace ReadFile so stdin path is used: any non-state read
 			// returns an error so file reads are never confused with stdin
@@ -1007,7 +1007,7 @@ func TestRequestBodyIdentityAcrossCarriersForAllClearableCommands(t *testing.T) 
 					},
 					HomeDir:           func() (string, error) { return "/home/test", nil },
 					CurrentDirectory:  func() string { return "/work/tree" },
-					Input:             &countingReader{reader: strings.NewReader(body)},
+					Input:             &stdinCountingReader{reader: strings.NewReader(body)},
 					OpenManagedLock:   func(string) (io.Closer, error) { return io.NopCloser(strings.NewReader("")), nil },
 					ManagedPathExists: func(string) bool { return false },
 				}
@@ -1019,7 +1019,7 @@ func TestRequestBodyIdentityAcrossCarriersForAllClearableCommands(t *testing.T) 
 				t.Fatalf("file code=%d", code)
 			}
 			stdinDeps := makeDeps()
-			counter := &countingReader{reader: strings.NewReader(body)}
+			counter := &stdinCountingReader{reader: strings.NewReader(body)}
 			stdinDeps.Input = counter
 			stdinDeps.ReadFile = func(path string) (string, error) {
 				if v, ok := state[path]; ok {
@@ -1288,11 +1288,11 @@ func TestNonblankValuesAreSentUntrimmed(t *testing.T) {
 	state := map[string]string{"/work/tree/.mohist/cli-state.json": `{"activeProjectId":"proj"}`}
 	body := "  leading  \n\tinterior\n  trailing  \n"
 	cases := []struct {
-		name      string
-		args      []string
-		wantPath  string
-		flag      string
-		key       string
+		name     string
+		args     []string
+		wantPath string
+		flag     string
+		key      string
 	}{
 		{
 			name:     "issue-create",
