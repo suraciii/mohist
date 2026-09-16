@@ -884,9 +884,7 @@ describe('Codex turn closeout integration', () => {
     const clock = buildFakeClock()
     // Use a deadline shorter than the 5-minute lead so the warning
     // fires at execution start.
-    const completion = driveTurnToCompletion(
-      driveArgs(transport, undefined, { deadlineMs: 60_000, clock }),
-    )
+    const completion = driveTurnToCompletion(driveArgs(transport, undefined, { deadlineMs: 60_000, clock }))
     // Advance the fake clock past the warning delay (0ms — the
     // lead is longer than the deadline, so the warning fires at
     // execution start) and drain the microtask queue so the async
@@ -927,9 +925,7 @@ describe('Codex turn closeout integration', () => {
       result: { threadId: THREAD_ID, turnId: TURN_ID, accepted: true },
     })
     const clock = buildFakeClock()
-    const completion = driveTurnToCompletion(
-      driveArgs(transport, undefined, { deadlineMs: 60_000, clock }),
-    )
+    const completion = driveTurnToCompletion(driveArgs(transport, undefined, { deadlineMs: 60_000, clock }))
     clock.advance(0)
     for (let i = 0; i < 5; i += 1) await Promise.resolve()
     const steerCall = transport.calls.find((c) => c.method === 'turn/steer')

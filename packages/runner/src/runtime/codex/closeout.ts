@@ -42,17 +42,9 @@ import {
   type CodexTurnCompletedEvent,
   type CodexTurnSteerParams,
 } from './protocol-types.js'
-import {
-  normalizePermissionRequiredCodex,
-  normalizeUnknownCodex,
-} from './errors.js'
+import { normalizePermissionRequiredCodex, normalizeUnknownCodex } from './errors.js'
 import { redactCodexCredentialString } from './credential.js'
-import type {
-  CodexClock,
-  CodexDiagnostic,
-  CodexResult,
-  CodexTurnResult,
-} from './types.js'
+import type { CodexClock, CodexDiagnostic, CodexResult, CodexTurnResult } from './types.js'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -302,9 +294,9 @@ export type CodexDeadlineConfirmation =
 export interface CodexDeadlineInterruptHandle {
   readonly deadlineMs: number
   /** True after the deadline fired and the result was fixed. */
-  readonly fired: boolean;
+  readonly fired: boolean
   /** Await bounded confirmation of the interrupt. */
-  awaitConfirmation(): Promise<CodexDeadlineConfirmation>;
+  awaitConfirmation(): Promise<CodexDeadlineConfirmation>
   /** Dispose the deadline timer. Idempotent. */
   dispose(): void
 }
@@ -540,7 +532,9 @@ export function createPermissionRejection(deps: {
   readonly onUnconfirmed?: () => void
 }): CodexPermissionRejectionHandle {
   const budgetMs =
-    deps.confirmationBudgetMs !== undefined && Number.isFinite(deps.confirmationBudgetMs) && deps.confirmationBudgetMs >= 0
+    deps.confirmationBudgetMs !== undefined &&
+    Number.isFinite(deps.confirmationBudgetMs) &&
+    deps.confirmationBudgetMs >= 0
       ? Math.floor(deps.confirmationBudgetMs)
       : CODEX_INTERRUPT_CONFIRMATION_BUDGET_MS
   const state: MutablePermissionState = {

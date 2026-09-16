@@ -323,7 +323,8 @@ export async function driveTurnToCompletion(
   // new deadline interrupt does) but preserves the early-fix
   // contract for the live lifecycle: as soon as the deadline
   // fires, the session is resolved with `deadline-exceeded`.
-  const legacyHandle = options.deadlineMs !== null ? legacyScheduleDeadlineCloseout(options, session, deadlineHandle) : null
+  const legacyHandle =
+    options.deadlineMs !== null ? legacyScheduleDeadlineCloseout(options, session, deadlineHandle) : null
   // Permission / user-input rejection state machine. Headless
   // execution fails closed. The `onUnconfirmed` callback fires
   // when the budget expires without a matching terminal event;

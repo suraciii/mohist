@@ -623,9 +623,7 @@ describe('Codex createPermissionRejection', () => {
     })
     expect(unconfirmed).toMatchObject({ ok: false, error: { kind: 'unknown' } })
     if (unconfirmed.ok) throw new Error('expected failure')
-    expect(
-      unconfirmed.diagnostics.some((d) => d.code === 'interruption-unconfirmed'),
-    ).toBe(true)
+    expect(unconfirmed.diagnostics.some((d) => d.code === 'interruption-unconfirmed')).toBe(true)
     // No Workflow Approval Point: no transient approval state was
     // ever created. The protocol-defined denial was the only
     // response; the runtime never opened an approval workflow.
@@ -761,12 +759,14 @@ describe('Codex createPermissionRejection', () => {
         params: { threadId: THREAD_ID, turnId: TURN_ID },
       }),
     ).toBeNull()
-    expect(rejection.observeTurnCompleted({
-      type: 'turn/completed',
-      threadId: THREAD_ID,
-      turnId: TURN_ID,
-      status: 'interrupted',
-    })).toBeNull()
+    expect(
+      rejection.observeTurnCompleted({
+        type: 'turn/completed',
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        status: 'interrupted',
+      }),
+    ).toBeNull()
   })
 })
 
