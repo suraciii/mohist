@@ -181,6 +181,24 @@ func parseIssueNested(area string, args []string) (command, error) {
 	}
 	action := args[0]
 	c := command{kind: "issue-" + area + "-" + action}
+	var allowed []string
+	switch area {
+	case "template":
+		allowed = []string{"list", "view"}
+	case "comment":
+		allowed = []string{"create"}
+	case "prereq":
+		allowed = []string{"add", "remove"}
+	case "watch":
+		allowed = []string{"list", "add", "remove"}
+	case "github":
+		allowed = []string{"view", "link", "sync", "unlink"}
+	case "variable":
+		allowed = []string{"list", "get", "set", "unset"}
+	}
+	if !contains(allowed, action) {
+		return command{}, usage("unknown issue " + area + " command")
+	}
 	discoveryCatalog := []string(nil)
 	if area == "template" {
 		discoveryCatalog = templateListFields
@@ -193,7 +211,7 @@ func parseIssueNested(area string, args []string) (command, error) {
 		discoveryCatalog = issueResultFields
 	} else if area == "watch" && action == "list" {
 		discoveryCatalog = watchFields
-	} else if area == "github" && (action == "link" || action == "view") {
+	} else if area == "github" {
 		discoveryCatalog = issueFields
 	} else if area == "variable" && contains([]string{"list", "get", "set", "unset"}, action) {
 		discoveryCatalog = variableFields
@@ -391,6 +409,9 @@ func parseEpic(args []string) (command, error) {
 
 func parseLabel(args []string) (command, error) {
 	action := args[0]
+	if !contains([]string{"list", "create", "edit", "delete"}, action) {
+		return command{}, usage("unknown label command")
+	}
 	c := command{kind: "label-" + action, catalog: nil}
 	if action == "list" {
 		c.catalog = labelFields
@@ -403,9 +424,6 @@ func parseLabel(args []string) (command, error) {
 			return command{}, usage("label key is required")
 		}
 		c.args = append(c.args, "key", args[1])
-	}
-	if !contains([]string{"list", "create", "edit", "delete"}, action) {
-		return command{}, usage("unknown label command")
 	}
 	start := 1
 	if action != "list" {

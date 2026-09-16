@@ -40,20 +40,18 @@ func parseAgent(args []string) (command, error) {
 		return parseAgentNested(args[0], args[1:])
 	}
 	action := args[0]
-	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
-		catalog := agentFields
-		if action == "launch" || action == "start" {
-			catalog = agentLaunchFields
-		}
-		if action == "spawn" {
-			catalog = agentSpawnFields
-		}
-		return command{help: true, helpText: leafHelp("agent-"+action, catalog)}, nil
-	}
 	if !contains([]string{"list", "view", "create", "edit", "archive", "restore", "start", "launch", "spawn", "install"}, action) {
 		return command{}, usage("unknown agent command")
 	}
 	c := command{kind: "agent-" + action, catalog: agentFields}
+	if action == "launch" || action == "start" {
+		c.catalog = agentLaunchFields
+	} else if action == "spawn" {
+		c.catalog = agentSpawnFields
+	}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
+	}
 	start := 1
 	if action == "list" {
 		c.catalog = agentFields
@@ -90,22 +88,6 @@ func parseAgentNested(area string, args []string) (command, error) {
 	}
 	action := args[0]
 	c := command{kind: "agent-" + area + "-" + action}
-	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
-		catalog := agentJobListFields
-		if area == "job" && action == "view" {
-			catalog = agentJobFields
-		}
-		if area == "job" && action == "observation" {
-			catalog = observationFields
-		}
-		if area == "model" {
-			catalog = modelFields
-		}
-		if area == "subscription" && action != "list" {
-			catalog = subscriptionFields
-		}
-		return command{help: true, helpText: leafHelp("agent-"+area+"-"+action, catalog)}, nil
-	}
 	start := 1
 	switch area {
 	case "job":
@@ -119,7 +101,10 @@ func parseAgentNested(area string, args []string) (command, error) {
 		if action == "observation" {
 			c.catalog = observationFields
 		}
-		if len(args) <= 1 {
+		if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+			return discovered, err
+		}
+		if len(args) <= 1 || isControlToken(args[1]) {
 			return command{}, usage("agent or job id is required")
 		}
 		c.args = append(c.args, "target", args[1])
@@ -129,6 +114,9 @@ func parseAgentNested(area string, args []string) (command, error) {
 			return command{}, usage("unknown agent model command")
 		}
 		c.catalog = modelFields
+		if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+			return discovered, err
+		}
 	case "subscription":
 		if !contains([]string{"list", "create", "edit", "delete"}, action) {
 			return command{}, usage("unknown agent subscription command")
@@ -137,13 +125,16 @@ func parseAgentNested(area string, args []string) (command, error) {
 		if action != "list" {
 			c.catalog = subscriptionFields
 		}
-		if len(args) <= 1 {
+		if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+			return discovered, err
+		}
+		if len(args) <= 1 || isControlToken(args[1]) {
 			return command{}, usage("agent name or id is required")
 		}
 		c.args = append(c.args, "agent", args[1])
 		start = 2
 		if action == "edit" || action == "delete" {
-			if len(args) <= start {
+			if len(args) <= start || isControlToken(args[start]) {
 				return command{}, usage("subscription id is required")
 			}
 			c.args = append(c.args, "subscription", args[start])
@@ -256,9 +247,6 @@ func parseSession(args []string) (command, error) {
 		return command{}, usage("unknown session command")
 	}
 	c := command{kind: "session-" + action, catalog: sessionFields}
-	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
-		return command{help: true, helpText: leafHelp("session-"+action, sessionCatalog(action))}, nil
-	}
 	if action == "list" {
 		c.catalog = sessionListFields
 	} else if action == "tree" {
@@ -273,6 +261,9 @@ func parseSession(args []string) (command, error) {
 		c.catalog = detachFields
 	} else if action == "compact" || action == "reset" {
 		c.catalog = recoveryFields
+	}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
 	}
 	if action != "list" {
 		if len(args) < 2 || strings.HasPrefix(args[1], "-") {
@@ -341,10 +332,10 @@ func parseSchedule(args []string) (command, error) {
 	if !contains([]string{"create", "list", "cancel"}, action) {
 		return command{}, usage("unknown session schedule command")
 	}
-	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
-		return command{help: true, helpText: leafHelp("session-schedule-"+action, scheduleFields)}, nil
-	}
 	c := command{kind: "session-schedule-" + action, catalog: scheduleFields}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
+	}
 	start := 1
 	if len(args) <= 1 || strings.HasPrefix(args[1], "-") {
 		return command{}, usage("session id is required")

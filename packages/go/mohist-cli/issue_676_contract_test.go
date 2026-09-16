@@ -137,6 +137,8 @@ func TestIssue676CrossFamilyDiscoveryIsLocal(t *testing.T) {
 		{name: "repository", args: []string{"repo", "create", "--json"}, want: repoFields},
 		{name: "workspace", args: []string{"workspace", "create", "--json"}, want: workspaceFields},
 		{name: "issue without id", args: []string{"issue", "view", "--json"}, want: issueFields},
+		{name: "issue github sync", args: []string{"issue", "github", "sync", "--json"}, want: issueFields},
+		{name: "issue github unlink", args: []string{"issue", "github", "unlink", "--json"}, want: issueFields},
 		{name: "epic without id", args: []string{"epic", "view", "--json"}, want: epicFields},
 		{name: "label", args: []string{"label", "list", "--json"}, want: labelFields},
 		{name: "workflow", args: []string{"workflow", "list", "--json"}, want: workflowListFields},
@@ -146,6 +148,15 @@ func TestIssue676CrossFamilyDiscoveryIsLocal(t *testing.T) {
 		{name: "event dead-letter", args: []string{"event", "dead-letter", "list", "--json"}, want: []string{"id", "type", "handler", "status", "attempts", "deadLetteredAt", "error"}},
 		{name: "event tail", args: []string{"event", "tail", "--json"}, want: []string{"specversion", "id", "source", "type", "subject", "time", "data", "projectid", "issue", "parent", "githubrepo", "githubissue"}},
 		{name: "otel", args: []string{"otel", "query", "--json"}, want: otelQueryFields},
+		{name: "agent view", args: []string{"agent", "view", "--json"}, want: agentFields},
+		{name: "agent launch", args: []string{"agent", "launch", "--json"}, want: agentLaunchFields},
+		{name: "agent spawn", args: []string{"agent", "spawn", "--json"}, want: agentSpawnFields},
+		{name: "agent job", args: []string{"agent", "job", "view", "--json"}, want: agentJobFields},
+		{name: "agent subscription", args: []string{"agent", "subscription", "edit", "--json"}, want: subscriptionFields},
+		{name: "session list", args: []string{"session", "list", "--json"}, want: sessionListFields},
+		{name: "session view", args: []string{"session", "view", "--json"}, want: sessionFields},
+		{name: "session followup", args: []string{"session", "followup", "--json"}, want: followupFields},
+		{name: "session schedule", args: []string{"session", "schedule", "create", "--json"}, want: scheduleFields},
 	}
 
 	for _, tc := range cases {

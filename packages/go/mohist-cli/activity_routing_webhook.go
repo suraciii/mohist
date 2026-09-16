@@ -24,7 +24,8 @@ func parseActivity(args []string) (command, error) {
 		return command{}, usage("unknown activity command")
 	}
 	c := command{kind: "activity-list", catalog: activityFields, args: []string{"project-required", "true", "collection", "true"}}
-	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+	helpText := "USAGE\n    mo activity list [--project <ref>] [--limit <1-200>] [--json [fields]]\n\nList bounded recorded and snapshot activity evidence.\n\nJSON FIELDS\n" + strings.Join(activityFields, "\n")
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, helpText); ok {
 		return discovered, err
 	}
 	for i := 1; i < len(args); i++ {
@@ -42,7 +43,7 @@ func parseActivity(args []string) (command, error) {
 				return command{}, err
 			}
 		case "--help", "-h":
-			return command{help: true, helpText: "USAGE\n    mo activity list [--project <ref>] [--limit <1-200>] [--json [fields]]\n\nList bounded recorded and snapshot activity evidence.\n\nJSON FIELDS\n" + strings.Join(activityFields, "\n")}, nil
+			return command{help: true, helpText: helpText}, nil
 		default:
 			return command{}, usage("unknown option " + args[i])
 		}

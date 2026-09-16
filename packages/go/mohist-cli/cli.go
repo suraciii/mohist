@@ -621,8 +621,11 @@ func leafValueOption(kind, arg string) bool {
 		"--file", "--id", "--name", "--description", "--issue", "--display-name", "--message", "--from-stage", "--interval", "--feedback", "--value",
 		"--limit", "--match", "--event", "--handler", "--service", "--target-url", "--secret", "--auth-type", "--auth-token", "--auth-user",
 		"--auth-password", "--auth-header", "--subscription-id", "--title", "--label", "--agent", "--response-prompt", "--before", "--after",
-		"--description-file", "--priority", "--supported-values", "--parent", "--model", "--model-variant", "--workflow-profile", "--stage-models",
-		"--stage-models-file", "--stage-model-variants", "--stage-model-variants-file":
+		"--description-file", "--priority", "--risk", "--supported-values", "--parent", "--model", "--model-variant", "--workflow-profile", "--stage-models",
+		"--stage-models-file", "--stage-model-variants", "--stage-model-variants-file",
+		"--runtime", "--variant", "--reasoning-effort", "--purpose", "--instructions", "--instructions-file", "--avatar-file",
+		"--skills", "--permissions", "--max-concurrent-runs", "--allowed-subagent", "--parent-session", "--prompt", "--prompt-file",
+		"--workspace", "--epic", "--idempotency-key", "--at", "--text", "--text-file", "--run", "--continuation", "--attach", "--turn-id":
 		return true
 	default:
 		return false

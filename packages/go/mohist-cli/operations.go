@@ -180,7 +180,13 @@ func operationsHelp(area string) string {
 	return "USAGE\n    mo " + area + " <action> [flags]\n\nOperations and integrations.\n\nActions: " + actions[area]
 }
 func opsLeafHelp(kind string, fields []string) string {
-	return "USAGE\n    mo " + strings.Replace(strings.TrimPrefix(kind, "ops-"), "-", " ", 1) + " [flags]\n\nJSON FIELDS\n" + strings.Join(fields, "\n")
+	path := strings.TrimPrefix(kind, "ops-")
+	if strings.HasPrefix(path, "event-dead-letter-") {
+		path = "event dead-letter " + strings.TrimPrefix(path, "event-dead-letter-")
+	} else {
+		path = strings.Replace(path, "-", " ", 1)
+	}
+	return "USAGE\n    mo " + path + " [flags]\n\nJSON FIELDS\n" + strings.Join(fields, "\n")
 }
 
 func parseService(args []string) (command, error) {
@@ -238,8 +244,11 @@ func parseEvent(args []string) (command, error) {
 		if len(args) < 2 {
 			return command{}, usage("dead-letter action is required")
 		}
+		if args[1] != "list" && args[1] != "redeliver" {
+			return command{}, usage("unknown dead-letter command")
+		}
 		c := command{kind: "ops-event-dead-letter-" + args[1], catalog: []string{"id", "type", "handler", "status", "attempts", "deadLetteredAt", "error"}}
-		if discovered, ok, err := discoverLeaf(args[2:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		if discovered, ok, err := discoverLeaf(args[2:], c.kind, c.catalog, opsLeafHelp(c.kind, c.catalog)); ok {
 			return discovered, err
 		}
 		if args[1] == "list" {
@@ -270,7 +279,7 @@ func parseEvent(args []string) (command, error) {
 				c.args = append(c.args, strings.TrimPrefix(args[i], "--"), args[i+1])
 				i++
 			} else if args[i] == "--help" || args[i] == "-h" {
-				return command{help: true, helpText: leafHelp(c.kind, c.catalog)}, nil
+				return command{help: true, helpText: opsLeafHelp(c.kind, c.catalog)}, nil
 			} else {
 				return command{}, usage("unknown option " + args[i])
 			}
@@ -295,7 +304,7 @@ func parseEvent(args []string) (command, error) {
 				return command{}, e
 			}
 		} else if args[i] == "--help" || args[i] == "-h" {
-			return command{help: true, helpText: leafHelp(c.kind, c.catalog)}, nil
+			return command{help: true, helpText: opsLeafHelp(c.kind, c.catalog)}, nil
 		} else {
 			return command{}, usage("unknown option " + args[i])
 		}
