@@ -74,8 +74,7 @@ export function getAgentLaunchErrorFeedback(
       kind: 'execution-config-unresolvable',
       title: 'Execution configuration is required',
       message: 'This task does not have a resolvable execution configuration.',
-      nextAction:
-        'Choose a Runtime and Model here, or configure the Project default execution configuration, then retry.',
+      nextAction: 'Choose a Model for this task here, then retry.',
     }
   }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react'
+import { useCallback, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { XIcon, AlertTriangleIcon, InfoIcon } from 'lucide-react'
 import {
@@ -202,7 +202,7 @@ export function AgentSessionComposerPage({
   useDocumentTitle('New Session — Mohist')
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
-  const { projectId, currentProject } = useProject()
+  const { projectId } = useProject()
   const [searchParams] = useSearchParams()
 
   const {
@@ -239,10 +239,9 @@ export function AgentSessionComposerPage({
 
   const [prompt, setPrompt] = useState('')
   const [promptTouched, setPromptTouched] = useState(false)
-  const [executionRuntime, setExecutionRuntime] = useState<AgentRuntime>(AGENT_RUNTIME_OPENCODE)
+  const [executionRuntime, setExecutionRuntime] = useState<AgentRuntime>(AGENT_RUNTIME_PI)
   const [executionModel, setExecutionModel] = useState<string | null>(null)
   const [executionVariant, setExecutionVariant] = useState<string | null>(null)
-  const [executionConfigAdjusted, setExecutionConfigAdjusted] = useState(false)
   const [allowedCollaboratorIds, setAllowedCollaboratorIds] = useState<string[]>([])
   const [maxConcurrentRunsText, setMaxConcurrentRunsText] = useState('')
   const [pendingPreflight, setPendingPreflight] = useState<PendingPreflight | null>(null)
@@ -255,14 +254,6 @@ export function AgentSessionComposerPage({
     sessionPath: string
   } | null>(null)
   const launchKeyRef = useRef<string | null>(null)
-  const defaultExecutionConfig = currentProject?.defaultExecutionConfig ?? null
-
-  useEffect(() => {
-    if (executionConfigAdjusted || !defaultExecutionConfig) return
-    setExecutionRuntime(defaultExecutionConfig.runtime)
-    setExecutionModel(defaultExecutionConfig.model)
-    setExecutionVariant(defaultExecutionConfig.variant ?? null)
-  }, [defaultExecutionConfig, executionConfigAdjusted])
 
   const selectedAgent = useMemo(
     () => agents?.find((a) => a.id === selectedAgentRef) ?? null,
@@ -283,8 +274,8 @@ export function AgentSessionComposerPage({
   const showPromptError = promptTouched && promptEmpty && attachmentIds.length === 0
 
   const isCreatingAgent = !selectedAgentRef
-  const executionConfigResolvable = !!defaultExecutionConfig || !!executionModel
-  const executionControlsVisible = isCreatingAgent && (!defaultExecutionConfig || executionConfigAdjusted)
+  const executionConfigResolvable = !!executionModel
+  const executionControlsVisible = isCreatingAgent
   const concurrencyValue = maxConcurrentRunsText.trim() ? Number(maxConcurrentRunsText) : null
   const concurrencyValid = concurrencyValue === null || (Number.isInteger(concurrencyValue) && concurrencyValue > 0)
   const launchPending =
@@ -440,11 +431,9 @@ export function AgentSessionComposerPage({
     }
     if (allowedCollaboratorIds.length > 0) taskInput.allowedSubagentAgentIds = allowedCollaboratorIds
     if (maxConcurrentRunsText.trim()) taskInput.maxConcurrentRuns = Number(maxConcurrentRunsText)
-    if (!defaultExecutionConfig || executionConfigAdjusted) {
-      taskInput.runtime = executionRuntime
-      taskInput.model = executionModel
-      taskInput.variant = executionVariant
-    }
+    taskInput.runtime = executionRuntime
+    taskInput.model = executionModel
+    taskInput.variant = executionVariant
     if (!preflightTaskMutation) {
       startTaskMutation.mutate({ ...taskInput, idempotencyKey }, { onSuccess })
     } else {
@@ -459,8 +448,6 @@ export function AgentSessionComposerPage({
     attachmentIds,
     canLaunch,
     contextRefs,
-    defaultExecutionConfig,
-    executionConfigAdjusted,
     executionModel,
     executionRuntime,
     executionVariant,
@@ -763,30 +750,6 @@ export function AgentSessionComposerPage({
                   <p className="text-xs text-destructive">Use a positive whole number or leave this empty.</p>
                 )}
               </div>
-            </div>
-          </div>
-        )}
-
-        {isCreatingAgent && defaultExecutionConfig && !executionConfigAdjusted && (
-          <div data-testid="recommended-execution-config" className="rounded-lg border border-border bg-card p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium text-foreground">Recommended execution configuration</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Project default for tasks in this Project</p>
-                <p className="mt-2 text-xs text-foreground">
-                  {defaultExecutionConfig.runtime === 'opencode' ? 'OpenCode' : 'Pi'} · {defaultExecutionConfig.model}
-                  {defaultExecutionConfig.variant ? ` · ${defaultExecutionConfig.variant}` : ''}
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                data-testid="adjust-execution-config"
-                onClick={() => setExecutionConfigAdjusted(true)}
-              >
-                Adjust
-              </Button>
             </div>
           </div>
         )}

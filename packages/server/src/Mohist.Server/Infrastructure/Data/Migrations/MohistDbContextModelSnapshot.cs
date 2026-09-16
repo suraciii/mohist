@@ -1738,9 +1738,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("LastRepositoryCommandJson")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("DefaultExecutionConfigJson")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("VerificationCommand")
                         .HasMaxLength(4096)
                         .HasColumnType("TEXT");

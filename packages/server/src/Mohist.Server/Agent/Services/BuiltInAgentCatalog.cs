@@ -49,8 +49,20 @@ public static class BuiltInAgentCatalog
     public static bool IsReservedName(string? name) =>
         string.Equals(name?.Trim(), MohistSlackName, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// The built-in Workflow Agent definitions a Project may override. The
+    /// application-owned Slack manager is not part of a Project's Agent
+    /// surface and never appears in Project lists.
+    /// </summary>
+    public static IReadOnlyList<BuiltInAgentDefinition> WorkflowDefinitions { get; } =
+        Definitions.Where(definition => !IsReservedName(definition.Name)).ToArray();
+
     public static BuiltInAgentDefinition? Find(string? name) =>
         Definitions.FirstOrDefault(definition =>
+            string.Equals(definition.Name, name?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    public static BuiltInAgentDefinition? FindWorkflow(string? name) =>
+        WorkflowDefinitions.FirstOrDefault(definition =>
             string.Equals(definition.Name, name?.Trim(), StringComparison.OrdinalIgnoreCase));
 
     public static AgentInfo Resolve(string name, string? projectId = null)
@@ -69,7 +81,8 @@ public static class BuiltInAgentCatalog
             Status: Domain.AgentStatus.Active,
             CreatedAt: string.Empty,
             UpdatedAt: string.Empty,
-            Permissions: []);
+            Permissions: [],
+            Origin: AgentOrigins.BuiltIn);
     }
 
     private static System.Text.Json.JsonElement AgentConfig(BuiltInAgentDefinition definition)

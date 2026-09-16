@@ -56,8 +56,7 @@ public static class SlackAdmissionTestFactory
         }
 
         var jobs = new AgentJobQuerier(factory, time);
-        var defaults = new ProjectDefaultExecutionConfigReader(factory);
-        var readiness = new AgentReadinessService(jobs, defaults);
+        var readiness = new AgentReadinessService(jobs);
         var secrets = new EmptySecretStore();
         var agents = new AgentQuerier(factory);
         var connections = new AgentConnectionStore(factory, agents, secrets, [], time);
@@ -125,7 +124,9 @@ public sealed class SlackAdmissionTestContext(
         "Agent",
         string.Empty,
         "Instructions",
-        configured ? JsonSerializer.SerializeToElement(new { model = "openai/gpt-4o", runtime = "opencode" }) : null,
+        configured
+            ? JsonSerializer.SerializeToElement(new { model = "openai/gpt-4o", runtime = "opencode" })
+            : JsonSerializer.SerializeToElement(new { model = "gpt-4o", runtime = "opencode" }),
         [],
         null,
         AgentStatus.Active,

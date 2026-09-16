@@ -11,14 +11,6 @@ public class ProjectRow
     public string? LastRepositoryCommandJson { get; set; }
 
     /// <summary>
-    /// Serialized Project default execution configuration
-    /// (<c>{ runtime, model, variant? }</c>) or null when no default is
-    /// configured. Nullable and additive — deployments without a default
-    /// keep null and observe no behavior change.
-    /// </summary>
-    public string? DefaultExecutionConfigJson { get; set; }
-
-    /// <summary>
     /// The Project-owned verification script. Nullable only for Projects
     /// created before the verification command migration; such Projects are
     /// rejected before new work starts until configured.

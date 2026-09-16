@@ -165,7 +165,11 @@ public sealed class AgentSubscriptionApiSpecs(DefaultMohistIntegrationFixture fi
             name = "subscription-agent",
             description = "subscription spec agent",
             instructions,
-            agentConfig = configured ? new { model = "openai/gpt-5.6", runtime = "pi" } : null,
+            // The unconfigured case carries an explicitly malformed Model
+            // reference: an unset Model is Runtime behavior, not a gap.
+            agentConfig = configured
+                ? new { model = "openai/gpt-5.6", runtime = "pi" }
+                : (object)new { model = "gpt" },
             skills = Array.Empty<string>(),
             maxConcurrentRuns = 1,
         });

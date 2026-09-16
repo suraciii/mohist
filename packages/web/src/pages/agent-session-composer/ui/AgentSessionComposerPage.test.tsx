@@ -2,9 +2,23 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
-import { makeAgent, renderPage, state } from '../../../../tests/support/agent-session-composer-test-support'
+import {
+  chooseExecutionModel,
+  makeAgent,
+  renderPage,
+  state,
+} from '../../../../tests/support/agent-session-composer-test-support'
 
-useMswServer()
+// Task-first launches are rendered inside execution controls, so the catalog
+// request is issued for every creating-Agent render.
+useMswServer(
+  http.get('*/api/projects/:projectId/opencode/models', () =>
+    HttpResponse.json({
+      success: true,
+      data: { models: ['anthropic/claude-3'], modelVariants: {}, reasoningEfforts: {} },
+    }),
+  ),
+)
 
 describe('AgentSessionComposerPage', () => {
   beforeEach(() => {
@@ -16,11 +30,6 @@ describe('AgentSessionComposerPage', () => {
     state.sessionPreflightCalls.length = 0
     state.enablePreflight = false
     state.enableSessionPreflight = false
-    state.defaultExecutionConfig = {
-      runtime: 'opencode',
-      model: 'openai/gpt-4o',
-      variant: null,
-    }
     state.launchError = null
     state.launchFailuresRemaining = -1
     state.launchResponse = null
@@ -122,6 +131,7 @@ describe('AgentSessionComposerPage', () => {
   it('confirms the server-resolved scope before task-first launch', async () => {
     state.enablePreflight = true
     renderPage()
+    await chooseExecutionModel()
     fireEvent.change(screen.getByTestId('prompt-textarea'), {
       target: { value: 'Review the current change' },
     })
@@ -145,6 +155,7 @@ describe('AgentSessionComposerPage', () => {
       code: 'launch_scope_changed',
     }
     renderPage(['/agent-sessions/new?issue=42'])
+    await chooseExecutionModel()
     fireEvent.change(screen.getByTestId('prompt-textarea'), {
       target: { value: 'Keep this task att:attachment-1' },
     })
@@ -200,6 +211,7 @@ describe('AgentSessionComposerPage', () => {
 
   it('launches a task without an Agent selection through the task-first mutation', async () => {
     renderPage()
+    await chooseExecutionModel()
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, {
       target: { value: 'Review the current change' },
@@ -214,10 +226,10 @@ describe('AgentSessionComposerPage', () => {
       prompt: 'Review the current change',
       context: null,
       attachments: [],
+      runtime: 'pi',
+      model: 'anthropic/claude-3',
+      variant: null,
     })
-    expect(state.taskCalls[0].body).not.toHaveProperty('runtime')
-    expect(state.taskCalls[0].body).not.toHaveProperty('model')
-    expect(state.taskCalls[0].body).not.toHaveProperty('variant')
     expect(state.launchCalls).toHaveLength(0)
     expect(state.taskCalls[0].idempotencyKey).toBeTruthy()
   })
@@ -226,6 +238,7 @@ describe('AgentSessionComposerPage', () => {
     state.launchError = { error: 'response lost' }
     state.launchFailuresRemaining = 1
     renderPage()
+    await chooseExecutionModel()
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Retry this task' } })
     fireEvent.click(screen.getByTestId('launch-button'))
@@ -238,8 +251,7 @@ describe('AgentSessionComposerPage', () => {
     expect(state.taskCalls[1].idempotencyKey).toBe(state.taskCalls[0].idempotencyKey)
   })
 
-  it('requires catalog-backed Runtime and Model when the Project has no default', async () => {
-    state.defaultExecutionConfig = null
+  it('defaults the Runtime to pi and requires a catalog-backed Model', async () => {
     server.use(
       http.get('*/api/projects/:projectId/opencode/models', () =>
         HttpResponse.json({
@@ -254,7 +266,8 @@ describe('AgentSessionComposerPage', () => {
     renderPage()
 
     expect(await screen.findByTestId('execution-config-controls')).toBeInTheDocument()
-    expect(screen.getByTestId('task-runtime')).toHaveValue('opencode')
+    expect(screen.queryByTestId('recommended-execution-config')).not.toBeInTheDocument()
+    expect(screen.getByTestId('task-runtime')).toHaveValue('pi')
     expect(screen.getByTestId('launch-button')).toBeDisabled()
     await waitFor(() => expect(screen.getByRole('button', { name: 'Model' })).not.toBeDisabled())
 
@@ -271,46 +284,9 @@ describe('AgentSessionComposerPage', () => {
     await waitFor(() => expect(state.taskCalls).toHaveLength(1))
     expect(state.taskCalls[0].body).toMatchObject({
       prompt: 'Use the catalog model',
-      runtime: 'opencode',
+      runtime: 'pi',
       model: 'anthropic/claude-3',
       variant: 'high',
-    })
-  })
-
-  it('shows the Project default as a recommendation and submits adjusted catalog values as hints', async () => {
-    server.use(
-      http.get('*/api/projects/:projectId/opencode/models', () =>
-        HttpResponse.json({
-          success: true,
-          data: {
-            models: ['anthropic/claude-3'],
-            modelVariants: { 'anthropic/claude-3': ['high', 'low'] },
-          },
-        }),
-      ),
-    )
-    renderPage()
-    expect(await screen.findByTestId('recommended-execution-config')).toHaveTextContent(
-      /recommended execution configuration/i,
-    )
-    expect(screen.getByTestId('recommended-execution-config')).toHaveTextContent(/Project default for tasks/i)
-    expect(screen.queryByTestId('execution-config-controls')).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByTestId('adjust-execution-config'))
-    expect(await screen.findByTestId('execution-config-controls')).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Model' })).not.toBeDisabled())
-    fireEvent.click(screen.getByRole('button', { name: 'Model' }))
-    fireEvent.click(await screen.findByRole('option', { name: /anthropic\/claude-3/i }))
-    fireEvent.change(screen.getByTestId('prompt-textarea'), {
-      target: { value: 'Use an adjusted model' },
-    })
-    fireEvent.click(screen.getByTestId('launch-button'))
-
-    await waitFor(() => expect(state.taskCalls).toHaveLength(1))
-    expect(state.taskCalls[0].body).toMatchObject({
-      prompt: 'Use an adjusted model',
-      runtime: 'opencode',
-      model: 'anthropic/claude-3',
     })
   })
 
@@ -320,14 +296,14 @@ describe('AgentSessionComposerPage', () => {
       code: 'execution_config_unresolvable',
     }
     renderPage(['/agent-sessions/new?issue=42'])
+    await chooseExecutionModel()
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Keep this task' } })
     fireEvent.click(screen.getByTestId('launch-button'))
 
     const feedback = await screen.findByTestId('error-execution-config')
     expect(feedback).toHaveAttribute('data-feedback-kind', 'execution-config-unresolvable')
-    expect(feedback).toHaveTextContent(/Runtime and Model/i)
-    expect(feedback).toHaveTextContent(/Project default/i)
+    expect(feedback).toHaveTextContent(/Model for this task/i)
     expect(screen.getByTestId('prompt-textarea')).toHaveValue('Keep this task')
     expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #42')
   })
@@ -338,6 +314,7 @@ describe('AgentSessionComposerPage', () => {
       code: 'launch_idempotency_conflict',
     }
     renderPage(['/agent-sessions/new?issue=42'])
+    await chooseExecutionModel()
     const textarea = await screen.findByTestId('prompt-textarea')
     fireEvent.change(textarea, { target: { value: 'Keep this task' } })
     fireEvent.click(screen.getByTestId('launch-button'))

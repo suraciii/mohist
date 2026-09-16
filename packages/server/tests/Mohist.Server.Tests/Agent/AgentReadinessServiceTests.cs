@@ -34,13 +34,25 @@ public sealed class AgentReadinessServiceTests
     }
 
     [Fact]
-    public void MissingAgentConfiguration_IsNotConfigured()
+    public void UnsetModelWithoutExecutionHistory_IsUnknownAndAdmitted()
     {
+        // An Agent with an unset Model is not a configuration gap: the
+        // Runtime chooses the model at dispatch.
         var result = AgentReadinessService.Evaluate(Agent() with { AgentConfig = null }, null);
 
+        Assert.Equal(AgentExecutabilityStates.Unknown, result.State);
+        Assert.Empty(result.Gaps);
+        Assert.True(AgentConnectionDispatchDecision.For(result.State).Accepted);
+    }
+
+    [Fact]
+    public void MissingInstructions_IsNotConfigured()
+    {
+        var result = AgentReadinessService.Evaluate(Agent(instructions: ""), null);
+
         Assert.Equal(AgentExecutabilityStates.NotConfigured, result.State);
-        Assert.Contains(result.Gaps, gap => gap.Code == "model-missing");
         Assert.Equal("/agents/agent-1", Assert.Single(result.Gaps).FixEntryPoint.Path);
+        Assert.Equal("instructions-missing", Assert.Single(result.Gaps).Code);
         Assert.True(AgentExecutabilityStates.IsBlocked(result.State));
     }
 
@@ -70,26 +82,17 @@ public sealed class AgentReadinessServiceTests
     }
 
     [Fact]
-    public void VariantWithoutModel_IsNotConfigured()
+    public void VariantOrEffortWithoutModel_IsNotAGap()
     {
-        var result = AgentReadinessService.Evaluate(
-            Agent(config: "{\"variant\":\"fast\"}"),
-            null);
+        // Both apply to the Runtime-chosen model, so neither is a structural
+        // gap on its own.
+        var variant = AgentReadinessService.Evaluate(Agent(config: "{\"variant\":\"fast\"}"), null);
+        var effort = AgentReadinessService.Evaluate(Agent(config: "{\"reasoningEffort\":\"high\"}"), null);
 
-        Assert.Equal(AgentExecutabilityStates.NotConfigured, result.State);
-        Assert.Contains(result.Gaps, gap => gap.Code == "variant-without-model");
-    }
-
-    [Fact]
-    public void ReasoningEffortWithoutModel_IsNotConfigured()
-    {
-        var result = AgentReadinessService.Evaluate(
-            Agent(config: "{\"reasoningEffort\":\"high\"}"),
-            null);
-
-        Assert.Equal(AgentExecutabilityStates.NotConfigured, result.State);
-        Assert.Contains(result.Gaps, gap => gap.Code == "model-missing");
-        Assert.Contains(result.Gaps, gap => gap.Code == "reasoning-effort-without-model");
+        Assert.Equal(AgentExecutabilityStates.Unknown, variant.State);
+        Assert.Empty(variant.Gaps);
+        Assert.Equal(AgentExecutabilityStates.Unknown, effort.State);
+        Assert.Empty(effort.Gaps);
     }
 
     [Fact]
@@ -178,129 +181,13 @@ public sealed class AgentReadinessServiceTests
         Assert.Equal(state == AgentExecutabilityStates.NotConfigured ? "agent_not_configured" : "agent_not_executable", decision.Kind);
     }
 
-    // -------------------------------------------------------------------
-    // Project default execution configuration matrix (issue-560 T-001)
-    // -------------------------------------------------------------------
-
-    private static readonly ExecutionConfigHint Default = new("pi", "b/two", null);
-
     [Fact]
-    public void ProjectDefault_ResolvesMissingModel_ToUnknown()
+    public void CompletedExecutionWithUnsetModel_IsExecutable()
     {
-        var result = AgentReadinessService.Evaluate(
-            Agent() with { AgentConfig = null },
-            null,
-            Default);
-
-        Assert.Equal(AgentExecutabilityStates.Unknown, result.State);
-        Assert.DoesNotContain(result.Gaps, gap => gap.Code == "model-missing");
-    }
-
-    [Fact]
-    public void ProjectDefault_ResolvesVariantWithoutModel()
-    {
-        var result = AgentReadinessService.Evaluate(
-            Agent(config: "{\"variant\":\"fast\"}"),
-            null,
-            Default);
-
-        Assert.DoesNotContain(result.Gaps, gap => gap.Code == "variant-without-model");
-        Assert.DoesNotContain(result.Gaps, gap => gap.Code == "model-missing");
-    }
-
-    [Fact]
-    public void WithoutDefault_TheGapRemainsNeedsSetup()
-    {
-        var result = AgentReadinessService.Evaluate(Agent() with { AgentConfig = null }, null, null);
-
-        Assert.Equal(AgentExecutabilityStates.NotConfigured, result.State);
-        var gap = Assert.Single(result.Gaps, g => g.Code == "model-missing");
-        Assert.Equal("Set a model in Agent settings.", gap.NextAction);
-        Assert.Equal("/agents/agent-1", gap.FixEntryPoint.Path);
-    }
-
-    [Fact]
-    public void DefinitionModel_WinsOverProjectDefault()
-    {
-        var result = AgentReadinessService.Evaluate(
-            Agent(config: "{\"model\":\"a/one\"}"),
-            History(AgentJobStatus.Completed, model: "a/one", config: "{\"model\":\"a/one\"}"),
-            Default);
-
-        // The completed execution matches the definition-resolved model, so
-        // the Project default (b/two) neither changes the resolution nor the
-        // conclusion.
-        Assert.Equal(AgentExecutabilityStates.Executable, result.State);
-    }
-
-    [Fact]
-    public void MalformedDefinitionModel_IsNotMaskedByDefault()
-    {
-        var result = AgentReadinessService.Evaluate(
-            Agent(config: "{\"model\":\"gpt\"}"),
-            null,
-            Default);
-
-        Assert.Equal(AgentExecutabilityStates.NotConfigured, result.State);
-        Assert.Contains(result.Gaps, gap => gap.Code == "model-reference-malformed");
-        Assert.DoesNotContain(result.Gaps, gap => gap.Code == "model-missing");
-    }
-
-    [Fact]
-    public void InvalidDefinitionRuntime_IsNotMaskedByDefault()
-    {
-        var result = AgentReadinessService.Evaluate(
-            Agent(config: "{\"model\":\"a/one\",\"runtime\":\"fast\"}"),
-            null,
-            Default);
-
-        Assert.Equal(AgentExecutabilityStates.NotConfigured, result.State);
-        Assert.Contains(result.Gaps, gap => gap.Code == "runtime-invalid");
-    }
-
-    [Fact]
-    public void DefaultResolvesModel_CompletedExecutionIsReady()
-    {
+        // A completed execution with a Runtime-chosen model (null on both
+        // sides) confirms the current definition.
         var agent = Agent() with { AgentConfig = null };
-        var history = History(AgentJobStatus.Completed, model: "b/two", config: null);
-
-        var result = AgentReadinessService.Evaluate(agent, history, Default);
-
-        Assert.Equal(AgentExecutabilityStates.Executable, result.State);
-    }
-
-    [Fact]
-    public void DefaultChange_DoesNotFlipACompletedExecution()
-    {
-        // The Agent definition carries no model; the execution ran with the
-        // default-resolved model b/two. Changing the Project default must not
-        // flip the completed execution's conclusion: both sides of the
-        // history match resolve under the same (current) default.
-        var agent = Agent() with { AgentConfig = null };
-        var history = History(AgentJobStatus.Completed, model: "b/two", config: null);
-        var changedDefault = new ExecutionConfigHint("pi", "c/three", null);
-
-        var result = AgentReadinessService.Evaluate(agent, history, changedDefault);
-
-        Assert.Equal(AgentExecutabilityStates.Executable, result.State);
-    }
-
-    [Fact]
-    public void DefinitionEdit_StillFlipsACompletedExecutionToUnknown()
-    {
-        var agent = Agent(config: "{\"model\":\"provider/new-model\"}");
-        var history = History(AgentJobStatus.Completed, model: "provider/old-model", config: "{\"model\":\"provider/old-model\"}");
-
-        var result = AgentReadinessService.Evaluate(agent, history, Default);
-
-        Assert.Equal(AgentExecutabilityStates.Unknown, result.State);
-    }
-
-    [Fact]
-    public void LegacyHistoryWithoutConfig_UsesPersistedDispatchForDefinitionFields()
-    {
-        var agent = Agent(config: "{\"model\":\"provider/model\"}");
-        var history = History(AgentJobStatus.Completed, model: "provider/model", config: null);
+        var history = History(AgentJobStatus.Completed, model: null, config: null);
 
         var result = AgentReadinessService.Evaluate(agent, history);
 
@@ -308,35 +195,35 @@ public sealed class AgentReadinessServiceTests
     }
 
     [Fact]
-    public void DefaultRuntime_FillsADefinitionWithoutRuntime()
+    public void CompletedExecutionWithChoosenModel_DoesNotMatchAnUnsetDefinition()
     {
-        var result = AgentReadinessService.Evaluate(
-            Agent(config: "{\"model\":\"a/one\"}"),
-            null,
-            new ExecutionConfigHint("pi", "b/two", null));
+        // The Runtime chose a model at dispatch; the definition never
+        // carried one, so the completed execution still matches the
+        // definition's resolved (null) model.
+        var agent = Agent() with { AgentConfig = null };
+        var history = History(AgentJobStatus.Completed, model: "runtime/choice", config: null);
 
-        Assert.Empty(result.Gaps);
+        var result = AgentReadinessService.Evaluate(agent, history);
+
+        Assert.Equal(AgentExecutabilityStates.Executable, result.State);
     }
 
     [Fact]
-    public void DefaultVariant_FillsADefinitionModelGap()
+    public void ExplicitRuntimeDefault_FillsADefinitionWithoutRuntime()
     {
-        // Per-field precedence: a definition model stands while the default
-        // supplies the missing variant.
-        var result = AgentReadinessService.Evaluate(
-            Agent(config: "{\"model\":\"a/one\"}"),
-            null,
-            new ExecutionConfigHint("pi", "b/two", "high"));
+        var result = AgentReadinessService.Evaluate(Agent(config: "{\"model\":\"a/one\"}"), null);
 
         Assert.Empty(result.Gaps);
     }
 
-    private static AgentInfo Agent(string config = "{\"model\":\"provider/model\"}") => new(
+    private static AgentInfo Agent(
+        string config = "{\"model\":\"provider/model\"}",
+        string instructions = "Do the work") => new(
         "agent-1",
         "project-1",
         "Agent",
         "",
-        "Do the work",
+        instructions,
         JsonDocument.Parse(config).RootElement,
         [],
         null,
@@ -347,7 +234,7 @@ public sealed class AgentReadinessServiceTests
     private static AgentExecutionHistory History(
         AgentJobStatus status,
         string? category = null,
-        string model = "provider/model",
+        string? model = "provider/model",
         string? config = "{\"model\":\"provider/model\"}") => new(
         status,
         category,

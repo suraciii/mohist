@@ -3,7 +3,6 @@ using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Agent.Services;
@@ -12,16 +11,13 @@ public class AgentQuerier : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly AgentReadinessService? _readiness;
-    private readonly ProjectDefaultExecutionConfigReader? _defaults;
 
     public AgentQuerier(
         IDbContextFactory<MohistDbContext> dbFactory,
-        AgentReadinessService? readiness = null,
-        ProjectDefaultExecutionConfigReader? defaults = null)
+        AgentReadinessService? readiness = null)
     {
         _dbFactory = dbFactory;
         _readiness = readiness;
-        _defaults = defaults;
     }
 
     public async Task<AgentInfo?> GetByIdAsync(string projectId, string id, CancellationToken ct = default)
@@ -43,13 +39,16 @@ public class AgentQuerier : IScopedService
     }
 
     /// <summary>
-    /// Resolves an Agent by name within a project, case-insensitively.
-    /// Mention resolution (<c>@SuperVisor</c> → Agent named <c>supervisor</c>)
-    /// and the Agent-name uniqueness check both go through this path, so both treat
-    /// name equality as ordinal-ignorecase. Matches the client-side filter
-    /// shape already used by <see cref="GetByIdAsync"/>: the rows are pulled
-    /// by project, deserialized, and filtered in memory, so the comparison
-    /// is the same on SQLite (default case-sensitive <c>=</c>) and Postgres.
+    /// Resolves a stored Project Agent by name within a project,
+    /// case-insensitively. Mention resolution (<c>@SuperVisor</c> → Agent
+    /// named <c>supervisor</c>) and the Agent-name uniqueness check both go
+    /// through this path, so both treat name equality as ordinal-ignorecase.
+    /// Matches the client-side filter shape already used by
+    /// <see cref="GetByIdAsync"/>: the rows are pulled by project,
+    /// deserialized, and filtered in memory, so the comparison is the same
+    /// on SQLite (default case-sensitive <c>=</c>) and Postgres. Built-in
+    /// definitions are not stored rows and resolve through
+    /// <see cref="GetEffectiveByNameAsync"/>.
     /// </summary>
     public async Task<AgentInfo?> GetByNameAsync(string projectId, string name)
     {
@@ -70,6 +69,26 @@ public class AgentQuerier : IScopedService
             : await HydrateAsync(projectId, agent);
     }
 
+    /// <summary>
+    /// Resolves the Project's effective Agent for a name: the stored Project
+    /// Agent when one exists (it shadows a built-in with the same name, also
+    /// while archived), otherwise the unshadowed built-in Workflow Agent
+    /// definition.
+    /// </summary>
+    public async Task<AgentInfo?> GetEffectiveByNameAsync(
+        string projectId,
+        string name,
+        CancellationToken ct = default)
+    {
+        var stored = await GetByNameAsync(projectId, name);
+        if (stored is not null) return stored;
+
+        var definition = BuiltInAgentCatalog.FindWorkflow(name);
+        return definition is null
+            ? null
+            : await HydrateAsync(projectId, BuiltInAgentCatalog.Resolve(definition.Name, projectId), ct);
+    }
+
     public async Task<IReadOnlyList<AgentInfo>> ListAsync(
         string projectId,
         string? status = null,
@@ -77,11 +96,28 @@ public class AgentQuerier : IScopedService
         CancellationToken ct = default)
     {
         var infos = await ListDefinitionsAsync(projectId, status, all, ct);
-        var hydrated = new List<AgentInfo>(infos.Count);
+        var hydrated = new List<AgentInfo>(infos.Count + BuiltInAgentCatalog.WorkflowDefinitions.Count);
         foreach (var info in infos)
         {
             hydrated.Add(await HydrateAsync(projectId, info, ct));
         }
+
+        if (status is null or AgentStatus.Active)
+        {
+            // An archived same-name Project Agent remains the shadowing
+            // entry, so the shadow set comes from every stored name rather
+            // than from the filtered list.
+            var shadowed = await ListStoredNamesAsync(projectId, ct);
+            foreach (var definition in BuiltInAgentCatalog.WorkflowDefinitions)
+            {
+                if (shadowed.Contains(definition.Name)) continue;
+                hydrated.Add(await HydrateAsync(
+                    projectId,
+                    BuiltInAgentCatalog.Resolve(definition.Name, projectId),
+                    ct));
+            }
+        }
+
         return hydrated;
     }
 
@@ -115,12 +151,21 @@ public class AgentQuerier : IScopedService
         return infos;
     }
 
+    private async Task<HashSet<string>> ListStoredNamesAsync(string projectId, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var names = await db.Agents.AsNoTracking()
+            .Where(agent => agent.ProjectId == projectId)
+            .Select(agent => agent.Name)
+            .ToListAsync(ct);
+        return new HashSet<string>(names.Where(name => name is not null)!, StringComparer.OrdinalIgnoreCase);
+    }
+
     private async Task<AgentInfo> HydrateAsync(string projectId, AgentInfo agent, CancellationToken ct = default)
     {
         var effective = ExecutionConfigResolver.Resolve(
             callerHint: null,
-            definition: ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig),
-            projectDefault: _defaults is null ? null : await _defaults.GetAsync(projectId, ct));
+            definition: ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig));
         var hydrated = agent with
         {
             EffectiveExecutionConfig = new AgentEffectiveExecutionConfig(
@@ -148,5 +193,7 @@ public class AgentQuerier : IScopedService
         AllowedSubagentAgentIds: agent.AllowedSubagentAgentIds,
         Avatar: agent.Avatar,
         Purpose: agent.Purpose,
-        Permissions: agent.Permissions);
+        Permissions: agent.Permissions,
+        Origin: AgentOrigins.Project,
+        OverridesBuiltIn: BuiltInAgentCatalog.FindWorkflow(agent.Name) is not null);
 }
