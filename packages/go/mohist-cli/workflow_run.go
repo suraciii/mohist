@@ -30,15 +30,22 @@ func parseWorkflow(args []string) (command, error) {
 		return command{}, usage("unknown workflow command")
 	}
 	if action == "validate" {
-		return parseWorkflowInput(command{kind: "workflow-validate"}, args[1:], false, false)
+		c := command{kind: "workflow-validate"}
+		if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+			return discovered, err
+		}
+		return parseWorkflowInput(c, args[1:], false, false)
 	}
 	c := command{kind: "workflow-" + action, catalog: workflowFields}
 	if action == "list" {
 		c.catalog = workflowListFields
 	}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
+	}
 	start := 1
 	if action == "view" || action == "delete" || action == "edit" {
-		if len(args) <= 1 {
+		if len(args) <= 1 || isControlToken(args[1]) {
 			return command{}, usage("profile id is required")
 		}
 		c.args = append(c.args, "profile", args[1])
@@ -105,6 +112,9 @@ func parseRun(args []string) (command, error) {
 	if action == "watch" {
 		c.catalog = nil
 	}
+	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+		return discovered, err
+	}
 	start := 1
 	if action != "list" {
 		if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
@@ -159,8 +169,11 @@ func parseRunNested(area string, args []string) (command, error) {
 			return command{}, usage("unknown run variable command")
 		}
 		c.catalog = variableFields
+		if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+			return discovered, err
+		}
 		if action != "list" {
-			if len(args) < 2 {
+			if len(args) < 2 || isControlToken(args[1]) {
 				return command{}, usage("variable key is required")
 			}
 			c.args = append(c.args, "key", args[1])
@@ -174,12 +187,15 @@ func parseRunNested(area string, args []string) (command, error) {
 		if area == "artifact" {
 			c.catalog = artifactFields
 		}
+		if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, leafHelp(c.kind, c.catalog)); ok {
+			return discovered, err
+		}
 		if len(args) > 1 && !strings.HasPrefix(args[1], "-") {
 			c.args = append(c.args, "run", args[1])
 			start = 2
 		}
 		if action == "get" {
-			if len(args) <= start {
+			if len(args) <= start || isControlToken(args[start]) {
 				return command{}, usage("artifact id is required")
 			}
 			c.args = append(c.args, "artifact", args[start])

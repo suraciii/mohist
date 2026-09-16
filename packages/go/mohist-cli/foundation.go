@@ -231,12 +231,15 @@ func parseAuth(args []string) (command, error) {
 		if len(args) == 3 && (args[2] == "--help" || args[2] == "-h") {
 			return command{help: true, helpText: "USAGE\n    mo auth token list\n\nList token names and recognizable prefixes; full values are never shown."}, nil
 		}
+		if len(args) != 2 {
+			return command{}, usage("auth token list does not accept arguments or options")
+		}
 		return command{kind: "auth-token-list", path: "/api/auth/tokens"}, nil
 	case "revoke":
 		if len(args) == 3 && (args[2] == "--help" || args[2] == "-h") {
 			return command{help: true, helpText: "USAGE\n    mo auth token revoke <name>"}, nil
 		}
-		if len(args) != 3 {
+		if len(args) != 3 || isControlToken(args[2]) {
 			return command{}, &usageError{message: "error: token name is required\nusage: mo auth token revoke <name>"}
 		}
 		return command{kind: "auth-token-revoke", args: args[2:]}, nil

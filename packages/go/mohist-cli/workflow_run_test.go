@@ -28,6 +28,81 @@ func TestWorkflowValidateIsLocalAndReadsFile(t *testing.T) {
 	}
 }
 
+func TestWorkflowAndArtifactDiscoveryPrecedeRequiredInputs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{name: "workflow list", args: []string{"workflow", "list", "--json"}, want: workflowListFields},
+		{name: "workflow view", args: []string{"workflow", "view", "--json"}, want: workflowFields},
+		{name: "workflow create", args: []string{"workflow", "create", "--json"}, want: workflowFields},
+		{name: "workflow edit", args: []string{"workflow", "edit", "--json"}, want: workflowFields},
+		{name: "workflow delete", args: []string{"workflow", "delete", "--json"}, want: workflowFields},
+		{name: "artifact list", args: []string{"run", "artifact", "list", "--json"}, want: artifactFields},
+		{name: "artifact view", args: []string{"run", "artifact", "view", "--json"}, want: artifactFields},
+		{name: "artifact get", args: []string{"run", "artifact", "get", "--json"}, want: artifactFields},
+		{name: "feedback list", args: []string{"run", "feedback", "list", "--json"}, want: feedbackFields},
+		{name: "feedback view", args: []string{"run", "feedback", "view", "--json"}, want: feedbackFields},
+		{name: "feedback get", args: []string{"run", "feedback", "get", "--json"}, want: feedbackFields},
+		{name: "variable list", args: []string{"run", "variable", "list", "--json"}, want: variableFields},
+		{name: "variable get", args: []string{"run", "variable", "get", "--json"}, want: variableFields},
+		{name: "variable set", args: []string{"run", "variable", "set", "--json"}, want: variableFields},
+		{name: "variable unset", args: []string{"run", "variable", "unset", "--json"}, want: variableFields},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return nil, errors.New("must not call")
+			}), map[string]string{})
+			code := Run(context.Background(), test.args, deps)
+			want := strings.Join(test.want, "\n") + "\n"
+			if code != ExitOK || calls != 0 || out.String() != want || errOut.Len() != 0 {
+				t.Fatalf("code=%d calls=%d stdout=%q stderr=%q", code, calls, out.String(), errOut.String())
+			}
+		})
+	}
+}
+
+func TestWorkflowDeleteHelpPrecedesProfileAndProjectResolution(t *testing.T) {
+	for _, token := range []string{"--help", "-h"} {
+		t.Run(token, func(t *testing.T) {
+			calls := 0
+			deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return nil, errors.New("must not call")
+			}), map[string]string{})
+			if code := Run(context.Background(), []string{"workflow", "delete", token}, deps); code != ExitOK || calls != 0 || !strings.Contains(out.String(), "USAGE") || errOut.Len() != 0 {
+				t.Fatalf("code=%d calls=%d stdout=%q stderr=%q", code, calls, out.String(), errOut.String())
+			}
+		})
+	}
+}
+
+func TestWorkflowNoCatalogJSONIsLocalUsageError(t *testing.T) {
+	for _, args := range [][]string{
+		{"workflow", "validate", "--json", "--file", "workflow.yaml"},
+		{"run", "watch", "--json"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			calls := 0
+			deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return nil, errors.New("must not call")
+			}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+			deps.ReadFile = func(string) (string, error) {
+				t.Fatal("file must not be read")
+				return "", nil
+			}
+			if code := Run(context.Background(), args, deps); code != ExitUsage || calls != 0 || out.Len() != 0 || errOut.Len() == 0 {
+				t.Fatalf("code=%d calls=%d stdout=%q stderr=%q", code, calls, out.String(), errOut.String())
+			}
+		})
+	}
+}
+
 func TestRunControlUsesDistinctEndpointsAndDoesNotRetryMutation(t *testing.T) {
 	requests := 0
 	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
