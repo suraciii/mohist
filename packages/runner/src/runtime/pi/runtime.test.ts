@@ -1,303 +1,470 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PiRuntime } from './runtime.js'
+import { CredentialMasker } from '../task-log.js'
+import { CANCEL_CONFIRMATION_TIMEOUT_MS } from './runtime-clock.js'
+import { ControlledPiSession, controlledPiSdk, type PiTestMessage } from '../../../tests/support/pi-turn-session.js'
+import { deferred } from '../../../tests/support/deferred.js'
 
-type FixtureMessage = {
-  role: string
-  content: unknown
-  stopReason?: string
-  errorMessage?: string
-}
+const terminal = (text = 'the final answer'): PiTestMessage => ({
+  role: 'assistant',
+  content: [{ type: 'text', text }],
+  stopReason: 'stop',
+})
 
-function sessionFixture(overrides: Partial<Record<string, unknown>> = {}) {
-  return {
-    sessionFile: '/workspace/session.json',
-    sessionId: 'session-1',
-    messages: [{ role: 'user', content: 'do the work' }] as FixtureMessage[],
-    isStreaming: false,
-    subscribe: () => () => undefined,
-    prompt: vi.fn(async () => undefined),
-    steer: vi.fn(async () => undefined),
-    abort: vi.fn(async () => undefined),
-    compact: vi.fn(async () => undefined),
-    setModel: vi.fn(async () => undefined),
-    setThinkingLevel: vi.fn(),
-    getModel: () => undefined,
-    getThinkingLevel: () => 'off',
-    dispose: () => undefined,
-    ...overrides,
-  }
-}
-
-function runtimeFor(session: ReturnType<typeof sessionFixture>, openSession?: () => Promise<never>) {
-  return new PiRuntime({
-    agentDir: '/agent',
-    sdkFactory: {
-      create: async () => ({
-        catalog: async () => [{ provider: 'provider', id: 'model' }],
-        createSession: async () => session,
-        openSession: openSession ?? (async () => session),
-        model: () => ({ provider: 'provider', id: 'model' }),
-        close: async () => undefined,
-      }),
+function run(
+  runtime: PiRuntime,
+  session: ControlledPiSession,
+  controller = new AbortController(),
+  durationMs?: number,
+) {
+  return runtime.runTurn(
+    {
+      target: { runtime: 'pi', runtimeSessionId: session.sessionFile, workDir: '/workspace' },
+      prompt: 'do the work',
+      durationMs,
     },
-  })
+    controller.signal,
+  )
 }
 
-describe('PiRuntime runTurn deadline', () => {
-  it('settles deadline-exceeded even when prompt and abort never resolve', async () => {
-    vi.useFakeTimers()
-    try {
-      const never = () => new Promise<void>(() => {})
-      const prompt = vi.fn(never)
-      const abort = vi.fn(never)
-      const session = {
-        ...sessionFixture({
-          messages: [{ role: 'user', content: 'do the work' }],
-          isStreaming: false,
-          prompt,
-          abort,
-        }),
-      }
-      const runtime = runtimeFor(session)
-      await runtime.start()
+async function createRuntime(session: ControlledPiSession, masker?: CredentialMasker) {
+  const runtime = new PiRuntime({ agentDir: '/agent', sdkFactory: controlledPiSdk(session), masker })
+  expect((await runtime.start()).ok).toBe(true)
+  return runtime
+}
 
-      const controller = new AbortController()
-      const turn = runtime.runTurn(
-        {
-          target: { runtime: 'pi', runtimeSessionId: '/workspace/session.json', workDir: '/workspace' },
-          prompt: 'do the work',
-          durationMs: 25,
-        },
-        controller.signal,
-      )
-      const pending = turn
-        .then(
-          () => false,
-          () => false,
-        )
-        .catch(() => false)
-      await vi.advanceTimersByTimeAsync(25)
-      const settled = await Promise.race([pending, Promise.resolve(true)])
-      // Give the microtask queue a chance to settle the turn after the timer.
-      await vi.advanceTimersByTimeAsync(0)
-      const result = await turn
+function expectCleanedUp(session: ControlledPiSession) {
+  expect(session.listeners.size).toBe(0)
+  expect(vi.getTimerCount()).toBe(0)
+}
 
-      expect(result.ok).toBe(false)
-      if (result.ok) return
-      expect(result.error.kind).toBe('deadline-exceeded')
-      // abort was attempted (bounded) even though it never resolves
-      expect(abort).toHaveBeenCalled()
-      void settled
-    } finally {
-      vi.useRealTimers()
-    }
+describe('PiRuntime bounded turn completion', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.restoreAllMocks())
+
+  it('keeps normal prompt completion and removes its deadline, observer, and abort listener', async () => {
+    const session = new ControlledPiSession()
+    const runtime = await createRuntime(session)
+    const controller = new AbortController()
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener')
+    const turn = run(runtime, session, controller, 60_000)
+    await session.promptEntered.promise
+
+    session.messages.push(terminal())
+    session.isStreaming = false
+    session.promptCompletion.resolve()
+
+    await expect(turn).resolves.toMatchObject({
+      ok: true,
+      value: { facts: { finalAssistantText: 'the final answer', runtimeSessionId: session.sessionFile } },
+    })
+    expect(session.prompt).toHaveBeenCalledExactlyOnceWith('do the work', { expandPromptTemplates: false })
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function))
+    expectCleanedUp(session)
+    controller.abort()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(session.abort).not.toHaveBeenCalled()
   })
 
-  it('settles a terminal session as success when prompt never resolves', async () => {
-    vi.useFakeTimers()
-    try {
-      const session = {
-        ...sessionFixture({
-          messages: [{ role: 'user', content: 'do the work' }],
-          isStreaming: true,
-          prompt: vi.fn(() => new Promise<void>(() => {})),
-        }),
-      }
-      const runtime = runtimeFor(session)
-      await runtime.start()
-
+  it.each(['agent_settled', 'message_end', 'agent_end'])(
+    'settles once from idle terminal facts observed at %s while prompt remains pending',
+    async (eventType) => {
+      const session = new ControlledPiSession()
+      const runtime = await createRuntime(session)
       const controller = new AbortController()
+      const settled = vi.fn()
+      const events = vi.fn()
       const turn = runtime.runTurn(
         {
-          target: { runtime: 'pi', runtimeSessionId: '/workspace/session.json', workDir: '/workspace' },
+          target: { runtime: 'pi', runtimeSessionId: session.sessionFile, workDir: '/workspace' },
           prompt: 'do the work',
+          durationMs: 60_000,
         },
         controller.signal,
+        { onEvent: events },
       )
-      // Let runTurn reach the point where the initial message count is
-      // captured and the prompt is in flight, then simulate the model
-      // finishing with a terminal message while the prompt stays stuck and
-      // isStreaming stays true (the hang shape seen in production).
-      for (let i = 0; i < 6; i++) await Promise.resolve()
-      expect(session.prompt).toHaveBeenCalled()
-      session.messages = [
-        { role: 'user', content: 'do the work' },
-        { role: 'assistant', content: [{ type: 'text', text: 'the final answer' }], stopReason: 'stop' },
-      ] as never
-      await vi.advanceTimersByTimeAsync(30_000)
+      void turn.then(settled)
+      await session.promptEntered.promise
+      session.messages.push(terminal())
+      session.isStreaming = false
+      session.emit({ type: eventType, message: session.messages.at(-1) })
+      await vi.advanceTimersByTimeAsync(5_000)
 
-      const result = await turn
-      expect(result.ok).toBe(true)
-      if (!result.ok) return
-      expect(result.value.facts.finalAssistantText).toBe('the final answer')
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('settles a terminal error session as failure when prompt never resolves', async () => {
-    vi.useFakeTimers()
-    try {
-      const session = {
-        ...sessionFixture({
-          messages: [{ role: 'user', content: 'do the work' }],
-          isStreaming: true,
-          prompt: vi.fn(() => new Promise<void>(() => {})),
-        }),
-      }
-      const runtime = runtimeFor(session)
-      await runtime.start()
-
-      const controller = new AbortController()
-      const turn = runtime.runTurn(
-        {
-          target: { runtime: 'pi', runtimeSessionId: '/workspace/session.json', workDir: '/workspace' },
-          prompt: 'do the work',
-        },
-        controller.signal,
-      )
-      for (let i = 0; i < 6; i++) await Promise.resolve()
-      expect(session.prompt).toHaveBeenCalled()
-      session.messages = [
-        { role: 'user', content: 'do the work' },
-        { role: 'assistant', content: [], stopReason: 'error', errorMessage: 'provider exploded' },
-      ] as never
-      await vi.advanceTimersByTimeAsync(30_000)
-
-      const result = await turn
-      expect(result.ok).toBe(false)
-      if (result.ok) return
-      expect(result.error.kind).toBe('turn-failed')
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('settles from a terminal session file when memory diverges from it', async () => {
-    vi.useFakeTimers()
-    try {
-      const dir = mkdtempSync(join(tmpdir(), 'pi-file-settle-'))
-      const sessionFile = join(dir, 'session.jsonl')
-      writeFileSync(
-        sessionFile,
-        [
-          JSON.stringify({ type: 'message', message: { role: 'user', content: 'do the work' } }),
-          JSON.stringify({ type: 'message', message: { role: 'toolResult', content: [] } }),
-        ].join('\n') + '\n',
-      )
-      const appendTerminal = () =>
-        writeFileSync(
-          sessionFile,
-          JSON.stringify({
-            type: 'message',
-            message: { role: 'assistant', content: [{ type: 'text', text: 'file final' }], stopReason: 'stop' },
-          }) + '\n',
-          { flag: 'a' },
-        )
-      // Memory keeps a stale toolResult as its last message: overflow recovery
-      // can remove the terminal assistant message from agent state while the
-      // file keeps it, and the follow-up continue call can hang before any
-      // event reaches memory.
-      const session = {
-        ...sessionFixture({
-          messages: [{ role: 'user', content: 'do the work' }],
-          isStreaming: true,
-          prompt: vi.fn(() => new Promise<void>(() => {})),
-        }),
-      }
-      const runtime = runtimeFor(session)
-      await runtime.start()
-
-      const controller = new AbortController()
-      const turn = runtime.runTurn(
-        {
-          target: { runtime: 'pi', runtimeSessionId: sessionFile, workDir: '/workspace' },
-          prompt: 'do the work',
-        },
-        controller.signal,
-      )
-      for (let i = 0; i < 6; i++) await Promise.resolve()
-      expect(session.prompt).toHaveBeenCalled()
-      // Memory never gains a terminal message, but the file grows a terminal
-      // assistant message while the prompt stays stuck.
-      appendTerminal()
-      await vi.advanceTimersByTimeAsync(30_000)
-
-      const result = await turn
-      expect(result.ok).toBe(true)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('does not settle from a stale terminal message before this turn produces one', async () => {
-    vi.useFakeTimers()
-    try {
-      const session = {
-        ...sessionFixture({
-          // Reused session: the previous turn already ended with a terminal
-          // assistant message. The new turn has not produced anything yet.
-          messages: [
-            { role: 'user', content: 'old' },
-            { role: 'assistant', content: [{ type: 'text', text: 'old answer' }], stopReason: 'stop' },
-          ],
-          isStreaming: true,
-          prompt: vi.fn(() => new Promise<void>(() => {})),
-        }),
-      }
-      const runtime = runtimeFor(session)
-      await runtime.start()
-
-      const controller = new AbortController()
-      const turn = runtime.runTurn(
-        {
-          target: { runtime: 'pi', runtimeSessionId: '/workspace/session.json', workDir: '/workspace' },
-          prompt: 'do the work',
-        },
-        controller.signal,
-      )
+      await expect(turn).resolves.toMatchObject({
+        ok: true,
+        value: { facts: { finalAssistantText: 'the final answer' } },
+      })
+      expect(settled).toHaveBeenCalledTimes(1)
+      expectCleanedUp(session)
+      const eventsAtCompletion = events.mock.calls.length
+      session.promptCompletion.reject(new Error('late stream rejection'))
+      session.emit({ type: 'agent_settled' })
+      controller.abort()
       await vi.advanceTimersByTimeAsync(60_000)
-      // The turn is still in flight with no new terminal message; the stale
-      // terminal message must not settle it early.
-      await Promise.resolve()
-      await Promise.resolve()
-      const settled = await Promise.race([turn.then(() => true), Promise.resolve(false)])
-      expect(settled).toBe(false)
-    } finally {
-      vi.useRealTimers()
-    }
+      expect(settled).toHaveBeenCalledTimes(1)
+      expect(events).toHaveBeenCalledTimes(eventsAtCompletion)
+      expect(session.prompt).toHaveBeenCalledTimes(1)
+      expect(session.abort).not.toHaveBeenCalled()
+      expectCleanedUp(session)
+    },
+  )
+
+  it.each([
+    ['error', 'turn-failed'],
+    ['aborted', 'interrupted'],
+  ] as const)('fails an idle %s terminal message with its safe underlying reason', async (stopReason, kind) => {
+    const session = new ControlledPiSession()
+    const masker = new CredentialMasker()
+    masker.registerSecret('provider-secret')
+    const runtime = await createRuntime(session, masker)
+    const turn = run(runtime, session)
+    await session.promptEntered.promise
+    session.messages.push({ role: 'assistant', content: [], stopReason, errorMessage: 'provider-secret stream ended' })
+    session.isStreaming = false
+    session.emit({ type: 'agent_settled' })
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    const result = await turn
+    expect(result).toMatchObject({ ok: false, error: { kind } })
+    expect(JSON.stringify(result)).toContain('stream ended')
+    expect(JSON.stringify(result)).not.toContain('provider-secret')
+    expect(session.prompt).toHaveBeenCalledTimes(1)
+    expectCleanedUp(session)
   })
 
-  it('lets a healthy prompt win the race before the settle guard fires', async () => {
-    vi.useFakeTimers()
-    try {
-      const session = {
-        ...sessionFixture({
-          isStreaming: false,
-          prompt: vi.fn(async () => undefined),
-        }),
-      }
-      const runtime = runtimeFor(session)
-      await runtime.start()
-
+  it.each(['stop', 'length', 'error', 'aborted', 'toolUse'])(
+    'does not use a %s assistant message or agent_end to settle a still-streaming session',
+    async (stopReason) => {
+      const session = new ControlledPiSession()
+      const runtime = await createRuntime(session)
       const controller = new AbortController()
+      const settled = vi.fn()
+      const turn = run(runtime, session, controller)
+      void turn.then(settled)
+      await session.promptEntered.promise
+      session.messages.push({ ...terminal(), stopReason })
+      session.emit({ type: 'agent_end', messages: session.messages })
+      session.emit({ type: 'agent_settled' })
+      await vi.advanceTimersByTimeAsync(10_000)
+
+      expect(settled).not.toHaveBeenCalled()
+      controller.abort()
+      await vi.advanceTimersByTimeAsync(CANCEL_CONFIRMATION_TIMEOUT_MS)
+      await expect(turn).resolves.toMatchObject({ ok: false, error: { kind: 'interrupted' } })
+      expect(session.prompt).toHaveBeenCalledTimes(1)
+      expectCleanedUp(session)
+    },
+  )
+
+  it('does not settle an idle session from a tool-use assistant message', async () => {
+    const session = new ControlledPiSession()
+    const runtime = await createRuntime(session)
+    const settled = vi.fn()
+    const turn = run(runtime, session)
+    void turn.then(settled)
+    await session.promptEntered.promise
+    session.messages.push({ ...terminal(), stopReason: 'toolUse' })
+    session.isStreaming = false
+    session.emit({ type: 'agent_settled' })
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(settled).not.toHaveBeenCalled()
+
+    session.messages.push(terminal('after tools'))
+    session.emit({ type: 'agent_settled' })
+    await expect(turn).resolves.toMatchObject({ ok: true, value: { facts: { finalAssistantText: 'after tools' } } })
+    expectCleanedUp(session)
+  })
+
+  it('preserves normal success semantics for an idle length-limited terminal message', async () => {
+    const session = new ControlledPiSession()
+    const runtime = await createRuntime(session)
+    const turn = run(runtime, session)
+    await session.promptEntered.promise
+    session.messages.push({ ...terminal('length-limited answer'), stopReason: 'length' })
+    session.isStreaming = false
+    session.emit({ type: 'agent_settled' })
+
+    await expect(turn).resolves.toMatchObject({
+      ok: true,
+      value: { facts: { finalAssistantText: 'length-limited answer' } },
+    })
+    expectCleanedUp(session)
+  })
+
+  it('observes compaction_end after the initial check expires and the SDK subsequently becomes idle', async () => {
+    const session = new ControlledPiSession()
+    const runtime = await createRuntime(session)
+    const settled = vi.fn()
+    const turn = run(runtime, session)
+    void turn.then(settled)
+    await session.promptEntered.promise
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(settled).not.toHaveBeenCalled()
+    session.messages = [terminal('compacted answer')]
+    session.emit({ type: 'compaction_end' })
+    session.isStreaming = false
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    await expect(turn).resolves.toMatchObject({
+      ok: true,
+      value: { facts: { finalAssistantText: 'compacted answer' } },
+    })
+    expectCleanedUp(session)
+  })
+
+  it('gives the latest lifecycle boundary its full idle-observation delay', async () => {
+    const session = new ControlledPiSession()
+    const runtime = await createRuntime(session)
+    const settled = vi.fn()
+    const turn = run(runtime, session)
+    void turn.then(settled)
+    await session.promptEntered.promise
+    session.messages.push(terminal())
+    session.emit({ type: 'message_end', message: session.messages.at(-1) })
+    await vi.advanceTimersByTimeAsync(4_999)
+    session.emit({ type: 'agent_end' })
+    session.isStreaming = false
+    await vi.advanceTimersByTimeAsync(1)
+    expect(settled).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(4_999)
+
+    await expect(turn).resolves.toMatchObject({ ok: true })
+    expectCleanedUp(session)
+  })
+
+  it('excludes a previous turn terminal and still observes a shorter compacted message array', async () => {
+    const session = new ControlledPiSession()
+    session.messages = [{ role: 'user', content: 'old prompt' }, terminal('old answer')]
+    session.prompt.mockImplementation(() => {
+      session.promptEntered.resolve()
+      return session.promptCompletion.promise
+    })
+    const runtime = await createRuntime(session)
+    const settled = vi.fn()
+    const turn = run(runtime, session)
+    void turn.then(settled)
+    await session.promptEntered.promise
+    session.emit({ type: 'agent_settled' })
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(settled).not.toHaveBeenCalled()
+
+    session.messages = [terminal('new answer after compaction')]
+    session.emit({ type: 'agent_settled' })
+    await expect(turn).resolves.toMatchObject({
+      ok: true,
+      value: { facts: { finalAssistantText: 'new answer after compaction' } },
+    })
+    expectCleanedUp(session)
+  })
+
+  it('captures the message baseline only when a queued prompt acquires the session', async () => {
+    const session = new ControlledPiSession()
+    const secondEntered = deferred()
+    const secondCompletion = deferred()
+    session.prompt
+      .mockImplementationOnce(() => {
+        session.isStreaming = true
+        session.promptEntered.resolve()
+        return session.promptCompletion.promise
+      })
+      .mockImplementationOnce(() => {
+        secondEntered.resolve()
+        return secondCompletion.promise
+      })
+    const runtime = await createRuntime(session)
+    const first = run(runtime, session)
+    await session.promptEntered.promise
+    const second = run(runtime, session)
+    const secondSettled = vi.fn()
+    void second.then(secondSettled)
+    session.messages.push(terminal('first answer'))
+    session.isStreaming = false
+    session.promptCompletion.resolve()
+    await first
+    await secondEntered.promise
+    session.emit({ type: 'agent_settled' })
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(secondSettled).not.toHaveBeenCalled()
+
+    session.messages.push(terminal('second answer'))
+    session.emit({ type: 'agent_settled' })
+    await expect(second).resolves.toMatchObject({ ok: true, value: { facts: { finalAssistantText: 'second answer' } } })
+    expect(session.prompt).toHaveBeenCalledTimes(2)
+    expectCleanedUp(session)
+  })
+
+  it('cancels a queued turn without submitting it or aborting the active owner', async () => {
+    const session = new ControlledPiSession()
+    const runtime = await createRuntime(session)
+    const first = run(runtime, session)
+    await session.promptEntered.promise
+    const controller = new AbortController()
+    const queued = run(runtime, session, controller)
+    controller.abort()
+
+    await expect(queued).resolves.toMatchObject({ ok: false, error: { kind: 'interrupted' } })
+    expect(session.prompt).toHaveBeenCalledTimes(1)
+    expect(session.abort).not.toHaveBeenCalled()
+    session.messages.push(terminal('active owner answer'))
+    session.isStreaming = false
+    session.promptCompletion.resolve()
+    await expect(first).resolves.toMatchObject({ ok: true })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(session.prompt).toHaveBeenCalledTimes(1)
+    expect(session.abort).not.toHaveBeenCalled()
+    expectCleanedUp(session)
+  })
+
+  it('bounds a deadline failure when both prompt and abort remain pending, with stable diagnostics', async () => {
+    const session = new ControlledPiSession()
+    const abortCompletion = deferred()
+    session.abort.mockImplementation(() => abortCompletion.promise)
+    const runtime = await createRuntime(session)
+    const settled = vi.fn()
+    const turn = run(runtime, session, new AbortController(), 25)
+    void turn.then(settled)
+    await session.promptEntered.promise
+    await vi.advanceTimersByTimeAsync(25)
+    expect(session.abort).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(CANCEL_CONFIRMATION_TIMEOUT_MS - 1)
+    expect(settled).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+
+    const result = await turn
+    expect(result).toMatchObject({
+      ok: false,
+      error: { kind: 'deadline-exceeded' },
+      diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'abort-unconfirmed' })]),
+    })
+    expectCleanedUp(session)
+    const snapshot = JSON.stringify(result)
+    abortCompletion.reject(new Error('late abort failure'))
+    session.promptCompletion.resolve()
+    session.emit({ type: 'agent_settled' })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(JSON.stringify(result)).toBe(snapshot)
+    expect(settled).toHaveBeenCalledTimes(1)
+    expect(session.prompt).toHaveBeenCalledTimes(1)
+    expectCleanedUp(session)
+  })
+
+  it.each(['resolved', 'rejected', 'pending'] as const)(
+    'preserves a redacted stream failure once when abort is %s',
+    async (abortOutcome) => {
+      const session = new ControlledPiSession()
+      const abortCompletion = deferred()
+      if (abortOutcome === 'rejected') session.abort.mockRejectedValue(new Error('provider-secret abort rejected'))
+      if (abortOutcome === 'pending') session.abort.mockImplementation(() => abortCompletion.promise)
+      const masker = new CredentialMasker()
+      masker.registerSecret('provider-secret')
+      const runtime = await createRuntime(session, masker)
+      const controller = new AbortController()
+      const settled = vi.fn()
+      const turn = run(runtime, session, controller, 60_000)
+      void turn.then(settled)
+      await session.promptEntered.promise
+      const streamError = Object.assign(new Error('provider-secret SSE disconnected'), { code: 'ECONNRESET' })
+      session.promptCompletion.reject(streamError)
+      await vi.advanceTimersByTimeAsync(CANCEL_CONFIRMATION_TIMEOUT_MS)
+
+      const result = await turn
+      expect(result).toMatchObject({ ok: false, error: { kind: 'turn-failed' } })
+      expect(result.diagnostics.filter((item) => item.code === 'turn-failed')).toHaveLength(1)
+      expect(result.diagnostics.find((item) => item.code === 'turn-failed')?.message).toContain('SSE disconnected')
+      expect(result.diagnostics.filter((item) => item.code === 'abort-unconfirmed')).toHaveLength(
+        abortOutcome === 'resolved' ? 0 : 1,
+      )
+      expect(JSON.stringify(result)).not.toContain('provider-secret')
+      expect(session.abort).toHaveBeenCalledTimes(1)
+      expectCleanedUp(session)
+      const snapshot = JSON.stringify(result)
+      abortCompletion.reject(new Error('late abort error'))
+      if (abortOutcome !== 'pending') void abortCompletion.promise.catch(() => {})
+      controller.abort()
+      session.emit({ type: 'agent_settled' })
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(JSON.stringify(result)).toBe(snapshot)
+      expect(settled).toHaveBeenCalledTimes(1)
+      expect(session.prompt).toHaveBeenCalledTimes(1)
+      expectCleanedUp(session)
+    },
+  )
+
+  it('retains interruption when abort rejects and does not expose the credential', async () => {
+    const session = new ControlledPiSession()
+    session.abort.mockRejectedValue(new Error('provider-secret abort rejected'))
+    const masker = new CredentialMasker()
+    masker.registerSecret('provider-secret')
+    const runtime = await createRuntime(session, masker)
+    const controller = new AbortController()
+    const turn = run(runtime, session, controller)
+    await session.promptEntered.promise
+    controller.abort()
+
+    const result = await turn
+    expect(result).toMatchObject({
+      ok: false,
+      error: { kind: 'interrupted' },
+      diagnostics: expect.arrayContaining([
+        expect.objectContaining({ code: 'abort-unconfirmed', message: expect.stringContaining('abort rejected') }),
+      ]),
+    })
+    expect(JSON.stringify(result)).not.toContain('provider-secret')
+    expectCleanedUp(session)
+  })
+
+  it.each(['throws', 'rejects'] as const)(
+    'preserves convergence when the event observer %s during final reconciliation',
+    async (failure) => {
+      const session = new ControlledPiSession()
+      const masker = new CredentialMasker()
+      masker.registerSecret('observer-secret')
+      const runtime = await createRuntime(session, masker)
+      const observerFailure = new Error('observer-secret event delivery failed')
+      const onEvent = vi.fn(() => {
+        if (failure === 'throws') throw observerFailure
+        return Promise.reject(observerFailure)
+      })
       const turn = runtime.runTurn(
         {
-          target: { runtime: 'pi', runtimeSessionId: '/workspace/session.json', workDir: '/workspace' },
+          target: { runtime: 'pi', runtimeSessionId: session.sessionFile, workDir: '/workspace' },
           prompt: 'do the work',
         },
-        controller.signal,
+        new AbortController().signal,
+        { onEvent },
       )
+      await session.promptEntered.promise
+      session.messages.push(terminal())
+      session.isStreaming = false
+      session.promptCompletion.resolve()
+      await vi.advanceTimersByTimeAsync(CANCEL_CONFIRMATION_TIMEOUT_MS)
+
       const result = await turn
-      expect(result.ok).toBe(true)
-      if (!result.ok) return
-      expect(result.value.facts.finalAssistantText).toBeNull()
-    } finally {
-      vi.useRealTimers()
-    }
+      if (failure === 'throws') {
+        expect(result).toMatchObject({ ok: false, error: { kind: 'turn-failed' } })
+        expect(JSON.stringify(result)).toContain('event delivery failed')
+      } else {
+        expect(result).toMatchObject({ ok: true, value: { facts: { finalAssistantText: 'the final answer' } } })
+      }
+      expect(JSON.stringify(result)).not.toContain('observer-secret')
+      expect(session.abort).toHaveBeenCalledTimes(failure === 'throws' ? 1 : 0)
+      expectCleanedUp(session)
+    },
+  )
+
+  it('does not submit or abort a prompt whose signal was already cancelled', async () => {
+    const session = new ControlledPiSession()
+    const runtime = await createRuntime(session)
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(run(runtime, session, controller)).resolves.toMatchObject({
+      ok: false,
+      error: { kind: 'interrupted' },
+    })
+    expect(session.prompt).not.toHaveBeenCalled()
+    expect(session.abort).not.toHaveBeenCalled()
+    expectCleanedUp(session)
   })
 })
 

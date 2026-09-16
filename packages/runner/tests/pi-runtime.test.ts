@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CredentialMasker } from '../src/runtime/task-log.js'
+import { deferred } from './support/deferred.js'
 import {
   PiRuntime,
   createPiProjector,
@@ -24,6 +25,8 @@ class FakeSession implements PiSdkSession {
   thinkingCalls: string[] = []
   currentModel: unknown = undefined
   currentThinkingLevel: string = 'off'
+  readonly promptEntered = deferred()
+  readonly steerEntered = deferred()
   private listeners = new Set<(event: unknown) => void>()
   private completions: Array<{ resolve: () => void; text: string }> = []
   /** When set to false, the next preflight callback will be invoked with false. Resets to true after use. */
@@ -37,6 +40,7 @@ class FakeSession implements PiSdkSession {
   }
   prompt(text: string, options?: PiPromptOptions): Promise<void> {
     this.promptCalls.push(text)
+    this.promptEntered.resolve()
     const preflight = options?.preflight
     if (preflight) {
       const success = this.nextPreflightResult
@@ -50,6 +54,7 @@ class FakeSession implements PiSdkSession {
   }
   steer(text: string): Promise<void> {
     this.steerCalls.push(text)
+    this.steerEntered.resolve()
     return Promise.resolve()
   }
   abort(): Promise<void> {
@@ -197,7 +202,7 @@ describe('PiRuntime', () => {
       },
       new AbortController().signal,
     )
-    await Promise.resolve()
+    await session.promptEntered.promise
     expect(session.promptCalls).toEqual(['/literal prompt'])
     expect(session.modelCalls).toEqual([{ provider: 'provider', id: 'family/model' }])
     // Issue-557 T-004: variants no longer smuggle a thinking level. A
@@ -224,7 +229,7 @@ describe('PiRuntime', () => {
       },
       new AbortController().signal,
     )
-    await Promise.resolve()
+    await session.promptEntered.promise
     expect(session.thinkingCalls).toEqual(['xhigh'])
     session.complete('answer')
     await expect(resultPromise).resolves.toMatchObject({ ok: true })
@@ -258,8 +263,7 @@ describe('PiRuntime', () => {
       },
       controller.signal,
     )
-    await new Promise<void>((resolve) => setImmediate(resolve))
-    await new Promise<void>((resolve) => setImmediate(resolve))
+    await session.promptEntered.promise
     expect(session.promptCalls).toEqual(['once'])
     clock.advance(100)
     await new Promise<void>((resolve) => setImmediate(resolve))
@@ -283,8 +287,9 @@ describe('PiRuntime', () => {
       },
       new AbortController().signal,
     )
-    await Promise.resolve()
+    await session.promptEntered.promise
     clock.advance(55 * 60_000)
+    await session.steerEntered.promise
     expect(session.steerCalls).toHaveLength(1)
     clock.advance(5 * 60_000)
     session.complete()
@@ -301,8 +306,9 @@ describe('PiRuntime', () => {
       },
       new AbortController().signal,
     )
-    await Promise.resolve()
+    await shortSession.promptEntered.promise
     shortClock.advance(0)
+    await shortSession.steerEntered.promise
     expect(shortSession.steerCalls).toHaveLength(1)
     shortSession.complete()
     await short
