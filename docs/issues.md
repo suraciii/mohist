@@ -29,8 +29,8 @@ mo issue create "Document search API" --body-file ./issue-body.md --ready
 ```
 
 The command accepts a body inline, from a file, or from stdin. It can also set
-priority, labels, a Workflow Profile, a model, a target Repository, and a
-parent Issue. See [CLI Reference](cli-reference.md#issue) for all options.
+priority, labels, a Workflow Profile, a target Repository, and a parent Issue.
+See [CLI Reference](cli-reference.md#issue) for all options.
 
 Draft protects an incomplete requirement from consuming execution capacity.
 Mark an Issue ready only when its body and prerequisites are usable.

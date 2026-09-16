@@ -316,8 +316,10 @@ declare non-empty top-level `approval.feedback.tasks`.
 ### Configure the Agent for a Task
 
 Every Agent-backed Task names its Agent in the Task input. To use a different
-role, edit the Profile to reference another Agent, or create a Project Agent
-that overrides the built-in definition of the same name:
+role, edit the Profile to reference another Agent, or customize the built-in
+from the Agents page or `mo agent edit <built-in>`, which materializes a
+same-name Project Agent from the built-in definition and applies the requested
+change:
 
 ```yaml
 - id: proposal
@@ -329,14 +331,18 @@ that overrides the built-in definition of the same name:
 ```
 
 The model, Reasoning Effort, variant, and Skills are Agent configuration, not
-Workflow configuration. Change them on the Agent or in Project Agent settings.
-A Workflow Variable cannot override them for one Task.
+Workflow configuration. Change them on the named Agent, including a same-name
+Project Agent that overrides a built-in. A Workflow Variable cannot override
+them for one Task.
 
 ## Manage Profiles
 
 In Settings > Workflows, manage the current Project's Profile collection, edit
-a custom Profile Definition, and select the Project default. The Issue details
-page selects or changes a Profile. It does not edit the Profile Definition.
+a custom Profile Definition, and select the Project default. The page shows the
+named Agents the Profile's Tasks use with their effective configuration and
+routes to the Agents page for model configuration. The Issue details page
+selects or changes a Profile and shows the named Agents responsible for
+execution; it does not edit the Profile Definition and has no model selector.
 
 Before saving, run `mo workflow validate --file <path>` to check Definition
 structure, field types, and template expressions. Use `--file -` to read from

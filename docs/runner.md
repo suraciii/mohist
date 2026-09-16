@@ -189,8 +189,8 @@ protection remains the deployment owner's responsibility.
 
 Runner does not select a global Runtime through `type`. A Workflow Agent task
 names a Mohist Agent through `mohist/agent`; the Agent definition selects the
-Runtime. `mohist/agent` remains the only Workflow Agent Action, and Agent Input
-supplies model options. See
+Runtime. `mohist/agent` remains the only Workflow Agent Action; the named Agent
+definition supplies the model configuration. See
 [Action Contracts](actions/README.md).
 
 `ENABLED_AGENT_RUNTIMES` controls which Agent Runtime processes this Runner may

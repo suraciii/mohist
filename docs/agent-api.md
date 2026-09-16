@@ -53,36 +53,29 @@ mean execution has finished. The response body is the current public
 observation. A still-converging command may return a retryable `503`; repeat the
 same keyed request.
 
-## Project Default Execution Configuration
-
-`PUT /api/projects/{projectRef}/default-execution-config` sets the Project
-default execution configuration. The body carries `runtime`, `model`, and an
-optional `variant`. The Project read reports `defaultExecutionConfig`, or
-`null` when unset. A new default replaces the previous one. An invalid default
-is rejected and leaves the previous default untouched. See
-[Agents and AgentSessions](agent-sessions.md#project-default-execution-configuration)
-for resolution at launch.
-
 ## Task-First Launch
 
 `POST /api/projects/{projectRef}/agent-tasks` starts work for a caller that has
 a task but does not yet need to configure an Agent. The body accepts exactly
 these JSON fields: `prompt`, `attachments`, `context`, `name`, `runtime`,
-`model`, `variant`, `allowedSubagentAgentIds`, and `maxConcurrentRuns`.
+`model`, `reasoningEffort`, `variant`, `allowedSubagentAgentIds`, and
+`maxConcurrentRuns`.
 
 A non-null collaborator list contains Agent IDs from the same Project. A
 non-null concurrency limit is a positive integer. `context` uses the same
 `issueNumber`, `epicNumber`, `repository`, `workspace`, `workspacePath`, and
 `targetId` references as a definition-first launch. The request requires an
-`Idempotency-Key`. The Server derives missing Definition fields, materializes
-the resolved execution configuration, creates the Agent, then uses the
-canonical AgentJob and AgentSession launch pipeline.
+`Idempotency-Key`. The Server derives missing Definition fields, creates the
+Agent carrying only the supplied execution values, then uses the canonical
+AgentJob and AgentSession launch pipeline. Unset execution fields stay unset and
+mean Runtime behavior; see
+[Agents and AgentSessions](agent-sessions.md#execution-resolution).
 
 Task-first replay uses the same key space as definition-first launch. A retry
 with the same key and caller-visible inputs returns the original Agent, Job,
 Session, Input, Turn, Workspace, attachment result, and canonical URLs. A
-changed prompt, context, attachment list, name, runtime, model, variant,
-collaborator list, or concurrency limit returns `409
+changed prompt, context, attachment list, name, runtime, model,
+reasoningEffort, variant, collaborator list, or concurrency limit returns `409
 launch_idempotency_conflict`. A still-converging launch returns
 `503 launch_setup_pending` and keeps the same key. A recorded rejection is
 replayed as the same rejection. Retry a pending launch with its original key,

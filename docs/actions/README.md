@@ -83,10 +83,10 @@ Reasoning Effort, and true model variant. The AgentJob fixes these values at
 launch. The Workflow supplies only `name`, `prompt`, `session`, and `timeout`
 through `mohist/agent`.
 
-Project and Issue model selectors configure the Agent, not the Workflow. The
-available catalogs come from the runtime selected by the Agent. A configured
-model that is no longer discovered stays visible until it is changed or
-cleared. Mohist never substitutes a model from another backend.
+Model selection configures the named Agent on the Agents surface, not the
+Workflow. The available catalogs come from the runtime selected by the Agent. A
+configured model that is no longer discovered stays visible until it is changed
+or cleared. Mohist never substitutes a model from another backend.
 
 ## Shared Semantics for Agent Execution Actions
 

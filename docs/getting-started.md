@@ -177,10 +177,10 @@ When the OpenCode CLI is not installed, install it following the
 
 Without a model, the Agent uses its runtime default. The Runtime itself
 defaults to `pi` when an entry point does not supply one; see
-[Agents and AgentSessions](agent-sessions.md#project-default-execution-configuration)
-for the full resolution order. Configure a model on the Agent or in Project
-Agent settings. See [Agents and AgentSessions](agent-sessions.md) and
-[Workflow Profiles](workflow-profiles.md#agent-tasks).
+[Agents and AgentSessions](agent-sessions.md#execution-resolution) for the
+resolution order. Configure a model on the named Agent from the Agents page or
+`mo agent edit`. See [Agents and AgentSessions](agent-sessions.md) and
+[Workflow Profiles](workflow-profiles.md#configure-the-agent-for-a-task).
 
 ## 7. Create Your First Project
 
@@ -194,15 +194,16 @@ mo project use my-app
 ### Start your first Agent task (recommended)
 
 Task-first startup is the default first-run path when you have work to do but
-do not need to design an Agent first. If this Project has a default execution
-configuration, the task is enough:
+do not need to design an Agent first. The task alone stays on Runtime behavior:
+the created Agent carries unset execution fields, resolution selects `pi`, and
+the Runtime chooses the model at dispatch.
 
 ```bash
 mo agent start --prompt "Inspect this repository and report the highest-priority next step"
 ```
 
-When the Project does not have a default, list available models and provide the
-execution hints explicitly. Choose the runtime you opted in to:
+Pass execution flags to choose a different Runtime, model, Reasoning Effort, or
+variant. List the available models for the runtime you opted in to:
 
 ```bash
 # OpenCode opt-in: list models and pass the execution hints explicitly.
