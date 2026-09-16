@@ -65,7 +65,7 @@ subscription secret that Mohist uses.
 Run the guided setup command:
 
 ```bash
-mo notification setup --platform telegram
+mo notification setup
 ```
 
 The guide checks the local listener, generates a subscription secret, writes
@@ -88,7 +88,7 @@ platform-level secret from `config.yaml`.
 Weixin has no default receiving chat. Specify its chat ID explicitly:
 
 ```bash
-mo notification setup --platform weixin --deliver-chat-id "<your WeChat chat ID>"
+mo notification setup --deliver-chat-id "<your WeChat chat ID>"
 ```
 
 Reload Server after writing the configuration:

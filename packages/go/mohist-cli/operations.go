@@ -22,6 +22,93 @@ var slackFields = []string{"id", "projectId", "agentId", "workspaceTeamId", "sta
 
 const maxSlackReplyFileBytes = 10 * 1024 * 1024
 
+const notificationSetupUsage = "USAGE\n    mo notification setup [--health-base URL] [--webhook-url URL]\n\nConfigure local Hermes notifications without contacting the Server."
+
+// flagShape records whether a leaf flag consumes a following value or is a
+// standalone boolean. Every entry below is taken from a real argValue,
+// hasArg, or valuesFor call in runRemoteOperations, slackMessageBody,
+// runLocalNotification, or the audit helpers. Flags that only appear in
+// legacy docs and have no implementation reader are deliberately omitted so
+// the parser rejects them instead of silently absorbing a value.
+type flagShape int
+
+const (
+	flagValue flagShape = iota
+	flagBool
+)
+
+var operationsFlags = map[string]map[string]map[string]flagShape{
+	"runner": {
+		"list":   {"scope": flagValue, "project": flagValue},
+		"view":   {"project": flagValue},
+		"status": {"project": flagValue},
+		"revoke": {"project": flagValue},
+	},
+	"server": {
+		"status": {},
+		"health": {},
+		"info":   {},
+		"logs":   {},
+	},
+	"audit": {
+		"list": {"kind": flagValue, "since": flagValue, "limit": flagValue},
+	},
+	"github": {
+		// --repo deliberately omitted; connect reads owner/repo from the
+		// positional argument only.
+		"connect": {"approver": flagValue, "project": flagValue},
+		"list":    {"project": flagValue},
+		"view":    {"project": flagValue},
+		"update":  {"approver": flagValue, "clear-approvers": flagBool, "project": flagValue},
+		"enable":  {"project": flagValue},
+		"disable": {"project": flagValue},
+	},
+	"slack": {
+		"setup":            {},
+		"status":           {"workspace-team": flagValue},
+		"install-agent":    {"agent": flagValue, "project": flagValue},
+		"create":           {"agent": flagValue, "project": flagValue},
+		"list":             {"project": flagValue},
+		"view":             {"project": flagValue},
+		"diagnostics":      {"project": flagValue},
+		"claim-owner":      {"project": flagValue},
+		"edit":             {"project": flagValue},
+		"transfer-owner":   {"project": flagValue},
+		"enable":           {"project": flagValue},
+		"disable":          {"project": flagValue},
+		"remove-binding":   {"project": flagValue},
+		"permanent-delete": {"yes": flagBool, "project": flagValue},
+		"deliveries":       {"project": flagValue},
+		"resend-delivery":  {"project": flagValue},
+		"clear-gap":        {"project": flagValue},
+		"reconcile-create": {"project": flagValue},
+		"reconcile-delete": {"project": flagValue},
+		"message-send": {
+			"workspace":          flagValue,
+			"conversation":       flagValue,
+			"reply-to":           flagValue,
+			"connection":         flagValue,
+			"session":            flagValue,
+			"triggering-message": flagValue,
+			"dispatch-ref":       flagValue,
+			"text":               flagValue,
+			"image":              flagValue,
+			"file":               flagValue,
+			"project":            flagValue,
+		},
+	},
+	"notification": {
+		"setup": {
+			// --platform deliberately omitted; runLocalNotification does not
+			// read it and never sends it.
+			"health-base": flagValue,
+			"webhook-url": flagValue,
+			"secret":      flagValue,
+			"config-file": flagValue,
+		},
+	},
+}
+
 func parseOperations(area string, args []string) (command, error) {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		return command{help: true, helpText: operationsHelp(area)}, nil
@@ -92,9 +179,11 @@ func parseOperations(area string, args []string) (command, error) {
 		c.args = append(c.args, "agent", args[1])
 		start = 2
 	}
+	leafUsage := opsLeafHelp(c.kind, c.catalog)
+	leaf := operationsFlags[area][action]
 	for i := start; i < len(args); i++ {
 		if args[i] == "--help" || args[i] == "-h" {
-			return command{help: true, helpText: opsLeafHelp(c.kind, c.catalog)}, nil
+			return command{help: true, helpText: leafUsage}, nil
 		}
 		if args[i] == "--json" {
 			var err error
@@ -105,20 +194,24 @@ func parseOperations(area string, args []string) (command, error) {
 			continue
 		}
 		if !strings.HasPrefix(args[i], "--") {
-			return command{}, usage("unexpected argument " + args[i])
+			return command{}, usageWithLeaf("unexpected argument "+args[i], leafUsage)
 		}
 		name := strings.TrimPrefix(args[i], "--")
-		if name == "yes" || name == "follow" {
+		if area == "slack" && contains([]string{"bot-token", "app-token", "configuration-token", "configuration-refresh-token", "token"}, name) {
+			return command{}, usage("Slack credentials must be supplied through a protected credentials file")
+		}
+		shape, ok := leaf[name]
+		if !ok {
+			return command{}, usageWithLeaf("unknown option "+args[i], leafUsage)
+		}
+		if shape == flagBool {
 			c.args = append(c.args, name, "true")
 			continue
 		}
 		if i+1 >= len(args) {
-			return command{}, usage(args[i] + " requires a value")
+			return command{}, usageWithLeaf(args[i]+" requires a value", leafUsage)
 		}
 		c.args = append(c.args, name, args[i+1])
-		if area == "slack" && contains([]string{"bot-token", "app-token", "configuration-token", "configuration-refresh-token", "token"}, name) {
-			return command{}, usage("Slack credentials must be supplied through a protected credentials file")
-		}
 		i++
 	}
 	if area == "runner" && action == "list" {
@@ -221,14 +314,27 @@ func parseNotification(args []string) (command, error) {
 		return command{}, usage("unknown notification command")
 	}
 	c := command{kind: "ops-notification"}
+	leaf := operationsFlags["notification"]["setup"]
 	for i := 1; i < len(args); i++ {
 		if args[i] == "--help" || args[i] == "-h" {
-			return command{help: true, helpText: "USAGE\n    mo notification setup [--health-base URL] [--webhook-url URL] [--platform NAME]\n\nConfigure local Hermes notifications without contacting the Server."}, nil
+			return command{help: true, helpText: notificationSetupUsage}, nil
 		}
-		if i+1 >= len(args) || !strings.HasPrefix(args[i], "--") {
-			return command{}, usage("notification option requires a value")
+		if !strings.HasPrefix(args[i], "--") {
+			return command{}, usageWithLeaf("unexpected argument "+args[i], notificationSetupUsage)
 		}
-		c.args = append(c.args, strings.TrimPrefix(args[i], "--"), args[i+1])
+		name := strings.TrimPrefix(args[i], "--")
+		shape, ok := leaf[name]
+		if !ok {
+			return command{}, usageWithLeaf("unknown option "+args[i], notificationSetupUsage)
+		}
+		if shape == flagBool {
+			c.args = append(c.args, name, "true")
+			continue
+		}
+		if i+1 >= len(args) {
+			return command{}, usageWithLeaf(args[i]+" requires a value", notificationSetupUsage)
+		}
+		c.args = append(c.args, name, args[i+1])
 		i++
 	}
 	return c, nil

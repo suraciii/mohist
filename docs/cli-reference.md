@@ -606,7 +606,7 @@ for the complete product semantics.
 Project Repository: the mirror of Issues, the `/mohist` command entry, and
 review-based Approval Point decisions.
 
-- `mo github connect owner/repo [--repo <name>] [--approver <login> ...]`
+- `mo github connect owner/repo [--approver <login> ...]`
   connects a GitHub repository through the deployment's GitHub App. Mohist
   verifies the App installation and Repository scope, or returns an installation
   URL and a retry action. It then prints the webhook address, content type,
