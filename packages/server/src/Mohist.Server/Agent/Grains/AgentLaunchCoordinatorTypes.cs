@@ -217,7 +217,15 @@ public sealed record AgentLaunchCoordinatorRequest(
     [property: Id(16)] string? Variant = null,
     /// <summary>Task-first collaborator and concurrency hints.</summary>
     [property: Id(17)] IReadOnlyList<string>? AllowedSubagentAgentIds = null,
-    [property: Id(18)] int? MaxConcurrentRuns = null);
+    [property: Id(18)] int? MaxConcurrentRuns = null,
+    /// <summary>
+    /// Caller-supplied reasoning-effort hint. Null means the field was not
+    /// supplied; the field is append-only so older coordinator plans
+    /// deserialize unchanged. Folded into the replay fingerprint as an
+    /// additional block so a changed effort with the same Idempotency-Key
+    /// conflicts while effort-free requests keep their previous fingerprint.
+    /// </summary>
+    [property: Id(19)] string? ReasoningEffort = null);
 
 /// <summary>
 /// Result returned by the coordinator on success. Carries the four
@@ -370,6 +378,12 @@ public static class AgentLaunchCoordinatorCodec
                 request.AllowedSubagentAgentIds,
                 request.MaxConcurrentRuns);
         }
+
+        // The reasoning-effort hint appends its own block so effort-free
+        // requests keep the fingerprint they had before the hint existed,
+        // while any change to the effort with the same key conflicts.
+        if (request.ReasoningEffort is not null)
+            canonical += '\u001f' + EncodePart(request.ReasoningEffort);
 
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexString(hash).ToLowerInvariant();

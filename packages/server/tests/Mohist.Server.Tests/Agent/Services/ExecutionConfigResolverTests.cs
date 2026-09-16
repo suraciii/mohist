@@ -5,22 +5,21 @@ using Xunit;
 namespace Mohist.Server.Tests.Agent.Services;
 
 /// <summary>
-/// Precedence matrix for the single execution-field resolution rule
-/// (issue-560 T-001): caller hint → Agent definition → Project default,
-/// runtime defaulting to Pi, explicit malformed values never masked
-/// by a lower-precedence source.
+/// Precedence matrix for the single execution-field resolution rule:
+/// caller hint → Agent definition, runtime defaulting to Pi, explicit
+/// malformed values never masked by a lower-precedence source, and an
+/// unset Model left null for the Runtime to choose at dispatch.
 /// </summary>
 [Trait("level", "L0")]
 public sealed class ExecutionConfigResolverTests
 {
     private static readonly ExecutionConfigHint Hint = new("pi", "c/three", "turbo");
     private static readonly ExecutionConfigHint Definition = new("pi", "a/one", "high");
-    private static readonly ExecutionConfigHint ProjectDefault = new("pi", "b/two", "low");
 
     [Fact]
-    public void Hint_WinsOverDefinitionAndDefault_EveryField()
+    public void Hint_WinsOverDefinition_EveryField()
     {
-        var resolved = ExecutionConfigResolver.Resolve(Hint, Definition, ProjectDefault);
+        var resolved = ExecutionConfigResolver.Resolve(Hint, Definition);
 
         Assert.Equal("pi", resolved.Runtime);
         Assert.Equal("c/three", resolved.Model);
@@ -31,7 +30,7 @@ public sealed class ExecutionConfigResolverTests
     public void Hint_WinsPerField_NotWholeBundle()
     {
         var hint = new ExecutionConfigHint(Model: "c/three");
-        var resolved = ExecutionConfigResolver.Resolve(hint, Definition, ProjectDefault);
+        var resolved = ExecutionConfigResolver.Resolve(hint, Definition);
 
         // The hint overrides only the model; definition values stand for the
         // fields the hint omits.
@@ -41,9 +40,9 @@ public sealed class ExecutionConfigResolverTests
     }
 
     [Fact]
-    public void Definition_WinsOverDefault()
+    public void Definition_ResolvesWhenNoHintIsSupplied()
     {
-        var resolved = ExecutionConfigResolver.Resolve(null, Definition, ProjectDefault);
+        var resolved = ExecutionConfigResolver.Resolve(null, Definition);
 
         Assert.Equal("pi", resolved.Runtime);
         Assert.Equal("a/one", resolved.Model);
@@ -51,43 +50,9 @@ public sealed class ExecutionConfigResolverTests
     }
 
     [Fact]
-    public void Default_FillsADefinitionGap_PerField()
+    public void UnsetModelAndVariant_StayNullForRuntimeBehavior()
     {
-        var definition = new ExecutionConfigHint(Model: "a/one");
-        var resolved = ExecutionConfigResolver.Resolve(null, definition, ProjectDefault);
-
-        Assert.Equal("pi", resolved.Runtime);
-        Assert.Equal("a/one", resolved.Model);
-        Assert.Equal("low", resolved.Variant);
-    }
-
-    [Fact]
-    public void Default_ResolvesAnEmptyDefinition()
-    {
-        var resolved = ExecutionConfigResolver.Resolve(null, null, ProjectDefault);
-
-        Assert.Equal("pi", resolved.Runtime);
-        Assert.Equal("b/two", resolved.Model);
-        Assert.Equal("low", resolved.Variant);
-    }
-
-    [Fact]
-    public void Runtime_DefaultsToPi_WhenNoSourceSuppliesOne()
-    {
-        var resolved = ExecutionConfigResolver.Resolve(
-            null,
-            new ExecutionConfigHint(Model: "a/one"),
-            new ExecutionConfigHint(Model: "b/two"));
-
-        Assert.Equal(AgentConfigSchema.DefaultRuntime, resolved.Runtime);
-        Assert.Equal("a/one", resolved.Model);
-        Assert.Null(resolved.Variant);
-    }
-
-    [Fact]
-    public void EmptySources_ResolveToPiWithNoModel()
-    {
-        var resolved = ExecutionConfigResolver.Resolve(null, null, null);
+        var resolved = ExecutionConfigResolver.Resolve(null, null);
 
         Assert.Equal(AgentConfigSchema.DefaultRuntime, resolved.Runtime);
         Assert.Null(resolved.Model);
@@ -95,28 +60,50 @@ public sealed class ExecutionConfigResolverTests
     }
 
     [Fact]
-    public void MalformedDefinitionModel_IsNeverMaskedByDefault()
+    public void HintModel_ResolvesWithoutADefinition()
     {
-        var definition = new ExecutionConfigHint(Model: "gpt");
-        var resolved = ExecutionConfigResolver.Resolve(null, definition, ProjectDefault);
+        var resolved = ExecutionConfigResolver.Resolve(new ExecutionConfigHint(Model: "a/one"), null);
+
+        Assert.Equal(AgentConfigSchema.DefaultRuntime, resolved.Runtime);
+        Assert.Equal("a/one", resolved.Model);
+        Assert.Null(resolved.Variant);
+    }
+
+    [Fact]
+    public void Runtime_DefaultsToPi_WhenNoSourceSuppliesOne()
+    {
+        var resolved = ExecutionConfigResolver.Resolve(
+            null,
+            new ExecutionConfigHint(Model: "a/one"));
+
+        Assert.Equal(AgentConfigSchema.DefaultRuntime, resolved.Runtime);
+        Assert.Equal("a/one", resolved.Model);
+        Assert.Null(resolved.Variant);
+    }
+
+    [Fact]
+    public void MalformedDefinitionModel_IsPreserved()
+    {
+        var resolved = ExecutionConfigResolver.Resolve(null, new ExecutionConfigHint(Model: "gpt"));
 
         Assert.Equal("gpt", resolved.Model);
     }
 
     [Fact]
-    public void MalformedDefinitionRuntime_IsNeverMaskedByDefault()
+    public void MalformedDefinitionRuntime_IsPreserved()
     {
-        var definition = new ExecutionConfigHint(Runtime: "fast", Model: "a/one");
-        var resolved = ExecutionConfigResolver.Resolve(null, definition, ProjectDefault);
+        var resolved = ExecutionConfigResolver.Resolve(
+            null,
+            new ExecutionConfigHint(Runtime: "fast", Model: "a/one"));
 
         Assert.Equal("fast", resolved.Runtime);
     }
 
     [Fact]
-    public void MalformedHint_IsNeverMaskedByDefinitionOrDefault()
+    public void MalformedHint_IsNeverMaskedByDefinition()
     {
         var hint = new ExecutionConfigHint(Runtime: "fast", Model: "gpt", Variant: string.Empty);
-        var resolved = ExecutionConfigResolver.Resolve(hint, Definition, ProjectDefault);
+        var resolved = ExecutionConfigResolver.Resolve(hint, Definition);
 
         Assert.Equal("fast", resolved.Runtime);
         Assert.Equal("gpt", resolved.Model);
@@ -129,11 +116,11 @@ public sealed class ExecutionConfigResolverTests
     public void WhitespaceValues_AreTreatedAsAbsent()
     {
         var definition = new ExecutionConfigHint(Runtime: "  ", Model: " ", Variant: "\t");
-        var resolved = ExecutionConfigResolver.Resolve(null, definition, ProjectDefault);
+        var resolved = ExecutionConfigResolver.Resolve(null, definition);
 
         Assert.Equal("pi", resolved.Runtime);
-        Assert.Equal("b/two", resolved.Model);
-        Assert.Equal("low", resolved.Variant);
+        Assert.Null(resolved.Model);
+        Assert.Null(resolved.Variant);
     }
 
     [Fact]
@@ -149,56 +136,22 @@ public sealed class ExecutionConfigResolverTests
     }
 
     [Fact]
+    public void FromAgentConfig_DoesNotFoldReasoningEffortIntoResolution()
+    {
+        var hint = ExecutionConfigResolver.FromAgentConfig(
+            JsonDocument.Parse("{\"model\":\"a/one\",\"reasoningEffort\":\"high\"}").RootElement);
+
+        Assert.NotNull(hint);
+        Assert.Equal("a/one", hint!.Model);
+        Assert.Null(hint.ReasoningEffort);
+    }
+
+    [Fact]
     public void FromAgentConfig_NullOrNonObject_IsNoDefinition()
     {
         Assert.Null(ExecutionConfigResolver.FromAgentConfig(null));
         Assert.Null(ExecutionConfigResolver.FromAgentConfig(JsonDocument.Parse("null").RootElement));
         Assert.Null(ExecutionConfigResolver.FromAgentConfig(JsonDocument.Parse("\"config\"").RootElement));
         Assert.Null(ExecutionConfigResolver.FromAgentConfig(JsonDocument.Parse("{}").RootElement));
-    }
-}
-
-/// <summary>
-/// Storage codec for the persisted execution-config selections (the
-/// Project default column): round-trips the supplied fields, reads absent
-/// or malformed storage as unset.
-/// </summary>
-[Trait("level", "L0")]
-public sealed class ExecutionConfigJsonTests
-{
-    [Fact]
-    public void RoundTrips_SuppliedFields()
-    {
-        var config = new ExecutionConfigHint("pi", "openai/gpt-5.6", "high");
-
-        var parsed = ExecutionConfigJson.Deserialize(ExecutionConfigJson.Serialize(config));
-
-        Assert.Equal(config, parsed);
-    }
-
-    [Fact]
-    public void RoundTrips_WithoutVariant()
-    {
-        var config = new ExecutionConfigHint("opencode", "openai/gpt-5.6");
-
-        var parsed = ExecutionConfigJson.Deserialize(ExecutionConfigJson.Serialize(config));
-
-        Assert.Equal(config, parsed);
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void AbsentStorage_DeserializesToUnset(string? json)
-    {
-        Assert.Null(ExecutionConfigJson.Deserialize(json));
-    }
-
-    [Fact]
-    public void MalformedStorage_DeserializesToUnset()
-    {
-        Assert.Null(ExecutionConfigJson.Deserialize("not json"));
-        Assert.Null(ExecutionConfigJson.Deserialize("[1,2]"));
     }
 }

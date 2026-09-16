@@ -1,8 +1,8 @@
+import { expect } from 'vitest'
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
-import { render } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../src/entities/project'
-import type { ProjectDefaultExecutionConfig } from '../../src/entities/project'
 import type {
   AgentAvailabilitySummaryEntry,
   AgentInfo,
@@ -33,11 +33,6 @@ export const state = {
   launchError: null as { error: string; code?: string } | null,
   launchFailuresRemaining: -1,
   launchResponse: null as Partial<AgentSessionLaunchResponse> | null,
-  defaultExecutionConfig: {
-    runtime: 'opencode' as const,
-    model: 'openai/gpt-4o',
-    variant: null,
-  } as ProjectDefaultExecutionConfig | null,
 }
 
 const components: AgentSessionComposerPageComponents = {
@@ -194,6 +189,17 @@ function LocationProbe() {
   return <div data-testid="current-path">{location.pathname}</div>
 }
 
+/**
+ * Task-first launches need a catalog-backed Model: with no Project-level
+ * default there is nothing else to resolve the Model from.
+ */
+export async function chooseExecutionModel(model = 'anthropic/claude-3') {
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Model' })).not.toBeDisabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Model' }))
+  const optionName = new RegExp(model.replaceAll('/', '\\/'), 'i')
+  fireEvent.click(await screen.findByRole('option', { name: optionName }))
+}
+
 export function renderPage(initialEntries = ['/agent-sessions/new']) {
   const queryClient = createQueryClient()
   return render(
@@ -207,7 +213,6 @@ export function renderPage(initialEntries = ['/agent-sessions/new']) {
             createdAt: '2026-01-01T00:00:00.000Z',
             updatedAt: '2026-01-01T00:00:00.000Z',
             repositories: [],
-            defaultExecutionConfig: state.defaultExecutionConfig,
           },
         ]}
       >

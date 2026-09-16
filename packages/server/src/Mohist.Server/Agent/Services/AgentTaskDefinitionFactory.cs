@@ -2,29 +2,21 @@ using System.Text;
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
-using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Agent.Services;
 
 /// <summary>
-/// The complete Agent definition derived by a task-first request. The
-/// execution configuration is materialized so later Project-default changes
-/// cannot change what this Agent means in lists or on its first launch.
+/// The complete Agent definition derived by a task-first request. Only the
+/// caller's supplied execution values are materialized, so the created
+/// Agent is like any definition-first Agent and later edits to other
+/// resources cannot change what it means in lists or on its first launch.
 /// </summary>
 public sealed record AgentTaskDefinition(
     string Name,
     string Description,
     string Instructions,
     JsonElement AgentConfig);
-
-public sealed class AgentTaskDefinitionExecutionConfigException : InvalidOperationException
-{
-    public AgentTaskDefinitionExecutionConfigException()
-        : base("Execution configuration is unresolved. Supply runtime/model/variant hints or configure the Project default.")
-    {
-    }
-}
 
 /// <summary>
 /// Derives the small, deterministic definition required by the task-first
@@ -36,14 +28,10 @@ public sealed class AgentTaskDefinitionFactory : IScopedService
     public const int NameLengthCap = 60;
 
     private readonly AgentQuerier _agents;
-    private readonly ProjectDefaultExecutionConfigReader _defaults;
 
-    public AgentTaskDefinitionFactory(
-        AgentQuerier agents,
-        ProjectDefaultExecutionConfigReader defaults)
+    public AgentTaskDefinitionFactory(AgentQuerier agents)
     {
         _agents = agents;
-        _defaults = defaults;
     }
 
     public async Task<AgentTaskDefinition> CreateAsync(
@@ -65,13 +53,11 @@ public sealed class AgentTaskDefinitionFactory : IScopedService
                 .Where(name => !string.Equals(name, occupiedNameToIgnore, StringComparison.OrdinalIgnoreCase))
                 .ToArray()
             : [];
-        var projectDefault = await _defaults.GetAsync(projectId, ct);
         return Build(
             prompt,
             hasAcceptedAttachment,
             nameHint,
             callerHint,
-            projectDefault,
             identity,
             occupiedNames);
     }
@@ -86,15 +72,12 @@ public sealed class AgentTaskDefinitionFactory : IScopedService
         bool hasAcceptedAttachment,
         string? nameHint,
         ExecutionConfigHint? callerHint,
-        ExecutionConfigHint? projectDefault,
         string identity,
         IEnumerable<string>? occupiedNames = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(identity);
 
         var normalizedPrompt = prompt?.Trim() ?? string.Empty;
-        var resolved = ExecutionConfigResolver.Resolve(callerHint, null, projectDefault);
-        ValidateResolvedConfiguration(resolved);
 
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var occupied in occupiedNames ?? [])
@@ -116,13 +99,17 @@ public sealed class AgentTaskDefinitionFactory : IScopedService
             : $"Created from task: {FirstLine(normalizedPrompt)}";
         var instructions = BuildInstructions(normalizedPrompt, hasAcceptedAttachment);
 
-        var configValues = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["runtime"] = resolved.Runtime,
-            ["model"] = resolved.Model!,
-        };
-        if (!string.IsNullOrWhiteSpace(resolved.Variant))
-            configValues["variant"] = resolved.Variant!;
+        // Only the caller's supplied values reach the definition: an unset
+        // field stays unset and means Runtime behavior.
+        var configValues = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(callerHint?.Runtime))
+            configValues["runtime"] = callerHint!.Runtime!.Trim();
+        if (!string.IsNullOrWhiteSpace(callerHint?.Model))
+            configValues["model"] = callerHint!.Model!.Trim();
+        if (!string.IsNullOrWhiteSpace(callerHint?.Variant))
+            configValues["variant"] = callerHint!.Variant!.Trim();
+        if (!string.IsNullOrWhiteSpace(callerHint?.ReasoningEffort))
+            configValues["reasoningEffort"] = callerHint!.ReasoningEffort!.Trim();
 
         var config = JsonSerializer.SerializeToElement(configValues, JSON.Options);
         var schemaError = AgentConfigSchema.Validate(config);
@@ -175,16 +162,6 @@ public sealed class AgentTaskDefinitionFactory : IScopedService
             return $"Task {AgentLaunchCoordinatorCodec.StableToken(identity)[..8]}";
 
         return "Task";
-    }
-
-    private static void ValidateResolvedConfiguration(ResolvedExecutionConfig resolved)
-    {
-        if (!AgentConfigSchema.AllowedRuntimes.Contains(resolved.Runtime)
-            || string.IsNullOrWhiteSpace(resolved.Model)
-            || !AgentConfigSchema.HasProviderModelForm(resolved.Model))
-        {
-            throw new AgentTaskDefinitionExecutionConfigException();
-        }
     }
 
     private static string BuildInstructions(string prompt, bool hasAcceptedAttachment)

@@ -31,6 +31,7 @@ public static class AgentTaskRoutes
         "name",
         "runtime",
         "model",
+        "reasoningEffort",
         "variant",
         "allowedSubagentAgentIds",
         "maxConcurrentRuns",
@@ -115,31 +116,18 @@ public static class AgentTaskRoutes
             var callerHint = new ExecutionConfigHint(
                 NormalizeOptional(body.Runtime),
                 NormalizeOptional(body.Model),
-                NormalizeOptional(body.Variant));
-            var projectDefault = project.DefaultExecutionConfig;
-            var resolved = ExecutionConfigResolver.Resolve(callerHint, null, projectDefault);
-            if (string.IsNullOrWhiteSpace(resolved.Model))
-                return ExecutionConfigUnresolvable();
+                NormalizeOptional(body.Variant),
+                NormalizeOptional(body.ReasoningEffort));
+            var resolved = ExecutionConfigResolver.Resolve(callerHint, null);
 
-            AgentTaskDefinition definition;
-            try
-            {
-                definition = await definitions.CreateAsync(
-                    project.Id,
-                    body.Prompt,
-                    body.Attachments is { Count: > 0 },
-                    NormalizeOptional(body.Name),
-                    callerHint,
-                    idempotencyKey,
-                    ct);
-            }
-            catch (AgentTaskDefinitionExecutionConfigException ex)
-            {
-                return ApiResults.Conflict(
-                    ex.Message,
-                    "execution_config_unresolvable",
-                    new { repairs = ExecutionConfigRepairs });
-            }
+            var definition = await definitions.CreateAsync(
+                project.Id,
+                body.Prompt,
+                body.Attachments is { Count: > 0 },
+                NormalizeOptional(body.Name),
+                callerHint,
+                idempotencyKey,
+                ct);
 
             if (!string.IsNullOrWhiteSpace(body.Name)
                 && (BuiltInAgentCatalog.IsReservedName(body.Name)
@@ -188,7 +176,7 @@ public static class AgentTaskRoutes
             {
                 return ApiResults.BadRequest(
                     $"unsupported top-level field(s): {string.Join(", ", body.UndeclaredFields)}; "
-                    + "the task body accepts prompt, attachments, context, name, runtime, model, variant, allowedSubagentAgentIds, and maxConcurrentRuns.",
+                    + "the task body accepts prompt, attachments, context, name, runtime, model, reasoningEffort, variant, allowedSubagentAgentIds, and maxConcurrentRuns.",
                     "unsupported_field",
                     new { fields = body.UndeclaredFields.ToArray() });
             }
@@ -276,14 +264,13 @@ public static class AgentTaskRoutes
 
             if (!string.IsNullOrWhiteSpace(preflightFingerprint))
             {
-                var projectDefault = project.DefaultExecutionConfig;
                 var resolved = ExecutionConfigResolver.Resolve(
                     new ExecutionConfigHint(
                         NormalizeOptional(body.Runtime),
                         NormalizeOptional(body.Model),
-                        NormalizeOptional(body.Variant)),
-                    null,
-                    projectDefault);
+                        NormalizeOptional(body.Variant),
+                        NormalizeOptional(body.ReasoningEffort)),
+                    null);
                 var actualScopeFingerprint = BuildScopeFingerprint(launchRequest, resolved, workspaceRepositories);
                 if (!string.Equals(preflightFingerprint.Trim(), actualScopeFingerprint, StringComparison.Ordinal))
                 {
@@ -374,7 +361,8 @@ public static class AgentTaskRoutes
             var callerHint = new ExecutionConfigHint(
                 NormalizeOptional(body.Runtime),
                 NormalizeOptional(body.Model),
-                NormalizeOptional(body.Variant));
+                NormalizeOptional(body.Variant),
+                NormalizeOptional(body.ReasoningEffort));
             var agentGrain = grains.GetGrain<IAgentGrain>(GrainKey.Agent(project.Id, preMintedAgentId));
             var adopted = await agentGrain.ShowAsync();
             AgentInfo agent;
@@ -422,33 +410,14 @@ public static class AgentTaskRoutes
                 agent = null!;
                 for (var attempt = 0; attempt < MaxNameRaceRetries; attempt++)
                 {
-                    AgentTaskDefinition definition;
-                    try
-                    {
-                            definition = await definitions.CreateAsync(
-                            project.Id,
-                            body.Prompt,
-                            attachmentBatch.AcceptedCount > 0,
-                            NormalizeOptional(body.Name),
-                            callerHint,
-                            idempotencyKey,
-                            ct);
-                    }
-                    catch (AgentTaskDefinitionExecutionConfigException ex)
-                    {
-                        await RollbackAttachmentsAsync();
-                        return ApiResults.Conflict(
-                            ex.Message,
-                            "execution_config_unresolvable",
-                            new
-                            {
-                                repairs = new[]
-                                {
-                                    "supply runtime/model/variant hints",
-                                    "configure the Project default execution configuration",
-                                },
-                            });
-                    }
+                    var definition = await definitions.CreateAsync(
+                        project.Id,
+                        body.Prompt,
+                        attachmentBatch.AcceptedCount > 0,
+                        NormalizeOptional(body.Name),
+                        callerHint,
+                        idempotencyKey,
+                        ct);
 
                     try
                     {
@@ -618,6 +587,10 @@ public static class AgentTaskRoutes
         if (HasNonNullProperty(body.Raw, "variant")
             && string.IsNullOrWhiteSpace(body.Variant))
             return ("variant", "variant must not be empty.");
+        if (HasNonNullProperty(body.Raw, "reasoningEffort")
+            && (string.IsNullOrWhiteSpace(body.ReasoningEffort)
+                || !AgentConfigSchema.CanonicalReasoningEfforts.Contains(body.ReasoningEffort!)))
+            return ("reasoningEffort", $"reasoningEffort must be one of {string.Join(", ", AgentConfigSchema.CanonicalReasoningEffortsOrdered)}.");
         return null;
     }
 
@@ -628,17 +601,6 @@ public static class AgentTaskRoutes
 
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
-    private static readonly string[] ExecutionConfigRepairs =
-    [
-        "supply runtime/model/variant hints",
-        "configure the Project default execution configuration",
-    ];
-
-    private static IResult ExecutionConfigUnresolvable() => ApiResults.Conflict(
-        "Execution configuration is unresolved. Supply runtime/model/variant hints or configure the Project default execution configuration.",
-        "execution_config_unresolvable",
-        new { repairs = ExecutionConfigRepairs });
 
     private static AgentLaunchCoordinatorRequest BuildCoordinatorRequest(
         AgentTaskBody body,
@@ -660,6 +622,7 @@ public static class AgentTaskRoutes
             TargetId: NormalizeOptional(body.Context?.TargetId),
             Model: NormalizeOptional(body.Model),
             Variant: NormalizeOptional(body.Variant),
+            ReasoningEffort: NormalizeOptional(body.ReasoningEffort),
             WorkspaceRepositories: workspaceRepositories,
             AllowedSubagentAgentIds: body.AllowedSubagentAgentIds,
             MaxConcurrentRuns: body.MaxConcurrentRuns);
@@ -749,6 +712,7 @@ public sealed record AgentTaskBody(
     string? Runtime,
     string? Model,
     string? Variant,
+    string? ReasoningEffort,
     IReadOnlyList<string>? AllowedSubagentAgentIds,
     int? MaxConcurrentRuns,
     IReadOnlyList<string> UndeclaredFields,
@@ -763,6 +727,7 @@ public sealed record AgentTaskBody(
             if (raw.ValueKind != JsonValueKind.Object)
             {
                 return new AgentTaskBody(
+                    null,
                     null,
                     null,
                     null,
@@ -798,6 +763,7 @@ public sealed record AgentTaskBody(
                 StringValue(raw, "runtime"),
                 StringValue(raw, "model"),
                 StringValue(raw, "variant"),
+                StringValue(raw, "reasoningEffort"),
                 StringListValue(raw, "allowedSubagentAgentIds"),
                 IntValue(raw, "maxConcurrentRuns"),
                 undeclared,
@@ -805,7 +771,7 @@ public sealed record AgentTaskBody(
         }
         catch (JsonException ex)
         {
-            return new AgentTaskBody(null, null, null, null, null, null, null, null, null, [], default, ex.Message);
+            return new AgentTaskBody(null, null, null, null, null, null, null, null, null, null, [], default, ex.Message);
         }
     }
 

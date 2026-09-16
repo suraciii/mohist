@@ -386,7 +386,9 @@ public sealed partial class SlackMultiAgentIngressSpecs
             var row = await db.Agents.SingleAsync(agent =>
                 agent.ProjectId == selected.ProjectId && agent.Id == selected.AgentId);
             var agent = AgentStore.Deserialize(row.State)!;
-            agent.AgentConfig = null;
+            // An explicitly malformed Model reference is a structural
+            // configuration gap; an unset Model is not.
+            agent.AgentConfig = JsonSerializer.SerializeToElement(new { model = "gpt" });
             row.State = AgentStore.Serialize(agent);
             await db.SaveChangesAsync();
         }

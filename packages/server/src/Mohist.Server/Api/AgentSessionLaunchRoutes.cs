@@ -145,8 +145,7 @@ public static class AgentSessionLaunchRoutes
                 WorkspaceRepositories: workspaceRepositories);
             var execution = ExecutionConfigResolver.Resolve(
                 callerHint: null,
-                definition: ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig),
-                projectDefault: project.DefaultExecutionConfig);
+                definition: ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig));
 
             return ApiResults.Ok(new AgentTaskPreflightResponse(
                 ScopeFingerprint: AgentTaskRoutes.BuildScopeFingerprint(launchRequest, execution, workspaceRepositories),
@@ -337,8 +336,7 @@ public static class AgentSessionLaunchRoutes
             {
                 var execution = ExecutionConfigResolver.Resolve(
                     callerHint: null,
-                    definition: ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig),
-                    projectDefault: project.DefaultExecutionConfig);
+                    definition: ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig));
                 var actualScopeFingerprint = AgentTaskRoutes.BuildScopeFingerprint(
                     launchRequest,
                     execution,
