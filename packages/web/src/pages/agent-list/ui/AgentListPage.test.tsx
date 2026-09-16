@@ -171,6 +171,53 @@ describe('AgentListPage', () => {
       expect(row).toHaveTextContent('balanced')
     })
 
+    it('presents an unset Model as Runtime default for a stored Project Agent', async () => {
+      mockAgents([makeAgent({ id: 'unset-model', name: 'Unset Model' })])
+      renderPage()
+      const row = await screen.findByTestId('agent-row-unset-model')
+      expect(row).toHaveTextContent('Runtime default')
+      expect(within(row).getByTestId('agent-origin-unset-model')).toHaveTextContent('Project')
+    })
+
+    it('marks unshadowed built-in Agents with their origin and Runtime default, and never tracks their workload', async () => {
+      mockAgents([
+        makeAgent({
+          id: 'builtin:mohist/planner',
+          name: 'mohist/planner',
+          origin: 'built-in',
+          executability: { state: 'executable', gaps: [], pendingLaunchNote: null },
+        }),
+        makeAgent({ id: 'a1', name: 'Own Agent' }),
+      ])
+      renderPage()
+
+      const builtInRow = await screen.findByTestId('agent-row-builtin:mohist/planner')
+      expect(within(builtInRow).getByTestId('agent-origin-builtin:mohist/planner')).toHaveTextContent('Built-in')
+      expect(builtInRow).toHaveTextContent('Runtime default')
+      expect(within(builtInRow).getByTestId('agent-availability-builtin:mohist/planner')).toHaveTextContent(
+        'Availability: Not tracked for built-in Agents',
+      )
+      expect(within(builtInRow).getByTestId('agent-workload-builtin:mohist/planner')).toHaveTextContent(
+        'Workload: Not tracked',
+      )
+      expect(
+        within(builtInRow).queryByTestId('agent-availability-guidance-builtin:mohist/planner'),
+      ).not.toBeInTheDocument()
+
+      const ownRow = screen.getByTestId('agent-row-a1')
+      expect(within(ownRow).getByTestId('agent-origin-a1')).toHaveTextContent('Project')
+      expect(within(ownRow).getByTestId('agent-availability-a1')).toHaveTextContent('Availability: Unknown')
+    })
+
+    it('marks a stored Project Agent that shadows a built-in name as overriding it', async () => {
+      mockAgents([makeAgent({ id: 'a1', name: 'mohist/planner', overridesBuiltIn: true })])
+      renderPage()
+
+      const row = await screen.findByTestId('agent-row-a1')
+      expect(within(row).getByTestId('agent-overrides-built-in-a1')).toHaveTextContent('Overrides built-in')
+      expect(within(row).getByTestId('agent-origin-a1')).toHaveTextContent('Project')
+    })
+
     it('renders purpose and the server Executability state distinctly', async () => {
       mockAgents([
         makeAgent({

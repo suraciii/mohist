@@ -1,5 +1,4 @@
 import { useParams, Navigate } from 'react-router-dom'
-import { AiSettingsSection } from './AiSettingsSection'
 import { AgentSettingsSection } from './AgentSettingsSection'
 import { InboxSubscriptionSection } from './InboxSubscriptionSection'
 import { PreferencesSection } from './PreferencesSection'
@@ -11,11 +10,7 @@ import { LabelCatalogSection } from './LabelCatalogSection'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { useProject } from '../../../entities/project'
 import { SettingsSearch } from './SettingsSearch'
-import {
-  getSectionMeta,
-  isSettingsSectionKey,
-  type SettingsSectionKey,
-} from '../lib/sections'
+import { getSectionMeta, isSettingsSectionKey, type SettingsSectionKey } from '../lib/sections'
 import { SettingsDirtyProvider } from '../lib/SettingsDirtyContext'
 import { NoProjectCard } from './NoProjectCard'
 import { SettingsSubNav } from './SettingsSubNav'
@@ -24,16 +19,10 @@ function SectionContent({ section }: { section: SettingsSectionKey }) {
   const { currentProject } = useProject()
 
   switch (section) {
-    case 'ai':
-      return <AiSettingsSection />
-    case 'agent':
+    case 'scheduling':
       return <AgentSettingsSection />
     case 'inbox':
-      return currentProject ? (
-        <InboxSubscriptionSection />
-      ) : (
-        <NoProjectCard title={getSectionMeta(section).label} />
-      )
+      return currentProject ? <InboxSubscriptionSection /> : <NoProjectCard title={getSectionMeta(section).label} />
     case 'repositories':
       return currentProject ? (
         <RepositoriesSection projectId={currentProject.id} />
@@ -45,11 +34,7 @@ function SectionContent({ section }: { section: SettingsSectionKey }) {
     case 'templates':
       return <TemplatesSection />
     case 'label-catalog':
-      return currentProject ? (
-        <LabelCatalogSection />
-      ) : (
-        <NoProjectCard title={getSectionMeta(section).label} />
-      )
+      return currentProject ? <LabelCatalogSection /> : <NoProjectCard title={getSectionMeta(section).label} />
     case 'system':
       return <SystemSettingsSection />
     case 'preferences':
@@ -63,7 +48,7 @@ export function SettingsPage() {
   useDocumentTitle('Settings — Mohist')
 
   if (!section || !isSettingsSectionKey(section)) {
-    return <Navigate to="/settings/ai" replace />
+    return <Navigate to="/settings/scheduling" replace />
   }
 
   return (

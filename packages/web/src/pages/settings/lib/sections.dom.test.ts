@@ -10,13 +10,11 @@ import {
 } from './sections'
 
 describe('settings section SOT', () => {
-  it('classifies ai/agent/system/preferences as application scope', () => {
-    expect(isApplicationSection('ai')).toBe(true)
-    expect(isApplicationSection('agent')).toBe(true)
+  it('classifies scheduling/system/preferences as application scope', () => {
+    expect(isApplicationSection('scheduling')).toBe(true)
     expect(isApplicationSection('system')).toBe(true)
     expect(isApplicationSection('preferences')).toBe(true)
-    expect(sectionScope('ai')).toBe('application')
-    expect(sectionScope('agent')).toBe('application')
+    expect(sectionScope('scheduling')).toBe('application')
     expect(sectionScope('system')).toBe('application')
     expect(sectionScope('preferences')).toBe('application')
   })
@@ -50,7 +48,7 @@ describe('settings section SOT', () => {
   })
 
   it('isSettingsSectionKey narrows string to SettingsSectionKey', () => {
-    expect(isSettingsSectionKey('ai')).toBe(true)
+    expect(isSettingsSectionKey('scheduling')).toBe(true)
     expect(isSettingsSectionKey('not-a-section')).toBe(false)
   })
 

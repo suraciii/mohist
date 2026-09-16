@@ -19,11 +19,6 @@ import type {
 import type { WorkflowRunDetail } from '../model/workflow-run'
 import type { IssueListParams } from './query-keys'
 
-export interface IssueWorkflowVariables {
-  vars?: Record<string, unknown> | null
-  stages?: Record<string, { vars?: Record<string, unknown> | null } | null> | null
-}
-
 export function getIssues(params?: IssueListParams, signal?: AbortSignal) {
   const search = new URLSearchParams()
   if (params?.stage) search.set('stage', params.stage)
@@ -350,34 +345,6 @@ export function getWorkflowTimeline(number: number, projectId?: string | null, s
     projectApiPath(projectId, `/issues/${number}/workflow/status`),
     { signal },
   ).then((response) => response.workflow)
-}
-
-export function getIssueWorkflowVariables(number: number, projectId: string) {
-  return request<IssueWorkflowVariables>(projectApiPath(projectId, `/issues/${number}/variables`))
-}
-
-export function getIssueWorkflowDefinitionVar(number: number, _name: string, projectId: string) {
-  return getIssueWorkflowVariables(number, projectId)
-}
-
-export function patchIssueWorkflowDefinitionVar(number: number, name: string, value: unknown, projectId: string) {
-  return request<IssueWorkflowVariables>(projectApiPath(projectId, `/issues/${number}/variables`), {
-    method: 'PATCH',
-    body: JSON.stringify({ vars: { [name]: value } }),
-  })
-}
-
-export function patchIssueWorkflowStageDefinitionVar(
-  number: number,
-  stage: string,
-  name: string,
-  value: unknown,
-  projectId: string,
-) {
-  return request<IssueWorkflowVariables>(projectApiPath(projectId, `/issues/${number}/variables`), {
-    method: 'PATCH',
-    body: JSON.stringify({ stages: { [stage]: { vars: { [name]: value } } } }),
-  })
 }
 
 export async function rebaseIssue(number: number, projectId?: string | null) {

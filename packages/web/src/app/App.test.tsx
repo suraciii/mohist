@@ -23,9 +23,7 @@ let inboxRequests = 0
 let projectsData = [TEST_PROJECT]
 
 useMswServer(
-  http.get('*/api/projects', () =>
-    HttpResponse.json({ success: true, data: projectsData }),
-  ),
+  http.get('*/api/projects', () => HttpResponse.json({ success: true, data: projectsData })),
   http.get('*/api/projects/:projectId/sessions/:sessionId', ({ params }) =>
     HttpResponse.json({
       success: true,
@@ -69,12 +67,8 @@ useMswServer(
   http.get('*/api/projects/:projectId/inbox/unread-count', () =>
     HttpResponse.json({ success: true, data: { unreadCount: 0 } }),
   ),
-  http.get('*/api/projects/:projectId/issues', () =>
-    HttpResponse.json({ success: true, data: [] }),
-  ),
-  http.get('*/api/projects/:projectId/repositories', () =>
-    HttpResponse.json({ success: true, data: [] }),
-  ),
+  http.get('*/api/projects/:projectId/issues', () => HttpResponse.json({ success: true, data: [] })),
+  http.get('*/api/projects/:projectId/repositories', () => HttpResponse.json({ success: true, data: [] })),
   http.get('*/api/projects/:projectId/workflow-profile/default', ({ params }) =>
     HttpResponse.json({
       success: true,
@@ -94,21 +88,21 @@ useMswServer(
   http.get('*/api/projects/:projectId/workflow-profiles', ({ params }) =>
     HttpResponse.json({
       success: true,
-      data: [{
-        projectId: params.projectId,
-        profileId: 'mohist/local',
-        name: 'Default',
-        description: '',
-        sourceProvenance: 'BuiltIn',
-        isBuiltIn: true,
-        definitionSource: null,
-        agentRuntime: 'opencode',
-      }],
+      data: [
+        {
+          projectId: params.projectId,
+          profileId: 'mohist/local',
+          name: 'Default',
+          description: '',
+          sourceProvenance: 'BuiltIn',
+          isBuiltIn: true,
+          definitionSource: null,
+          agentRuntime: 'opencode',
+        },
+      ],
     }),
   ),
-  http.get('*/api/issue-templates', () =>
-    HttpResponse.json({ success: true, data: [] }),
-  ),
+  http.get('*/api/issue-templates', () => HttpResponse.json({ success: true, data: [] })),
   http.get('*/api/config', () =>
     HttpResponse.json({
       success: true,
@@ -252,9 +246,7 @@ function renderApp({ sessionPage }: { sessionPage?: ComponentType } = {}) {
 }
 
 function getShellContentContainer(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(
-    '[data-slot="sidebar-inset"] > .flex-1.min-h-0.flex.flex-col',
-  )
+  return document.querySelector<HTMLElement>('[data-slot="sidebar-inset"] > .flex-1.min-h-0.flex.flex-col')
 }
 
 describe('App shell bottom spacing for mobile bottom nav', () => {
@@ -351,17 +343,17 @@ describe('App routing split for settings scopes', () => {
     window.localStorage.clear()
   })
 
-  it('redirects legacy /:projectName/settings/ai (global section under project scope) to /settings/ai', async () => {
-    window.history.replaceState({}, '', '/demo/settings/ai')
+  it('redirects legacy /:projectName/settings/scheduling (global section under project scope) to /settings/scheduling', async () => {
+    window.history.replaceState({}, '', '/demo/settings/scheduling')
 
     renderApp()
 
     // After the replace navigation, the URL must be the application-scope URL.
-    await waitFor(() => expect(window.location.pathname).toBe('/settings/ai'))
+    await waitFor(() => expect(window.location.pathname).toBe('/settings/scheduling'))
   })
 
-  it('renders /settings/ai without showing the "No projects yet" gate even when projects exist', () => {
-    window.history.replaceState({}, '', '/settings/ai')
+  it('renders /settings/scheduling without showing the "No projects yet" gate even when projects exist', () => {
+    window.history.replaceState({}, '', '/settings/scheduling')
 
     const { queryByText } = renderApp()
 
@@ -378,8 +370,8 @@ describe('App routing split for settings scopes', () => {
     expect(window.location.pathname).toBe('/demo/settings/repositories')
   })
 
-  it('redirects legacy /:projectName/settings/agent, /system, /preferences to the application scope', async () => {
-    for (const section of ['agent', 'system', 'preferences']) {
+  it('redirects legacy /:projectName/settings/system and /preferences to the application scope', async () => {
+    for (const section of ['system', 'preferences']) {
       window.history.replaceState({}, '', `/demo/settings/${section}`)
       renderApp()
       await waitFor(() => expect(window.location.pathname).toBe(`/settings/${section}`))
@@ -398,7 +390,7 @@ describe('App routing split for settings scopes', () => {
 
   it('keeps application settings reachable when no project exists (no "No projects yet" prompt)', () => {
     projectsData = []
-    window.history.replaceState({}, '', '/settings/ai')
+    window.history.replaceState({}, '', '/settings/scheduling')
 
     const { queryByText } = renderApp()
 
@@ -448,7 +440,7 @@ describe('App routing split for settings scopes', () => {
   })
 
   it('renders /settings/<app-section> on the application scope (no project prefix) for every global section', () => {
-    for (const section of ['ai', 'agent', 'system', 'preferences']) {
+    for (const section of ['scheduling', 'system', 'preferences']) {
       window.history.replaceState({}, '', `/settings/${section}`)
       renderApp()
       expect(window.location.pathname).toBe(`/settings/${section}`)

@@ -49,16 +49,18 @@ useMswServer(
   http.get('/api/projects/:projectId/workflow-profiles', ({ params }) =>
     HttpResponse.json({
       success: true,
-      data: [{
-        projectId: params.projectId,
-        profileId: 'mohist/local',
-        name: 'Mohist Local',
-        description: 'Standard staged workflow.',
-        sourceProvenance: 'BuiltIn',
-        isBuiltIn: true,
-        definitionSource: null,
-        agentRuntime: 'opencode',
-      }],
+      data: [
+        {
+          projectId: params.projectId,
+          profileId: 'mohist/local',
+          name: 'Mohist Local',
+          description: 'Standard staged workflow.',
+          sourceProvenance: 'BuiltIn',
+          isBuiltIn: true,
+          definitionSource: null,
+          agentRuntime: 'opencode',
+        },
+      ],
     }),
   ),
   http.get('/api/projects/:projectId/workflow-profile/default', ({ params }) =>
@@ -104,9 +106,7 @@ useMswServer(
       },
     }),
   ),
-  http.get('/api/system/update/status', () =>
-    HttpResponse.json({ success: true, data: { hasJob: false, job: null } }),
-  ),
+  http.get('/api/system/update/status', () => HttpResponse.json({ success: true, data: { hasJob: false, job: null } })),
 )
 
 beforeEach(() => {
@@ -119,18 +119,14 @@ const projects: Project[] = [
   {
     id: 'proj-first',
     name: 'first-project',
-    repositories: [
-      { name: 'first', gitUrl: 'git@example.com:first.git', baseBranch: 'main', isDefault: true },
-    ],
+    repositories: [{ name: 'first', gitUrl: 'git@example.com:first.git', baseBranch: 'main', isDefault: true }],
     createdAt: '2026-06-01T00:00:00Z',
     updatedAt: '2026-06-01T00:00:00Z',
   },
   {
     id: 'proj-selected',
     name: 'selected-project',
-    repositories: [
-      { name: 'selected', gitUrl: 'git@example.com:selected.git', baseBranch: 'master', isDefault: true },
-    ],
+    repositories: [{ name: 'selected', gitUrl: 'git@example.com:selected.git', baseBranch: 'master', isDefault: true }],
     createdAt: '2026-06-01T00:00:00Z',
     updatedAt: '2026-06-01T00:00:00Z',
   },
@@ -174,7 +170,7 @@ describe('SettingsPage sub-navigation', () => {
   })
 
   it('renders a left sub-navigation grouped into Application and Project sections (no horizontal tab bar)', () => {
-    renderSettings('/settings/ai')
+    renderSettings('/settings/scheduling')
 
     const subnav = screen.getByTestId('settings-subnav')
     expect(subnav).toBeInTheDocument()
@@ -182,8 +178,7 @@ describe('SettingsPage sub-navigation', () => {
     const applicationGroup = screen.getByTestId('settings-subnav-group-application')
     const projectGroup = screen.getByTestId('settings-subnav-group-project')
 
-    expect(within(applicationGroup).getByTestId('settings-subnav-ai')).toBeInTheDocument()
-    expect(within(applicationGroup).getByTestId('settings-subnav-agent')).toBeInTheDocument()
+    expect(within(applicationGroup).getByTestId('settings-subnav-scheduling')).toBeInTheDocument()
     expect(within(applicationGroup).getByTestId('settings-subnav-system')).toBeInTheDocument()
     expect(within(applicationGroup).getByTestId('settings-subnav-preferences')).toBeInTheDocument()
 
@@ -193,36 +188,32 @@ describe('SettingsPage sub-navigation', () => {
     expect(within(projectGroup).getByTestId('settings-subnav-workflows')).toBeInTheDocument()
     expect(within(projectGroup).getByTestId('settings-subnav-inbox')).toBeInTheDocument()
 
-    expect(screen.queryByTestId('settings-tab-ai')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('settings-tab-scheduling')).not.toBeInTheDocument()
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
   })
 
   it('renders each navigation group as a semantic list of links', () => {
-    renderSettings('/settings/ai')
+    renderSettings('/settings/scheduling')
 
     const applicationList = screen.getByRole('list', { name: 'Application' })
     const projectList = screen.getByRole('list', { name: 'Project' })
 
-    expect(within(applicationList).getAllByRole('listitem')).toHaveLength(4)
+    expect(within(applicationList).getAllByRole('listitem')).toHaveLength(3)
     expect(within(projectList).getAllByRole('listitem')).toHaveLength(5)
-    expect(within(applicationList).getByRole('link', { name: 'Coder Agent' })).toBeInTheDocument()
+    expect(within(applicationList).getByRole('link', { name: 'Scheduling' })).toBeInTheDocument()
     expect(within(projectList).getByRole('link', { name: 'Repositories' })).toBeInTheDocument()
   })
 
   it('application items link to /settings/<section> without a project name segment', () => {
-    renderSettings('/settings/ai')
+    renderSettings('/settings/scheduling')
 
-    expect(screen.getByTestId('settings-subnav-ai')).toHaveAttribute('href', '/settings/ai')
-    expect(screen.getByTestId('settings-subnav-agent')).toHaveAttribute('href', '/settings/agent')
+    expect(screen.getByTestId('settings-subnav-scheduling')).toHaveAttribute('href', '/settings/scheduling')
     expect(screen.getByTestId('settings-subnav-system')).toHaveAttribute('href', '/settings/system')
-    expect(screen.getByTestId('settings-subnav-preferences')).toHaveAttribute(
-      'href',
-      '/settings/preferences',
-    )
+    expect(screen.getByTestId('settings-subnav-preferences')).toHaveAttribute('href', '/settings/preferences')
   })
 
   it('project items link to /:projectName/settings/<section> with the selected project name segment', () => {
-    renderSettings('/settings/ai')
+    renderSettings('/settings/scheduling')
 
     expect(screen.getByTestId('settings-subnav-repositories')).toHaveAttribute(
       'href',
@@ -240,26 +231,14 @@ describe('SettingsPage sub-navigation', () => {
       'href',
       '/selected-project/settings/workflows',
     )
-    expect(screen.getByTestId('settings-subnav-inbox')).toHaveAttribute(
-      'href',
-      '/selected-project/settings/inbox',
-    )
+    expect(screen.getByTestId('settings-subnav-inbox')).toHaveAttribute('href', '/selected-project/settings/inbox')
   })
 
   it('marks only the active sub-nav item with aria-current="page"', () => {
-    renderSettings('/settings/agent')
+    renderSettings('/settings/scheduling')
 
-    expect(screen.getByTestId('settings-subnav-agent')).toHaveAttribute('aria-current', 'page')
-    for (const key of [
-      'ai',
-      'system',
-      'preferences',
-      'repositories',
-      'templates',
-      'label-catalog',
-      'workflows',
-      'inbox',
-    ]) {
+    expect(screen.getByTestId('settings-subnav-scheduling')).toHaveAttribute('aria-current', 'page')
+    for (const key of ['system', 'preferences', 'repositories', 'templates', 'label-catalog', 'workflows', 'inbox']) {
       expect(screen.getByTestId(`settings-subnav-${key}`)).not.toHaveAttribute('aria-current')
     }
   })
@@ -267,15 +246,12 @@ describe('SettingsPage sub-navigation', () => {
   it('active aria-current follows the URL when mounted on a project-scoped section', () => {
     renderSettings('/selected-project/settings/repositories')
 
-    expect(screen.getByTestId('settings-subnav-repositories')).toHaveAttribute(
-      'aria-current',
-      'page',
-    )
-    expect(screen.getByTestId('settings-subnav-ai')).not.toHaveAttribute('aria-current')
+    expect(screen.getByTestId('settings-subnav-repositories')).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByTestId('settings-subnav-scheduling')).not.toHaveAttribute('aria-current')
   })
 
   it('clicking an application item navigates to its /settings/<section> route', () => {
-    renderSettings('/settings/ai')
+    renderSettings('/settings/scheduling')
 
     fireEvent.click(screen.getByTestId('settings-subnav-preferences'))
 
@@ -284,31 +260,28 @@ describe('SettingsPage sub-navigation', () => {
   })
 
   it('clicking a project item navigates to its /:projectName/settings/<section> route', async () => {
-    renderSettings('/settings/ai')
+    renderSettings('/settings/scheduling')
 
     fireEvent.click(screen.getByTestId('settings-subnav-repositories'))
 
     await waitFor(() => {
       expect(reposUrlCaptures.some((u) => u.includes('/projects/proj-selected/repositories'))).toBe(true)
     })
-    expect(screen.getByTestId('settings-subnav-repositories')).toHaveAttribute(
-      'aria-current',
-      'page',
-    )
+    expect(screen.getByTestId('settings-subnav-repositories')).toHaveAttribute('aria-current', 'page')
     expect(screen.getByTestId('repositories-section')).toBeInTheDocument()
   })
 
   it('ArrowDown moves roving focus from the active item to the next item and updates tabIndex', () => {
-    renderSettings('/settings/ai')
+    renderSettings('/settings/scheduling')
 
-    const ai = screen.getByTestId('settings-subnav-ai')
-    const agent = screen.getByTestId('settings-subnav-agent')
-    ai.focus()
-    fireEvent.keyDown(ai, { key: 'ArrowDown' })
+    const scheduling = screen.getByTestId('settings-subnav-scheduling')
+    const system = screen.getByTestId('settings-subnav-system')
+    scheduling.focus()
+    fireEvent.keyDown(scheduling, { key: 'ArrowDown' })
 
-    expect(agent).toHaveFocus()
-    expect(agent).toHaveProperty('tabIndex', 0)
-    expect(ai).toHaveProperty('tabIndex', -1)
+    expect(system).toHaveFocus()
+    expect(system).toHaveProperty('tabIndex', 0)
+    expect(scheduling).toHaveProperty('tabIndex', -1)
   })
 
   it('ArrowDown moves from the last Application item to the first Project item', () => {
@@ -325,15 +298,15 @@ describe('SettingsPage sub-navigation', () => {
   })
 
   it('ArrowUp wraps from the first item to the last item across the full subnav', () => {
-    renderSettings('/settings/ai')
+    renderSettings('/settings/scheduling')
 
-    const ai = screen.getByTestId('settings-subnav-ai')
-    ai.focus()
-    fireEvent.keyDown(ai, { key: 'ArrowUp' })
+    const scheduling = screen.getByTestId('settings-subnav-scheduling')
+    scheduling.focus()
+    fireEvent.keyDown(scheduling, { key: 'ArrowUp' })
 
     expect(screen.getByTestId('settings-subnav-inbox')).toHaveFocus()
     expect(screen.getByTestId('settings-subnav-inbox')).toHaveProperty('tabIndex', 0)
-    expect(ai).toHaveProperty('tabIndex', -1)
+    expect(scheduling).toHaveProperty('tabIndex', -1)
   })
 
   it('ArrowDown wraps from the last item to the first item across the full subnav', () => {
@@ -343,8 +316,8 @@ describe('SettingsPage sub-navigation', () => {
     inbox.focus()
     fireEvent.keyDown(inbox, { key: 'ArrowDown' })
 
-    expect(screen.getByTestId('settings-subnav-ai')).toHaveFocus()
-    expect(screen.getByTestId('settings-subnav-ai')).toHaveProperty('tabIndex', 0)
+    expect(screen.getByTestId('settings-subnav-scheduling')).toHaveFocus()
+    expect(screen.getByTestId('settings-subnav-scheduling')).toHaveProperty('tabIndex', 0)
     expect(inbox).toHaveProperty('tabIndex', -1)
   })
 
@@ -352,8 +325,7 @@ describe('SettingsPage sub-navigation', () => {
     renderSettings('/settings/system')
 
     const indices: Record<string, number> = {
-      ai: screen.getByTestId('settings-subnav-ai').tabIndex,
-      agent: screen.getByTestId('settings-subnav-agent').tabIndex,
+      scheduling: screen.getByTestId('settings-subnav-scheduling').tabIndex,
       system: screen.getByTestId('settings-subnav-system').tabIndex,
       preferences: screen.getByTestId('settings-subnav-preferences').tabIndex,
       repositories: screen.getByTestId('settings-subnav-repositories').tabIndex,
@@ -367,18 +339,17 @@ describe('SettingsPage sub-navigation', () => {
     }
   })
 
-  it('does not render the onboarding banner on the Coder Agent section', () => {
-    renderSettings('/settings/ai')
+  it('does not render the onboarding banner on the Scheduling section', () => {
+    renderSettings('/settings/scheduling')
 
     expect(screen.queryByTestId('settings-onboarding-banner')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /dismiss onboarding banner/i })).not.toBeInTheDocument()
-    expect(screen.queryByText(/start here — select the coder agent model/i)).not.toBeInTheDocument()
   })
 
-  it('redirects an invalid section to /settings/ai (application-scope fallback)', () => {
+  it('redirects an invalid section to /settings/scheduling (application-scope fallback)', () => {
     renderSettings('/settings/not-a-real-section')
 
-    expect(screen.getByTestId('settings-subnav-ai')).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByTestId('settings-subnav-scheduling')).toHaveAttribute('aria-current', 'page')
     expect(screen.queryByTestId('settings-onboarding-banner')).not.toBeInTheDocument()
   })
 })
@@ -409,7 +380,7 @@ describe('SettingsSubNav overflow affordance', () => {
 
   it('does not render a fade affordance when the sub-nav content fits (no overflow)', () => {
     withSimulatedOverflow({ scrollHeight: 200, clientHeight: 400 }, () => {
-      renderSettings('/settings/ai')
+      renderSettings('/settings/scheduling')
 
       const subnav = screen.getByTestId('settings-subnav')
       expect(subnav.getAttribute('data-overflow')).toBe('contained')
@@ -420,7 +391,7 @@ describe('SettingsSubNav overflow affordance', () => {
 
   it('renders the bottom fade affordance when the sub-nav content overflows', () => {
     withSimulatedOverflow({ scrollHeight: 1200, clientHeight: 400 }, () => {
-      renderSettings('/settings/ai')
+      renderSettings('/settings/scheduling')
 
       const subnav = screen.getByTestId('settings-subnav')
       expect(subnav.getAttribute('data-overflow')).toBe('overflowing')
@@ -431,7 +402,7 @@ describe('SettingsSubNav overflow affordance', () => {
 
   it('toggles the top fade on once the user has scrolled away from the top of an overflowing list', () => {
     withSimulatedOverflow({ scrollHeight: 1200, clientHeight: 400 }, () => {
-      renderSettings('/settings/ai')
+      renderSettings('/settings/scheduling')
 
       const subnav = screen.getByTestId('settings-subnav') as HTMLElement
       expect(screen.getByTestId('settings-subnav-fade-top')).toHaveAttribute('data-visible', 'false')
@@ -446,23 +417,20 @@ describe('SettingsSubNav overflow affordance', () => {
 
   it('hides the bottom fade once the user has scrolled to the bottom of an overflowing list', () => {
     withSimulatedOverflow({ scrollHeight: 1200, clientHeight: 400 }, () => {
-      renderSettings('/settings/ai')
+      renderSettings('/settings/scheduling')
 
       const subnav = screen.getByTestId('settings-subnav') as HTMLElement
       subnav.scrollTop = subnav.scrollHeight - subnav.clientHeight
       fireEvent.scroll(subnav)
 
       expect(screen.getByTestId('settings-subnav-fade-top')).toHaveAttribute('data-visible', 'true')
-      expect(screen.getByTestId('settings-subnav-fade-bottom')).toHaveAttribute(
-        'data-visible',
-        'false',
-      )
+      expect(screen.getByTestId('settings-subnav-fade-bottom')).toHaveAttribute('data-visible', 'false')
     })
   })
 
   it('drops the fades after the measured overflow state transitions back to contained (resize)', () => {
     withSimulatedOverflow({ scrollHeight: 1200, clientHeight: 400 }, () => {
-      renderSettings('/settings/ai')
+      renderSettings('/settings/scheduling')
       expect(screen.getByTestId('settings-subnav-fade-bottom')).toBeInTheDocument()
     })
 
@@ -507,8 +475,8 @@ describe('SettingsSubNav dirty-guard', () => {
     vi.clearAllMocks()
   })
 
-  it('proceeds with sub-nav navigation when the Agent form is clean (no prompt)', async () => {
-    renderSettings('/settings/agent')
+  it('proceeds with sub-nav navigation when the Scheduling form is clean (no prompt)', async () => {
+    renderSettings('/settings/scheduling')
 
     await waitFor(() => {
       expect(screen.getByText('Session Timeout')).toBeInTheDocument()
@@ -523,8 +491,8 @@ describe('SettingsSubNav dirty-guard', () => {
     expect(screen.queryByTestId('settings-dirty-discard-alert')).not.toBeInTheDocument()
   })
 
-  it('opens the discard dialog when selecting another tab while the Agent form is dirty', async () => {
-    renderSettings('/settings/agent')
+  it('opens the discard dialog when selecting another tab while the Scheduling form is dirty', async () => {
+    renderSettings('/settings/scheduling')
 
     await waitFor(() => {
       expect(screen.getByText('Session Timeout')).toBeInTheDocument()
@@ -542,12 +510,12 @@ describe('SettingsSubNav dirty-guard', () => {
     expect(within(dialog).getByTestId('settings-dirty-discard-alert-confirm')).toBeInTheDocument()
     expect(within(dialog).getByTestId('settings-dirty-discard-alert-cancel')).toBeInTheDocument()
 
-    expect(screen.getByTestId('settings-subnav-agent')).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByTestId('settings-subnav-scheduling')).toHaveAttribute('aria-current', 'page')
     expect(screen.queryByTestId('preferences-theme-card')).not.toBeInTheDocument()
   })
 
   it('keeps the dirty form intact when the discard dialog is cancelled', async () => {
-    renderSettings('/settings/agent')
+    renderSettings('/settings/scheduling')
 
     await waitFor(() => {
       expect(screen.getByText('Session Timeout')).toBeInTheDocument()
@@ -566,7 +534,7 @@ describe('SettingsSubNav dirty-guard', () => {
       expect(screen.queryByTestId('settings-dirty-discard-alert')).not.toBeInTheDocument()
     })
 
-    expect(screen.getByTestId('settings-subnav-agent')).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByTestId('settings-subnav-scheduling')).toHaveAttribute('aria-current', 'page')
     expect(screen.queryByTestId('preferences-theme-card')).not.toBeInTheDocument()
 
     const sessionInputAfter = getInputByLabel('Session Timeout') as HTMLInputElement
@@ -574,7 +542,7 @@ describe('SettingsSubNav dirty-guard', () => {
   })
 
   it('navigates to the requested tab after the dirty dialog is confirmed', async () => {
-    renderSettings('/settings/agent')
+    renderSettings('/settings/scheduling')
 
     await waitFor(() => {
       expect(screen.getByText('Session Timeout')).toBeInTheDocument()
@@ -596,7 +564,7 @@ describe('SettingsSubNav dirty-guard', () => {
   })
 
   it('clears dirty state after navigating away so the next tab switch is unguarded', async () => {
-    renderSettings('/settings/agent')
+    renderSettings('/settings/scheduling')
 
     await waitFor(() => {
       expect(screen.getByText('Session Timeout')).toBeInTheDocument()

@@ -52,10 +52,11 @@ function AgentRow({
   const agentType = useMemo(() => getAgentType(agent), [agent])
   const lifecycle = useMemo(() => getLifecycleStatus(agent), [agent])
   const isArchived = agent.status === 'archived'
+  const isBuiltIn = agent.origin === 'built-in'
   const executability = agent.executability?.state ?? 'unknown'
   const leadingGap = agent.executability?.gaps[0]
   const availabilityFeedback =
-    !isArchived && availability && !availability.canStartNow
+    !isArchived && !isBuiltIn && availability && !availability.canStartNow
       ? getAgentAvailabilityFeedback(availability.waitingReason)
       : null
 
@@ -80,6 +81,22 @@ function AgentRow({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-foreground truncate">{agent.name}</span>
+              <Badge
+                data-testid={`agent-origin-${agent.id}`}
+                variant="outline"
+                className={`text-[10px] px-1 py-0 h-4 ${isBuiltIn ? 'text-blue-700 border-blue-300' : 'text-muted-foreground'}`}
+              >
+                {isBuiltIn ? 'Built-in' : 'Project'}
+              </Badge>
+              {agent.overridesBuiltIn && (
+                <Badge
+                  data-testid={`agent-overrides-built-in-${agent.id}`}
+                  variant="outline"
+                  className="text-[10px] px-1 py-0 h-4 text-amber-700 border-amber-300"
+                >
+                  Overrides built-in
+                </Badge>
+              )}
               {isArchived && (
                 <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 text-muted-foreground">
                   <ArchiveIcon className="size-3 mr-0.5" />
@@ -89,16 +106,12 @@ function AgentRow({
             </div>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-xs text-muted-foreground">{agentType}</span>
-              {model && (
+              <span className="text-xs text-muted-foreground/50">·</span>
+              <span className="text-xs text-muted-foreground">{model ?? 'Runtime default'}</span>
+              {variant && (
                 <>
                   <span className="text-xs text-muted-foreground/50">·</span>
-                  <span className="text-xs text-muted-foreground">{model}</span>
-                  {variant && (
-                    <>
-                      <span className="text-xs text-muted-foreground/50">·</span>
-                      <span className="text-xs text-muted-foreground">{variant}</span>
-                    </>
-                  )}
+                  <span className="text-xs text-muted-foreground">{variant}</span>
                 </>
               )}
             </div>
@@ -137,19 +150,29 @@ function AgentRow({
           <span
             data-testid={`agent-availability-${agent.id}`}
             data-state={
-              isArchived ? 'archived' : availability ? (availability.canStartNow ? 'available' : 'waiting') : 'unknown'
+              isArchived
+                ? 'archived'
+                : isBuiltIn
+                  ? 'built-in'
+                  : availability
+                    ? availability.canStartNow
+                      ? 'available'
+                      : 'waiting'
+                    : 'unknown'
             }
             className={availability?.canStartNow ? 'text-emerald-700' : 'text-muted-foreground'}
           >
             {isArchived
               ? 'Availability: Not tracked for archived agents'
-              : availability
-                ? availability.canStartNow
-                  ? 'Availability: Can start now'
-                  : `Availability: ${availabilityFeedback!.title}`
-                : availabilityLoading
-                  ? 'Availability: Loading...'
-                  : 'Availability: Unknown'}
+              : isBuiltIn
+                ? 'Availability: Not tracked for built-in Agents'
+                : availability
+                  ? availability.canStartNow
+                    ? 'Availability: Can start now'
+                    : `Availability: ${availabilityFeedback!.title}`
+                  : availabilityLoading
+                    ? 'Availability: Loading...'
+                    : 'Availability: Unknown'}
           </span>
           {availabilityFeedback && (
             <p
@@ -162,7 +185,7 @@ function AgentRow({
           )}
         </div>
         <span data-testid={`agent-workload-${agent.id}`} className="text-muted-foreground">
-          {isArchived
+          {isArchived || isBuiltIn
             ? 'Workload: Not tracked'
             : `Active: ${availability?.activeRuns ?? 'unknown'}, Queued: ${availability?.queuedCount ?? 'unknown'}`}
         </span>

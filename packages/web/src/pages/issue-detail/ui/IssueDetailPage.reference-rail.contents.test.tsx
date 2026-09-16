@@ -1,13 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import {
-  DEFAULT_RECOVERY,
-  makeIssue,
-  mockMatchMedia,
-  renderPage,
-} from './_issueDetailReferenceRailTestUtils'
+import { DEFAULT_RECOVERY, makeIssue, mockMatchMedia, renderPage } from './_issueDetailReferenceRailTestUtils'
 import { mockIssue, mockIssueCommits, mockIssueDiff, mountIssueDetail } from './_issueDetailMsw'
-
 
 mountIssueDetail({ issue: makeIssue() })
 
@@ -21,18 +15,19 @@ afterEach(() => {
 })
 
 describe('IssueDetailPage reference-rail — metadata and configuration only', () => {
-  it('exposes metadata, model, workflow-profile control, and prerequisites in the rail', async () => {
-    mockIssue(makeIssue({
-      model: 'sonnet',
-      repository: {
-        name: 'master',
-        baseBranch: 'master',
-        gitUrl: 'https://github.com/suraciii/mohist.git',
-      },
-      prereq: [
-        { number: 9, title: 'Prerequisite issue', completed: true },
-      ],
-    }))
+  it('exposes metadata, the named execution Agents, the workflow-profile control, and prerequisites in the rail', async () => {
+    mockIssue(
+      makeIssue({
+        workflowProfileId: 'mohist/local',
+        model: 'sonnet',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        prereq: [{ number: 9, title: 'Prerequisite issue', completed: true }],
+      }),
+    )
 
     renderPage()
 
@@ -45,25 +40,56 @@ describe('IssueDetailPage reference-rail — metadata and configuration only', (
 
     const detailsToggle = screen.getByTestId('reference-rail-details-toggle')
     const profileToggle = screen.getByTestId('reference-rail-workflow-profile-toggle')
-    const configurationToggle = screen.getByTestId('reference-rail-configuration-toggle')
+    const agentsToggle = screen.getByTestId('reference-rail-agents-toggle')
     expect(referenceRail.contains(detailsToggle)).toBe(true)
     expect(referenceRail.contains(profileToggle)).toBe(true)
-    expect(referenceRail.contains(configurationToggle)).toBe(true)
-    expect(within(configurationToggle).getByText('Configuration')).toBeTruthy()
-    expect(within(configurationToggle).queryByText('CONF…')).toBeNull()
+    expect(referenceRail.contains(agentsToggle)).toBe(true)
+    expect(within(agentsToggle).getByText('Execution Agents')).toBeTruthy()
+    // The rail shows an Agent's configuration and routes to the Agents page;
+    // per-Issue model configuration is gone.
+    expect(within(agentsToggle).queryByText('Configuration')).toBeNull()
+    expect(screen.queryByTestId('reference-rail-configuration-toggle')).toBeNull()
     expect(referenceRail.querySelectorAll('select')).toHaveLength(0)
   })
 
+  it("lists the Profile's named Agents with their effective configuration and a route to the Agents page", async () => {
+    mockIssue(makeIssue({ workflowProfileId: 'mohist/local' }))
+
+    renderPage()
+
+    const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
+    expect(referenceRail.dataset.railMode).toBe('desktop')
+
+    const planner = await screen.findByTestId('workflow-agent-mohist/planner')
+    await waitFor(() => expect(planner).toHaveAttribute('data-state', 'resolved'))
+    expect(within(planner).getByText('mohist/planner')).toBeTruthy()
+    expect(within(planner).getByText('Built-in')).toBeTruthy()
+    expect(within(planner).getByTestId('workflow-agent-runtime-mohist/planner')).toHaveTextContent('Pi')
+    expect(within(planner).getByTestId('workflow-agent-model-mohist/planner')).toHaveTextContent('Runtime default')
+    expect(within(planner).getByTestId('workflow-agent-configure-mohist/planner')).toHaveAttribute(
+      'href',
+      '/Project%201/agents/builtin%3Amohist%2Fplanner',
+    )
+
+    expect(await screen.findByTestId('workflow-agent-mohist/builder')).toBeInTheDocument()
+    // No selector, no model input: configuration lives on the Agents page.
+    const agentsBlock = screen.getByTestId('workflow-agents-block')
+    expect(agentsBlock.querySelectorAll('select')).toHaveLength(0)
+    expect(agentsBlock.querySelectorAll('input')).toHaveLength(0)
+  })
+
   it('does not place lifecycle or workflow actions in the reference rail (they live in the issue decision surface)', async () => {
-    mockIssue(makeIssue({
-      health: 'blocked',
-      blockedReason: 'Blocked by runtime execution.',
-      recovery: {
-        ...DEFAULT_RECOVERY,
-        latestAttemptState: 'failed',
-        allowedActions: ['stop', 'retry', 'resume', 'rerun'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        health: 'blocked',
+        blockedReason: 'Blocked by runtime execution.',
+        recovery: {
+          ...DEFAULT_RECOVERY,
+          latestAttemptState: 'failed',
+          allowedActions: ['stop', 'retry', 'resume', 'rerun'],
+        },
+      }),
+    )
 
     renderPage()
 
@@ -76,26 +102,40 @@ describe('IssueDetailPage reference-rail — metadata and configuration only', (
     expect(referenceRail.textContent ?? '').not.toContain('Build decision surface')
     expect(referenceRail.textContent ?? '').not.toContain('Blocked by runtime execution.')
 
-    for (const kind of ['approve', 'send-back', 'retry', 'resume', 'rerun', 'stop', 'start', 'mark-ready', 'close', 'mark-as-done']) {
-      const action = referenceRail.querySelector(`[data-testid="runtime-action-${kind}"]`)
-        ?? referenceRail.querySelector(`[data-testid="decision-action-${kind}"]`)
+    for (const kind of [
+      'approve',
+      'send-back',
+      'retry',
+      'resume',
+      'rerun',
+      'stop',
+      'start',
+      'mark-ready',
+      'close',
+      'mark-as-done',
+    ]) {
+      const action =
+        referenceRail.querySelector(`[data-testid="runtime-action-${kind}"]`) ??
+        referenceRail.querySelector(`[data-testid="decision-action-${kind}"]`)
       expect(action).toBeNull()
     }
   })
 
   it('does not place workflow progress, outputs, changes/diff, commits, description, or comments in the rail', async () => {
-    mockIssue(makeIssue({
-      body: 'A description body that should not appear in the rail at all.',
-      comments: [
-        {
-          id: 'c1',
-          author: 'tester',
-          body: 'A reviewer comment.',
-          createdAt: '2026-01-04T00:00:00Z',
-        },
-      ],
-      recovery: DEFAULT_RECOVERY,
-    }))
+    mockIssue(
+      makeIssue({
+        body: 'A description body that should not appear in the rail at all.',
+        comments: [
+          {
+            id: 'c1',
+            author: 'tester',
+            body: 'A reviewer comment.',
+            createdAt: '2026-01-04T00:00:00Z',
+          },
+        ],
+        recovery: DEFAULT_RECOVERY,
+      }),
+    )
     const diffData = {
       available: true,
       reason: null,
@@ -140,10 +180,12 @@ describe('IssueDetailPage reference-rail — metadata and configuration only', (
 
 describe('IssueDetailPage reference-rail — low-frequency items collapsed by default', () => {
   it('keeps the drift panel collapsed by default with its body absent', async () => {
-    mockIssue(makeIssue({
-      drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
-      recovery: DEFAULT_RECOVERY,
-    }))
+    mockIssue(
+      makeIssue({
+        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+        recovery: DEFAULT_RECOVERY,
+      }),
+    )
 
     renderPage()
 
@@ -154,10 +196,12 @@ describe('IssueDetailPage reference-rail — low-frequency items collapsed by de
   })
 
   it('expands the drift panel only on a deliberate click', async () => {
-    mockIssue(makeIssue({
-      drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
-      recovery: DEFAULT_RECOVERY,
-    }))
+    mockIssue(
+      makeIssue({
+        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+        recovery: DEFAULT_RECOVERY,
+      }),
+    )
 
     renderPage()
 
@@ -175,21 +219,23 @@ describe('IssueDetailPage reference-rail — low-frequency items collapsed by de
   })
 
   it('keeps the convergence panel collapsed by default with its body absent', async () => {
-    mockIssue(makeIssue({
-      health: 'blocked',
-      convergence: {
-        blockingItemCount: 1,
-        directlyRepairedCount: 0,
-        reactionAttempts: 0,
-        attemptedItemIds: [],
-        resolvedItemIds: [],
-        unresolvedItemIds: ['cb-1'],
-        newBlockingItemIds: [],
-        nonBlockingItemIds: [],
-        blockedReason: 'A blocking check failed.',
-      },
-      recovery: DEFAULT_RECOVERY,
-    }))
+    mockIssue(
+      makeIssue({
+        health: 'blocked',
+        convergence: {
+          blockingItemCount: 1,
+          directlyRepairedCount: 0,
+          reactionAttempts: 0,
+          attemptedItemIds: [],
+          resolvedItemIds: [],
+          unresolvedItemIds: ['cb-1'],
+          newBlockingItemIds: [],
+          nonBlockingItemIds: [],
+          blockedReason: 'A blocking check failed.',
+        },
+        recovery: DEFAULT_RECOVERY,
+      }),
+    )
 
     renderPage()
 
@@ -200,36 +246,42 @@ describe('IssueDetailPage reference-rail — low-frequency items collapsed by de
   })
 
   it('does not render an empty convergence rail card for blocked issues without convergence content', async () => {
-    mockIssue(makeIssue({
-      health: 'blocked',
-      blockedReason: 'Runtime blocked without convergence payload.',
-      recovery: DEFAULT_RECOVERY,
-    }))
+    mockIssue(
+      makeIssue({
+        health: 'blocked',
+        blockedReason: 'Runtime blocked without convergence payload.',
+        recovery: DEFAULT_RECOVERY,
+      }),
+    )
 
     renderPage()
 
     const headline = await waitFor(() => screen.getByTestId('status-headline'))
     expect(headline.dataset.summary).toBe('blocked')
-    expect(screen.getByTestId('decision-rationale').textContent ?? '').toContain('Runtime blocked without convergence payload.')
+    expect(screen.getByTestId('decision-rationale').textContent ?? '').toContain(
+      'Runtime blocked without convergence payload.',
+    )
     expect(screen.queryByTestId('reference-rail-convergence')).toBeNull()
   })
 
   it('expands the convergence panel only on a deliberate click', async () => {
-    mockIssue(makeIssue({
-      health: 'blocked',
-      convergence: {
-        blockingItemCount: 1,
-        directlyRepairedCount: 0,
-        reactionAttempts: 0,
-        attemptedItemIds: [],
-        resolvedItemIds: [],
-        unresolvedItemIds: ['cb-1'],
-        newBlockingItemIds: [],
-        nonBlockingItemIds: [],
-        blockedReason: 'A blocking check failed.',
-      },
-      recovery: DEFAULT_RECOVERY,
-    }))
+    mockIssue(
+      makeIssue({
+        health: 'blocked',
+        convergence: {
+          blockingItemCount: 1,
+          directlyRepairedCount: 0,
+          reactionAttempts: 0,
+          attemptedItemIds: [],
+          resolvedItemIds: [],
+          unresolvedItemIds: ['cb-1'],
+          newBlockingItemIds: [],
+          nonBlockingItemIds: [],
+          blockedReason: 'A blocking check failed.',
+        },
+        recovery: DEFAULT_RECOVERY,
+      }),
+    )
 
     renderPage()
 
@@ -247,10 +299,12 @@ describe('IssueDetailPage reference-rail — low-frequency items collapsed by de
 
   it('keeps the drift panel collapsed on a narrow viewport until a deliberate click', async () => {
     mockMatchMedia(true)
-    mockIssue(makeIssue({
-      drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
-      recovery: DEFAULT_RECOVERY,
-    }))
+    mockIssue(
+      makeIssue({
+        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+        recovery: DEFAULT_RECOVERY,
+      }),
+    )
 
     renderPage()
 
@@ -267,28 +321,31 @@ describe('IssueDetailPage reference-rail — low-frequency items collapsed by de
 
 describe('IssueDetailPage reference-rail — rail contents exclusivity (full set of conditional cards)', () => {
   it('only renders rail cards from the allowed metadata/config/non-runtime action set', async () => {
-    mockIssue(makeIssue({
-      model: 'sonnet',
-      repository: {
-        name: 'master',
-        baseBranch: 'master',
-        gitUrl: 'https://github.com/suraciii/mohist.git',
-      },
-      drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
-      convergence: {
-        blockingItemCount: 1,
-        directlyRepairedCount: 0,
-        reactionAttempts: 0,
-        attemptedItemIds: [],
-        resolvedItemIds: [],
-        unresolvedItemIds: ['cb-1'],
-        newBlockingItemIds: [],
-        nonBlockingItemIds: [],
-        blockedReason: 'A blocking check failed.',
-      },
-      prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
-      recovery: DEFAULT_RECOVERY,
-    }))
+    mockIssue(
+      makeIssue({
+        workflowProfileId: 'mohist/local',
+        model: 'sonnet',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+        convergence: {
+          blockingItemCount: 1,
+          directlyRepairedCount: 0,
+          reactionAttempts: 0,
+          attemptedItemIds: [],
+          resolvedItemIds: [],
+          unresolvedItemIds: ['cb-1'],
+          newBlockingItemIds: [],
+          nonBlockingItemIds: [],
+          blockedReason: 'A blocking check failed.',
+        },
+        prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+        recovery: DEFAULT_RECOVERY,
+      }),
+    )
 
     renderPage()
 
@@ -297,9 +354,9 @@ describe('IssueDetailPage reference-rail — rail contents exclusivity (full set
     const expectedRailCards = [
       'reference-rail-details',
       'reference-rail-workflow-profile',
+      'reference-rail-agents',
       'reference-rail-drift',
       'reference-rail-convergence',
-      'reference-rail-configuration',
       'reference-rail-prerequisites',
     ]
     for (const testId of expectedRailCards) {
@@ -308,28 +365,30 @@ describe('IssueDetailPage reference-rail — rail contents exclusivity (full set
   })
 
   it('does not render rail cards outside the allowed metadata/config/non-runtime action set', async () => {
-    mockIssue(makeIssue({
-      model: 'sonnet',
-      repository: {
-        name: 'master',
-        baseBranch: 'master',
-        gitUrl: 'https://github.com/suraciii/mohist.git',
-      },
-      drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
-      convergence: {
-        blockingItemCount: 1,
-        directlyRepairedCount: 0,
-        reactionAttempts: 0,
-        attemptedItemIds: [],
-        resolvedItemIds: [],
-        unresolvedItemIds: ['cb-1'],
-        newBlockingItemIds: [],
-        nonBlockingItemIds: [],
-        blockedReason: 'A blocking check failed.',
-      },
-      prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
-      recovery: DEFAULT_RECOVERY,
-    }))
+    mockIssue(
+      makeIssue({
+        model: 'sonnet',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+        convergence: {
+          blockingItemCount: 1,
+          directlyRepairedCount: 0,
+          reactionAttempts: 0,
+          attemptedItemIds: [],
+          resolvedItemIds: [],
+          unresolvedItemIds: ['cb-1'],
+          newBlockingItemIds: [],
+          nonBlockingItemIds: [],
+          blockedReason: 'A blocking check failed.',
+        },
+        prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+        recovery: DEFAULT_RECOVERY,
+      }),
+    )
 
     renderPage()
 
@@ -356,18 +415,20 @@ describe('IssueDetailPage reference-rail — rail contents exclusivity (full set
   })
 
   it('renders only metadata, configuration, and workflow-profile on the rail (no decision surface)', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop', 'retry', 'resume', 'rerun'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop', 'retry', 'resume', 'rerun'],
+        },
+      }),
+    )
 
     renderPage()
 

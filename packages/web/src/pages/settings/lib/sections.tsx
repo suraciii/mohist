@@ -9,7 +9,6 @@ import {
   type SettingsSectionScope,
 } from '../../../shared/config/settings-sections'
 import {
-  BotIcon,
   ClockIcon,
   FileTextIcon,
   FolderTreeIcon,
@@ -29,13 +28,12 @@ export interface SettingsSectionMeta {
 }
 
 export const SETTINGS_SECTIONS: readonly SettingsSectionMeta[] = [
-  { key: 'ai', label: 'Coder Agent', icon: <BotIcon />, scope: 'application' },
   {
-    key: 'agent',
-    label: 'Runtime',
+    key: 'scheduling',
+    label: 'Scheduling',
     icon: <ClockIcon />,
     scope: 'application',
-    description: 'Configure how Mohist schedules external coder agent sessions.',
+    description: 'Configure Mohist execution timeouts and concurrency.',
   },
   { key: 'repositories', label: 'Repositories', icon: <FolderTreeIcon />, scope: 'project' },
   {
@@ -43,7 +41,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionMeta[] = [
     label: 'Workflows',
     icon: <GitBranchIcon />,
     scope: 'project',
-    description: 'Choose the workflow new issues inherit for this project, then browse the read-only system catalog below.',
+    description:
+      'Choose the workflow new issues inherit for this project, then browse the read-only system catalog below.',
   },
   {
     key: 'templates',
@@ -57,7 +56,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionMeta[] = [
     label: 'Label catalog',
     icon: <TagIcon />,
     scope: 'project',
-    description: 'Define the labels your project suggests for issues. This catalog is advisory — issues can still carry any free-form label, and edits here do not change existing issue labels.',
+    description:
+      'Define the labels your project suggests for issues. This catalog is advisory — issues can still carry any free-form label, and edits here do not change existing issue labels.',
   },
   { key: 'inbox', label: 'Inbox', icon: <InboxIcon />, scope: 'project' },
   {
@@ -84,11 +84,5 @@ export function getSectionMeta(key: SettingsSectionKey): SettingsSectionMeta {
   return meta
 }
 
-export {
-  SETTINGS_SECTION_KEYS,
-  isApplicationSection,
-  isProjectSection,
-  isSettingsSectionKey,
-  sectionScope,
-}
+export { SETTINGS_SECTION_KEYS, isApplicationSection, isProjectSection, isSettingsSectionKey, sectionScope }
 export type { SettingsSectionKey, SettingsSectionScope }

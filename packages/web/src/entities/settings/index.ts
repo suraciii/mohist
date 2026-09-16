@@ -11,19 +11,14 @@ export {
   useEnableWorkflowProfile,
   useLogLevel,
   useModelVariants,
-  useOpencodeModel,
-  useOpencodeRuntime,
   useProjectDefaultWorkflowProfile,
   useRuntimeConsistency,
   useSetAgentRuntime,
   useSetLogLevel,
   useSetProjectDefaultWorkflowProfile,
-  useSetStageModels,
-  useStageModels,
   useSystemInfo,
   useSystemUpdateStatus,
   useUpdateConfig,
-  useUpdateOpencodeModel,
   useWorkflowProfile,
   useWorkflowProfiles,
 } from './api/queries'
@@ -49,6 +44,7 @@ export type {
 } from './model/types'
 export * from './model/types'
 export * from './model/updateOutcome'
+export { parseProfileAgentNames } from './model/profile-agents'
 export { includesWorkflowProfileId, workflowProfileIdEquals } from './model/workflowProfileIds'
 export { ProgressStages } from './ui/ProgressStages'
 export { SystemUpdateOutcomeView } from './ui/SystemUpdateOutcomeView'

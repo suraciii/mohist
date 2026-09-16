@@ -748,13 +748,14 @@ describe('IssueDetailPage reading-flow — decision surface and rail content exc
     }
   })
 
-  it('does not place metadata, model, profile, prerequisites, drift, or convergence blocks inside the reading flow', async () => {
+  it('does not place metadata, named-Agent configuration, profile, prerequisites, drift, or convergence blocks inside the reading flow', async () => {
     mockIssue(
       makeIssue({
         status: 'in_progress',
         workflowStage: 'build',
         workflowStatus: 'running',
         health: 'blocked',
+        workflowProfileId: 'mohist/local',
         model: 'sonnet',
         repository: {
           name: 'master',
@@ -802,9 +803,9 @@ describe('IssueDetailPage reading-flow — decision surface and rail content exc
     expect(referenceRail.contains(screen.getByTestId('workflow-profile-editor-frame'))).toBe(true)
     expect(readingFlow.contains(screen.getByTestId('workflow-profile-editor-frame'))).toBe(false)
 
-    const configurationSection = screen.getByTestId('reference-rail-configuration')
-    expect(referenceRail.contains(configurationSection)).toBe(true)
-    expect(readingFlow.contains(configurationSection)).toBe(false)
+    const agentsSection = screen.getByTestId('reference-rail-agents')
+    expect(referenceRail.contains(agentsSection)).toBe(true)
+    expect(readingFlow.contains(agentsSection)).toBe(false)
 
     const prereqSection = screen.getByTestId('reference-rail-prerequisites')
     expect(referenceRail.contains(prereqSection)).toBe(true)

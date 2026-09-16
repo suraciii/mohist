@@ -7,9 +7,7 @@ import { toast } from 'sonner'
 import { useMswServer } from '../../../../tests/support/msw'
 import type { GeneralConfig } from '../../../entities/settings'
 
-const { AgentSettingsSection } = await import(
-  './AgentSettingsSection'
-)
+const { AgentSettingsSection } = await import('./AgentSettingsSection')
 
 const DEFAULT_CONFIG: GeneralConfig = {
   agentTimeout: 600,
@@ -35,7 +33,7 @@ useMswServer(
   }),
   http.put('/api/config/:key', async ({ params, request }) => {
     const key = params.key as string
-    const body = await request.json() as { value: number }
+    const body = (await request.json()) as { value: number }
     putCaptures.push({ key, value: body.value })
     if (_putError) {
       return HttpResponse.json({ success: false, error: _putError.message }, { status: _putError.status ?? 500 })
@@ -113,13 +111,13 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('AgentSettingsSection (Runtime tab)', () => {
-  it('renders the runtime panel successfully when config exposes scheduling values', async () => {
+describe('AgentSettingsSection (Scheduling section)', () => {
+  it('renders the scheduling panel successfully when config exposes scheduling values', async () => {
     const { queryClient } = renderSection()
 
     await waitFor(() => {
       expect(queryClient.isFetching()).toBe(0)
-      expect(screen.getByText('Runtime')).toBeInTheDocument()
+      expect(screen.getByText('Scheduling')).toBeInTheDocument()
     })
     expect(screen.queryByText(/Failed to load settings/i)).not.toBeInTheDocument()
     const sessionInput = getInputByLabel('Session Timeout')
@@ -208,9 +206,7 @@ describe('AgentSettingsSection (Runtime tab)', () => {
     })
 
     fireEvent.focus(screen.getByText('Session Timeout'))
-    expect(screen.getByRole('tooltip')).toHaveTextContent(
-      'Maximum total time an external coder agent session can run.',
-    )
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Maximum total time an Agent session can run.')
     fireEvent.blur(screen.getByText('Session Timeout'))
 
     fireEvent.focus(screen.getByText('Stage Timeout'))
@@ -236,9 +232,7 @@ describe('AgentSettingsSection (Runtime tab)', () => {
     await waitFor(() => expect(putCaptures.length).toBe(1))
     expect(putCaptures[0]).toEqual({ key: 'agentTimeout', value: 1200 })
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled(),
-    )
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled())
     expect(screen.queryByText(/Settings saved successfully/i)).not.toBeInTheDocument()
   })
 
@@ -257,9 +251,7 @@ describe('AgentSettingsSection (Runtime tab)', () => {
 
     await waitFor(() => expect(putCaptures.length).toBeGreaterThan(0))
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled(),
-    )
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled())
 
     const errorBanner = await screen.findByTestId('agent-runtime-save-error')
     expect(errorBanner).toHaveAttribute('role', 'alert')
@@ -271,7 +263,10 @@ describe('AgentSettingsSection (Runtime tab)', () => {
 
   it('disables unsupported fields with explanatory text and excludes them from save payloads', async () => {
     vi.useRealTimers()
-    _configData = makeGeneralConfig({ maxGracePeriods: undefined as unknown as number, pollInterval: undefined as unknown as number })
+    _configData = makeGeneralConfig({
+      maxGracePeriods: undefined as unknown as number,
+      pollInterval: undefined as unknown as number,
+    })
 
     renderSection()
 
@@ -373,9 +368,7 @@ describe('AgentSettingsSection (Runtime tab)', () => {
 
     await screen.findByTestId('agent-reset-alert')
 
-    const handWrittenOverlay = document.querySelector(
-      '.fixed.inset-0.flex.items-center.justify-center.bg-black\\/50',
-    )
+    const handWrittenOverlay = document.querySelector('.fixed.inset-0.flex.items-center.justify-center.bg-black\\/50')
     expect(handWrittenOverlay).toBeNull()
   })
 })
@@ -463,7 +456,7 @@ describe('AgentSettingsSection mutation feedback', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Reset to Defaults/ }))
 
-    await screen.findByText('Reset Coder Agent Settings')
+    await screen.findByText('Reset Scheduling Settings')
 
     fireEvent.click(screen.getByRole('button', { name: /^Reset$/ }))
 
@@ -496,7 +489,7 @@ describe('AgentSettingsSection mutation feedback', () => {
 
     const callsBeforeReset = vi.mocked(toast.error).mock.calls.length
     fireEvent.click(screen.getByRole('button', { name: /Reset to Defaults/ }))
-    await screen.findByText('Reset Coder Agent Settings')
+    await screen.findByText('Reset Scheduling Settings')
     fireEvent.click(screen.getByRole('button', { name: /^Reset$/ }))
 
     await waitFor(() => {

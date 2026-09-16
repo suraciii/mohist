@@ -190,8 +190,8 @@ function LocationProbe() {
 }
 
 /**
- * Task-first launches need a catalog-backed Model: with no Project-level
- * default there is nothing else to resolve the Model from.
+ * Picks a catalog-backed Model for a task-first launch. Unset stays a valid
+ * choice (Runtime default); this helper is for tests that need an explicit one.
  */
 export async function chooseExecutionModel(model = 'anthropic/claude-3') {
   await waitFor(() => expect(screen.getByRole('button', { name: 'Model' })).not.toBeDisabled())

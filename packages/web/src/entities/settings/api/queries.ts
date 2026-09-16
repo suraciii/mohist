@@ -24,26 +24,17 @@ import {
   getAgentRuntime,
   getConfig,
   getLogLevel,
-  getModel,
-  getOpencodeModel,
-  getOpencodeModelConfig,
-  getOpencodeRuntime,
   getProjectDefaultWorkflowProfile,
   getRuntimeConsistency,
-  getStageModels,
   getSystemInfo,
   getSystemUpdateStatus,
   getWorkflowProfile,
   getWorkflowProfiles,
   getModels,
   setLogLevel,
-  setModel,
-  setOpencodeModel,
   setProjectDefaultWorkflowProfile,
-  setStageModel,
   updateAgentRuntime,
   updateConfig,
-  updateOpencodeModel,
 } from './client'
 
 type InvalidationClient = Pick<QueryClient, 'invalidateQueries'>
@@ -99,36 +90,6 @@ export function useUpdateConfig() {
   })
 }
 
-export function useOpencodeModel() {
-  const { projectId } = useProject()
-  return useQuery<{ model: string | null; variant: string | null; reasoningEffort: string | null }>({
-    queryKey: ['opencode-model', projectId],
-    queryFn: () => getOpencodeModel(projectId),
-    enabled: !!projectId,
-  })
-}
-
-export function useUpdateOpencodeModel() {
-  const queryClient = useQueryClient()
-  const { projectId } = useProject()
-  return useMutation<
-    { model: string | null; variant: string | null; reasoningEffort: string | null },
-    Error,
-    { model: string | null; variant?: string | null; reasoningEffort?: string | null }
-  >({
-    mutationFn: ({ model, variant, reasoningEffort }) =>
-      updateOpencodeModel(projectId, model, variant, reasoningEffort),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['opencode-model', projectId] })
-      queryClient.invalidateQueries({ queryKey: ['stage-models', projectId] })
-      toast.success('Model updated')
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Request failed')
-    },
-  })
-}
-
 export function availableModelIdsQueryOptions(
   projectId: string | null | undefined,
   runtime: AgentRuntime | string | null = DEFAULT_AGENT_RUNTIME,
@@ -167,13 +128,6 @@ export function useModelVariants(runtime: AgentRuntime | string | null = DEFAULT
   return selectModelVariants(data)
 }
 
-export function useOpencodeRuntime() {
-  return useQuery<{ mode: string; command: string; model: string | null; note: string }, Error>({
-    queryKey: ['opencode-runtime'],
-    queryFn: () => getOpencodeRuntime(),
-  })
-}
-
 export function useSystemUpdateStatus(enabled = true) {
   return useQuery<SystemUpdateStatusEnvelope, Error>({
     queryKey: ['system-update-status'],
@@ -189,48 +143,6 @@ export function useSystemUpdateStatus(enabled = true) {
         return false
       }
       return false
-    },
-  })
-}
-
-export function useModel() {
-  return useQuery<{ model: string | null }>({
-    queryKey: ['model'],
-    queryFn: () => getModel(),
-  })
-}
-
-export function useSetModel() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (model: string | null) => setModel(model),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['model'] })
-      toast.success('Model updated')
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Request failed')
-    },
-  })
-}
-
-export function useOpencodeModelConfig() {
-  return useQuery<{ model: string | null }>({
-    queryKey: ['opencode-model-config'],
-    queryFn: () => getOpencodeModelConfig(),
-  })
-}
-
-export function useSetOpencodeModelConfig() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (model: string | null) => setOpencodeModel(model),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['opencode-model-config'] })
-      toast.success('Model updated')
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Request failed')
     },
   })
 }
@@ -276,44 +188,6 @@ export function useSetAgentRuntime() {
     onError: (err: Error) => {
       queryClient.invalidateQueries({ queryKey: ['agent-runtime'] })
       queryClient.invalidateQueries({ queryKey: ['config'] })
-      toast.error(err.message || 'Request failed')
-    },
-  })
-}
-
-export function useStageModels() {
-  const { projectId } = useProject()
-  return useQuery<{
-    stageModels: Record<string, string> | null
-    stageModelVariants: Record<string, string> | null
-    stageReasoningEfforts: Record<string, string> | null
-  }>({
-    queryKey: ['stage-models', projectId],
-    queryFn: () => getStageModels(projectId),
-    enabled: !!projectId,
-  })
-}
-
-export function useSetStageModels() {
-  const queryClient = useQueryClient()
-  const { projectId } = useProject()
-  return useMutation({
-    mutationFn: ({
-      stage,
-      model,
-      variant,
-      reasoningEffort,
-    }: {
-      stage: string
-      model: string | null
-      variant?: string | null
-      reasoningEffort?: string | null
-    }) => setStageModel(projectId, stage, model, variant, reasoningEffort),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['stage-models', projectId] })
-      toast.success('Stage models updated')
-    },
-    onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
     },
   })
