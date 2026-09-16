@@ -64,7 +64,7 @@ func (p *discoveryProbe) deps(out, errOut *strings.Builder) Dependencies {
 			p.openBrowserCalls++
 			return errors.New("browser execution must not be used")
 		},
-		Input: countingReader{reads: &p.inputReads},
+		Input: discoveryCountingReader{reads: &p.inputReads},
 		Now: func() time.Time {
 			p.nowCalls++
 			return time.Time{}
@@ -108,9 +108,9 @@ func (p *discoveryProbe) deps(out, errOut *strings.Builder) Dependencies {
 	}
 }
 
-type countingReader struct{ reads *int }
+type discoveryCountingReader struct{ reads *int }
 
-func (r countingReader) Read([]byte) (int, error) {
+func (r discoveryCountingReader) Read([]byte) (int, error) {
 	*r.reads++
 	return 0, io.EOF
 }
