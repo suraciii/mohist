@@ -59,6 +59,16 @@ import {
   normalizeUnknownCodex,
 } from './errors.js'
 import { redactCodexCredentialString } from './credential.js'
+import {
+  buildPermissionRejectionUnconfirmed,
+  createPermissionRejection,
+  scheduleCloseoutWarning,
+  scheduleDeadlineInterrupt,
+  type CodexCloseoutTransport,
+  type CodexCloseoutWarningHandle,
+  type CodexDeadlineInterruptHandle,
+  type CodexPermissionRejectionHandle,
+} from './closeout.js'
 import type {
   CodexClock,
   CodexDiagnostic,
@@ -273,15 +283,77 @@ export async function driveTurnToCompletion(
   options: CodexTurnCompletionOptions,
 ): Promise<CodexResult<CodexTurnResult>> {
   const diagnostics: CodexDiagnostic[] = []
+  const closeoutClock = options.clock ?? defaultTurnClock
+  const closeoutTransport: CodexCloseoutTransport = options.transport
   const session = createTurnSession(options, diagnostics)
   const unsubscribe = options.transport.subscribe((message) => {
     routeTurnMessage(message, session, options.transport)
   })
-  const deadlineHandle = options.deadlineMs !== null ? scheduleDeadlineCloseout(options, session) : null
+  // Phase 1 — closeout warning. Fires once at
+  // `min(deadlineMs - CODEX_CLOSEOUT_WARNING_LEAD_MS, 0)`. The
+  // warning text is task-independent and locked.
+  const warningHandle: CodexCloseoutWarningHandle | null =
+    options.deadlineMs !== null
+      ? scheduleCloseoutWarning({
+          transport: closeoutTransport,
+          threadId: options.threadId,
+          turnId: options.turnId,
+          deadlineMs: options.deadlineMs,
+          clock: closeoutClock,
+          nextRequestId: options.nextRequestId,
+          observer: session,
+        })
+      : null
+  // Phase 2 — deadline interrupt. Fixes the result as
+  // `deadline-exceeded` at the deadline and sends `turn/interrupt`.
+  const deadlineHandle: CodexDeadlineInterruptHandle | null =
+    options.deadlineMs !== null
+      ? scheduleDeadlineInterrupt({
+          transport: closeoutTransport,
+          threadId: options.threadId,
+          turnId: options.turnId,
+          deadlineMs: options.deadlineMs,
+          clock: closeoutClock,
+          nextRequestId: options.nextRequestId,
+          observer: session,
+        })
+      : null
+  // Legacy deadline scheduler kept for back-compat with the
+  // pre-closeout hook; it no longer fixes the result itself (the
+  // new deadline interrupt does) but preserves the early-fix
+  // contract for the live lifecycle: as soon as the deadline
+  // fires, the session is resolved with `deadline-exceeded`.
+  const legacyHandle = options.deadlineMs !== null ? legacyScheduleDeadlineCloseout(options, session, deadlineHandle) : null
+  // Permission / user-input rejection state machine. Headless
+  // execution fails closed. The `onUnconfirmed` callback fires
+  // when the budget expires without a matching terminal event;
+  // the lifecycle surfaces `unknown` /
+  // `interruption-unconfirmed` and leaves the AgentSession
+  // binding unchanged.
+  const permissionRejection: CodexPermissionRejectionHandle = createPermissionRejection({
+    transport: closeoutTransport,
+    threadId: options.threadId,
+    turnId: options.turnId,
+    clock: closeoutClock,
+    nextRequestId: options.nextRequestId,
+    observer: session,
+    onUnconfirmed: () => {
+      const unconfirmed = buildPermissionRejectionUnconfirmed({
+        threadId: options.threadId,
+        turnId: options.turnId,
+      })
+      session.fixedUnknown = unconfirmed
+      session.resolve(unconfirmed)
+    },
+  })
+  session.permissionRejection = permissionRejection
   try {
     return await session.settled.promise
   } finally {
-    deadlineHandle?.dispose?.()
+    warningHandle?.dispose()
+    deadlineHandle?.dispose()
+    legacyHandle?.dispose?.()
+    permissionRejection.dispose()
     unsubscribe()
   }
 }
@@ -296,6 +368,9 @@ interface TurnSession {
   readonly observer?: CodexTurnEventObserver
   fixedDeadline: CodexResult<CodexTurnResult> | null
   fixedPermission: CodexResult<CodexTurnResult> | null
+  fixedUnknown: CodexResult<CodexTurnResult> | null
+  /** Permission / user-input rejection state machine. */
+  permissionRejection?: CodexPermissionRejectionHandle
   resolve(value: CodexResult<CodexTurnResult>): void
   observeDiagnostic(diagnostic: CodexDiagnostic): void
   sendInterrupt(transport: CodexTurnTransport): Promise<void>
@@ -304,6 +379,12 @@ interface TurnSession {
    * {@link CodexTurnFacts} that crosses the module boundary.
    */
   snapshotFacts(): CodexTurnFacts
+  /**
+   * The closeout helpers observe diagnostics through this hook so
+   * they can be surfaced through the same channel the lifecycle
+   * already records.
+   */
+  onDiagnostic?(diagnostic: CodexDiagnostic): void
 }
 
 interface MutableTurnFacts {
@@ -345,10 +426,15 @@ function createTurnSession(options: CodexTurnCompletionOptions, diagnostics: Cod
     observer: options.observer,
     fixedDeadline: options.fixedDeadlineResult ?? null,
     fixedPermission: options.fixedPermissionResult ?? null,
+    fixedUnknown: null,
     resolve(value) {
       session.settled.resolve(value)
     },
     observeDiagnostic(diagnostic) {
+      diagnostics.push(diagnostic)
+      options.observer?.onDiagnostic?.(diagnostic)
+    },
+    onDiagnostic(diagnostic) {
       diagnostics.push(diagnostic)
       options.observer?.onDiagnostic?.(diagnostic)
     },
@@ -375,7 +461,20 @@ interface DeadlineHandle {
   dispose(): void
 }
 
-function scheduleDeadlineCloseout(options: CodexTurnCompletionOptions, session: TurnSession): DeadlineHandle {
+/**
+ * Legacy deadline closeout scheduler kept for back-compat with the
+ * pre-closeout hook. The actual deadline interrupt (including the
+ * bounded confirmation of the interrupt RPC) now lives in
+ * `./closeout.ts`; this helper remains to drive the early-fix
+ * behaviour so the session is resolved with `deadline-exceeded`
+ * the instant the deadline fires, regardless of whether the
+ * interrupt RPC has been confirmed.
+ */
+function legacyScheduleDeadlineCloseout(
+  options: CodexTurnCompletionOptions,
+  session: TurnSession,
+  interrupt: CodexDeadlineInterruptHandle | null,
+): DeadlineHandle {
   const deadlineMs = options.deadlineMs as number
   const clock = options.clock ?? defaultTurnClock
   const fixedAtDeadline = () => {
@@ -389,8 +488,12 @@ function scheduleDeadlineCloseout(options: CodexTurnCompletionOptions, session: 
     session.fixedDeadline = result
     session.resolve(result)
     // The interrupt is best-effort; failure is diagnostic but does
-    // not block the fixed deadline result.
-    void session.sendInterrupt(options.transport)
+    // not block the fixed deadline result. The bounded confirmation
+    // observable on `interrupt` is reported through the deadline
+    // closeout helper for diagnostics only.
+    if (interrupt) {
+      void interrupt.awaitConfirmation()
+    }
   }
   const timer = clock.setTimeout(fixedAtDeadline, deadlineMs)
   return {
@@ -491,9 +594,30 @@ function handleServerRequest(
     return
   }
   // Headless execution fails closed: deny, then attempt to interrupt
-  // the exact active Turn. `permission-required` is returned ONLY
-  // after the matching turn/completed event confirms the Turn has
-  // reached a terminal state.
+  // the exact active Turn. The permission-rejection state machine
+  // owns the bounded confirmation budget. `permission-required` is
+  // returned ONLY after the matching turn/completed event confirms
+  // the Turn has reached a terminal state within the budget;
+  // unconfirmed denial stays `unknown` /
+  // `interruption-unconfirmed` and never creates a Workflow
+  // Approval Point.
+  if (session.permissionRejection) {
+    const outcome = session.permissionRejection.observeServerRequest(request)
+    if (outcome === 'active-turn') {
+      // The state machine has already sent the protocol-defined
+      // denial, recorded the diagnostic, and called
+      // `turn/interrupt` on the exact active Turn. The terminal
+      // event observer will resolve the session to
+      // `permission-required` once the matching event arrives.
+      return
+    }
+    if (outcome === 'different-turn') {
+      return
+    }
+  }
+  // Fallback path — the state machine was not wired (legacy
+  // callers). Preserve the pre-existing behaviour so existing
+  // tests that exercise this seam directly keep working.
   transport.denyServerRequest(request.id, 'Codex headless runtime denies approval / permission / user-input requests')
   session.observeDiagnostic({
     severity: 'warning',
@@ -530,6 +654,24 @@ function handleTurnCompleted(event: CodexTurnCompletedEvent, session: TurnSessio
   if (session.fixedPermission && !session.fixedPermission.ok) {
     session.resolve(session.fixedPermission)
     return
+  }
+  if (session.fixedUnknown && !session.fixedUnknown.ok) {
+    // A previously exhausted bounded confirmation budget owns
+    // the outcome. The AgentSession binding is unchanged.
+    session.resolve(session.fixedUnknown)
+    return
+  }
+  // Permission-rejection state machine: a previously observed
+  // server-initiated request denial owns the outcome. The state
+  // machine returns `permission-required` when the matching
+  // interrupted terminal event confirms the interrupt.
+  if (session.permissionRejection) {
+    const permissionResult = session.permissionRejection.observeTurnCompleted(event)
+    if (permissionResult !== null) {
+      session.fixedPermission = permissionResult
+      session.resolve(permissionResult)
+      return
+    }
   }
   const result = translateCompletedStatus(event, session)
   session.resolve(result)

@@ -93,3 +93,19 @@ export {
   type CodexTurnStartSubmission,
   type CodexTurnTransport,
 } from './turn.js'
+
+export {
+  buildPermissionRejectionUnconfirmed,
+  createPermissionRejection,
+  scheduleCloseoutWarning,
+  scheduleDeadlineInterrupt,
+  CODEX_CLOSEOUT_WARNING_LEAD_MS,
+  CODEX_CLOSEOUT_WARNING_TEXT,
+  CODEX_INTERRUPT_CONFIRMATION_BUDGET_MS,
+  type CodexCloseoutObserver,
+  type CodexCloseoutTransport,
+  type CodexCloseoutWarningHandle,
+  type CodexDeadlineConfirmation,
+  type CodexDeadlineInterruptHandle,
+  type CodexPermissionRejectionHandle,
+} from './closeout.js'
