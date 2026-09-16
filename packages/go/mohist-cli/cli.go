@@ -456,6 +456,13 @@ type command struct {
 	helpText         string
 	args             []string
 	outcome          *updateOutcomeReporter
+	// preflightedInput holds the text-carrier result for commands whose
+	// request body is built after a fail-closed input resolution. Empty when
+	// the command does not consume a text carrier. Callers must read the
+	// carrier via resolveTextInput before reaching here so a missing,
+	// permission, or partial-read failure stops the command locally with
+	// ExitUsage=2 instead of being silently coerced to an empty string.
+	preflightedInput string
 }
 
 var diagnosisFields = []string{"workflowRunId", "status", "failure", "tasks", "dispatch", "events"}

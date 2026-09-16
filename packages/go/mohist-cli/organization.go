@@ -465,6 +465,28 @@ func parseLabel(args []string) (command, error) {
 }
 
 func runOrganization(ctx context.Context, deps Dependencies, c *client, cmd command) int {
+	// Text carriers must resolve before Project-state lookup so a missing,
+	// permission, or arbitrary read failure stops the command locally with
+	// ExitUsage=2 instead of falling through to an HTTP request against an
+	// implicit Project. The resolved value is stored on cmd.preflightedInput
+	// and reused by both organizationRequest and the issue-edit-with-labels
+	// pre-flight GET so stdin is consumed at most once per command.
+	switch cmd.kind {
+	case "issue-create", "issue-edit", "issue-comment-create":
+		value, err := resolveTextInput(deps, cmd, "body", "body-file")
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitUsage
+		}
+		cmd.preflightedInput = value
+	case "epic-create", "epic-edit":
+		value, err := resolveTextInput(deps, cmd, "description", "description-file")
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitUsage
+		}
+		cmd.preflightedInput = value
+	}
 	project, ok := resolveProject(deps, argValue(cmd.args, "project", ""))
 	if !ok {
 		writeError(deps.Stderr, errors.New("Run 'mo project use <name-or-id>' or pass --project <name-or-id>"))
@@ -747,7 +769,7 @@ func organizationRequest(cmd command, base string, deps Dependencies) (string, s
 	case "issue-view":
 		return issue, http.MethodGet, nil, false, nil
 	case "issue-create":
-		b := map[string]any{"title": argValue(cmd.args, "title", ""), "body": inputValue(deps, cmd, "body", "body-file"), "labels": labelMap(valuesFor(cmd.args, "label")), "priority": argValue(cmd.args, "priority", ""), "model": argValue(cmd.args, "model", ""), "modelVariant": argValue(cmd.args, "model-variant", ""), "risk": argValue(cmd.args, "risk", ""), "isDraft": true}
+		b := map[string]any{"title": argValue(cmd.args, "title", ""), "body": cmd.preflightedInput, "labels": labelMap(valuesFor(cmd.args, "label")), "priority": argValue(cmd.args, "priority", ""), "model": argValue(cmd.args, "model", ""), "modelVariant": argValue(cmd.args, "model-variant", ""), "risk": argValue(cmd.args, "risk", ""), "isDraft": true}
 		if hasArg(cmd.args, "ready") {
 			b["isDraft"] = false
 		}
@@ -780,7 +802,7 @@ func organizationRequest(cmd command, base string, deps Dependencies) (string, s
 			}
 		}
 		if hasArg(cmd.args, "body") || hasArg(cmd.args, "body-file") {
-			b["body"] = inputValue(deps, cmd, "body", "body-file")
+			b["body"] = cmd.preflightedInput
 		}
 		if hasArg(cmd.args, "parent") {
 			v := argValue(cmd.args, "parent", "")
@@ -825,7 +847,7 @@ func organizationRequest(cmd command, base string, deps Dependencies) (string, s
 	case "issue-prereq-remove":
 		return issue + "/prerequisites/" + url.PathEscape(argValue(cmd.args, "prereq-number", "")), http.MethodDelete, nil, false, nil
 	case "issue-comment-create":
-		b := map[string]any{"body": inputValue(deps, cmd, "body", "body-file")}
+		b := map[string]any{"body": cmd.preflightedInput}
 		if hasArg(cmd.args, "display-name") {
 			b["displayName"] = strings.TrimSpace(argValue(cmd.args, "display-name", ""))
 		}
@@ -891,7 +913,7 @@ func organizationRequest(cmd command, base string, deps Dependencies) (string, s
 	case "epic-list":
 		return epic, http.MethodGet, nil, true, nil
 	case "epic-create":
-		return epic, http.MethodPost, map[string]any{"title": argValue(cmd.args, "title", ""), "description": inputValue(deps, cmd, "description", "description-file"), "priority": argValue(cmd.args, "priority", "")}, false, nil
+		return epic, http.MethodPost, map[string]any{"title": argValue(cmd.args, "title", ""), "description": cmd.preflightedInput, "priority": argValue(cmd.args, "priority", "")}, false, nil
 	case "epic-view":
 		return epic + url.PathEscape(argValue(cmd.args, "number", "")), http.MethodGet, nil, false, nil
 	case "epic-edit":
@@ -902,7 +924,7 @@ func organizationRequest(cmd command, base string, deps Dependencies) (string, s
 			}
 		}
 		if hasArg(cmd.args, "description") || hasArg(cmd.args, "description-file") {
-			b["description"] = inputValue(deps, cmd, "description", "description-file")
+			b["description"] = cmd.preflightedInput
 		}
 		return epic + url.PathEscape(argValue(cmd.args, "number", "")), http.MethodPatch, b, false, nil
 	case "epic-add":
@@ -946,7 +968,7 @@ func issueEditWithLabels(ctx context.Context, deps Dependencies, c *client, cmd 
 		b["title"] = argValue(cmd.args, "title", "")
 	}
 	if hasArg(cmd.args, "body") || hasArg(cmd.args, "body-file") {
-		b["body"] = inputValue(deps, cmd, "body", "body-file")
+		b["body"] = cmd.preflightedInput
 	}
 	if hasArg(cmd.args, "priority") {
 		b["priority"] = argValue(cmd.args, "priority", "")

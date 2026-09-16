@@ -281,8 +281,36 @@ func runWorkflow(ctx context.Context, deps Dependencies, c *client, cmd command)
 }
 
 func runWorkflowProfile(ctx context.Context, deps Dependencies, c *client, cmd command) int {
+	// Workflow validate is local: resolve its text carrier before the
+	// Project-state lookup so a missing, permission, or arbitrary read
+	// failure stops the command locally without consulting cli-state.json
+	// or issuing any HTTP request.
 	if cmd.kind == "workflow-validate" {
-		return validateWorkflowFile(deps, cmd)
+		source, err := resolveTextInput(deps, cmd, "", "file")
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitUsage
+		}
+		if strings.TrimSpace(source) == "" {
+			writeError(deps.Stderr, errors.New("--file must not be blank"))
+			return ExitUsage
+		}
+		cmd.preflightedInput = source
+		return validateWorkflowFile(deps, cmd, source)
+	}
+	// Create and edit also preflight their complete-document --file input
+	// before Project-state lookup so a failed read fails closed locally.
+	if cmd.kind == "workflow-create" || cmd.kind == "workflow-edit" {
+		source, err := resolveTextInput(deps, cmd, "", "file")
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitUsage
+		}
+		if strings.TrimSpace(source) == "" {
+			writeError(deps.Stderr, errors.New("--file must not be blank"))
+			return ExitUsage
+		}
+		cmd.preflightedInput = source
 	}
 	project, ok := resolveProject(deps, argValue(cmd.args, "project", ""))
 	if !ok {
@@ -290,9 +318,6 @@ func runWorkflowProfile(ctx context.Context, deps Dependencies, c *client, cmd c
 		return ExitOperation
 	}
 	base := "/api/projects/" + url.PathEscape(project) + "/workflow-profiles"
-	if cmd.kind == "workflow-validate" {
-		return validateWorkflowFile(deps, cmd)
-	}
 	var method, path string
 	var body any
 	collection := false
@@ -303,10 +328,10 @@ func runWorkflowProfile(ctx context.Context, deps Dependencies, c *client, cmd c
 		method, path = http.MethodGet, base+"/"+url.PathEscape(argValue(cmd.args, "profile", ""))
 	case "workflow-create":
 		method, path = http.MethodPost, base
-		body = workflowBody(deps, cmd)
+		body = workflowBody(cmd)
 	case "workflow-edit":
 		method, path = http.MethodPut, base+"/"+url.PathEscape(argValue(cmd.args, "profile", ""))
-		body = workflowBody(deps, cmd)
+		body = workflowBody(cmd)
 	case "workflow-delete":
 		method, path = http.MethodDelete, base+"/"+url.PathEscape(argValue(cmd.args, "profile", ""))
 	}
@@ -326,17 +351,12 @@ func runWorkflowProfile(ctx context.Context, deps Dependencies, c *client, cmd c
 	return resourceRequest(ctx, deps, c, method, path, body, cmd, collection)
 }
 
-func workflowBody(deps Dependencies, cmd command) map[string]any {
-	result := map[string]any{"profileId": argValue(cmd.args, "profile", argValue(cmd.args, "id", "")), "name": argValue(cmd.args, "name", ""), "description": argValue(cmd.args, "description", ""), "definitionSource": inputValue(deps, cmd, "", "file")}
+func workflowBody(cmd command) map[string]any {
+	result := map[string]any{"profileId": argValue(cmd.args, "profile", argValue(cmd.args, "id", "")), "name": argValue(cmd.args, "name", ""), "description": argValue(cmd.args, "description", ""), "definitionSource": cmd.preflightedInput}
 	return result
 }
 
-func validateWorkflowFile(deps Dependencies, cmd command) int {
-	source := inputValue(deps, cmd, "", "file")
-	if strings.TrimSpace(source) == "" {
-		writeError(deps.Stderr, errors.New("workflow definition is empty"))
-		return ExitOperation
-	}
+func validateWorkflowFile(deps Dependencies, cmd command, source string) int {
 	if strings.Contains(source, "\t") {
 		writeError(deps.Stderr, errors.New("workflow definition uses tabs, which are not valid YAML indentation"))
 		return ExitOperation

@@ -561,7 +561,12 @@ func runProjectSpace(ctx context.Context, deps Dependencies, c *client, cmd comm
 		return projectUse(ctx, deps, c, argValue(cmd.args, "name", ""))
 	}
 	if cmd.kind == "project-create" {
-		return projectCreate(ctx, deps, c, cmd)
+		verification, err := resolveTextInput(deps, cmd, "verification-command", "verification-command-file")
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitUsage
+		}
+		return projectCreate(ctx, deps, c, cmd, verification)
 	}
 	if cmd.kind == "project-list" {
 		return resourceRequest(ctx, deps, c, http.MethodGet, "/api/projects", nil, cmd, true)
@@ -571,6 +576,36 @@ func runProjectSpace(ctx context.Context, deps Dependencies, c *client, cmd comm
 	}
 	if cmd.kind == "project-delete" {
 		return resourceRequest(ctx, deps, c, http.MethodDelete, "/api/projects/"+url.PathEscape(argValue(cmd.args, "name", "")), nil, cmd, false)
+	}
+	// Text carriers must resolve before Project-state lookup so a missing,
+	// permission, or arbitrary read failure stops the command locally with
+	// ExitUsage=2 instead of falling through to an HTTP request against an
+	// implicit Project. Each affected kind resolves exactly one carrier and
+	// stores the result on cmd.preflightedInput for the body construction
+	// below; downstream helpers never read the carrier again.
+	switch cmd.kind {
+	case "project-workflow-verification-set":
+		value, err := resolveTextInput(deps, cmd, "command", "command-file")
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitUsage
+		}
+		if strings.TrimSpace(value) == "" {
+			writeError(deps.Stderr, errors.New("--command must not be blank"))
+			return ExitUsage
+		}
+		cmd.preflightedInput = value
+	case "project-workflow-prompt-set":
+		value, err := resolveTextInput(deps, cmd, "body", "body-file")
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitUsage
+		}
+		if strings.TrimSpace(value) == "" {
+			writeError(deps.Stderr, errors.New("--body must not be blank"))
+			return ExitUsage
+		}
+		cmd.preflightedInput = value
 	}
 	project, ok := resolveProject(deps, argValue(cmd.args, "project", ""))
 	if !ok {
@@ -606,11 +641,11 @@ func runProjectSpace(ctx context.Context, deps Dependencies, c *client, cmd comm
 	case "project-workflow-verification-view":
 		return resourceRequest(ctx, deps, c, http.MethodGet, base, nil, cmd, false)
 	case "project-workflow-verification-set":
-		return resourceRequest(ctx, deps, c, http.MethodPut, base+"/verification-command", map[string]any{"command": inputValue(deps, cmd, "command", "command-file")}, cmd, false)
+		return resourceRequest(ctx, deps, c, http.MethodPut, base+"/verification-command", map[string]any{"command": cmd.preflightedInput}, cmd, false)
 	case "project-workflow-prompt-get":
 		return resourceRequest(ctx, deps, c, http.MethodGet, base+"/workflow-profile/prompts", nil, cmd, true)
 	case "project-workflow-prompt-set":
-		return resourceRequest(ctx, deps, c, http.MethodPut, base+"/workflow-profile/prompts/"+url.PathEscape(argValue(cmd.args, "key", "")), map[string]any{"body": inputValue(deps, cmd, "body", "body-file")}, cmd, false)
+		return resourceRequest(ctx, deps, c, http.MethodPut, base+"/workflow-profile/prompts/"+url.PathEscape(argValue(cmd.args, "key", "")), map[string]any{"body": cmd.preflightedInput}, cmd, false)
 	case "project-workflow-prompt-clear":
 		return resourceRequest(ctx, deps, c, http.MethodDelete, base+"/workflow-profile/prompts/"+url.PathEscape(argValue(cmd.args, "key", "")), nil, cmd, false)
 	case "project-workflow-prompt-preview":
@@ -647,21 +682,6 @@ func runProjectSpace(ctx context.Context, deps Dependencies, c *client, cmd comm
 		return runVariables(ctx, deps, c, cmd, project)
 	}
 	return ExitUsage
-}
-
-func inputValue(deps Dependencies, c command, plain, file string) string {
-	if hasArg(c.args, plain) {
-		return argValue(c.args, plain, "")
-	}
-	if argValue(c.args, file, "") == "-" {
-		b, _ := io.ReadAll(deps.Input)
-		return string(b)
-	}
-	v, e := deps.ReadFile(argValue(c.args, file, ""))
-	if e != nil {
-		return ""
-	}
-	return strings.TrimSuffix(v, "\n")
 }
 
 func resourceRequest(ctx context.Context, deps Dependencies, c *client, method, path string, body any, cmd command, collection bool) int {
@@ -846,10 +866,13 @@ func projectUse(ctx context.Context, deps Dependencies, c *client, ref string) i
 	return ExitOK
 }
 
-func projectCreate(ctx context.Context, deps Dependencies, c *client, cmd command) int {
+func projectCreate(ctx context.Context, deps Dependencies, c *client, cmd command, verification string) int {
 	path := argValue(cmd.args, "path", "")
 	name := argValue(cmd.args, "name", "")
-	verification := inputValue(deps, cmd, "verification-command", "verification-command-file")
+	if strings.TrimSpace(verification) == "" {
+		writeError(deps.Stderr, errors.New("--verification-command must not be blank"))
+		return ExitUsage
+	}
 	repo := filepath.Base(filepath.Clean(path))
 	if repo == "." || repo == string(filepath.Separator) {
 		writeError(deps.Stderr, errors.New("--path produced an empty repository resource name"))
