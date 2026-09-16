@@ -12,18 +12,11 @@ export interface Repository {
   isDefault: boolean
 }
 
-export interface ProjectDefaultExecutionConfig {
-  runtime: 'opencode' | 'pi'
-  model: string
-  variant?: string | null
-}
-
 export interface Project {
   id: string
   name: string
   createdAt: string
   updatedAt: string
   repositories: Repository[]
-  defaultExecutionConfig?: ProjectDefaultExecutionConfig | null
   verificationCommand?: string | null
 }

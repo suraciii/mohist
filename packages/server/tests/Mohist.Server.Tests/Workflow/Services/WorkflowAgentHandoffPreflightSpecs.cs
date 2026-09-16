@@ -52,7 +52,7 @@ public sealed class WorkflowAgentHandoffPreflightSpecs
             Description = "handoff preflight needs setup",
             Instructions = "follow the task",
             Skills = [],
-            AgentConfig = JsonSerializer.SerializeToElement(new { runtime = "opencode" }),
+            AgentConfig = JsonSerializer.SerializeToElement(new { runtime = "opencode", model = "gpt-4o" }),
             Status = AgentStatus.Active,
             CreatedAt = DateTimeOffset.UnixEpoch,
             UpdatedAt = DateTimeOffset.UnixEpoch,

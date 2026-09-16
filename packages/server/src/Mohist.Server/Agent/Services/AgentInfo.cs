@@ -2,6 +2,12 @@ using System.Text.Json;
 
 namespace Mohist.Server.Agent.Services;
 
+public static class AgentOrigins
+{
+    public const string Project = "project";
+    public const string BuiltIn = "built-in";
+}
+
 [GenerateSerializer]
 public sealed record AgentEffectiveExecutionConfig(
     [property: Id(0)] string Runtime,
@@ -43,4 +49,18 @@ public sealed record AgentInfo(
     [property: Id(15)]
     IReadOnlyList<string>? Permissions = null,
     [property: Id(16)]
-    AgentEffectiveExecutionConfig? EffectiveExecutionConfig = null);
+    AgentEffectiveExecutionConfig? EffectiveExecutionConfig = null,
+    /// <summary>
+    /// <c>project</c> for a stored Project Agent, <c>built-in</c> for an
+    /// unshadowed built-in Workflow Agent definition. Append-only Orleans
+    /// field id (next free after <see cref="EffectiveExecutionConfig"/>).
+    /// </summary>
+    [property: Id(17)]
+    string? Origin = null,
+    /// <summary>
+    /// True when this stored Project Agent carries the name of a built-in
+    /// Workflow Agent and therefore shadows it. Append-only Orleans field id
+    /// (next free after <see cref="Origin"/>).
+    /// </summary>
+    [property: Id(18)]
+    bool OverridesBuiltIn = false);

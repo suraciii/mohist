@@ -15,8 +15,6 @@ namespace Mohist.Server.Tests.Agent.Services;
 [Trait("level", "L0")]
 public sealed class AgentTaskDefinitionFactoryTests
 {
-    private static readonly ExecutionConfigHint Default = new("pi", "provider/default", "balanced");
-
     [Fact]
     public void DerivesFirstSentence_WithUnicodeLetters_AndCapsName()
     {
@@ -27,7 +25,6 @@ public sealed class AgentTaskDefinitionFactoryTests
             hasAcceptedAttachment: false,
             nameHint: null,
             callerHint: new ExecutionConfigHint(Model: "provider/task"),
-            projectDefault: Default,
             identity: "project\nkey",
             occupiedNames: []);
 
@@ -44,7 +41,6 @@ public sealed class AgentTaskDefinitionFactoryTests
             hasAcceptedAttachment: false,
             nameHint: null,
             callerHint: new ExecutionConfigHint(Model: "provider/task"),
-            projectDefault: null,
             identity: "project\\njapanese",
             occupiedNames: []);
 
@@ -59,7 +55,6 @@ public sealed class AgentTaskDefinitionFactoryTests
             hasAcceptedAttachment: false,
             nameHint: null,
             callerHint: new ExecutionConfigHint(Model: "provider/task"),
-            projectDefault: null,
             identity: "project\nkey",
             occupiedNames: ["base", "Base 2"]);
 
@@ -70,7 +65,6 @@ public sealed class AgentTaskDefinitionFactoryTests
             hasAcceptedAttachment: false,
             nameHint: null,
             callerHint: new ExecutionConfigHint(Model: "provider/task"),
-            projectDefault: null,
             identity: "project\nreserved",
             occupiedNames: []);
 
@@ -104,12 +98,12 @@ public sealed class AgentTaskDefinitionFactoryTests
 
         var dbFactory = new TestDbContextFactory(database.Options);
         var agents = new AgentQuerier(dbFactory);
-        var archived = Assert.Single(await agents.ListAsync(projectId, all: true));
+        var archived = Assert.Single(
+            await agents.ListAsync(projectId, all: true),
+            agent => agent.Origin == AgentOrigins.Project);
         Assert.Equal(AgentStatus.Archived, archived.Status);
 
-        var factory = new AgentTaskDefinitionFactory(
-            agents,
-            new ProjectDefaultExecutionConfigReader(dbFactory));
+        var factory = new AgentTaskDefinitionFactory(agents);
         var derived = await factory.CreateAsync(
             projectId,
             prompt: archivedName,
@@ -129,7 +123,6 @@ public sealed class AgentTaskDefinitionFactoryTests
             hasAcceptedAttachment: true,
             nameHint: null,
             callerHint: new ExecutionConfigHint(Model: "provider/task"),
-            projectDefault: null,
             identity: "project\nattachment-key",
             occupiedNames: []);
         var second = AgentTaskDefinitionFactory.Build(
@@ -137,7 +130,6 @@ public sealed class AgentTaskDefinitionFactoryTests
             hasAcceptedAttachment: true,
             nameHint: null,
             callerHint: new ExecutionConfigHint(Model: "provider/task"),
-            projectDefault: null,
             identity: "project\nattachment-key",
             occupiedNames: []);
 
@@ -158,26 +150,63 @@ public sealed class AgentTaskDefinitionFactoryTests
         Assert.Equal(first.Instructions, second.Instructions);
         Assert.Equal(first.AgentConfig.GetRawText(), second.AgentConfig.GetRawText());
         Assert.Null(AgentConfigSchema.Validate(first.AgentConfig));
-        Assert.Equal("pi", first.AgentConfig.GetProperty("runtime").GetString());
         Assert.Equal("provider/task", first.AgentConfig.GetProperty("model").GetString());
         Assert.Equal("high", first.AgentConfig.GetProperty("variant").GetString());
+        Assert.False(
+            first.AgentConfig.TryGetProperty("runtime", out _),
+            "an unsupplied Runtime stays unset in the definition and resolves to pi at execution");
     }
 
     [Fact]
-    public void MissingModel_RejectsBeforeDefinitionCanBeCreated()
+    public void ReasoningEffortHint_IsMaterializedOnTheCreatedDefinition()
     {
-        var exception = Assert.Throws<AgentTaskDefinitionExecutionConfigException>(() =>
-            AgentTaskDefinitionFactory.Build(
-                "No model yet",
-                hasAcceptedAttachment: false,
-                nameHint: null,
-                callerHint: null,
-                projectDefault: null,
-                identity: "project\nmissing",
-                occupiedNames: []));
+        var definition = AgentTaskDefinitionFactory.Build(
+            "Implement the task",
+            hasAcceptedAttachment: false,
+            nameHint: null,
+            callerHint: new ExecutionConfigHint(Model: "provider/task", ReasoningEffort: "xhigh"),
+            identity: "project\neffort",
+            occupiedNames: []);
 
-        Assert.Contains("Supply runtime/model/variant hints", exception.Message, StringComparison.Ordinal);
-        Assert.Contains("configure the Project default", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("xhigh", definition.AgentConfig.GetProperty("reasoningEffort").GetString());
+        Assert.Null(AgentConfigSchema.Validate(definition.AgentConfig));
+
+        var withoutEffort = AgentTaskDefinitionFactory.Build(
+            "Implement the task",
+            hasAcceptedAttachment: false,
+            nameHint: null,
+            callerHint: new ExecutionConfigHint(Model: "provider/task"),
+            identity: "project\neffort",
+            occupiedNames: []);
+
+        Assert.False(withoutEffort.AgentConfig.TryGetProperty("reasoningEffort", out _));
+    }
+
+    [Fact]
+    public void NoHints_MaterializeNoExecutionFields()
+    {
+        var definition = AgentTaskDefinitionFactory.Build(
+            "No execution hints yet",
+            hasAcceptedAttachment: false,
+            nameHint: null,
+            callerHint: null,
+            identity: "project\nmissing",
+            occupiedNames: []);
+
+        Assert.Null(AgentConfigSchema.Validate(definition.AgentConfig));
+        Assert.Empty(definition.AgentConfig.EnumerateObject());
+
+        var partial = AgentTaskDefinitionFactory.Build(
+            "Only an effort hint",
+            hasAcceptedAttachment: false,
+            nameHint: null,
+            callerHint: new ExecutionConfigHint(ReasoningEffort: "xhigh"),
+            identity: "project\neffort-only",
+            occupiedNames: []);
+
+        Assert.Equal("xhigh", partial.AgentConfig.GetProperty("reasoningEffort").GetString());
+        Assert.False(partial.AgentConfig.TryGetProperty("model", out _));
+        Assert.False(partial.AgentConfig.TryGetProperty("runtime", out _));
     }
 
     private static AgentTaskDefinition BuildTask() => AgentTaskDefinitionFactory.Build(
@@ -185,7 +214,6 @@ public sealed class AgentTaskDefinitionFactoryTests
         hasAcceptedAttachment: false,
         nameHint: null,
         callerHint: new ExecutionConfigHint(Model: "provider/task", Variant: "high"),
-        projectDefault: Default,
         identity: "project\ndeterministic",
         occupiedNames: []);
 }
@@ -203,6 +231,32 @@ public sealed class AgentTaskLaunchFingerprintTests
         Assert.Equal(
             AgentLaunchCoordinatorCodec.Fingerprint(baseline),
             AgentLaunchCoordinatorCodec.Fingerprint(explicitNulls));
+    }
+
+    [Fact]
+    public void ReasoningEffortHintChanges_AreVisibleToReplayFingerprint()
+    {
+        var baseline = new AgentLaunchCoordinatorRequest(
+            "task", null, null, null, null, null, null, null);
+        var effort = baseline with { ReasoningEffort = "high" };
+        var changedEffort = baseline with { ReasoningEffort = "xhigh" };
+        var effortRemoved = effort with { ReasoningEffort = null };
+
+        Assert.NotEqual(
+            AgentLaunchCoordinatorCodec.Fingerprint(baseline),
+            AgentLaunchCoordinatorCodec.Fingerprint(effort));
+        Assert.NotEqual(
+            AgentLaunchCoordinatorCodec.Fingerprint(effort),
+            AgentLaunchCoordinatorCodec.Fingerprint(changedEffort));
+        Assert.NotEqual(
+            AgentLaunchCoordinatorCodec.Fingerprint(effort),
+            AgentLaunchCoordinatorCodec.Fingerprint(effortRemoved));
+
+        // A request without an effort hint keeps the fingerprint it had
+        // before the hint existed.
+        Assert.Equal(
+            AgentLaunchCoordinatorCodec.Fingerprint(baseline),
+            AgentLaunchCoordinatorCodec.Fingerprint(baseline with { Model = null }));
     }
 
     [Fact]

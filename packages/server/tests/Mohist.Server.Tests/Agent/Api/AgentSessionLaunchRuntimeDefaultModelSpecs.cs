@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
@@ -10,72 +11,70 @@ using Xunit;
 namespace Mohist.Server.Tests.Agent.Api;
 
 /// <summary>
-/// Readiness + definition-first launch behavior under the Project default
-/// execution configuration (issue-560 T-001): a default resolves
-/// model-missing / variant-without-model into launchable dispatches with the
-/// model Readiness resolved, resolution happens once at launch, and without
-/// a default the existing Needs-setup gating is unchanged.
+/// Readiness + definition-first launch behavior for an Agent with an unset
+/// Model: no Project value participates, the Runtime chooses the model at
+/// dispatch, and the accepted Job snapshot records the Runtime-chosen
+/// (null) model. Nothing substitutes a borrowed model.
 /// </summary>
 [Collection("LaunchIntegration")]
 [Trait("level", "L1")]
-public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSessionLaunchRoutesTestSupport
+public sealed class AgentSessionLaunchRuntimeDefaultModelSpecs : AgentSessionLaunchRoutesTestSupport
 {
-    public AgentSessionLaunchDefaultExecutionConfigSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)
+    public AgentSessionLaunchRuntimeDefaultModelSpecs(IsolatedMohistIntegrationFixture fixture) : base(fixture)
     {
     }
 
     [Fact]
-    public async Task Launch_WithoutDefaultAndWithoutModel_IsBlockedByReadiness()
+    public async Task UnsetModel_IsNotAReadinessGap_AndLaunchIsAccepted()
     {
-        var projectId = await CreateProjectAsync("launch-default-missing");
-        var agent = await CreateModellessAgentAsync(projectId, "gap-agent");
+        var projectId = await CreateProjectAsync("launch-runtime-default");
+        var agent = await CreateModellessAgentAsync(projectId, "runtime-default-agent");
 
         var readiness = await GetReadinessAsync(projectId, agent.Id);
-        Assert.Equal("not-configured", readiness.Conclusion);
-        Assert.Contains("model-missing", readiness.Gaps);
+        Assert.Equal("unknown", readiness.Conclusion);
+        Assert.DoesNotContain("model-missing", readiness.Gaps);
+        Assert.Empty(readiness.Gaps);
 
         using var response = await _fixture.Client.LaunchAgentSessionAsync(
             projectId,
             agent.Id,
-            new { prompt = "run the task" });
+            new { prompt = "run with the runtime default" });
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("agent_not_configured", body.GetProperty("code").GetString());
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
     [Fact]
-    public async Task Launch_WithProjectDefault_DispatchesWithTheResolvedConfiguration()
+    public async Task UnsetModel_DispatchesWithoutAModelSoTheRuntimeChooses()
     {
-        var projectId = await CreateProjectAsync("launch-default-model");
-        var agent = await CreateModellessAgentAsync(projectId, "default-model-agent");
-        await SetDefaultAsync(projectId, "pi", "openai/gpt-5.6", "high");
-        var runnerId = $"launch-default-model-runner-{Guid.NewGuid():N}";
+        var projectId = await CreateProjectAsync("launch-runtime-default-dispatch");
+        var agent = await CreateModellessAgentAsync(projectId, "runtime-default-dispatch-agent");
+        var runnerId = $"launch-runtime-default-runner-{Guid.NewGuid():N}";
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
-            // The default resolved the gap: Readiness is no longer
-            // Not needs setup even though the definition carries no model.
-            var readiness = await GetReadinessAsync(projectId, agent.Id);
-            Assert.Equal("unknown", readiness.Conclusion);
-            Assert.DoesNotContain("model-missing", readiness.Gaps);
-
             using var response = await _fixture.Client.LaunchAgentSessionAsync(
                 projectId,
                 agent.Id,
-                new { prompt = "run with the project default" });
+                new { prompt = "run with the runtime default" });
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
             var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
 
+            // The accepted snapshot records the Runtime-chosen (null) model
+            // rather than a substituted value.
+            var frozen = await _fixture.Grains
+                .GetGrain<Mohist.Server.Agent.Grains.IAgentJobGrain>(jobId)
+                .GetRuntimeSnapshotAsync();
+            Assert.Equal("pi", frozen.ExecutionDefinition?.Runtime);
+            Assert.Null(frozen.ExecutionDefinition?.Model);
+
             var snapshot = await ClaimDispatchForSessionAsync(jobId, runnerId, sessionId);
             var dispatch = await PollDispatchEnvelopeForWorkAsync(runnerId, snapshot.WorkId!);
-            Assert.Equal("openai/gpt-5.6", ReadModelFromDispatch(dispatch));
-            Assert.Equal("high", ReadVariantFromDispatch(dispatch));
-            Assert.Equal("pi", ReadRuntimeFromDispatch(dispatch));
+            Assert.Equal(AgentConfigSchema.DefaultRuntime, ReadRuntimeFromDispatch(dispatch));
+            Assert.False(HasDispatchField(dispatch, "model"), "the dispatch must not carry a substituted model");
         }
         finally
         {
@@ -118,41 +117,6 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
         return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, name);
     }
 
-    private async Task<AgentRef> CreateAgentWithConfigAsync(
-        string projectId,
-        string name,
-        object config)
-    {
-        using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agents",
-            new
-            {
-                name,
-                description = $"description for {name}",
-                instructions = $"instructions for {name}",
-                agentConfig = config,
-                skills = Array.Empty<string>(),
-                maxConcurrentRuns = 1,
-            });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, name);
-    }
-
-    private async Task SetDefaultAsync(
-        string projectId,
-        string runtime,
-        string model,
-        string? variant)
-    {
-        using var response = await _fixture.Client.PutAsJsonAsync(
-            $"/api/projects/{projectId}/default-execution-config",
-            (object)(variant is null ? new { runtime, model } : new { runtime, model, variant }));
-        Assert.True(
-            response.IsSuccessStatusCode,
-            $"setting the default execution config failed: {(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");
-    }
-
     private async Task<JsonElement> PollDispatchEnvelopeForWorkAsync(string runnerId, string workId)
     {
         for (var i = 0; i < 50; i++)
@@ -185,5 +149,13 @@ public sealed class AgentSessionLaunchDefaultExecutionConfigSpecs : AgentSession
             doc.RootElement.TryGetProperty(field, out var value) && value.ValueKind == JsonValueKind.String,
             $"the dispatch envelope carries no '{field}'");
         return value.GetString()!;
+    }
+
+    private static bool HasDispatchField(JsonElement dispatch, string field)
+    {
+        var withJson = dispatch.GetProperty("with").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(withJson));
+        using var doc = JsonDocument.Parse(withJson!);
+        return doc.RootElement.TryGetProperty(field, out _);
     }
 }

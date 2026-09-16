@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
-using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Agent.Services;
@@ -53,22 +52,17 @@ public sealed class AgentExecutabilityException : Exception
 public sealed class AgentReadinessService : IScopedService
 {
     private readonly AgentJobQuerier _jobs;
-    private readonly ProjectDefaultExecutionConfigReader _defaults;
 
-    public AgentReadinessService(AgentJobQuerier jobs, ProjectDefaultExecutionConfigReader defaults)
+    public AgentReadinessService(AgentJobQuerier jobs)
     {
         _jobs = jobs;
-        _defaults = defaults;
     }
 
     public async Task<AgentExecutabilityResult> GetAsync(string projectId, AgentInfo agent, CancellationToken ct = default)
     {
         if (IsBuiltInAgent(agent)) return Unknown();
-        // The Project default is read once per request scope (cached in the
-        // reader), so hydrating Readiness for an N-agent list costs one read.
-        var projectDefault = await _defaults.GetAsync(projectId, ct);
         var history = await _jobs.GetLatestExecutionAsync(projectId, agent.Id, ct);
-        return Evaluate(agent, history, projectDefault);
+        return Evaluate(agent, history);
     }
 
     public async Task EnsureLaunchableAsync(string projectId, AgentInfo agent, CancellationToken ct = default)
@@ -80,13 +74,12 @@ public sealed class AgentReadinessService : IScopedService
 
     public static AgentExecutabilityResult Evaluate(
         AgentInfo agent,
-        AgentExecutionHistory? history,
-        ExecutionConfigHint? projectDefault = null)
+        AgentExecutionHistory? history)
     {
         if (IsBuiltInAgent(agent)) return Unknown();
-        var structuralGaps = StructuralGaps(agent, projectDefault);
+        var structuralGaps = StructuralGaps(agent);
         if (structuralGaps.Count > 0) return NotConfigured(structuralGaps);
-        if (history is null || !MatchesCurrentDefinition(agent, history.Input, projectDefault)) return Unknown();
+        if (history is null || !MatchesCurrentDefinition(agent, history.Input)) return Unknown();
         if (history.Status == AgentJobStatus.Completed) return Executable();
         return history.Status == AgentJobStatus.Failed && IsConfigurationFailure(history.FailureCategory)
             ? NotExecutable(agent, history.FailureCategory)
@@ -94,68 +87,56 @@ public sealed class AgentReadinessService : IScopedService
     }
 
     /// <summary>
-    /// Structural gaps resolve Model and Variant by Agent definition, then
-    /// Project default — the same precedence rule as launch. A configured
-    /// default therefore resolves <c>model-missing</c> and
-    /// <c>variant-without-model</c>; definition errors
-    /// (<c>model-reference-malformed</c>, <c>runtime-invalid</c>) are
-    /// malformed explicit values and are never masked by a default.
+    /// Structural gaps are decision-free configuration facts about the Agent
+    /// definition itself: missing Instructions, an explicitly malformed Model
+    /// reference, or an explicitly unsupported Runtime. An unset Model is not
+    /// a gap — the Runtime chooses the model at dispatch and the Job snapshot
+    /// records that choice — and a Variant or Reasoning Effort without a Model
+    /// is not a gap either, because both apply to the Runtime-chosen model.
+    /// Malformed explicit values are never masked by any other source.
     /// </summary>
-    internal static List<AgentExecutabilityGap> StructuralGaps(AgentInfo agent, ExecutionConfigHint? projectDefault)
+    internal static List<AgentExecutabilityGap> StructuralGaps(AgentInfo agent)
     {
         var gaps = new List<AgentExecutabilityGap>();
         if (string.IsNullOrWhiteSpace(agent.Instructions))
             gaps.Add(Gap(agent, "instructions-missing", "Instructions are missing.", "Add instructions in Agent settings."));
 
-        var reasoningEffort = AgentLauncher.ResolveReasoningEffort(agent.AgentConfig);
         var config = agent.AgentConfig is { ValueKind: JsonValueKind.Object } raw ? raw : (JsonElement?)null;
         var resolved = ExecutionConfigResolver.Resolve(
             callerHint: null,
-            definition: ExecutionConfigResolver.FromAgentConfig(config),
-            projectDefault: projectDefault);
+            definition: ExecutionConfigResolver.FromAgentConfig(config));
 
-        if (resolved.Model is null)
-            gaps.Add(Gap(
-                agent,
-                "model-missing",
-                "A model is not configured.",
-                "Set a model in Agent settings."));
-        else if (!resolved.Model.Contains('/', StringComparison.Ordinal))
+        if (resolved.Model is not null && !resolved.Model.Contains('/', StringComparison.Ordinal))
             gaps.Add(Gap(agent, "model-reference-malformed", "The model reference must use provider/model format.", "Set a valid model in Agent settings."));
-        if (resolved.Model is null && resolved.Variant is not null)
-            gaps.Add(Gap(agent, "variant-without-model", "A variant is set without a model.", "Set a model or remove the variant in Agent settings."));
-        if (!string.IsNullOrWhiteSpace(reasoningEffort) && resolved.Model is null)
-            gaps.Add(Gap(agent, "reasoning-effort-without-model", "A reasoning effort is set without a model.", "Set a model or remove the reasoning effort in Agent settings."));
         if (config is not null && AgentConfigSchema.ValidateRuntime(config.Value) is not null)
             gaps.Add(Gap(agent, "runtime-invalid", "The configured runtime is not supported.", "Choose opencode or pi in Agent settings."));
         return gaps;
     }
 
     /// <summary>
-    /// Compares the resolved execution tuple — definition, then Project
-    /// default — against the last execution's launch-time definition
-    /// snapshot, with both sides resolved under the same (current) default.
-    /// A Project-default change therefore cannot flip a completed
-    /// execution: an Agent whose definition is unchanged still matches.
+    /// Compares the resolved execution tuple — caller hint or Agent
+    /// definition — against the last execution's launch-time definition
+    /// snapshot. A definition edit therefore flips a completed execution to
+    /// Unknown; a completed execution whose definition is unchanged never
+    /// flips.
     ///
     /// Older AgentJobInput records predate the AgentConfig snapshot and have
     /// only the already-resolved dispatch fields. For those records, compare
     /// fields the current definition explicitly supplies and leave
-    /// default-resolved fields free, preserving the pre-feature readiness
+    /// runtime-defaulted fields free, preserving the pre-feature readiness
     /// result while retaining the full tuple comparison for new launches.
     /// </summary>
     private static bool MatchesCurrentDefinition(
         AgentInfo agent,
-        AgentJobInput input,
-        ExecutionConfigHint? projectDefault)
+        AgentJobInput input)
     {
         var definition = ExecutionConfigResolver.FromAgentConfig(agent.AgentConfig);
-        var current = ExecutionConfigResolver.Resolve(null, definition, projectDefault);
+        var current = ExecutionConfigResolver.Resolve(null, definition);
         var launchDefinition = ExecutionConfigResolver.FromAgentConfig(input.AgentConfig);
         var matchesExecution = launchDefinition is not null
             ? MatchesResolvedTuple(
                 current,
-                ExecutionConfigResolver.Resolve(null, launchDefinition, projectDefault))
+                ExecutionConfigResolver.Resolve(null, launchDefinition))
             : MatchesLegacyDispatch(definition, current, input);
 
         return string.Equals(agent.Instructions, input.AgentInstructions ?? string.Empty, StringComparison.Ordinal)

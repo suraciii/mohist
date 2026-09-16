@@ -91,6 +91,86 @@ public static class AgentDefinitionRoutes
             return agent is null ? ApiResults.NotFound($"Agent {id} not found") : ApiResults.Ok(agent);
         });
 
+        // Built-in Workflow Agent names contain a path separator
+        // (`mohist/builder`), so their detail read needs a catch-all name
+        // route. It applies the same case-insensitive name resolution as
+        // launch: a stored Project Agent shadows the built-in under this name.
+        group.MapGet("/by-name/{**name}", async (HttpContext context, string name, AgentQuerier query) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            var agent = await query.GetEffectiveByNameAsync(projectId, name);
+            return agent is null ? ApiResults.NotFound($"Agent '{name}' not found") : ApiResults.Ok(agent);
+        });
+
+        // Materialize a built-in Workflow Agent as a same-name Project Agent
+        // carrying the caller's changes. The creation path and its invariants
+        // are the ones POST /agents already owns; this route only composes
+        // the definition before delegating to it.
+        group.MapPost("/overrides", async (
+            HttpContext context,
+            AgentOverrideRequest? req,
+            IGrainFactory grains,
+            AgentQuerier query) =>
+        {
+            if (req is null) return ApiResults.BadRequest("request body is required", "body_required");
+            if (req.UndeclaredFields.Count > 0)
+            {
+                return ApiResults.BadRequest(
+                    $"unsupported top-level field(s): {string.Join(", ", req.UndeclaredFields)}; the override accepts only name, description, agentConfig, and skills.",
+                    "unsupported_field",
+                    new { fields = req.UndeclaredFields.ToArray() });
+            }
+
+            var name = req.Name?.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+                return ApiResults.BadRequest("name is required", "validation_failed", new { fields = new[] { "name" } });
+
+            var definition = BuiltInAgentCatalog.FindWorkflow(name);
+            if (definition is null)
+                return ApiResults.NotFound($"Built-in Agent '{name}' not found");
+
+            var agentConfigError = AgentConfigSchema.Validate(req.AgentConfig);
+            if (agentConfigError is not null)
+                return ApiResults.BadRequest(agentConfigError, "invalid_agent_config");
+
+            var projectId = context.GetResolvedProject().Id;
+            var existing = await query.GetByNameAsync(projectId, definition.Name);
+            if (existing is not null)
+            {
+                return string.Equals(existing.Status, AgentStatus.Archived, StringComparison.Ordinal)
+                    ? ApiResults.Conflict(
+                        $"An archived Project Agent named '{definition.Name}' shadows this built-in Agent; restore or rename it instead of creating an override.",
+                        "agent_override_archived",
+                        new { name = definition.Name, agentId = existing.Id })
+                    : ApiResults.Conflict(
+                        $"An active Project Agent named '{definition.Name}' already overrides this built-in Agent; edit that Agent instead.",
+                        "agent_override_conflict",
+                        new { name = definition.Name, agentId = existing.Id });
+            }
+
+            var agentId = $"agent_{Guid.NewGuid():N}";
+            var grain = grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, agentId));
+            try
+            {
+                var created = await grain.CreateAsync(new AgentCreateData(
+                    projectId,
+                    definition.Name,
+                    req.Description ?? definition.Description,
+                    definition.Instructions,
+                    OverlayBuiltInConfig(definition, req.AgentConfig),
+                    req.Skills ?? definition.Skills,
+                    MaxConcurrentRuns: null));
+                return Results.Json(new ApiResponse<AgentInfo>(true, created), statusCode: 201);
+            }
+            catch (Exception ex) when (IsNameConflict(ex))
+            {
+                return ApiResults.Conflict(
+                    $"An active Project Agent named '{definition.Name}' already overrides this built-in Agent; edit that Agent instead.",
+                    "agent_override_conflict",
+                    new { name = definition.Name });
+            }
+        });
+
         group.MapPatch("/{id}", async (HttpContext context, string id, AgentUpdateRequest req, IGrainFactory grains, AgentQuerier query) =>
         {
             if (TouchesImmutableField(req.Raw))
@@ -162,6 +242,28 @@ public static class AgentDefinitionRoutes
         return app;
     }
 
+    private static JsonElement? OverlayBuiltInConfig(
+        BuiltInAgentDefinition definition,
+        JsonElement? changes)
+    {
+        var values = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+        {
+            ["runtime"] = JsonSerializer.SerializeToElement(definition.Runtime),
+        };
+        if (!string.IsNullOrWhiteSpace(definition.Model))
+            values["model"] = JsonSerializer.SerializeToElement(definition.Model);
+        if (!string.IsNullOrWhiteSpace(definition.Variant))
+            values["variant"] = JsonSerializer.SerializeToElement(definition.Variant);
+
+        if (changes is { ValueKind: JsonValueKind.Object } overlay)
+        {
+            foreach (var property in overlay.EnumerateObject())
+                values[property.Name] = property.Value.Clone();
+        }
+
+        return JsonSerializer.SerializeToElement(values);
+    }
+
     private static AgentAvailabilitySummaryEntry ToSummary(AgentAvailabilityListEntry entry) => new(
         entry.AgentId,
         entry.CanStartNow,
@@ -226,6 +328,47 @@ public sealed record AgentCreateRequest(
             AgentDefinitionRequestBinding.GetString(raw, "avatar"),
             raw);
     }
+}
+
+public sealed record AgentOverrideRequest(
+    string? Name,
+    string? Description,
+    JsonElement? AgentConfig,
+    IReadOnlyList<string>? Skills,
+    IReadOnlyList<string> UndeclaredFields)
+{
+    public static async ValueTask<AgentOverrideRequest?> BindAsync(HttpContext context)
+    {
+        try
+        {
+            var raw = await JsonSerializer.DeserializeAsync<JsonElement>(context.Request.Body, JSON.Options);
+            if (raw.ValueKind != JsonValueKind.Object)
+                throw new JsonException("the override request must be a JSON object");
+
+            var undeclared = raw.EnumerateObject()
+                .Where(property => !AllowedFields.Contains(property.Name))
+                .Select(property => property.Name)
+                .ToArray();
+            return new AgentOverrideRequest(
+                AgentDefinitionRequestBinding.GetString(raw, "name"),
+                AgentDefinitionRequestBinding.GetString(raw, "description"),
+                AgentDefinitionRequestBinding.GetElement(raw, "agentConfig"),
+                AgentDefinitionRequestBinding.GetStringList(raw, "skills"),
+                undeclared);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static readonly IReadOnlySet<string> AllowedFields = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "name",
+        "description",
+        "agentConfig",
+        "skills",
+    };
 }
 
 public sealed record AgentUpdateRequest(

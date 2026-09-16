@@ -528,30 +528,6 @@ public static class ProjectRoutes
             }
         });
 
-        // Replace-on-set write surface for the Project default execution
-        // configuration. PUT and PATCH share one closed field set (runtime,
-        // model, variant); a success replaces any prior default and returns
-        // the updated Project (the read surface is GET /{projectRef}).
-        byRef.MapPut("/default-execution-config", async (
-            HttpContext context,
-            ProjectDefaultExecutionConfigBody? body,
-            IGrainFactory grains) =>
-        {
-            var rejection = await SetDefaultExecutionConfigAsync(context, body, grains);
-            return rejection ?? Results.Ok(
-                await grains.GetGrain<IProjectGrain>(context.GetResolvedProject().Id).GetAsync());
-        });
-
-        byRef.MapPatch("/default-execution-config", async (
-            HttpContext context,
-            ProjectDefaultExecutionConfigBody? body,
-            IGrainFactory grains) =>
-        {
-            var rejection = await SetDefaultExecutionConfigAsync(context, body, grains);
-            return rejection ?? Results.Ok(
-                await grains.GetGrain<IProjectGrain>(context.GetResolvedProject().Id).GetAsync());
-        });
-
         byRef.MapPut("/verification-command", async (
             HttpContext context,
             ProjectVerificationCommandBody? body,
@@ -704,39 +680,6 @@ public static class ProjectRoutes
     private static bool IsSupplied(JsonElement value) =>
         value.ValueKind != JsonValueKind.Undefined;
 
-    private static async Task<IResult?> SetDefaultExecutionConfigAsync(
-        HttpContext context,
-        ProjectDefaultExecutionConfigBody? body,
-        IGrainFactory grains)
-    {
-        if (body is null)
-            return ApiResults.BadRequest("request body is required", "body_required");
-
-        if (body.UndeclaredFields.Count > 0)
-        {
-            return ApiResults.BadRequest(
-                $"unsupported top-level field(s): {string.Join(", ", body.UndeclaredFields)}; " +
-                "the default execution configuration accepts only runtime, model, and variant.",
-                "unsupported_field",
-                new { fields = body.UndeclaredFields.ToArray() });
-        }
-
-        try
-        {
-            var updated = await grains
-                .GetGrain<IProjectGrain>(context.GetResolvedProject().Id)
-                .SetDefaultExecutionConfigAsync(new ExecutionConfigHint(
-                    body.Runtime,
-                    body.Model,
-                    body.Variant));
-            return updated is null ? ApiResults.NotFound("Project not found") : null;
-        }
-        catch (ArgumentException ex)
-        {
-            return ApiResults.BadRequest(ex.Message, "invalid_default_execution_config");
-        }
-    }
-
     private static bool TryGetForbiddenLocalRepositoryField(
         JsonElement path,
         JsonElement remote,
@@ -868,16 +811,6 @@ public sealed record ProjectVerificationCommandBody(
             return null;
         }
     }
-}
-
-public sealed record ProjectDefaultExecutionConfigBody(
-    string? Runtime,
-    string? Model,
-    string? Variant,
-    IReadOnlyList<string> UndeclaredFields)
-{
-    public static ValueTask<ProjectDefaultExecutionConfigBody?> BindAsync(HttpContext context) =>
-        ProjectDefaultExecutionConfigBinder.BindAsync(context);
 }
 
 public sealed record WorkflowProfileSaveRequest(

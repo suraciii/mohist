@@ -7,7 +7,6 @@ using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -63,9 +62,7 @@ public sealed class AgentQuerierListDefinitionsSpecs : IAsyncLifetime
             .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))
             .Options;
         var factory = new TestDbContextFactory(options);
-        var readiness = new AgentReadinessService(
-            new AgentJobQuerier(factory),
-            new ProjectDefaultExecutionConfigReader(factory));
+        var readiness = new AgentReadinessService(new AgentJobQuerier(factory));
         var querier = new AgentQuerier(factory, readiness);
 
         var agents = await querier.ListActiveDefinitionsAsync(projectId);

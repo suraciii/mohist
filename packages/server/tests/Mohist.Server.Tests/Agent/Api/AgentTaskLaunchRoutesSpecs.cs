@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -98,22 +99,27 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
         using var agents = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents?all=true");
         agents.EnsureSuccessStatusCode();
         var agentEntries = (await agents.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
-        Assert.Single(agentEntries.EnumerateArray());
+        Assert.Single(
+            agentEntries.EnumerateArray(),
+            entry => entry.GetProperty("origin").GetString() == AgentOrigins.Project);
     }
 
     [Fact]
-    public async Task TaskLaunch_UsesProjectDefaultWhenHintsAreOmitted()
+    public async Task TaskLaunch_CarriesReasoningEffortIntoDefinitionAndSnapshot()
     {
-        var projectId = await CreateProjectAsync("task-default");
-        using var configured = await _fixture.Client.PutAsJsonAsync(
-            $"/api/projects/{projectId}/default-execution-config",
-            new { runtime = "pi", model = "provider/default", variant = "balanced" });
-        configured.EnsureSuccessStatusCode();
+        var projectId = await CreateProjectAsync("task-effort");
+        const string key = "task-effort-key";
 
         using var response = await PostTaskAsync(
             projectId,
-            new { prompt = "use the project default" },
-            "task-default-key");
+            new
+            {
+                prompt = "use the canonical effort",
+                runtime = "pi",
+                model = "provider/task",
+                reasoningEffort = "xhigh",
+            },
+            key);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
 
@@ -122,31 +128,60 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
         agent.EnsureSuccessStatusCode();
         var config = (await agent.Content.ReadFromJsonAsync<JsonElement>())
             .GetProperty("data").GetProperty("agentConfig");
-        Assert.Equal("pi", config.GetProperty("runtime").GetString());
-        Assert.Equal("provider/default", config.GetProperty("model").GetString());
-        Assert.Equal("balanced", config.GetProperty("variant").GetString());
+        Assert.Equal("xhigh", config.GetProperty("reasoningEffort").GetString());
 
-        using var listed = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents");
-        listed.EnsureSuccessStatusCode();
-        var listedAgent = (await listed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").EnumerateArray().Single();
-        Assert.Equal("pi", listedAgent.GetProperty("effectiveExecutionConfig").GetProperty("runtime").GetString());
-        Assert.Equal("provider/default", listedAgent.GetProperty("effectiveExecutionConfig").GetProperty("model").GetString());
+        // The accepted launch snapshot froze the effort beside model and
+        // variant; nothing reinterprets it from a Variant.
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(data.GetProperty("jobId").GetString()!);
+        var frozen = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal("xhigh", frozen.ExecutionDefinition?.ReasoningEffort);
+        Assert.Equal("provider/task", frozen.ExecutionDefinition?.Model);
+    }
+
+    [Fact]
+    public async Task TaskLaunch_ChangedReasoningEffortConflictsOnReplay()
+    {
+        var projectId = await CreateProjectAsync("task-effort-conflict");
+        const string key = "task-effort-conflict-key";
+        var body = new
+        {
+            prompt = "keep this effort",
+            model = "provider/task",
+            reasoningEffort = "high",
+        };
+
+        using var first = await PostTaskAsync(projectId, body, key);
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+
+        using var changedEffort = await PostTaskAsync(
+            projectId,
+            new
+            {
+                prompt = "keep this effort",
+                model = "provider/task",
+                reasoningEffort = "max",
+            },
+            key);
+        Assert.Equal(HttpStatusCode.Conflict, changedEffort.StatusCode);
+        var conflict = await changedEffort.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("launch_idempotency_conflict", conflict.GetProperty("code").GetString());
+        Assert.Equal(key, conflict.GetProperty("details").GetProperty("idempotencyKey").GetString());
+
+        Assert.Equal(1, await AgentCountAsync(projectId));
     }
 
     [Fact]
     public async Task TaskLaunch_PreflightProjectsScopeAndLaunchRejectsScopeDrift()
     {
         var projectId = await CreateProjectAsync("task-preflight");
-        using var configured = await _fixture.Client.PutAsJsonAsync(
-            $"/api/projects/{projectId}/default-execution-config",
-            new { runtime = "pi", model = "provider/default", variant = "balanced" });
-        configured.EnsureSuccessStatusCode();
 
         const string key = "task-preflight-key";
         var body = new
         {
             prompt = "confirm the execution scope",
             context = new { repository = "main" },
+            runtime = "pi",
+            model = "provider/original",
         };
         using var preflightRequest = new HttpRequestMessage(
             HttpMethod.Post,
@@ -160,21 +195,22 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
         Assert.Equal(HttpStatusCode.OK, preflight.StatusCode);
         var preflightData = (await preflight.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
         Assert.Equal("pi", preflightData.GetProperty("execution").GetProperty("runtime").GetString());
-        Assert.Equal("provider/default", preflightData.GetProperty("execution").GetProperty("model").GetString());
+        Assert.Equal("provider/original", preflightData.GetProperty("execution").GetProperty("model").GetString());
         Assert.Equal("project-workspace-write", preflightData.GetProperty("permissionScope").GetString());
         var fingerprint = preflightData.GetProperty("scopeFingerprint").GetString();
         Assert.False(string.IsNullOrWhiteSpace(fingerprint));
-
-        using var changedDefault = await _fixture.Client.PutAsJsonAsync(
-            $"/api/projects/{projectId}/default-execution-config",
-            new { runtime = "pi", model = "provider/changed", variant = "balanced" });
-        changedDefault.EnsureSuccessStatusCode();
 
         using var launchRequest = new HttpRequestMessage(
             HttpMethod.Post,
             $"/api/projects/{projectId}/agent-tasks")
         {
-            Content = JsonContent.Create(body),
+            Content = JsonContent.Create(new
+            {
+                prompt = "confirm the execution scope",
+                context = new { repository = "main" },
+                runtime = "pi",
+                model = "provider/changed",
+            }),
         };
         launchRequest.Headers.Add("Idempotency-Key", key);
         launchRequest.Headers.Add("X-Mohist-Launch-Origin", "web");
@@ -186,16 +222,11 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
     }
 
     [Fact]
-    public async Task TaskLaunch_ReplaysAcceptedOutcomeBeforeCheckingDriftedPreflightScope()
+    public async Task TaskLaunch_ReplaysAcceptedOutcomeBeforeCheckingStalePreflightScope()
     {
         var projectId = await CreateProjectAsync("task-preflight-replay");
-        using var configured = await _fixture.Client.PutAsJsonAsync(
-            $"/api/projects/{projectId}/default-execution-config",
-            new { runtime = "pi", model = "provider/original", variant = "balanced" });
-        configured.EnsureSuccessStatusCode();
-
         const string key = "task-preflight-replay-key";
-        var body = new { prompt = "replay the confirmed task" };
+        var body = new { prompt = "replay the confirmed task", model = "provider/original" };
         using var preflightRequest = new HttpRequestMessage(
             HttpMethod.Post,
             $"/api/projects/{projectId}/agent-tasks/preflight")
@@ -223,11 +254,8 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
         Assert.Equal(HttpStatusCode.Created, first.StatusCode);
         var firstData = (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
 
-        using var changedDefault = await _fixture.Client.PutAsJsonAsync(
-            $"/api/projects/{projectId}/default-execution-config",
-            new { runtime = "pi", model = "provider/changed", variant = "balanced" });
-        changedDefault.EnsureSuccessStatusCode();
-
+        // A replay resumes the accepted outcome before the scope check, so a
+        // stale preflight header cannot turn the retry into a rejection.
         using var replayRequest = new HttpRequestMessage(
             HttpMethod.Post,
             $"/api/projects/{projectId}/agent-tasks")
@@ -236,7 +264,7 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
         };
         replayRequest.Headers.Add("Idempotency-Key", key);
         replayRequest.Headers.Add("X-Mohist-Launch-Origin", "web");
-        replayRequest.Headers.Add("X-Mohist-Agent-Preflight", fingerprint!);
+        replayRequest.Headers.Add("X-Mohist-Agent-Preflight", "stale-scope-fingerprint");
         using var replay = await _fixture.Client.SendAsync(replayRequest);
         Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
         var replayData = (await replay.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
@@ -263,6 +291,15 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
         using var malformedModel = await PostTaskAsync(projectId, new { prompt = "task", model = "gpt" }, "task-model");
         Assert.Equal(HttpStatusCode.BadRequest, malformedModel.StatusCode);
         Assert.Contains("model", (await malformedModel.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
+
+        using var malformedEffort = await PostTaskAsync(
+            projectId,
+            new { prompt = "task", model = "provider/task", reasoningEffort = "none" },
+            "task-effort-invalid");
+        Assert.Equal(HttpStatusCode.BadRequest, malformedEffort.StatusCode);
+        var effortError = await malformedEffort.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("validation_failed", effortError.GetProperty("code").GetString());
+        Assert.Contains("reasoningEffort", effortError.GetProperty("error").GetString(), StringComparison.Ordinal);
         Assert.Equal(before, await AgentCountAsync(projectId));
     }
 
@@ -302,12 +339,6 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
         Assert.Equal(HttpStatusCode.BadRequest, noInput.StatusCode);
         Assert.Equal("input_required", (await noInput.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
 
-        using var noConfig = await PostTaskAsync(projectId, new { prompt = "task" }, "task-config");
-        Assert.Equal(HttpStatusCode.Conflict, noConfig.StatusCode);
-        var noConfigPayload = await noConfig.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("execution_config_unresolvable", noConfigPayload.GetProperty("code").GetString());
-        Assert.Equal(2, noConfigPayload.GetProperty("details").GetProperty("repairs").GetArrayLength());
-
         var existing = await CreateAgentAsync(projectId, "already-used");
         using var nameConflict = await PostTaskAsync(
             projectId,
@@ -317,6 +348,37 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
         Assert.Equal("AGENT_NAME_CONFLICT", (await nameConflict.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
 
         Assert.Equal(before + 1, await AgentCountAsync(projectId));
+    }
+
+    [Fact]
+    public async Task TaskLaunch_NoExecutionHints_CreatesAgentWithUnsetExecutionAndResolvedSnapshot()
+    {
+        var projectId = await CreateProjectAsync("task-no-hints");
+        const string key = "task-no-hints-key";
+
+        using var response = await PostTaskAsync(projectId, new { prompt = "Run with Runtime defaults" }, key);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+
+        using var agent = await _fixture.Client.GetAsync(
+            $"/api/projects/{projectId}/agents/{data.GetProperty("agentId").GetString()}");
+        agent.EnsureSuccessStatusCode();
+        var agentPayload = (await agent.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        var config = agentPayload.GetProperty("agentConfig");
+        Assert.False(config.TryGetProperty("runtime", out _), "the definition carries no unsupplied Runtime");
+        Assert.False(config.TryGetProperty("model", out _), "the definition carries no unsupplied Model");
+        Assert.False(config.TryGetProperty("variant", out _));
+
+        var effective = agentPayload.GetProperty("effectiveExecutionConfig");
+        Assert.Equal("pi", effective.GetProperty("runtime").GetString());
+        Assert.False(effective.TryGetProperty("model", out var effectiveModel) && effectiveModel.ValueKind != JsonValueKind.Null);
+
+        // The accepted launch records the Runtime the Server resolved, and a
+        // null Model means the Runtime chooses at dispatch.
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(data.GetProperty("jobId").GetString()!);
+        var frozen = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal("pi", frozen.ExecutionDefinition?.Runtime);
+        Assert.Null(frozen.ExecutionDefinition?.Model);
     }
 
     [Fact]
@@ -341,7 +403,7 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
                 firstPayload.GetProperty("details").GetProperty("reason").GetString());
 
             var entries = await AgentEntriesAsync(projectId);
-            var archived = Assert.Single(entries.EnumerateArray());
+            var archived = Assert.Single(ProjectEntries(entries));
             Assert.Equal("archived", archived.GetProperty("status").GetString());
             var archivedName = archived.GetProperty("name").GetString();
             Assert.Equal("Terminal rejection task", archivedName);
@@ -389,7 +451,7 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
                 "the reminder must retry the archive participant after the injected failure");
 
             var entries = await AgentEntriesAsync(projectId);
-            Assert.Equal("archived", Assert.Single(entries.EnumerateArray()).GetProperty("status").GetString());
+            Assert.Equal("archived", Assert.Single(ProjectEntries(entries)).GetProperty("status").GetString());
 
             using var replay = await PostTaskAsync(projectId, body, key);
             Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
@@ -420,13 +482,13 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
                 "launch_setup_pending",
                 (await pending.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
 
-            var pendingAgent = Assert.Single((await AgentEntriesAsync(projectId)).EnumerateArray());
+            var pendingAgent = Assert.Single(ProjectEntries(await AgentEntriesAsync(projectId)));
             Assert.Equal("active", pendingAgent.GetProperty("status").GetString());
 
             _fixture.LaunchFaults.StopFailing(LaunchParticipantGate.EnsureInitialLaunch);
             using var recovered = await PostTaskAsync(projectId, body, key);
             Assert.Equal(HttpStatusCode.Created, recovered.StatusCode);
-            var recoveredAgent = Assert.Single((await AgentEntriesAsync(projectId)).EnumerateArray());
+            var recoveredAgent = Assert.Single(ProjectEntries(await AgentEntriesAsync(projectId)));
             Assert.Equal("active", recoveredAgent.GetProperty("status").GetString());
         }
         finally
@@ -519,9 +581,16 @@ public sealed class AgentTaskLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSup
         return await _fixture.Client.SendAsync(request);
     }
 
+    private static IEnumerable<JsonElement> ProjectEntries(JsonElement entries) =>
+        entries.EnumerateArray()
+            .Where(entry => entry.GetProperty("origin").GetString() == AgentOrigins.Project);
+
     private async Task<int> AgentCountAsync(string projectId)
     {
-        return (await AgentEntriesAsync(projectId)).GetArrayLength();
+        // The list read merges unshadowed built-in Workflow Agents; these
+        // assertions count only the Project's stored definitions.
+        return (await AgentEntriesAsync(projectId)).EnumerateArray()
+            .Count(entry => entry.GetProperty("origin").GetString() == AgentOrigins.Project);
     }
 
     private async Task<JsonElement> AgentEntriesAsync(string projectId)
