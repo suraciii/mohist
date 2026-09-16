@@ -147,10 +147,12 @@ describe('RunnerDetailPage', () => {
     expect(screen.getByText(/Runtime readiness and capability catalog are independent facts/i)).toBeInTheDocument()
   })
 
-  it('keeps an offline known definition and Server-provided re-enrollment action', () => {
+  it('keeps an offline known definition and safely quoted Server re-enrollment action', () => {
+    const runnerId = "build runner'$(touch /tmp/owned);"
+    const command = "mo install runner --repo-root <path> --runner-id 'build runner'\"'\"'$(touch /tmp/owned);'"
     runner = makeRunner({
       identity: {
-        id: 'runner-7',
+        id: runnerId,
         hostname: null,
         kind: null,
         component: null,
@@ -167,15 +169,15 @@ describe('RunnerDetailPage', () => {
         {
           code: 'reenroll-runner',
           message: 'Re-enroll the Runner credential.',
-          command: 'mo install runner --repo-root <path> --runner-id runner-7',
+          command,
         },
       ],
     })
     renderPage()
-    expect(screen.getByTestId('runner-detail-id')).toHaveTextContent('runner-7')
+    expect(screen.getByTestId('runner-detail-id')).toHaveTextContent(runnerId)
     expect(screen.getByTestId('runner-detail-max-slots')).toContainElement(screen.getByTestId('slots-editor'))
     expect(screen.getByTestId('runner-detail-capacity')).toHaveTextContent('unknown/4 slots')
-    expect(screen.getByText('mo install runner --repo-root <path> --runner-id runner-7')).toBeInTheDocument()
+    expect(screen.getByText(command)).toBeInTheDocument()
     expect(screen.queryByText('mo runner start runner')).not.toBeInTheDocument()
   })
 

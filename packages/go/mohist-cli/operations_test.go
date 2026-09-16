@@ -538,14 +538,15 @@ func TestRunnerEmptyAndOfflineOutputUsesServerActions(t *testing.T) {
 		}
 	})
 
-	t.Run("confirmed re-enrollment", func(t *testing.T) {
+	t.Run("confirmed re-enrollment preserves shell quoting", func(t *testing.T) {
 		deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
-			return response(http.StatusOK, `{"success":true,"data":{"observedAt":"2026-08-01T12:00:00Z","inventory":{"state":"ready","nextActions":[]},"runners":[{"identity":{"id":"runner-revoked"},"presence":{"state":"offline","lastObservedAt":null},"control":{"state":"disconnected","generation":null},"admission":{"state":"blocked","reasonCodes":["presence-offline","credential-revoked"]},"capabilities":[],"runtimes":[],"capacity":{"used":null,"total":1},"activeWorks":[],"drain":null,"nextActions":[{"code":"reenroll-runner","message":"Re-enroll the Runner credential.","command":"mo install runner --repo-root <path> --runner-id runner-revoked"}]}]}}`), nil
+			return response(http.StatusOK, `{"success":true,"data":{"observedAt":"2026-08-01T12:00:00Z","inventory":{"state":"ready","nextActions":[]},"runners":[{"identity":{"id":"build runner'$(touch /tmp/owned);"},"presence":{"state":"offline","lastObservedAt":null},"control":{"state":"disconnected","generation":null},"admission":{"state":"blocked","reasonCodes":["presence-offline","credential-revoked"]},"capabilities":[],"runtimes":[],"capacity":{"used":null,"total":1},"activeWorks":[],"drain":null,"nextActions":[{"code":"reenroll-runner","message":"Re-enroll the Runner credential.","command":"mo install runner --repo-root <path> --runner-id 'build runner'\"'\"'$(touch /tmp/owned);'"}]}]}}`), nil
 		}), map[string]string{"MOHIST_TOKEN": "token"})
 		if code := Run(context.Background(), []string{"runner", "list"}, deps); code != ExitOK {
 			t.Fatalf("code=%d stderr=%q", code, errOut.String())
 		}
-		if !strings.Contains(out.String(), "reenroll-runner") || !strings.Contains(out.String(), "--runner-id runner-revoked") || strings.Contains(out.String(), "start-runner") {
+		expectedCommand := `mo install runner --repo-root <path> --runner-id 'build runner'"'"'$(touch /tmp/owned);'`
+		if !strings.Contains(out.String(), "reenroll-runner") || !strings.Contains(out.String(), expectedCommand) || strings.Contains(out.String(), "start-runner") {
 			t.Fatalf("output=%q", out.String())
 		}
 	})

@@ -12,6 +12,7 @@ import {
 } from '../../../entities/issue'
 import { deriveAttentionItems } from '../../../entities/agent-ops'
 import { type AgentStatus } from '../../../entities/agent'
+import { type RunnerStatusEntry, type RunnerStatusSummary } from '../../../entities/runner'
 import { ProjectProvider } from '../../../entities/project'
 import {
   AttentionHero as DefaultAttentionHero,
@@ -22,12 +23,14 @@ import { issueListKeys } from '../../../entities/issue/api/query-keys'
 
 let _issues: Issue[] | undefined
 let _agentStatus: AgentStatus | undefined
+let _runnerSummary: RunnerStatusSummary | undefined
 let _approvalWait: ApprovalWaitMetricsResponse | null
 const _approveHandler = vi.fn()
 
 const dataHook: AttentionHeroDataHook = () => ({
   issues: _issues,
   agentStatus: _agentStatus,
+  runnerSummary: _runnerSummary,
   approvalWait: _approvalWait,
   issuesResolved: _issues !== undefined,
 })
@@ -70,6 +73,46 @@ function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
   }
 }
 
+function makeRunnerSummary(kind: 'draining' | 'full'): RunnerStatusSummary {
+  const row: RunnerStatusEntry = {
+    identity: {
+      id: `runner-${kind}`,
+      hostname: 'runner-host',
+      kind: 'external',
+      component: null,
+      sourceRevision: null,
+      releaseId: null,
+      generation: null,
+    },
+    presence: { state: 'online', lastObservedAt: '2026-06-18T00:00:00.000Z' },
+    control: { state: 'connected', generation: 'connection:1' },
+    admission: { state: 'blocked', reasonCodes: [kind === 'draining' ? 'draining' : 'capacity-full'] },
+    capabilities: [],
+    runtimes: [],
+    capacity: { used: kind === 'full' ? 1 : 0, total: 1 },
+    activeWorks: [],
+    drain: kind === 'draining' ? { active: true, kind: 'update', updateInterruptId: 'update-1' } : null,
+    nextActions: [],
+  }
+  return {
+    readyCount: 0,
+    blockedCount: 1,
+    onlineCount: 1,
+    staleCount: 0,
+    offlineCount: 0,
+    disconnectedCount: 0,
+    drainingCount: kind === 'draining' ? 1 : 0,
+    fullCount: kind === 'full' ? 1 : 0,
+    activeWorkCount: 0,
+    capacityUsed: kind === 'full' ? 1 : 0,
+    capacityTotal: 1,
+    hasUnknownCapacity: false,
+    hasAdmissibleCapacity: false,
+    rows: [row],
+    inventory: { state: 'ready', nextActions: [] },
+  }
+}
+
 const NO_AGENT: AgentStatus = {
   running: false,
   issueNumber: null,
@@ -109,6 +152,7 @@ function renderHeroWithClient(queryClient: QueryClient) {
 beforeEach(() => {
   _issues = []
   _agentStatus = makeAgentStatus({ runnerAvailable: true })
+  _runnerSummary = undefined
   _approvalWait = null
 })
 
@@ -227,6 +271,26 @@ describe('AttentionHero - has-attention state', () => {
     expect(rendered[0]).toHaveAttribute('data-label', shared[0]!.label)
     expect(rendered[1]).toHaveAttribute('data-label', shared[1]!.label)
     expect(rendered[2]).toHaveAttribute('data-label', shared[2]!.label)
+  })
+
+  it('prioritizes canonical draining facts over generic admission blocked', async () => {
+    _issues = [makeIssue({ status: IssueStatus.InProgress, health: IssueHealth.Active })]
+    _runnerSummary = makeRunnerSummary('draining')
+    renderHero()
+    const item = await screen.findByTestId('runner-status-entry')
+    expect(item).toHaveAttribute('data-kind', 'runner-draining')
+    expect(item).toHaveTextContent('Runner draining')
+    expect(item).not.toHaveTextContent('Runner admission blocked')
+  })
+
+  it('prioritizes canonical capacity-full facts over generic admission blocked', async () => {
+    _issues = [makeIssue({ status: IssueStatus.InProgress, health: IssueHealth.Active })]
+    _runnerSummary = makeRunnerSummary('full')
+    renderHero()
+    const item = await screen.findByTestId('runner-capacity-entry')
+    expect(item).toHaveAttribute('data-kind', 'runner-capacity-limited')
+    expect(item).toHaveTextContent('Runner capacity full')
+    expect(item).not.toHaveTextContent('Runner admission blocked')
   })
 
   it('contains no local copy of the four attention rules (only delegates to deriveAttentionItems)', async () => {

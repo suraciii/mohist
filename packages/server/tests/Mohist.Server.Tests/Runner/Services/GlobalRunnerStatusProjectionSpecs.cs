@@ -1,4 +1,3 @@
-using System.Reflection;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
@@ -19,9 +18,7 @@ public sealed class GlobalRunnerStatusProjectionSpecs : IAsyncLifetime
 
     public GlobalRunnerStatusProjectionSpecs()
     {
-        _definitions = new RunnerDefinitionStore(
-            new TestDbContextFactory(_database.Options),
-            _time);
+        _definitions = new RunnerDefinitionStore(new TestDbContextFactory(_database.Options), _time);
     }
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
@@ -38,7 +35,6 @@ public sealed class GlobalRunnerStatusProjectionSpecs : IAsyncLifetime
         const string runnerId = "runner-global-projection";
         await _definitions.GetOrInitAsync(runnerId);
         await _definitions.UpdateSlotsAsync(runnerId, 3);
-
         var tracker = new RunnerConnectionTracker();
         var connectionGeneration = tracker.Register(runnerId, "connection-1");
         var info = new RunnerInfo(
@@ -61,23 +57,23 @@ public sealed class GlobalRunnerStatusProjectionSpecs : IAsyncLifetime
             ReleaseId: "release-42",
             Generation: 7,
             ConnectionGeneration: connectionGeneration);
-        var runtime = new RunnerRuntimeState(
+        var observation = new RunnerStatusObservation(
             RunnerStatus.Online,
             Now,
-            [
-                new RunnerActiveWorkItem("workflow-work", WorkDispatchOwnerKinds.Workflow, "workflow-1", "task", "build", "Build"),
-                new RunnerActiveWorkItem("agent-work", WorkDispatchOwnerKinds.AgentJob, "job-1", "agent-job", null, "Agent"),
-            ],
+            info,
+            Draining: false,
+            UpdateInterruptId: null,
             DispatchObservation: new RunnerDispatchObservation(
                 connectionGeneration,
                 AdmissionReady: true,
                 AdmissionReasonCodes: [],
                 RuntimeReadiness: [new RuntimeReadinessWitness("pi", true, 3)]));
-        var (service, _) = CreateService(
-            runnerId,
-            tracker,
-            new StatusRunnerProxy { Info = info, Runtime = runtime },
-            new Dictionary<string, RunnerCredentialStatus> { [runnerId] = RunnerCredentialStatus.Active });
+        var works = new RunnerActiveWorkItem[]
+        {
+            new("workflow-work", WorkDispatchOwnerKinds.Workflow, "workflow-1", "task", "build", "Build"),
+            new("agent-work", WorkDispatchOwnerKinds.AgentJob, "job-1", "agent-job", null, "Agent"),
+        };
+        var service = CreateService(runnerId, tracker, observation, works, RunnerCredentialStatus.Active);
 
         var snapshot = await service.GetGlobalRunnersAsync();
         var row = Assert.Single(snapshot.Runners);
@@ -110,11 +106,7 @@ public sealed class GlobalRunnerStatusProjectionSpecs : IAsyncLifetime
         const string runnerId = "runner-offline-definition";
         await _definitions.GetOrInitAsync(runnerId);
         await _definitions.UpdateSlotsAsync(runnerId, 3);
-        var (service, _) = CreateService(
-            runnerId,
-            new RunnerConnectionTracker(),
-            new StatusRunnerProxy(),
-            new Dictionary<string, RunnerCredentialStatus> { [runnerId] = RunnerCredentialStatus.Active });
+        var service = CreateService(runnerId, new RunnerConnectionTracker(), null, [], RunnerCredentialStatus.Active);
 
         var row = Assert.Single((await service.GetGlobalRunnersAsync()).Runners);
 
@@ -127,77 +119,77 @@ public sealed class GlobalRunnerStatusProjectionSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GlobalProjection_ConfirmedRevocationWinsOverStartGuidance()
+    public async Task GlobalProjection_CurrentNegativeRuntimeWitnessPreservesGeneration()
     {
-        const string runnerId = "runner-revoked-credential";
+        const string runnerId = "runner-negative-runtime";
         await _definitions.GetOrInitAsync(runnerId);
-        var (service, _) = CreateService(
-            runnerId,
-            new RunnerConnectionTracker(),
-            new StatusRunnerProxy(),
-            new Dictionary<string, RunnerCredentialStatus> { [runnerId] = RunnerCredentialStatus.Revoked });
+        var tracker = new RunnerConnectionTracker();
+        var connectionGeneration = tracker.Register(runnerId, "connection-negative");
+        var observation = new RunnerStatusObservation(
+            RunnerStatus.Online,
+            Now,
+            new RunnerInfo(runnerId, [], "negative-host", null, ConnectionGeneration: connectionGeneration),
+            Draining: false,
+            UpdateInterruptId: null,
+            DispatchObservation: new RunnerDispatchObservation(
+                connectionGeneration,
+                AdmissionReady: true,
+                AdmissionReasonCodes: [],
+                RuntimeReadiness: [new RuntimeReadinessWitness("pi", Ready: false, Generation: 7)]));
+        var service = CreateService(runnerId, tracker, observation, [], RunnerCredentialStatus.Active);
+
+        var runtime = Assert.Single(Assert.Single((await service.GetGlobalRunnersAsync()).Runners).Runtimes);
+
+        Assert.Equal("not-ready", runtime.Readiness.State);
+        Assert.Equal(7, runtime.Readiness.Generation);
+        Assert.Equal("runtime-reported-not-ready", runtime.Readiness.ReasonCode);
+    }
+
+    [Fact]
+    public async Task GlobalProjection_ConfirmedRevocationShellQuotesValidRunnerId()
+    {
+        const string runnerId = "build runner'$(touch /tmp/owned);";
+        await _definitions.GetOrInitAsync(runnerId);
+        var service = CreateService(runnerId, new RunnerConnectionTracker(), null, [], RunnerCredentialStatus.Revoked);
 
         var row = Assert.Single((await service.GetGlobalRunnersAsync()).Runners);
 
         Assert.Contains("credential-revoked", row.Admission.ReasonCodes);
         var action = Assert.Single(row.NextActions);
         Assert.Equal("reenroll-runner", action.Code);
+        Assert.Equal(
+            "mo install runner --repo-root <path> --runner-id 'build runner'\"'\"'$(touch /tmp/owned);'",
+            action.Command);
         Assert.DoesNotContain(row.NextActions, next => next.Code == "start-runner");
     }
 
-    private (RunnerStatusService Service, StatusRunnerProxy Runner) CreateService(
+    private RunnerStatusService CreateService(
         string runnerId,
         RunnerConnectionTracker tracker,
-        StatusRunnerProxy runner,
-        IReadOnlyDictionary<string, RunnerCredentialStatus> credentials)
+        RunnerStatusObservation? observation,
+        IReadOnlyList<RunnerActiveWorkItem> works,
+        RunnerCredentialStatus credentialStatus)
     {
-        var grain = DispatchProxy.Create<IRunnerGrain, StatusRunnerProxy>();
-        var grainProxy = (StatusRunnerProxy)(object)grain;
-        grainProxy.Id = runner.Id;
-        grainProxy.Info = runner.Info;
-        grainProxy.Runtime = runner.Runtime;
-
-        var factory = DispatchProxy.Create<IGrainFactory, StatusGrainFactory>();
-        var factoryProxy = (StatusGrainFactory)(object)factory;
-        factoryProxy.Runners[runnerId] = grainProxy;
-        var service = new RunnerStatusService(
-            factory,
+        var observations = new RunnerStatusObservationStore();
+        if (observation is not null)
+            observations.Set(runnerId, observation);
+        return new RunnerStatusService(
+            null!,
             tracker,
             _time,
             _definitions,
-            new StatusCredentialReader(credentials));
-        return (service, grainProxy);
+            new StatusCredentialReader(new Dictionary<string, RunnerCredentialStatus> { [runnerId] = credentialStatus }),
+            observations,
+            new StubActiveWorkReader(new Dictionary<string, IReadOnlyList<RunnerActiveWorkItem>> { [runnerId] = works }));
     }
 
-    private class StatusGrainFactory : DispatchProxy
+    private sealed class StubActiveWorkReader(
+        IReadOnlyDictionary<string, IReadOnlyList<RunnerActiveWorkItem>> values) : IRunnerActiveWorkReader
     {
-        public Dictionary<string, StatusRunnerProxy> Runners { get; } = new(StringComparer.Ordinal);
-
-        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
-        {
-            if (targetMethod?.Name == nameof(IGrainFactory.GetGrain)
-                && targetMethod.IsGenericMethod
-                && targetMethod.GetGenericArguments()[0] == typeof(IRunnerGrain)
-                && args is { Length: > 0 }
-                && args[0] is string runnerId)
-                return Runners[runnerId];
-
-            throw new NotSupportedException(targetMethod?.Name);
-        }
-    }
-
-    private class StatusRunnerProxy : DispatchProxy
-    {
-        public string Id { get; set; } = "runner-offline-definition";
-        public RunnerInfo? Info { get; set; }
-        public RunnerRuntimeState? Runtime { get; set; }
-
-        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) => targetMethod?.Name switch
-        {
-            nameof(IRunnerGrain.GetInfoAsync) => Task.FromResult(Info),
-            nameof(IRunnerGrain.GetRuntimeStateAsync) => Task.FromResult(Runtime!),
-            _ => throw new NotSupportedException(targetMethod?.Name),
-        };
+        public Task<IReadOnlyList<RunnerActiveWorkItem>> ListAsync(string runnerId, CancellationToken ct = default) =>
+            Task.FromResult(values.TryGetValue(runnerId, out var works)
+                ? works
+                : (IReadOnlyList<RunnerActiveWorkItem>)[]);
     }
 
     private sealed class StatusCredentialReader(IReadOnlyDictionary<string, RunnerCredentialStatus> values)

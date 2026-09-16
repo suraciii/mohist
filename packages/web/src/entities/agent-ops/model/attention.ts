@@ -31,14 +31,14 @@ function runnerAttentionItem(summary: RunnerStatusSummary): Exclude<AttentionIte
   if (summary.disconnectedCount > 0) {
     return { kind: 'runner-disconnected', label: 'Runner control disconnected', detail: runnerSummaryText(summary) }
   }
-  if (summary.blockedCount > 0) {
-    return { kind: 'runner-admission-blocked', label: 'Runner admission blocked', detail: runnerSummaryText(summary) }
-  }
   if (summary.drainingCount > 0) {
     return { kind: 'runner-draining', label: 'Runner draining', detail: runnerSummaryText(summary) }
   }
   if (summary.fullCount > 0) {
     return { kind: 'runner-capacity-limited', label: 'Runner capacity full', detail: runnerSummaryText(summary) }
+  }
+  if (summary.blockedCount > 0) {
+    return { kind: 'runner-admission-blocked', label: 'Runner admission blocked', detail: runnerSummaryText(summary) }
   }
   return { kind: 'runner-admission-blocked', label: 'Runner admission blocked', detail: runnerSummaryText(summary) }
 }

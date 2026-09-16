@@ -23,24 +23,43 @@ namespace Mohist.Server.Tests.Agent.Api;
 /// </summary>
 public sealed class CountingRunnerStatusSource : IRunnerStatusSource
 {
-    private IReadOnlyList<RunnerStatusView> _onlineRunners;
+    private RunnerAvailabilitySnapshot _availability;
 
     public CountingRunnerStatusSource(IReadOnlyList<RunnerStatusView> onlineRunners)
     {
-        _onlineRunners = onlineRunners;
+        _availability = ProjectAvailability(onlineRunners);
     }
 
-    public IReadOnlyList<RunnerStatusView> OnlineRunners => _onlineRunners;
     public int CallCount { get; private set; }
 
-    public void SetOnlineRunners(IReadOnlyList<RunnerStatusView> runners) => _onlineRunners = runners;
+    public void SetOnlineRunners(IReadOnlyList<RunnerStatusView> runners) =>
+        _availability = ProjectAvailability(runners);
+
+    public void SetAvailability(RunnerAvailabilitySnapshot availability) =>
+        _availability = availability;
 
     public void Reset() => CallCount = 0;
 
-    public Task<IReadOnlyList<RunnerStatusView>> GetOnlineRunnersAsync(string projectId, CancellationToken ct = default)
+    public Task<RunnerAvailabilitySnapshot> GetAvailabilityAsync(CancellationToken ct = default)
     {
         CallCount++;
-        return Task.FromResult(_onlineRunners);
+        return Task.FromResult(_availability);
+    }
+
+    private static RunnerAvailabilitySnapshot ProjectAvailability(IReadOnlyList<RunnerStatusView> runners)
+    {
+        var capacity = new RunnerCapacityView(
+            runners.Sum(runner => runner.Capacity?.UsedSlots ?? 0),
+            runners.Sum(runner => runner.Capacity?.TotalSlots ?? 0));
+        var canAcceptWork = runners.Any(runner =>
+            runner.Capacity is { } runnerCapacity
+            && runnerCapacity.UsedSlots < runnerCapacity.TotalSlots);
+        return new RunnerAvailabilitySnapshot(
+            capacity,
+            runners.Count > 0,
+            canAcceptWork,
+            runners.Count > 0 && !canAcceptWork ? "capacity-full" : null,
+            DateTimeOffset.UnixEpoch);
     }
 }
 

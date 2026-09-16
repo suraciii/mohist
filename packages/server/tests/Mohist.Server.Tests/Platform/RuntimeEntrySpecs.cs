@@ -89,7 +89,7 @@ public class RuntimeEntrySpecs
     }
 
     [Fact]
-    public async Task AgentStatus_WhenRunnerRegisteredWithoutActiveWork_ReportsIdleRuntime()
+    public async Task AgentStatus_WhenRunnerRegisteredWithoutAdmissionEvidence_ReportsBlockedCapacity()
     {
         var projectName = $"runtime-status-{Guid.NewGuid():N}";
         var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
@@ -113,9 +113,9 @@ public class RuntimeEntrySpecs
             var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
 
             Assert.False(status.Running);
-            Assert.True(status.RunnerAvailable);
+            Assert.False(status.RunnerAvailable);
             Assert.False(status.EmbeddedRunnerEnabled);
-            Assert.Null(status.RunnerMessage);
+            Assert.Contains("credential-missing", status.RunnerMessage);
             Assert.Equal(0, status.Capacity.Active);
             Assert.Equal(2, status.Capacity.Max);
             var runner = Assert.Single(status.Runners, r => r.Id == "runtime-test-runner");
@@ -129,7 +129,7 @@ public class RuntimeEntrySpecs
     }
 
     [Fact]
-    public async Task AgentStatus_WhenGlobalRunnerRegistered_ReportsRunnerAvailableForProject()
+    public async Task AgentStatus_WhenGlobalRunnerRegisteredWithoutAdmissionEvidence_RemainsBlocked()
     {
         var projectName = $"runtime-global-runner-{Guid.NewGuid():N}";
         var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", projectName);
@@ -142,8 +142,8 @@ public class RuntimeEntrySpecs
 
             var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
 
-            Assert.True(status.RunnerAvailable);
-            Assert.Null(status.RunnerMessage);
+            Assert.False(status.RunnerAvailable);
+            Assert.Contains("credential-missing", status.RunnerMessage);
             Assert.Contains(status.Runners, r => r.Id == runnerId);
         }
         finally
@@ -231,7 +231,8 @@ public class RuntimeEntrySpecs
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
-            Assert.True(status.RunnerAvailable);
+            Assert.False(status.RunnerAvailable);
+            Assert.Contains("credential-missing", status.RunnerMessage);
             Assert.Contains(status.Runners, r => r.Id == runnerId && r.Max == 1);
         }
         finally
@@ -245,8 +246,13 @@ public class RuntimeEntrySpecs
     {
         var status = AgentStatusResponse.Create(
             activeAgents: [],
-            runners: Array.Empty<RunnerStatusView>(),
-            capacity: new RunnerCapacityView(0, 0),
+            runners: Array.Empty<RunnerStatusEntry>(),
+            availability: new RunnerAvailabilitySnapshot(
+                new RunnerCapacityView(0, 0),
+                HasOnlineRunner: false,
+                CanAcceptWork: false,
+                BlockingReason: null,
+                DateTimeOffset.UnixEpoch),
             amplification: new AgentAmplificationDto(0, 0, 0, 0, 0));
 
         Assert.False(status.Running);
