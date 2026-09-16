@@ -93,7 +93,9 @@ public partial class RunnerGrain
     /// which also covers the case where it is still the Runner's current
     /// generation (presence expiry and unregister). The returned unsettled
     /// claim generation lets the caller keep the obligation when the owner
-    /// could not decide yet.
+    /// could not decide yet: for Workflow work the reachable trigger is the
+    /// persistence exception the owner throws, and the <c>Outstanding</c>
+    /// verdict stays handled as the owner's own way of declining to decide.
     /// </summary>
     private async Task<(bool Complete, string? UnsettledClaimGeneration)> CloseoutLostAsync(
         string? closingGeneration,
@@ -137,6 +139,9 @@ public partial class RunnerGrain
                     if (!string.IsNullOrEmpty(claimGeneration)
                         && IsLostClaim(claimGeneration, closingGeneration, authoritativeGeneration))
                     {
+                        // A persistence failure surfaces as a thrown exception
+                        // and is retained by the caller; this verdict check is
+                        // the owner's declared way of declining to decide.
                         var verdict = await GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId)
                             .FailActiveWorkAsync(workerId, active!.WorkId, claimGeneration, "runner-lost");
                         if (verdict == WorkReportVerdict.Outstanding)
@@ -226,28 +231,35 @@ public partial class RunnerGrain
         var (complete, unsettledClaimGeneration) = await CloseoutLostAsync(
             closingGeneration: null,
             authoritativeGeneration);
-        if (complete || unsettledClaimGeneration is null)
-            return;
-
-        // The claim could not be settled now. Keep it as the durable closeout
-        // obligation so the presence reminder retries this closeout instead of
-        // the work waiting for the next activation or registration.
-        var wasDraining = _draining;
-        state.ClosingProcessGeneration = unsettledClaimGeneration;
-        _draining = true;
-        try
+        if (complete)
         {
-            await PersistAsync();
+            _supersededGenerationRetryPending = false;
+            return;
         }
-        catch (Exception ex)
+
+        _supersededGenerationRetryPending = true;
+        if (unsettledClaimGeneration is not null)
         {
-            state.ClosingProcessGeneration = null;
-            _draining = wasDraining;
-            _log.LogWarning(ex,
-                "Runner {RunnerId} could not record the pending closeout for process generation {ProcessGeneration}",
-                RunnerId,
-                unsettledClaimGeneration);
-            return;
+            // The claim is known, so it can be named as the durable closeout
+            // obligation. A claim that cannot even be named stays a retry of
+            // this arbitration only: the run's own claim remains the durable
+            // record that re-derives it.
+            var wasDraining = _draining;
+            state.ClosingProcessGeneration = unsettledClaimGeneration;
+            _draining = true;
+            try
+            {
+                await PersistAsync();
+            }
+            catch (Exception ex)
+            {
+                state.ClosingProcessGeneration = null;
+                _draining = wasDraining;
+                _log.LogWarning(ex,
+                    "Runner {RunnerId} could not record the pending closeout for process generation {ProcessGeneration}",
+                    RunnerId,
+                    unsettledClaimGeneration);
+            }
         }
 
         await EnsurePresenceReminderAsync();
@@ -275,13 +287,14 @@ public partial class RunnerGrain
         var hasLease = _status == RunnerStatus.Online
             && state?.PresenceLeaseExpiresAt is not null;
         var hasCloseout = !string.IsNullOrWhiteSpace(state?.ClosingProcessGeneration);
-        if (!hasLease && !hasCloseout)
+        var hasRetry = _supersededGenerationRetryPending;
+        if (!hasLease && !hasCloseout && !hasRetry)
             return;
 
         var due = hasLease
             ? state!.PresenceLeaseExpiresAt!.Value - _timeProvider.GetUtcNow()
             : PresenceCheckInterval;
-        if (hasCloseout && due > PresenceCheckInterval)
+        if ((hasCloseout || hasRetry) && due > PresenceCheckInterval)
             due = PresenceCheckInterval;
         if (due <= TimeSpan.Zero)
             due = TimeSpan.FromMilliseconds(1);

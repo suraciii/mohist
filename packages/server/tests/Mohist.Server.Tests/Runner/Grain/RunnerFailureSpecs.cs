@@ -5,6 +5,7 @@ using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Tests.Workflow;
 using Mohist.Server.TestSupport;
 using Orleans;
+using Orleans.Runtime;
 using Orleans.Storage;
 using Xunit;
 
@@ -421,6 +422,49 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task SupersededGenerationOrphan_WhenDiscoveryCannotRun_RetriesOnThePresenceReminder()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+        var runnerId = _runnerId!;
+        var (work, _) = await PollWorkAnyAsync();
+        await StageSupersededClaimAsync(runnerId);
+
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var readFailures = Services.GetRequiredService<WorkflowRunReadFailureProbe>();
+        var reminders = Services.GetRequiredService<IReminderTable>();
+        var storage = _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<IGrainStorage>();
+
+        // The arbitration discovers owners through an owner query. When that
+        // query cannot run, no claim can be named and no durable obligation
+        // exists, so the retry itself must survive the failure.
+        await RemovePresenceReminderAsync(runner, reminders);
+        readFailures.FailNextWorkflowRunRead();
+        _ = await runner.GetRuntimeStateAsync();
+
+        var failedCommand = readFailures.FailedCommand;
+        Assert.NotNull(failedCommand);
+        Assert.Contains("ActiveWorkerId", failedCommand, StringComparison.Ordinal);
+
+        var undecided = new GrainState<RunnerState>();
+        await storage.ReadStateAsync("runner", runner.GetGrainId(), undecided);
+        Assert.Null(undecided.State.ClosingProcessGeneration);
+        Assert.NotNull(await reminders.ReadRow(runner.GetGrainId(), "presence"));
+
+        // The lost generation still owns the work.
+        Assert.Equal("Running", await workflow.GetRunStatusAsync());
+
+        // No activation and no registration: the presence reminder alone
+        // carries the undecided arbitration to completion.
+        await runner.AsReference<IRemindable>().ReceiveReminder("presence", default);
+
+        var settled = await LoadRunAsync(work.WorkflowRunId);
+        Assert.Equal(WorkflowRunStatus.Failed, settled.Status);
+        Assert.Equal("runner-lost", settled.Failure?.Message);
+        Assert.Equal(work.ActionAttemptId, Assert.Single(settled.Stages.Single().Tasks).Id);
+        Assert.Null(await reminders.ReadRow(runner.GetGrainId(), "presence"));
+    }
+
+    [Fact]
     public async Task SupersededGenerationOrphan_WhenAReportLandedFirst_IsNotFailed()
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
@@ -450,6 +494,17 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
     private RunnerInfo RunnerInfoFor(string runnerId, string workflowRunId) =>
         new(runnerId, ["spec/*"], "test-host", TestProjectId(workflowRunId));
+
+    /// <summary>
+    /// Drops the presence reminder the earlier registration left behind, so a
+    /// spec observes the obligation this Runner arms for itself.
+    /// </summary>
+    private static async Task RemovePresenceReminderAsync(IRunnerGrain runner, IReminderTable reminders)
+    {
+        var row = await reminders.ReadRow(runner.GetGrainId(), "presence");
+        if (row is not null)
+            Assert.True(await reminders.RemoveRow(runner.GetGrainId(), "presence", row.ETag));
+    }
 
     /// <summary>
     /// Leaves the Runner in the state the paused-work closeout defect produced:

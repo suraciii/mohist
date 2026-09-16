@@ -431,8 +431,11 @@ bounded by that AgentJob's own recovery deadline. Race safety stays with the
 owner: a stale identity, a claim that the current generation owns, a report or
 retry that landed first, or a blocked settlement is refused and changes
 nothing. A lost claim that this pass cannot settle stays recorded as the
-pending closeout obligation, so the presence reminder retries it instead of
-dropping it.
+pending closeout obligation, and a pass that cannot even decide what is lost —
+the owner query could not run, or the run cannot be read — keeps its retry in
+memory: either form is retried by the same presence reminder on its next tick,
+and an activation re-derives it from the run's own claim, so the pass completes
+instead of dropping it.
 
 A managed Runner update uses the same boundary. Update interrupt closes claim
 admission and records only a minimal drain-fence identity record: the pending
