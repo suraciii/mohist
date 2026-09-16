@@ -28,7 +28,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     private const string OpenCodeRuntime = "opencode";
     private const string PiRuntime = "pi";
     private const string CodexRuntime = "codex";
-
     private readonly IAgentSessionStore _stateStore;
     private readonly IAgentSessionTranscriptStore _transcriptStore;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;

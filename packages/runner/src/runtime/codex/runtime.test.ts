@@ -284,6 +284,30 @@ describe('CodexRuntime readiness gate', () => {
     expect(result.error.diagnostics.some((diagnostic) => diagnostic.code === 'catalog-empty')).toBe(true)
   })
 
+  it('retains the last complete snapshot while exposing a failed refresh through readiness', async () => {
+    const liveCatalog = { models: [{ id: 'gpt-5' }], complete: true }
+    const handle = fakeHandle({ catalog: liveCatalog })
+    const runtime = new CodexRuntime({
+      codexHome: MANAGED_CODEX_HOME,
+      cwd: '/work',
+      serverFactory: async () => handle,
+      readinessProbe: passingProbe(),
+    })
+
+    await expect(runtime.start()).resolves.toMatchObject({ ok: true })
+    const snapshot = runtime.catalog()
+    expect(snapshot).not.toBeNull()
+    liveCatalog.models.length = 0
+
+    const refreshed = await runtime.refreshCatalog()
+
+    expect(refreshed).toEqual({ changed: false, catalog: snapshot })
+    expect(runtime.catalog()).toEqual(snapshot)
+    expect(runtime.ready()).toBe(false)
+    expect(runtime.diagnostic()).toMatchObject({ code: 'catalog-empty' })
+    await runtime.shutdown({ clearDiagnostic: true })
+  })
+
   it('bounds a server factory that never produces a child handle', async () => {
     vi.useFakeTimers()
     try {

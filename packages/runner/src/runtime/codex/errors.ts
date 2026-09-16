@@ -279,6 +279,8 @@ export function normalizeUnknownCodex(
  * `unsupported-execution-configuration` for configuration values the
  * Codex v1 surface cannot honour (e.g. `variant`).
  */
+export const UNSUPPORTED_EXECUTION_CONFIGURATION_CATEGORY = 'unsupported_execution_configuration'
+
 export function normalizeUnsupportedExecutionConfigurationCodex(
   message: string,
   diagnostics: readonly CodexDiagnostic[] = [],
@@ -290,7 +292,7 @@ export function normalizeUnsupportedExecutionConfigurationCodex(
       ...diagnostics,
       {
         severity: 'error',
-        code: 'unsupported-execution-configuration',
+        code: UNSUPPORTED_EXECUTION_CONFIGURATION_CATEGORY,
         message,
       },
     ],

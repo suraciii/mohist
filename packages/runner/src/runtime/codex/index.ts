@@ -57,6 +57,7 @@ export {
   normalizeUnavailableRuntimeCodex,
   normalizeUnknownCodex,
   normalizeUnsupportedExecutionConfigurationCodex,
+  UNSUPPORTED_EXECUTION_CONFIGURATION_CATEGORY,
 } from './errors.js'
 export type { RawCodexError } from './errors.js'
 

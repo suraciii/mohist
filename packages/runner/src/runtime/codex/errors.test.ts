@@ -154,7 +154,7 @@ describe('Codex runtime error normalization', () => {
       diagnostics: [
         {
           severity: 'error',
-          code: 'unsupported-execution-configuration',
+          code: 'unsupported_execution_configuration',
         },
       ],
     })

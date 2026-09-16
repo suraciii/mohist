@@ -114,6 +114,29 @@ describe('Codex model catalog refresh', () => {
     expect(calls).toEqual([{ pageSize: 2 }, { cursor: 'page-2', pageSize: 2 }])
   })
 
+  it('retains the last complete snapshot when a refresh becomes empty', async () => {
+    const calls: Array<{ readonly cursor?: string | null; readonly pageSize?: number }> = []
+    const loader = createCodexModelCatalogLoader(
+      catalogTransport(
+        [
+          { models: [{ id: 'gpt-5', reasoningEfforts: ['none'] }], complete: true },
+          { models: [], complete: true },
+        ],
+        calls,
+      ),
+    )
+
+    const first = await loader.refreshCatalog()
+    const second = await loader.refreshCatalog()
+
+    expect(second.ok).toBe(false)
+    expect(second.changed).toBe(false)
+    expect(second.catalog).toEqual(first.catalog)
+    expect(second.diagnostics[0]).toMatchObject({ code: 'catalog-empty' })
+    expect(loader.catalog()).toEqual(first.catalog)
+    expect(loader.diagnostic()?.code).toBe('catalog-empty')
+  })
+
   it('retains the last complete snapshot and emits the current failure diagnostic', async () => {
     const calls: Array<{ readonly cursor?: string | null; readonly pageSize?: number }> = []
     const loader = createCodexModelCatalogLoader(

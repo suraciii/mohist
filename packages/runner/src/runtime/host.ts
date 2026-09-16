@@ -413,13 +413,26 @@ export class RunnerHost {
     const runtime = this.codexRuntime
     if (!runtime) return false
     try {
+      const hadCatalog = runtime.catalog() !== null
+      if (!runtime.ready()) {
+        const started = await runtime.start()
+        if (!started.ok) {
+          log.warn('codex runtime could not be recreated for model discovery', {
+            reason: started.error.message,
+          })
+          return false
+        }
+      }
       const refreshed = await runtime.refreshCatalog()
       if (!runtime.ready() && runtime.diagnostic()) {
         log.warn('codex model catalog refresh failed; retaining last complete snapshot', {
           reason: runtime.diagnostic()?.message,
         })
       }
-      if (refreshed.changed) this.heartbeatLifecycle.trigger()
+      // A recovered runtime may have loaded its first catalog during start,
+      // so refreshCatalog() reports no content change even though the
+      // registration had no Codex catalog to publish yet.
+      if (refreshed.changed || (!hadCatalog && refreshed.catalog !== null)) this.heartbeatLifecycle.trigger()
       return refreshed.catalog !== null && runtime.ready()
     } catch (error) {
       log.error('codex model rediscovery failed', { exception: error })
