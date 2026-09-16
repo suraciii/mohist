@@ -526,14 +526,14 @@ instead of selecting the tree again. See
 a bot identity in one Slack workspace, and installation of the workspace-level
 Mohist App.
 
-- `mo slack setup [--workspace-team <team-id>] [--configuration-token-file <path>] [--credentials-file <path>]`
+- `mo slack setup [--workspace-team <team-id>] [--configuration-token-file <path>] [--credentials-file <path>]`[^go-slack-provisioning]
   installs the workspace-level Mohist App in Slack and connects local Socket
   Mode. It creates or restores one workspace installation record, creates and
   configures the App, and guides the user through Slack installation and
   App-level token generation. On first installation, Configuration token
   validation determines the workspace. Use the flag when multiple workspaces
   are connected.
-- `mo slack install-agent <agent> [--workspace-team <team-id>] [--credentials-file <path>]`
+- `mo slack install-agent <agent> [--workspace-team <team-id>] [--credentials-file <path>]`[^go-slack-provisioning]
   installs an existing Mohist Agent in Slack. It creates or restores the Agent
   integration and dedicated Agent App. It guides App configuration,
   installation, identity and credential validation, connection startup, and
@@ -558,6 +558,8 @@ Mohist App.
   accept token literals. The CLI reads only the fields needed for the current
   step. Mohist encrypts them after validation and never includes them in output,
   errors, JSON, or logs.
+[^go-slack-provisioning]: The Go CLI currently rejects the workspace and credential-file options on these two provisioning commands. It accepts `mo slack setup` without options and `mo slack install-agent <agent> --project <project>`. The guided provisioning contract above still requires implementation; passing these unsupported options exits 2 before any request.
+
 - `mo slack status --workspace-team <team-id>` shows the current Mohist App, Agent integrations, local
   connection state, and one next action. Missing provisioning credentials point
   to `setup`. An incomplete Agent installation points to the same

@@ -22,14 +22,9 @@ var slackFields = []string{"id", "projectId", "agentId", "workspaceTeamId", "sta
 
 const maxSlackReplyFileBytes = 10 * 1024 * 1024
 
-const notificationSetupUsage = "USAGE\n    mo notification setup [--health-base URL] [--webhook-url URL]\n\nConfigure local Hermes notifications without contacting the Server."
+const notificationSetupUsage = "USAGE\n    mo notification setup [--health-base URL] [--webhook-url URL] [--secret VALUE] [--config-file PATH]\n\nConfigure local Hermes notifications without contacting the Server."
 
-// flagShape records whether a leaf flag consumes a following value or is a
-// standalone boolean. Every entry below is taken from a real argValue,
-// hasArg, or valuesFor call in runRemoteOperations, slackMessageBody,
-// runLocalNotification, or the audit helpers. Flags that only appear in
-// legacy docs and have no implementation reader are deliberately omitted so
-// the parser rejects them instead of silently absorbing a value.
+// Tie accepted flags to execution inputs so unsupported options cannot silently succeed.
 type flagShape int
 
 const (
@@ -39,7 +34,7 @@ const (
 
 var operationsFlags = map[string]map[string]map[string]flagShape{
 	"runner": {
-		"list":   {"scope": flagValue, "project": flagValue},
+		"list":   {"project": flagValue},
 		"view":   {"project": flagValue},
 		"status": {"project": flagValue},
 		"revoke": {"project": flagValue},
@@ -229,12 +224,6 @@ func parseOperations(area string, args []string) (command, error) {
 			return command{}, usageWithLeaf("github update requires --approver or --clear-approvers", leafUsage)
 		}
 	}
-	if area == "runner" && action == "list" {
-		scope := argValue(c.args, "scope", "all")
-		if !contains([]string{"all", "global", "project"}, scope) {
-			return command{}, usage("--scope must be all, global, or project")
-		}
-	}
 	if area == "github" && action == "connect" {
 		parts := strings.Split(argValue(c.args, "repository", ""), "/")
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
@@ -306,20 +295,32 @@ func parseService(args []string) (command, error) {
 		return command{}, usage("service target must be server, runner, or slack")
 	}
 	c := command{kind: "ops-service", args: []string{"action", action, "target", target}}
+	leafUsage := "USAGE\n    mo service " + action + " " + target + " [--dry-run]"
+	if action == "logs" {
+		leafUsage += " [--lines N] [--follow]"
+	} else if action == "uninstall" {
+		leafUsage += " [--unit-dir PATH]"
+	}
 	for i := 2; i < len(args); i++ {
 		switch args[i] {
 		case "--help", "-h":
-			return command{help: true, helpText: "USAGE\n    mo service <start|stop|restart|status|logs|uninstall> <server|runner|slack> [--lines N] [--follow] [--dry-run] [--unit-dir PATH]\n\nOperate local service-manager processes; application logs are provided by mo server logs."}, nil
+			return command{help: true, helpText: leafUsage + "\n\nOperate local service-manager processes; application logs are provided by mo server logs."}, nil
 		case "--follow", "--dry-run":
+			if args[i] == "--follow" && action != "logs" {
+				return command{}, usageWithLeaf("unknown option "+args[i], leafUsage)
+			}
 			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), "true")
 		case "--lines", "--unit-dir":
+			if args[i] == "--lines" && action != "logs" || args[i] == "--unit-dir" && action != "uninstall" {
+				return command{}, usageWithLeaf("unknown option "+args[i], leafUsage)
+			}
 			if i+1 >= len(args) {
-				return command{}, usage(args[i] + " requires a value")
+				return command{}, usageWithLeaf(args[i]+" requires a value", leafUsage)
 			}
 			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), args[i+1])
 			i++
 		default:
-			return command{}, usage("unknown option " + args[i])
+			return command{}, usageWithLeaf("unknown option "+args[i], leafUsage)
 		}
 	}
 	return c, nil
@@ -393,7 +394,7 @@ func parseEvent(args []string) (command, error) {
 				if e != nil {
 					return command{}, e
 				}
-			} else if args[i] == "--limit" || args[i] == "--handler" {
+			} else if args[1] == "list" && (args[i] == "--limit" || args[i] == "--handler") {
 				if i+1 >= len(args) {
 					return command{}, usage(args[i] + " requires a value")
 				}
@@ -402,7 +403,7 @@ func parseEvent(args []string) (command, error) {
 			} else if args[i] == "--help" || args[i] == "-h" {
 				return command{help: true, helpText: opsLeafHelp(c.kind, c.catalog)}, nil
 			} else {
-				return command{}, usage("unknown option " + args[i])
+				return command{}, usageWithLeaf("unknown option "+args[i], opsLeafHelp(c.kind, c.catalog))
 			}
 		}
 		return c, validateFields(c.fields, c.catalog, "mo event dead-letter "+args[1])
@@ -427,7 +428,7 @@ func parseEvent(args []string) (command, error) {
 		} else if args[i] == "--help" || args[i] == "-h" {
 			return command{help: true, helpText: opsLeafHelp(c.kind, c.catalog)}, nil
 		} else {
-			return command{}, usage("unknown option " + args[i])
+			return command{}, usageWithLeaf("unknown option "+args[i], opsLeafHelp(c.kind, c.catalog))
 		}
 	}
 	return c, validateFields(c.fields, c.catalog, "mo event tail")
@@ -460,7 +461,7 @@ func parseOtel(args []string) (command, error) {
 			if e != nil {
 				return command{}, e
 			}
-		} else if args[i] == "--service" || args[i] == "--limit" {
+		} else if action == "traces" && (args[i] == "--service" || args[i] == "--limit") {
 			if i+1 >= len(args) {
 				return command{}, usage(args[i] + " requires a value")
 			}
@@ -469,7 +470,7 @@ func parseOtel(args []string) (command, error) {
 		} else if args[i] == "--help" || args[i] == "-h" {
 			return command{help: true, helpText: opsLeafHelp(c.kind, c.catalog)}, nil
 		} else {
-			return command{}, usage("unknown option " + args[i])
+			return command{}, usageWithLeaf("unknown option "+args[i], opsLeafHelp(c.kind, c.catalog))
 		}
 	}
 	if action == "query" && !c.fieldsOnly && argValue(c.args, "sql", "") == "" {

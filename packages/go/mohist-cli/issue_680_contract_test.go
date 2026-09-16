@@ -61,7 +61,7 @@ func issue680OpsLeaves() []issue680OpsLeaf {
 // flag for a leaf and satisfies its parser-level requirements.
 func issue680ValidArgs(leaf issue680OpsLeaf) []string {
 	additions := map[string][]string{
-		"runner.list":            {"--project", "proj", "--scope", "global"},
+		"runner.list":            {"--project", "proj"},
 		"runner.view":            {"--project", "proj"},
 		"runner.status":          {"--project", "proj"},
 		"runner.revoke":          {"--project", "proj"},
@@ -231,10 +231,31 @@ func TestIssue680OperationsLeavesAcceptDocumentedFlags(t *testing.T) {
 		body   string
 	}{
 		{
-			name:   "runner.list scope",
-			args:   []string{"runner", "list", "--project", "proj", "--scope", "global"},
+			name:   "runner.list project",
+			args:   []string{"runner", "list", "--project", "proj"},
 			method: http.MethodGet,
 			path:   "/api/projects/proj/runners",
+		},
+		{
+			name:   "dead-letter list filters",
+			args:   []string{"event", "dead-letter", "list", "--handler", "dispatch", "--limit", "5"},
+			method: http.MethodGet,
+			path:   "/api/events/dead-letters",
+			query:  map[string]string{"handler": "dispatch", "limit": "5"},
+		},
+		{
+			name:   "otel traces filters",
+			args:   []string{"otel", "traces", "--service", "runner", "--limit", "5"},
+			method: http.MethodGet,
+			path:   "/otel/api/traces",
+			query:  map[string]string{"service": "runner", "limit": "5"},
+		},
+		{
+			name:   "otel query sql",
+			args:   []string{"otel", "query", "select 1"},
+			method: http.MethodPost,
+			path:   "/otel/api/query",
+			body:   `{"sql":"select 1"}`,
 		},
 		{
 			name:   "audit.list flags",
