@@ -1,9 +1,11 @@
 using System.Net;
 using System.Text.Json;
 using System.Net.Http.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Tests.Support;
@@ -101,13 +103,10 @@ public class ApiContractSpecs
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
 
-        // Capacity.Max is summed across all currently-registered global
-        // runners, so we need a clean registry to assert against this
-        // runner's contribution in isolation. Drain anything left over
-        // from prior tests in this collection.
-        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-        foreach (var staleId in await registry.ListRunnerIdsAsync())
-            await registry.UnregisterAsync(staleId);
+        // Capacity.Max is summed from the canonical global Runner
+        // observation projection. Clear observations left by prior tests in
+        // this shared collection so only this Runner contributes online slots.
+        _fixture.Services.GetRequiredService<RunnerStatusObservationStore>().Clear();
 
         var runnerId = $"slot-runner-{Guid.NewGuid():N}";
 
