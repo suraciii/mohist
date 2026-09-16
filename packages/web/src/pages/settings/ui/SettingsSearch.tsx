@@ -37,18 +37,14 @@ import {
   CommandItem,
   CommandList,
 } from '@/shared/ui/components/command'
-import {
-  useSettingsSectionPath,
-  type SettingsSectionKey,
-} from '../lib'
+import { useSettingsSectionPath, type SettingsSectionKey } from '../lib'
 import { isProjectSection } from '../lib/sections'
 import { registerShortcutHandler } from '@/shared/lib/keyboard-shortcuts'
 import { settingsSearchRegistry } from '../model/settings-search-registry'
 import type { SettingsSearchEntry, SettingsTab } from '../model/settings-search'
 
 const SECTION_LABEL: Record<SettingsTab, string> = {
-  ai: 'Coder Agent',
-  agent: 'Runtime',
+  scheduling: 'Scheduling',
   repositories: 'Repositories',
   workflows: 'Workflows',
   templates: 'Templates',
@@ -79,9 +75,7 @@ interface PendingFocus {
 const PENDING_FOCUS_STATE_KEY = 'settingsSearchFocus'
 
 function recordState(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {}
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
 }
 
 function pendingFocusFromState(value: unknown): PendingFocus | null {
@@ -120,9 +114,7 @@ function groupEntriesByTab(entries: readonly SettingsSearchEntry[]): GroupedEntr
  * field whose current value happens to be 30.
  */
 function buildHaystack(entry: SettingsSearchEntry): string {
-  return `${entry.label} ${entry.description} ${entry.placeholder ?? ''}`
-    .trim()
-    .toLowerCase()
+  return `${entry.label} ${entry.description} ${entry.placeholder ?? ''}`.trim().toLowerCase()
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -193,7 +185,9 @@ function SettingsSearch() {
     timeoutId = window.setTimeout(() => {
       cleanup()
       // eslint-disable-next-line no-console
-      console.warn(`[SettingsSearch] focus target #${targetId} did not mount within ${FOCUS_POLL_TIMEOUT_MS}ms after navigation`)
+      console.warn(
+        `[SettingsSearch] focus target #${targetId} did not mount within ${FOCUS_POLL_TIMEOUT_MS}ms after navigation`,
+      )
     }, FOCUS_POLL_TIMEOUT_MS)
     tryRevealAndFocus()
   }
@@ -269,9 +263,7 @@ function SettingsSearch() {
                     <span className="text-sm font-medium text-foreground">{entry.label}</span>
                     <span className="text-xs text-foreground/70">{entry.description}</span>
                   </span>
-                  <span className="ml-2 text-xs text-foreground/70 shrink-0">
-                    {SECTION_LABEL[entry.tab]}
-                  </span>
+                  <span className="ml-2 text-xs text-foreground/70 shrink-0">{SECTION_LABEL[entry.tab]}</span>
                 </CommandItem>
               )
             })}

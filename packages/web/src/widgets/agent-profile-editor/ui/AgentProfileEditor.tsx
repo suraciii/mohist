@@ -284,10 +284,10 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="agent-runtime">Execution backend</Label>
+              <Label htmlFor="agent-runtime">Runtime</Label>
               <select
                 id="agent-runtime"
-                aria-label="Execution backend"
+                aria-label="Runtime"
                 data-testid="agent-runtime"
                 value={runtime}
                 onChange={(event) => {
@@ -308,7 +308,7 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
               <ModelSelect
                 id="agent-model"
                 value={model}
-                placeholder="Select a model"
+                placeholder="Runtime default"
                 models={allModels}
                 onChange={(m) => setModel(m)}
                 onChangeVariant={setVariant}
@@ -335,6 +335,10 @@ export function AgentProfileEditor({ agent, open, onClose, onSaved, operationsHo
                   if (modelChanged) setVariant(null)
                 }}
               />
+              <p className="text-[10px] text-muted-foreground">
+                Leave Model unset for the Runtime default; the Runtime chooses at dispatch. Catalog-backed values stay
+                unverified until a complete catalog confirms them.
+              </p>
             </div>
 
             <div className="space-y-1.5">

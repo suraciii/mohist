@@ -71,12 +71,6 @@ async function mockSettingsApi(page: Page, repositories = project.repositories) 
         }),
       })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/variables`) {
-      return route.fulfill({ json: apiResponse({ vars: { agent: { type: 'opencode', model: null } }, stages: {} }) })
-    }
-    if (method === 'GET' && path === '/opencode/runtime') {
-      return route.fulfill({ json: apiResponse({ mode: 'local', command: 'opencode', model: null, note: '' }) })
-    }
     if (method === 'GET' && path === '/config') {
       return route.fulfill({ json: apiResponse(config) })
     }
@@ -157,7 +151,7 @@ async function mockSettingsApi(page: Page, repositories = project.repositories) 
 
 async function gotoSettingsTab(
   page: Page,
-  tab: 'ai' | 'agent' | 'repositories' | 'workflows' | 'templates' | 'system' | 'preferences',
+  tab: 'scheduling' | 'repositories' | 'workflows' | 'templates' | 'system' | 'preferences',
 ) {
   await page.goto(`/${project.name}/settings/${tab}`)
   await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeAttached()
@@ -167,7 +161,7 @@ async function gotoSettingsTab(
 test.describe('Settings search dialog in Chromium', () => {
   test('⌘K opens the dialog on a Settings tab', async ({ page }) => {
     await mockSettingsApi(page)
-    await gotoSettingsTab(page, 'agent')
+    await gotoSettingsTab(page, 'scheduling')
 
     // Ensure no dialog before the keystroke.
     await expect(page.getByTestId('settings-search-input')).toHaveCount(0)
@@ -203,7 +197,7 @@ test.describe('Settings search dialog in Chromium', () => {
 
   test('search matches label, description, and placeholder but excludes current numeric values', async ({ page }) => {
     await mockSettingsApi(page)
-    await gotoSettingsTab(page, 'agent')
+    await gotoSettingsTab(page, 'scheduling')
 
     await page.keyboard.press('Meta+K')
     const input = page.getByTestId('settings-search-input')
@@ -232,7 +226,7 @@ test.describe('Settings search dialog in Chromium', () => {
 
   test('Enter on a highlighted result navigates to the owning tab and focuses the field', async ({ page }) => {
     await mockSettingsApi(page)
-    await gotoSettingsTab(page, 'ai')
+    await gotoSettingsTab(page, 'scheduling')
 
     await page.keyboard.press('Meta+K')
     const input = page.getByTestId('settings-search-input')
@@ -249,7 +243,7 @@ test.describe('Settings search dialog in Chromium', () => {
 
     // Dialog closes; the URL switches to the owning tab.
     await expect(page.getByTestId('settings-search-input')).toHaveCount(0)
-    await expect(page).toHaveURL(new RegExp(`/settings/agent$`))
+    await expect(page).toHaveURL(new RegExp(`/settings/scheduling$`))
 
     // The focus target receives keyboard focus with a visible :focus-visible
     // outline. We assert the active element id rather than reading CSS so the
@@ -266,29 +260,9 @@ test.describe('Settings search dialog in Chromium', () => {
     expect(matchesFocusVisible).toBe(true)
   })
 
-  test('Enter reveals collapsed stage model overrides before focusing a stage model field', async ({ page }) => {
-    await mockSettingsApi(page)
-    await gotoSettingsTab(page, 'agent')
-
-    await page.keyboard.press('Meta+K')
-    const input = page.getByTestId('settings-search-input')
-    await expect(input).toBeVisible()
-
-    await input.fill('plan stage model')
-    const result = page.getByTestId('settings-search-result-settings-stage-model-plan')
-    await expect(result).toBeVisible()
-    await result.hover()
-
-    await page.keyboard.press('Enter')
-
-    await expect(page.getByTestId('settings-search-input')).toHaveCount(0)
-    await expect(page).toHaveURL(new RegExp(`/settings/ai$`))
-    await expect(page.locator('#settings-stage-model-plan')).toBeFocused()
-  })
-
   test('Enter reveals the empty repository add form before focusing a repository field', async ({ page }) => {
     await mockSettingsApi(page, [])
-    await gotoSettingsTab(page, 'agent')
+    await gotoSettingsTab(page, 'scheduling')
 
     await page.keyboard.press('Meta+K')
     const input = page.getByTestId('settings-search-input')
@@ -308,7 +282,7 @@ test.describe('Settings search dialog in Chromium', () => {
 
   test('Esc closes the dialog without navigating', async ({ page }) => {
     await mockSettingsApi(page)
-    await gotoSettingsTab(page, 'ai')
+    await gotoSettingsTab(page, 'scheduling')
 
     await page.keyboard.press('Meta+K')
     const input = page.getByTestId('settings-search-input')
@@ -318,12 +292,12 @@ test.describe('Settings search dialog in Chromium', () => {
     await page.keyboard.press('Escape')
 
     await expect(page.getByTestId('settings-search-input')).toHaveCount(0)
-    await expect(page).toHaveURL(new RegExp(`/settings/ai$`))
+    await expect(page).toHaveURL(new RegExp(`/settings/scheduling$`))
   })
 
   test('overlay click closes the dialog without navigating', async ({ page }) => {
     await mockSettingsApi(page)
-    await gotoSettingsTab(page, 'agent')
+    await gotoSettingsTab(page, 'scheduling')
 
     await page.keyboard.press('Meta+K')
     const input = page.getByTestId('settings-search-input')
@@ -333,12 +307,12 @@ test.describe('Settings search dialog in Chromium', () => {
     await page.locator('[data-slot="dialog-overlay"]').click({ position: { x: 5, y: 5 } })
 
     await expect(page.getByTestId('settings-search-input')).toHaveCount(0)
-    await expect(page).toHaveURL(new RegExp(`/settings/agent$`))
+    await expect(page).toHaveURL(new RegExp(`/settings/scheduling$`))
   })
 
   test('empty result renders "No matching settings"', async ({ page }) => {
     await mockSettingsApi(page)
-    await gotoSettingsTab(page, 'agent')
+    await gotoSettingsTab(page, 'scheduling')
 
     await page.keyboard.press('Meta+K')
     const input = page.getByTestId('settings-search-input')

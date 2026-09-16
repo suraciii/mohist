@@ -21,12 +21,9 @@ export function isAgentRuntime(value: string | null | undefined): value is Agent
   return value === AGENT_RUNTIME_OPENCODE || value === AGENT_RUNTIME_PI
 }
 
-export const DEFAULT_AGENT_RUNTIME: AgentRuntime = AGENT_RUNTIME_OPENCODE
+export const DEFAULT_AGENT_RUNTIME: AgentRuntime = AGENT_RUNTIME_PI
 
-export interface VariableBundle {
-  vars?: Record<string, unknown> | null
-  stages?: Record<string, { vars?: Record<string, unknown> | null } | null> | null
-}
+export type OpencodeModelVariants = Record<string, string[]>
 
 export function getConfig() {
   return request<GeneralConfig>('/config')
@@ -45,14 +42,6 @@ export function getLogLevel() {
 
 export function setLogLevel(level: string) {
   return updateConfig('logLevel', level).then((config) => ({ level: config.logLevel ?? level }))
-}
-
-export type OpencodeModelVariants = Record<string, string[]>
-
-export function getOpencodeModels(projectId?: string | null) {
-  return request<{ models: string[]; modelVariants?: OpencodeModelVariants; reasoningEfforts?: OpencodeModelVariants }>(
-    projectApiPath(projectId, '/opencode/models'),
-  )
 }
 
 export function getModels(
@@ -77,63 +66,6 @@ export function getOpencodeModelVariantsFor(
     if (variants && variants.length > 0) result[id] = variants
   }
   return result
-}
-
-export function getProjectWorkflowVariables(projectId?: string | null) {
-  return request<VariableBundle>(projectApiPath(projectId, '/variables'))
-}
-
-export function patchProjectWorkflowVariables(projectId: string | null | undefined, patch: VariableBundle) {
-  return request<VariableBundle>(projectApiPath(projectId, '/variables'), {
-    method: 'PATCH',
-    body: JSON.stringify(patch),
-  })
-}
-
-export function getOpencodeModel(projectId?: string | null) {
-  return getProjectWorkflowVariables(projectId).then((variables) => ({
-    model: getAgentModel(variables.vars),
-    variant: getAgentVariant(variables.vars),
-    reasoningEffort: getAgentReasoningEffort(variables.vars),
-  }))
-}
-
-export function updateOpencodeModel(
-  projectId: string | null | undefined,
-  model: string | null,
-  variant?: string | null,
-  reasoningEffort?: string | null,
-) {
-  const agent: Record<string, unknown> = { model }
-  if (variant !== undefined) agent.variant = variant
-  if (reasoningEffort !== undefined) agent.reasoningEffort = reasoningEffort
-  return patchProjectWorkflowVariables(projectId, { vars: { agent } }).then((variables) => ({
-    model: getAgentModel(variables.vars),
-    variant: getAgentVariant(variables.vars),
-    reasoningEffort: getAgentReasoningEffort(variables.vars),
-  }))
-}
-
-export function getModel() {
-  return request<{ model: string | null }>('/model')
-}
-
-export function setModel(model: string | null) {
-  return request<{ model: string | null }>('/model', {
-    method: 'PUT',
-    body: JSON.stringify({ model }),
-  })
-}
-
-export function getOpencodeModelConfig() {
-  return request<{ model: string | null }>('/opencode-model')
-}
-
-export function setOpencodeModel(model: string | null) {
-  return request<{ model: string | null }>('/opencode-model', {
-    method: 'PUT',
-    body: JSON.stringify({ model }),
-  })
 }
 
 export const SUPPORTED_RUNTIME_KEYS = [
@@ -173,10 +105,6 @@ export function agentRuntimeToConfigKey(key: keyof AgentRuntimeConfig): Supporte
 
 export function getAgentRuntime() {
   return getConfig().then((config) => configToAgentRuntime(config))
-}
-
-export function getOpencodeRuntime() {
-  return request<{ mode: string; command: string; model: string | null; note: string }>('/opencode/runtime')
 }
 
 export function updateAgentRuntime(data: Partial<AgentRuntimeConfig>) {
@@ -231,31 +159,6 @@ function encodeRuntimeValue(key: keyof AgentRuntimeConfig, value: number): numbe
     return Math.round(value / 1000)
   }
   return value
-}
-
-export function getStageModels(projectId?: string | null) {
-  return getProjectWorkflowVariables(projectId).then((variables) => ({
-    stageModels: getStageModelMap(variables),
-    stageModelVariants: getStageModelVariantMap(variables),
-    stageReasoningEfforts: getStageReasoningEffortMap(variables),
-  }))
-}
-
-export function setStageModel(
-  projectId: string | null | undefined,
-  stage: string,
-  model: string | null,
-  variant?: string | null,
-  reasoningEffort?: string | null,
-) {
-  const agent: Record<string, unknown> = { model }
-  if (variant !== undefined) agent.variant = variant
-  if (reasoningEffort !== undefined) agent.reasoningEffort = reasoningEffort
-  return patchProjectWorkflowVariables(projectId, { stages: { [stage]: { vars: { agent } } } }).then((variables) => ({
-    stageModels: getStageModelMap(variables),
-    stageModelVariants: getStageModelVariantMap(variables),
-    stageReasoningEfforts: getStageReasoningEffortMap(variables),
-  }))
 }
 
 export function getWorkflowProfiles(projectId: string) {
@@ -362,49 +265,4 @@ export function getSystemUpdateStatus() {
 
 export function getRuntimeConsistency() {
   return request<RuntimeConsistencyResponse>('/system/consistency')
-}
-
-function getAgentModel(vars: Record<string, unknown> | null | undefined) {
-  const agent = vars?.agent
-  if (!agent || typeof agent !== 'object') return null
-  const model = (agent as Record<string, unknown>).model
-  return typeof model === 'string' && model.trim() ? model : null
-}
-
-function getAgentVariant(vars: Record<string, unknown> | null | undefined) {
-  const agent = vars?.agent
-  if (!agent || typeof agent !== 'object') return null
-  const variant = (agent as Record<string, unknown>).variant
-  return typeof variant === 'string' && variant.trim() ? variant : null
-}
-
-function getAgentReasoningEffort(vars: Record<string, unknown> | null | undefined) {
-  const agent = vars?.agent
-  if (!agent || typeof agent !== 'object') return null
-  const effort = (agent as Record<string, unknown>).reasoningEffort
-  return typeof effort === 'string' && effort.trim() ? effort : null
-}
-
-function getStageModelMap(variables: VariableBundle) {
-  const entries = Object.entries(variables.stages ?? {})
-    .map(([stage, stageVars]) => [stage, getAgentModel(stageVars?.vars)] as const)
-    .filter((entry): entry is readonly [string, string] => typeof entry[1] === 'string')
-
-  return entries.length > 0 ? Object.fromEntries(entries) : null
-}
-
-function getStageModelVariantMap(variables: VariableBundle) {
-  const entries = Object.entries(variables.stages ?? {})
-    .map(([stage, stageVars]) => [stage, getAgentVariant(stageVars?.vars)] as const)
-    .filter((entry): entry is readonly [string, string] => typeof entry[1] === 'string')
-
-  return entries.length > 0 ? Object.fromEntries(entries) : null
-}
-
-function getStageReasoningEffortMap(variables: VariableBundle) {
-  const entries = Object.entries(variables.stages ?? {})
-    .map(([stage, stageVars]) => [stage, getAgentReasoningEffort(stageVars?.vars)] as const)
-    .filter((entry): entry is readonly [string, string] => typeof entry[1] === 'string')
-
-  return entries.length > 0 ? Object.fromEntries(entries) : null
 }

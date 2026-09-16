@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import type { AgentInfo, AgentStatusDetailResponse } from '../../../entities/agent'
@@ -56,28 +57,31 @@ function makeAgent(overrides: Partial<AgentInfo> = {}): AgentInfo {
 }
 
 function renderPage() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(
-    <ProjectProvider
-      initialProjectId="proj-1"
-      initialProjects={[
-        {
-          id: 'proj-1',
-          name: 'Test',
-          createdAt: '2026-01-01T00:00:00.000Z',
-          updatedAt: '2026-01-01T00:00:00.000Z',
-          repositories: [],
-        },
-      ]}
-    >
-      <MemoryRouter initialEntries={['/test/agents/agent-1']}>
-        <Routes>
-          <Route
-            path="/:projectName/agents/:agentId"
-            element={<AgentDetailPage components={components} dataHook={dataHook} />}
-          />
-        </Routes>
-      </MemoryRouter>
-    </ProjectProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ProjectProvider
+        initialProjectId="proj-1"
+        initialProjects={[
+          {
+            id: 'proj-1',
+            name: 'Test',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            repositories: [],
+          },
+        ]}
+      >
+        <MemoryRouter initialEntries={['/test/agents/agent-1']}>
+          <Routes>
+            <Route
+              path="/:projectName/agents/:agentId"
+              element={<AgentDetailPage components={components} dataHook={dataHook} />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </ProjectProvider>
+    </QueryClientProvider>,
   )
 }
 

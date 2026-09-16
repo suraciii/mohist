@@ -72,9 +72,9 @@ export function getAgentLaunchErrorFeedback(
   if (code === 'execution_config_unresolvable') {
     return {
       kind: 'execution-config-unresolvable',
-      title: 'Execution configuration is required',
-      message: 'This task does not have a resolvable execution configuration.',
-      nextAction: 'Choose a Model for this task here, then retry.',
+      title: 'Execution configuration is unresolved',
+      message: "The task's execution configuration could not be resolved.",
+      nextAction: 'Review the execution configuration on the Agent definition, then retry.',
     }
   }
 

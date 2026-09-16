@@ -1,5 +1,5 @@
-import { useMemo, useState, type ComponentProps, type ComponentType } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState, type ComponentProps, type ComponentType } from 'react'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BotIcon,
   PencilIcon,
@@ -19,9 +19,11 @@ import {
   useAgentDetailStatus,
   useAgentSessions,
   useArchiveAgent,
+  useCustomizeBuiltInAgent,
   useUnarchiveAgent,
   readAgentModelAndVariant,
   getAgentAvailabilityFeedback,
+  isBuiltInAgentRef,
 } from '../../../entities/agent'
 import type {
   AgentAvailabilityResponse,
@@ -61,11 +63,15 @@ export interface AgentDetailPageData {
 export type AgentDetailPageDataHook = (agentId: string) => AgentDetailPageData
 
 const useDefaultData: AgentDetailPageDataHook = (agentId) => {
+  // Built-in definitions have no stored row: only the by-name read resolves
+  // them, and per-agent sessions/status endpoints cannot answer for them.
+  const isBuiltIn = isBuiltInAgentRef(agentId)
   const { data: agent, isLoading, isError } = useAgent(agentId)
   const { data: sessions = [], isLoading: sessionsLoading } = useAgentSessions({
     agentRef: agentId,
+    enabled: !isBuiltIn,
   })
-  const { data: detailStatus, isLoading: detailStatusLoading } = useAgentDetailStatus(agentId)
+  const { data: detailStatus, isLoading: detailStatusLoading } = useAgentDetailStatus(agentId, !isBuiltIn)
   return {
     agent,
     isLoading,
@@ -338,6 +344,27 @@ function SessionSection({
   )
 }
 
+function BuiltInAgentCard() {
+  return (
+    <div
+      data-testid="agent-detail-built-in-note"
+      className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-2"
+    >
+      <div className="flex items-center gap-2">
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-blue-700 border-blue-300">
+          Built-in
+        </Badge>
+        <span className="text-sm font-medium text-blue-900">Mohist-owned definition</span>
+      </div>
+      <p className="text-xs text-blue-800">
+        Workflows run this Agent by name until a Project Agent overrides it. Customize materializes a same-name Project
+        Agent you can edit — including its Model. The built-in definition itself is read-only and an unset Model means
+        the Runtime chooses at dispatch.
+      </p>
+    </div>
+  )
+}
+
 export function AgentDetailPage({
   components,
   dataHook = useDefaultData,
@@ -352,6 +379,8 @@ export function AgentDetailPage({
   const { agentId } = useParams<{ agentId: string }>()
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const customizeAgent = useCustomizeBuiltInAgent()
   const {
     agent,
     isLoading,
@@ -363,13 +392,33 @@ export function AgentDetailPage({
     detailStatus,
     detailStatusLoading,
   } = dataHook(agentId ?? '')
-  const [editorOpen, setEditorOpen] = useState(false)
+  const [editorOpen, setEditorOpen] = useState(() => searchParams.get('edit') === '1')
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
+  const [repair, setRepair] = useState<{ agentId: string; name: string } | null>(null)
+  const [customizeError, setCustomizeError] = useState<string | null>(null)
+
+  // A Customize conflict navigates to the shadowing Agent's edit view, which
+  // reuses this route element instead of remounting it.
+  const editRequested = searchParams.get('edit') === '1'
+  const conflictNotice = searchParams.get('notice') === 'override-conflict'
+  useEffect(() => {
+    if (editRequested) setEditorOpen(true)
+  }, [editRequested, agentId])
+
+  const closeEditor = () => {
+    setEditorOpen(false)
+    if (searchParams.has('edit')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('edit')
+      setSearchParams(next, { replace: true })
+    }
+  }
 
   useDocumentTitle(agent ? `${agent.name} — Mohist` : 'Agent — Mohist')
 
   const { model, variant, runtime, reasoningEffort } = useMemo(() => readAgentModelAndVariant(agent), [agent])
   const isArchived = agent?.status === 'archived'
+  const isBuiltIn = agent?.origin === 'built-in'
   const executability = agent?.executability
   const executabilityState = executability?.state ?? 'unknown'
   const launchBlockedByExecutability =
@@ -404,6 +453,33 @@ export function AgentDetailPage({
     unarchiveAgent.mutate(agent.id)
   }
 
+  function handleCustomize() {
+    if (!agent) return
+    setCustomizeError(null)
+    setRepair(null)
+    customizeAgent.mutate(
+      { name: agent.name },
+      {
+        onSuccess: (created) => {
+          navigate(toProjectPath(`/agents/${encodeURIComponent(created.id)}?edit=1`))
+        },
+        onError: (error) => {
+          const apiError = error as { code?: string; data?: { agentId?: string; name?: string } }
+          const existingAgentId = apiError.data?.agentId
+          if (apiError.code === 'agent_override_conflict' && existingAgentId) {
+            navigate(toProjectPath(`/agents/${encodeURIComponent(existingAgentId)}?edit=1&notice=override-conflict`))
+            return
+          }
+          if (apiError.code === 'agent_override_archived' && existingAgentId) {
+            setRepair({ agentId: existingAgentId, name: apiError.data?.name ?? agent.name })
+            return
+          }
+          setCustomizeError(error.message)
+        },
+      },
+    )
+  }
+
   if (isLoading) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -431,8 +507,24 @@ export function AgentDetailPage({
               <BotIcon className={`size-6 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`} />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-lg font-semibold text-foreground truncate">{agent.name}</h1>
+                <Badge
+                  data-testid="agent-detail-origin"
+                  variant="outline"
+                  className={`text-[10px] px-1.5 py-0 h-4 ${isBuiltIn ? 'text-blue-700 border-blue-300' : 'text-muted-foreground'}`}
+                >
+                  {isBuiltIn ? 'Built-in' : 'Project'}
+                </Badge>
+                {agent.overridesBuiltIn && (
+                  <Badge
+                    data-testid="agent-detail-overrides-built-in"
+                    variant="outline"
+                    className="text-[10px] px-1.5 py-0 h-4 text-amber-700 border-amber-300"
+                  >
+                    Overrides built-in
+                  </Badge>
+                )}
                 <Badge
                   data-testid="agent-detail-lifecycle"
                   variant="outline"
@@ -461,41 +553,99 @@ export function AgentDetailPage({
                 </p>
               )}
               <p className="text-xs text-muted-foreground mt-0.5">
-                {model ? `Model · ${model}` : 'Model · Default'}
+                {model ? `Model · ${model}` : 'Model · Runtime default'}
                 {variant && ` · ${variant}`}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Button variant="outline" size="sm" onClick={() => setEditorOpen(true)} data-testid="agent-detail-edit">
-              <PencilIcon />
-              Edit
-            </Button>
-            {!isArchived ? (
+            {isBuiltIn ? (
               <Button
                 size="sm"
-                onClick={() => navigate(toProjectPath(`/agent-sessions/new?agent=${encodeURIComponent(agent.id)}`))}
-                data-testid="agent-detail-new-session"
-                disabled={launchBlockedByExecutability}
-                title={launchBlockedByExecutability ? 'Executability is blocked — fix the gaps first.' : undefined}
+                onClick={handleCustomize}
+                data-testid="agent-detail-customize"
+                disabled={customizeAgent.isPending}
               >
-                <PlayIcon />
-                New Session
+                {customizeAgent.isPending && <Loader2Icon className="size-4 animate-spin" />}
+                Customize
               </Button>
             ) : (
-              <Button
-                size="sm"
-                disabled
-                variant="outline"
-                data-testid="agent-detail-new-session"
-                className="opacity-50 cursor-not-allowed"
-              >
-                <PlayIcon />
-                New Session
-              </Button>
+              <>
+                <Button variant="outline" size="sm" onClick={() => setEditorOpen(true)} data-testid="agent-detail-edit">
+                  <PencilIcon />
+                  Edit
+                </Button>
+                {!isArchived ? (
+                  <Button
+                    size="sm"
+                    onClick={() => navigate(toProjectPath(`/agent-sessions/new?agent=${encodeURIComponent(agent.id)}`))}
+                    data-testid="agent-detail-new-session"
+                    disabled={launchBlockedByExecutability}
+                    title={launchBlockedByExecutability ? 'Executability is blocked — fix the gaps first.' : undefined}
+                  >
+                    <PlayIcon />
+                    New Session
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    disabled
+                    variant="outline"
+                    data-testid="agent-detail-new-session"
+                    className="opacity-50 cursor-not-allowed"
+                  >
+                    <PlayIcon />
+                    New Session
+                  </Button>
+                )}
+              </>
             )}
           </div>
         </div>
+
+        {conflictNotice && (
+          <div
+            data-testid="agent-detail-notice"
+            data-notice="override-conflict"
+            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+          >
+            This Agent already overrides the built-in name. Edit it here instead of customizing the built-in again.
+          </div>
+        )}
+
+        {repair && (
+          <div
+            data-testid="agent-detail-override-repair"
+            className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800 space-y-1"
+          >
+            <p className="font-medium">
+              Archived Agent {repair.agentId} shadows {repair.name}.
+            </p>
+            <p>
+              An archived same-name Agent never silently falls back to the built-in. Restore or rename it before
+              customizing:{' '}
+              <a
+                className="font-semibold underline"
+                href={toProjectPath(`/agents/${encodeURIComponent(repair.agentId)}`)}
+                data-testid="agent-detail-override-repair-link"
+              >
+                open the archived Agent
+              </a>
+              .
+            </p>
+          </div>
+        )}
+
+        {customizeError && (
+          <div
+            data-testid="agent-detail-customize-error"
+            className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800"
+          >
+            {customizeError}
+          </div>
+        )}
+
+        {isBuiltIn && <BuiltInAgentCard />}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="md:col-span-2 space-y-6">
@@ -517,7 +667,9 @@ export function AgentDetailPage({
                 <div className="text-xs text-muted-foreground py-4 text-center">Loading sessions...</div>
               ) : allSessions.length === 0 ? (
                 <div className="text-xs text-muted-foreground py-4 text-center">
-                  No sessions yet. Start a new session to get started.
+                  {isBuiltIn
+                    ? 'Built-in Agents run through Workflows by name; direct sessions are recorded once a Project Agent overrides the name.'
+                    : 'No sessions yet. Start a new session to get started.'}
                 </div>
               ) : (
                 <div className="space-y-4" data-testid="agent-detail-sessions">
@@ -539,11 +691,13 @@ export function AgentDetailPage({
           </div>
 
           <div className="space-y-4">
-            <AvailabilityCard
-              availability={detailStatus?.availability}
-              waitingWork={detailStatus?.waitingWork ?? []}
-              loading={detailStatusLoading}
-            />
+            {!isBuiltIn && (
+              <AvailabilityCard
+                availability={detailStatus?.availability}
+                waitingWork={detailStatus?.waitingWork ?? []}
+                loading={detailStatusLoading}
+              />
+            )}
 
             <div className="rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-medium text-foreground mb-3">Agent Config</h3>
@@ -556,12 +710,14 @@ export function AgentDetailPage({
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-muted-foreground">Model</span>
-                  <span className="text-xs font-medium text-foreground">{model ?? 'Default'}</span>
+                  <span data-testid="agent-detail-model" className="text-xs font-medium text-foreground">
+                    {model ?? 'Runtime default'}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-muted-foreground">Variant</span>
                   <span data-testid="agent-detail-variant" className="text-xs font-medium text-foreground">
-                    {variant ?? 'Default'}
+                    {variant ?? 'None'}
                   </span>
                 </div>
                 {reasoningEffort ? (
@@ -629,51 +785,53 @@ export function AgentDetailPage({
               )}
             </div>
 
-            <SubscriptionsSection agent={agent} />
+            {!isBuiltIn && <SubscriptionsSection agent={agent} />}
 
-            <ConnectionsSection agent={agent} />
+            {!isBuiltIn && <ConnectionsSection agent={agent} />}
 
-            <div className="rounded-lg border border-border bg-card p-4">
-              <h3 className="text-sm font-medium text-foreground mb-3">Actions</h3>
-              <div className="space-y-2">
-                {!isArchived ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setArchiveConfirmOpen(true)}
-                    className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
-                    data-testid="agent-detail-archive-btn"
-                    disabled={archiveAgent.isPending}
-                  >
-                    <ArchiveIcon />
-                    Archive
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleUnarchive}
-                    className="w-full justify-start"
-                    data-testid="agent-detail-unarchive-btn"
-                    disabled={unarchiveAgent.isPending}
-                  >
-                    {unarchiveAgent.isPending ? <Loader2Icon className="size-4 animate-spin" /> : <RotateCcwIcon />}
-                    Unarchive
-                  </Button>
-                )}
+            {!isBuiltIn && (
+              <div className="rounded-lg border border-border bg-card p-4">
+                <h3 className="text-sm font-medium text-foreground mb-3">Actions</h3>
+                <div className="space-y-2">
+                  {!isArchived ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setArchiveConfirmOpen(true)}
+                      className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
+                      data-testid="agent-detail-archive-btn"
+                      disabled={archiveAgent.isPending}
+                    >
+                      <ArchiveIcon />
+                      Archive
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleUnarchive}
+                      className="w-full justify-start"
+                      data-testid="agent-detail-unarchive-btn"
+                      disabled={unarchiveAgent.isPending}
+                    >
+                      {unarchiveAgent.isPending ? <Loader2Icon className="size-4 animate-spin" /> : <RotateCcwIcon />}
+                      Unarchive
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
 
-      {editorOpen && (
+      {!isBuiltIn && editorOpen && (
         <AgentProfileEditor
           agent={agent}
           open={editorOpen}
-          onClose={() => setEditorOpen(false)}
+          onClose={closeEditor}
           onSaved={() => {
-            setEditorOpen(false)
+            closeEditor()
           }}
         />
       )}

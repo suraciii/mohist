@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
+import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
+import { server, useMswServer } from '../../../../tests/support/msw'
 import type {
   AgentSessionLaunchContext,
   AgentSessionLaunchResponse,
@@ -145,6 +147,23 @@ function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
+function LocationProbe() {
+  const location = useLocation()
+  return <div data-testid="current-path">{location.pathname}</div>
+}
+
+const OVERRIDES_PATH = '*/api/projects/:projectId/agents/overrides'
+const BY_NAME_PATH = '*/api/projects/:projectId/agents/by-name/*'
+
+useMswServer(
+  http.post(OVERRIDES_PATH, () =>
+    HttpResponse.json(
+      { success: false, error: 'not configured for this test', code: 'agent_override_conflict' },
+      { status: 409 },
+    ),
+  ),
+)
+
 function renderPage() {
   const queryClient = createQueryClient()
   return render(
@@ -164,7 +183,40 @@ function renderPage() {
         <MemoryRouter initialEntries={['/agents/agent-1']}>
           <Routes>
             <Route path="/agents/:agentId" element={<AgentDetailPage components={components} dataHook={dataHook} />} />
+            <Route
+              path="/Test/agents/:agentId"
+              element={<AgentDetailPage components={components} dataHook={dataHook} />}
+            />
           </Routes>
+          <LocationProbe />
+        </MemoryRouter>
+      </ProjectProvider>
+    </QueryClientProvider>,
+  )
+}
+
+/** Renders the real data hook so built-in refs resolve through the by-name read. */
+function renderBuiltInPage(agentRef: string) {
+  const queryClient = createQueryClient()
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ProjectProvider
+        initialProjectId="proj-1"
+        initialProjects={[
+          {
+            id: 'proj-1',
+            name: 'Test',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            repositories: [],
+          },
+        ]}
+      >
+        <MemoryRouter initialEntries={[`/Test/agents/${encodeURIComponent(agentRef)}`]}>
+          <Routes>
+            <Route path="/Test/agents/:agentId" element={<AgentDetailPage components={components} />} />
+          </Routes>
+          <LocationProbe />
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -526,6 +578,169 @@ describe('AgentDetailPage', () => {
       const section = await screen.findByTestId('agent-subscriptions-section')
       expect(section).toBeInTheDocument()
       expect(section).toHaveAttribute('data-agent-status', 'archived')
+    })
+  })
+
+  describe('built-in Agent detail (by-name read)', () => {
+    const builtInPlanner = makeAgent({
+      id: 'builtin:mohist/planner',
+      name: 'mohist/planner',
+      purpose: 'Turns an Issue into a plan',
+      description: 'Mohist-owned planning Agent.',
+      instructions: 'Plan the work.',
+      agentConfig: null,
+      skills: ['planning'],
+      status: 'active',
+      origin: 'built-in',
+    })
+
+    function mockBuiltIn(agent: AgentInfo = builtInPlanner) {
+      server.use(http.get(BY_NAME_PATH, () => HttpResponse.json({ success: true, data: agent })))
+    }
+
+    it('resolves the built-in through the by-name route instead of a stored id', async () => {
+      let byNameUrl = ''
+      server.use(
+        http.get(BY_NAME_PATH, ({ request }) => {
+          byNameUrl = request.url
+          return HttpResponse.json({ success: true, data: builtInPlanner })
+        }),
+      )
+
+      renderBuiltInPage('builtin:mohist/planner')
+
+      expect(await screen.findByTestId('agent-detail-page')).toHaveAttribute('data-agent-id', 'builtin:mohist/planner')
+      expect(screen.getByText('mohist/planner')).toBeInTheDocument()
+      expect(byNameUrl).toContain('/api/projects/proj-1/agents/by-name/mohist/planner')
+    })
+
+    it('shows the built-in origin, its own definition, and Runtime default for an unset Model', async () => {
+      mockBuiltIn()
+      renderBuiltInPage('builtin:mohist/planner')
+
+      await screen.findByTestId('agent-detail-page')
+      expect(screen.getByTestId('agent-detail-origin')).toHaveTextContent('Built-in')
+      expect(screen.getByTestId('agent-detail-built-in-note')).toBeInTheDocument()
+      expect(screen.getByTestId('agent-detail-instructions')).toHaveTextContent('Plan the work.')
+      expect(screen.getByTestId('agent-detail-runtime')).toHaveTextContent('Pi')
+      expect(screen.getByTestId('agent-detail-model')).toHaveTextContent('Runtime default')
+      expect(screen.queryByText(/gpt-4/)).not.toBeInTheDocument()
+    })
+
+    it('offers Customize as the primary action and no stored-Agent controls', async () => {
+      mockBuiltIn()
+      renderBuiltInPage('builtin:mohist/planner')
+
+      await screen.findByTestId('agent-detail-page')
+      expect(screen.getByTestId('agent-detail-customize')).toBeInTheDocument()
+      expect(screen.queryByTestId('agent-detail-edit')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('agent-detail-new-session')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('agent-detail-archive-btn')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('agent-detail-unarchive-btn')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('agent-subscriptions-section')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('agent-detail-availability')).not.toBeInTheDocument()
+      expect(
+        screen.getByText(/direct sessions are recorded once a Project Agent overrides the name/i),
+      ).toBeInTheDocument()
+    })
+  })
+
+  describe('Customize flow', () => {
+    const builtInBuilder = makeAgent({
+      id: 'builtin:mohist/builder',
+      name: 'mohist/builder',
+      origin: 'built-in',
+      agentConfig: null,
+    })
+
+    it('materializes the override through the Server and opens the created Agent for editing', async () => {
+      mockAgent(builtInBuilder)
+      let postedBody: unknown = null
+      server.use(
+        http.post(OVERRIDES_PATH, async ({ request }) => {
+          postedBody = await request.json()
+          const created = makeAgent({
+            id: 'agent-override-1',
+            name: 'mohist/builder',
+            origin: 'project',
+            overridesBuiltIn: true,
+            agentConfig: { model: 'anthropic/claude-3', runtime: 'pi' },
+          })
+          state.agent = created
+          return HttpResponse.json({ success: true, data: created }, { status: 201 })
+        }),
+      )
+
+      renderPage()
+      fireEvent.click(await screen.findByTestId('agent-detail-customize'))
+
+      await waitFor(() => expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agents/agent-override-1'))
+      expect(screen.getByTestId('agent-profile-editor')).toBeInTheDocument()
+      // The client sends only the caller's changes; the Server copies the definition.
+      expect(postedBody).toEqual({ name: 'mohist/builder' })
+    })
+
+    it('navigates to the existing Agent with a repair notice when an active override conflicts', async () => {
+      mockAgent(builtInBuilder)
+      server.use(
+        http.post(OVERRIDES_PATH, () => {
+          state.agent = makeAgent({
+            id: 'agent-existing',
+            name: 'mohist/builder',
+            origin: 'project',
+            overridesBuiltIn: true,
+          })
+          return HttpResponse.json(
+            {
+              success: false,
+              error:
+                "An active Project Agent named 'mohist/builder' already overrides this built-in Agent; edit that Agent instead.",
+              code: 'agent_override_conflict',
+              data: { name: 'mohist/builder', agentId: 'agent-existing' },
+            },
+            { status: 409 },
+          )
+        }),
+      )
+
+      renderPage()
+      fireEvent.click(await screen.findByTestId('agent-detail-customize'))
+
+      await waitFor(() => expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agents/agent-existing'))
+      expect(screen.getByTestId('agent-detail-notice')).toHaveAttribute('data-notice', 'override-conflict')
+      expect(screen.getByTestId('agent-detail-notice')).toHaveTextContent(/already overrides the built-in name/i)
+      expect(screen.getByTestId('agent-profile-editor')).toBeInTheDocument()
+      expect(screen.queryByTestId('agent-detail-customize-error')).not.toBeInTheDocument()
+    })
+
+    it('names the archived shadow as the repair case instead of falling back to the built-in', async () => {
+      mockAgent(builtInBuilder)
+      server.use(
+        http.post(OVERRIDES_PATH, () =>
+          HttpResponse.json(
+            {
+              success: false,
+              error: "An archived Project Agent named 'mohist/builder' shadows this built-in Agent.",
+              code: 'agent_override_archived',
+              data: { name: 'mohist/builder', agentId: 'agent-archived' },
+            },
+            { status: 409 },
+          ),
+        ),
+      )
+
+      renderPage()
+      fireEvent.click(await screen.findByTestId('agent-detail-customize'))
+
+      const repair = await screen.findByTestId('agent-detail-override-repair')
+      expect(repair).toHaveTextContent(/agent-archived shadows mohist\/builder/i)
+      expect(repair).toHaveTextContent(/never silently falls back to the built-in/i)
+      expect(screen.getByTestId('agent-detail-override-repair-link')).toHaveAttribute(
+        'href',
+        '/Test/agents/agent-archived',
+      )
+      // No silent repair: the page stays on the built-in definition.
+      expect(screen.getByTestId('agent-detail-page')).toHaveAttribute('data-agent-id', 'builtin:mohist/builder')
     })
   })
 })

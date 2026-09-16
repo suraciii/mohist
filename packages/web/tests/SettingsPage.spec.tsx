@@ -8,15 +8,6 @@ import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { useMswServer } from './support/msw'
 import React from 'react'
 
-let _opencodeRuntimeData: any = {
-  mode: 'local-opencode',
-  command: 'opencode',
-  model: null,
-  note: 'external coder agent',
-}
-let _opencodeRuntimeLoading = false
-let _opencodeRuntimeError: string | null = null
-
 let _configData: Record<string, unknown> = {
   agentTimeout: 600,
   taskTimeout: 600,
@@ -26,11 +17,6 @@ let _configData: Record<string, unknown> = {
   pollInterval: 5000,
   logLevel: 'INFO',
 }
-
-let _workflowVariablesData: any = { vars: null, stages: null }
-
-let _opencodeModelsData: any = { models: ['openai/gpt-4', 'anthropic/claude-3-opus'], modelVariants: {} }
-let _opencodeModelsError: string | null = null
 
 let _systemInfoData: any = null
 let _systemInfoLoading = false
@@ -47,13 +33,6 @@ useMswServer(
     _healthHandler()
     return new HttpResponse(null, { status: 200 })
   }),
-  http.get('*/api/opencode/runtime', () => {
-    if (_opencodeRuntimeLoading) return new Promise(() => {})
-    if (_opencodeRuntimeError) {
-      return HttpResponse.json({ success: false, error: _opencodeRuntimeError }, { status: 500 })
-    }
-    return HttpResponse.json({ success: true, data: _opencodeRuntimeData })
-  }),
   http.get('*/api/config', () => HttpResponse.json({ success: true, data: _configData })),
   http.put('*/api/config/:key', async ({ params, request }) => {
     const key = params.key as string
@@ -68,31 +47,6 @@ useMswServer(
     const body = (await request.json()) as { value: number | string }
     _configData = { ..._configData, [key]: body.value }
     return HttpResponse.json({ success: true, data: _configData })
-  }),
-  http.get('*/api/projects/:projectId/variables', () =>
-    HttpResponse.json({ success: true, data: _workflowVariablesData }),
-  ),
-  http.patch('*/api/projects/:projectId/variables', async ({ request }) => {
-    const body = (await request.json()) as any
-    if (body.vars) {
-      _workflowVariablesData = {
-        ..._workflowVariablesData,
-        vars: { ...(_workflowVariablesData.vars || {}), ...body.vars },
-      }
-    }
-    if (body.stages) {
-      _workflowVariablesData = {
-        ..._workflowVariablesData,
-        stages: { ...(_workflowVariablesData.stages || {}), ...body.stages },
-      }
-    }
-    return HttpResponse.json({ success: true, data: _workflowVariablesData })
-  }),
-  http.get('*/api/projects/:projectId/opencode/models', () => {
-    if (_opencodeModelsError) {
-      return HttpResponse.json({ success: false, error: _opencodeModelsError }, { status: 500 })
-    }
-    return HttpResponse.json({ success: true, data: _opencodeModelsData })
   }),
   http.get('*/api/system/info', () => {
     if (_systemInfoLoading) return new Promise(() => {})
@@ -158,7 +112,7 @@ function createMockQueryClient() {
   })
 }
 
-function renderWithQueryClient(ui: React.ReactElement, initialEntries = ['/settings/ai']) {
+function renderWithQueryClient(ui: React.ReactElement, initialEntries = ['/settings/scheduling']) {
   const queryClient = createMockQueryClient()
   return baseRender(
     <MemoryRouter initialEntries={initialEntries}>
@@ -192,9 +146,6 @@ function renderWithoutProject(ui: React.ReactElement, initialEntries: string[] =
 
 beforeEach(() => {
   vi.clearAllMocks()
-  _opencodeRuntimeData = { mode: 'local-opencode', command: 'opencode', model: null, note: 'external coder agent' }
-  _opencodeRuntimeLoading = false
-  _opencodeRuntimeError = null
   _configData = {
     agentTimeout: 600,
     taskTimeout: 600,
@@ -204,9 +155,6 @@ beforeEach(() => {
     pollInterval: 5000,
     logLevel: 'INFO',
   }
-  _workflowVariablesData = { vars: null, stages: null }
-  _opencodeModelsData = { models: ['openai/gpt-4', 'anthropic/claude-3-opus'], modelVariants: {} }
-  _opencodeModelsError = null
   _systemInfoData = null
   _systemInfoLoading = false
   _systemInfoError = null
@@ -220,21 +168,24 @@ afterEach(() => {
 })
 
 describe('SettingsPage', () => {
-  describe('Coder Agent Tab', () => {
-    it('should render Coder Agent tab by default', () => {
+  describe('Scheduling section', () => {
+    it('renders the application sub-navigation without a model configuration page', () => {
       renderWithQueryClient(<SettingsPage />)
 
-      expect(screen.getByRole('link', { name: 'Coder Agent' })).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: 'Runtime' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Scheduling' })).toBeInTheDocument()
       expect(screen.getByRole('link', { name: 'System' })).toBeInTheDocument()
-      expect(screen.getAllByRole('heading', { name: 'Coder Agent' })[0]).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Coder Agent' })).not.toBeInTheDocument()
+      expect(screen.getAllByRole('heading', { name: 'Scheduling' })[0]).toBeInTheDocument()
     })
 
-    it('should display opencode model count via the lightweight hint', async () => {
+    it('renders the scheduling controls under the Scheduling heading', async () => {
       renderWithQueryClient(<SettingsPage />)
+
       await waitFor(() => {
-        expect(screen.getAllByText(/2 models available/i)[0]).toBeInTheDocument()
+        expect(screen.getAllByText('Session Timeout')[0]).toBeInTheDocument()
       })
+      expect(screen.getByText('Max Concurrent')).toBeInTheDocument()
+      expect(screen.queryByText('Coder Model')).not.toBeInTheDocument()
     })
 
     it('should not render the redundant Runtime/Command/Models summary or provider note', () => {
@@ -243,83 +194,44 @@ describe('SettingsPage', () => {
       expect(screen.queryByText('Models')).not.toBeInTheDocument()
       expect(screen.queryByText(/Mohist does not configure AI providers/i)).not.toBeInTheDocument()
     })
-
-    it('renders the default model trigger with the stored variant suffix when the model reports variants', async () => {
-      _opencodeModelsData = {
-        models: ['openai/gpt-4', 'anthropic/claude-3-opus'],
-        modelVariants: { 'anthropic/claude-3-opus': ['low', 'medium', 'high'] },
-      }
-      _workflowVariablesData = {
-        vars: { agent: { type: 'opencode', model: 'anthropic/claude-3-opus', variant: 'high' } },
-        stages: null,
-      }
-
-      renderWithQueryClient(<SettingsPage />)
-
-      await waitFor(() => {
-        expect(screen.queryByTestId('settings-default-model-variant-trigger')).not.toBeInTheDocument()
-        const trigger = document.getElementById('settings-default-model') as HTMLElement
-        expect(trigger).toBeInTheDocument()
-        expect(trigger.textContent).toContain('high')
-      })
-    })
-
-    it('does not show a variant suffix on the default model trigger when the model is not in the variants map', async () => {
-      _opencodeModelsData = {
-        models: ['openai/gpt-4', 'anthropic/claude-3-opus'],
-        modelVariants: { 'anthropic/claude-3-opus': [] },
-      }
-      _workflowVariablesData = {
-        vars: { agent: { type: 'opencode', model: 'anthropic/claude-3-opus', variant: 'high' } },
-        stages: null,
-      }
-
-      renderWithQueryClient(<SettingsPage />)
-
-      await waitFor(() => {
-        expect(screen.queryByTestId('settings-default-model-variant-trigger')).not.toBeInTheDocument()
-        const trigger = document.getElementById('settings-default-model') as HTMLElement
-        expect(trigger.textContent).not.toContain('high')
-      })
-    })
   })
 
   describe('Tab switching', () => {
-    it('should switch to Runtime section when the Runtime sub-nav link is clicked', () => {
-      renderWithQueryClient(<SettingsPage />, ['/settings/ai'])
+    it('should switch to Scheduling section when the Scheduling sub-nav link is clicked', () => {
+      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      fireEvent.click(screen.getByRole('link', { name: 'Runtime' }))
+      fireEvent.click(screen.getByRole('link', { name: 'Scheduling' }))
 
-      expect(screen.getAllByRole('heading', { name: 'Runtime' })[0]).toBeInTheDocument()
+      expect(screen.getAllByRole('heading', { name: 'Scheduling' })[0]).toBeInTheDocument()
     })
 
-    it('should switch back to Coder Agent section when its sub-nav link is clicked', () => {
-      renderWithQueryClient(<SettingsPage />, ['/settings/ai'])
+    it('should switch back to System section when its sub-nav link is clicked', () => {
+      renderWithQueryClient(<SettingsPage />, ['/settings/scheduling'])
 
-      fireEvent.click(screen.getByRole('link', { name: 'Runtime' }))
-      expect(screen.getAllByRole('heading', { name: 'Runtime' })[0]).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('link', { name: 'System' }))
+      expect(screen.getAllByRole('heading', { name: 'System' })[0]).toBeInTheDocument()
 
-      fireEvent.click(screen.getByRole('link', { name: 'Coder Agent' }))
-      expect(screen.getAllByRole('heading', { name: 'Coder Agent' })[0]).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('link', { name: 'Scheduling' }))
+      expect(screen.getAllByRole('heading', { name: 'Scheduling' })[0]).toBeInTheDocument()
     })
 
     it('should mark the active sub-nav item with aria-current="page"', () => {
-      renderWithQueryClient(<SettingsPage />, ['/settings/ai'])
+      renderWithQueryClient(<SettingsPage />, ['/settings/scheduling'])
 
-      const aiLink = screen.getByRole('link', { name: 'Coder Agent' })
-      const agentLink = screen.getByRole('link', { name: 'Runtime' })
+      const schedulingLink = screen.getByRole('link', { name: 'Scheduling' })
+      const systemLink = screen.getByRole('link', { name: 'System' })
 
-      expect(aiLink).toHaveAttribute('aria-current', 'page')
-      expect(agentLink).not.toHaveAttribute('aria-current')
+      expect(schedulingLink).toHaveAttribute('aria-current', 'page')
+      expect(systemLink).not.toHaveAttribute('aria-current')
 
-      fireEvent.click(agentLink)
+      fireEvent.click(systemLink)
 
-      expect(agentLink).toHaveAttribute('aria-current', 'page')
-      expect(aiLink).not.toHaveAttribute('aria-current')
+      expect(systemLink).toHaveAttribute('aria-current', 'page')
+      expect(schedulingLink).not.toHaveAttribute('aria-current')
     })
 
-    it('does not prompt when a dirty Runtime form re-clicks the active tab', async () => {
-      renderWithQueryClient(<SettingsPage />, ['/settings/agent'])
+    it('does not prompt when a dirty Scheduling form re-clicks the active tab', async () => {
+      renderWithQueryClient(<SettingsPage />, ['/settings/scheduling'])
 
       await waitFor(() => {
         expect(screen.getByLabelText('Session Timeout')).toBeInTheDocument()
@@ -327,33 +239,22 @@ describe('SettingsPage', () => {
       const timeoutInput = screen.getByLabelText('Session Timeout')
       fireEvent.change(timeoutInput, { target: { value: '31' } })
 
-      fireEvent.click(screen.getByRole('link', { name: 'Runtime' }))
+      fireEvent.click(screen.getByRole('link', { name: 'Scheduling' }))
 
       expect(screen.queryByTestId('settings-dirty-discard-alert')).not.toBeInTheDocument()
-      expect(screen.getAllByRole('heading', { name: 'Runtime' })[0]).toBeInTheDocument()
+      expect(screen.getAllByRole('heading', { name: 'Scheduling' })[0]).toBeInTheDocument()
       expect(timeoutInput).toHaveValue(31)
     })
   })
 
-  describe('Loading state', () => {
-    it('should display loading skeletons when opencode runtime is loading', () => {
-      _opencodeRuntimeLoading = true
-
-      const { container } = renderWithQueryClient(<SettingsPage />)
-
-      const skeletons = container.querySelectorAll('.animate-pulse')
-      expect(skeletons.length).toBeGreaterThan(0)
-    })
-  })
-
   describe('Error state', () => {
-    it('should display error message when the selected runtime model catalog query fails', async () => {
-      _opencodeModelsError = 'Failed to load opencode models'
+    it('should display error message when the system info query fails', async () => {
+      _systemInfoError = 'Failed to load system info'
 
-      renderWithQueryClient(<SettingsPage />)
+      renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
       await waitFor(() => {
-        expect(screen.getAllByText(/Failed to load opencode models/i)[0]).toBeInTheDocument()
+        expect(screen.getAllByText(/Failed to load system info/i)[0]).toBeInTheDocument()
       })
     })
   })

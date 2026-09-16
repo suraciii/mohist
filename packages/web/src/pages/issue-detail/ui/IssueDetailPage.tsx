@@ -52,6 +52,7 @@ import { IssueDecisionSurface } from './IssueDecisionSurface'
 import { IssueDetailsCard } from './cards/IssueDetailsCard'
 import { IssueDriftCard } from './cards/IssueDriftCard'
 import { IssueConfigurationCard } from './cards/IssueConfigurationCard'
+import { IssueExecutionAgentsCard } from './cards/IssueExecutionAgentsCard'
 import { IssuePrerequisitesCard } from './cards/IssuePrerequisitesCard'
 import { IssueReadinessCard } from './cards/IssueReadinessCard'
 import { IssueWatchCard } from './cards/IssueWatchCard'
@@ -701,32 +702,40 @@ export function IssueDetailPage({ components, mutationDependencies }: IssueDetai
                 </CollapsibleRailCard>
               )}
 
-              <CollapsibleRailCard
-                testId="reference-rail-configuration"
-                title="Configuration"
-                forceCollapsed={isNarrowViewport}
-                summary={issue.model ?? 'default model'}
-              >
-                <IssueConfigurationCard
-                  issue={{
-                    number: issue.number,
-                    model: issue.model,
-                    stageModels: issue.stageModels,
-                    workflowRunId: issue.workflowRunId,
-                    workflowProfileId: issue.workflowProfileId,
-                    prerequisites: issue.prereq,
-                    canStart: issue.canStart,
-                    blocker: issue.blocker,
-                    isBacklog: !!isBacklog,
-                  }}
-                  projectId={issueProjectId}
-                  mutations={{
-                    addPrerequisiteMutation: mutations.addPrerequisiteMutation,
-                    removePrerequisiteMutation: mutations.removePrerequisiteMutation,
-                  }}
-                  unframed
-                />
-              </CollapsibleRailCard>
+              {!isCompositeParent && issue.workflowProfileId && (
+                <CollapsibleRailCard
+                  testId="reference-rail-agents"
+                  title="Execution Agents"
+                  forceCollapsed={isNarrowViewport}
+                  summary={issue.workflowProfileId}
+                >
+                  <IssueExecutionAgentsCard workflowProfileId={issue.workflowProfileId} />
+                </CollapsibleRailCard>
+              )}
+
+              {!isCompositeParent && isBacklog && (
+                <CollapsibleRailCard
+                  testId="reference-rail-configuration"
+                  title="Configuration"
+                  forceCollapsed={isNarrowViewport}
+                >
+                  <IssueConfigurationCard
+                    issue={{
+                      number: issue.number,
+                      prerequisites: issue.prereq,
+                      canStart: issue.canStart,
+                      blocker: issue.blocker,
+                      isBacklog: !!isBacklog,
+                    }}
+                    projectId={issueProjectId}
+                    mutations={{
+                      addPrerequisiteMutation: mutations.addPrerequisiteMutation,
+                      removePrerequisiteMutation: mutations.removePrerequisiteMutation,
+                    }}
+                    unframed
+                  />
+                </CollapsibleRailCard>
+              )}
 
               {issue.prereq && issue.prereq.length > 0 && (
                 <CollapsibleRailCard

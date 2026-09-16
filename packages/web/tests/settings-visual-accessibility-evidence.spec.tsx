@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Project } from '../src/entities/project'
 import { ProjectProvider } from '../src/entities/project'
 import { AgentSettingsSection } from '../src/pages/settings/ui/AgentSettingsSection'
-import { AiSettingsSection } from '../src/pages/settings/ui/AiSettingsSection'
 import { PreferencesSection } from '../src/pages/settings/ui/PreferencesSection'
 import { RepositoriesSection } from '../src/pages/settings/ui/RepositoriesSection'
 import { SystemSettingsSection } from '../src/pages/settings/ui/SystemSettingsSection'
@@ -27,17 +26,19 @@ const project: Project = {
 let artifacts: Record<string, string> = {}
 
 const beforeSummaries: Record<string, string> = {
-  ai: 'Before: External Coder Agent used a hand-rolled rounded-md border bg-muted card and local h3 page title.',
-  agent: 'Before: Runtime used a rounded-md bg-muted border card plus text-foreground/80 and text-foreground/85 tokens. Tab heading was "Coder Agent Runtime", differing from the nav label "Runtime".',
-  preferences: 'Before: Preferences tab did not exist. The tab is new for Settings 2.0; page title is rendered by SettingsSection and cards are CardSection instances.',
+  agent:
+    'Before: Runtime used a rounded-md bg-muted border card plus text-foreground/80 and text-foreground/85 tokens. Tab heading was "Coder Agent Runtime", differing from the nav label "Runtime".',
+  preferences:
+    'Before: Preferences tab did not exist. The tab is new for Settings 2.0; page title is rendered by SettingsSection and cards are CardSection instances.',
   repositories: 'Before: Repository rows used rounded-lg border bg-card/50 and included hardcoded text-gray-500.',
-  workflows: 'Before: Workflow profile cards used rounded-md border wrappers and text-foreground/85 body/caption tokens. Tab heading was "Workflow Profiles", differing from the nav label "Workflows".',
+  workflows:
+    'Before: Workflow profile cards used rounded-md border wrappers and text-foreground/85 body/caption tokens. Tab heading was "Workflow Profiles", differing from the nav label "Workflows".',
   templates: 'Before: Template rows and editor used rounded-lg border bg-card/50 or bg-card/60 wrappers.',
-  system: 'Before: System card titles visually drove the page with h2 uppercase tracking-wider styling while other tabs used local h3 page titles.',
+  system:
+    'Before: System card titles visually drove the page with h2 uppercase tracking-wider styling while other tabs used local h3 page titles.',
 }
 
 const sections = [
-  ['ai', <AiSettingsSection />],
   ['agent', <AgentSettingsSection />],
   ['preferences', <PreferencesSection />],
   ['repositories', <RepositoriesSection projectId={project.id} />],
@@ -68,20 +69,59 @@ const CONFIG = {
 const SYSTEM_INFO = {
   running: { version: '1.0.0', gitHash: 'abcdef1234567890', startedAt: '2026-06-18T00:00:00Z' },
   source: { path: '/repo/mohist', branch: 'master', head: 'abcdef1234567890', dirty: false },
-  install: { mode: 'local-source', serviceManager: 'systemd', serverUnit: 'mohist-server', runnerUnit: 'mohist-runner', reason: 'local checkout' },
+  install: {
+    mode: 'local-source',
+    serviceManager: 'systemd',
+    serverUnit: 'mohist-server',
+    runnerUnit: 'mohist-runner',
+    reason: 'local checkout',
+  },
   update: { status: 'up-to-date', available: false, reason: 'Already current' },
   services: { server: 'running', runner: 'running' },
-  paths: { db: '/var/lib/mohist/db.sqlite', config: '~/.mohist/config.jsonc', opencode: '~/.config/opencode', logs: '~/.mohist/logs' },
+  paths: {
+    db: '/var/lib/mohist/db.sqlite',
+    config: '~/.mohist/config.jsonc',
+    opencode: '~/.config/opencode',
+    logs: '~/.mohist/logs',
+  },
 }
 
 const WORKFLOW_PROFILES = [
-  { id: 'mohist/local', displayName: 'Default', description: 'Standard staged workflow.', isDefault: true, agentRuntime: 'opencode' as const },
-  { id: 'mohist/quick-fix', displayName: 'Quick Fix', description: 'Short repair workflow.', isDefault: false, agentRuntime: 'opencode' as const },
+  {
+    id: 'mohist/local',
+    displayName: 'Default',
+    description: 'Standard staged workflow.',
+    isDefault: true,
+    agentRuntime: 'opencode' as const,
+  },
+  {
+    id: 'mohist/quick-fix',
+    displayName: 'Quick Fix',
+    description: 'Short repair workflow.',
+    isDefault: false,
+    agentRuntime: 'opencode' as const,
+  },
 ]
 
 const PROJECT_TEMPLATES = [
-  { key: 'build-plan', displayName: 'Build Plan', description: 'Plan the implementation.', tags: ['plan'], stage: 'plan', body: 'Plan body', source: 'system' },
-  { key: 'review-fix', displayName: 'Review Fix', description: 'Fix review findings.', tags: ['check'], stage: 'check', body: 'Fix body', source: 'project-override' },
+  {
+    key: 'build-plan',
+    displayName: 'Build Plan',
+    description: 'Plan the implementation.',
+    tags: ['plan'],
+    stage: 'plan',
+    body: 'Plan body',
+    source: 'system',
+  },
+  {
+    key: 'review-fix',
+    displayName: 'Review Fix',
+    description: 'Fix review findings.',
+    tags: ['check'],
+    stage: 'check',
+    body: 'Fix body',
+    source: 'project-override',
+  },
 ]
 
 function makeQueryClient() {
@@ -92,16 +132,6 @@ function makeQueryClient() {
     },
   })
   queryClient.setQueryData(['repositories', project.id], project.repositories)
-  queryClient.setQueryData(['opencode-runtime'], { mode: 'local', command: 'opencode', model: null, note: '' })
-  queryClient.setQueryData(['opencode-model-ids', 'opencode', project.id], {
-    models: ['openai/gpt-5.1', 'anthropic/claude-sonnet-4'],
-    modelVariants: {},
-  })
-  queryClient.setQueryData(['opencode-model', project.id], { model: 'openai/gpt-5.1', variant: null })
-  queryClient.setQueryData(['stage-models', project.id], {
-    stageModels: { check: 'anthropic/claude-sonnet-4' },
-    stageModelVariants: null,
-  })
   queryClient.setQueryData(['agent-runtime'], AGENT_RUNTIME)
   queryClient.setQueryData(['config'], CONFIG)
   queryClient.setQueryData(['log-level'], { level: CONFIG.logLevel })
@@ -141,10 +171,7 @@ function renderEvidenceSection(section: React.ReactElement) {
 }
 
 function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function writeArtifact(name: string, content: string) {
@@ -168,7 +195,11 @@ function renderTextSnapshot(container: HTMLElement) {
 
 function textColorClass(element: Element): string | null {
   for (const className of Array.from(element.classList)) {
-    if (className === 'text-foreground' || className === 'text-muted-foreground' || className === 'text-foreground/70') {
+    if (
+      className === 'text-foreground' ||
+      className === 'text-muted-foreground' ||
+      className === 'text-foreground/70'
+    ) {
       return className
     }
   }
@@ -186,9 +217,7 @@ const cssColors: Record<string, Rgb> = {
 function relativeLuminance([red, green, blue]: Rgb) {
   const [r, g, b] = [red, green, blue].map((channel) => {
     const normalized = channel / 255
-    return normalized <= 0.03928
-      ? normalized / 12.92
-      : ((normalized + 0.055) / 1.055) ** 2.4
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4
   })
   return 0.2126 * r + 0.7152 * g + 0.0722 * b
 }
@@ -206,8 +235,9 @@ function colorForToken(token: string): Rgb {
 }
 
 function auditContrast(container: HTMLElement) {
-  const bodyText = Array.from(container.querySelectorAll('p, label, span, button, pre, div'))
-    .filter((element) => (element.textContent ?? '').trim().length > 0)
+  const bodyText = Array.from(container.querySelectorAll('p, label, span, button, pre, div')).filter(
+    (element) => (element.textContent ?? '').trim().length > 0,
+  )
   const violations = bodyText.flatMap((element) => {
     const token = textColorClass(element)
     if (!token) return []
@@ -258,9 +288,6 @@ describe('settings visual accessibility evidence', () => {
       'agent-after.html',
       'agent-before.txt',
       'agent-visual-diff.txt',
-      'ai-after.html',
-      'ai-before.txt',
-      'ai-visual-diff.txt',
       'contrast-audit.json',
       'preferences-after.html',
       'preferences-before.txt',

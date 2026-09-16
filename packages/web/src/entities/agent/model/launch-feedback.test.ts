@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { getAgentLaunchErrorFeedback } from './launch-feedback'
 
 describe('getAgentLaunchErrorFeedback task-first outcomes', () => {
-  it('names the composer control that resolves an unresolved execution configuration', () => {
+  it('routes an unresolved execution configuration to the Agent definition instead of a composer control', () => {
     const feedback = getAgentLaunchErrorFeedback({ code: 'execution_config_unresolvable' })
 
     expect(feedback).toMatchObject({
       kind: 'execution-config-unresolvable',
-      nextAction: expect.stringMatching(/Model for this task/i),
+      nextAction: expect.stringMatching(/execution configuration on the Agent definition/i),
     })
   })
 
