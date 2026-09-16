@@ -304,6 +304,17 @@ blank-required rejections share `ExitUsage=2` but use distinct diagnostics
 can distinguish an unreadable carrier from a successful read that the
 command's empty-text contract rejected.
 
+Issue create applies one command-local envelope rule on top of the carrier
+bytes. A leading YAML frontmatter block that opens and closes with `---` is
+partitioned from the stored body; `recommended_workflow` and `risk` fill the
+Issue metadata and `recommended_workflow_reason` is consumed but never sent to
+the Server. Explicit `--workflow-profile`, `--risk`, and `--no-workflow`
+override the envelope and emit a stderr note when they differ. Malformed
+metadata or a missing closing delimiter warns on stderr and sends the exact
+original body with no partial metadata, while a body without a leading `---`
+stays byte-exact and silent. The rule is CLI-local and does not change the
+Server DTO, the packaged Skill, or any other body carrier.
+
 ### Output and Fields
 
 A command computes a semantic result before selecting a renderer. The reference
