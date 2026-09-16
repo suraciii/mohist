@@ -444,6 +444,24 @@ func agentSessionPath(project, suffix string) string {
 }
 
 func runAgent(ctx context.Context, deps Dependencies, c *client, cmd command) int {
+	// Agent start and launch preflight their --prompt / --prompt-file text
+	// carrier before Project-state lookup so a missing, permission, or
+	// arbitrary read failure stops the command locally with ExitUsage=2
+	// instead of falling through to an HTTP request against an implicit
+	// Project. The resolved value is stored on cmd.preflightedInput and
+	// reused by runLaunch so stdin is consumed at most once per command.
+	if cmd.kind == "agent-start" || cmd.kind == "agent-launch" {
+		value, err := resolveTextInput(deps, cmd, "prompt", "prompt-file")
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitUsage
+		}
+		if strings.TrimSpace(value) == "" {
+			writeError(deps.Stderr, errors.New("--prompt must not be blank"))
+			return ExitUsage
+		}
+		cmd.preflightedInput = value
+	}
 	project, ok := resolveProject(deps, argValue(cmd.args, "project", ""))
 	if !ok {
 		writeError(deps.Stderr, errors.New("Run 'mo project use <name-or-id>' or pass --project <name-or-id>"))
@@ -774,10 +792,9 @@ func subscriptionValue(name, value string) any {
 }
 func runLaunch(ctx context.Context, deps Dependencies, c *client, project string, cmd command) int {
 	action := strings.TrimPrefix(cmd.kind, "agent-")
-	prompt := argValue(cmd.args, "prompt", "")
-	if prompt == "" && hasArg(cmd.args, "prompt-file") {
-		prompt = inputValue(deps, cmd, "prompt", "prompt-file")
-	}
+	// The carrier was already resolved by runAgent before Project-state
+	// lookup; reuse the preflighted value so stdin is consumed at most once.
+	prompt := cmd.preflightedInput
 	if prompt == "" {
 		return ExitUsage
 	}
@@ -797,6 +814,24 @@ func runSpawn(ctx context.Context, deps Dependencies, c *client, project string,
 }
 
 func runSession(ctx context.Context, deps Dependencies, c *client, cmd command) int {
+	// Session follow-up preflights its --text / --text-file text carrier
+	// before Project-state lookup so a missing, permission, or arbitrary
+	// read failure stops the command locally with ExitUsage=2 instead of
+	// falling through to an HTTP request against an implicit Project. The
+	// resolved value is stored on cmd.preflightedInput so the body builder
+	// below reuses it instead of reading the carrier a second time.
+	if cmd.kind == "session-followup" {
+		value, err := resolveTextInput(deps, cmd, "text", "text-file")
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitUsage
+		}
+		if strings.TrimSpace(value) == "" && !hasArg(cmd.args, "attach") {
+			writeError(deps.Stderr, errors.New("--text must not be blank"))
+			return ExitUsage
+		}
+		cmd.preflightedInput = value
+	}
 	project, ok := resolveProject(deps, argValue(cmd.args, "project", ""))
 	if !ok {
 		writeError(deps.Stderr, errors.New("Run 'mo project use <name-or-id>' or pass --project <name-or-id>"))
@@ -839,10 +874,7 @@ func runSession(ctx context.Context, deps Dependencies, c *client, cmd command) 
 		return requestAndRender(ctx, deps, c, http.MethodPost, agentSessionPath(project, "/"+sid+"/detach"), nil, cmd, false, "")
 	}
 	if action == "followup" {
-		body := map[string]any{"text": argValue(cmd.args, "text", "")}
-		if body["text"] == "" && hasArg(cmd.args, "text-file") {
-			body["text"] = inputValue(deps, cmd, "text", "text-file")
-		}
+		body := map[string]any{"text": cmd.preflightedInput}
 		return requestAndRender(ctx, deps, c, http.MethodPost, agentSessionPath(project, "/"+sid+"/followup"), body, cmd, true, argValue(cmd.args, "idempotency-key", ""))
 	}
 	if action == "compact" || action == "reset" {

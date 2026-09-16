@@ -279,6 +279,22 @@ Mutually exclusive inputs such as body and body-file, or target and selector,
 fail locally and cannot overwrite one another. Help, list, view, and local
 validation never trigger a setup prompt.
 
+Text carriers (Issue body, Issue comment, Epic description, Project
+verification command, Project Prompt body, Workflow Definition, Agent prompt,
+and Session follow-up text) share one resolver and identical file/stdin
+semantics. The resolver returns the exact, untrimmed content of the chosen
+carrier together with an explicit error. A successful read returns the bytes
+as-is, including all trailing newlines; an empty file or empty stdin is a
+successful read whose value is `""`. A read failure is a local usage error
+with `ExitUsage=2`: the diagnostic names the originating flag and either the
+quoted path or `-`/`stdin`. The carrier is resolved before Project-state
+lookup and before any HTTP call, including command-specific pre-flight reads
+such as the Issue GET that `issue edit --label` uses for label diffing.
+stdin is consumed at most once per command so the resolved value can be
+reused for pre-flight and mutation paths. Empty-text validation lives on the
+command that owns the field and runs only after a successful read; a missing
+file cannot be misclassified as a successful empty value.
+
 ### Output and Fields
 
 A command computes a semantic result before selecting a renderer. The reference

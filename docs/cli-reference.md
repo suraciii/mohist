@@ -676,6 +676,20 @@ cannot start new work; the error identifies this command and the Project Setting
   `-` to read from stdin.
 - Files and stdin have only two channels: `--<name>-file` and `--file`. The
   `@<file>` form must not be accepted.
+- A file/stdin carrier is resolved before the CLI looks up the current Project
+  and before any HTTP request, including the pre-flight Issue read used by
+  `issue edit --label` for label diffing. A missing file, a permission error,
+  an arbitrary read failure, or a stdin read that returns partial bytes with
+  an error is a local usage failure. The diagnostic names the originating
+  flag and either the quoted path or `-`/`stdin`. The exit code is `2`.
+  stdin is consumed at most once per command so the resolved value can be
+  reused for pre-flight and mutation paths.
+- File and stdin carriers produce identical bytes for identical input. The
+  resolver preserves the exact UTF-8 content, including all trailing
+  newlines, and never substitutes an empty value or another fallback when a
+  read fails. An empty file or empty stdin is a successful read whose value
+  is `""`; the command that owns the field decides whether to accept an
+  empty carrier.
 - In a TTY, some install, setup, and create commands may prompt when optional
   input is missing.
 - Outside a TTY, commands never prompt. Missing required input fails
