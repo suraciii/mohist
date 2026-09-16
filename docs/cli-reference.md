@@ -257,6 +257,17 @@ in body frontmatter. The mutually exclusive `--no-workflow` selects no Workflow:
 the Issue then runs no WorkflowRun, and `issue start` moves it directly to in
 progress.
 
+`issue create` also accepts a leading YAML frontmatter envelope in the body
+carrier. It reads `recommended_workflow`, `recommended_workflow_reason`, and
+`risk`. A legal envelope (an opening `---` line, `key: value` metadata, and a
+closing `---` line) is stripped from the stored body, `recommended_workflow`
+and `risk` fill the Issue's structured metadata, and
+`recommended_workflow_reason` is accepted but has no Server field. Explicit
+`--workflow-profile`, `--risk`, and `--no-workflow` override the envelope and
+report the override on stderr. Malformed metadata or an unclosed envelope warns
+and sends the full original body without applying partial metadata. A body with
+no leading `---` is stored unchanged.
+
 When the target repository is connected to GitHub, every non-Draft Issue has a
 GitHub mirror. `issue view` and `issue list` expose its repository, number, URL,
 and sync health as first-class fields; callers never derive them from labels.

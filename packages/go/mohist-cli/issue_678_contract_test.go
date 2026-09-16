@@ -23,7 +23,16 @@ func runIssue678Command(t *testing.T, args []string, files map[string]string, st
 	t.Helper()
 	captured := &issue678Captured{}
 	out, errOut := &strings.Builder{}, &strings.Builder{}
-	deps := Dependencies{
+	deps := issue678Dependencies(out, errOut, files, stdin, captured, `{"success":true,"data":{"number":1,"title":"Title"}}`)
+	code := Run(context.Background(), args, deps)
+	return code, out.String(), errOut.String(), captured
+}
+
+// issue678Dependencies builds the capturing Dependencies shared by the Issue
+// #678 command tests. responseBody is the Server envelope the transport
+// returns for the single captured request.
+func issue678Dependencies(stdout, stderr io.Writer, files map[string]string, stdin string, captured *issue678Captured, responseBody string) Dependencies {
+	return Dependencies{
 		HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			captured.httpCalls++
 			captured.request = r
@@ -35,10 +44,10 @@ func runIssue678Command(t *testing.T, args []string, files map[string]string, st
 			if len(raw) > 0 {
 				_ = json.Unmarshal(raw, &captured.body)
 			}
-			return response(http.StatusOK, `{"success":true,"data":{"number":1,"title":"Title"}}`), nil
+			return response(http.StatusOK, responseBody), nil
 		})},
-		Stdout: out,
-		Stderr: errOut,
+		Stdout: stdout,
+		Stderr: stderr,
 		Lookup: func(name string) (string, bool) {
 			switch name {
 			case "MOHIST_TOKEN":
@@ -60,8 +69,6 @@ func runIssue678Command(t *testing.T, args []string, files map[string]string, st
 		OpenManagedLock:   func(string) (io.Closer, error) { return io.NopCloser(strings.NewReader("")), nil },
 		ManagedPathExists: func(string) bool { return false },
 	}
-	code := Run(context.Background(), args, deps)
-	return code, out.String(), errOut.String(), captured
 }
 
 const issue678Envelope = "---\n" +
@@ -332,5 +339,58 @@ func TestIssue678IssueEditStillAcceptsInheritWorkflowProfile(t *testing.T) {
 	}
 	if got := captured.body["noWorkflow"]; got != false {
 		t.Fatalf("noWorkflow=%v", got)
+	}
+}
+
+func TestIssue678CreateJSONDiscoveryIsLocalAndListsCreateMetadata(t *testing.T) {
+	probe := discoveryProbe{}
+	out, errOut := &strings.Builder{}, &strings.Builder{}
+	if code := Run(context.Background(), []string{"issue", "create", "Title", "--json"}, probe.deps(out, errOut)); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if got := out.String(); got != strings.Join(issueResultFields, "\n")+"\n" {
+		t.Fatalf("stdout=%q want the issue result catalog", got)
+	}
+	catalog := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	for _, field := range []string{"workflowProfileId", "noWorkflow", "isDraft", "risk"} {
+		if !contains(catalog, field) {
+			t.Fatalf("catalog %v missing %q", catalog, field)
+		}
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("stderr=%q", errOut.String())
+	}
+	probe.assertUnused(t)
+}
+
+func TestIssue678CreateJSONFieldSelectionProjectsResponseAndKeepsRequest(t *testing.T) {
+	files := map[string]string{"./body.md": issue678Envelope}
+	base := []string{"issue", "create", "Title", "--body-file", "./body.md", "--project", "proj"}
+
+	_, _, plainErr, plain := runIssue678Command(t, base, files, "")
+	if plainErr != "" {
+		t.Fatalf("plain stderr=%q", plainErr)
+	}
+
+	captured := &issue678Captured{}
+	out, errOut := &strings.Builder{}, &strings.Builder{}
+	deps := issue678Dependencies(out, errOut, files, "", captured,
+		`{"success":true,"data":{"number":1,"workflowProfileId":"feature-flow","noWorkflow":false,"isDraft":true,"risk":"high"}}`)
+	args := append(append([]string{}, base...), "--json", "workflowProfileId,noWorkflow,isDraft,risk")
+	if code := Run(context.Background(), args, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	want := `{"isDraft":true,"noWorkflow":false,"risk":"high","workflowProfileId":"feature-flow"}` + "\n"
+	if out.String() != want {
+		t.Fatalf("stdout=%q want %q", out.String(), want)
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("stderr=%q", errOut.String())
+	}
+	if captured.httpCalls != 1 {
+		t.Fatalf("HTTP calls=%d want 1", captured.httpCalls)
+	}
+	if string(captured.rawBody) != string(plain.rawBody) {
+		t.Fatalf("request body changed with --json fields:\n got=%s\nwant=%s", captured.rawBody, plain.rawBody)
 	}
 }
