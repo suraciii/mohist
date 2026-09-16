@@ -6,20 +6,25 @@ import { useProject } from '../../project/@x/project-context'
 import {
   archiveAgent,
   createAgent,
+  customizeAgent,
   getAgent,
   getAgentActivity,
+  getAgentByName,
   getAgentDetailStatus,
   getAgentListAvailability,
   getAgentSessions as getGlobalAgentSessions,
   getAgentStatus,
+  isBuiltInAgentRef,
   listAgents,
   unarchiveAgent,
   updateAgent,
+  BUILT_IN_AGENT_ID_PREFIX,
 } from './client'
 import type {
   AgentCreateRequest,
   AgentAvailabilitySummaryEntry,
   AgentInfo,
+  AgentOverrideRequest,
   AgentStatusDetailResponse,
   AgentUpdateRequest,
 } from './client'
@@ -93,7 +98,12 @@ export function useAgentListAvailability() {
 export function agentQueryOptions(projectId: string | null | undefined, agentRef: string) {
   return {
     queryKey: ['agents', projectId, agentRef],
-    queryFn: () => getAgent(projectId!, agentRef),
+    // Built-in definitions are not stored rows: their ref is `builtin:<name>`
+    // and only the by-name route resolves them.
+    queryFn: () =>
+      isBuiltInAgentRef(agentRef)
+        ? getAgentByName(projectId!, agentRef.slice(BUILT_IN_AGENT_ID_PREFIX.length))
+        : getAgent(projectId!, agentRef),
     enabled: !!projectId && !!agentRef,
   }
 }
@@ -101,6 +111,20 @@ export function agentQueryOptions(projectId: string | null | undefined, agentRef
 export function useAgent(agentRef: string) {
   const { projectId } = useProject()
   return useQuery<AgentInfo>(agentQueryOptions(projectId, agentRef))
+}
+
+export function agentByNameQueryOptions(projectId: string | null | undefined, name: string | null | undefined) {
+  return {
+    queryKey: ['agents', projectId, 'by-name', name],
+    queryFn: () => getAgentByName(projectId!, name!),
+    enabled: !!projectId && !!name,
+  }
+}
+
+/** Resolves the Project's effective Agent for a name, including built-ins. */
+export function useAgentByName(name: string | null | undefined) {
+  const { projectId } = useProject()
+  return useQuery<AgentInfo>(agentByNameQueryOptions(projectId, name))
 }
 
 export function createAgentMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
@@ -120,6 +144,31 @@ export function useCreateAgent() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   return useMutation(createAgentMutationOptions(projectId, queryClient))
+}
+
+export function customizeBuiltInAgentMutationOptions(
+  projectId: string | null | undefined,
+  queryClient: InvalidationClient,
+) {
+  return {
+    mutationFn: (data: AgentOverrideRequest) => customizeAgent(projectId!, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  }
+}
+
+/**
+ * Materializes a built-in Workflow Agent as a same-name Project Agent. The
+ * caller reacts to the named 409 repair cases from `ApiError.code`.
+ */
+export function useCustomizeBuiltInAgent() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation(customizeBuiltInAgentMutationOptions(projectId, queryClient))
 }
 
 export function updateAgentMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
@@ -184,31 +233,31 @@ export function useUnarchiveAgent() {
 
 /* ── Agent-scoped session list (consumes #130) ──────────── */
 
-export function agentSessionsQueryOptions(projectId: string | null | undefined, agentRef: string) {
+export function agentSessionsQueryOptions(projectId: string | null | undefined, agentRef: string, enabled = true) {
   return {
     queryKey: ['agents', projectId, agentRef, 'sessions'],
     queryFn: () => getAgentScopedSessions(projectId!, agentRef),
-    enabled: !!projectId && !!agentRef,
+    enabled: !!projectId && !!agentRef && enabled,
   }
 }
 
-export function useAgentSessions({ agentRef }: { agentRef: string }) {
+export function useAgentSessions({ agentRef, enabled = true }: { agentRef: string; enabled?: boolean }) {
   const { projectId } = useProject()
-  return useQuery<AgentSessionListItemDto[]>(agentSessionsQueryOptions(projectId, agentRef))
+  return useQuery<AgentSessionListItemDto[]>(agentSessionsQueryOptions(projectId, agentRef, enabled))
 }
 
 /* ── Per-agent server-side status (Executability/Availability/waiting) ── */
 
-export function agentDetailStatusQueryOptions(projectId: string | null | undefined, agentRef: string) {
+export function agentDetailStatusQueryOptions(projectId: string | null | undefined, agentRef: string, enabled = true) {
   return {
     queryKey: ['agents', projectId, agentRef, 'status'],
     queryFn: () => getAgentDetailStatus(projectId!, agentRef),
-    enabled: !!projectId && !!agentRef,
+    enabled: !!projectId && !!agentRef && enabled,
     refetchInterval: 5000,
   }
 }
 
-export function useAgentDetailStatus(agentRef: string) {
+export function useAgentDetailStatus(agentRef: string, enabled = true) {
   const { projectId } = useProject()
-  return useQuery<AgentStatusDetailResponse>(agentDetailStatusQueryOptions(projectId, agentRef))
+  return useQuery<AgentStatusDetailResponse>(agentDetailStatusQueryOptions(projectId, agentRef, enabled))
 }

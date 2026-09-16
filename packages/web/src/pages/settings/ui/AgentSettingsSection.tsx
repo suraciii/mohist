@@ -114,7 +114,7 @@ const FIELDS: FieldDef[] = [
     key: 'timeout',
     label: 'Session Timeout',
     unit: 'minutes',
-    description: 'Maximum total time an external coder agent session can run.',
+    description: 'Maximum total time an Agent session can run.',
     validate: validateTimeout,
     group: 'timeout',
   },
@@ -154,14 +154,14 @@ const FIELDS: FieldDef[] = [
     key: 'maxGracePeriods',
     label: 'Retry attempts',
     unit: 'times',
-    description: 'Maximum retry attempts after an external coder agent failure.',
+    description: 'Maximum retry attempts after an Agent failure.',
     validate: validateGracePeriods,
     group: 'recovery',
   },
 ]
 
 export const AGENT_RUNTIME_DESCRIPTORS: SettingsSearchEntry[] = FIELDS.map((field) => ({
-  tab: 'agent',
+  tab: 'scheduling',
   label: field.label,
   description: field.description,
   focusTargetId: `agent-runtime-${field.key}`,
@@ -180,7 +180,9 @@ function TimeoutDiagram({ session, stage, task }: { session: number; stage: numb
 
   return (
     <CardSection>
-      <pre className="text-xs text-muted-foreground font-mono leading-5 whitespace-pre tabular-nums">{lines.join('\n')}</pre>
+      <pre className="text-xs text-muted-foreground font-mono leading-5 whitespace-pre tabular-nums">
+        {lines.join('\n')}
+      </pre>
     </CardSection>
   )
 }
@@ -229,9 +231,7 @@ function InputField({
         />
         <span className="text-sm text-muted-foreground tabular-nums">{unit}</span>
       </div>
-      {disabled && disabledReason && (
-        <p className="text-xs text-muted-foreground">{disabledReason}</p>
-      )}
+      {disabled && disabledReason && <p className="text-xs text-muted-foreground">{disabledReason}</p>}
       {hasError && <FieldError id={errorId}>{error}</FieldError>}
     </div>
   )
@@ -242,7 +242,7 @@ export function AgentSettingsSection() {
   const { data: config } = useConfig()
   const setAgentRuntime = useSetAgentRuntime()
   const { setDirty: setSettingsDirty } = useSettingsDirty()
-  const { label: sectionLabel, description: sectionDescription } = getSectionMeta('agent')
+  const { label: sectionLabel, description: sectionDescription } = getSectionMeta('scheduling')
 
   const [localValues, setLocalValues] = useState<FormValues>(() => configToForm(DEFAULTS))
   const [savedValues, setSavedValues] = useState<FormValues>(() => configToForm(DEFAULTS))
@@ -394,14 +394,7 @@ export function AgentSettingsSection() {
   }
 
   if (isLoading) {
-    return (
-      <SectionState
-        variant="loading"
-        title={sectionLabel}
-        description={sectionDescription}
-        skeletonRows={6}
-      />
-    )
+    return <SectionState variant="loading" title={sectionLabel} description={sectionDescription} skeletonRows={6} />
   }
 
   if (error) {
@@ -417,17 +410,10 @@ export function AgentSettingsSection() {
   }
 
   return (
-    <SettingsSection
-      title={sectionLabel}
-      description={sectionDescription}
-    >
+    <SettingsSection title={sectionLabel} description={sectionDescription}>
       <div className="space-y-4">
         <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Timeouts</h3>
-        <TimeoutDiagram
-          session={localValues.timeout}
-          stage={localValues.stageTimeout}
-          task={localValues.taskTimeout}
-        />
+        <TimeoutDiagram session={localValues.timeout} stage={localValues.stageTimeout} task={localValues.taskTimeout} />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {FIELDS.filter((field) => field.group === 'timeout').map(renderField)}
         </div>
@@ -450,7 +436,7 @@ export function AgentSettingsSection() {
           {FIELDS.filter((field) => field.group === 'recovery').map(renderField)}
         </div>
         <p className="text-xs text-muted-foreground">
-          Number of times an external coder agent can fail and be retried before the issue is marked as blocked.
+          Number of times an Agent can fail and be retried before the issue is marked as blocked.
         </p>
       </div>
 
@@ -464,11 +450,7 @@ export function AgentSettingsSection() {
         >
           {saving ? 'Saving...' : 'Save Changes'}
         </Button>
-        <Button
-          variant="outline"
-          onClick={handleReset}
-          disabled={saving}
-        >
+        <Button variant="outline" onClick={handleReset} disabled={saving}>
           Reset to Defaults
         </Button>
       </div>
@@ -490,7 +472,7 @@ export function AgentSettingsSection() {
           if (saving) return
           setShowResetConfirm(open)
         }}
-        title="Reset Coder Agent Settings"
+        title="Reset Scheduling Settings"
         description="Reset all agent runtime settings to their default values?"
         confirmLabel={saving ? 'Resetting...' : 'Reset'}
         cancelLabel="Cancel"

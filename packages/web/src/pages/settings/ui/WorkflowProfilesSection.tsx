@@ -15,6 +15,7 @@ import type {
 } from '../../../entities/settings'
 import { includesWorkflowProfileId } from '../../../entities/settings'
 import { CardSection } from '../../../shared/ui/components/card-section'
+import { WorkflowAgentsBlock } from '../../../widgets/workflow-agents'
 import { Switch } from '../../../shared/ui/components/switch'
 import { Textarea } from '../../../shared/ui/components/textarea'
 import { Button } from '../../../shared/ui/components/button'
@@ -234,6 +235,14 @@ function ProfileDetail({
             <StageSummary key={s.stage} stage={s} />
           ))}
         </div>
+      </CardSection>
+
+      <CardSection title="Named Agents" titleAs="h3">
+        <p className="text-[11px] text-muted-foreground mb-3">
+          Agents this Profile's <code>mohist/agent</code> tasks run. Effective configuration is read from each Agent
+          definition; configure Agents on the Agents page.
+        </p>
+        <WorkflowAgentsBlock profile={profile} />
       </CardSection>
 
       <CardSection title="Shared Stage Definition (YAML)" titleAs="h3">

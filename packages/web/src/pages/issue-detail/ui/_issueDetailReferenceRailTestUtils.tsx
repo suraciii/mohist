@@ -111,7 +111,10 @@ export function mockMatchMedia(narrow: boolean) {
     dispatchEvent: vi.fn(),
     onchange: null,
   }
-  vi.stubGlobal('matchMedia', vi.fn(() => mql))
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn(() => mql),
+  )
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: narrow ? 375 : 1280 })
   return {
     setNarrow(next: boolean) {
@@ -126,6 +129,7 @@ export function mockMatchMedia(narrow: boolean) {
 export const RAIL_CARD_TESTIDS = [
   'reference-rail-details',
   'reference-rail-workflow-profile',
+  'reference-rail-agents',
   'reference-rail-drift',
   'reference-rail-convergence',
   'reference-rail-configuration',

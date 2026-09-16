@@ -16,7 +16,6 @@
  * focus the target element via
  * `document.getElementById(entry.focusTargetId)?.focus()`.
  */
-import { AI_SETTINGS_DESCRIPTORS } from '../ui/AiSettingsSection'
 import { AGENT_RUNTIME_DESCRIPTORS } from '../ui/AgentSettingsSection'
 import { PREFERENCES_DESCRIPTORS } from '../ui/PreferencesSection'
 import { REPOSITORIES_DESCRIPTORS } from '../ui/RepositoriesSection'
@@ -33,7 +32,6 @@ export type { SettingsSearchEntry, SettingsTab } from './settings-search'
  * it for behaviour beyond display grouping.
  */
 export const settingsSearchRegistry: readonly SettingsSearchEntry[] = Object.freeze([
-  ...AI_SETTINGS_DESCRIPTORS,
   ...AGENT_RUNTIME_DESCRIPTORS,
   ...PREFERENCES_DESCRIPTORS,
   ...REPOSITORIES_DESCRIPTORS,

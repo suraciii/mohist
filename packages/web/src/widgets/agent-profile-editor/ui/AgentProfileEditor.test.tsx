@@ -196,6 +196,7 @@ describe('AgentProfileEditor', () => {
     it('renders model variant chips and persists model plus variant on create', async () => {
       renderEditor()
       fillRequiredFields()
+      fireEvent.change(screen.getByTestId('agent-runtime'), { target: { value: 'opencode' } })
       await openAgentModelSelect()
 
       expect(screen.getByTestId('agent-model-row-anthropic/claude-variant-low')).toHaveTextContent('low')
@@ -274,7 +275,7 @@ describe('AgentProfileEditor', () => {
       purpose: 'Review changes',
       description: 'Original purpose',
       instructions: 'Original instructions',
-      agentConfig: { model: 'anthropic/claude', variant: 'high' },
+      agentConfig: { runtime: 'opencode', model: 'anthropic/claude', variant: 'high' },
       skills: ['code'],
       permissions: ['repo:read'],
       maxConcurrentRuns: null,
@@ -496,7 +497,8 @@ describe('AgentProfileEditor', () => {
       fireEvent.click(screen.getByTestId('editor-save'))
 
       const updateCall = (mocks.updateMutation.mutate as ReturnType<typeof vi.fn>).mock.calls[0][0]
-      expect(updateCall.data.agentConfig).toBeNull()
+      // An explicit Runtime stays explicit; only the Model and Variant are cleared.
+      expect(updateCall.data.agentConfig).toEqual({ runtime: 'opencode' })
     })
 
     it('shows inline API error on update failure', async () => {

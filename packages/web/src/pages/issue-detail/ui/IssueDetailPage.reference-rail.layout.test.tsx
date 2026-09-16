@@ -11,7 +11,6 @@ import {
 } from './_issueDetailReferenceRailTestUtils'
 import { mockIssue, mountIssueDetail } from './_issueDetailMsw'
 
-
 mountIssueDetail({ issue: makeIssue() })
 
 afterEach(() => {
@@ -67,15 +66,17 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
   })
 
   it('marks the rail as narrow mode and does not occupy a right column beside the reading flow', async () => {
-    mockIssue(makeIssue({
-      model: 'sonnet',
-      repository: {
-        name: 'master',
-        baseBranch: 'master',
-        gitUrl: 'https://github.com/suraciii/mohist.git',
-      },
-      recovery: DEFAULT_RECOVERY,
-    }))
+    mockIssue(
+      makeIssue({
+        model: 'sonnet',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        recovery: DEFAULT_RECOVERY,
+      }),
+    )
 
     renderPage()
 
@@ -91,28 +92,32 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
   })
 
   it('renders all rail items as collapsed sections on a narrow viewport', async () => {
-    mockIssue(makeIssue({
-      model: 'sonnet',
-      repository: {
-        name: 'master',
-        baseBranch: 'master',
-        gitUrl: 'https://github.com/suraciii/mohist.git',
-      },
-      drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
-      convergence: {
-        blockingItemCount: 1,
-        directlyRepairedCount: 0,
-        reactionAttempts: 0,
-        attemptedItemIds: [],
-        resolvedItemIds: [],
-        unresolvedItemIds: ['cb-1'],
-        newBlockingItemIds: [],
-        nonBlockingItemIds: [],
-        blockedReason: 'A blocking check failed.',
-      },
-      prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
-      recovery: DEFAULT_RECOVERY,
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'backlog',
+        workflowProfileId: 'mohist/local',
+        model: 'sonnet',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+        convergence: {
+          blockingItemCount: 1,
+          directlyRepairedCount: 0,
+          reactionAttempts: 0,
+          attemptedItemIds: [],
+          resolvedItemIds: [],
+          unresolvedItemIds: ['cb-1'],
+          newBlockingItemIds: [],
+          nonBlockingItemIds: [],
+          blockedReason: 'A blocking check failed.',
+        },
+        prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+        recovery: DEFAULT_RECOVERY,
+      }),
+    )
 
     renderPage()
 
@@ -122,6 +127,7 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
     const railItems = [
       'reference-rail-details',
       'reference-rail-workflow-profile',
+      'reference-rail-agents',
       'reference-rail-drift',
       'reference-rail-convergence',
       'reference-rail-configuration',
@@ -136,28 +142,32 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
 
   it('collapses expanded rail cards when the viewport changes from desktop to narrow', async () => {
     const viewport = mockMatchMedia(false)
-    mockIssue(makeIssue({
-      model: 'sonnet',
-      repository: {
-        name: 'master',
-        baseBranch: 'master',
-        gitUrl: 'https://github.com/suraciii/mohist.git',
-      },
-      drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
-      convergence: {
-        blockingItemCount: 1,
-        directlyRepairedCount: 0,
-        reactionAttempts: 0,
-        attemptedItemIds: [],
-        resolvedItemIds: [],
-        unresolvedItemIds: ['cb-1'],
-        newBlockingItemIds: [],
-        nonBlockingItemIds: [],
-        blockedReason: 'A blocking check failed.',
-      },
-      prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
-      recovery: DEFAULT_RECOVERY,
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'backlog',
+        workflowProfileId: 'mohist/local',
+        model: 'sonnet',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+        convergence: {
+          blockingItemCount: 1,
+          directlyRepairedCount: 0,
+          reactionAttempts: 0,
+          attemptedItemIds: [],
+          resolvedItemIds: [],
+          unresolvedItemIds: ['cb-1'],
+          newBlockingItemIds: [],
+          nonBlockingItemIds: [],
+          blockedReason: 'A blocking check failed.',
+        },
+        prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+        recovery: DEFAULT_RECOVERY,
+      }),
+    )
 
     renderPage()
 
@@ -176,6 +186,7 @@ describe('IssueDetailPage reference-rail — narrow-screen collapsed sections', 
     for (const testId of [
       'reference-rail-details',
       'reference-rail-workflow-profile',
+      'reference-rail-agents',
       'reference-rail-drift',
       'reference-rail-convergence',
       'reference-rail-configuration',
@@ -203,37 +214,39 @@ describe('IssueDetailPage reference-rail — document-order audit (narrow)', () 
   })
 
   it('places every rail card after every last reading-flow item in document order on a narrow viewport', async () => {
-    mockIssue(makeIssue({
-      model: 'sonnet',
-      repository: {
-        name: 'master',
-        baseBranch: 'master',
-        gitUrl: 'https://github.com/suraciii/mohist.git',
-      },
-      drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
-      convergence: {
-        blockingItemCount: 1,
-        directlyRepairedCount: 0,
-        reactionAttempts: 0,
-        attemptedItemIds: [],
-        resolvedItemIds: [],
-        unresolvedItemIds: ['cb-1'],
-        newBlockingItemIds: [],
-        nonBlockingItemIds: [],
-        blockedReason: 'A blocking check failed.',
-      },
-      prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
-      recovery: DEFAULT_RECOVERY,
-    }))
+    mockIssue(
+      makeIssue({
+        model: 'sonnet',
+        repository: {
+          name: 'master',
+          baseBranch: 'master',
+          gitUrl: 'https://github.com/suraciii/mohist.git',
+        },
+        drift: { drifted: true, detectedAt: '2026-01-05T00:00:00Z', decision: 'needs-attention' },
+        convergence: {
+          blockingItemCount: 1,
+          directlyRepairedCount: 0,
+          reactionAttempts: 0,
+          attemptedItemIds: [],
+          resolvedItemIds: [],
+          unresolvedItemIds: ['cb-1'],
+          newBlockingItemIds: [],
+          nonBlockingItemIds: [],
+          blockedReason: 'A blocking check failed.',
+        },
+        prereq: [{ number: 9, title: 'Prerequisite issue', completed: false }],
+        recovery: DEFAULT_RECOVERY,
+      }),
+    )
 
     renderPage()
 
     const referenceRail = await waitFor(() => screen.getByTestId('reference-rail'))
     expect(referenceRail.dataset.railMode).toBe('narrow')
 
-    const lastReadingFlowElement = READING_FLOW_LAST_TESTIDS
-      .map((id) => screen.queryByTestId(id))
-      .find((el): el is HTMLElement => el !== null)
+    const lastReadingFlowElement = READING_FLOW_LAST_TESTIDS.map((id) => screen.queryByTestId(id)).find(
+      (el): el is HTMLElement => el !== null,
+    )
 
     if (lastReadingFlowElement) {
       const referenceRailPos = lastReadingFlowElement.compareDocumentPosition(referenceRail)
@@ -284,18 +297,20 @@ describe('IssueDetailPage reference-rail — desktop restoration excludes mobile
   })
 
   it('does not render MobileActionBar or ConfirmationDrawer on desktop even with a primary action', async () => {
-    mockIssue(makeIssue({
-      status: 'in_progress',
-      workflowStage: 'build',
-      workflowStatus: 'running',
-      health: 'active',
-      recovery: {
-        currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
-        latestAttemptState: 'running',
-        workflowSummaryState: 'running',
-        allowedActions: ['stop'],
-      },
-    }))
+    mockIssue(
+      makeIssue({
+        status: 'in_progress',
+        workflowStage: 'build',
+        workflowStatus: 'running',
+        health: 'active',
+        recovery: {
+          currentWorkItem: { type: 'task', id: 't1', title: 'Build decision surface' },
+          latestAttemptState: 'running',
+          workflowSummaryState: 'running',
+          allowedActions: ['stop'],
+        },
+      }),
+    )
 
     const { container } = renderPage()
 

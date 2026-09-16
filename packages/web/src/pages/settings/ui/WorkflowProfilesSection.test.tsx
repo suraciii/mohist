@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { http, HttpResponse } from 'msw'
 import { fireEvent, render, screen, waitFor, within } from '../../../../tests/test-utils'
+import { useMswServer } from '../../../../tests/support/msw'
 import { setScopedProperty } from '../../../../tests/support/scoped-property'
 import {
   WorkflowProfilesSection as DefaultWorkflowProfilesSection,
@@ -53,6 +55,48 @@ const DEFAULT_DETAIL = {
 }
 
 const overflowByTestId = new Map<string, boolean>()
+
+const PROFILE_WITH_NAMED_AGENTS = [
+  'id: mohist/local',
+  'stages:',
+  '- stage: plan',
+  '  tasks:',
+  '  - id: plan',
+  '    uses: mohist/agent',
+  '    with:',
+  '      name: mohist/planner',
+  '- stage: check',
+  '  tasks:',
+  '  - id: review',
+  '    uses: mohist/agent',
+  '    with:',
+  '      name: mohist/reviewer',
+].join('\n')
+
+useMswServer(
+  http.get('*/api/projects/:projectId/agents/by-name/*', ({ params }) => {
+    const name = String(params[1] ?? '').replace(/^\/+/, '')
+    return HttpResponse.json({
+      success: true,
+      data: {
+        id: `builtin:${name}`,
+        projectId: 'test-project',
+        name,
+        purpose: null,
+        description: '',
+        instructions: '',
+        agentConfig: null,
+        skills: [],
+        permissions: [],
+        maxConcurrentRuns: null,
+        status: 'active',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        origin: 'built-in',
+      },
+    })
+  }),
+)
 
 const DETAILS = {
   'mohist/local': { ...DEFAULT_DETAIL, displayName: DEFAULT_DETAIL.name },
@@ -295,6 +339,48 @@ describe('WorkflowProfilesSection', () => {
       const DOC_ORDER = Node.DOCUMENT_POSITION_FOLLOWING
       expect(description.compareDocumentPosition(stagesHeading) & DOC_ORDER).toBeTruthy()
       expect(stagesHeading.compareDocumentPosition(yamlHeading) & DOC_ORDER).toBeTruthy()
+    })
+
+    it("lists the Profile's named Agents with their effective configuration and routes to the Agents page", async () => {
+      const profileHookWithAgents: WorkflowProfileHook = (profileId) => ({
+        data:
+          profileId === 'mohist/local'
+            ? { ...DETAILS['mohist/local'], displayName: DETAILS['mohist/local'].name, yaml: PROFILE_WITH_NAMED_AGENTS }
+            : undefined,
+        isLoading: false,
+        isError: false,
+      })
+
+      render(
+        <DefaultWorkflowProfilesSection
+          dataHook={dataHook}
+          profileHook={profileHookWithAgents}
+          components={components}
+        />,
+      )
+
+      await waitFor(() => expect(screen.getByTestId('workflow-profile-mohist/local')).toBeInTheDocument())
+      fireEvent.click(
+        within(screen.getByTestId('workflow-profile-mohist/local')).getByRole('button', { name: 'View details' }),
+      )
+
+      expect(await screen.findByText('Named Agents')).toBeInTheDocument()
+
+      const planner = await screen.findByTestId('workflow-agent-mohist/planner')
+      await waitFor(() => expect(planner).toHaveAttribute('data-state', 'resolved'))
+      expect(within(planner).getByText('Built-in')).toBeInTheDocument()
+      expect(within(planner).getByTestId('workflow-agent-runtime-mohist/planner')).toHaveTextContent('Pi')
+      expect(within(planner).getByTestId('workflow-agent-model-mohist/planner')).toHaveTextContent('Runtime default')
+      expect(within(planner).getByTestId('workflow-agent-effort-mohist/planner')).toHaveTextContent('Runtime behavior')
+      expect(within(planner).getByTestId('workflow-agent-configure-mohist/planner')).toHaveAttribute(
+        'href',
+        '/Test%20Project/agents/builtin%3Amohist%2Fplanner',
+      )
+      expect(await screen.findByTestId('workflow-agent-mohist/reviewer')).toBeInTheDocument()
+
+      // The block is read-only: the Agents page owns configuration.
+      expect(screen.getByTestId('workflow-agents-block').querySelectorAll('select')).toHaveLength(0)
+      expect(screen.getByTestId('workflow-agents-block').querySelectorAll('input')).toHaveLength(0)
     })
 
     it('falls back to the All profiles view when the back button is clicked', async () => {

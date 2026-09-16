@@ -1,6 +1,5 @@
 export type SettingsSectionKey =
-  | 'ai'
-  | 'agent'
+  | 'scheduling'
   | 'repositories'
   | 'workflows'
   | 'templates'
@@ -12,8 +11,7 @@ export type SettingsSectionKey =
 export type SettingsSectionScope = 'application' | 'project'
 
 export const SETTINGS_SECTION_KEYS: readonly SettingsSectionKey[] = [
-  'ai',
-  'agent',
+  'scheduling',
   'repositories',
   'workflows',
   'templates',

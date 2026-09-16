@@ -251,7 +251,7 @@ describe('AgentSessionComposerPage', () => {
     expect(state.taskCalls[1].idempotencyKey).toBe(state.taskCalls[0].idempotencyKey)
   })
 
-  it('defaults the Runtime to pi and requires a catalog-backed Model', async () => {
+  it('defaults the Runtime to pi and launches with an unset Model as Runtime default', async () => {
     server.use(
       http.get('*/api/projects/:projectId/opencode/models', () =>
         HttpResponse.json({
@@ -268,11 +268,40 @@ describe('AgentSessionComposerPage', () => {
     expect(await screen.findByTestId('execution-config-controls')).toBeInTheDocument()
     expect(screen.queryByTestId('recommended-execution-config')).not.toBeInTheDocument()
     expect(screen.getByTestId('task-runtime')).toHaveValue('pi')
-    expect(screen.getByTestId('launch-button')).toBeDisabled()
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Model' })).not.toBeDisabled())
+    // Nothing to prefill from: the unset Model stays unset and reads as Runtime default.
+    expect(screen.getByRole('button', { name: 'Model' })).toHaveTextContent('Runtime default')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Model' }))
-    fireEvent.click(await screen.findByRole('option', { name: /anthropic\/claude-3/i }))
+    fireEvent.change(screen.getByTestId('prompt-textarea'), {
+      target: { value: 'Use the Runtime default model' },
+    })
+    expect(screen.getByTestId('launch-button')).not.toBeDisabled()
+    fireEvent.click(screen.getByTestId('launch-button'))
+
+    await waitFor(() => expect(state.taskCalls).toHaveLength(1))
+    expect(state.taskCalls[0].body).toMatchObject({
+      prompt: 'Use the Runtime default model',
+      runtime: 'pi',
+      model: null,
+      variant: null,
+    })
+  })
+
+  it('still sends an explicitly chosen catalog Model and Variant', async () => {
+    server.use(
+      http.get('*/api/projects/:projectId/opencode/models', () =>
+        HttpResponse.json({
+          success: true,
+          data: {
+            models: ['anthropic/claude-3'],
+            modelVariants: { 'anthropic/claude-3': ['high', 'low'] },
+          },
+        }),
+      ),
+    )
+    renderPage()
+
+    expect(await screen.findByTestId('execution-config-controls')).toBeInTheDocument()
+    await chooseExecutionModel()
     fireEvent.click(screen.getByRole('button', { name: 'Model' }))
     fireEvent.click(await screen.findByTestId('task-model-row-anthropic/claude-3-variant-high'))
     fireEvent.change(screen.getByTestId('prompt-textarea'), {
@@ -290,6 +319,34 @@ describe('AgentSessionComposerPage', () => {
     })
   })
 
+  it('clears the Model back to Runtime default', async () => {
+    renderPage()
+    await chooseExecutionModel()
+    expect(screen.getByRole('button', { name: 'Model' })).toHaveTextContent('anthropic/claude-3')
+
+    fireEvent.click(screen.getByTitle('Clear'))
+
+    expect(screen.getByRole('button', { name: 'Model' })).toHaveTextContent('Runtime default')
+    fireEvent.change(screen.getByTestId('prompt-textarea'), { target: { value: 'Back to the default' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+
+    await waitFor(() => expect(state.taskCalls).toHaveLength(1))
+    expect(state.taskCalls[0].body).toMatchObject({ runtime: 'pi', model: null, variant: null })
+  })
+
+  it('never offers a built-in Agent for launch (built-ins are not stored rows)', async () => {
+    state.agentsData = [
+      makeAgent('agent-1'),
+      makeAgent('builtin:mohist/planner', { name: 'mohist/planner', origin: 'built-in' }),
+    ]
+    renderPage()
+
+    fireEvent.click(await screen.findByTestId('agent-selector-trigger'))
+    expect(screen.getByTestId('agent-option-agent-1')).toBeInTheDocument()
+    expect(screen.queryByTestId('agent-option-builtin:mohist/planner')).not.toBeInTheDocument()
+    expect(screen.queryByText('mohist/planner')).not.toBeInTheDocument()
+  })
+
   it('preserves task and context state when the task-first launch is rejected', async () => {
     state.launchError = {
       error: 'Execution configuration is unresolved',
@@ -303,7 +360,7 @@ describe('AgentSessionComposerPage', () => {
 
     const feedback = await screen.findByTestId('error-execution-config')
     expect(feedback).toHaveAttribute('data-feedback-kind', 'execution-config-unresolvable')
-    expect(feedback).toHaveTextContent(/Model for this task/i)
+    expect(feedback).toHaveTextContent(/Review the execution configuration on the Agent definition/i)
     expect(screen.getByTestId('prompt-textarea')).toHaveValue('Keep this task')
     expect(screen.getByTestId('context-ref-chip-issue')).toHaveTextContent('Issue #42')
   })

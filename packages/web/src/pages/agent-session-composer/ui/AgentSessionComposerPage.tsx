@@ -102,7 +102,8 @@ function TaskExecutionConfigControls({
       <div>
         <p className="text-sm font-medium text-foreground">Execution configuration</p>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Choose the Runtime and a catalog model for this task. Variant is optional.
+          Choose the Runtime and optionally a catalog model and variant. Leaving Model at Runtime default lets the
+          Runtime choose at dispatch.
         </p>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -125,9 +126,14 @@ function TaskExecutionConfigControls({
           <ModelSelect
             id="task-model"
             value={model}
-            placeholder={availableModels ? 'Select a catalog model' : 'Loading catalog models...'}
+            placeholder="Runtime default"
             models={models}
             onChange={(nextModel) => onModelChange(nextModel)}
+            onClear={() => {
+              onModelChange(null)
+              onVariantChange(null)
+            }}
+            allowClear={!!model}
             onChangeVariant={onVariantChange}
             modelVariants={modelVariants}
             valueVariant={variant}
@@ -135,12 +141,12 @@ function TaskExecutionConfigControls({
               onModelChange(nextModel)
               onVariantChange(nextVariant)
             }}
-            disabled={!availableModels}
           />
         </div>
       </div>
       <p data-testid="execution-config-catalog-hint" className="text-[11px] text-muted-foreground">
-        Models and variants come from the selected Runtime catalog.
+        Models and variants come from the selected Runtime catalog. An unset Model stays unset and means Runtime
+        default.
       </p>
     </div>
   )
@@ -216,7 +222,10 @@ export function AgentSessionComposerPage({
     startTaskMutation,
   } = dataHook()
 
-  const launchableAgents = useMemo(() => agents?.filter((a) => a.status !== 'archived') ?? [], [agents])
+  const launchableAgents = useMemo(
+    () => agents?.filter((a) => a.status !== 'archived' && a.origin !== 'built-in') ?? [],
+    [agents],
+  )
 
   const [selectedAgentRef, setSelectedAgentRef] = useState(() => searchParams.get('agent') || '')
   const [contextRefs, setContextRefs] = useState<ContextRef[]>(() => {
@@ -274,7 +283,6 @@ export function AgentSessionComposerPage({
   const showPromptError = promptTouched && promptEmpty && attachmentIds.length === 0
 
   const isCreatingAgent = !selectedAgentRef
-  const executionConfigResolvable = !!executionModel
   const executionControlsVisible = isCreatingAgent
   const concurrencyValue = maxConcurrentRunsText.trim() ? Number(maxConcurrentRunsText) : null
   const concurrencyValid = concurrencyValue === null || (Number.isInteger(concurrencyValue) && concurrencyValue > 0)
@@ -285,7 +293,6 @@ export function AgentSessionComposerPage({
     startTaskMutation.isPending
   const canLaunch =
     (!promptEmpty || attachmentIds.length > 0) &&
-    (!isCreatingAgent || executionConfigResolvable) &&
     concurrencyValid &&
     (!selectedAgentRef || (!isArchived && !launchBlockedByExecutability)) &&
     !launchPending

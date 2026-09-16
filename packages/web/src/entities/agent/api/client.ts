@@ -2,7 +2,18 @@ import { request, projectApiPath } from '../../../shared/api/client'
 import type { AgentActivity, AgentSessionInfo, AgentStatus } from '../model/types'
 
 type AgentRuntime = 'opencode' | 'pi'
-const DEFAULT_AGENT_RUNTIME: AgentRuntime = 'opencode'
+
+/** The Runtime an unset Agent definition resolves to at dispatch. */
+const RUNTIME_DEFAULT: AgentRuntime = 'pi'
+
+/** Stored Project Agents carry an id; built-in definitions live under `builtin:<name>`. */
+export const BUILT_IN_AGENT_ID_PREFIX = 'builtin:'
+
+export type AgentOrigin = 'project' | 'built-in'
+
+export function isBuiltInAgentRef(agentRef: string | null | undefined): boolean {
+  return !!agentRef && agentRef.startsWith(BUILT_IN_AGENT_ID_PREFIX)
+}
 
 export type AgentExecutabilityState = 'not-configured' | 'not-executable' | 'unknown' | 'executable'
 
@@ -46,6 +57,10 @@ export interface AgentInfo {
   createdAt: string
   updatedAt: string
   executability?: AgentExecutabilityResult | null
+  /** `project` for a stored Project Agent, `built-in` for a built-in definition. */
+  origin?: AgentOrigin | null
+  /** True when a stored Project Agent shadows a built-in Workflow Agent. */
+  overridesBuiltIn?: boolean
 }
 
 export interface AgentCreateRequest {
@@ -58,6 +73,13 @@ export interface AgentCreateRequest {
   permissions?: string[]
   maxConcurrentRuns?: number | null
   allowedSubagentAgentIds?: string[] | null
+}
+
+export interface AgentOverrideRequest {
+  name: string
+  description?: string | null
+  agentConfig?: Record<string, unknown> | null
+  skills?: string[] | null
 }
 
 export interface AgentUpdateRequest {
@@ -149,6 +171,31 @@ export function getAgent(projectId: string, id: string) {
   return request<AgentInfo>(projectApiPath(projectId, `/agents/${encodeURIComponent(id)}`))
 }
 
+/**
+ * Resolves the Project's effective Agent for a name. Built-in Workflow Agent
+ * names contain a path separator, so detail reads go through the name route:
+ * a stored Project Agent shadows the built-in under the same name.
+ */
+export function getAgentByName(projectId: string, name: string) {
+  const encodedName = name
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+  return request<AgentInfo>(projectApiPath(projectId, `/agents/by-name/${encodedName}`))
+}
+
+/**
+ * Materializes a built-in Workflow Agent as a same-name Project Agent in one
+ * Server operation. The Server copies the built-in definition; clients send
+ * only the caller's changes.
+ */
+export function customizeAgent(projectId: string, data: AgentOverrideRequest) {
+  return request<AgentInfo>(projectApiPath(projectId, '/agents/overrides'), {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
 export function createAgent(projectId: string, data: AgentCreateRequest) {
   return request<AgentInfo>(projectApiPath(projectId, '/agents'), {
     method: 'POST',
@@ -193,7 +240,7 @@ export function readAgentDefinitionModelAndVariant(agent: Pick<AgentInfo, 'agent
     model: rawModel,
     variant: rawVariant,
     reasoningEffort: rawReasoningEffort,
-    runtime: rawRuntime ?? DEFAULT_AGENT_RUNTIME,
+    runtime: rawRuntime ?? RUNTIME_DEFAULT,
   }
 }
 
@@ -222,14 +269,14 @@ export function writeAgentModelAndVariant(
   _current: Record<string, unknown> | null | undefined,
   model: string | null,
   variant: string | null,
-  runtime: AgentRuntime = DEFAULT_AGENT_RUNTIME,
+  runtime: AgentRuntime = RUNTIME_DEFAULT,
   reasoningEffort: string | null = null,
 ): Record<string, unknown> | null {
   const next: Record<string, unknown> = {}
   if (model === null) {
     if (variant !== null) next.variant = variant
     if (reasoningEffort !== null) next.reasoningEffort = reasoningEffort
-    if (runtime !== DEFAULT_AGENT_RUNTIME) next.runtime = runtime
+    if (runtime !== RUNTIME_DEFAULT) next.runtime = runtime
     return Object.keys(next).length > 0 ? next : null
   }
   next.model = model

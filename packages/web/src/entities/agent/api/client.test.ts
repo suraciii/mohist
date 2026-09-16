@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
 import {
+  BUILT_IN_AGENT_ID_PREFIX,
+  customizeAgent,
+  getAgentByName,
+  isBuiltInAgentRef,
   readAgentDefinitionModelAndVariant,
   readAgentModelAndVariant,
   unarchiveAgent,
@@ -66,13 +70,98 @@ describe('unarchiveAgent', () => {
   })
 })
 
+describe('getAgentByName', () => {
+  it('reads a built-in name through the project by-name route with literal slashes', async () => {
+    const paths: string[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/agents/by-name/*', ({ request }) => {
+        paths.push(requestPath(request))
+        return successResponse({ id: 'builtin:mohist/planner', name: 'mohist/planner', origin: 'built-in' })
+      }),
+    )
+
+    const agent = await getAgentByName('proj-1', 'mohist/planner')
+
+    expect(paths).toEqual(['/api/projects/proj-1/agents/by-name/mohist/planner'])
+    expect(agent.id).toBe('builtin:mohist/planner')
+  })
+
+  it('encodes name segments that need URL escaping', async () => {
+    const paths: string[] = []
+    server.use(
+      http.get('*/api/projects/:projectId/agents/by-name/*', ({ request }) => {
+        paths.push(requestPath(request))
+        return successResponse({ id: 'agent-1', name: 'a b/c' })
+      }),
+    )
+
+    await getAgentByName('proj-1', 'a b/c')
+
+    expect(paths).toEqual(['/api/projects/proj-1/agents/by-name/a%20b/c'])
+  })
+})
+
+describe('customizeAgent', () => {
+  it('POSTs /agents/overrides with only the caller changes and returns the materialized Agent', async () => {
+    const requests: Request[] = []
+    const bodies: unknown[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/agents/overrides', async ({ request }) => {
+        requests.push(request)
+        bodies.push(await request.json())
+        return HttpResponse.json(
+          { success: true, data: { id: 'agent-override', name: 'mohist/reviewer', origin: 'project' } },
+          { status: 201 },
+        )
+      }),
+    )
+
+    const created = await customizeAgent('proj-1', { name: 'mohist/reviewer' })
+
+    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/agents/overrides')
+    expect(requests[0].method).toBe('POST')
+    expect(bodies).toEqual([{ name: 'mohist/reviewer' }])
+    expect(created.id).toBe('agent-override')
+  })
+
+  it('surfaces the named conflict code and the existing Agent id', async () => {
+    server.use(
+      http.post('*/api/projects/:projectId/agents/overrides', () =>
+        HttpResponse.json(
+          {
+            success: false,
+            error: 'already overrides this built-in Agent',
+            code: 'agent_override_conflict',
+            data: { name: 'mohist/reviewer', agentId: 'agent-existing' },
+          },
+          { status: 409 },
+        ),
+      ),
+    )
+
+    await expect(customizeAgent('proj-1', { name: 'mohist/reviewer' })).rejects.toMatchObject({
+      code: 'agent_override_conflict',
+      data: { agentId: 'agent-existing' },
+    })
+  })
+})
+
+describe('built-in Agent refs', () => {
+  it('recognizes the built-in id prefix', () => {
+    expect(isBuiltInAgentRef(`${BUILT_IN_AGENT_ID_PREFIX}mohist/planner`)).toBe(true)
+    expect(isBuiltInAgentRef('agent_123')).toBe(false)
+    expect(isBuiltInAgentRef(null)).toBe(false)
+    expect(isBuiltInAgentRef(undefined)).toBe(false)
+  })
+})
+
 describe('readAgentModelAndVariant', () => {
   it('returns null model and variant when agent config is missing', () => {
     expect(readAgentModelAndVariant(null)).toEqual({
       model: null,
       variant: null,
       reasoningEffort: null,
-      runtime: 'opencode',
+      runtime: 'pi',
     })
   })
 
@@ -85,7 +174,7 @@ describe('readAgentModelAndVariant', () => {
       model: null,
       variant: null,
       reasoningEffort: null,
-      runtime: 'opencode',
+      runtime: 'pi',
     })
   })
 
@@ -98,7 +187,7 @@ describe('readAgentModelAndVariant', () => {
       model: 'anthropic/claude',
       variant: 'high',
       reasoningEffort: null,
-      runtime: 'opencode',
+      runtime: 'pi',
     })
   })
 
@@ -115,7 +204,7 @@ describe('readAgentModelAndVariant', () => {
       model: null,
       variant: null,
       reasoningEffort: null,
-      runtime: 'opencode',
+      runtime: 'pi',
     })
   })
 
@@ -128,7 +217,7 @@ describe('readAgentModelAndVariant', () => {
       model: null,
       variant: null,
       reasoningEffort: null,
-      runtime: 'opencode',
+      runtime: 'pi',
     })
   })
 
@@ -141,7 +230,7 @@ describe('readAgentModelAndVariant', () => {
       model: null,
       variant: 'high',
       reasoningEffort: null,
-      runtime: 'opencode',
+      runtime: 'pi',
     })
   })
 })
@@ -151,7 +240,7 @@ describe('writeAgentModelAndVariant', () => {
     expect(writeAgentModelAndVariant(null, 'anthropic/claude', 'high')).toEqual({
       model: 'anthropic/claude',
       variant: 'high',
-      runtime: 'opencode',
+      runtime: 'pi',
     })
   })
 
@@ -162,14 +251,14 @@ describe('writeAgentModelAndVariant', () => {
     expect(writeAgentModelAndVariant({ type: 'opencode', temperature: 0.5 }, 'anthropic/claude', 'low')).toEqual({
       model: 'anthropic/claude',
       variant: 'low',
-      runtime: 'opencode',
+      runtime: 'pi',
     })
   })
 
   it('drops the variant when null is passed', () => {
     expect(writeAgentModelAndVariant({ model: 'm', variant: 'high' }, 'm', null)).toEqual({
       model: 'm',
-      runtime: 'opencode',
+      runtime: 'pi',
     })
   })
 

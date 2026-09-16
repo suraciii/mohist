@@ -9,6 +9,7 @@ import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { TEST_PROJECT } from './test-utils'
 import { server, useMswServer } from './support/msw'
 import { setScopedProperty, setScopedValue } from './support/scoped-property'
+import { agentsByNameHandler, namedAgentsProfileDetailHandler } from '../src/pages/issue-detail/ui/_issueDetailMsw'
 import React from 'react'
 import { IssueHealth, WorkflowStage } from '../src/entities/issue'
 
@@ -27,15 +28,9 @@ let _retryHandler = vi.fn()
 let _closeHandler = vi.fn()
 
 useMswServer(
-  http.get('*/api/projects/:projectId/issues/:number', () =>
-    HttpResponse.json({ success: true, data: _issueData }),
-  ),
-  http.get('*/api/projects/:projectId/issues/:number/diff', () =>
-    HttpResponse.json({ success: true, data: null }),
-  ),
-  http.get('*/api/projects/:projectId/issues/:number/commits', () =>
-    HttpResponse.json({ success: true, data: null }),
-  ),
+  http.get('*/api/projects/:projectId/issues/:number', () => HttpResponse.json({ success: true, data: _issueData })),
+  http.get('*/api/projects/:projectId/issues/:number/diff', () => HttpResponse.json({ success: true, data: null })),
+  http.get('*/api/projects/:projectId/issues/:number/commits', () => HttpResponse.json({ success: true, data: null })),
   http.get('*/api/projects/:projectId/issues/:number/workspace-status', () =>
     HttpResponse.json({ success: true, data: null }),
   ),
@@ -52,11 +47,12 @@ useMswServer(
   http.delete('*/api/projects/:projectId/issues/:number/workflow-profile/template', () =>
     HttpResponse.json({ success: true, data: _workflowProfileData }),
   ),
-  http.patch('*/api/projects/:projectId/issues/:number', () =>
-    HttpResponse.json({ success: true, data: _issueData }),
-  ),
+  http.patch('*/api/projects/:projectId/issues/:number', () => HttpResponse.json({ success: true, data: _issueData })),
   http.get('*/api/projects/:projectId/workflow-profile/default', () =>
-    HttpResponse.json({ success: true, data: { projectId: 'test-project', defaultWorkflowProfileId: 'mohist/local', disabledWorkflowProfileIds: [] } }),
+    HttpResponse.json({
+      success: true,
+      data: { projectId: 'test-project', defaultWorkflowProfileId: 'mohist/local', disabledWorkflowProfileIds: [] },
+    }),
   ),
   http.get('*/api/projects/:projectId/workflow-profiles', ({ params }) =>
     HttpResponse.json({
@@ -73,6 +69,10 @@ useMswServer(
       })),
     }),
   ),
+  namedAgentsProfileDetailHandler(
+    (profileId) => _workflowProfilesListData.find((p: any) => p.id === profileId) ?? { displayName: profileId },
+  ),
+  agentsByNameHandler('test-project'),
   http.get('*/api/projects/:projectId/opencode/models', () =>
     HttpResponse.json({ success: true, data: { models: [], modelVariants: {} } }),
   ),
@@ -82,9 +82,7 @@ useMswServer(
   http.get('*/api/projects/:projectId/variables', () =>
     HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
   ),
-  http.get('*/api/projects/:projectId/issues', () =>
-    HttpResponse.json({ success: true, data: [] }),
-  ),
+  http.get('*/api/projects/:projectId/issues', () => HttpResponse.json({ success: true, data: [] })),
   http.get('*/api/projects/:projectId/agent/status', () =>
     HttpResponse.json({
       success: true,
@@ -103,15 +101,11 @@ useMswServer(
   http.get('*/api/projects/:projectId/issues/:number/workflow/tasks/:taskId/logs', () =>
     HttpResponse.json({ success: true, data: { lines: [], nextCursor: null, truncated: false } }),
   ),
-  http.get('*/api/workflow-runs/:runId/sessions', () =>
-    HttpResponse.json({ success: true, data: [] }),
-  ),
+  http.get('*/api/workflow-runs/:runId/sessions', () => HttpResponse.json({ success: true, data: [] })),
   http.patch('*/api/projects/:projectId/issues/:number/variables', () =>
     HttpResponse.json({ success: true, data: { vars: {}, stages: {} } }),
   ),
-  http.post('*/api/projects/:projectId/issues/:number/start', () =>
-    HttpResponse.json({ success: true, data: {} }),
-  ),
+  http.post('*/api/projects/:projectId/issues/:number/start', () => HttpResponse.json({ success: true, data: {} })),
   http.post('*/api/projects/:projectId/issues/:number/close', ({ params }) => {
     _closeHandler(Number(params.number), params.projectId)
     return HttpResponse.json({ success: true, data: {} })
@@ -119,12 +113,8 @@ useMswServer(
   http.post('*/api/projects/:projectId/issues/:number/force-stop', () =>
     HttpResponse.json({ success: true, data: {} }),
   ),
-  http.post('*/api/projects/:projectId/issues/:number/reopen', () =>
-    HttpResponse.json({ success: true, data: {} }),
-  ),
-  http.post('*/api/projects/:projectId/issues/:number/rerun', () =>
-    HttpResponse.json({ success: true, data: {} }),
-  ),
+  http.post('*/api/projects/:projectId/issues/:number/reopen', () => HttpResponse.json({ success: true, data: {} })),
+  http.post('*/api/projects/:projectId/issues/:number/rerun', () => HttpResponse.json({ success: true, data: {} })),
   http.post('*/api/projects/:projectId/issues/:number/retry', () => {
     _retryHandler()
     if (_retryError) {
@@ -133,19 +123,24 @@ useMswServer(
     return HttpResponse.json({ success: true, data: {} })
   }),
   http.post('*/api/projects/:projectId/issues/:number/comments', async ({ params, request }) => {
-    const body = await request.json() as any
+    const body = (await request.json()) as any
     _addCommentHandler(Number(params.number), body.body, params.projectId)
-    return HttpResponse.json({ success: true, data: { id: 'comment-new', body: body.body, createdAt: new Date().toISOString() } })
+    return HttpResponse.json({
+      success: true,
+      data: { id: 'comment-new', body: body.body, createdAt: new Date().toISOString() },
+    })
   }),
   http.delete('*/api/projects/:projectId/issues/:number/comments/:commentId', ({ params }) => {
     _deleteCommentHandler(Number(params.number), params.commentId, params.projectId)
     return HttpResponse.json({ success: true, data: { message: 'Deleted' } })
   }),
-  http.get('*/api/projects/:projectId/issues/:number/comments/:commentId/attachments/:attachmentId/content', () =>
-    new HttpResponse('fake content', { headers: { 'content-type': 'text/plain' } }),
+  http.get(
+    '*/api/projects/:projectId/issues/:number/comments/:commentId/attachments/:attachmentId/content',
+    () => new HttpResponse('fake content', { headers: { 'content-type': 'text/plain' } }),
   ),
-  http.get('*/api/projects/:projectId/issues/:number/attachments/:attachmentId/content', () =>
-    new HttpResponse('fake content', { headers: { 'content-type': 'text/plain' } }),
+  http.get(
+    '*/api/projects/:projectId/issues/:number/attachments/:attachmentId/content',
+    () => new HttpResponse('fake content', { headers: { 'content-type': 'text/plain' } }),
   ),
   http.get('*/api/projects/:projectId/issues/:number/workflow/status', () =>
     HttpResponse.json({ success: true, data: { workflow: null } }),
@@ -175,7 +170,10 @@ class StubResizeObserver {
   }
   trigger(): void {
     this.callback(
-      this.observed.map((target) => ({ target, contentRect: { width: 0, height: 0, top: 0, left: 0, bottom: 0, right: 0, x: 0, y: 0, toJSON: () => ({}) } })) as unknown as ResizeObserverEntry[],
+      this.observed.map((target) => ({
+        target,
+        contentRect: { width: 0, height: 0, top: 0, left: 0, bottom: 0, right: 0, x: 0, y: 0, toJSON: () => ({}) },
+      })) as unknown as ResizeObserverEntry[],
       this as unknown as ResizeObserver,
     )
   }
@@ -230,7 +228,12 @@ beforeEach(() => {
     open = vi.fn()
     send = vi.fn(() => {
       this.status = 200
-      const upload = _uploads.shift() ?? { id: 'att_default', fileName: 'default.txt', contentType: 'text/plain', size: 12 }
+      const upload = _uploads.shift() ?? {
+        id: 'att_default',
+        fileName: 'default.txt',
+        contentType: 'text/plain',
+        size: 12,
+      }
       this.responseText = JSON.stringify(upload)
       this.upload.onprogress?.({ lengthComputable: true, loaded: upload.size, total: upload.size } as ProgressEvent)
       this.onload?.()
@@ -579,12 +582,8 @@ describe('IssueDetailPage Markdown rendering', () => {
         ],
       })
       renderWithQueryClient(<IssueDetailPage />)
-      const readers = await waitFor(() =>
-        screen.getAllByTestId('markdown-reader'),
-      )
-      const commentReader = readers.find(
-        (node) => node.getAttribute('data-base-heading-level') === '3',
-      )
+      const readers = await waitFor(() => screen.getAllByTestId('markdown-reader'))
+      const commentReader = readers.find((node) => node.getAttribute('data-base-heading-level') === '3')
       expect(commentReader).toBeDefined()
       expect(commentReader).toHaveAttribute('data-base-heading-level', '3')
     })
@@ -848,7 +847,10 @@ describe('IssueDetailPage Markdown rendering', () => {
       renderWithQueryClient(<IssueDetailPage />)
 
       const issueImage = await screen.findByRole('img', { name: 'screen' })
-      expect(issueImage).toHaveAttribute('src', '/api/projects/test-project/issues/1/attachments/att_image_real/content')
+      expect(issueImage).toHaveAttribute(
+        'src',
+        '/api/projects/test-project/issues/1/attachments/att_image_real/content',
+      )
       fireEvent.click(screen.getAllByTestId('markdown-attachment-image-trigger')[0])
       expect(await screen.findByTestId('markdown-attachment-lightbox')).toBeInTheDocument()
       fireEvent.click(screen.getByTestId('markdown-attachment-lightbox'))
@@ -973,7 +975,7 @@ describe('IssueDetailPage workflow profile integration', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('reference-rail-details-toggle')).toBeInTheDocument()
-      expect(screen.getByTestId('reference-rail-configuration-toggle')).toBeInTheDocument()
+      expect(screen.getByTestId('reference-rail-agents-toggle')).toBeInTheDocument()
       expect(screen.getByRole('heading', { name: 'Artifacts' })).toBeInTheDocument()
     })
 
@@ -981,7 +983,7 @@ describe('IssueDetailPage workflow profile integration', () => {
     const readingFlow = await waitFor(() => screen.getByTestId('reading-flow'))
 
     expect(referenceRail.contains(screen.getByTestId('reference-rail-details'))).toBe(true)
-    expect(referenceRail.contains(screen.getByTestId('reference-rail-configuration'))).toBe(true)
+    expect(referenceRail.contains(screen.getByTestId('reference-rail-agents'))).toBe(true)
     expect(referenceRail.querySelector('[data-testid="reference-rail-actions"]')).toBeNull()
     expect(readingFlow.contains(screen.getByRole('heading', { name: 'Artifacts' }))).toBe(true)
     expect(readingFlow.contains(screen.getByText('Tasks', { selector: 'h3' }))).toBe(true)
@@ -989,9 +991,13 @@ describe('IssueDetailPage workflow profile integration', () => {
     expect(readingFlow.contains(screen.getByText('Sessions'))).toBe(true)
     expect(referenceRail.contains(screen.getByRole('heading', { name: 'Artifacts' }))).toBe(false)
 
-    const configurationCard = findRailCard('Configuration')
-    expect(within(configurationCard).getByText('Coder Model')).toBeInTheDocument()
-    expect(within(configurationCard).getByText('Per-stage overrides')).toBeInTheDocument()
+    // The rail shows the named Agents responsible for execution; there is no
+    // per-Issue or per-Stage model selector anywhere on the page.
+    const agentsCard = screen.getByTestId('reference-rail-agents')
+    expect(within(agentsCard).getByText('Execution Agents')).toBeInTheDocument()
+    await waitFor(() => expect(within(agentsCard).getByText('mohist/planner')).toBeInTheDocument())
+    expect(within(agentsCard).queryByText('Coder Model')).toBeNull()
+    expect(within(agentsCard).queryByText('Per-stage overrides')).toBeNull()
   })
 
   it('groups backlog prerequisite controls with configuration instead of a separate rail card', async () => {
@@ -999,9 +1005,7 @@ describe('IssueDetailPage workflow profile integration', () => {
       body: 'Issue body',
       status: 'backlog',
       workflowProfileId: 'mohist/local',
-      prerequisites: [
-        { number: 2, title: 'Prepare dependency', completed: false },
-      ],
+      prerequisites: [{ number: 2, title: 'Prepare dependency', completed: false }],
     })
     _workflowProfileData = referenceProfileData()
 
@@ -1029,23 +1033,17 @@ describe('IssueDetailPage workflow profile integration', () => {
 
     renderWithQueryClient(<IssueDetailPage />)
 
-    const trigger = await waitFor(() =>
-      screen.getByTestId('active-run-yaml-trigger'),
-    )
+    const trigger = await waitFor(() => screen.getByTestId('active-run-yaml-trigger'))
     expect(trigger).toBeInTheDocument()
 
-    expect(
-      within(trigger).getByText('Active run YAML'),
-    ).toBeInTheDocument()
+    expect(within(trigger).getByText('Active run YAML')).toBeInTheDocument()
     expect(
       within(trigger).getByText(
         /Rendered runtime output of the active workflow run, not the issue's workflow profile configuration\./i,
       ),
     ).toBeInTheDocument()
 
-    expect(
-      screen.queryByText(/workflow profile configuration/i, { selector: 'h2' }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/workflow profile configuration/i, { selector: 'h2' })).not.toBeInTheDocument()
   })
 
   it('displays the issue-level workflow profile on the detail page from the read model', async () => {
@@ -1090,7 +1088,7 @@ describe('IssueDetailPage workflow profile integration', () => {
     const _patchHandler = vi.fn()
     server.use(
       http.patch('*/api/projects/:projectId/issues/:number', async ({ params, request }) => {
-        const body = await request.json() as any
+        const body = (await request.json()) as any
         _patchHandler(Number(params.number), body.workflowProfileId, params.projectId)
         return HttpResponse.json({ success: true, data: _issueData })
       }),

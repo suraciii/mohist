@@ -71,7 +71,7 @@ function usePageTitle(dataHooks: HeaderDataHooks): string {
   if (firstSegment === 'logs') return 'Logs'
   if (firstSegment === 'settings') {
     const sub = params.section
-    if (!sub || sub === 'ai') return 'Settings'
+    if (!sub) return 'Settings'
     return `Settings · ${sub.charAt(0).toUpperCase()}${sub.slice(1)}`
   }
 
@@ -96,7 +96,7 @@ function usePageTitle(dataHooks: HeaderDataHooks): string {
   if (section.startsWith('/logs')) return 'Logs'
   if (section.startsWith('/settings')) {
     const section = params.section
-    if (!section || section === 'ai') return 'Settings'
+    if (!section) return 'Settings'
     return `Settings · ${section.charAt(0).toUpperCase()}${section.slice(1)}`
   }
 
@@ -132,12 +132,8 @@ export function Header({
     <header className="h-12 shrink-0 flex items-center gap-2 border-b bg-background px-3 md:px-4">
       <SidebarTrigger className="-ml-1" />
       <div className="flex items-center gap-2 min-w-0">
-        {isMobile && (
-          <span className="text-sm font-bold tracking-tight">mohist</span>
-        )}
-        {!isSettingsRoute && (
-          <h1 className="text-sm font-medium text-foreground truncate">{title}</h1>
-        )}
+        {isMobile && <span className="text-sm font-bold tracking-tight">mohist</span>}
+        {!isSettingsRoute && <h1 className="text-sm font-medium text-foreground truncate">{title}</h1>}
       </div>
       <div className="ml-auto flex items-center gap-2">
         {running && (
@@ -150,12 +146,7 @@ export function Header({
           </span>
         )}
         {!isMobile && !isSettingsRoute && (
-          <Button
-            size="sm"
-            onClick={onCreateIssue}
-            data-testid="header-new-issue"
-            className="h-8"
-          >
+          <Button size="sm" onClick={onCreateIssue} data-testid="header-new-issue" className="h-8">
             <PlusIcon />
             New Issue
           </Button>

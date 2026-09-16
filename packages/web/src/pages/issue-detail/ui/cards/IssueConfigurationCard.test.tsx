@@ -36,10 +36,11 @@ const CANDIDATE_ISSUES: Issue[] = [
 
 let currentIssues: Issue[] = CANDIDATE_ISSUES
 
-const issuesHook: NonNullable<IssuePrerequisitePickerProps['issuesHook']> = () => ({
-  data: currentIssues,
-  isLoading: false,
-}) as ReturnType<NonNullable<IssuePrerequisitePickerProps['issuesHook']>>
+const issuesHook: NonNullable<IssuePrerequisitePickerProps['issuesHook']> = () =>
+  ({
+    data: currentIssues,
+    isLoading: false,
+  }) as ReturnType<NonNullable<IssuePrerequisitePickerProps['issuesHook']>>
 
 function setIssues(issues: Issue[]) {
   currentIssues = issues
@@ -54,7 +55,14 @@ interface MutationStubs {
   removePending?: boolean
 }
 
-function buildMutations({ addPrerequisite, removePrerequisite, addError = null, removeError = null, addPending = false, removePending = false }: MutationStubs): Pick<IssueDetailMutations, 'addPrerequisiteMutation' | 'removePrerequisiteMutation'> {
+function buildMutations({
+  addPrerequisite,
+  removePrerequisite,
+  addError = null,
+  removeError = null,
+  addPending = false,
+  removePending = false,
+}: MutationStubs): Pick<IssueDetailMutations, 'addPrerequisiteMutation' | 'removePrerequisiteMutation'> {
   return {
     addPrerequisiteMutation: {
       mutate: addPrerequisite,
@@ -96,8 +104,6 @@ function renderCard({
       <IssueConfigurationCard
         issue={{
           number: ISSUE_NUMBER,
-          model: null,
-          stageModels: null,
           prerequisites,
           canStart,
           blocker,
@@ -148,6 +154,7 @@ describe('IssueConfigurationCard', () => {
 
       expect(screen.queryByTestId('prerequisite-configuration-controls')).not.toBeInTheDocument()
       expect(screen.queryByTestId('issue-prerequisite-picker')).not.toBeInTheDocument()
+      expect(screen.queryByText('Prerequisites')).not.toBeInTheDocument()
     })
   })
 
@@ -183,7 +190,15 @@ describe('IssueConfigurationCard', () => {
     it('excludes already-selected prerequisites from the candidate list', async () => {
       setIssues(CANDIDATE_ISSUES)
       renderCard({
-        prerequisites: [{ number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active }],
+        prerequisites: [
+          {
+            number: 5,
+            title: 'Wire up auth',
+            completed: false,
+            status: IssueStatus.InProgress,
+            health: IssueHealth.Active,
+          },
+        ],
       })
 
       openPicker()
@@ -214,8 +229,20 @@ describe('IssueConfigurationCard', () => {
       const user = userEvent.setup()
       renderCard({
         prerequisites: [
-          { number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
-          { number: 7, title: 'Audit auth tokens', completed: true, status: IssueStatus.Done, health: IssueHealth.Done },
+          {
+            number: 5,
+            title: 'Wire up auth',
+            completed: false,
+            status: IssueStatus.InProgress,
+            health: IssueHealth.Active,
+          },
+          {
+            number: 7,
+            title: 'Audit auth tokens',
+            completed: true,
+            status: IssueStatus.Done,
+            health: IssueHealth.Done,
+          },
         ],
         canStart: false,
         blocker: { kind: 'waiting-for', issue: { number: 5, title: 'Wire up auth' } },
@@ -255,7 +282,9 @@ describe('IssueConfigurationCard', () => {
         }),
       })
 
-      expect(screen.getByTestId('prerequisite-picker-error')).toHaveTextContent('Circular prerequisite: this would create a cycle')
+      expect(screen.getByTestId('prerequisite-picker-error')).toHaveTextContent(
+        'Circular prerequisite: this would create a cycle',
+      )
     })
 
     it('surfaces a self-reference error from the server unchanged', () => {
@@ -268,14 +297,22 @@ describe('IssueConfigurationCard', () => {
         }),
       })
 
-      expect(screen.getByTestId('prerequisite-picker-error')).toHaveTextContent('Issue cannot be a prerequisite of itself')
+      expect(screen.getByTestId('prerequisite-picker-error')).toHaveTextContent(
+        'Issue cannot be a prerequisite of itself',
+      )
     })
 
     it('surfaces the removePrerequisite mutation error when removal fails', () => {
       setIssues(CANDIDATE_ISSUES)
       renderCard({
         prerequisites: [
-          { number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
+          {
+            number: 5,
+            title: 'Wire up auth',
+            completed: false,
+            status: IssueStatus.InProgress,
+            health: IssueHealth.Active,
+          },
         ],
         mutations: buildMutations({
           addPrerequisite: vi.fn(),
@@ -293,7 +330,13 @@ describe('IssueConfigurationCard', () => {
       setIssues(CANDIDATE_ISSUES)
       renderCard({
         prerequisites: [
-          { number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
+          {
+            number: 5,
+            title: 'Wire up auth',
+            completed: false,
+            status: IssueStatus.InProgress,
+            health: IssueHealth.Active,
+          },
         ],
         canStart: false,
         blocker: { kind: 'waiting-for', issue: { number: 5, title: 'Wire up auth' } },
@@ -308,7 +351,13 @@ describe('IssueConfigurationCard', () => {
       setIssues(CANDIDATE_ISSUES)
       renderCard({
         prerequisites: [
-          { number: 7, title: 'Audit auth tokens', completed: true, status: IssueStatus.Done, health: IssueHealth.Done },
+          {
+            number: 7,
+            title: 'Audit auth tokens',
+            completed: true,
+            status: IssueStatus.Done,
+            health: IssueHealth.Done,
+          },
         ],
         canStart: true,
         blocker: null,
@@ -323,7 +372,13 @@ describe('IssueConfigurationCard', () => {
       setIssues(CANDIDATE_ISSUES)
       renderCard({
         prerequisites: [
-          { number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
+          {
+            number: 5,
+            title: 'Wire up auth',
+            completed: false,
+            status: IssueStatus.InProgress,
+            health: IssueHealth.Active,
+          },
         ],
         canStart: false,
         blocker: { kind: 'waiting-for', issue: { number: 5, title: 'Wire up auth' } },
@@ -338,7 +393,13 @@ describe('IssueConfigurationCard', () => {
       setIssues(CANDIDATE_ISSUES)
       renderCard({
         prerequisites: [
-          { number: 5, title: 'Wire up auth', completed: false, status: IssueStatus.InProgress, health: IssueHealth.Active },
+          {
+            number: 5,
+            title: 'Wire up auth',
+            completed: false,
+            status: IssueStatus.InProgress,
+            health: IssueHealth.Active,
+          },
         ],
       })
 

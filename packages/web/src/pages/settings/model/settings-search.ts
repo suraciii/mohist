@@ -17,14 +17,7 @@
  * `document.getElementById(entry.focusTargetId)?.focus()`.
  */
 
-export type SettingsTab =
-  | 'ai'
-  | 'agent'
-  | 'repositories'
-  | 'workflows'
-  | 'templates'
-  | 'system'
-  | 'preferences'
+export type SettingsTab = 'scheduling' | 'repositories' | 'workflows' | 'templates' | 'system' | 'preferences'
 
 export interface SettingsSearchEntry {
   /** Owning tab. Used both for grouping and for navigation on Enter. */
