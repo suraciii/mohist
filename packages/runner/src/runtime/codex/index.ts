@@ -69,3 +69,27 @@ export {
   createDefaultCodexRuntime,
 } from './factory.js'
 export type { CodexRuntimeFactory } from './factory.js'
+
+export {
+  buildCodexThreadResumeRequest,
+  buildCodexThreadStartRequest,
+  isStructuredThreadNotFound,
+  resumeThread,
+  startThread,
+  type CodexThreadStartInput,
+  type CodexThreadStartOutcome,
+  type CodexThreadTransport,
+} from './thread.js'
+
+export {
+  buildLostTurnStartUnknown,
+  driveTurnToCompletion,
+  submitTurnStart,
+  type CodexRuntimeTurnEvent,
+  type CodexTurnCompletionConfig,
+  type CodexTurnCompletionOptions,
+  type CodexTurnEventObserver,
+  type CodexTurnStartOutcome,
+  type CodexTurnStartSubmission,
+  type CodexTurnTransport,
+} from './turn.js'
