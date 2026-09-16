@@ -149,7 +149,12 @@ function createQueryClient() {
 
 function LocationProbe() {
   const location = useLocation()
-  return <div data-testid="current-path">{location.pathname}</div>
+  return (
+    <div data-testid="current-path">
+      {location.pathname}
+      {location.search}
+    </div>
+  )
 }
 
 const OVERRIDES_PATH = '*/api/projects/:projectId/agents/overrides'
@@ -674,8 +679,12 @@ describe('AgentDetailPage', () => {
       renderPage()
       fireEvent.click(await screen.findByTestId('agent-detail-customize'))
 
-      await waitFor(() => expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agents/agent-override-1'))
-      expect(screen.getByTestId('agent-profile-editor')).toBeInTheDocument()
+      await waitFor(() =>
+        expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agents/agent-override-1?edit=1'),
+      )
+      // The editor is opened by a URL-synced effect, so it appears one passive
+      // flush after the route commits: wait for the outcome, not the commit.
+      expect(await screen.findByTestId('agent-profile-editor')).toBeInTheDocument()
       // The client sends only the caller's changes; the Server copies the definition.
       expect(postedBody).toEqual({ name: 'mohist/builder' })
     })
@@ -706,10 +715,15 @@ describe('AgentDetailPage', () => {
       renderPage()
       fireEvent.click(await screen.findByTestId('agent-detail-customize'))
 
-      await waitFor(() => expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agents/agent-existing'))
+      await waitFor(() =>
+        expect(screen.getByTestId('current-path')).toHaveTextContent(
+          '/Test/agents/agent-existing?edit=1&notice=override-conflict',
+        ),
+      )
       expect(screen.getByTestId('agent-detail-notice')).toHaveAttribute('data-notice', 'override-conflict')
       expect(screen.getByTestId('agent-detail-notice')).toHaveTextContent(/already overrides the built-in name/i)
-      expect(screen.getByTestId('agent-profile-editor')).toBeInTheDocument()
+      // Same URL-synced editor effect as the materialize case: wait for the outcome.
+      expect(await screen.findByTestId('agent-profile-editor')).toBeInTheDocument()
       expect(screen.queryByTestId('agent-detail-customize-error')).not.toBeInTheDocument()
     })
 
