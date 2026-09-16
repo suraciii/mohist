@@ -621,6 +621,18 @@ func leafValueOption(kind, arg string) bool {
 		return false
 	}
 	if strings.HasPrefix(kind, "ops-") {
+		if area, action, ok := splitOperationsKind(kind); ok {
+			if leaf, ok := operationsFlags[area][action]; ok {
+				// Unknown flags keep the value-shaped default so an
+				// unrecognised flag does not turn a following --help or
+				// --json into a discovery request.
+				shape, ok := leaf[strings.TrimPrefix(arg, "--")]
+				if !ok {
+					return true
+				}
+				return shape == flagValue
+			}
+		}
 		return arg != "--yes" && arg != "--follow"
 	}
 	switch arg {
@@ -637,6 +649,14 @@ func leafValueOption(kind, arg string) bool {
 	default:
 		return false
 	}
+}
+
+func splitOperationsKind(kind string) (string, string, bool) {
+	parts := strings.SplitN(strings.TrimPrefix(kind, "ops-"), "-", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 func contains(values []string, wanted string) bool {
