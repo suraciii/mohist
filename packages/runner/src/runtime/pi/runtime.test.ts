@@ -257,7 +257,7 @@ describe('PiRuntime bounded turn completion', () => {
     expectCleanedUp(session)
   })
 
-  it('captures the message baseline only when a queued prompt acquires the session', async () => {
+  it('starts a queued prompt after idle settlement while the previous SDK prompt remains pending', async () => {
     const session = new ControlledPiSession()
     const secondEntered = deferred()
     const secondCompletion = deferred()
@@ -274,16 +274,23 @@ describe('PiRuntime bounded turn completion', () => {
     const runtime = await createRuntime(session)
     const first = run(runtime, session)
     await session.promptEntered.promise
+    const firstPromptSettled = vi.fn()
+    void session.promptCompletion.promise.then(firstPromptSettled, firstPromptSettled)
     const second = run(runtime, session)
     const secondSettled = vi.fn()
     void second.then(secondSettled)
     session.messages.push(terminal('first answer'))
     session.isStreaming = false
-    session.promptCompletion.resolve()
-    await first
+    session.emit({ type: 'agent_settled' })
+    await expect(first).resolves.toMatchObject({ ok: true, value: { facts: { finalAssistantText: 'first answer' } } })
     await secondEntered.promise
+    expect(firstPromptSettled).not.toHaveBeenCalled()
+    expect(session.prompt).toHaveBeenCalledTimes(2)
     session.emit({ type: 'agent_settled' })
     await vi.advanceTimersByTimeAsync(5_000)
+    expect(secondSettled).not.toHaveBeenCalled()
+    session.promptCompletion.reject(new Error('previous prompt disconnected late'))
+    await vi.advanceTimersByTimeAsync(0)
     expect(secondSettled).not.toHaveBeenCalled()
 
     session.messages.push(terminal('second answer'))
@@ -363,18 +370,43 @@ describe('PiRuntime bounded turn completion', () => {
       const turn = run(runtime, session, controller, 60_000)
       void turn.then(settled)
       await session.promptEntered.promise
-      const streamError = Object.assign(new Error('provider-secret SSE disconnected'), { code: 'ECONNRESET' })
+      const streamError = Object.assign(new Error('provider-secret SSE disconnected'), {
+        code: 'ECONNRESET',
+        statusCode: 502,
+        headers: { authorization: 'top-header-only-secret' },
+        metadata: { private: 'top-metadata-only-secret' },
+        cause: Object.assign(new Error('provider-secret socket closed'), {
+          code: 'EPIPE',
+          status: 503,
+          headers: { authorization: 'nested-header-only-secret' },
+          metadata: { private: 'nested-metadata-only-secret' },
+        }),
+      })
       session.promptCompletion.reject(streamError)
       await vi.advanceTimersByTimeAsync(CANCEL_CONFIRMATION_TIMEOUT_MS)
 
       const result = await turn
       expect(result).toMatchObject({ ok: false, error: { kind: 'turn-failed' } })
       expect(result.diagnostics.filter((item) => item.code === 'turn-failed')).toHaveLength(1)
-      expect(result.diagnostics.find((item) => item.code === 'turn-failed')?.message).toContain('SSE disconnected')
+      expect(result.diagnostics.find((item) => item.code === 'turn-failed')).toEqual({
+        code: 'turn-failed',
+        severity: 'error',
+        message: '*** SSE disconnected',
+        details: {
+          phase: 'prompt',
+          name: 'Error',
+          message: '*** SSE disconnected',
+          code: 'ECONNRESET',
+          statusCode: 502,
+          cause: { name: 'Error', message: '*** socket closed', code: 'EPIPE', status: 503 },
+        },
+      })
       expect(result.diagnostics.filter((item) => item.code === 'abort-unconfirmed')).toHaveLength(
         abortOutcome === 'resolved' ? 0 : 1,
       )
       expect(JSON.stringify(result)).not.toContain('provider-secret')
+      expect(JSON.stringify(result)).not.toContain('header-only-secret')
+      expect(JSON.stringify(result)).not.toContain('metadata-only-secret')
       expect(session.abort).toHaveBeenCalledTimes(1)
       expectCleanedUp(session)
       const snapshot = JSON.stringify(result)
