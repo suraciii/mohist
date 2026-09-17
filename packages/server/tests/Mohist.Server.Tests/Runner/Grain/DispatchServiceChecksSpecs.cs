@@ -105,7 +105,8 @@ public partial class DispatchServiceReconciliationSpecs
         {
             var first = await Dispatch.PollAsync(
                 _runnerId,
-                new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
+                DispatchTestExtensions.ReadyPollRequestForGeneration(
+                    TestRunnerGenerationExtensions.ProcessGeneration));
             Assert.Empty(first.Dispatches);
 
             var stillAssigned = await LoadRunAsync(_workflowId);
@@ -115,7 +116,8 @@ public partial class DispatchServiceReconciliationSpecs
 
             var second = await Dispatch.PollAsync(
                 _runnerId,
-                new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
+                DispatchTestExtensions.ReadyPollRequestForGeneration(
+                    TestRunnerGenerationExtensions.ProcessGeneration));
             Assert.Empty(second.Dispatches);
 
             var settled = await LoadRunAsync(_workflowId);

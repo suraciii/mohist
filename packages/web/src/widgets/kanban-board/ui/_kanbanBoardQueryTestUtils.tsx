@@ -23,14 +23,24 @@ import { KanbanBoard } from './KanbanBoard'
 import type { AgentStatus } from '../../../entities/agent'
 import { IssueStatus, IssueHealth, type Issue } from '../../../entities/issue'
 
-export const RUNNERS_PATH = '*/api/projects/:projectId/runners'
+export const RUNNERS_PATH = '*/api/runners'
 
 function defaultRunnersHandler() {
-  return http.get(RUNNERS_PATH, () => HttpResponse.json({ success: true, data: { runners: [] } }))
+  return http.get(RUNNERS_PATH, () =>
+    HttpResponse.json({
+      success: true,
+      data: { observedAt: '2026-01-01T00:00:00Z', inventory: { state: 'ready', nextActions: [] }, runners: [] },
+    }),
+  )
 }
 
 export function runnerRowsHandler(rows: Array<Record<string, unknown>>) {
-  return http.get(RUNNERS_PATH, () => HttpResponse.json({ success: true, data: { runners: rows } }))
+  return http.get(RUNNERS_PATH, () =>
+    HttpResponse.json({
+      success: true,
+      data: { observedAt: '2026-01-01T00:00:00Z', inventory: { state: 'ready', nextActions: [] }, runners: rows },
+    }),
+  )
 }
 
 export function renderBoard(ui: ReactNode, repositories: Repository[] = []): ReturnType<typeof render> {
@@ -38,16 +48,19 @@ export function renderBoard(ui: ReactNode, repositories: Repository[] = []): Ret
   const queryClient = new QueryClient()
   return render(
     <QueryClientProvider client={queryClient}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[{
-        id: 'proj-1',
-        name: 'Project 1',
-        createdAt: '2026-01-01T00:00:00Z',
-        updatedAt: '2026-01-01T00:00:00Z',
-        repositories,
-      }]}>
-        <MemoryRouter>
-          {ui}
-        </MemoryRouter>
+      <ProjectProvider
+        initialProjectId="proj-1"
+        initialProjects={[
+          {
+            id: 'proj-1',
+            name: 'Project 1',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            repositories,
+          },
+        ]}
+      >
+        <MemoryRouter>{ui}</MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
   )

@@ -60,7 +60,7 @@ afterEach(() => {
 describe('useDeleteProjectTemplateOverride hook', () => {
   it('issues DELETE /api/projects/{id}/templates/{key}/override with no body', async () => {
     const deleteRequests: { method: string; url: string; body: unknown }[] = []
-    server.resetHandlers(
+    server.use(
       http.delete(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, async ({ request }) => {
         let body: unknown = null
         const text = await request.text()
@@ -129,7 +129,7 @@ describe('useDeleteProjectTemplateOverride hook', () => {
   })
 
   it('surfaces API errors from the DELETE response', async () => {
-    server.resetHandlers(
+    server.use(
       http.delete(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, () =>
         HttpResponse.json({ success: false, error: 'Server error', code: 'server_error' }, { status: 500 }),
       ),

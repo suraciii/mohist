@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-var runnerFields = []string{"id", "kind", "hostname", "scope", "status", "registeredAt", "lastHeartbeatAt", "connectionState", "capabilities", "coderModels", "coderModelCount", "capacity", "activeWorks"}
+var runnerFields = []string{"identity", "presence", "control", "admission", "capabilities", "runtimes", "capacity", "activeWorks", "drain", "nextActions"}
 var auditFields = []string{"id", "subjectId", "eventType", "targetKind", "targetId", "occurredAt", "metadata"}
 var otelQueryFields = []string{"columns", "rows", "truncated", "truncate_reason"}
 var otelTraceFields = []string{"trace_id", "service_name", "start_time", "end_time", "span_count"}
@@ -38,10 +38,10 @@ const (
 
 var operationsFlags = map[string]map[string]map[string]flagShape{
 	"runner": {
-		"list":   {"project": flagValue},
-		"view":   {"project": flagValue},
-		"status": {"project": flagValue},
-		"revoke": {"project": flagValue},
+		"list":   {},
+		"view":   {},
+		"status": {},
+		"revoke": {},
 	},
 	"server": {
 		"status": {},
@@ -161,7 +161,13 @@ func parseOperations(area string, args []string) (command, error) {
 		start = 2
 	}
 	if area == "runner" && (action == "view" || action == "revoke") || area == "github" && contains([]string{"view", "update", "enable", "disable"}, action) || area == "slack" && contains([]string{"view", "diagnostics", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete"}, action) {
-		if len(args) <= 1 || isControlToken(args[1]) {
+		if len(args) <= 1 {
+			return command{}, usage("resource id is required")
+		}
+		if area == "runner" && (args[1] == "--project" || args[1] == "--scope") {
+			return command{}, usage(args[1] + " is not supported by mo runner; Runner status is global")
+		}
+		if isControlToken(args[1]) {
 			return command{}, usage("resource id is required")
 		}
 		c.args = append(c.args, "id", args[1])
@@ -199,6 +205,9 @@ func parseOperations(area string, args []string) (command, error) {
 		name := strings.TrimPrefix(arg, "--")
 		if area == "slack" && contains([]string{"bot-token", "app-token", "configuration-token", "configuration-refresh-token", "token"}, name) {
 			return command{}, usage("Slack credentials must be supplied through a protected credentials file")
+		}
+		if area == "runner" && (name == "project" || name == "scope") {
+			return command{}, usageWithLeaf("unknown option "+args[i]+": --"+name+" is not supported by mo runner; Runner status is global", leafUsage)
 		}
 		shape, ok := leaf[name]
 		if !ok {
@@ -308,10 +317,24 @@ func fieldsFor(area string) []string {
 	}
 }
 func operationsHelp(area string) string {
-	actions := map[string]string{"runner": "list, view, status, revoke", "server": "status, health, info, logs", "audit": "list", "github": "connect, list, view, update, enable, disable", "slack": "setup, status, install-agent, list, view, claim-owner, edit, transfer-owner, enable, disable, remove-binding, permanent-delete, message, deliveries, resend-delivery, clear-gap, reconcile-create, reconcile-delete"}
+	if area == "runner" {
+		return "USAGE\n    mo runner <list|status|view|revoke> [flags]\n\nRead and manage Server-global Runner resources. Local service-manager state is separate: use mo service status runner.\n\nActions: list, view, status, revoke"
+	}
+	actions := map[string]string{"server": "status, health, info, logs", "audit": "list", "github": "connect, list, view, update, enable, disable", "slack": "setup, status, install-agent, list, view, claim-owner, edit, transfer-owner, enable, disable, remove-binding, permanent-delete, message, deliveries, resend-delivery, clear-gap, reconcile-create, reconcile-delete"}
 	return "USAGE\n    mo " + area + " <action> [flags]\n\nOperations and integrations.\n\nActions: " + actions[area]
 }
 func opsLeafHelp(kind string, fields []string) string {
+	if strings.HasPrefix(kind, "ops-runner-") {
+		action := strings.TrimPrefix(kind, "ops-runner-")
+		if action == "revoke" {
+			return "USAGE\n    mo runner revoke <runner-id>\n\nRevoke the credential for a Server-global Runner resource."
+		}
+		usage := "mo runner " + action + " [--json [fields]]"
+		if action == "view" {
+			usage = "mo runner view <runner-id> [--json [fields]]"
+		}
+		return "USAGE\n    " + usage + "\n\nRead Server-global Runner status.\n\nJSON FIELDS\n" + strings.Join(fields, "\n")
+	}
 	path := strings.TrimPrefix(kind, "ops-")
 	if strings.HasPrefix(path, "event-dead-letter-") {
 		path = "event dead-letter " + strings.TrimPrefix(path, "event-dead-letter-")
@@ -686,8 +709,11 @@ func runLocalNotification(ctx context.Context, deps Dependencies, cmd command) i
 func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd command) int {
 	area := strings.Split(cmd.kind, "-")[1]
 	action := strings.TrimPrefix(cmd.kind, "ops-"+area+"-")
+	if area == "runner" {
+		return runRemoteRunnerOperations(ctx, deps, c, action, cmd)
+	}
 	project := argValue(cmd.args, "project", "")
-	needsProject := contains([]string{"runner", "github"}, area)
+	needsProject := area == "github"
 	if area == "slack" && !contains([]string{"setup", "status"}, action) {
 		needsProject = !(isManagerMode(deps.Lookup) && action == "message-send")
 	}
@@ -719,16 +745,6 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 			path += "?" + q.Encode()
 		}
 		collection = true
-	} else if area == "runner" {
-		path = "/api/projects/" + url.PathEscape(project) + "/runners"
-		collection = action == "list" || action == "status"
-		if action == "view" {
-			path += "/" + url.PathEscape(argValue(cmd.args, "id", ""))
-		}
-		if action == "revoke" {
-			path = "/api/runners/" + url.PathEscape(argValue(cmd.args, "id", "")) + "/credentials"
-			method = http.MethodDelete
-		}
 	} else if area == "github" {
 		path = "/api/projects/" + url.PathEscape(project) + "/github-connections"
 		collection = action == "list"
@@ -801,6 +817,367 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 		collection = true
 	}
 	return remoteOperation(ctx, deps, c, method, path, body, cmd, collection)
+}
+
+type runnerInventoryResponse struct {
+	State       string                     `json:"state"`
+	NextActions []runnerNextActionResponse `json:"nextActions"`
+}
+
+type runnerNextActionResponse struct {
+	Code    string  `json:"code"`
+	Message string  `json:"message"`
+	Command *string `json:"command"`
+}
+
+type runnerListResponse struct {
+	ObservedAt string                       `json:"observedAt"`
+	Inventory  runnerInventoryResponse      `json:"inventory"`
+	Runners    []map[string]json.RawMessage `json:"runners"`
+}
+
+type runnerDetailResponse struct {
+	ObservedAt string                     `json:"observedAt"`
+	Runner     map[string]json.RawMessage `json:"runner"`
+}
+
+func runRemoteRunnerOperations(ctx context.Context, deps Dependencies, c *client, action string, cmd command) int {
+	path := "/api/runners"
+	method := http.MethodGet
+	if action == "view" {
+		path += "/" + url.PathEscape(argValue(cmd.args, "id", ""))
+	} else if action == "revoke" {
+		path += "/" + url.PathEscape(argValue(cmd.args, "id", "")) + "/credentials"
+		method = http.MethodDelete
+	}
+
+	if action == "revoke" {
+		return remoteOperation(ctx, deps, c, method, path, nil, cmd, false)
+	}
+
+	if cmd.fieldsOnly {
+		for _, field := range cmd.catalog {
+			fmt.Fprintln(deps.Stdout, field)
+		}
+		return ExitOK
+	}
+
+	data, err := c.request(ctx, method, path, nil)
+	if err != nil {
+		return operationExit(deps, ctx, err)
+	}
+	if len(cmd.fields) > 0 {
+		var selected json.RawMessage
+		if action == "view" {
+			response, decodeErr := decodeRunnerDetailResponse(data)
+			if decodeErr != nil {
+				return operationExit(deps, ctx, decodeErr)
+			}
+			row, marshalErr := json.Marshal(response.Runner)
+			if marshalErr != nil {
+				return operationExit(deps, ctx, runnerResponseError())
+			}
+			selected, err = SelectFields(row, cmd.fields, false)
+		} else {
+			response, decodeErr := decodeRunnerListResponse(data)
+			if decodeErr != nil {
+				return operationExit(deps, ctx, decodeErr)
+			}
+			rows, marshalErr := json.Marshal(response.Runners)
+			if marshalErr != nil {
+				return operationExit(deps, ctx, runnerResponseError())
+			}
+			selected, err = SelectFields(rows, cmd.fields, true)
+		}
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitOperation
+		}
+		return writeJSON(deps.Stdout, selected)
+	}
+
+	if err := renderRunnerResponse(deps.Stdout, data, action); err != nil {
+		writeError(deps.Stderr, err)
+		return ExitOperation
+	}
+	return ExitOK
+}
+
+func decodeRunnerListResponse(data json.RawMessage) (runnerListResponse, error) {
+	var response runnerListResponse
+	if json.Unmarshal(data, &response) != nil || response.ObservedAt == "" || response.Inventory.State == "" || response.Inventory.NextActions == nil || response.Runners == nil {
+		return runnerListResponse{}, runnerResponseError()
+	}
+	return response, nil
+}
+
+func decodeRunnerDetailResponse(data json.RawMessage) (runnerDetailResponse, error) {
+	var response runnerDetailResponse
+	if json.Unmarshal(data, &response) != nil || response.ObservedAt == "" || response.Runner == nil {
+		return runnerDetailResponse{}, runnerResponseError()
+	}
+	return response, nil
+}
+
+func runnerResponseError() error {
+	return errors.New("error: Runner response has an invalid shape [invalid_response]")
+}
+
+func renderRunnerResponse(out io.Writer, data json.RawMessage, action string) error {
+	if action == "view" {
+		response, err := decodeRunnerDetailResponse(data)
+		if err != nil {
+			return err
+		}
+		row, err := runnerRowValues(response.Runner)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "observed at: "+response.ObservedAt)
+		return renderRunnerRow(out, row)
+	}
+
+	response, err := decodeRunnerListResponse(data)
+	if err != nil {
+		return err
+	}
+	if len(response.Runners) == 0 {
+		if response.Inventory.State != "first-install" {
+			return runnerResponseError()
+		}
+		for _, action := range response.Inventory.NextActions {
+			if action.Code == "install-runner" {
+				return renderRunnerActions(out, []runnerNextActionResponse{action})
+			}
+		}
+		return runnerResponseError()
+	}
+	fmt.Fprintln(out, "observed at: "+response.ObservedAt)
+	for index, rawRow := range response.Runners {
+		if index > 0 {
+			fmt.Fprintln(out)
+		}
+		row, rowErr := runnerRowValues(rawRow)
+		if rowErr != nil {
+			return rowErr
+		}
+		if rowErr := renderRunnerRow(out, row); rowErr != nil {
+			return rowErr
+		}
+	}
+	return nil
+}
+
+func runnerRowValues(raw map[string]json.RawMessage) (map[string]any, error) {
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil, runnerResponseError()
+	}
+	var row map[string]any
+	if json.Unmarshal(data, &row) != nil || row == nil {
+		return nil, runnerResponseError()
+	}
+	return row, nil
+}
+
+func renderRunnerActions(out io.Writer, actions []runnerNextActionResponse) error {
+	for _, action := range actions {
+		if action.Code == "" && action.Message == "" {
+			return runnerResponseError()
+		}
+		if action.Code == "" {
+			fmt.Fprintln(out, "next action: "+action.Message)
+		} else if action.Message == "" {
+			fmt.Fprintln(out, "next action: "+action.Code)
+		} else {
+			fmt.Fprintf(out, "next action: %s - %s\n", action.Code, action.Message)
+		}
+		if action.Command != nil && strings.TrimSpace(*action.Command) != "" {
+			fmt.Fprintln(out, "command: "+*action.Command)
+		}
+	}
+	return nil
+}
+
+func renderRunnerRow(out io.Writer, row map[string]any) error {
+	identity := runnerObject(row, "identity")
+	if identity == nil || runnerString(identity, "id") == "" {
+		return runnerResponseError()
+	}
+	fmt.Fprintln(out, "runner: "+runnerString(identity, "id"))
+	fmt.Fprintln(out, "identity:")
+	printFields(out, identity, 1, []string{"hostname", "kind", "component", "sourceRevision", "releaseId", "generation"})
+
+	presence := runnerObject(row, "presence")
+	fmt.Fprintln(out, "presence: "+runnerString(presence, "state"))
+	if value, ok := runnerValue(presence, "lastObservedAt"); ok && value != nil {
+		fmt.Fprintln(out, "  lastObservedAt: "+display(value))
+	}
+
+	control := runnerObject(row, "control")
+	fmt.Fprintln(out, "control: "+runnerString(control, "state"))
+	if value, ok := runnerValue(control, "generation"); ok && value != nil {
+		fmt.Fprintln(out, "  generation: "+display(value))
+	}
+
+	admission := runnerObject(row, "admission")
+	fmt.Fprintln(out, "admission: "+runnerString(admission, "state"))
+	if value, ok := runnerValue(admission, "reasonCodes"); ok {
+		if reasons, isList := value.([]any); isList && len(reasons) == 0 {
+			fmt.Fprintln(out, "  reasonCodes: none")
+		} else {
+			fmt.Fprintln(out, "  reasonCodes: "+display(value))
+		}
+	}
+
+	if value, ok := runnerValue(row, "capabilities"); ok {
+		fmt.Fprintln(out, "capabilities: "+display(value))
+	}
+	renderRunnerRuntimes(out, row["runtimes"])
+	renderRunnerCapacity(out, row["capacity"])
+	renderRunnerActiveWorks(out, row["activeWorks"])
+	renderRunnerDrain(out, row["drain"])
+	renderRunnerNextActions(out, row["nextActions"])
+	return nil
+}
+
+func renderRunnerRuntimes(out io.Writer, value any) {
+	runtimes, ok := value.([]any)
+	if !ok {
+		return
+	}
+	fmt.Fprintln(out, "runtimes:")
+	if len(runtimes) == 0 {
+		fmt.Fprintln(out, "  none")
+		return
+	}
+	for _, value := range runtimes {
+		runtime, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		name := runnerString(runtime, "name")
+		if name == "" {
+			name = "unknown"
+		}
+		fmt.Fprintln(out, "  "+name+":")
+		readiness := runnerObject(runtime, "readiness")
+		fmt.Fprintln(out, "    readiness: "+runnerString(readiness, "state"))
+		printFields(out, readiness, 2, []string{"generation", "reasonCode"})
+		catalog := runnerObject(runtime, "catalog")
+		if catalog == nil {
+			fmt.Fprintln(out, "    catalog: unavailable")
+			continue
+		}
+		fmt.Fprintln(out, "    catalog:")
+		printFields(out, catalog, 3, []string{"complete", "capabilityRevision", "modelCount", "models", "variants", "supportsReasoningEffort", "reasoningEfforts"})
+	}
+}
+
+func renderRunnerCapacity(out io.Writer, value any) {
+	capacity, ok := value.(map[string]any)
+	if !ok {
+		return
+	}
+	fmt.Fprintln(out, "capacity:")
+	if used, present := capacity["used"]; present {
+		if used == nil {
+			fmt.Fprintln(out, "  used: unknown")
+		} else {
+			fmt.Fprintln(out, "  used: "+display(used))
+		}
+	}
+	if total, present := capacity["total"]; present {
+		fmt.Fprintln(out, "  total: "+display(total))
+	}
+}
+
+func renderRunnerActiveWorks(out io.Writer, value any) {
+	works, ok := value.([]any)
+	if !ok {
+		return
+	}
+	fmt.Fprintln(out, "active works:")
+	if len(works) == 0 {
+		fmt.Fprintln(out, "  none")
+		return
+	}
+	for _, value := range works {
+		work, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		kind := runnerString(work, "ownerKind")
+		if kind == "" {
+			kind = "unknown"
+		}
+		ownerID := runnerString(work, "ownerId")
+		workID := runnerString(work, "workId")
+		fmt.Fprintf(out, "  %s owner: %s (workId: %s)\n", kind, ownerID, workID)
+		printFields(out, work, 2, []string{"workType", "stage", "title", "issue"})
+	}
+}
+
+func renderRunnerDrain(out io.Writer, value any) {
+	if value == nil {
+		fmt.Fprintln(out, "drain: none")
+		return
+	}
+	drain, ok := value.(map[string]any)
+	if !ok {
+		return
+	}
+	fmt.Fprintln(out, "drain: active")
+	printFields(out, drain, 1, []string{"kind", "updateInterruptId"})
+}
+
+func renderRunnerNextActions(out io.Writer, value any) {
+	actions, ok := value.([]any)
+	if !ok {
+		return
+	}
+	fmt.Fprintln(out, "next actions:")
+	if len(actions) == 0 {
+		fmt.Fprintln(out, "  none")
+		return
+	}
+	for _, value := range actions {
+		action, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		code := runnerString(action, "code")
+		message := runnerString(action, "message")
+		if code == "" {
+			fmt.Fprintln(out, "  "+message)
+		} else {
+			fmt.Fprintf(out, "  %s: %s\n", code, message)
+		}
+		if command := runnerString(action, "command"); command != "" {
+			fmt.Fprintln(out, "    command: "+command)
+		}
+	}
+}
+
+func runnerObject(value any, key string) map[string]any {
+	object, _ := runnerValue(value, key)
+	result, _ := object.(map[string]any)
+	return result
+}
+
+func runnerValue(value any, key string) (any, bool) {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	result, present := object[key]
+	return result, present
+}
+
+func runnerString(value map[string]any, key string) string {
+	result, _ := runnerValue(value, key)
+	text, _ := result.(string)
+	return text
 }
 
 func slackEditBody(cmd command) map[string]any {

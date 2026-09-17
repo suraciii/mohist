@@ -6,6 +6,7 @@ import { http, HttpResponse } from 'msw'
 import { IssueHealth, IssueStatus, type Issue } from '../../../entities/issue'
 import { type AgentCostMetricDto, type AgentStatus } from '../../../entities/agent'
 import { ProjectProvider } from '../../../entities/project'
+import { deriveRunnerSummary, type RunnerStatusEntry, type RunnerStatusSummary } from '../../../entities/runner'
 import { server, useMswServer } from '../../../../tests/support/msw'
 import { FactoryStatusHeadline } from './FactoryStatusHeadline'
 
@@ -28,9 +29,7 @@ const todayIso = now.toISOString()
 
 useMswServer(
   http.get(ISSUES_PATH, () => HttpResponse.json({ success: true, data: [] })),
-  http.get(STATUS_PATH, () =>
-    HttpResponse.json({ success: true, data: makeAgentStatus({ runnerAvailable: true }) }),
-  ),
+  http.get(STATUS_PATH, () => HttpResponse.json({ success: true, data: makeAgentStatus({ runnerAvailable: true }) })),
   http.get(COST_PATH, () =>
     HttpResponse.json({
       success: true,
@@ -73,6 +72,34 @@ function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
   }
 }
 
+function makeRunner(overrides: Partial<RunnerStatusEntry> = {}): RunnerStatusEntry {
+  return {
+    identity: {
+      id: 'runner-1',
+      hostname: 'host-1',
+      kind: 'external',
+      component: null,
+      sourceRevision: null,
+      releaseId: null,
+      generation: null,
+    },
+    presence: { state: 'online', lastObservedAt: null },
+    control: { state: 'connected', generation: null },
+    admission: { state: 'ready', reasonCodes: [] },
+    capabilities: [],
+    runtimes: [],
+    capacity: { used: 0, total: 8 },
+    activeWorks: [],
+    drain: null,
+    nextActions: [],
+    ...overrides,
+  }
+}
+
+function makeRunnerSummary(row = makeRunner()): RunnerStatusSummary {
+  return deriveRunnerSummary([row])
+}
+
 function makeTodayCost(overrides: Partial<AgentCostMetricDto> = {}): AgentCostMetricDto {
   return {
     amount: 1.25,
@@ -90,12 +117,12 @@ const demoProject = {
   repositories: [],
 }
 
-function renderHeadline() {
+function renderHeadline(runnerSummary = makeRunnerSummary(), issues?: Issue[]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId="proj-1" initialProjects={[demoProject]}>
-        <FactoryStatusHeadline />
+        <FactoryStatusHeadline issues={issues} runnerSummary={runnerSummary} runnerSummaryHook={() => runnerSummary} />
       </ProjectProvider>
     </QueryClientProvider>,
   )
@@ -114,8 +141,8 @@ describe('FactoryStatusHeadline rendering', () => {
   it('renders the headline with all fields', async () => {
     renderHeadline()
 
-    expect(await screen.findByText('Online')).toBeInTheDocument()
-    expect(screen.getByTestId('factory-status-runner')).toHaveTextContent('Online')
+    expect(await screen.findByText('Admission ready')).toBeInTheDocument()
+    expect(screen.getByTestId('factory-status-runner')).toHaveTextContent('Admission ready')
     expect(screen.getByTestId('factory-status-in-flight')).toHaveTextContent('0')
     expect(screen.getByTestId('factory-status-awaiting-approval')).toHaveTextContent('0')
     expect(screen.getByTestId('factory-status-shipped-today')).toHaveTextContent('0')
@@ -126,7 +153,7 @@ describe('FactoryStatusHeadline rendering', () => {
     mockIssues([])
     renderHeadline()
 
-    expect(await screen.findByText('Online')).toBeInTheDocument()
+    expect(await screen.findByText('Admission ready')).toBeInTheDocument()
     expect(screen.getByTestId('factory-status-in-flight')).toHaveTextContent('0')
     expect(screen.getByTestId('factory-status-awaiting-approval')).toHaveTextContent('0')
     expect(screen.getByTestId('factory-status-shipped-today')).toHaveTextContent('0')
@@ -141,25 +168,32 @@ describe('FactoryStatusHeadline rendering', () => {
     ])
     mockAgentStatus(makeAgentStatus({ runnerAvailable: true }))
 
-    renderHeadline()
+    renderHeadline(makeRunnerSummary(), [
+      makeIssue({ status: IssueStatus.InProgress, health: IssueHealth.Active }),
+      makeIssue({ status: IssueStatus.InProgress, health: IssueHealth.Active }),
+      makeIssue({ approvalState: { status: 'awaiting', requestedAt: todayIso } }),
+      makeIssue({ status: IssueStatus.Done, health: IssueHealth.Done, completedAt: todayIso, updatedAt: todayIso }),
+    ])
 
-    expect(await screen.findByText('Online')).toBeInTheDocument()
+    expect(await screen.findByText('Admission ready')).toBeInTheDocument()
     expect(screen.getByTestId('factory-status-in-flight')).toHaveTextContent('2')
     expect(screen.getByTestId('factory-status-awaiting-approval')).toHaveTextContent('1')
     expect(screen.getByTestId('factory-status-shipped-today')).toHaveTextContent('1')
   })
 
   it('shows runner as unavailable when runnerAvailable is not true', async () => {
-    mockAgentStatus(makeAgentStatus({ runnerAvailable: false }))
-    renderHeadline()
-
-    expect(await screen.findByText('Unavailable')).toBeInTheDocument()
-
-    mockAgentStatus(makeAgentStatus({ runnerAvailable: undefined }))
     cleanup()
-    renderHeadline()
+    renderHeadline(
+      makeRunnerSummary(
+        makeRunner({
+          admission: { state: 'blocked', reasonCodes: ['control-disconnected'] },
+          control: { state: 'disconnected', generation: null },
+        }),
+      ),
+    )
 
-    expect(await screen.findByText('Unavailable')).toBeInTheDocument()
+    expect(await screen.findByText('Admission blocked')).toBeInTheDocument()
+    expect(screen.getByTestId('factory-status-runner-facts')).toHaveTextContent('control disconnected')
   })
 
   it('uses injected props over query data when provided', async () => {
@@ -172,13 +206,14 @@ describe('FactoryStatusHeadline rendering', () => {
         <ProjectProvider initialProjectId="proj-1" initialProjects={[demoProject]}>
           <FactoryStatusHeadline
             issues={[]}
-            agentStatus={makeAgentStatus({ runnerAvailable: true })}
+            runnerSummary={makeRunnerSummary()}
+            runnerSummaryHook={() => makeRunnerSummary()}
           />
         </ProjectProvider>
       </QueryClientProvider>,
     )
 
-    expect(screen.getByTestId('factory-status-runner')).toHaveTextContent('Online')
+    expect(screen.getByTestId('factory-status-runner')).toHaveTextContent('Admission ready')
     expect(screen.getByTestId('factory-status-in-flight')).toHaveTextContent('0')
   })
 })
@@ -231,9 +266,7 @@ describe('FactoryStatusHeadline today-cost', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <ProjectProvider initialProjectId="proj-1" initialProjects={[demoProject]}>
-          <FactoryStatusHeadline
-            todayCost={makeTodayCost({ amount: 0.5, currency: 'EUR', sampleCount: 1 })}
-          />
+          <FactoryStatusHeadline todayCost={makeTodayCost({ amount: 0.5, currency: 'EUR', sampleCount: 1 })} />
         </ProjectProvider>
       </QueryClientProvider>,
     )
@@ -255,7 +288,7 @@ describe('FactoryStatusHeadline today-cost', () => {
     renderHeadline()
 
     expect(await screen.findByText('$1.25')).toBeInTheDocument()
-    expect(screen.getByTestId('factory-status-runner')).toHaveTextContent('Online')
+    expect(screen.getByTestId('factory-status-runner')).toHaveTextContent('Admission ready')
     expect(screen.getByTestId('factory-status-in-flight')).toHaveTextContent('1')
     expect(screen.getByTestId('factory-status-awaiting-approval')).toHaveTextContent('1')
     expect(screen.getByTestId('factory-status-shipped-today')).toHaveTextContent('1')

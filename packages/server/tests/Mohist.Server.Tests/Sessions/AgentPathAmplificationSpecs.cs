@@ -88,8 +88,10 @@ public sealed class AgentPathAmplificationSpecs
         Assert.Equal(1, amplification.GetProperty("candidates").GetInt64());
         Assert.Equal(1, amplification.GetProperty("processed").GetInt64());
         Assert.Equal(2, amplification.GetProperty("transcriptRecords").GetInt64());
+        // Runner status reads local projections and owner stores, so Activity
+        // no longer needs a downstream grain call for capacity.
         Assert.True(amplification.GetProperty("databaseCalls").GetInt64() > 0);
-        Assert.True(amplification.GetProperty("downstreamCalls").GetInt64() > 0);
+        Assert.Equal(0, amplification.GetProperty("downstreamCalls").GetInt64());
     }
 
     [Fact]

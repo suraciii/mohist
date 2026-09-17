@@ -3,6 +3,16 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 
 const baselineHandlers = [
+  http.get('*/api/runners', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        observedAt: '2026-01-01T00:00:00.000Z',
+        inventory: { state: 'ready', nextActions: [] },
+        runners: [],
+      },
+    }),
+  ),
   http.get('*/api/workflow-runs/:workflowRunId', ({ params }) =>
     HttpResponse.json({
       success: true,

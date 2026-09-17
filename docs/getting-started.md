@@ -153,7 +153,7 @@ connected Runner is ready to execute Pi by listing its registrations and
 checking the published capability set:
 
 ```bash
-mo runner list --json id,status,capabilities
+mo runner list --json identity,presence,admission,capabilities
 ```
 
 The connected Runner's `capabilities` array must include

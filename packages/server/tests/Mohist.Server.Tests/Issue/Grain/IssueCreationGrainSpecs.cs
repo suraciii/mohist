@@ -102,7 +102,12 @@ public class IssueCreationGrainSpecs
 
         var runnerId = $"runner-variable-test-{Guid.NewGuid():N}";
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", project.Id));
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "test-host",
+            project.Id,
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration));
 
         var work = await PollAnyWorkAsync(runner);
 
@@ -155,7 +160,12 @@ public class IssueCreationGrainSpecs
 
         var runnerId = $"runner-{Guid.NewGuid():N}";
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", project.Id));
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "test-host",
+            project.Id,
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration));
         try
         {
             await PollAnyWorkAsync(runner);

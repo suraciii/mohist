@@ -1,104 +1,121 @@
 import { describe, expect, it } from 'vitest'
 import { deriveRunnerSummary } from './queries'
-import type { RunnerStatusRow } from '../model/types'
+import { runnerSummaryText } from '../model/summary'
+import type { RunnerStatusEntry } from '../model/types'
 
-function makeRow(overrides: Partial<RunnerStatusRow> = {}): RunnerStatusRow {
+function makeRow(overrides: Partial<RunnerStatusEntry> = {}): RunnerStatusEntry {
   return {
-    id: 'runner-test',
-    kind: 'external',
-    hostname: 'test-host',
-    scope: { type: 'global' },
-    status: 'idle',
+    identity: {
+      id: 'runner-test',
+      hostname: 'test-host',
+      kind: 'external',
+      component: 'mohist-runner',
+      sourceRevision: null,
+      releaseId: null,
+      generation: 1,
+    },
+    presence: { state: 'online', lastObservedAt: '2026-01-01T12:00:00Z' },
+    control: { state: 'connected', generation: 'connection-1' },
+    admission: { state: 'ready', reasonCodes: [] },
     capabilities: [],
-    coderModels: [],
-    coderModelCount: 0,
+    runtimes: [],
+    capacity: { used: 0, total: 2 },
     activeWorks: [],
+    drain: null,
+    nextActions: [],
     ...overrides,
   }
 }
 
 describe('deriveRunnerSummary', () => {
-  it('returns empty capacity for no rows', () => {
-    const summary = deriveRunnerSummary([])
-    expect(summary.hasConnectedCapacity).toBe(false)
-    expect(summary.connectedIdleCount).toBe(0)
-    expect(summary.connectedBusyCount).toBe(0)
+  it('keeps first-install inventory guidance separate from rows', () => {
+    const summary = deriveRunnerSummary({
+      observedAt: '2026-01-01T00:00:00Z',
+      inventory: {
+        state: 'first-install',
+        nextActions: [{ code: 'install-runner', message: 'Install Runner', command: 'mo install runner' }],
+      },
+      runners: [],
+    })
+    expect(summary.rows).toHaveLength(0)
+    expect(summary.inventory?.state).toBe('first-install')
+    expect(summary.readyCount).toBe(0)
   })
 
-  it('treats connected idle runner as available capacity', () => {
-    const rows = [makeRow({ status: 'idle', connectionState: 'connected' })]
-    const summary = deriveRunnerSummary(rows)
-    expect(summary.hasConnectedCapacity).toBe(true)
-    expect(summary.connectedIdleCount).toBe(1)
-    expect(summary.connectedBusyCount).toBe(0)
-  })
-
-  it('treats idle runner as available capacity when status is idle', () => {
-    const rows = [makeRow({ status: 'idle', connectionState: 'disconnected' })]
-    const summary = deriveRunnerSummary(rows)
-    expect(summary.hasConnectedCapacity).toBe(true)
-    expect(summary.connectedIdleCount).toBe(1)
-    expect(summary.connectedBusyCount).toBe(0)
-  })
-
-  it('treats connected busy runner as available capacity', () => {
+  it('counts independent admission and active-owner facts', () => {
     const rows = [
       makeRow({
-        status: 'busy',
-        connectionState: 'connected',
-        activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }],
+        capacity: { used: 1, total: 2 },
+        activeWorks: [
+          {
+            workId: 'w1',
+            ownerKind: 'workflow',
+            ownerId: 'wf-1',
+            workType: 'workflow',
+            stage: null,
+            title: null,
+            issue: null,
+          },
+        ],
+      }),
+      makeRow({
+        identity: { ...makeRow().identity, id: 'runner-2' },
+        admission: { state: 'blocked', reasonCodes: ['capacity-full'] },
+        capacity: { used: 2, total: 2 },
       }),
     ]
     const summary = deriveRunnerSummary(rows)
-    expect(summary.hasConnectedCapacity).toBe(true)
-    expect(summary.connectedIdleCount).toBe(0)
-    expect(summary.connectedBusyCount).toBe(1)
+    expect(summary.readyCount).toBe(1)
+    expect(summary.blockedCount).toBe(1)
+    expect(summary.activeWorkCount).toBe(1)
+    expect(summary.hasAdmissibleCapacity).toBe(true)
   })
 
-  it('excludes stale runner from connected capacity', () => {
-    const rows = [makeRow({ status: 'stale', connectionState: null })]
-    const summary = deriveRunnerSummary(rows)
-    expect(summary.hasConnectedCapacity).toBe(false)
+  it('does not infer admissible capacity from unknown used capacity', () => {
+    const summary = deriveRunnerSummary([makeRow({ capacity: { used: null, total: 2 } })])
+    expect(summary.hasAdmissibleCapacity).toBe(false)
   })
 
-  it('excludes offline runner from connected capacity', () => {
-    const rows = [makeRow({ status: 'offline', connectionState: null })]
-    const summary = deriveRunnerSummary(rows)
-    expect(summary.hasConnectedCapacity).toBe(false)
-  })
-
-  it('counts disconnected busy runner as connected capacity when status is busy', () => {
-    const rows = [
+  it('retains presence, control, drain, full-capacity, and active-work facts in one summary', () => {
+    const summary = deriveRunnerSummary([
       makeRow({
-        status: 'busy',
-        connectionState: 'disconnected',
-        activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }],
+        identity: { ...makeRow().identity, id: 'offline' },
+        presence: { state: 'offline', lastObservedAt: null },
+        control: { state: 'disconnected', generation: null },
+        admission: { state: 'blocked', reasonCodes: ['presence-offline', 'control-disconnected'] },
+        capacity: { used: null, total: 4 },
       }),
-    ]
-    const summary = deriveRunnerSummary(rows)
-    expect(summary.hasConnectedCapacity).toBe(true)
-    expect(summary.connectedBusyCount).toBe(1)
-  })
-
-  it('counts both idle and busy connected runners', () => {
-    const rows = [
-      makeRow({ id: 'r1', status: 'idle', connectionState: 'connected' }),
       makeRow({
-        id: 'r2',
-        status: 'busy',
-        connectionState: 'connected',
-        activeWorks: [{ workId: 'w1', ownerKind: 'workflow', ownerId: 'wf1', workType: 'workflow' }],
+        identity: { ...makeRow().identity, id: 'draining' },
+        presence: { state: 'stale', lastObservedAt: '2026-01-01T00:00:00Z' },
+        admission: { state: 'blocked', reasonCodes: ['draining', 'capacity-full'] },
+        drain: { active: true, kind: 'update', updateInterruptId: 'interrupt-1' },
+        capacity: { used: 2, total: 2 },
+        activeWorks: [
+          {
+            workId: 'work-1',
+            ownerKind: 'agent-job',
+            ownerId: 'job-1',
+            workType: 'agent-job',
+            stage: null,
+            title: null,
+            issue: null,
+          },
+        ],
       }),
-    ]
-    const summary = deriveRunnerSummary(rows)
-    expect(summary.hasConnectedCapacity).toBe(true)
-    expect(summary.connectedIdleCount).toBe(1)
-    expect(summary.connectedBusyCount).toBe(1)
-  })
+    ])
 
-  it('includes all rows in summary rows', () => {
-    const rows = [makeRow({ id: 'r1' }), makeRow({ id: 'r2' })]
-    const summary = deriveRunnerSummary(rows)
-    expect(summary.rows).toHaveLength(2)
+    expect(summary.onlineCount).toBe(0)
+    expect(summary.staleCount).toBe(1)
+    expect(summary.offlineCount).toBe(1)
+    expect(summary.disconnectedCount).toBe(1)
+    expect(summary.drainingCount).toBe(1)
+    expect(summary.fullCount).toBe(1)
+    expect(summary.activeWorkCount).toBe(1)
+    expect(summary.capacityUsed).toBeNull()
+    expect(summary.capacityTotal).toBe(6)
+    expect(summary.hasUnknownCapacity).toBe(true)
+    expect(runnerSummaryText(summary)).toContain('1 capacity full')
+    expect(runnerSummaryText(summary)).toContain('1 active work')
   })
 })

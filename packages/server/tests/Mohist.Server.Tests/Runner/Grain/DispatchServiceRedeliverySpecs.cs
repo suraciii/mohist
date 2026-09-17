@@ -26,7 +26,10 @@ public partial class DispatchServiceReconciliationSpecs
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
         var runnerId = _runnerId!;
-        var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
+        var first = Assert.Single((await Dispatch.PollAsync(
+            runnerId,
+            DispatchTestExtensions.ReadyPollRequestForGeneration(
+                TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
         var snapshotStore = scope.ServiceProvider.GetRequiredService<IDispatchSnapshotStore>();
@@ -63,7 +66,10 @@ public partial class DispatchServiceReconciliationSpecs
         var runnerId = _runnerId!;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var first = Assert.Single(
-            (await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
+            (await Dispatch.PollAsync(
+                runnerId,
+                DispatchTestExtensions.ReadyPollRequestForGeneration(
+                    TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         await runner.UnregisterAsync();
         await runner.RegisterAsync(
@@ -94,7 +100,10 @@ public partial class DispatchServiceReconciliationSpecs
         var originalRunnerId = _runnerId!;
         var originalRunner = Grains.GetGrain<IRunnerGrain>(originalRunnerId);
         var first = Assert.Single(
-            (await Dispatch.PollAsync(originalRunnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
+            (await Dispatch.PollAsync(
+                originalRunnerId,
+                DispatchTestExtensions.ReadyPollRequestForGeneration(
+                    TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
         await originalRunner.UnregisterAsync();
 
         var otherRunnerId = $"other-recovery-runner-{Guid.NewGuid():N}";

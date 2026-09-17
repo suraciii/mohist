@@ -1,52 +1,37 @@
 import { Link } from 'react-router-dom'
-import { useProjectPath } from '../../../entities/project'
-import { useAgentStatus, type AgentStatus } from '../../../entities/agent'
+import { useRunnerSummary, type RunnerStatusSummary } from '../../../entities/runner'
 import { cn } from '@/shared/lib/utils'
 import { GaugeIcon } from 'lucide-react'
 
 export interface DashboardCapacityZoneProps {
-  /**
-   * Test/dev override: lets spec tests inject an in-memory agent status
-   * without going through `useAgentStatus`. Production callers should rely
-   * on the default `useAgentStatus()` pull.
-   */
-  agentStatusOverride?: AgentStatus
-  agentStatusHook?: typeof useAgentStatus
+  runnerSummaryOverride?: RunnerStatusSummary
+  runnerSummaryHook?: typeof useRunnerSummary
 }
 
 /**
- * Capacity level — a compact usage strip that surfaces runner slot usage
- * (`active / max`) on its own. Sourced from `agentStatus.capacity` (the
- * same field the attention model and the headline already consume) — not
- * from `AgentActivity.summary.slots` — so capacity feedback stays on a
- * single feed.
- *
- * Collapse rule: renders nothing when capacity data is absent or
- * `max === 0`. There is no reserved fixed-height box, so an absent
- * capacity level is not visible on the page at all.
+ * Capacity level is the global Runner slot projection. It stays visible even
+ * when no project has active work, because slots are shared across Projects.
+ * Unknown used capacity remains unknown rather than being rendered as free.
  */
 export function DashboardCapacityZone({
-  agentStatusOverride,
-  agentStatusHook = useAgentStatus,
+  runnerSummaryOverride,
+  runnerSummaryHook = useRunnerSummary,
 }: DashboardCapacityZoneProps = {}) {
-  const { data: fetchedStatus } = agentStatusHook()
-  const agentStatus = agentStatusOverride ?? fetchedStatus
-  const toProjectPath = useProjectPath()
+  const fetchedSummary = runnerSummaryHook()
+  const summary = runnerSummaryOverride ?? fetchedSummary
+  if (summary.isLoading || summary.rows.length === 0 || summary.capacityTotal <= 0) return null
 
-  const capacity = agentStatus?.capacity
-  if (!capacity || capacity.max <= 0) return null
-
-  const active = Math.max(0, capacity.active)
-  const max = capacity.max
-  const usedPercent = Math.min(100, Math.round((active / max) * 100))
-  const saturated = active >= max
+  const active = summary.hasUnknownCapacity ? null : Math.max(0, summary.capacityUsed ?? 0)
+  const max = summary.capacityTotal
+  const usedPercent = active == null ? 0 : Math.min(100, Math.round((active / max) * 100))
+  const saturated = active != null && active >= max
 
   return (
     <section
       data-testid="dashboard-zone-capacity"
       data-zone="capacity"
-      data-state={saturated ? 'saturated' : 'available'}
-      data-active={active}
+      data-state={active == null ? 'unknown' : saturated ? 'saturated' : 'available'}
+      data-active={active == null ? 'unknown' : active}
       data-max={max}
       aria-label="Runner capacity"
       className={cn(
@@ -69,32 +54,20 @@ export function DashboardCapacityZone({
       >
         Runner capacity
       </span>
-      <div
-        className="flex items-center gap-2 flex-1 min-w-[160px]"
-        data-testid="dashboard-zone-capacity-usage"
-      >
-        <div
-          className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden"
-          aria-hidden
-        >
+      <div className="flex items-center gap-2 flex-1 min-w-[160px]" data-testid="dashboard-zone-capacity-usage">
+        <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden" aria-hidden>
           <div
             data-testid="dashboard-zone-capacity-bar"
-            className={cn(
-              'h-full rounded-full transition-all duration-300',
-              saturated ? 'bg-warning' : 'bg-info',
-            )}
+            className={cn('h-full rounded-full transition-all duration-300', saturated ? 'bg-warning' : 'bg-info')}
             style={{ width: `${usedPercent}%` }}
           />
         </div>
-        <span
-          data-testid="dashboard-zone-capacity-count"
-          className="text-sm font-medium tabular-nums text-foreground"
-        >
-          {active}/{max}
+        <span data-testid="dashboard-zone-capacity-count" className="text-sm font-medium tabular-nums text-foreground">
+          {active == null ? `unknown/${max}` : `${active}/${max}`}
         </span>
       </div>
       <Link
-        to={toProjectPath('/runners')}
+        to="/runners"
         data-testid="dashboard-zone-capacity-link"
         className="text-xs text-muted-foreground hover:text-foreground hover:underline shrink-0"
       >

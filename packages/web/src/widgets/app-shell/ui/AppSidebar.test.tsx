@@ -28,9 +28,7 @@ useMswServer(
       data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } },
     }),
   ),
-  http.get(`*/api/projects/${TEST_PROJECT.id}/inbox`, () =>
-    HttpResponse.json({ success: true, data: [] }),
-  ),
+  http.get(`*/api/projects/${TEST_PROJECT.id}/inbox`, () => HttpResponse.json({ success: true, data: [] })),
   http.get(`*/api/projects/${TEST_PROJECT.id}/inbox/unread-count`, () =>
     HttpResponse.json({ success: true, data: { unreadCount: 0 } }),
   ),
@@ -200,6 +198,15 @@ describe('AppSidebar primary navigation', () => {
     expect(screen.getByTestId('nav-settings')).toHaveAttribute('data-active', 'true')
   })
 
+  it('navigates to the global Runner route with no project selected', () => {
+    renderSidebar('/demo', null)
+
+    fireEvent.click(screen.getByTestId('nav-runners'))
+
+    expect(screen.getByTestId('location-spy')).toHaveAttribute('data-pathname', '/runners')
+    expect(screen.getByTestId('nav-runners')).toHaveAttribute('data-active', 'true')
+  })
+
   it('navigates Logs through the selected project route', () => {
     renderSidebar('/demo')
 
@@ -265,14 +272,26 @@ describe('AppSidebar unread inbox count badge', () => {
   }
 
   const readItem: InboxItem = {
-    itemId: 'inb-1', notificationKind: 'workflow_failed', issueNumber: 1,
-    issueTitle: 'Read', createdAt: '2024-01-01T00:00:00.000Z', isRead: true, isArchived: false,
-    readAt: '2024-01-02T00:00:00.000Z', archivedAt: null,
+    itemId: 'inb-1',
+    notificationKind: 'workflow_failed',
+    issueNumber: 1,
+    issueTitle: 'Read',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    isRead: true,
+    isArchived: false,
+    readAt: '2024-01-02T00:00:00.000Z',
+    archivedAt: null,
   }
   const unreadItem: InboxItem = {
-    itemId: 'inb-2', notificationKind: 'issue_started', issueNumber: 2,
-    issueTitle: 'Unread', createdAt: '2024-01-01T00:00:00.000Z', isRead: false, isArchived: false,
-    readAt: null, archivedAt: null,
+    itemId: 'inb-2',
+    notificationKind: 'issue_started',
+    issueNumber: 2,
+    issueTitle: 'Unread',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    isRead: false,
+    isArchived: false,
+    readAt: null,
+    archivedAt: null,
   }
 
   it('shows a badge with the unread count when there are unread inbox items', () => {

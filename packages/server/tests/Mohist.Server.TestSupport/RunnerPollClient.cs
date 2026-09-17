@@ -31,6 +31,8 @@ public static class RunnerPollClient
         request ??= new RunnerPollRequest(
             [],
             [],
+            AdmissionReady: true,
+            AdmissionReasonCodes: [],
             ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration);
         return client.PostAsJsonAsync($"/api/runner/{runnerId}/poll", request, JsonOptions);
     }

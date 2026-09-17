@@ -63,6 +63,7 @@ public static class AgentJobReadRoutes
                     conclusion.ActiveRuns,
                     conclusion.MaxConcurrentRuns,
                     conclusion.Capacity,
+                    conclusion.CapacityIncomplete,
                     conclusion.ObservedAt.ToString("o")),
                 waiting));
         });
@@ -229,6 +230,7 @@ public sealed record AgentAvailabilityResponse(
     int ActiveRuns,
     int? MaxConcurrentRuns,
     RunnerCapacityView Capacity,
+    bool CapacityIncomplete,
     string ObservedAt);
 
 /// <summary>

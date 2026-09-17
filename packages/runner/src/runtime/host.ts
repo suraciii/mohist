@@ -65,6 +65,7 @@ import {
   supportsManagerExecution,
   createHostTaskLogDeps,
   currentCatalogRevision,
+  deriveRunnerAdmissionObservation,
   isOpenCodeReadyForClaim as isOpenCodeReadyForClaimForRuntime,
   resolveFollowupTarget,
   runtimeReadinessWitnesses,
@@ -96,6 +97,10 @@ export { startTaskLogFlushTrigger } from './host-task-log.js'
 const log = runnerLogger.child('host')
 const INITIAL_EMPTY_MODEL_CATALOG_RETRY_MS = 5_000
 const MAX_EMPTY_MODEL_CATALOG_RETRY_MS = 5 * 60_000
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
 
 export interface ReportResult {
   workflowRunId?: string | null
@@ -140,7 +145,8 @@ export class RunnerHost {
   private piRuntime: PiRuntime | null = null
   private piRuntimeGeneration = 0
   private providerPolicyDiagnostic: string | null = null
-  private lastProviderPolicyDiagnosticLogged: string | null = null
+  private runtimeEventQueueAvailable = false
+  private lastAdmissionReasonCodes: string[] = []
   private readonly shutdownStopBudgetMs: number
   private readonly hostShutdown: ReturnType<typeof createHostShutdown>
   private readonly waitForConnectionRetry: (delayMs: number, signal: AbortSignal) => Promise<void>
@@ -533,16 +539,19 @@ export class RunnerHost {
 
   private async loadAgentSessionRuntimeEventQueue(signal: AbortSignal): Promise<void> {
     const queue = this.agentSessionRuntimeEventQueue
+    let loaded = false
     try {
       await queue.load()
+      loaded = true
     } catch (error) {
       log.error('agent-session runtime event queue failed to initialize', {
         exception: error,
         session: 'runtime-event-queue',
       })
     }
+    this.runtimeEventQueueAvailable = loaded && queue.ready()
     if (signal.aborted) return
-    if (!queue.ready()) {
+    if (!this.runtimeEventQueueAvailable) {
       log.warn('agent-session runtime event queue unavailable; runner admission is gated', {
         session: 'runtime-event-queue',
       })
@@ -577,17 +586,18 @@ export class RunnerHost {
       // Report retry is independent from admission. Retry volatile
       // awaitingAck results first so their owners can settle them while new
       // claims remain gated.
-      if (this.providerPolicyDiagnostic !== null) {
-        if (this.providerPolicyDiagnostic !== this.lastProviderPolicyDiagnosticLogged) {
-          log.warn('runner not ready; skipping poll', {
-            reason: this.providerPolicyDiagnostic,
+      const admission = this.currentAdmissionObservation()
+      if (!sameStrings(admission.admissionReasonCodes, this.lastAdmissionReasonCodes)) {
+        if (admission.admissionReady) {
+          log.info('runner admission recovered')
+        } else {
+          log.warn('runner admission blocked; continuing reconciliation', {
+            reasonCodes: admission.admissionReasonCodes,
+            providerPolicy: this.providerPolicyDiagnostic,
           })
-          this.lastProviderPolicyDiagnosticLogged = this.providerPolicyDiagnostic
         }
-        await raceInterval(nextReconciliationInterval(this.executionContext), signal, [])
-        continue
+        this.lastAdmissionReasonCodes = [...admission.admissionReasonCodes]
       }
-      this.lastProviderPolicyDiagnosticLogged = null
       this.syncOpenCodeWorkOwners()
       if (this.piRuntime && !this.piRuntime.ready()) {
         const piStart = await this.piRuntime.start().catch(() => null)
@@ -759,6 +769,13 @@ export class RunnerHost {
     await invalidateManagerExecutions(this.inFlight.values(), this.managerExecutionRegistry)
   }
 
+  private currentAdmissionObservation() {
+    return deriveRunnerAdmissionObservation(
+      this.providerPolicyDiagnostic !== null,
+      this.runtimeEventQueueAvailable && this.agentSessionRuntimeEventQueue.ready(),
+    )
+  }
+
   private pollReport(): ReturnType<typeof buildRunnerPollReport> {
     return buildRunnerPollReport({
       processGeneration: this.processGeneration,
@@ -766,7 +783,7 @@ export class RunnerHost {
       awaitingAck: this.awaitingAck.keys(),
       runtimeReadiness: runtimeReadinessWitnesses(this.openCodeRuntime, this.piRuntime, this.piRuntimeGeneration),
       connectionId: this.control.getConnectionId(),
-      admissionReady: this.providerPolicyDiagnostic === null,
+      admission: this.currentAdmissionObservation(),
       deploymentEpoch: this.connection.deploymentEpoch,
     })
   }

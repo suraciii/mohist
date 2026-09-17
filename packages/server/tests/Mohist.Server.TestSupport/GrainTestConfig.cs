@@ -275,6 +275,10 @@ public static class GrainTestConfig
         siloBuilder.Services.AddSingleton<IWorkflowAgentHandoffPreflight, WorkflowAgentHandoffPreflight>();
         siloBuilder.Services.AddScoped<WorkflowRunQuerier>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
+        siloBuilder.Services.AddScoped<RunnerActiveWorkReader>();
+        siloBuilder.Services.AddScoped<IRunnerActiveWorkReader>(services =>
+            services.GetRequiredService<RunnerActiveWorkReader>());
+        siloBuilder.Services.AddSingleton<RunnerStatusObservationStore>();
         siloBuilder.Services.AddSingleton<ProjectQuerier>();
         siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
         siloBuilder.Services.AddSingleton<PromptTemplateEngine>();

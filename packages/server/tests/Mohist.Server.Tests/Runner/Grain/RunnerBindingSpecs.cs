@@ -28,6 +28,72 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task DispatchObservation_IsExposedAndClearedAcrossProcessAndConnectionGenerations()
+    {
+        var runnerId = $"observation-generation-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var info = new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "observation-host",
+            "test-project",
+            ConnectionGeneration: "test-epoch:1");
+
+        await runner.RegisterAsync(info, "process-1");
+        var first = await runner.ObserveDispatchObservationAsync(
+            "process-1",
+            new RunnerDispatchObservation(
+                "test-epoch:1",
+                AdmissionReady: false,
+                AdmissionReasonCodes: [RunnerAdmissionReasonCodes.ProviderPolicyInvalid],
+                RuntimeReadiness: [new RuntimeReadinessWitness("pi", Ready: false, Generation: 2)]));
+
+        Assert.NotNull(first);
+        Assert.False(first!.AdmissionReady);
+        Assert.Equal([RunnerAdmissionReasonCodes.ProviderPolicyInvalid], first.AdmissionReasonCodes);
+        Assert.False(first.RuntimeReadiness.Single().Ready);
+        var exposed = (await runner.GetRuntimeStateAsync()).DispatchObservation;
+        Assert.NotNull(exposed);
+        Assert.Equal(first!.ConnectionGeneration, exposed!.ConnectionGeneration);
+        Assert.Equal(first.AdmissionReady, exposed.AdmissionReady);
+        Assert.Equal(first.AdmissionReasonCodes, exposed.AdmissionReasonCodes);
+        Assert.Equal(first.RuntimeReadiness, exposed.RuntimeReadiness);
+
+        var staleRuntime = await runner.ObserveDispatchObservationAsync(
+            "process-1",
+            new RunnerDispatchObservation(
+                "test-epoch:1",
+                AdmissionReady: true,
+                AdmissionReasonCodes: [],
+                RuntimeReadiness: [new RuntimeReadinessWitness("pi", Ready: true, Generation: 1)]));
+        Assert.NotNull(staleRuntime);
+        Assert.False(staleRuntime!.RuntimeReadiness.Single().Ready);
+        Assert.Equal(2, staleRuntime.RuntimeReadiness.Single().Generation);
+
+        await runner.RegisterAsync(info, "process-2");
+        Assert.Null((await runner.GetRuntimeStateAsync()).DispatchObservation);
+
+        await runner.ObserveDispatchObservationAsync(
+            "process-2",
+            new RunnerDispatchObservation("test-epoch:1", true, [], []));
+        await runner.UpdateRuntimeIdentityAsync(
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "test-epoch:2");
+
+        Assert.Null((await runner.GetRuntimeStateAsync()).DispatchObservation);
+        Assert.Null(await runner.ObserveDispatchObservationAsync(
+            "process-2",
+            new RunnerDispatchObservation("test-epoch:1", true, [], [])));
+    }
+
+    [Fact]
     public async Task CapacityOneRunner_WithInFlightWork_DoesNotGetSecondWorkflow()
     {
         var runnerId = await RegisterRunnerAsync("shared-runner");

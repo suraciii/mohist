@@ -3,9 +3,14 @@ import { Link } from 'react-router-dom'
 import { ChevronDownIcon } from 'lucide-react'
 import { StatusBar } from '../../../shared/ui/StatusBar'
 import { useActivityCards } from '../../../entities/agent-ops'
-import { UsageSnapshotLabel, useActivityUsageSnapshot, useActivityEvents, sortActivityEvents, type ActivityEvent } from '../../../widgets/coder-session'
+import {
+  UsageSnapshotLabel,
+  useActivityUsageSnapshot,
+  useActivityEvents,
+  sortActivityEvents,
+  type ActivityEvent,
+} from '../../../widgets/coder-session'
 import { RunnerSummaryBadge } from '../../../widgets/runner-status'
-import { useProjectPath } from '../../../entities/project'
 import { ActivityEventEntry } from './ActivityEventEntry'
 
 const EVENT_TYPES: ActivityEvent['type'][] = ['issue-state', 'workflow-stage', 'agent-session', 'runner', 'failure']
@@ -142,16 +147,24 @@ export function ActivityPage({
   const [attentionOnly, setAttentionOnly] = useState(false)
   const [attentionCollapsed, setAttentionCollapsed] = useState(false)
   const [routineCollapsed, setRoutineCollapsed] = useState(false)
-  const { activityEventsHook: useEvents, activityCardsHook: useCards, activityUsageSnapshotHook: useUsageSnapshot, RunnerSummaryBadge: RunnerBadge } = dependencies
+  const {
+    activityEventsHook: useEvents,
+    activityCardsHook: useCards,
+    activityUsageSnapshotHook: useUsageSnapshot,
+    RunnerSummaryBadge: RunnerBadge,
+  } = dependencies
   const selectedTypeFilters = useMemo(() => [...selectedTypes], [selectedTypes])
-  const { events, isLoading, isError, sourceErrors = [] } = useEvents({
+  const {
+    events,
+    isLoading,
+    isError,
+    sourceErrors = [],
+  } = useEvents({
     types: selectedTypeFilters,
     attentionOnly,
   })
   const { statusCounts, slotUsage } = useCards()
   const usageSnapshot = useUsageSnapshot()
-  const toProjectPath = useProjectPath()
-
   useEffect(() => {
     if (providedNow != null) return
     const id = setInterval(() => setClockNow(Date.now()), 1000)
@@ -185,10 +198,13 @@ export function ActivityPage({
 
   const attentionEntries = filtered.filter((e) => e.attention !== 'routine')
   const routineEntries = filtered.filter((e) => e.attention === 'routine')
-  const evidenceCounts = useMemo(() => ({
-    completed: orderedEvents.filter((event) => event.outcome === 'completed').length,
-    failed: orderedEvents.filter((event) => event.outcome === 'failed').length,
-  }), [orderedEvents])
+  const evidenceCounts = useMemo(
+    () => ({
+      completed: orderedEvents.filter((event) => event.outcome === 'completed').length,
+      failed: orderedEvents.filter((event) => event.outcome === 'failed').length,
+    }),
+    [orderedEvents],
+  )
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -207,7 +223,7 @@ export function ActivityPage({
         <div className="max-w-3xl mx-auto px-4 py-4 md:px-6 space-y-6">
           <div className="flex justify-end">
             <Link
-              to={toProjectPath('/runners?from=activity')}
+              to="/runners?from=activity"
               data-testid="activity-runners-link"
               className="inline-flex items-center gap-1 text-xs font-medium text-info hover:text-info-foreground hover:underline"
             >
@@ -256,7 +272,9 @@ export function ActivityPage({
                 <span>Activity evidence is incomplete: {source.label} is unavailable.</span>
                 <button
                   type="button"
-                  onClick={() => { void source.retry() }}
+                  onClick={() => {
+                    void source.retry()
+                  }}
                   data-testid={`activity-evidence-retry-${source.key}`}
                   className="rounded border border-warning-border bg-background px-2 py-1 text-xs font-semibold text-foreground hover:bg-warning-subtle"
                 >

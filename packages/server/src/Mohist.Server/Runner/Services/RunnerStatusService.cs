@@ -1,6 +1,7 @@
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Services;
 
 namespace Mohist.Server.Runner.Services;
 
@@ -9,13 +10,170 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
     private readonly IGrainFactory _grainFactory;
     private readonly RunnerConnectionTracker _connectionTracker;
     private readonly TimeProvider _timeProvider;
+    private readonly RunnerDefinitionStore? _definitions;
+    private readonly IRunnerCredentialStatusReader? _credentials;
+    private readonly RunnerStatusObservationStore? _observations;
+    private readonly IRunnerActiveWorkReader? _activeWorks;
+    private readonly IRunnerDurableStatusReader? _durableStatus;
     private static readonly TimeSpan StaleThreshold = TimeSpan.FromMinutes(2);
 
-    public RunnerStatusService(IGrainFactory grainFactory, RunnerConnectionTracker connectionTracker, TimeProvider timeProvider)
+    public RunnerStatusService(
+        IGrainFactory grainFactory,
+        RunnerConnectionTracker connectionTracker,
+        TimeProvider timeProvider)
+        : this(grainFactory, connectionTracker, timeProvider, null, null, null, null)
+    {
+    }
+
+    public RunnerStatusService(
+        IGrainFactory grainFactory,
+        RunnerConnectionTracker connectionTracker,
+        TimeProvider timeProvider,
+        RunnerDefinitionStore? definitions,
+        IRunnerCredentialStatusReader? credentials)
+        : this(grainFactory, connectionTracker, timeProvider, definitions, credentials, null, null)
+    {
+    }
+
+    public RunnerStatusService(
+        IGrainFactory grainFactory,
+        RunnerConnectionTracker connectionTracker,
+        TimeProvider timeProvider,
+        RunnerDefinitionStore? definitions,
+        IRunnerCredentialStatusReader? credentials,
+        RunnerStatusObservationStore? observations,
+        IRunnerActiveWorkReader? activeWorks,
+        IRunnerDurableStatusReader? durableStatus = null)
     {
         _grainFactory = grainFactory;
         _connectionTracker = connectionTracker;
         _timeProvider = timeProvider;
+        _definitions = definitions;
+        _credentials = credentials;
+        _observations = observations;
+        _activeWorks = activeWorks;
+        _durableStatus = durableStatus;
+    }
+
+    /// <summary>
+    /// Reads an observational snapshot. A claim may win or lose after this
+    /// method reads capacity; RunnerGrain remains the authoritative claim
+    /// boundary and this read never reserves a slot.
+    /// </summary>
+    public virtual async Task<RunnerStatusListSnapshot> GetGlobalRunnersAsync(CancellationToken ct = default)
+    {
+        if (_definitions is null || _observations is null || _activeWorks is null)
+            throw new InvalidOperationException("Global Runner status requires the read projection stores.");
+
+        var observedAt = _timeProvider.GetUtcNow();
+        var definitions = await _definitions.ListAsync(ct);
+        var rows = new List<RunnerStatusEntry>(definitions.Count);
+        foreach (var definition in definitions)
+            rows.Add(await ProjectGlobalRunnerAsync(definition, observedAt, ct));
+
+        return new RunnerStatusListSnapshot(observedAt, rows);
+    }
+
+    public async Task<RunnerAvailabilitySnapshot> GetAvailabilityAsync(CancellationToken ct = default) =>
+        ProjectAvailability(await GetGlobalRunnersAsync(ct));
+
+    public static RunnerAvailabilitySnapshot ProjectAvailability(RunnerStatusListSnapshot snapshot) =>
+        ProjectAvailability(snapshot, requirement: null);
+
+    /// <summary>
+    /// Projects canonical Runner availability. Rows whose owner-ledger usage is
+    /// unknown are excluded from the aggregate instead of being counted as
+    /// zero used with their full slots apparently free. When a Runtime/model
+    /// requirement is supplied, a Runner only counts as able to accept work if
+    /// its current Runtime witness is ready and its catalog accepts the
+    /// requested model/variant; this mirrors the capability gate claim applies.
+    /// </summary>
+    public static RunnerAvailabilitySnapshot ProjectAvailability(
+        RunnerStatusListSnapshot snapshot,
+        RunnerRuntimeRequirement? requirement)
+    {
+        var online = snapshot.Runners
+            .Where(row => string.Equals(row.Presence.State, "online", StringComparison.Ordinal))
+            .ToList();
+        var known = online
+            .Where(row => row.Capacity?.Used is not null)
+            .ToList();
+        var capacity = new RunnerCapacityView(
+            known.Sum(row => row.Capacity!.Used!.Value),
+            known.Sum(row => row.Capacity!.Total));
+        var capacityIncomplete = online.Count != known.Count;
+        var free = known
+            .Where(row => row.Capacity!.Used < row.Capacity.Total)
+            .ToList();
+        var canAcceptWork = free.Any(row =>
+            string.Equals(row.Admission.State, "ready", StringComparison.Ordinal)
+            && SatisfiesRuntime(row, requirement));
+
+        string? blockingReason = null;
+        if (online.Count > 0 && !canAcceptWork)
+        {
+            blockingReason = free
+                .SelectMany(row => row.Admission.ReasonCodes)
+                .FirstOrDefault(reason => !string.Equals(reason, "capacity-full", StringComparison.Ordinal));
+            if (blockingReason is null && free.Count == 0)
+                blockingReason = capacityIncomplete ? "capacity-unknown" : "capacity-full";
+            if (blockingReason is null)
+                blockingReason = "runtime-not-ready";
+        }
+
+        return new RunnerAvailabilitySnapshot(
+            capacity,
+            online.Count > 0,
+            canAcceptWork,
+            blockingReason,
+            snapshot.ObservedAt,
+            capacityIncomplete);
+    }
+
+    private static bool SatisfiesRuntime(
+        RunnerStatusEntry row,
+        RunnerRuntimeRequirement? requirement)
+    {
+        if (requirement is null || string.IsNullOrWhiteSpace(requirement.Runtime))
+            return true;
+
+        var runtime = row.Runtimes.FirstOrDefault(candidate =>
+            string.Equals(candidate.Name, requirement.Runtime, StringComparison.OrdinalIgnoreCase));
+        if (runtime is null
+            || !string.Equals(runtime.Readiness.State, "ready", StringComparison.Ordinal))
+            return false;
+
+        if (string.IsNullOrWhiteSpace(requirement.Model))
+            return true;
+
+        var catalog = runtime.Catalog;
+        if (catalog is null
+            || !catalog.Models.Contains(requirement.Model, StringComparer.OrdinalIgnoreCase))
+            return false;
+
+        if (string.IsNullOrWhiteSpace(requirement.Variant))
+            return true;
+
+        return catalog.Variants.TryGetValue(requirement.Model, out var variants)
+            && variants.Contains(requirement.Variant, StringComparer.OrdinalIgnoreCase);
+    }
+
+    public async Task<RunnerStatusDetailSnapshot?> GetGlobalRunnerAsync(
+        string runnerId,
+        CancellationToken ct = default)
+    {
+        if (_definitions is null || string.IsNullOrWhiteSpace(runnerId))
+            return null;
+        if (_observations is null || _activeWorks is null)
+            throw new InvalidOperationException("Global Runner status requires the read projection stores.");
+
+        var observedAt = _timeProvider.GetUtcNow();
+        var definition = await _definitions.GetAsync(runnerId, ct);
+        return definition is null
+            ? null
+            : new RunnerStatusDetailSnapshot(
+                observedAt,
+                await ProjectGlobalRunnerAsync(definition, observedAt, ct));
     }
 
     public virtual async Task<IReadOnlyList<RunnerStatusView>> GetRunnersAsync(string projectId)
@@ -95,6 +253,349 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
 
         return await ProjectRunnerAsync(info);
     }
+
+    private async Task<RunnerStatusEntry> ProjectGlobalRunnerAsync(
+        RunnerDefinition definition,
+        DateTimeOffset observedAt,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var status = _observations!.Get(definition.Id);
+        // Durable facts survive a Server restart. They are read straight from
+        // grain storage (never by activating the grain) so an offline Runner
+        // keeps its build identity, last presence and update fence visible
+        // without triggering closeout reconciliation.
+        var durable = _durableStatus is null
+            ? null
+            : await _durableStatus.ReadAsync(definition.Id, ct);
+        IReadOnlyList<RunnerActiveWorkItem>? ownerWorks = null;
+        try
+        {
+            ownerWorks = await _activeWorks!.ListAsync(definition.Id, ct);
+        }
+        catch
+        {
+            // Owner-ledger read failures leave usage unknown; status does not
+            // activate lifecycle authority to reconstruct the value.
+        }
+
+        var info = status?.Info ?? durable?.Info;
+        var lastPresenceAt = status?.LastPresenceAt is { } observedPresence
+            && observedPresence != default
+                ? observedPresence
+                : durable?.LastPresenceAt;
+        var updateInterruptId = status?.UpdateInterruptId ?? durable?.UpdateInterruptId;
+        var draining = status?.Draining == true || !string.IsNullOrWhiteSpace(updateInterruptId);
+        var runtime = status is null && durable is null
+            ? null
+            : new RunnerRuntimeState(
+                status?.Status ?? RunnerStatus.Offline,
+                lastPresenceAt ?? default,
+                ownerWorks ?? [],
+                draining,
+                updateInterruptId,
+                info?.ConnectionGeneration,
+                status?.DispatchObservation);
+        var connectionId = _connectionTracker.GetConnectionId(definition.Id);
+        var connectionGeneration = _connectionTracker.GetConnectionGeneration(definition.Id);
+        var connected = connectionId is not null;
+        var presenceState = DerivePresenceState(runtime, observedAt);
+        DateTimeOffset? lastObservedAt = lastPresenceAt is { } presence
+            && presence != default
+                ? presence
+                : null;
+        int? knownUsage = ownerWorks is null
+            || (status is null && ownerWorks.Count == 0)
+                ? null
+                : ownerWorks.Count;
+        var capacity = new RunnerStatusCapacityView(knownUsage, definition.Slots);
+        var activeWorks = ProjectActiveWorks(ownerWorks);
+        var observation = CurrentObservation(runtime?.DispatchObservation, connectionGeneration);
+        var credentialStatus = await ReadCredentialStatusAsync(definition.Id, ct);
+        var reasonCodes = DeriveAdmissionReasons(
+            runtime,
+            presenceState,
+            connected,
+            observation,
+            capacity,
+            credentialStatus);
+        var runtimes = ProjectRuntimes(info, observation);
+
+        return new RunnerStatusEntry(
+            new RunnerIdentityStatusView(
+                definition.Id,
+                info?.Hostname,
+                info?.Kind,
+                info?.Component,
+                info?.SourceRevision,
+                info?.ReleaseId,
+                info?.Generation),
+            new RunnerPresenceStatusView(presenceState, lastObservedAt),
+            new RunnerControlStatusView(connected ? "connected" : "disconnected", connectionGeneration),
+            new RunnerAdmissionStatusView(
+                reasonCodes.Count == 0 ? "ready" : "blocked",
+                reasonCodes),
+            info?.Capabilities ?? [],
+            runtimes,
+            capacity,
+            activeWorks,
+            ProjectDrain(runtime),
+            ProjectNextActions(
+                definition.Id,
+                info?.Hostname,
+                presenceState,
+                connected,
+                credentialStatus,
+                reasonCodes,
+                runtimes,
+                capacity));
+    }
+
+    private async Task<RunnerCredentialStatus> ReadCredentialStatusAsync(
+        string runnerId,
+        CancellationToken ct)
+    {
+        if (_credentials is null)
+            return RunnerCredentialStatus.Unknown;
+
+        try
+        {
+            return await _credentials.GetStatusAsync(runnerId, ct);
+        }
+        catch
+        {
+            // A credential-store read failure is not evidence of a missing or
+            // revoked credential and must not produce re-enrollment guidance.
+            return RunnerCredentialStatus.Unknown;
+        }
+    }
+
+    private static string DerivePresenceState(RunnerRuntimeState? runtime, DateTimeOffset observedAt)
+    {
+        if (runtime is null || runtime.Status == RunnerStatus.Offline)
+            return "offline";
+
+        return observedAt - runtime.LastHeartbeatAt > StaleThreshold
+            ? "stale"
+            : "online";
+    }
+
+    private static RunnerDispatchObservation? CurrentObservation(
+        RunnerDispatchObservation? observation,
+        string? connectionGeneration)
+    {
+        if (observation is null
+            || string.IsNullOrWhiteSpace(connectionGeneration)
+            || !string.Equals(
+                observation.ConnectionGeneration,
+                connectionGeneration,
+                StringComparison.Ordinal))
+            return null;
+
+        return observation;
+    }
+
+    private static IReadOnlyList<string> DeriveAdmissionReasons(
+        RunnerRuntimeState? runtime,
+        string presenceState,
+        bool connected,
+        RunnerDispatchObservation? observation,
+        RunnerStatusCapacityView capacity,
+        RunnerCredentialStatus credentialStatus)
+    {
+        var reasons = new List<string>();
+        if (presenceState == "offline")
+            reasons.Add("presence-offline");
+        else if (presenceState == "stale")
+            reasons.Add("presence-stale");
+
+        if (credentialStatus == RunnerCredentialStatus.Revoked)
+            reasons.Add("credential-revoked");
+        else if (credentialStatus == RunnerCredentialStatus.Missing)
+            reasons.Add("credential-missing");
+
+        if (!connected)
+            reasons.Add("control-disconnected");
+        if (runtime?.Draining == true)
+            reasons.Add("draining");
+
+        if (runtime is null)
+        {
+            reasons.Add("admission-observation-missing");
+        }
+        else if (connected)
+        {
+            if (observation is null)
+                reasons.Add("admission-observation-missing");
+            else if (!observation.AdmissionReady)
+                reasons.AddRange(observation.AdmissionReasonCodes);
+        }
+
+        if (capacity.Used is null)
+        {
+            if (!reasons.Contains("admission-observation-missing", StringComparer.Ordinal))
+                reasons.Add("admission-observation-missing");
+        }
+        else if (capacity.Used is { } used && used >= capacity.Total)
+        {
+            reasons.Add("capacity-full");
+        }
+
+        return reasons;
+    }
+
+    private static IReadOnlyList<RunnerRuntimeStatusView> ProjectRuntimes(
+        RunnerInfo? info,
+        RunnerDispatchObservation? observation)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (info?.RuntimeCatalogs is { } runtimeCatalogs)
+        {
+            foreach (var name in runtimeCatalogs.Keys)
+            {
+                if (!string.IsNullOrWhiteSpace(name))
+                    names.Add(name);
+            }
+        }
+        foreach (var witness in observation?.RuntimeReadiness ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(witness.Runtime))
+                names.Add(witness.Runtime);
+        }
+
+        var witnesses = (observation?.RuntimeReadiness ?? [])
+            .ToDictionary(witness => witness.Runtime, StringComparer.OrdinalIgnoreCase);
+        var catalogs = info?.RuntimeCatalogs ?? new Dictionary<string, RuntimeCatalogEntry>(StringComparer.OrdinalIgnoreCase);
+        return names
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .Select(name =>
+            {
+                catalogs.TryGetValue(name, out var catalog);
+                witnesses.TryGetValue(name, out var witness);
+                var hasCurrentWitness = witness is { Generation: > 0 };
+                var ready = hasCurrentWitness && witness!.Ready;
+                var readiness = new RunnerRuntimeReadinessStatusView(
+                    ready ? "ready" : "not-ready",
+                    hasCurrentWitness ? witness!.Generation : null,
+                    ready ? null : hasCurrentWitness
+                        ? "runtime-reported-not-ready"
+                        : "runtime-witness-missing");
+                return new RunnerRuntimeStatusView(
+                    name,
+                    readiness,
+                    catalog is null ? null : ProjectCatalog(catalog));
+            })
+            .ToList();
+    }
+
+    private static RunnerRuntimeCatalogStatusView ProjectCatalog(RuntimeCatalogEntry catalog)
+    {
+        var models = catalog.Models ?? [];
+        var variants = (catalog.Variants ?? new Dictionary<string, string[]>(StringComparer.Ordinal))
+            .ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value, StringComparer.Ordinal);
+        var reasoningEfforts = (catalog.ReasoningEfforts ?? new Dictionary<string, string[]>(StringComparer.Ordinal))
+            .ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value, StringComparer.Ordinal);
+        return new RunnerRuntimeCatalogStatusView(
+            catalog.Complete,
+            catalog.CapabilityRevision,
+            models.Length,
+            models,
+            variants,
+            catalog.SupportsReasoningEffort,
+            reasoningEfforts);
+    }
+
+    private static RunnerDrainStatusView? ProjectDrain(RunnerRuntimeState? runtime) =>
+        runtime?.Draining == true
+            ? new RunnerDrainStatusView(
+                true,
+                string.IsNullOrWhiteSpace(runtime.UpdateInterruptId) ? "generic" : "update",
+                runtime.UpdateInterruptId)
+            : null;
+
+    private static IReadOnlyList<RunnerNextActionView> ProjectNextActions(
+        string runnerId,
+        string? hostname,
+        string presenceState,
+        bool connected,
+        RunnerCredentialStatus credentialStatus,
+        IReadOnlyList<string> reasonCodes,
+        IReadOnlyList<RunnerRuntimeStatusView> runtimes,
+        RunnerStatusCapacityView capacity)
+    {
+        if (credentialStatus is RunnerCredentialStatus.Revoked or RunnerCredentialStatus.Missing)
+        {
+            return [new RunnerNextActionView(
+                "reenroll-runner",
+                "Re-enroll the Runner credential.",
+                $"mo install runner --repo-root <path> --runner-id {QuoteShellArgument(runnerId)}")];
+        }
+
+        if (credentialStatus == RunnerCredentialStatus.Active
+            && (presenceState is "offline" or "stale" || !connected))
+        {
+            return [new RunnerNextActionView(
+                "start-runner",
+                string.IsNullOrWhiteSpace(hostname)
+                    ? "Start the Runner process."
+                    : $"Start the Runner process on {hostname}.",
+                "mo service start runner")];
+        }
+
+        var actions = new List<RunnerNextActionView>();
+        if (reasonCodes.Contains("draining", StringComparer.Ordinal))
+        {
+            actions.Add(new RunnerNextActionView(
+                "wait-for-drain",
+                "Wait for the active drain to finish.",
+                null));
+        }
+        if (capacity.Used is { } used && used >= capacity.Total)
+        {
+            actions.Add(new RunnerNextActionView(
+                "wait-for-capacity",
+                "Wait for the active owner to release a Runner slot.",
+                null));
+        }
+        if (runtimes.Any(runtime => runtime.Readiness.State == "not-ready"))
+        {
+            actions.Add(new RunnerNextActionView(
+                "wait-for-runtime",
+                "Wait for the Runtime to report ready.",
+                null));
+        }
+
+        foreach (var reason in reasonCodes)
+        {
+            var action = reason switch
+            {
+                "provider-policy-invalid" => new RunnerNextActionView(
+                    "fix-provider-policy-invalid",
+                    "Fix the Runner provider policy before accepting new work.",
+                    null),
+                "runtime-event-queue-unavailable" => new RunnerNextActionView(
+                    "fix-runtime-event-queue-unavailable",
+                    "Restore the Runtime event queue before accepting new work.",
+                    null),
+                "admission-observation-invalid" => new RunnerNextActionView(
+                    "fix-admission-observation-invalid",
+                    "Refresh the Runner admission observation.",
+                    null),
+                "admission-observation-missing" => new RunnerNextActionView(
+                    "wait-for-admission-observation",
+                    "Wait for the Runner admission observation.",
+                    null),
+                _ => null,
+            };
+            if (action is not null && actions.All(existing => existing.Code != action.Code))
+                actions.Add(action);
+        }
+
+        return actions;
+    }
+
+    private static string QuoteShellArgument(string value) =>
+        $"'{value.Replace("'", "'\"'\"'", StringComparison.Ordinal)}'";
 
     private async Task<bool> IsRunnerOnlineAsync(string runnerId)
     {

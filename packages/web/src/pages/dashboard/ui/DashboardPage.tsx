@@ -1,9 +1,7 @@
 import { useMemo, useState } from 'react'
-import {
-  useProjects,
-  useProject,
-} from '../../../entities/project'
+import { useProjects, useProject } from '../../../entities/project'
 import { useAgentStatus, type AgentStatus } from '../../../entities/agent'
+import { useRunnerSummary } from '../../../entities/runner'
 import { CreateProjectDialog } from '../../../features/create-project'
 import { DashboardDigestWidget } from '../../../widgets/dashboard-digest'
 import { DashboardCapacityZone } from '../../../widgets/dashboard-capacity'
@@ -13,11 +11,7 @@ import { FactoryStatusHeadline } from '../../../widgets/factory-status'
 import { AttentionHero } from '../../../widgets/attention-hero'
 import { Button } from '../../../shared/ui/components/button'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
-import {
-  isRunningIssue,
-  useIssues,
-  useRecentDigest,
-} from '../../../entities/issue'
+import { isRunningIssue, useIssues, useRecentDigest } from '../../../entities/issue'
 import { deriveAttentionItems } from '../../../entities/agent-ops'
 import { CheckCircle2Icon } from 'lucide-react'
 import { DashboardZone } from './DashboardZone'
@@ -30,51 +24,58 @@ const defaultAgentStatus: AgentStatus = {
 }
 
 export type ActivityCardsHook = typeof useActivityCards
+export type RunnerSummaryHook = typeof useRunnerSummary
 
 export function DashboardPage({
   activityCardsHook = useActivityCards,
+  runnerSummaryHook = useRunnerSummary,
 }: {
   activityCardsHook?: ActivityCardsHook
+  runnerSummaryHook?: RunnerSummaryHook
 } = {}) {
   const { data: projects, isLoading: projectsLoading } = useProjects()
   const { currentProject, projectId } = useProject()
   const { data: agentStatus, isLoading: agentStatusLoading, isError: agentStatusError } = useAgentStatus()
-  const { data: fetchedIssues, isLoading: issuesLoading, isError: issuesError } = useIssues(projectId ? { projectId } : undefined)
+  const runnerSummary = runnerSummaryHook()
   const {
-    activeCards,
-    isLoading: activityLoading,
-    isError: activityError,
-  } = activityCardsHook()
+    data: fetchedIssues,
+    isLoading: issuesLoading,
+    isError: issuesError,
+  } = useIssues(projectId ? { projectId } : undefined)
+  const { activeCards, isLoading: activityLoading, isError: activityError } = activityCardsHook()
   const { completed, failed, archived } = useRecentDigest()
   const [showCreateProject, setShowCreateProject] = useState(false)
 
   useDocumentTitle('Dashboard — Mohist', agentStatus?.running ?? false)
 
   const attentionItems = useMemo(
-    () => deriveAttentionItems(fetchedIssues ?? [], agentStatus ?? defaultAgentStatus),
-    [fetchedIssues, agentStatus],
+    () => deriveAttentionItems(fetchedIssues ?? [], agentStatus ?? defaultAgentStatus, runnerSummary),
+    [fetchedIssues, agentStatus, runnerSummary],
   )
 
-  const runningIssues = useMemo(
-    () => (fetchedIssues ?? []).filter(isRunningIssue),
-    [fetchedIssues],
-  )
+  const runningIssues = useMemo(() => (fetchedIssues ?? []).filter(isRunningIssue), [fetchedIssues])
 
   const hasAttention = attentionItems.length > 0
-  const hasAgentStatusActiveWork =
-    agentStatus?.running === true || (agentStatus?.activeAgents?.length ?? 0) > 0
-  const hasActiveWork =
-    runningIssues.length > 0 || activeCards.length > 0 || hasAgentStatusActiveWork
-  const hasDigestItems =
-    completed.length > 0 || failed.length > 0 || archived.length > 0
-  const hasCapacityData =
-    agentStatus?.capacity != null && agentStatus.capacity.max > 0
+  const hasAgentStatusActiveWork = agentStatus?.running === true || (agentStatus?.activeAgents?.length ?? 0) > 0
+  const hasActiveWork = runningIssues.length > 0 || activeCards.length > 0 || hasAgentStatusActiveWork
+  const hasDigestItems = completed.length > 0 || failed.length > 0 || archived.length > 0
+  const hasCapacityData = runnerSummary.rows.length > 0 && runnerSummary.capacityTotal > 0
   const issuesResolved = fetchedIssues !== undefined || (!issuesLoading && !issuesError)
   const activityResolved = !activityLoading && !activityError
   const agentStatusResolved = agentStatus !== undefined || (!agentStatusLoading && !agentStatusError)
+  const runnerStatusResolved = runnerSummary.isLoading !== true && runnerSummary.isError !== true
+  const runnerReady = runnerSummary.rows.length > 0 && runnerSummary.blockedCount === 0
 
   const showAttentionHero = hasAttention
-  const showReadyState = issuesResolved && activityResolved && agentStatusResolved && !hasAttention && !hasActiveWork
+  const showReadyState =
+    issuesResolved &&
+    activityResolved &&
+    agentStatusResolved &&
+    runnerStatusResolved &&
+    runnerReady &&
+    runnerSummary.activeWorkCount === 0 &&
+    !hasAttention &&
+    !hasActiveWork
 
   if (projectsLoading) {
     return null
@@ -83,26 +84,15 @@ export function DashboardPage({
   if (!projects || projects.length === 0) {
     return (
       <>
-        <div
-          data-testid="dashboard-empty-state"
-          className="flex items-center justify-center flex-1"
-        >
+        <div data-testid="dashboard-empty-state" className="flex items-center justify-center flex-1">
           <div className="text-center">
-            <div className="text-muted-foreground text-lg mb-4">
-              No projects yet
-            </div>
-            <Button
-              onClick={() => setShowCreateProject(true)}
-              data-testid="dashboard-create-project"
-            >
+            <div className="text-muted-foreground text-lg mb-4">No projects yet</div>
+            <Button onClick={() => setShowCreateProject(true)} data-testid="dashboard-create-project">
               Create Project
             </Button>
           </div>
         </div>
-        <CreateProjectDialog
-          open={showCreateProject}
-          onClose={() => setShowCreateProject(false)}
-        />
+        <CreateProjectDialog open={showCreateProject} onClose={() => setShowCreateProject(false)} />
       </>
     )
   }
@@ -116,17 +106,27 @@ export function DashboardPage({
           ? 'has-attention'
           : hasActiveWork
             ? 'active-only'
-            : 'idle'
+            : runnerSummary.rows.length === 0 || runnerSummary.isError
+              ? 'runner-unavailable'
+              : runnerSummary.blockedCount > 0
+                ? 'runner-blocked'
+                : runnerSummary.activeWorkCount > 0
+                  ? 'runner-active-work'
+                  : 'ready'
       }
       className="flex-1 overflow-y-auto p-4 md:p-6"
     >
       <div className="flex flex-col gap-4 md:gap-6">
         <div data-testid="dashboard-headline">
-          <FactoryStatusHeadline />
+          <FactoryStatusHeadline runnerSummary={runnerSummary} />
         </div>
         {showAttentionHero && (
           <div data-testid="dashboard-hero">
-            <AttentionHero issues={fetchedIssues ?? []} agentStatus={agentStatus ?? defaultAgentStatus} />
+            <AttentionHero
+              issues={fetchedIssues ?? []}
+              agentStatus={agentStatus ?? defaultAgentStatus}
+              runnerSummary={runnerSummary}
+            />
           </div>
         )}
         {showReadyState && <ReadyState />}
@@ -139,7 +139,7 @@ export function DashboardPage({
             />
           </DashboardZone>
         )}
-        {hasCapacityData && agentStatus && <DashboardCapacityZone agentStatusOverride={agentStatus} />}
+        {hasCapacityData && <DashboardCapacityZone runnerSummaryOverride={runnerSummary} />}
         {hasDigestItems && (
           <DashboardZone id="digest" name="Recent history">
             <DashboardDigestWidget />
@@ -161,9 +161,7 @@ function ReadyState() {
         <span className="inline-flex items-center justify-center size-6 rounded-full bg-success text-white">
           <CheckCircle2Icon className="size-3.5" />
         </span>
-        <span className="text-sm font-semibold uppercase tracking-wide text-success">
-          All clear
-        </span>
+        <span className="text-sm font-semibold uppercase tracking-wide text-success">All clear</span>
       </div>
       <p className="mt-2 text-sm text-foreground">
         Nothing needs your attention right now. New activity will surface here.

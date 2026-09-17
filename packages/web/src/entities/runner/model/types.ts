@@ -1,12 +1,58 @@
-export interface RunnerScope {
-  type: 'global' | 'project'
-  projectId?: string | null
-  projectName?: string | null
+export type RunnerPresenceState = 'online' | 'stale' | 'offline'
+export type RunnerControlState = 'connected' | 'disconnected'
+export type RunnerAdmissionState = 'ready' | 'blocked'
+export type RunnerRuntimeReadinessState = 'ready' | 'not-ready'
+
+export interface RunnerIdentity {
+  id: string
+  hostname: string | null
+  kind: string | null
+  component: string | null
+  sourceRevision: string | null
+  releaseId: string | null
+  generation: number | null
+}
+
+export interface RunnerPresence {
+  state: RunnerPresenceState
+  lastObservedAt: string | null
+}
+
+export interface RunnerControl {
+  state: RunnerControlState
+  generation: string | null
+}
+
+export interface RunnerAdmission {
+  state: RunnerAdmissionState
+  reasonCodes: string[]
+}
+
+export interface RunnerRuntimeReadiness {
+  state: RunnerRuntimeReadinessState
+  generation: number | null
+  reasonCode: string | null
+}
+
+export interface RunnerRuntimeCatalog {
+  complete: boolean | null
+  capabilityRevision: string | null
+  modelCount: number
+  models: string[]
+  variants: Record<string, string[]>
+  supportsReasoningEffort: boolean | null
+  reasoningEfforts: Record<string, string[]>
+}
+
+export interface RunnerRuntime {
+  name: string
+  readiness: RunnerRuntimeReadiness
+  catalog: RunnerRuntimeCatalog | null
 }
 
 export interface RunnerCapacity {
-  usedSlots: number
-  totalSlots: number
+  used: number | null
+  total: number
 }
 
 export interface RunnerActiveWorkIssueRef {
@@ -14,45 +60,78 @@ export interface RunnerActiveWorkIssueRef {
   issueNumber: number
 }
 
+export type RunnerOwnerKind = 'workflow' | 'agent-job' | string
+
 export interface RunnerActiveWork {
   workId: string
-  ownerKind: string
+  ownerKind: RunnerOwnerKind
   ownerId: string
   workType: string
-  stage?: string | null
-  title?: string | null
-  issue?: RunnerActiveWorkIssueRef | null
+  stage: string | null
+  title: string | null
+  issue: RunnerActiveWorkIssueRef | null
 }
 
-export interface RunnerStatusRow {
-  id: string
-  kind: string
-  hostname: string
-  scope: RunnerScope
-  status: 'idle' | 'busy' | 'stale' | 'offline'
-  registeredAt?: string | null
-  lastHeartbeatAt?: string | null
-  connectionState?: string | null
+export interface RunnerDrain {
+  active: boolean
+  kind: 'update' | 'generic' | string
+  updateInterruptId: string | null
+}
+
+export interface RunnerNextAction {
+  code: string
+  message: string
+  command: string | null
+}
+
+export interface RunnerStatusEntry {
+  identity: RunnerIdentity
+  presence: RunnerPresence
+  control: RunnerControl
+  admission: RunnerAdmission
   capabilities: string[]
-  coderModels: string[]
-  coderModelCount: number
-  maxWorkflowSlots?: number | null
-  buildGitHash?: string | null
-  capacity?: RunnerCapacity | null
+  runtimes: RunnerRuntime[]
+  capacity: RunnerCapacity | null
   activeWorks: RunnerActiveWork[]
+  drain: RunnerDrain | null
+  nextActions: RunnerNextAction[]
+}
+
+/** Canonical row name used by the Web Runner surfaces. */
+export type RunnerStatusRow = RunnerStatusEntry
+
+export interface RunnerInventory {
+  state: 'first-install' | 'ready' | string
+  nextActions: RunnerNextAction[]
 }
 
 export interface RunnerStatusListResponse {
-  runners: RunnerStatusRow[]
+  observedAt: string
+  inventory: RunnerInventory
+  runners: RunnerStatusEntry[]
 }
 
 export interface RunnerStatusDetailResponse {
-  runner: RunnerStatusRow
+  observedAt: string
+  runner: RunnerStatusEntry
 }
 
 export interface RunnerStatusSummary {
-  connectedIdleCount: number
-  connectedBusyCount: number
-  hasConnectedCapacity: boolean
-  rows: RunnerStatusRow[]
+  readyCount: number
+  blockedCount: number
+  onlineCount: number
+  staleCount: number
+  offlineCount: number
+  disconnectedCount: number
+  drainingCount: number
+  fullCount: number
+  activeWorkCount: number
+  capacityUsed: number | null
+  capacityTotal: number
+  hasUnknownCapacity: boolean
+  hasAdmissibleCapacity: boolean
+  rows: RunnerStatusEntry[]
+  inventory: RunnerInventory | null
+  isLoading?: boolean
+  isError?: boolean
 }

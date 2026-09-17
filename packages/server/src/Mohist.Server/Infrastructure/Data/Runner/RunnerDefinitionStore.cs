@@ -16,6 +16,29 @@ public class RunnerDefinitionStore
         _timeProvider = timeProvider;
     }
 
+    public async Task<IReadOnlyList<RunnerDefinition>> ListAsync(CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.Runners
+            .AsNoTracking()
+            .OrderBy(row => row.Id)
+            .Select(row => new RunnerDefinition(row.Id, row.Slots))
+            .ToListAsync(ct);
+    }
+
+    public async Task<RunnerDefinition?> GetAsync(string runnerId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(runnerId))
+            return null;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.Runners
+            .AsNoTracking()
+            .Where(row => row.Id == runnerId)
+            .Select(row => new RunnerDefinition(row.Id, row.Slots))
+            .FirstOrDefaultAsync(ct);
+    }
+
     public async Task<int> GetOrInitAsync(string runnerId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(runnerId))

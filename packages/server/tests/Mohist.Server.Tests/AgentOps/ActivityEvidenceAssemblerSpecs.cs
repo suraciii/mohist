@@ -184,21 +184,21 @@ public class ActivityEvidenceAssemblerSpecs
         await db.SaveChangesAsync();
     }
 
-    private static RunnerStatusView BuildRunnerStatus(string runnerId, string hostname, DateTimeOffset registeredAt) =>
+    private static RunnerStatusEntry BuildRunnerStatus(
+        string runnerId,
+        string hostname,
+        DateTimeOffset registeredAt) =>
         new(
-            Id: runnerId,
-            Kind: "embedded",
-            Hostname: hostname,
-            Scope: new RunnerScopeView("global"),
-            Status: "idle",
-            RegisteredAt: registeredAt,
-            LastHeartbeatAt: registeredAt,
-            ConnectionState: "connected",
-            Capabilities: new[] { "spec/*" },
-            CoderModels: Array.Empty<string>(),
-            CoderModelCount: 0,
-            Capacity: new RunnerCapacityView(0, 1),
-            ActiveWorks: Array.Empty<RunnerActiveWorkView>());
+            new RunnerIdentityStatusView(runnerId, hostname, "embedded", null, null, null, null),
+            new RunnerPresenceStatusView("online", registeredAt),
+            new RunnerControlStatusView("connected", "test:1"),
+            new RunnerAdmissionStatusView("ready", []),
+            ["spec/*"],
+            [],
+            new RunnerStatusCapacityView(0, 1),
+            [],
+            null,
+            []);
 
     [Fact]
     public async Task ListAsync_IsolatesProjectEvidenceWhileRepeatingRunnerOnlyAsGlobal()

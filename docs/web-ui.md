@@ -52,8 +52,9 @@ authorization confirmation page (`/device`) are outside this prefix.
 - **Insights:** `/<projectName>/insights` shows delivery trends such as
   throughput, completion, stage duration, and cost.
 - **Activity:** `/<projectName>/activity` shows the live Activity feed.
-- **Runners:** `/<projectName>/runners` and
-  `/<projectName>/runners/<runnerId>` show connected Runners and their state.
+- **Runners:** `/runners` and `/runners/<runnerId>` show the Server-global
+  Runner inventory and each Runner's current state. These routes work without a
+  selected Project.
 - **Workspaces:** `/<projectName>/workspaces` and
   `/<projectName>/workspaces/<name>` show Project Workspaces.
 - **Logs:** `/<projectName>/logs` shows system logs.
@@ -74,9 +75,10 @@ identity, priority, current Workflow stage, and health. Priority, label, title
 search, and sort controls narrow the view. URL state is shareable so people can
 review the same view.
 
-Needs attention elevates blocked work and pending Approval Points. Runner
-unavailability remains a separate warning because it can affect many Issues.
-An Issue may still start and wait for Runner capacity.
+Needs attention elevates blocked work and pending Approval Points. The Board
+also shows a separate warning from the Server-global Runner projection because
+presence, control, admission, drain, and capacity can affect many Projects. An
+Issue may still start and wait for Runner capacity.
 
 Issue details keeps these decisions together:
 
@@ -281,8 +283,37 @@ See [Planning with Epics](epics.md) for action availability and transitions.
 URL: `/<projectName>/activity`
 
 The live Activity feed shows recent Issue state changes, Workflow stage
-progress, AgentSession start and end activity, and Runner connection changes.
-Use it to answer what happened recently.
+progress, AgentSession start and end activity, Runner connection changes, and
+current Runner status evidence. Runner links always use `/runners/<runnerId>`
+and remain valid independently of the selected Project. Status evidence keeps
+offline, disconnected, blocked, draining, full-capacity, and active-work facts
+separate; an empty active-work list is not an idle or health verdict.
+
+## Runners
+
+URLs: `/runners` and `/runners/<runnerId>`.
+
+Runner status is an application-scoped projection assembled by Server from
+Runner definitions, current presence and control observations, credentials,
+drain fences, and active Workflow and AgentJob owner ledgers. The list and
+detail pages do not resolve a Project or apply a Project filter. A known offline
+Runner remains visible with its configured capacity even when live build and
+Runtime details are unavailable.
+
+Each row exposes identity, presence (`online`, `stale`, or `offline`), control
+(`connected` or `disconnected`), admission (`ready` or `blocked`) with stable
+reason codes, per-Runtime readiness and catalog facts, used/total capacity,
+drain, active owner rows, and Server-provided next actions. Workflow and
+AgentJob owners remain distinct. Capacity and active-work counts are shown
+independently from admission, and secondary summaries use admission, drain,
+capacity, and active-work language rather than `idle` or `busy`.
+
+The displayed `observedAt` value identifies one observational read. Sources may
+change while the projection is assembled, and a later claim or other mutation
+remains authoritative. The page never turns a status read into a recovery
+command; it renders only Server-provided install, start, re-enroll, wait, or
+correction actions. `mo runner status` reads this remote projection, while
+`mo service status runner` reads only the local service-manager unit.
 
 ## Logs
 

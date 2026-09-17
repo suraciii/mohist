@@ -81,6 +81,7 @@ public static class MohistServiceRegistration
         services.AddHttpContextAccessor();
         services.AddSingleton<IFileCredentialStore>(PhysicalFileCredentialStore.Instance);
         services.AddScoped<ICredentialStore>(sp => sp.GetRequiredService<CredentialStore>());
+        services.AddScoped<IRunnerCredentialStatusReader>(sp => sp.GetRequiredService<CredentialStore>());
         services.AddScoped<IPrincipalStore>(sp => sp.GetRequiredService<PrincipalStore>());
         services.AddScoped<ICurrentUser>(sp => sp.GetRequiredService<HttpContextCurrentUser>());
         services.AddScoped<IAuthAuditEventStore>(sp => sp.GetRequiredService<AuthAuditEventStore>());
@@ -427,6 +428,8 @@ public static class MohistServiceRegistration
         services.AddScoped<ISessionCommandDispatcher, RunnerSessionCommandDispatcher>();
         services.AddScoped<IActionCatalogSource>(sp => sp.GetRequiredService<RunnerRegistryCatalogSource>());
         services.AddScoped<IRunnerStatusSource>(sp => sp.GetRequiredService<RunnerStatusService>());
+        services.AddScoped<IRunnerActiveWorkReader>(sp => sp.GetRequiredService<RunnerActiveWorkReader>());
+        services.AddScoped<IRunnerDurableStatusReader>(sp => sp.GetRequiredService<RunnerDurableStatusReader>());
         services.AddSingleton<IRunnerWorkflowStatusRouter, RunnerWorkflowStatusRouter>();
         services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
         {

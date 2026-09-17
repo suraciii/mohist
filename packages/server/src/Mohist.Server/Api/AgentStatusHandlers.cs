@@ -22,7 +22,8 @@ public static class AgentStatusHandlers
         var scope = RequestWorkScope.Current;
         scope?.SetAgentPath("agent.status");
 
-        var runners = await runnerStatus.GetOnlineRunnersAsync(project.Id);
+        var runnerSnapshot = await runnerStatus.GetGlobalRunnersAsync(ct);
+        var runnerAvailability = RunnerStatusService.ProjectAvailability(runnerSnapshot);
         var activeAgents = await projection.ListActiveAgentsResultAsync(project.Id, ct);
         scope?.AddCandidates(activeAgents.Candidates);
         scope?.AddProcessed(activeAgents.ActiveAgents.Count);
@@ -30,8 +31,8 @@ public static class AgentStatusHandlers
         var amplification = CurrentAmplification();
         return ApiResults.Ok(AgentStatusResponse.Create(
             activeAgents.ActiveAgents,
-            runners,
-            SumCapacity(runners),
+            runnerSnapshot.Runners,
+            runnerAvailability,
             amplification));
     }
 
@@ -45,7 +46,8 @@ public static class AgentStatusHandlers
     {
         RequestWorkScope.Current?.SetAgentPath("agent.activity");
 
-        var capacity = await runnerStatus.GetCapacityAsync(project.Id);
+        var runnerSnapshot = await runnerStatus.GetGlobalRunnersAsync(ct);
+        var capacity = RunnerStatusService.ProjectAvailability(runnerSnapshot).Capacity;
         var waiting = await BuildWaitingCardsAsync(issues, project.Id);
         var activity = await activityFeed.GetActivityAsync(
             project.Id,
@@ -118,17 +120,4 @@ public static class AgentStatusHandlers
             .ToList();
     }
 
-    private static RunnerCapacityView SumCapacity(IReadOnlyList<RunnerStatusView> runners)
-    {
-        var used = 0;
-        var total = 0;
-        foreach (var runner in runners)
-        {
-            if (runner.Capacity is not { } capacity) continue;
-            used += capacity.UsedSlots;
-            total += capacity.TotalSlots;
-        }
-
-        return new RunnerCapacityView(used, total);
-    }
 }

@@ -100,9 +100,13 @@ async function mockIssueBoardApi(page: Page) {
         json: apiResponse({ running: false, runnerAvailable: true, activeAgents: [], capacity: { active: 0, max: 8 } }),
       })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/runners`) {
+    if (method === 'GET' && path === '/runners') {
       return route.fulfill({
-        json: apiResponse({ runners: [{ id: 'runner-layout', status: 'idle', slots: 1, active: 0 }] }),
+        json: apiResponse({
+          observedAt: '2026-01-01T00:00:00.000Z',
+          inventory: { state: 'ready', nextActions: [] },
+          runners: [],
+        }),
       })
     }
     if (method === 'GET' && path === `/projects/${project.id}/inbox`) {

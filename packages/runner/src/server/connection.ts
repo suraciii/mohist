@@ -134,13 +134,18 @@ export class ServerConnection {
       runtimeReadiness?: RuntimeReadinessWitness[]
       connectionId?: string | null
       admissionReady?: boolean
+      admissionReasonCodes?: string[]
       deploymentEpoch?: string | null
     },
   ): Promise<PolledDispatch[]> {
     const response = await this.requestTransport.request('poll', this.url('poll'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(report),
+      body: JSON.stringify({
+        ...report,
+        admissionReady: report.admissionReady ?? false,
+        admissionReasonCodes: report.admissionReasonCodes ?? [],
+      }),
       signal,
     })
     this.observeDeploymentEpoch(response.headers.get('x-mohist-manager-deployment-epoch'))
