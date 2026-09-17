@@ -177,6 +177,14 @@ func TestIssue681SlackEditDiscoveryIsLocal(t *testing.T) {
 			if out.Len() == 0 || errOut.Len() != 0 {
 				t.Fatalf("stdout=%q stderr=%q, want local output without editable field", out.String(), errOut.String())
 			}
+			for _, field := range slackEditFields {
+				if !strings.Contains(out.String(), field) {
+					t.Fatalf("stdout=%q, want edit field %q", out.String(), field)
+				}
+			}
+			if strings.Contains(out.String(), "projectId") || strings.Contains(out.String(), "workspaceTeamId") {
+				t.Fatalf("stdout=%q, want only manage-access envelope fields", out.String())
+			}
 			probe.assertUnused(t)
 		})
 	}
@@ -227,4 +235,68 @@ func TestIssue681SlackEditManagerModeUsesBrokerAndDirectRoute(t *testing.T) {
 	if got.Header.Get("Authorization") != "" {
 		t.Fatalf("headers=%v, want no local Authorization in manager mode", got.Header)
 	}
+}
+
+func TestIssue681SlackEditPreservesOwnerMember(t *testing.T) {
+	var body string
+	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		data, _ := io.ReadAll(r.Body)
+		body = string(data)
+		return response(http.StatusOK, manageAccessResponse), nil
+	}), map[string]string{"MOHIST_TOKEN": "operator-token"})
+	// The CLI never filters the Owner; the Server owns Owner semantics.
+	args := []string{"slack", "edit", "s1", "--project", "proj", "--access-policy", "allowlist", "--allow-member", "UOWNER", "--allow-member", "U2"}
+	if code := Run(context.Background(), args, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if body != `{"accessPolicy":"allowlist","allowMembers":["UOWNER","U2"]}` {
+		t.Fatalf("body=%q, want Owner passed through unfiltered and in order", body)
+	}
+}
+
+func TestIssue681SlackEditJSONCatalog(t *testing.T) {
+	t.Run("bare-json-lists-edit-fields", func(t *testing.T) {
+		probe := discoveryProbe{}
+		out, errOut := &strings.Builder{}, &strings.Builder{}
+		if code := Run(context.Background(), []string{"slack", "edit", "s1", "--json"}, probe.deps(out, errOut)); code != ExitOK {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+		}
+		want := strings.Join(slackEditFields, "\n") + "\n"
+		if out.String() != want {
+			t.Fatalf("stdout=%q, want exactly %q", out.String(), want)
+		}
+		probe.assertUnused(t)
+	})
+
+	t.Run("selected-fields-are-real", func(t *testing.T) {
+		deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return response(http.StatusOK, manageAccessResponse), nil
+		}), map[string]string{"MOHIST_TOKEN": "operator-token"})
+		args := []string{"slack", "edit", "s1", "--project", "proj", "--access-policy", "allowlist", "--json", "accessPolicy,allowMembers"}
+		if code := Run(context.Background(), args, deps); code != ExitOK {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+		}
+		if !strings.Contains(out.String(), `"accessPolicy":"allowlist"`) || !strings.Contains(out.String(), `"allowMembers":["U1","U2"]`) {
+			t.Fatalf("stdout=%q, want selected real values", out.String())
+		}
+		if strings.Contains(out.String(), `"connection"`) {
+			t.Fatalf("stdout=%q, want unselected fields omitted", out.String())
+		}
+	})
+
+	t.Run("id-is-unknown", func(t *testing.T) {
+		probe := discoveryProbe{}
+		out, errOut := &strings.Builder{}, &strings.Builder{}
+		args := []string{"slack", "edit", "s1", "--json", "id"}
+		if code := Run(context.Background(), args, probe.deps(out, errOut)); code != ExitUsage {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+		}
+		if out.Len() != 0 {
+			t.Fatalf("stdout=%q, want empty", out.String())
+		}
+		if !strings.Contains(errOut.String(), `unknown JSON field "id"`) {
+			t.Fatalf("stderr=%q, want unknown JSON field id", errOut.String())
+		}
+		probe.assertUnused(t)
+	})
 }

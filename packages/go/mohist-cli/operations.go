@@ -20,6 +20,10 @@ var otelTraceFields = []string{"trace_id", "service_name", "start_time", "end_ti
 var githubFields = []string{"id", "projectId", "owner", "repo", "repositoryName", "approvers", "status", "installationId", "repositoryNodeId", "reconnectRequired", "needsAttention", "needsReprojection", "lastError", "webhookSecret", "ingressUrl", "createdAt", "updatedAt"}
 var slackFields = []string{"id", "projectId", "agentId", "workspaceTeamId", "status", "connectionState", "botName", "owner", "accessPolicy", "nextAction", "createdAt", "updatedAt"}
 
+// slackEditFields mirrors the manage-access response envelope, not the flat
+// Connection projection used by `slack list`/`slack view`.
+var slackEditFields = []string{"connection", "accessPolicy", "allowMembers", "anyoneDisclosure"}
+
 const maxSlackReplyFileBytes = 10 * 1024 * 1024
 
 const notificationSetupUsage = "USAGE\n    mo notification setup [--health-base URL] [--webhook-url URL] [--secret VALUE] [--config-file PATH]\n\nConfigure local Hermes notifications without contacting the Server."
@@ -135,7 +139,7 @@ func parseOperations(area string, args []string) (command, error) {
 		return command{}, usage("unknown " + area + " command")
 	}
 	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
-		return command{help: true, helpText: opsLeafHelp("ops-"+area+"-"+action, fieldsFor(area))}, nil
+		return command{help: true, helpText: opsLeafHelp("ops-"+area+"-"+action, catalogFor(area, action))}, nil
 	}
 	if action == "message" {
 		if len(args) < 2 || args[1] != "send" {
@@ -143,9 +147,9 @@ func parseOperations(area string, args []string) (command, error) {
 		}
 		action = "message-send"
 	} else if len(args) > 1 && (args[1] == "--help" || args[1] == "-h") {
-		return command{help: true, helpText: opsLeafHelp("ops-"+area+"-"+action, fieldsFor(area))}, nil
+		return command{help: true, helpText: opsLeafHelp("ops-"+area+"-"+action, catalogFor(area, action))}, nil
 	}
-	c := command{kind: "ops-" + area + "-" + action, catalog: fieldsFor(area)}
+	c := command{kind: "ops-" + area + "-" + action, catalog: catalogFor(area, action)}
 	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, opsLeafHelp(c.kind, c.catalog)); ok {
 		return discovered, err
 	}
@@ -231,6 +235,11 @@ func parseOperations(area string, args []string) (command, error) {
 		}
 	}
 	if area == "slack" && action == "edit" {
+		// Selected JSON fields are part of the edit leaf contract, so reject an
+		// unknown field before validating the editable payload.
+		if err := validateFields(c.fields, c.catalog, "mo slack edit"); err != nil {
+			return command{}, err
+		}
 		policy := strings.ToLower(strings.TrimSpace(argValue(c.args, "access-policy", "")))
 		if policy == "" {
 			return command{}, usageWithLeaf("slack edit requires --access-policy", leafUsage)
@@ -272,6 +281,13 @@ func parseOperations(area string, args []string) (command, error) {
 		return command{}, usage("slack status requires non-blank --workspace-team")
 	}
 	return c, validateFields(c.fields, c.catalog, "mo "+area+" "+strings.ReplaceAll(action, "-", " "))
+}
+
+func catalogFor(area, action string) []string {
+	if area == "slack" && action == "edit" {
+		return slackEditFields
+	}
+	return fieldsFor(area)
 }
 
 func fieldsFor(area string) []string {
