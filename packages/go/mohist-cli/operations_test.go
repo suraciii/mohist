@@ -591,7 +591,7 @@ func TestRunnerRevokeRequiresAnIDBeforeHTTP(t *testing.T) {
 		calls++
 		return nil, errors.New("must not call")
 	}), map[string]string{"MOHIST_TOKEN": "token"})
-	if code := Run(context.Background(), []string{"runner", "revoke", "--json"}, deps); code != ExitUsage || calls != 0 || !strings.Contains(errOut.String(), "resource id is required") {
+	if code := Run(context.Background(), []string{"runner", "revoke"}, deps); code != ExitUsage || calls != 0 || !strings.Contains(errOut.String(), "resource id is required") {
 		t.Fatalf("code=%d calls=%d stderr=%q", code, calls, errOut.String())
 	}
 }

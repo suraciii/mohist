@@ -38,10 +38,10 @@ const (
 
 var operationsFlags = map[string]map[string]map[string]flagShape{
 	"runner": {
-		"list":   {"project": flagValue},
-		"view":   {"project": flagValue},
-		"status": {"project": flagValue},
-		"revoke": {"project": flagValue},
+		"list":   {},
+		"view":   {},
+		"status": {},
+		"revoke": {},
 	},
 	"server": {
 		"status": {},
@@ -161,22 +161,17 @@ func parseOperations(area string, args []string) (command, error) {
 		start = 2
 	}
 	if area == "runner" && (action == "view" || action == "revoke") || area == "github" && contains([]string{"view", "update", "enable", "disable"}, action) || area == "slack" && contains([]string{"view", "diagnostics", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete"}, action) {
-		if area == "runner" && action == "view" && len(args) == 2 && args[1] == "--json" {
-			// Field discovery is local and does not require a Runner id.
-			start = 1
-		} else {
-			if len(args) <= 1 {
-				return command{}, usage("resource id is required")
-			}
-			if area == "runner" && (args[1] == "--project" || args[1] == "--scope") {
-				return command{}, usage(args[1] + " is not supported by mo runner; Runner status is global")
-			}
-			if isControlToken(args[1]) {
-				return command{}, usage("resource id is required")
-			}
-			c.args = append(c.args, "id", args[1])
-			start = 2
+		if len(args) <= 1 {
+			return command{}, usage("resource id is required")
 		}
+		if area == "runner" && (args[1] == "--project" || args[1] == "--scope") {
+			return command{}, usage(args[1] + " is not supported by mo runner; Runner status is global")
+		}
+		if isControlToken(args[1]) {
+			return command{}, usage("resource id is required")
+		}
+		c.args = append(c.args, "id", args[1])
+		start = 2
 	}
 	if area == "github" && action == "connect" {
 		if len(args) <= 1 || isControlToken(args[1]) {
@@ -211,7 +206,7 @@ func parseOperations(area string, args []string) (command, error) {
 			return command{}, usage("Slack credentials must be supplied through a protected credentials file")
 		}
 		if area == "runner" && (name == "project" || name == "scope") {
-			return command{}, usage("--" + name + " is not supported by mo runner; Runner status is global")
+			return command{}, usageWithLeaf("unknown option "+args[i]+": --"+name+" is not supported by mo runner; Runner status is global", leafUsage)
 		}
 		shape, ok := leaf[name]
 		if !ok {
