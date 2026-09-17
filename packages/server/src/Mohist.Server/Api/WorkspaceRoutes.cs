@@ -7,6 +7,7 @@ using Mohist.Server.Runner.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workspace.Grains;
 
 namespace Mohist.Server.Api;
 
@@ -19,6 +20,7 @@ public static class WorkspaceRoutes
 
         issues.MapGet("/diff", async (
             HttpContext context, int number,
+            IGrainFactory grains,
             IRunnerWorkspaceClient runnerWorkspace,
             WorkflowQuerier querier,
             IssueQuerier issuesQuery) =>
@@ -26,7 +28,7 @@ public static class WorkspaceRoutes
             var pid = context.GetResolvedProject().Id;
             var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
-            var prepared = await PrepareWorkspaceQueryAsync(querier, issue);
+            var prepared = await PrepareWorkspaceQueryAsync(grains, querier, issue);
             if (prepared.Unavailable is not null) return ApiResults.Ok(prepared.Unavailable);
 
             try
@@ -76,6 +78,7 @@ public static class WorkspaceRoutes
 
         issues.MapGet("/commits", async (
             HttpContext context, int number,
+            IGrainFactory grains,
             IRunnerWorkspaceClient runnerWorkspace,
             WorkflowQuerier querier,
             IssueQuerier issuesQuery) =>
@@ -83,7 +86,7 @@ public static class WorkspaceRoutes
             var pid = context.GetResolvedProject().Id;
             var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
-            var prepared = await PrepareWorkspaceQueryAsync(querier, issue);
+            var prepared = await PrepareWorkspaceQueryAsync(grains, querier, issue);
             if (prepared.Unavailable is not null) return ApiResults.Ok(prepared.Unavailable);
 
             try
@@ -131,6 +134,7 @@ public static class WorkspaceRoutes
 
         issues.MapGet("/commits/{hash}/diff", async (
             HttpContext context, int number, string hash,
+            IGrainFactory grains,
             IRunnerWorkspaceClient runnerWorkspace,
             WorkflowQuerier querier,
             IssueQuerier issuesQuery) =>
@@ -138,7 +142,7 @@ public static class WorkspaceRoutes
             var pid = context.GetResolvedProject().Id;
             var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
-            var prepared = await PrepareWorkspaceQueryAsync(querier, issue);
+            var prepared = await PrepareWorkspaceQueryAsync(grains, querier, issue);
             if (prepared.Unavailable is not null)
                 return ApiResults.Ok(ToCommitDiffUnavailable(prepared.Unavailable, hash));
 
@@ -175,6 +179,7 @@ public static class WorkspaceRoutes
 
         issues.MapGet("/workspace-status", async (
             HttpContext context, int number,
+            IGrainFactory grains,
             IRunnerWorkspaceClient runnerWorkspace,
             WorkflowQuerier querier,
             IssueQuerier issuesQuery) =>
@@ -182,7 +187,7 @@ public static class WorkspaceRoutes
             var pid = context.GetResolvedProject().Id;
             var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
-            var prepared = await PrepareWorkspaceQueryAsync(querier, issue);
+            var prepared = await PrepareWorkspaceQueryAsync(grains, querier, issue);
             if (prepared.Unavailable is not null)
                 return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = prepared.Unavailable.Reason });
 
@@ -216,6 +221,7 @@ public static class WorkspaceRoutes
 
         issues.MapGet("/file-content", async (
             HttpContext context, int number, string path,
+            IGrainFactory grains,
             IRunnerWorkspaceClient runnerWorkspace,
             WorkflowQuerier querier,
             IssueQuerier issuesQuery) =>
@@ -223,7 +229,7 @@ public static class WorkspaceRoutes
             var pid = context.GetResolvedProject().Id;
             var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
-            var prepared = await PrepareWorkspaceQueryAsync(querier, issue);
+            var prepared = await PrepareWorkspaceQueryAsync(grains, querier, issue);
             if (prepared.Unavailable is not null)
                 return ApiResults.Ok(new { @base = (string?)null, head = (string?)null, reason = prepared.Unavailable.Reason });
 
@@ -285,9 +291,7 @@ public static class WorkspaceRoutes
             if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
                 return ApiResults.Conflict("No workflow workspace to clean", "workspace_missing");
 
-            var workspace = await ResolveWorkspaceAsync(querier, issue);
-            if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path))
-                return ApiResults.Conflict("No workflow workspace to clean", "workspace_missing");
+            var workspace = await ResolveNamedWorkspaceAsync(grains, issue);
             var repository = await querier.GetRepositoryContextAsync(issue.WorkflowRunId);
             if (repository is null)
                 return ApiResults.Conflict("No workflow repository context to clean", "missing_repository_context");
@@ -308,17 +312,23 @@ public static class WorkspaceRoutes
         return app;
     }
 
-    private static async Task<PreparedWorkspaceQuery> PrepareWorkspaceQueryAsync(WorkflowQuerier querier, IssueReadModel issue)
+    /// <summary>
+    /// Resolves the Issue's Named Workspace identity: the derived
+    /// <c>issue-{number}</c> name, the Server-owned materialization Home
+    /// (may be unset before materialization or after archival), and the
+    /// immutable run-owned repository context used for review. The
+    /// WorkflowRun only supplies execution history and assignment routing;
+    /// its stored <see cref="WorkspaceIdentity.Path"/> is never consulted.
+    /// </summary>
+    private static async Task<PreparedWorkspaceQuery> PrepareWorkspaceQueryAsync(
+        IGrainFactory grains,
+        WorkflowQuerier querier,
+        IssueReadModel issue)
     {
         if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
             return PreparedWorkspaceQuery.UnavailableResult(Unavailable("not_started", "Issue has no active workflow"));
 
-        var workspace = await ResolveWorkspaceAsync(querier, issue);
-        if (workspace is null || string.IsNullOrWhiteSpace(workspace.Path))
-            return PreparedWorkspaceQuery.UnavailableResult(Unavailable("workspace_removed", "The workflow workspace is not available"));
-
-        if (WorkspaceHeadOrNull(workspace, issue.WorkflowRunId) is null)
-            return PreparedWorkspaceQuery.UnavailableResult(Unavailable("branch_missing", "Workspace head branch is not recorded for this run"));
+        var workspace = await ResolveNamedWorkspaceAsync(grains, issue);
 
         var repository = await querier.GetRepositoryContextAsync(issue.WorkflowRunId);
         if (repository is null)
@@ -326,6 +336,31 @@ public static class WorkspaceRoutes
 
         return PreparedWorkspaceQuery.Ready(workspace, repository);
     }
+
+    /// <summary>
+    /// Resolves the Named Workspace directly from the Server-owned
+    /// <see cref="IWorkspaceGrain"/>: the name is derived from the Issue and
+    /// the path is the reported materialization Home. A missing Home is not
+    /// treated as an unavailable workspace here — the Runner's own status is
+    /// the authority for whether the directory currently exists.
+    /// </summary>
+    private static async Task<WorkspaceIdentity> ResolveNamedWorkspaceAsync(
+        IGrainFactory grains,
+        IssueReadModel issue)
+    {
+        var workspaceName = NamedWorkspaceName(issue);
+        var home = await grains
+            .GetGrain<IWorkspaceGrain>(GrainKey.Workspace(issue.ProjectId, workspaceName))
+            .GetHomeAsync();
+        return new WorkspaceIdentity(
+            Path: home?.Path ?? string.Empty,
+            Branch: NamedWorkspaceBranch(workspaceName),
+            ChangeDir: null);
+    }
+
+    private static string NamedWorkspaceName(IssueReadModel issue) => $"issue-{issue.Number}";
+
+    private static string NamedWorkspaceBranch(string workspaceName) => $"mohist/ws-{workspaceName}";
 
     private static async Task<WorkspaceUnavailable?> EnsureRunnerWorkspaceAvailableAsync(
         IRunnerWorkspaceClient runnerWorkspace,
@@ -342,27 +377,6 @@ public static class WorkspaceRoutes
 
         var reason = string.IsNullOrWhiteSpace(status.Reason) ? "workspace_removed" : status.Reason;
         return Unavailable(reason, MessageForUnavailableReason(reason));
-    }
-
-    private static async Task<WorkspaceIdentity?> ResolveWorkspaceAsync(WorkflowQuerier querier, IssueReadModel issue)
-    {
-        if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
-            return null;
-        return await querier.GetWorkspaceAsync(issue.WorkflowRunId);
-    }
-
-    /// <summary>
-    /// Returns the workspace's recorded head ref. The runner prepares the
-    /// per-run branch <c>mohist/run-${workflowRunId}</c> inside the workspace;
-    /// review APIs use that ref instead of legacy <c>mo/issue-{N}</c>.
-    /// </summary>
-    private static string? WorkspaceHeadOrNull(WorkspaceIdentity? workspace, string? workflowRunId)
-    {
-        if (workspace is not null && !string.IsNullOrWhiteSpace(workspace.Branch))
-            return workspace.Branch;
-        if (string.IsNullOrWhiteSpace(workflowRunId))
-            return null;
-        return WorkflowRunBranch.For(workflowRunId);
     }
 
     private static bool IsWorkflowActive(IssueWorkflowStatus? workflow)

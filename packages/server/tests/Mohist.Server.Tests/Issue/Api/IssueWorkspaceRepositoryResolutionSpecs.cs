@@ -46,10 +46,13 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         // Given an issue bound to a project repository whose path and base branch are
         // subsequently changed in project configuration.
         _fixture.RunnerWorkspace.Reset();
+        var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary-old", "develop");
+        var issue = await CreateIssueAsync(projectId, "Repo path drifts", "secondary");
+
         _fixture.RunnerWorkspace.WorkspaceStatus = new WorkspaceStatus
         {
             Exists = true,
-            Branch = "mohist/run-test",
+            Branch = $"mohist/ws-issue-{issue.Number}",
             BaseBranch = "release",
             Ahead = 1,
             Behind = 0,
@@ -57,11 +60,9 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
             ConflictingFiles = [],
         };
         _fixture.RunnerWorkspace.Diff = new RunnerWorkspaceDiffResult(
-            "release", "mohist/run-test", "merge-base", 1, 0, 1, 1, 1,
+            "release", $"mohist/ws-issue-{issue.Number}", "merge-base", 1, 0, 1, 1, 1,
             [new DiffFile("a.txt", 1, 0, "@@ -1 +1 @@\n-x\n+y\n", false)]);
 
-        var projectId = await CreateProjectWithSecondaryRepositoryAsync("/proj/secondary-old", "develop");
-        var issue = await CreateIssueAsync(projectId, "Repo path drifts", "secondary");
         await StartIssueAndAssignmentRunnerAsync(projectId, issue.Number);
 
         // Round-trip the issue through cancelled to satisfy the

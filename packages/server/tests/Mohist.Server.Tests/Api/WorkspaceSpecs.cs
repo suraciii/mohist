@@ -11,6 +11,7 @@ using Mohist.Server.Issue.Grains;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workspace.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Api;
@@ -124,11 +125,11 @@ public class WorkspaceSpecs
     {
         var project = await CreateProjectWithRepositoryAsync("main");
         var issue = await CreateIssueAsync(project, "Workspace issue");
-        var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
-        _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(runId, "main", ahead: 2, behind: 1);
+        await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
+        _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(issue.Number, "main", ahead: 2, behind: 1);
         _fixture.RunnerWorkspace.Diff = new RunnerWorkspaceDiffResult(
             "main",
-            $"mohist/run-{runId}",
+            $"mohist/ws-issue-{issue.Number}",
             "abc123",
             2,
             1,
@@ -142,7 +143,7 @@ public class WorkspaceSpecs
         Assert.True(diff.Available);
         Assert.Null(diff.Reason);
         Assert.Equal("main", diff.Base);
-        Assert.Equal($"mohist/run-{runId}", diff.Head);
+        Assert.Equal($"mohist/ws-issue-{issue.Number}", diff.Head);
         Assert.Equal("abc123", diff.MergeBase);
         Assert.Equal(2, diff.Ahead);
         Assert.Equal(1, diff.Behind);
@@ -163,11 +164,11 @@ public class WorkspaceSpecs
     {
         var project = await CreateProjectWithRepositoryAsync("main");
         var issue = await CreateIssueAsync(project, "Behind base issue");
-        var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
-        _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(runId, "main", ahead: 0, behind: 3);
+        await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
+        _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(issue.Number, "main", ahead: 0, behind: 3);
         _fixture.RunnerWorkspace.Diff = new RunnerWorkspaceDiffResult(
             "main",
-            $"mohist/run-{runId}",
+            $"mohist/ws-issue-{issue.Number}",
             "merge-base",
             0,
             3,
@@ -192,11 +193,11 @@ public class WorkspaceSpecs
     {
         var project = await CreateProjectWithRepositoryAsync("main");
         var issue = await CreateIssueAsync(project, "Commits issue");
-        var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
-        _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(runId, "main", ahead: 2, behind: 0);
+        await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
+        _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(issue.Number, "main", ahead: 2, behind: 0);
         _fixture.RunnerWorkspace.Commits = new RunnerWorkspaceCommitsResult(
             "main",
-            $"mohist/run-{runId}",
+            $"mohist/ws-issue-{issue.Number}",
             "base123",
             2,
             0,
@@ -212,7 +213,7 @@ public class WorkspaceSpecs
 
         Assert.True(commits.Available);
         Assert.Equal("main", commits.Base);
-        Assert.Equal($"mohist/run-{runId}", commits.Head);
+        Assert.Equal($"mohist/ws-issue-{issue.Number}", commits.Head);
         Assert.Equal("base123", commits.MergeBase);
         Assert.Equal(2, commits.Ahead);
         Assert.Equal(0, commits.Behind);
@@ -231,8 +232,8 @@ public class WorkspaceSpecs
     {
         var project = await CreateProjectWithRepositoryAsync("main");
         var issue = await CreateIssueAsync(project, "Commit diff issue");
-        var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
-        _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(runId, "main");
+        await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
+        _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(issue.Number, "main");
         _fixture.RunnerWorkspace.CommitDiffs["deadbeef"] = new RunnerWorkspaceCommitDiffResult("@@ -1 +1 @@\n-x\n+y\n");
 
         var commitDiff = await _client.GetDataAsync<CommitDiffDto>($"/api/projects/{project.Id}/issues/{issue.Number}/commits/deadbeef/diff");
@@ -248,11 +249,11 @@ public class WorkspaceSpecs
     {
         var project = await CreateProjectWithRepositoryAsync("main");
         var issue = await CreateIssueAsync(project, "Status issue");
-        var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
+        await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
         _fixture.RunnerWorkspace.WorkspaceStatus = new WorkspaceStatus
         {
             Exists = true,
-            Branch = $"mohist/run-{runId}",
+            Branch = $"mohist/ws-issue-{issue.Number}",
             BaseBranch = "main",
             Ahead = 5,
             Behind = 0,
@@ -263,7 +264,7 @@ public class WorkspaceSpecs
         var status = await _client.GetDataAsync<StatusDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workspace-status");
 
         Assert.True(status.Exists);
-        Assert.Equal($"mohist/run-{runId}", status.Branch);
+        Assert.Equal($"mohist/ws-issue-{issue.Number}", status.Branch);
         Assert.Equal("main", status.BaseBranch);
         Assert.Equal(5, status.Ahead);
     }
@@ -273,8 +274,8 @@ public class WorkspaceSpecs
     {
         var project = await CreateProjectWithRepositoryAsync("main");
         var issue = await CreateIssueAsync(project, "File content issue");
-        var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
-        _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(runId, "main");
+        await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
+        _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(issue.Number, "main");
         _fixture.RunnerWorkspace.FileContent = new RunnerWorkspaceFileContentResult("base content", "head content");
 
         var fileContent = await _client.GetDataAsync<FileContentDto>($"/api/projects/{project.Id}/issues/{issue.Number}/file-content?path=a.txt");
@@ -288,8 +289,8 @@ public class WorkspaceSpecs
     {
         var project = await CreateProjectWithRepositoryAsync("main");
         var issue = await CreateIssueAsync(project, "Cleanup issue");
-        var runId = await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
-        var expectedPath = MohistWorkspaceLayout.WorkflowRunWorkspacePath(_fixture.RunnerRoot, runId);
+        await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
+        var expectedPath = NamedWorkspaceHomePath($"issue-{issue.Number}");
         _fixture.RunnerWorkspace.WorkspaceRemoval = new WorkspaceRemovalResultDto(true, "removed", expectedPath, null, "Workspace removed").ToDomain();
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/stop");
 
@@ -365,16 +366,22 @@ public class WorkspaceSpecs
         Assert.Equal(expectedRepository.Name, repository!.Name);
         Assert.Equal(expectedRepository.GitUrl, repository.GitUrl);
         Assert.Equal(expectedRepository.BaseBranch, repository.BaseBranch);
+        var workspaceName = $"issue-{issueNumber}";
+        await _fixture.Grains
+            .GetGrain<IWorkspaceGrain>(GrainKey.Workspace(project.Id, workspaceName))
+            .EnsureMaterializedOnAsync("workspace-spec-runner", NamedWorkspaceHomePath(workspaceName), DateTimeOffset.UnixEpoch);
         return workflowRunId;
     }
+
+    private static string NamedWorkspaceHomePath(string workspaceName) => $"/mohist-tests/runner/{workspaceName}";
 
     private Task DispatchEventsAsync() =>
         _fixture.Services.GetRequiredService<IEventDispatcher>().DrainAsync();
 
-    private static WorkspaceStatus AvailableStatus(string runId, string baseBranch, int ahead = 0, int behind = 0) => new()
+    private static WorkspaceStatus AvailableStatus(int issueNumber, string baseBranch, int ahead = 0, int behind = 0) => new()
     {
         Exists = true,
-        Branch = $"mohist/run-{runId}",
+        Branch = $"mohist/ws-issue-{issueNumber}",
         BaseBranch = baseBranch,
         Ahead = ahead,
         Behind = behind,

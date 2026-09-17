@@ -145,4 +145,37 @@ public partial class WorkflowItemTranslatorSpecs
             .GetProperty("path");
         Assert.Equal("${{ vars.reviewPath }}", check.GetString());
     }
+
+    [Fact]
+    public async Task TranslateToDispatch_IssueBackedRun_EmitsNamedWorkspaceAndBranchWithoutPath()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-translate-workspace", issueNumber: 77);
+
+        var dispatch = await _translator.TranslateToDispatchAsync(
+            WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", With(@"{ ""x"": ""y"" }")),
+            runId, run, "runner-1");
+
+        using var document = JsonDocument.Parse(dispatch.Variables!);
+        var workspace = document.RootElement.GetProperty("workspace");
+        Assert.Equal("issue-77", workspace.GetProperty("name").GetString());
+        Assert.Equal("mohist/ws-issue-77", workspace.GetProperty("branch").GetString());
+        Assert.False(workspace.TryGetProperty("path", out _));
+        Assert.DoesNotContain("mohist/run-", workspace.GetRawText());
+        Assert.DoesNotContain("workspaces/run-", workspace.GetRawText());
+    }
+
+    [Fact]
+    public async Task TranslateToDispatch_NonIssueRun_EmitsNullWorkspace()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var run = await SeedRunningWorkflowAsync(runId, "proj-translate-workspace-none", issueNumber: null);
+
+        var dispatch = await _translator.TranslateToDispatchAsync(
+            WorkItem.Task("build", "task-1.1", "Task 1", "spec/task", With(@"{ ""x"": ""y"" }")),
+            runId, run, "runner-1");
+
+        using var document = JsonDocument.Parse(dispatch.Variables!);
+        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("workspace").ValueKind);
+    }
 }

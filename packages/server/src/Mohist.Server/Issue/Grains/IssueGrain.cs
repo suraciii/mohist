@@ -512,20 +512,13 @@ public partial class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingT
             repo.BaseBranch);
     }
 
-    private WorkspaceIdentity BuildWorkspaceIdentity(Domain.Issue issue, WorkflowProjectContext projectContext, string workflowRunId)
+    private static WorkspaceIdentity BuildWorkspaceIdentity(Domain.Issue issue)
     {
-        var runnerRoot = MohistWorkspaceLayout.ResolveRunnerRoot(_configuration, _environment);
-        var workspacePath = MohistWorkspaceLayout.WorkflowRunWorkspacePath(runnerRoot, workflowRunId);
-        var changeDir = MohistDefaultWorkflowProjection.ChangeDir(issue.Number);
-        // The runner manages the per-run head ref (`mohist/run-${workflowRunId}`)
-        // inside the workspace; the integrate merge uses this branch as the
-        // source. Persisting it on WorkspaceIdentity keeps review APIs,
-        // runner handlers, and the integrate task aligned on a stable ref.
-        var runBranch = WorkflowRunBranch.For(workflowRunId);
+        var workspaceName = $"issue-{issue.Number}";
         return new WorkspaceIdentity(
-            Path: workspacePath,
-            Branch: runBranch,
-            ChangeDir: changeDir);
+            Path: string.Empty,
+            Branch: $"mohist/ws-{workspaceName}",
+            ChangeDir: MohistDefaultWorkflowProjection.ChangeDir(issue.Number));
     }
 
     public async Task CancelAsync()

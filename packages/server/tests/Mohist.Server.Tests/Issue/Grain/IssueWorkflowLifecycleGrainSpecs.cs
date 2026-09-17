@@ -6,7 +6,6 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
-using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Grains;
@@ -148,18 +147,12 @@ public sealed class IssueWorkflowLifecycleGrainSpecs
         var run = await LoadWorkflowRunAsync(wrId);
         Assert.NotNull(run);
         Assert.NotNull(run!.Workspace);
-        // The silo resolves the runner root via IEnvironmentVariableProvider
-        // (MockEnvironmentVariableProvider on WorkflowGrainFixture, with no
-        // env vars set); assert the workspace path the workflow run
-        // stamped matches the layout helper's computation against that
-        // root, without binding the spec to a host-specific path.
-        using var envScope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
-        var env = envScope.ServiceProvider.GetRequiredService<IEnvironmentVariableProvider>();
-        var runnerRoot = MohistWorkspaceLayout.DefaultRunnerRoot(env);
-        Assert.Equal(
-            MohistWorkspaceLayout.WorkflowRunWorkspacePath(runnerRoot, wrId),
-            run.Workspace.Path);
-        Assert.Equal($"mohist/run-{wrId}", run.Workspace.Branch);
+        // The Server no longer computes a canonical, WorkflowRun-derived
+        // Workspace path: the Named Workspace name/branch identify the
+        // directory and the Runner materializes it. The Run must never carry
+        // a workspaces/run-* path or a mohist/run-* branch.
+        Assert.Equal(string.Empty, run.Workspace.Path);
+        Assert.Equal($"mohist/ws-issue-{issueNumber}", run.Workspace.Branch);
         Assert.Equal("PLANS", run.Workspace.ChangeDir);
 
         using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
@@ -170,7 +163,9 @@ public sealed class IssueWorkflowLifecycleGrainSpecs
         var payload = started!.Envelope.Data!.Value.Deserialize<IssueWorkStarted>(JSON.Options);
         Assert.NotNull(payload);
         Assert.Equal(run.Repository!.Name, payload!.Repository!.Name);
+        Assert.Equal($"issue-{issueNumber}", payload.WorkspaceName);
         Assert.Equal(run.Workspace.Path, payload.Workspace!.Path);
+        Assert.Equal(run.Workspace.Branch, payload.Workspace.Branch);
         Assert.Equal(issueNumber, payload.Context!.IssueNumber);
     }
 
