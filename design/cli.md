@@ -282,6 +282,21 @@ argument definition validates required values, mutual exclusions, defaults, and
 allowed values. One field definition drives field selection, serialization, and
 leaf help. Skill examples must parse against the same tree.
 
+Short flags are a closed allowlist owned by the reference and canonicalized to
+their long spelling at the flag token before dispatch. Values are read from the
+original argument slice and are never rewritten, so a value that looks like a
+short flag stays byte-exact. A short flag outside the allowlist, or an
+allowlisted short flag on a leaf that does not declare its long flag, is a local
+usage error with `ExitUsage=2` that reaches no request. No abbreviation or alias
+layer is added.
+
+`mo skill install` accepts the existing `--claude` and `--hermes` install
+targets, which select the `.claude/skills` and Hermes home skills directories
+the install path already implements. Incompatible combinations such as
+`--hermes` with `--claude` or `--path` fail locally before any write. Both flags
+are valid only on `install`; every other skill action rejects them as a usage
+error.
+
 Project-scoped commands use one inherited `--project <name-or-id>` option and one
 resolver. Name, ID, and current Project are input forms of one ProjectRef.
 Mutually exclusive inputs such as body and body-file, or target and selector,

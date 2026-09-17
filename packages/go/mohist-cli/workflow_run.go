@@ -123,12 +123,13 @@ func parseRun(args []string) (command, error) {
 		}
 	}
 	for i := start; i < len(args); i++ {
-		switch args[i] {
+		arg := canonicalFlag(args[i])
+		switch arg {
 		case "--issue", "--project", "--display-name", "--message", "--from-stage", "--interval":
 			if i+1 >= len(args) {
-				return command{}, usage(args[i] + " requires a value")
+				return command{}, usage(arg + " requires a value")
 			}
-			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), args[i+1])
+			c.args = append(c.args, strings.TrimPrefix(arg, "--"), args[i+1])
 			i++
 		case "--yes":
 			c.args = append(c.args, "yes", "true")

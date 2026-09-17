@@ -187,10 +187,11 @@ func parseOperations(area string, args []string) (command, error) {
 	leafUsage := opsLeafHelp(c.kind, c.catalog)
 	leaf := operationsFlags[area][action]
 	for i := start; i < len(args); i++ {
-		if args[i] == "--help" || args[i] == "-h" {
+		arg := canonicalFlag(args[i])
+		if arg == "--help" || arg == "-h" {
 			return command{help: true, helpText: leafUsage}, nil
 		}
-		if args[i] == "--json" {
+		if arg == "--json" {
 			var err error
 			i, err = jsonFlag(args, i, &c)
 			if err != nil {
@@ -198,10 +199,10 @@ func parseOperations(area string, args []string) (command, error) {
 			}
 			continue
 		}
-		if !strings.HasPrefix(args[i], "--") {
+		if !strings.HasPrefix(arg, "--") {
 			return command{}, usageWithLeaf("unexpected argument "+args[i], leafUsage)
 		}
-		name := strings.TrimPrefix(args[i], "--")
+		name := strings.TrimPrefix(arg, "--")
 		if area == "slack" && contains([]string{"bot-token", "app-token", "configuration-token", "configuration-refresh-token", "token"}, name) {
 			return command{}, usage("Slack credentials must be supplied through a protected credentials file")
 		}
@@ -354,30 +355,31 @@ func parseService(args []string) (command, error) {
 	c := command{kind: "ops-service", args: []string{"action", action, "target", target}}
 	leafUsage := "USAGE\n    mo service " + action + " " + target + " [--dry-run]"
 	if action == "logs" {
-		leafUsage += " [--lines N] [--follow]"
+		leafUsage += " [-n, --lines N] [-f, --follow]"
 	} else if action == "uninstall" {
 		leafUsage += " [--unit-dir PATH]"
 	}
 	for i := 2; i < len(args); i++ {
-		switch args[i] {
+		arg := canonicalFlag(args[i])
+		switch arg {
 		case "--help", "-h":
 			return command{help: true, helpText: leafUsage + "\n\nOperate local service-manager processes; application logs are provided by mo server logs."}, nil
 		case "--follow", "--dry-run":
-			if args[i] == "--follow" && action != "logs" {
-				return command{}, usageWithLeaf("unknown option "+args[i], leafUsage)
+			if arg == "--follow" && action != "logs" {
+				return command{}, usageWithLeaf("unknown option "+arg, leafUsage)
 			}
-			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), "true")
+			c.args = append(c.args, strings.TrimPrefix(arg, "--"), "true")
 		case "--lines", "--unit-dir":
-			if args[i] == "--lines" && action != "logs" || args[i] == "--unit-dir" && action != "uninstall" {
-				return command{}, usageWithLeaf("unknown option "+args[i], leafUsage)
+			if arg == "--lines" && action != "logs" || arg == "--unit-dir" && action != "uninstall" {
+				return command{}, usageWithLeaf("unknown option "+arg, leafUsage)
 			}
 			if i+1 >= len(args) {
-				return command{}, usageWithLeaf(args[i]+" requires a value", leafUsage)
+				return command{}, usageWithLeaf(arg+" requires a value", leafUsage)
 			}
-			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), args[i+1])
+			c.args = append(c.args, strings.TrimPrefix(arg, "--"), args[i+1])
 			i++
 		default:
-			return command{}, usageWithLeaf("unknown option "+args[i], leafUsage)
+			return command{}, usageWithLeaf("unknown option "+arg, leafUsage)
 		}
 	}
 	return c, nil
