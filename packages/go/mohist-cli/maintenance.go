@@ -58,6 +58,11 @@ func parseSkill(args []string) (command, error) {
 			}
 		case "--full", "--all", "--dry-run":
 			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), "true")
+		case "--claude", "--hermes":
+			if action != "install" {
+				return command{}, usage(args[i] + " is only valid with mo skill install")
+			}
+			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), "true")
 		case "--path", "--source", "--repo-root":
 			if i+1 >= len(args) {
 				return command{}, usage(args[i] + " requires a value")

@@ -607,6 +607,31 @@ func parseLeaf(kind string, args []string, path string, catalog []string, usage 
 	return c, nil
 }
 
+// shortFlagLongForm is the closed allowlist of short flags accepted by the
+// CLI. It is the only place a short spelling is defined; widening the
+// allowlist is a one-line change here. No abbreviation or prefix matching is
+// performed.
+var shortFlagLongForm = map[string]string{
+	"-l": "--label",
+	"-m": "--message",
+	"-p": "--priority",
+	"-y": "--yes",
+	"-b": "--body",
+	"-f": "--follow",
+	"-n": "--lines",
+	"-v": "--verbose",
+}
+
+// canonicalFlag returns the long spelling for an allowlisted short flag and
+// the argument unchanged otherwise. Callers canonicalize only the flag token,
+// never a value, so a value that looks like a short flag is preserved.
+func canonicalFlag(arg string) string {
+	if long, ok := shortFlagLongForm[arg]; ok {
+		return long
+	}
+	return arg
+}
+
 func isControlToken(value string) bool { return strings.HasPrefix(value, "-") }
 
 func discoverLeaf(args []string, kind string, catalog []string, helpText string) (command, bool, error) {
@@ -636,6 +661,7 @@ func discoverLeaf(args []string, kind string, catalog []string, helpText string)
 }
 
 func leafValueOption(kind, arg string) bool {
+	arg = canonicalFlag(arg)
 	if !strings.HasPrefix(arg, "--") || arg == "--help" || arg == "-h" || arg == "--json" {
 		return false
 	}
