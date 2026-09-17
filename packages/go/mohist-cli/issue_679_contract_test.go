@@ -518,7 +518,7 @@ func TestIssue679CreateLabelObject(t *testing.T) {
 // TestIssue679LabelTokenRejectionMatrix proves every malformed set token fails
 // locally with ExitUsage and zero HTTP requests on both create and edit.
 func TestIssue679LabelTokenRejectionMatrix(t *testing.T) {
-	tokens := []string{"plan", "=fast", "Plan=fast", "plan=", "plan= "}
+	tokens := []string{"plan", "=fast", "Plan=fast", "plan=", "plan= ", "-"}
 	actions := []struct {
 		name string
 		base []string
@@ -561,6 +561,86 @@ func TestIssue679RemoveTokenCreateRejectedEditAccepted(t *testing.T) {
 	labels, _ := body["labels"].(map[string]any)
 	if _, removed := labels["plan"]; removed || labels["keep"] != "yes" {
 		t.Fatalf("labels=%v", body["labels"])
+	}
+}
+
+// TestIssue679LabelTokensApplyInOrder proves repeated tokens for one key
+// resolve last-write-wins in command order: set-then-remove drops the key and
+// remove-then-set keeps it.
+func TestIssue679LabelTokensApplyInOrder(t *testing.T) {
+	cases := []struct {
+		name   string
+		tokens []string
+		want   string // "absent" or the value expected for key "a"
+	}{
+		{name: "set then remove", tokens: []string{"a=1", "-a"}, want: "absent"},
+		{name: "remove then set", tokens: []string{"-a", "a=2"}, want: "2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			requests, deps, out, errOut := newIssue679LabelHarness(`{"a":"old","keep":"yes"}`)
+			args := []string{"issue", "edit", "42", "--project", "proj"}
+			for _, token := range tc.tokens {
+				args = append(args, "--label", token)
+			}
+			if code := Run(context.Background(), args, deps); code != ExitOK {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+			if len(*requests) != 2 || (*requests)[1].method != http.MethodPatch {
+				t.Fatalf("requests=%+v", *requests)
+			}
+			body := issue679JSON(t, (*requests)[1].body)
+			labels, _ := body["labels"].(map[string]any)
+			value, present := labels["a"]
+			if tc.want == "absent" {
+				if present {
+					t.Fatalf("labels=%v want a removed", body["labels"])
+				}
+			} else if !present || value != tc.want {
+				t.Fatalf("labels=%v want a=%s", body["labels"], tc.want)
+			}
+			if labels["keep"] != "yes" {
+				t.Fatalf("labels=%v want keep=yes", body["labels"])
+			}
+		})
+	}
+}
+
+// TestIssue679ParentNoneClearsParent pins the tri-state for --parent none:
+// the member is present and null so the Server removes the parent link.
+func TestIssue679ParentNoneClearsParent(t *testing.T) {
+	requests, deps, out, errOut := newIssue679Harness(nil, "")
+	code := Run(context.Background(), []string{
+		"issue", "edit", "42", "--project", "proj", "--parent", "none",
+	}, deps)
+	if code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if len(*requests) != 1 || (*requests)[0].method != http.MethodPatch {
+		t.Fatalf("requests=%+v", *requests)
+	}
+	body := issue679JSON(t, (*requests)[0].body)
+	if value, ok := body["parentIssueNumber"]; !ok || value != nil {
+		t.Fatalf("parentIssueNumber=%v present=%v want present null", value, ok)
+	}
+}
+
+// TestIssue679InheritAndNoWorkflowMutuallyExclusive pins the edit-side
+// exclusivity so an accepted flag pair can no longer silently drop one side.
+func TestIssue679InheritAndNoWorkflowMutuallyExclusive(t *testing.T) {
+	requests, deps, out, errOut := newIssue679Harness(nil, "")
+	code := Run(context.Background(), []string{
+		"issue", "edit", "42", "--project", "proj", "--title", "T",
+		"--inherit-workflow-profile", "--no-workflow",
+	}, deps)
+	if code != ExitUsage {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if len(*requests) != 0 {
+		t.Fatalf("HTTP requests were issued: %+v", *requests)
+	}
+	if !strings.Contains(errOut.String(), "mutually exclusive") {
+		t.Fatalf("stderr=%q", errOut.String())
 	}
 }
 

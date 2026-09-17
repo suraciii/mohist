@@ -162,6 +162,9 @@ func parseIssueOptions(c command, args []string, action string) (command, error)
 			return command{}, usage("--workflow-profile and --no-workflow are mutually exclusive")
 		}
 	}
+	if action != "list" && hasArg(c.args, "stage") {
+		return command{}, usage("--stage is only valid for issue list")
+	}
 	if action == "edit" {
 		if hasArg(c.args, "body") && hasArg(c.args, "body-file") {
 			return command{}, usage("--body and --body-file are mutually exclusive")
@@ -169,15 +172,15 @@ func parseIssueOptions(c command, args []string, action string) (command, error)
 		if hasArg(c.args, "workflow-profile") && (hasArg(c.args, "inherit-workflow-profile") || hasArg(c.args, "no-workflow")) {
 			return command{}, usage("workflow profile options are mutually exclusive")
 		}
+		if hasArg(c.args, "inherit-workflow-profile") && hasArg(c.args, "no-workflow") {
+			return command{}, usage("--inherit-workflow-profile and --no-workflow are mutually exclusive")
+		}
 		if hasArg(c.args, "ready") && hasArg(c.args, "draft") {
 			return command{}, usage("--ready and --draft are mutually exclusive")
 		}
 		if !hasIssueEditableField(c) {
 			return command{}, usage("at least one field is required to edit an issue")
 		}
-	}
-	if action != "list" && hasArg(c.args, "stage") {
-		return command{}, usage("--stage is only valid for issue list")
 	}
 	if action == "create" || action == "edit" {
 		if hasArg(c.args, "stage-models") && hasArg(c.args, "stage-models-file") {
@@ -496,7 +499,7 @@ func runOrganization(ctx context.Context, deps Dependencies, c *client, cmd comm
 	// permission, or arbitrary read failure stops the command locally with
 	// ExitUsage=2 instead of falling through to an HTTP request against an
 	// implicit Project. The resolved value is stored on cmd.preflightedInput
-	// and reused by both organizationRequest and the issue-edit-with-labels
+	// and reused by both organizationRequest and the issue-edit label
 	// pre-flight GET so stdin is consumed at most once per command.
 	switch cmd.kind {
 	case "issue-create", "issue-edit", "issue-comment-create":
