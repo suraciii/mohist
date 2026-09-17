@@ -67,7 +67,7 @@ var operationsFlags = map[string]map[string]map[string]flagShape{
 		"view":             {"project": flagValue},
 		"diagnostics":      {"project": flagValue},
 		"claim-owner":      {"project": flagValue},
-		"edit":             {"project": flagValue},
+		"edit":             {"project": flagValue, "access-policy": flagValue, "allow-member": flagValue},
 		"transfer-owner":   {"project": flagValue},
 		"enable":           {"project": flagValue},
 		"disable":          {"project": flagValue},
@@ -228,6 +228,24 @@ func parseOperations(area string, args []string) (command, error) {
 		parts := strings.Split(argValue(c.args, "repository", ""), "/")
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 			return command{}, usage("repository must be owner/repo")
+		}
+	}
+	if area == "slack" && action == "edit" {
+		policy := strings.ToLower(strings.TrimSpace(argValue(c.args, "access-policy", "")))
+		if policy == "" {
+			return command{}, usageWithLeaf("slack edit requires --access-policy", leafUsage)
+		}
+		if policy != "owner_only" && policy != "allowlist" && policy != "anyone" {
+			return command{}, usageWithLeaf("--access-policy must be owner_only, allowlist, or anyone", leafUsage)
+		}
+		members := valuesFor(c.args, "allow-member")
+		for _, member := range members {
+			if strings.TrimSpace(member) == "" {
+				return command{}, usageWithLeaf("--allow-member values must be non-blank", leafUsage)
+			}
+		}
+		if policy != "allowlist" && len(members) > 0 {
+			return command{}, usageWithLeaf("--allow-member is only allowed with --access-policy allowlist", leafUsage)
 		}
 	}
 	if area == "slack" && action == "permanent-delete" && !hasArg(c.args, "yes") {
@@ -749,6 +767,10 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 			if isManagerMode(deps.Lookup) {
 				path = "/api/slack-manager/reply"
 			}
+		} else if action == "edit" {
+			path += "/" + url.PathEscape(argValue(cmd.args, "id", "")) + "/manage-access"
+			method = http.MethodPost
+			body = slackEditBody(cmd)
 		} else if action != "list" {
 			path += "/" + url.PathEscape(argValue(cmd.args, "id", ""))
 		}
@@ -761,6 +783,23 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 		collection = true
 	}
 	return remoteOperation(ctx, deps, c, method, path, body, cmd, collection)
+}
+
+func slackEditBody(cmd command) map[string]any {
+	members := []string{}
+	seen := map[string]bool{}
+	for _, value := range valuesFor(cmd.args, "allow-member") {
+		member := strings.TrimSpace(value)
+		if seen[member] {
+			continue
+		}
+		seen[member] = true
+		members = append(members, member)
+	}
+	return map[string]any{
+		"accessPolicy": strings.ToLower(strings.TrimSpace(argValue(cmd.args, "access-policy", ""))),
+		"allowMembers": members,
+	}
 }
 
 func slackMessageBody(deps Dependencies, cmd command) (map[string]any, error) {
