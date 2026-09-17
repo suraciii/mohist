@@ -121,7 +121,9 @@ public sealed class AgentSessionLaunchRuntimeDefaultModelSpecs : AgentSessionLau
     {
         for (var i = 0; i < 50; i++)
         {
-            using var poll = await _fixture.Client.PostRunnerPollAsync(runnerId);
+            using var poll = await _fixture.Client.PostRunnerPollAsync(
+                runnerId,
+                ReadyPollRequest(runnerId));
             var dispatches = await poll.ReadDispatchElementsAsync();
             foreach (var data in dispatches)
             {

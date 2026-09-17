@@ -91,9 +91,21 @@ public sealed class DispatchService : IScopedService
         await _pollObserver.AfterRunnerInfoAsync(runnerId).WaitAsync(ct);
         ct.ThrowIfCancellationRequested();
 
-        var readiness = await runner.ObserveRuntimeReadinessAsync(
-            req.ConnectionGeneration,
-            req.RuntimeReadiness ?? []);
+        var observation = await runner.ObserveDispatchObservationAsync(
+            processGeneration,
+            new RunnerDispatchObservation(
+                req.ConnectionGeneration,
+                req.AdmissionReady == true,
+                req.AdmissionReasonCodes
+                    ?? [RunnerAdmissionReasonCodes.ObservationInvalid],
+                req.RuntimeReadiness ?? []));
+        var readiness = observation is null
+            ? RunnerRuntimeReadinessSnapshot.Empty
+            : new RunnerRuntimeReadinessSnapshot(
+                observation.ConnectionGeneration,
+                [.. observation.RuntimeReadiness]);
+        var admissionReady = observation is { AdmissionReady: true }
+            && observation.AdmissionReasonCodes.Count == 0;
 
         var dispatches = new List<WorkDispatch>();
         var reportedWorkKeys = ReportedWorkKeys(req);
@@ -123,7 +135,7 @@ public sealed class DispatchService : IScopedService
         // A Runner that reports admission unavailable can still reconcile
         // held work, but it must not receive fresh claims until its local
         // admission preconditions recover.
-        if (req.AdmissionReady is false)
+        if (!admissionReady)
             return new RunnerPollResponse(dispatches);
 
         ct.ThrowIfCancellationRequested();

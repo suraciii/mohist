@@ -7,7 +7,7 @@ import { AlertTriangleIcon, SearchIcon, XIcon } from 'lucide-react'
 import type { AgentStatus } from '../../../entities/agent'
 import { deriveLabelPairsFromIssues, formatLabelToken, IssueStatus, type Issue } from '../../../entities/issue'
 import { deriveAttentionItems, isIssueAttentionItem, type AttentionItem } from '../../../entities/agent-ops'
-import { useRunnerSummary } from '../../../entities/runner'
+import { runnerSummaryText, useRunnerSummary } from '../../../entities/runner'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
 import {
@@ -485,24 +485,32 @@ function NeedsAttentionSummary({ items }: { items: AttentionItem[] }) {
 function attentionFamily(item: Extract<AttentionItem, { issueNumber: number }>): 'danger' | 'warning' {
   return item.kind === 'approval-needed' ? 'warning' : 'danger'
 }
-function RunnerUnavailableBanner({
-  agentStatus,
-  runnerSummaryHook,
-}: {
-  agentStatus: AgentStatus
-  runnerSummaryHook: typeof useRunnerSummary
-}) {
-  const { hasConnectedCapacity } = runnerSummaryHook()
-  const toProjectPath = useProjectPath()
-  if (hasConnectedCapacity) return null
+function RunnerUnavailableBanner({ summary }: { summary: ReturnType<typeof useRunnerSummary> }) {
+  if (summary.isLoading || summary.hasAdmissibleCapacity) return null
+
+  const action = summary.inventory?.nextActions[0] ?? summary.rows.flatMap((row) => row.nextActions)[0]
+  const message = summary.isError
+    ? 'Runner status is unavailable.'
+    : summary.rows.length === 0
+      ? 'No Runner definitions.'
+      : 'No Runner has admissible capacity.'
 
   return (
-    <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
-      {agentStatus.runnerMessage ?? 'No runner is connected.'}{' '}
-      <Link to={toProjectPath('/activity')} className="underline hover:no-underline">
-        View runner status
-      </Link>{' '}
-      or start a runner before starting workflow work.
+    <div
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700"
+      data-testid="runner-status-banner"
+    >
+      <span>{message}</span>
+      {!summary.isError && summary.rows.length > 0 && <span>{runnerSummaryText(summary)}</span>}
+      <Link to="/runners" className="underline hover:no-underline">
+        View Runner status
+      </Link>
+      {action && (
+        <span data-testid="runner-status-banner-action">
+          {action.message}
+          {action.command && <code className="ml-1 break-all">{action.command}</code>}
+        </span>
+      )}
     </div>
   )
 }
@@ -513,6 +521,7 @@ function getSearchParams(): string {
 
 export function KanbanBoard({ issues, agentStatus, archivedCount = 0, runnerSummaryHook = useRunnerSummary }: Props) {
   const { projectId, projects } = useProject()
+  const runnerSummary = runnerSummaryHook()
   const project = projects?.find((candidate) => candidate.id === projectId)
   const allLabels = useMemo(() => deriveLabelPairsFromIssues(issues), [issues])
   const repositoryOptions = useMemo(
@@ -582,11 +591,14 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0, runnerSumm
     return selectedColumn
   }, [selectedColumn, selectedStage, showCancelled])
 
-  const attentionItems = useMemo(() => deriveAttentionItems(issues, agentStatus), [issues, agentStatus])
+  const attentionItems = useMemo(
+    () => deriveAttentionItems(issues, agentStatus, runnerSummary),
+    [issues, agentStatus, runnerSummary],
+  )
 
   return (
     <div data-testid="kanban-board-root" className="flex flex-col min-w-0 h-[calc(100vh-3rem)]">
-      <RunnerUnavailableBanner agentStatus={agentStatus} runnerSummaryHook={runnerSummaryHook} />
+      <RunnerUnavailableBanner summary={runnerSummary} />
       <NeedsAttentionSummary items={attentionItems} />
       <FilterBar
         state={localState}

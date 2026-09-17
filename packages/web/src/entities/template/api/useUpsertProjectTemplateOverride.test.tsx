@@ -75,7 +75,7 @@ afterEach(() => {
 describe('useUpsertProjectTemplateOverride hook', () => {
   it('issues PUT /api/projects/{id}/templates/{key}/override with the payload', async () => {
     const putRequests: { method: string; url: string; body: unknown }[] = []
-    server.resetHandlers(
+    server.use(
       http.put(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, async ({ request }) => {
         const body = await request.json()
         putRequests.push({ method: request.method, url: request.url, body })
@@ -137,7 +137,7 @@ describe('useUpsertProjectTemplateOverride hook', () => {
   })
 
   it('surfaces API errors from the PUT response', async () => {
-    server.resetHandlers(
+    server.use(
       http.put(`/api/projects/${PROJECT_ID}/templates/${KEY}/override`, () =>
         HttpResponse.json({ success: false, error: 'Body is required', code: 'bad_request' }, { status: 400 }),
       ),

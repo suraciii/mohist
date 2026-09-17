@@ -61,10 +61,10 @@ func issue680OpsLeaves() []issue680OpsLeaf {
 // flag for a leaf and satisfies its parser-level requirements.
 func issue680ValidArgs(leaf issue680OpsLeaf) []string {
 	additions := map[string][]string{
-		"runner.list":            {"--project", "proj"},
-		"runner.view":            {"--project", "proj"},
-		"runner.status":          {"--project", "proj"},
-		"runner.revoke":          {"--project", "proj"},
+		"runner.list":            {},
+		"runner.view":            {},
+		"runner.status":          {},
+		"runner.revoke":          {},
 		"audit.list":             {"--kind", "k", "--since", "s", "--limit", "1"},
 		"github.connect":         {"--project", "proj", "--approver", "alice"},
 		"github.list":            {"--project", "proj"},
@@ -223,18 +223,20 @@ func TestIssue680NotificationSetupRejectsUnknownFlags(t *testing.T) {
 
 func TestIssue680OperationsLeavesAcceptDocumentedFlags(t *testing.T) {
 	cases := []struct {
-		name   string
-		args   []string
-		method string
-		path   string
-		query  map[string]string
-		body   string
+		name         string
+		args         []string
+		method       string
+		path         string
+		query        map[string]string
+		body         string
+		responseBody string
 	}{
 		{
-			name:   "runner.list project",
-			args:   []string{"runner", "list", "--project", "proj"},
-			method: http.MethodGet,
-			path:   "/api/projects/proj/runners",
+			name:         "runner.list global",
+			args:         []string{"runner", "list"},
+			method:       http.MethodGet,
+			path:         "/api/runners",
+			responseBody: `{"success":true,"data":{"observedAt":"2026-08-01T12:00:00Z","inventory":{"state":"first-install","nextActions":[{"code":"install-runner","message":"Install and start the first Runner.","command":"mo install runner --repo-root <path>"}]},"runners":[]}}`,
 		},
 		{
 			name:   "dead-letter list filters",
@@ -297,7 +299,11 @@ func TestIssue680OperationsLeavesAcceptDocumentedFlags(t *testing.T) {
 			var got *http.Request
 			deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				got = r
-				return response(http.StatusOK, `{"success":true,"data":[]}`), nil
+				payload := `{"success":true,"data":[]}`
+				if tc.responseBody != "" {
+					payload = tc.responseBody
+				}
+				return response(http.StatusOK, payload), nil
 			}), map[string]string{"MOHIST_TOKEN": "token"})
 			if code := Run(context.Background(), tc.args, deps); code != ExitOK {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())

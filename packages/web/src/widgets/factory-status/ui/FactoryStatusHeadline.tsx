@@ -1,15 +1,25 @@
 import { useMemo, type ComponentType } from 'react'
-import { ActivityIcon, CheckCircle2Icon, CircleDollarSignIcon, ClockIcon, LayersIcon, ShieldOffIcon } from 'lucide-react'
+import {
+  ActivityIcon,
+  CheckCircle2Icon,
+  CircleDollarSignIcon,
+  ClockIcon,
+  GaugeIcon,
+  LayersIcon,
+  ShieldOffIcon,
+} from 'lucide-react'
 import { useIssues, type Issue } from '../../../entities/issue'
-import { useAgentStatus, useCostRollup, type AgentCostMetricDto, type AgentStatus } from '../../../entities/agent'
+import { useCostRollup, type AgentCostMetricDto } from '../../../entities/agent'
 import { useProject } from '../../../entities/project'
+import { runnerSummaryText, useRunnerSummary, type RunnerStatusSummary } from '../../../entities/runner'
 import { cn } from '@/shared/lib/utils'
 import { formatCost } from '@/shared/lib/format-compact'
 import { deriveFactoryStatus } from '../model/factory-status'
 
 export interface FactoryStatusHeadlineProps {
   issues?: Issue[]
-  agentStatus?: AgentStatus
+  runnerSummary?: RunnerStatusSummary
+  runnerSummaryHook?: typeof useRunnerSummary
   todayCost?: AgentCostMetricDto
 }
 
@@ -17,23 +27,37 @@ export function FactoryStatusHeadline(props: FactoryStatusHeadlineProps = {}) {
   const { projectId } = useProject()
 
   const issuesQuery = useIssues(projectId ? { projectId } : undefined)
-  const agentStatusQuery = useAgentStatus()
+  const runnerSummaryQuery = (props.runnerSummaryHook ?? useRunnerSummary)()
   const costRollupQuery = useCostRollup()
 
   const issues = props.issues ?? issuesQuery.data
-  const agentStatus = props.agentStatus ?? agentStatusQuery.data
+  const runnerSummary = props.runnerSummary ?? runnerSummaryQuery
   const todayCost = props.todayCost ?? costRollupQuery.data?.todayCost
 
-  const status = useMemo(
-    () => deriveFactoryStatus(issues, agentStatus, todayCost),
-    [issues, agentStatus, todayCost],
-  )
+  const status = useMemo(() => deriveFactoryStatus(issues, todayCost), [issues, todayCost])
 
-  const runnerUp = status.runnerAvailable
+  const runnerReady =
+    runnerSummary.rows.length > 0 &&
+    runnerSummary.blockedCount === 0 &&
+    runnerSummary.isLoading !== true &&
+    runnerSummary.isError !== true
+  const runnerStatusLabel = runnerSummary.isLoading
+    ? 'Checking'
+    : runnerSummary.rows.length === 0
+      ? runnerSummary.inventory?.state === 'first-install'
+        ? 'No definitions'
+        : 'Unavailable'
+      : runnerSummary.blockedCount > 0
+        ? 'Admission blocked'
+        : 'Admission ready'
+  const runnerCapacity =
+    runnerSummary.rows.length === 0
+      ? 'unknown'
+      : runnerSummary.hasUnknownCapacity
+        ? `unknown/${runnerSummary.capacityTotal}`
+        : `${runnerSummary.capacityUsed ?? 0}/${runnerSummary.capacityTotal}`
   const todayCostHasSample = (todayCost?.sampleCount ?? 0) > 0
-  const todayCostDisplay = todayCostHasSample
-    ? formatCost(todayCost?.amount ?? null, todayCost?.currency ?? null)
-    : '—'
+  const todayCostDisplay = todayCostHasSample ? formatCost(todayCost?.amount ?? null, todayCost?.currency ?? null) : '—'
 
   return (
     <section
@@ -44,11 +68,34 @@ export function FactoryStatusHeadline(props: FactoryStatusHeadlineProps = {}) {
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
         <Stat
           testId="factory-status-runner"
-          icon={runnerUp ? CheckCircle2Icon : ShieldOffIcon}
-          iconClassName={runnerUp ? 'text-emerald-500' : 'text-muted-foreground'}
+          icon={runnerReady ? CheckCircle2Icon : ShieldOffIcon}
+          iconClassName={runnerReady ? 'text-emerald-500' : 'text-muted-foreground'}
           label="Runner"
-          value={runnerUp ? 'Online' : 'Unavailable'}
-          valueClassName={runnerUp ? 'text-emerald-700' : 'text-muted-foreground'}
+          value={runnerStatusLabel}
+          valueClassName={
+            runnerReady ? 'text-emerald-700' : runnerSummary.blockedCount > 0 ? 'text-warning' : 'text-muted-foreground'
+          }
+        />
+        <Stat
+          testId="factory-status-runner-capacity"
+          icon={GaugeIcon}
+          iconClassName="text-info"
+          label="Runner capacity"
+          value={runnerCapacity}
+        />
+        <Stat
+          testId="factory-status-runner-active-work"
+          icon={LayersIcon}
+          iconClassName="text-info"
+          label="Active work"
+          value={runnerSummary.activeWorkCount}
+        />
+        <Stat
+          testId="factory-status-runner-draining"
+          icon={ShieldOffIcon}
+          iconClassName={runnerSummary.drainingCount > 0 ? 'text-warning' : 'text-muted-foreground/60'}
+          label="Draining"
+          value={runnerSummary.drainingCount}
         />
         <Stat
           testId="factory-status-in-flight"
@@ -81,6 +128,11 @@ export function FactoryStatusHeadline(props: FactoryStatusHeadlineProps = {}) {
           valueAriaLabel={todayCostHasSample ? 'Today cost' : 'Today cost unavailable'}
         />
       </div>
+      {runnerSummary.rows.length > 0 && (
+        <p className="mt-3 text-[10px] leading-4 text-muted-foreground" data-testid="factory-status-runner-facts">
+          {runnerSummaryText(runnerSummary)}
+        </p>
+      )}
     </section>
   )
 }
@@ -101,7 +153,9 @@ function Stat({ testId, icon: Icon, iconClassName, label, value, valueClassName,
       <Icon className={cn('size-4', iconClassName)} />
       <div className="flex flex-col">
         <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{label}</span>
-        <span className={cn('text-sm font-semibold tabular-nums', valueClassName)} aria-label={valueAriaLabel}>{value}</span>
+        <span className={cn('text-sm font-semibold tabular-nums', valueClassName)} aria-label={valueAriaLabel}>
+          {value}
+        </span>
       </div>
     </div>
   )

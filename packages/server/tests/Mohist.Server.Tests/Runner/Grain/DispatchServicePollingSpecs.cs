@@ -35,9 +35,60 @@ public partial class DispatchServiceReconciliationSpecs
         var assignment = await workflow.AssignWorkerAsync(runnerId);
         Assert.Equal(WorkflowAssignmentStatus.Assigned, assignment.Status);
 
-        var dispatch = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
+        var dispatch = Assert.Single((await Dispatch.PollAsync(
+            runnerId,
+            DispatchTestExtensions.ReadyPollRequestForGeneration(
+                TestRunnerGenerationExtensions.ProcessGeneration))).Dispatches);
 
         Assert.Equal(workflowIds[0], dispatch.WorkflowRunId);
+    }
+
+    [Fact]
+    public async Task PollAsync_MissingAdmissionObservationCannotClaimFreshWorkflow()
+    {
+        var (runnerId, workflowIds) = await StartReadyWorkflowsAsync(
+            $"poll-missing-admission-{Guid.NewGuid():N}", count: 1, slots: 1);
+
+        var response = await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest(
+                [],
+                [],
+                ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration,
+                ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
+
+        Assert.Empty(response.Dispatches);
+        Assert.Equal("Pending", await Grains.GetGrain<IWorkflowGrain>(workflowIds[0]).GetRunStatusAsync());    }
+
+    [Fact]
+    public async Task PollAsync_BlockedAdmissionReconcilesExistingWorkWithoutFreshClaims()
+    {
+        var prefix = $"poll-blocked-admission-{Guid.NewGuid():N}";
+        var (runnerId, workflowIds) = await StartReadyWorkflowsAsync(prefix, count: 1, slots: 2);
+        var first = Assert.Single((await Dispatch.PollAsync(
+            runnerId,
+            DispatchTestExtensions.ReadyPollRequest())).Dispatches);
+
+        var secondWorkflowId = $"poll-blocked-admission-second-{Guid.NewGuid():N}";
+        var projectId = $"{prefix}-project";
+        await SeedWorkflowTemplateAsync(secondWorkflowId, SingleStage(checks: []), projectId);
+        await Grains.GetGrain<IWorkflowGrain>(secondWorkflowId).StartAsync(TestInput(projectId));
+
+        var blocked = await Dispatch.PollAsync(
+            runnerId,
+            new RunnerPollRequest(
+                [],
+                [],
+                RuntimeReadiness: [],
+                ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration,
+                AdmissionReady: false,
+                AdmissionReasonCodes: [RunnerAdmissionReasonCodes.ProviderPolicyInvalid],
+                ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
+
+        var redelivery = Assert.Single(blocked.Dispatches);
+        Assert.Equal(first.WorkId, redelivery.WorkId);
+        Assert.Equal("Running", await Grains.GetGrain<IWorkflowGrain>(workflowIds[0]).GetRunStatusAsync());
+        Assert.NotEqual("Running", await Grains.GetGrain<IWorkflowGrain>(secondWorkflowId).GetRunStatusAsync());
     }
 
     [Fact]
@@ -237,7 +288,10 @@ public partial class DispatchServiceReconciliationSpecs
 
         try
         {
-            var poll = Dispatch.PollAsync(runnerId, new RunnerPollRequest([], [], ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration));
+            var poll = Dispatch.PollAsync(
+                runnerId,
+                DispatchTestExtensions.ReadyPollRequestForGeneration(
+                    TestRunnerGenerationExtensions.ProcessGeneration));
             await _fixture.DispatchPollObserver.WaitForRunnerInfoAsync();
 
             await Grains.GetGrain<IRunnerGrain>(runnerId).UpdateAsync(1);

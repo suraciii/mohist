@@ -34,6 +34,7 @@ public partial class RunnerGrain
         {
             if (_status == RunnerStatus.Offline)
                 await RemovePresenceReminderAsync();
+            PublishStatusObservation();
             return;
         }
 
@@ -55,6 +56,7 @@ public partial class RunnerGrain
         if (!complete)
         {
             await EnsurePresenceReminderAsync();
+            PublishStatusObservation();
             return;
         }
 
@@ -74,6 +76,7 @@ public partial class RunnerGrain
                 RunnerId,
                 closingGeneration);
             await EnsurePresenceReminderAsync();
+            PublishStatusObservation();
             return;
         }
 
@@ -81,6 +84,7 @@ public partial class RunnerGrain
             await RemovePresenceReminderAsync();
         else
             await EnsurePresenceReminderAsync();
+        PublishStatusObservation();
     }
 
     /// <summary>

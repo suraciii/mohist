@@ -690,14 +690,46 @@ real-time Event envelope stream that starts when the subscription is created.
 do not share read semantics and must not be combined into one command with a
 mode or source flag.
 
-`runner` represents only Server-registered execution resources and their
-presence, capacity, and state. `server` represents only the connected Mohist
-Server application. Use `mo service <action> <server|runner|slack>` to start,
-stop, or read logs from a managed local process. `slack` is the optional
+`runner` represents Server-global execution resources and their independent
+identity, presence, control, admission, Runtime, capacity, active-owner, drain,
+and next-action facts. Runner status never resolves a Project and does not
+accept `--project` or `--scope` filters. The status commands are:
+
+```bash
+mo runner list
+mo runner status
+mo runner view <runner-id>
+mo runner revoke <runner-id>
+```
+
+`mo runner list` and `mo runner status` read the global inventory. `view` reads
+one global Runner and `revoke` addresses its global credential. Selectable row
+fields are `identity`, `presence`, `control`, `admission`, `capabilities`,
+`runtimes`, `capacity`, `activeWorks`, `drain`, and `nextActions`. Selected
+`activeWorks` values retain each `workId`, `ownerKind`, and `ownerId`, so
+Workflow and AgentJob ownership remains visible. Empty inventory output uses
+the Server-provided first-install action. Known offline or revoked rows use only
+the Server-provided start or re-enrollment action; the CLI does not invent a
+Runner recovery command.
+
+Runner status exposes stable admission reason codes such as
+`presence-offline`, `presence-stale`, `credential-revoked`,
+`credential-missing`, `control-disconnected`, `draining`,
+`admission-observation-missing`, `capacity-full`,
+`provider-policy-invalid`, and `runtime-event-queue-unavailable`. Presence,
+control, admission, drain, capacity, active owners, and Runtime readiness are
+separate fields; zero active owners does not mean `idle` or healthy readiness.
+Every list or view response includes `observedAt`, captured at the start of one
+observational read. Definitions and ledgers may change during assembly, so the
+snapshot is not a reservation and a later claim remains authoritative.
+
+`server` represents only the connected Mohist Server application. Use `mo service <action> <server|runner|slack>` to start, stop, inspect status, or read logs from a managed local process. In particular, `mo service status runner`
+reads the local service manager and performs no HTTP request; it is distinct
+from the remote `mo runner status` command. `slack` is the optional
 `mohist-slack` integration service, not an integration resource managed by
-`mo slack`. Therefore, `server logs` returns application logs, while
-`service logs server` returns local service-manager logs. A `--source` flag must
-not switch between these behaviors.
+`mo slack`. Therefore, `server logs` returns application logs, while `service
+logs server` returns local service-manager logs. A `--source` flag must not
+switch between these behaviors.
 
 The CLI does not provide a generic root `config`. Each resource manages its own
 Project Variables, Prompts, Agent configuration, and other product settings.
@@ -877,7 +909,7 @@ mo issue comment create 42 --body-file -
 mo run variable set --issue 42 agent.model provider-a/model-a
 mo run variable get --issue 42 agent.model --effective --stage check
 
-# Distinguish a remote Runner resource from the local Runner service.
+# Read the remote global Runner projection or local service-manager state.
 mo runner status
 mo service status runner
 

@@ -73,7 +73,9 @@ public static class AgentDefinitionRoutes
             CancellationToken ct) =>
         {
             var projectId = context.GetResolvedProject().Id;
-            var agents = await query.ListActiveDefinitionsAsync(projectId, ct);
+            // Availability must reflect each Agent's resolved Runtime/model, so
+            // the list is hydrated rather than read as raw definitions.
+            var agents = await query.ListAsync(projectId, ct: ct);
 
             var entries = await availability.GetListSummaryAsync(projectId, agents, ct);
             var summaries = agents
@@ -270,7 +272,7 @@ public static class AgentDefinitionRoutes
         entry.WaitingReason,
         entry.ActiveRuns,
         entry.MaxConcurrentRuns,
-        new AgentAvailabilitySummaryCapacity(entry.Capacity.UsedSlots, entry.Capacity.TotalSlots),
+        new AgentAvailabilitySummaryCapacity(entry.Capacity.UsedSlots, entry.Capacity.TotalSlots, entry.CapacityIncomplete),
         entry.QueuedCount);
 
     private static bool TouchesImmutableField(JsonElement raw)
@@ -461,4 +463,4 @@ public sealed record AgentAvailabilitySummaryEntry(
     AgentAvailabilitySummaryCapacity Capacity,
     int QueuedCount);
 
-public sealed record AgentAvailabilitySummaryCapacity(int UsedSlots, int TotalSlots);
+public sealed record AgentAvailabilitySummaryCapacity(int UsedSlots, int TotalSlots, bool Incomplete = false);

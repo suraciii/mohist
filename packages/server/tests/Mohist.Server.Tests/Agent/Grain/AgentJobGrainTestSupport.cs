@@ -212,11 +212,15 @@ public abstract class AgentJobGrainTestSupport
             projectId,
             ConnectionGeneration: CapabilityFenceConnection,
             RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()));
-        await runner.ObserveRuntimeReadinessAsync(
-            CapabilityFenceConnection,
-            runtimes
-                .Select(runtime => new RuntimeReadinessWitness(runtime, Ready: true, Generation: 1))
-                .ToList());
+        await runner.ObserveDispatchObservationAsync(
+            TestRunnerGenerationExtensions.ProcessGeneration,
+            new RunnerDispatchObservation(
+                CapabilityFenceConnection,
+                AdmissionReady: true,
+                AdmissionReasonCodes: [],
+                RuntimeReadiness: runtimes
+                    .Select(runtime => new RuntimeReadinessWitness(runtime, Ready: true, Generation: 1))
+                    .ToList()));
     }
 
     /// <summary>
@@ -231,5 +235,7 @@ public abstract class AgentJobGrainTestSupport
                 .Select(runtime => new RuntimeReadinessWitness(runtime, Ready: true, Generation: 1))
                 .ToList(),
             ConnectionGeneration: CapabilityFenceConnection,
+            AdmissionReady: true,
+            AdmissionReasonCodes: [],
             ProcessGeneration: TestRunnerGenerationExtensions.ProcessGeneration);
 }

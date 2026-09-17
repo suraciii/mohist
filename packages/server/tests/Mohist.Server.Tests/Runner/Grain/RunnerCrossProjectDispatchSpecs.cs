@@ -65,7 +65,8 @@ public class RunnerCrossProjectDispatchSpecs : WorkflowGrainSpecs
             runnerId,
             ["spec/*"],
             "round-robin-host",
-            null));
+            null,
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration));
         // Bump capacity above the target count so unrelated assignable workflows
         // left by other specs cannot fill every slot before this assertion sees
         // all three projects.

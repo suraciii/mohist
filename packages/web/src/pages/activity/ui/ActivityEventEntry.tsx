@@ -107,7 +107,7 @@ function SecondaryTargets({ targets }: { targets: ActivityEventTargets }) {
     chips.push(
       <Link
         key="runner"
-        to={toProjectPath(targets.runner.path ?? `/runners/${encodeURIComponent(targets.runner.runnerId)}?from=activity`)}
+        to={targets.runner.path ?? `/runners/${encodeURIComponent(targets.runner.runnerId)}?from=activity`}
         data-testid="activity-event-runner-link"
         className="inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
       >
@@ -131,6 +131,7 @@ export function ActivityEventEntry({ event, now }: ActivityEventEntryProps) {
   const attentionStyle = attentionPresentation[event.attention]
   const typeStyle = typePresentation[event.type]
   const primary = event.targets.primary
+  const primaryPath = primary ? (primary.scope === 'application' ? primary.path : toProjectPath(primary.path)) : null
 
   return (
     <div
@@ -154,7 +155,7 @@ export function ActivityEventEntry({ event, now }: ActivityEventEntryProps) {
             </span>
             {primary ? (
               <Link
-                to={toProjectPath(primary.path)}
+                to={primaryPath ?? '#'}
                 data-testid="activity-event-primary-link"
                 className="text-sm font-medium text-foreground hover:underline truncate"
               >

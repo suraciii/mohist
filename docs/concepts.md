@@ -33,7 +33,7 @@ user's chat or collaboration workspace.
 ```bash
 mo project create my-app --path /path/to/repo --verification-command "npm run verify"   # Register the repository and its verification command.
 mo project use my-app
-mo runner status   # Show Runners and shared execution capacity.
+mo runner status   # Read the Server-global Runner status projection.
 ```
 
 A Project may declare separate Repositories for a product server and Web UI.

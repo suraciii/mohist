@@ -19,7 +19,8 @@ public sealed record AgentAvailabilityResult(
     int ActiveRuns,
     int? MaxConcurrentRuns,
     RunnerCapacityView Capacity,
-    DateTimeOffset ObservedAt);
+    DateTimeOffset ObservedAt,
+    bool CapacityIncomplete = false);
 
 public sealed record AgentWaitingWork(
     string JobId,
@@ -34,7 +35,8 @@ public sealed record AgentAvailabilityListEntry(
     int ActiveRuns,
     int? MaxConcurrentRuns,
     RunnerCapacityView Capacity,
-    int QueuedCount);
+    int QueuedCount,
+    bool CapacityIncomplete = false);
 
 public sealed class AgentAvailabilityService : IScopedService
 {
@@ -60,20 +62,26 @@ public sealed class AgentAvailabilityService : IScopedService
         AgentInfo agent,
         CancellationToken ct = default)
     {
-        var runners = await _runnerStatus.GetOnlineRunnersAsync(projectId, ct);
-        var capacity = SumCapacity(runners);
-        var snapshot = await _grains
+        // One canonical Runner read per request; the per-Agent Runtime
+        // requirement is projected from the same snapshot so availability
+        // never advertises a Runtime the capability gate would reject.
+        var runnerSnapshot = await _runnerStatus.GetGlobalRunnersAsync(ct);
+        var availability = RunnerStatusService.ProjectAvailability(runnerSnapshot, RequirementFor(agent));
+        var capacity = availability.Capacity;
+        var gateSnapshot = await _grains
             .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agent.Id))
             .GetSnapshotAsync();
-        var activeRuns = snapshot.ActivePermits.Count;
+        var activeRuns = gateSnapshot.ActivePermits.Count;
 
         var result = Compute(
             capacity,
             activeRuns,
             agent.MaxConcurrentRuns,
             _timeProvider.GetUtcNow(),
-            runners.Count > 0,
-            GateWaitingCount(snapshot));
+            availability.HasOnlineRunner,
+            GateWaitingCount(gateSnapshot),
+            availability.BlockingReason,
+            availability.CapacityIncomplete);
         return result;
     }
 
@@ -82,13 +90,12 @@ public sealed class AgentAvailabilityService : IScopedService
         IReadOnlyCollection<AgentInfo> agents,
         CancellationToken ct = default)
     {
-        // Runner capacity is fetched exactly once per request — the list
+        // Runner status is fetched exactly once per request — the list
         // summary's core cost-control guarantee. Per-Agent active counts
         // are cheap in-process grain calls; pending-job counts come from
-        // a single batched query grouped by Agent.
-        var runners = await _runnerStatus.GetOnlineRunnersAsync(projectId, ct);
-        var capacity = SumCapacity(runners);
-        var hasOnlineRunner = runners.Count > 0;
+        // a single batched query grouped by Agent. Per-Agent availability is
+        // then derived from the one snapshot with each Agent's requirement.
+        var runnerSnapshot = await _runnerStatus.GetGlobalRunnersAsync(ct);
         var pendingCounts = agents.Count == 0
             ? new Dictionary<string, int>(StringComparer.Ordinal)
             : await _jobs.CountPendingByAgentAsync(projectId, ct);
@@ -97,6 +104,7 @@ public sealed class AgentAvailabilityService : IScopedService
         var entries = new Dictionary<string, AgentAvailabilityListEntry>(agents.Count, StringComparer.Ordinal);
         foreach (var agent in agents)
         {
+            var availability = RunnerStatusService.ProjectAvailability(runnerSnapshot, RequirementFor(agent));
             var snapshot = await _grains
                 .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agent.Id))
                 .GetSnapshotAsync();
@@ -108,12 +116,14 @@ public sealed class AgentAvailabilityService : IScopedService
             var queuedCount = pendingCount + followupWaiters + pendingFollowupNotifications;
             entries[agent.Id] = BuildListEntry(
                 agent,
-                capacity,
+                availability.Capacity,
                 snapshot.ActivePermits.Count,
                 queuedCount,
-                hasOnlineRunner,
+                availability.HasOnlineRunner,
                 observedAt,
-                GateWaitingCount(snapshot));
+                GateWaitingCount(snapshot),
+                availability.BlockingReason,
+                availability.CapacityIncomplete);
         }
 
         return entries;
@@ -126,7 +136,9 @@ public sealed class AgentAvailabilityService : IScopedService
         int queuedCount,
         bool hasOnlineRunner,
         DateTimeOffset observedAt,
-        int gateWaiterCount = 0)
+        int gateWaiterCount = 0,
+        string? runnerBlockingReason = null,
+        bool capacityIncomplete = false)
     {
         var availability = Compute(
             capacity,
@@ -134,7 +146,9 @@ public sealed class AgentAvailabilityService : IScopedService
             agent.MaxConcurrentRuns,
             observedAt,
             hasOnlineRunner,
-            gateWaiterCount);
+            gateWaiterCount,
+            runnerBlockingReason,
+            capacityIncomplete);
         return new AgentAvailabilityListEntry(
             agent.Id,
             availability.CanStartNow,
@@ -142,7 +156,8 @@ public sealed class AgentAvailabilityService : IScopedService
             activeRuns,
             agent.MaxConcurrentRuns,
             capacity,
-            queuedCount);
+            queuedCount,
+            availability.CapacityIncomplete);
     }
 
     public async Task<IReadOnlyList<AgentWaitingWork>> GetWaitingWorkAsync(
@@ -206,17 +221,24 @@ public sealed class AgentAvailabilityService : IScopedService
         int? maxConcurrentRuns,
         DateTimeOffset observedAt,
         bool hasOnlineRunner,
-        int gateWaiterCount)
+        int gateWaiterCount,
+        string? runnerBlockingReason = null,
+        bool capacityIncomplete = false)
     {
+        // The Agent's own gate saturation is the tightest constraint; report it
+        // before a pool-wide Runner blocker so a waiting follow-up still reads
+        // as capacity-full rather than a less specific Runner reason.
         string? reason = !hasOnlineRunner
             ? AgentAvailabilityWaitReasons.NoOnlineRunner
-            : capacity.UsedSlots >= capacity.TotalSlots
+            : gateWaiterCount > 0
                 ? AgentAvailabilityWaitReasons.CapacityFull
-                : gateWaiterCount > 0
-                    ? AgentAvailabilityWaitReasons.CapacityFull
-                : maxConcurrentRuns is not null && activeRuns >= maxConcurrentRuns.Value
-                    ? AgentAvailabilityWaitReasons.ConcurrencyLimit
-                    : null;
+                : runnerBlockingReason is not null
+                    ? runnerBlockingReason
+                    : capacity.UsedSlots >= capacity.TotalSlots
+                        ? AgentAvailabilityWaitReasons.CapacityFull
+                        : maxConcurrentRuns is not null && activeRuns >= maxConcurrentRuns.Value
+                            ? AgentAvailabilityWaitReasons.ConcurrencyLimit
+                            : null;
 
         return new AgentAvailabilityResult(
             reason is null,
@@ -224,8 +246,14 @@ public sealed class AgentAvailabilityService : IScopedService
             activeRuns,
             maxConcurrentRuns,
             capacity,
-            observedAt);
+            observedAt,
+            capacityIncomplete);
     }
+
+    private static RunnerRuntimeRequirement? RequirementFor(AgentInfo agent) =>
+        agent.EffectiveExecutionConfig is { } execution
+            ? new RunnerRuntimeRequirement(execution.Runtime, execution.Model, execution.Variant)
+            : null;
 
     public static IReadOnlyList<AgentWaitingWork> BuildWaitingWork(
         IReadOnlyList<AgentJobListItem> pending,
@@ -244,17 +272,4 @@ public sealed class AgentAvailabilityService : IScopedService
     private static int GateWaitingCount(AgentConcurrencySnapshot snapshot) =>
         snapshot.Waiters.Count + snapshot.PendingNotifications.Count;
 
-    private static RunnerCapacityView SumCapacity(IReadOnlyList<RunnerStatusView> runners)
-    {
-        var used = 0;
-        var total = 0;
-        foreach (var runner in runners)
-        {
-            if (runner.Capacity is not { } runnerCapacity)
-                continue;
-            used += runnerCapacity.UsedSlots;
-            total += runnerCapacity.TotalSlots;
-        }
-        return new RunnerCapacityView(used, total);
-    }
 }

@@ -88,22 +88,12 @@ async function mockActivityApi(page: Page) {
         }),
       })
     }
-    if (route.request().method() === 'GET' && path === `/projects/${project.id}/runners`) {
+    if (route.request().method() === 'GET' && path === '/runners') {
       return route.fulfill({
         json: response({
-          runners: [
-            {
-              id: 'runner-42',
-              kind: 'external',
-              hostname: 'runner',
-              scope: { type: 'global' },
-              status: 'idle',
-              capabilities: [],
-              coderModels: [],
-              coderModelCount: 0,
-              activeWorks: [],
-            },
-          ],
+          observedAt: '2026-01-01T00:00:00.000Z',
+          inventory: { state: 'ready', nextActions: [] },
+          runners: [],
         }),
       })
     }
@@ -119,7 +109,7 @@ async function expectNoHorizontalOverflow(page: Page) {
   expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth)
 }
 
-test('Activity renders evidence zones and project-scoped navigation at desktop width', async ({ page }) => {
+test('Activity renders evidence zones and global Runner navigation at desktop width', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await mockActivityApi(page)
   await page.goto(`/${project.name}/activity`)
@@ -137,7 +127,7 @@ test('Activity renders evidence zones and project-scoped navigation at desktop w
   )
   await expect(page.getByTestId('activity-event-runner-link')).toHaveAttribute(
     'href',
-    `/${project.name}/runners/runner-42?from=activity`,
+    '/runners/runner-42?from=activity',
   )
 
   await page.getByTestId('activity-event-primary-link').first().click()
@@ -149,7 +139,7 @@ test('Activity renders evidence zones and project-scoped navigation at desktop w
   await page.goBack()
 
   await page.getByTestId('activity-event-runner-link').click()
-  await expect(page).toHaveURL(`/${project.name}/runners/runner-42?from=activity`)
+  await expect(page).toHaveURL('/runners/runner-42?from=activity')
 })
 
 test('Activity filters wrap without horizontal overflow on a narrow viewport', async ({ page }) => {

@@ -30,6 +30,42 @@ public class RunnerDefinitionStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ListAsync_ReturnsDefinitionsOrderedByStableRunnerId()
+    {
+        await _store.GetOrInitAsync("runner-z");
+        await _store.GetOrInitAsync("runner-a");
+        await _store.UpdateSlotsAsync("runner-z", 4);
+
+        var definitions = await _store.ListAsync();
+
+        Assert.Equal(["runner-a", "runner-z"], definitions.Select(definition => definition.Id));
+        Assert.Equal(4, definitions.Single(definition => definition.Id == "runner-z").Slots);
+    }
+
+    [Fact]
+    public async Task GetAsync_DoesNotCreateAnUnknownDefinition()
+    {
+        var definition = await _store.GetAsync("runner-not-defined");
+
+        Assert.Null(definition);
+        await using var db = new MohistDbContext(_database.Options);
+        Assert.Empty(await db.Runners.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task GetAsync_ReturnsConfiguredSlotsForOfflineDefinition()
+    {
+        await _store.GetOrInitAsync("runner-offline");
+        await _store.UpdateSlotsAsync("runner-offline", 3);
+
+        var definition = await _store.GetAsync("runner-offline");
+
+        Assert.NotNull(definition);
+        Assert.Equal("runner-offline", definition!.Id);
+        Assert.Equal(3, definition.Slots);
+    }
+
+    [Fact]
     public async Task GetOrInitAsync_UnknownRunner_InitializesSlotsToOneAndPersists()
     {
         var runnerId = $"runner-init-{Guid.NewGuid():N}";

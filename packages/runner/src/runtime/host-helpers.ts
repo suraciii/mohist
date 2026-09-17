@@ -122,6 +122,29 @@ export function runtimeReadinessWitnesses(
   ]
 }
 
+export const RUNNER_ADMISSION_REASON_CODES = {
+  providerPolicyInvalid: 'provider-policy-invalid',
+  runtimeEventQueueUnavailable: 'runtime-event-queue-unavailable',
+} as const
+
+export interface RunnerAdmissionObservation {
+  admissionReady: boolean
+  admissionReasonCodes: string[]
+}
+
+export function deriveRunnerAdmissionObservation(
+  providerPolicyInvalid: boolean,
+  runtimeEventQueueReady: boolean,
+): RunnerAdmissionObservation {
+  const admissionReasonCodes: string[] = []
+  if (providerPolicyInvalid) admissionReasonCodes.push(RUNNER_ADMISSION_REASON_CODES.providerPolicyInvalid)
+  if (!runtimeEventQueueReady) admissionReasonCodes.push(RUNNER_ADMISSION_REASON_CODES.runtimeEventQueueUnavailable)
+  return {
+    admissionReady: admissionReasonCodes.length === 0,
+    admissionReasonCodes,
+  }
+}
+
 export interface RunnerPollReport {
   processGeneration: string
   inFlight: string[]
@@ -129,6 +152,7 @@ export interface RunnerPollReport {
   runtimeReadiness: RuntimeReadinessWitness[]
   connectionId: string | null
   admissionReady: boolean
+  admissionReasonCodes: string[]
   deploymentEpoch: string | null
 }
 
@@ -138,7 +162,7 @@ export function buildRunnerPollReport(input: {
   awaitingAck: Iterable<string>
   runtimeReadiness: RuntimeReadinessWitness[]
   connectionId: string | null
-  admissionReady: boolean
+  admission: RunnerAdmissionObservation
   deploymentEpoch: string | null
 }): RunnerPollReport {
   return {
@@ -147,7 +171,8 @@ export function buildRunnerPollReport(input: {
     awaitingAck: [...input.awaitingAck],
     runtimeReadiness: input.runtimeReadiness,
     connectionId: input.connectionId,
-    admissionReady: input.admissionReady,
+    admissionReady: input.admission.admissionReady,
+    admissionReasonCodes: [...input.admission.admissionReasonCodes],
     deploymentEpoch: input.deploymentEpoch,
   }
 }

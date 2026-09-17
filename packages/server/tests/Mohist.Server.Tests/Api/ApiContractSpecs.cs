@@ -1,9 +1,11 @@
 using System.Net;
 using System.Text.Json;
 using System.Net.Http.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Tests.Support;
@@ -101,13 +103,10 @@ public class ApiContractSpecs
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
 
-        // Capacity.Max is summed across all currently-registered global
-        // runners, so we need a clean registry to assert against this
-        // runner's contribution in isolation. Drain anything left over
-        // from prior tests in this collection.
-        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-        foreach (var staleId in await registry.ListRunnerIdsAsync())
-            await registry.UnregisterAsync(staleId);
+        // Capacity.Max is summed from the canonical global Runner
+        // observation projection. Clear observations left by prior tests in
+        // this shared collection so only this Runner contributes online slots.
+        _fixture.Services.GetRequiredService<RunnerStatusObservationStore>().Clear();
 
         var runnerId = $"slot-runner-{Guid.NewGuid():N}";
 
@@ -225,7 +224,7 @@ public class ApiContractSpecs
     }
 
     [Fact]
-    public async Task RunnerStatus_RunnerWithVariants_KeepsCoderModelsAsStringArray()
+    public async Task RunnerStatus_RunnerWithCatalog_ExposesCurrentRuntimeCatalog()
     {
         var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"status-{Guid.NewGuid():N}", verificationCommand = "true", repository = new { name = "test-repo", gitUrl = "git@example.com:test-repo.git", baseBranch = "main" } });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
@@ -239,28 +238,35 @@ public class ApiContractSpecs
             capabilities = Array.Empty<string>(),
             hostname = "status-host",
             projectId,
-            coderModels = new[] { "zai/glm-5" },
-            coderModelVariants = new Dictionary<string, string[]>
+            runtimeCatalogs = new Dictionary<string, object>
             {
-                ["zai/glm-5"] = new[] { "low", "high" },
+                ["pi"] = new
+                {
+                    complete = true,
+                    capabilityRevision = "catalog-rev",
+                    models = new[] { "zai/glm-5" },
+                    variants = new Dictionary<string, string[]> { ["zai/glm-5"] = ["low", "high"] },
+                    supportsReasoningEffort = true,
+                    reasoningEfforts = new Dictionary<string, string[]> { ["zai/glm-5"] = ["high"] },
+                },
             },
         });
 
         try
         {
-            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
+            var response = await _fixture.Client.GetAsync("/api/runners");
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
             var runners = payload.GetProperty("data").GetProperty("runners");
-            var runner = runners.EnumerateArray().FirstOrDefault(r => r.GetProperty("id").GetString() == runnerId);
-            Assert.NotEqual(JsonValueKind.Undefined, runner.ValueKind);
+            var runner = runners.EnumerateArray().Single(r => r.GetProperty("identity").GetProperty("id").GetString() == runnerId);
 
-            var coderModels = runner.GetProperty("coderModels");
-            Assert.Equal(JsonValueKind.Array, coderModels.ValueKind);
-            Assert.Single(coderModels.EnumerateArray());
-            Assert.Equal("zai/glm-5", coderModels[0].GetString());
-
-            Assert.False(runner.TryGetProperty("coderModelVariants", out _));
+            var runtime = Assert.Single(runner.GetProperty("runtimes").EnumerateArray());
+            Assert.Equal("pi", runtime.GetProperty("name").GetString());
+            Assert.Equal("catalog-rev", runtime.GetProperty("catalog").GetProperty("capabilityRevision").GetString());
+            Assert.Equal(1, runtime.GetProperty("catalog").GetProperty("modelCount").GetInt32());
+            Assert.Equal("zai/glm-5", runtime.GetProperty("catalog").GetProperty("models")[0].GetString());
+            Assert.True(runtime.GetProperty("catalog").GetProperty("supportsReasoningEffort").GetBoolean());
+            Assert.False(runner.TryGetProperty("coderModels", out _));
         }
         finally
         {

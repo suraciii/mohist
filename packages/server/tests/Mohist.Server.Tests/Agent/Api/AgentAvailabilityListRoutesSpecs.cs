@@ -63,12 +63,18 @@ public sealed class AgentAvailabilityListRoutesSpecs : IClassFixture<AgentAvaila
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(payload.GetProperty("success").GetBoolean());
         var entries = payload.GetProperty("data").EnumerateArray().ToArray();
-        Assert.Equal(3, entries.Length);
+        // The availability list mirrors the Agents surface, which since the
+        // Agent-definition authority change also lists the built-in Workflow
+        // Agents (planner/builder/reviewer) alongside Project Agents.
+        Assert.Equal(6, entries.Length);
 
         var returnedIds = entries
             .Select(e => e.GetProperty("agentId").GetString()!)
             .ToHashSet();
-        Assert.Equal(new HashSet<string> { first.Id, second.Id, third.Id }, returnedIds);
+        Assert.Subset(returnedIds, new HashSet<string> { first.Id, second.Id, third.Id });
+        Assert.Contains("builtin:mohist/planner", returnedIds);
+        Assert.Contains("builtin:mohist/builder", returnedIds);
+        Assert.Contains("builtin:mohist/reviewer", returnedIds);
 
         Assert.Equal(1, _fixture.RunnerStatus.CallCount);
     }
@@ -88,9 +94,12 @@ public sealed class AgentAvailabilityListRoutesSpecs : IClassFixture<AgentAvaila
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var entries = payload.GetProperty("data").EnumerateArray().ToArray();
-        var single = Assert.Single(entries);
+        var single = Assert.Single(entries, e => e.GetProperty("agentId").GetString() == active.Id);
         Assert.Equal(active.Id, single.GetProperty("agentId").GetString());
         Assert.DoesNotContain(entries, e => e.GetProperty("agentId").GetString() == archived.Id);
+        // Built-in Workflow Agents stay available; only the archived Project
+        // Agent is omitted.
+        Assert.Contains(entries, e => e.GetProperty("agentId").GetString() == "builtin:mohist/planner");
         Assert.Equal(1, _fixture.RunnerStatus.CallCount);
     }
 
@@ -106,7 +115,14 @@ public sealed class AgentAvailabilityListRoutesSpecs : IClassFixture<AgentAvaila
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(payload.GetProperty("success").GetBoolean());
-        Assert.Equal(0, payload.GetProperty("data").GetArrayLength());
+        // A Project without its own Agents still lists the built-in Workflow
+        // Agents, mirroring the Agents surface.
+        var ids = payload.GetProperty("data").EnumerateArray()
+            .Select(e => e.GetProperty("agentId").GetString()!)
+            .ToHashSet();
+        Assert.Equal(
+            new HashSet<string> { "builtin:mohist/planner", "builtin:mohist/builder", "builtin:mohist/reviewer" },
+            ids);
         Assert.Equal(1, _fixture.RunnerStatus.CallCount);
     }
 
@@ -199,7 +215,9 @@ public sealed class AgentAvailabilityListRoutesSpecs : IClassFixture<AgentAvaila
             $"/api/projects/{projectId}/agents/availability");
         Assert.Equal(HttpStatusCode.OK, availabilityResponse.StatusCode);
         var availabilityPayload = await availabilityResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var entry = Assert.Single(availabilityPayload.GetProperty("data").EnumerateArray());
+        var entry = Assert.Single(
+            availabilityPayload.GetProperty("data").EnumerateArray(),
+            e => e.GetProperty("agentId").GetString() == agent.Id);
         Assert.Equal(1, entry.GetProperty("activeRuns").GetInt32());
         Assert.Equal(1, entry.GetProperty("queuedCount").GetInt32());
         Assert.Equal("capacity-full", entry.GetProperty("waitingReason").GetString());
@@ -223,7 +241,9 @@ public sealed class AgentAvailabilityListRoutesSpecs : IClassFixture<AgentAvaila
         Assert.Equal(HttpStatusCode.OK, pendingAvailabilityResponse.StatusCode);
         var pendingAvailabilityPayload =
             await pendingAvailabilityResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var pendingEntry = Assert.Single(pendingAvailabilityPayload.GetProperty("data").EnumerateArray());
+        var pendingEntry = Assert.Single(
+            pendingAvailabilityPayload.GetProperty("data").EnumerateArray(),
+            e => e.GetProperty("agentId").GetString() == agent.Id);
         Assert.Equal(1, pendingEntry.GetProperty("activeRuns").GetInt32());
         Assert.Equal(1, pendingEntry.GetProperty("queuedCount").GetInt32());
         Assert.Equal("capacity-full", pendingEntry.GetProperty("waitingReason").GetString());

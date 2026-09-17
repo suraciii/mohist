@@ -32,9 +32,9 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// connection. The snapshot is only an admission fence; it never settles
     /// or replays work.
     /// </summary>
-    Task<RunnerRuntimeReadinessSnapshot> ObserveRuntimeReadinessAsync(
-        string? connectionGeneration,
-        List<RuntimeReadinessWitness> witnesses);
+    Task<RunnerDispatchObservation?> ObserveDispatchObservationAsync(
+        string processGeneration,
+        RunnerDispatchObservation observation);
     /// <summary>Atomically rejects new poll and work claims until cancelled.</summary>
     Task BeginDrainAsync();
     /// <summary>
@@ -301,6 +301,7 @@ public sealed record RunnerPollRequest(
     [property: Id(4)] string? ConnectionGeneration = null,
     [property: Id(5)] bool? AdmissionReady = null,
     [property: Id(6)] string? DeploymentEpoch = null,
+    [property: Id(8)] List<string>? AdmissionReasonCodes = null,
     [property: Id(7)] string? ProcessGeneration = null)
 {
     public RunnerPollRequest() : this([], []) { }
@@ -311,6 +312,29 @@ public sealed record RuntimeReadinessWitness(
     [property: Id(0)] string Runtime,
     [property: Id(1)] bool Ready,
     [property: Id(2)] long? Generation = null);
+
+public static class RunnerAdmissionReasonCodes
+{
+    public const string ProviderPolicyInvalid = "provider-policy-invalid";
+    public const string RuntimeEventQueueUnavailable = "runtime-event-queue-unavailable";
+    public const string ObservationInvalid = "admission-observation-invalid";
+
+    public static readonly IReadOnlySet<string> Local = new HashSet<string>(StringComparer.Ordinal)
+    {
+        ProviderPolicyInvalid,
+        RuntimeEventQueueUnavailable,
+    };
+}
+
+[GenerateSerializer]
+public sealed record RunnerDispatchObservation(
+    [property: Id(0)] string? ConnectionGeneration,
+    [property: Id(1)] bool AdmissionReady,
+    [property: Id(2)] List<string> AdmissionReasonCodes,
+    [property: Id(3)] List<RuntimeReadinessWitness> RuntimeReadiness)
+{
+    public IReadOnlyList<RuntimeReadinessWitness> Witnesses => RuntimeReadiness;
+}
 
 [GenerateSerializer]
 public sealed record RunnerRuntimeReadinessSnapshot(
@@ -395,7 +419,8 @@ public record RunnerRuntimeState(
     IReadOnlyList<RunnerActiveWorkItem> ActiveWorks,
     bool Draining = false,
     string? UpdateInterruptId = null,
-    string? ConnectionGeneration = null);
+    string? ConnectionGeneration = null,
+    [property: Id(6)] RunnerDispatchObservation? DispatchObservation = null);
 
 [GenerateSerializer]
 public enum RunnerUpdateInterruptBeginStatus

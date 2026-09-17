@@ -156,6 +156,27 @@ describe('ServerConnection lifecycle transport', () => {
     expect(connection.deploymentEpoch).toBe('epoch-poll')
   })
 
+  it('sends admission readiness and blocker fields on every poll', async () => {
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({ dispatches: [] }), { status: 200 }))
+    const connection = new ServerConnection(options)
+
+    await connection.poll(signal, {
+      processGeneration: 'generation-1',
+      inFlight: [],
+      awaitingAck: [],
+      runtimeReadiness: [],
+      connectionId: 'connection-1',
+      admissionReady: false,
+      admissionReasonCodes: ['provider-policy-invalid'],
+    })
+
+    const [, init] = fetchSpy.mock.calls[0]!
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      admissionReady: false,
+      admissionReasonCodes: ['provider-policy-invalid'],
+    })
+  })
+
   it('classifies malformed poll JSON as a protocol transport failure', async () => {
     fetchSpy.mockResolvedValue(new Response('{', { status: 200 }))
     const connection = new ServerConnection(options)

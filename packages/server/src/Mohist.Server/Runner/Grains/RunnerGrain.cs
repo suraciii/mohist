@@ -9,6 +9,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Runner.Services;
 using Microsoft.EntityFrameworkCore;
 using Orleans;
 using Orleans.Runtime;
@@ -48,8 +49,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private bool _supersededGenerationRetryPending;
     private DateTimeOffset _lastPresenceAt;
     private IDisposable? _presenceTimer;
-    private string? _readinessConnectionGeneration;
-    private readonly Dictionary<string, RuntimeReadinessWitness> _runtimeReadiness = new(StringComparer.OrdinalIgnoreCase);
+    private RunnerDispatchObservation? _dispatchObservation;
 
     // Authoritative source for dispatch capacity. Loaded from the persisted
     // definition state in OnActivateAsync / RegisterAsync and updated via
@@ -60,6 +60,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private readonly WorkflowRunQuerier _workflowRuns;
     private readonly RunnerDefinitionStore _definitions;
     private readonly IAgentJobStore _agentJobStore;
+    private readonly IRunnerActiveWorkReader _activeWorkReader;
+    private readonly RunnerStatusObservationStore _statusObservations;
     private readonly AgentJobOptions _agentJobOptions;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RunnerGrain> _log;
@@ -72,6 +74,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         WorkflowRunQuerier workflowRuns,
         RunnerDefinitionStore definitions,
         IAgentJobStore agentJobStore,
+        IRunnerActiveWorkReader activeWorkReader,
+        RunnerStatusObservationStore statusObservations,
         IOptions<AgentJobOptions> agentJobOptions,
         ILogger<RunnerGrain> log,
         TimeProvider timeProvider,
@@ -81,6 +85,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         _workflowRuns = workflowRuns;
         _definitions = definitions;
         _agentJobStore = agentJobStore;
+        _activeWorkReader = activeWorkReader;
+        _statusObservations = statusObservations;
         _agentJobOptions = agentJobOptions.Value;
         ValidateRunnerLossRecoveryTimeout(_agentJobOptions.RunnerLossRecoveryTimeout);
         _log = log;
@@ -141,9 +147,12 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
 
         var now = _timeProvider.GetUtcNow();
+        _lastPresenceAt = state.LastPresenceAt
+            ?? (state.PresenceLeaseExpiresAt is { } legacyExpiry
+                ? legacyExpiry - PresenceTimeout
+                : default);
         if (state.PresenceLeaseExpiresAt is { } expiry)
         {
-            _lastPresenceAt = expiry - PresenceTimeout;
             if (expiry > now && _info is not null)
             {
                 _status = RunnerStatus.Online;
@@ -174,6 +183,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         // generation for this Runner, so work left behind by an earlier
         // closeout is settled here instead of waiting for the next register.
         await ReconcileSupersededGenerationAsync();
+        PublishStatusObservation();
     }
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -244,9 +254,9 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             // same process may register again after reconnecting and must not
             // reopen admission across a durable update fence.
             var updateInterruptFence = UpdateInterruptFence();
-            _readinessConnectionGeneration = null;
-            _runtimeReadiness.Clear();
+            _dispatchObservation = null;
             _lastPresenceAt = now;
+            state.LastPresenceAt = now;
             _pendingBuildGitHash = null;
             _pendingRuntimeIdentity = null;
             _slots = await _definitions.GetOrInitAsync(RunnerId);
@@ -266,6 +276,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             // The generation is now current: any claim that is not this one
             // belongs to a process that can no longer report or receive it.
             await ReconcileSupersededGenerationAsync();
+            PublishStatusObservation();
             await EnsurePresenceReminderAsync();
             EnsurePresenceTimer();
             await UpsertRegistryAsync();
@@ -285,11 +296,13 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _log.LogInformation("Runner {Id} unregistered", RunnerId);
             _pollAdmissionToken = null;
             _status = RunnerStatus.Offline;
+            _dispatchObservation = null;
             SetRunnerInfo(null);
             var state = _state.State ??= new RunnerState();
             state.PresenceLeaseExpiresAt = null;
             BeginDurableCloseout();
             await PersistAsync();
+            PublishStatusObservation();
             await EnsurePresenceReminderAsync();
             var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
             await registry.UnregisterAsync(RunnerId);
@@ -345,11 +358,14 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
         var now = _timeProvider.GetUtcNow();
         _lastPresenceAt = now;
-        (_state.State ??= new RunnerState()).PresenceLeaseExpiresAt = now + PresenceTimeout;
+        var state = _state.State ??= new RunnerState();
+        state.LastPresenceAt = now;
+        state.PresenceLeaseExpiresAt = now + PresenceTimeout;
         var wasOnline = _status == RunnerStatus.Online;
         await PersistAsync();
         EnsurePresenceTimer();
         _status = RunnerStatus.Online;
+        PublishStatusObservation();
         await EnsurePresenceReminderAsync();
         if (refreshRegistry || !wasOnline)
             await UpsertRegistryAsync();
@@ -419,60 +435,13 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
     }
 
-    public async Task<RunnerRuntimeReadinessSnapshot> ObserveRuntimeReadinessAsync(
-        string? connectionGeneration,
-        List<RuntimeReadinessWitness> witnesses)
-    {
-        await _lifecycleGate.WaitAsync();
-        try
-        {
-            if (_status != RunnerStatus.Online
-                || _info is null
-                || string.IsNullOrWhiteSpace(connectionGeneration))
-                return RunnerRuntimeReadinessSnapshot.Empty;
-
-            var normalizedConnectionGeneration = connectionGeneration.Trim();
-            if (_info.ConnectionGeneration is { } registered
-                && !string.Equals(registered, normalizedConnectionGeneration, StringComparison.Ordinal))
-                return new RunnerRuntimeReadinessSnapshot(normalizedConnectionGeneration, []);
-
-            if (!string.Equals(_readinessConnectionGeneration, normalizedConnectionGeneration, StringComparison.Ordinal))
-            {
-                _readinessConnectionGeneration = normalizedConnectionGeneration;
-                _runtimeReadiness.Clear();
-            }
-
-            foreach (var witness in witnesses ?? [])
-            {
-                var runtime = witness.Runtime?.Trim();
-                if (string.IsNullOrWhiteSpace(runtime) || witness.Generation is not > 0)
-                    continue;
-
-                if (_runtimeReadiness.TryGetValue(runtime, out var previous)
-                    && previous.Generation is { } previousGeneration
-                    && witness.Generation is { } incomingGeneration
-                    && previousGeneration > incomingGeneration)
-                    continue;
-
-                _runtimeReadiness[runtime] = witness with { Runtime = runtime };
-            }
-
-            return new RunnerRuntimeReadinessSnapshot(
-                _readinessConnectionGeneration,
-                _runtimeReadiness.Values.ToList());
-        }
-        finally
-        {
-            _lifecycleGate.Release();
-        }
-    }
-
     public async Task BeginDrainAsync()
     {
         await _lifecycleGate.WaitAsync();
         try
         {
             _draining = true;
+            PublishStatusObservation();
         }
         finally
         {
@@ -516,6 +485,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 pendingId: requestedId,
                 lastCancelledId: null);
             _draining = true;
+            PublishStatusObservation();
             return new RunnerUpdateInterruptBeginResult(
                 requestedId,
                 RunnerUpdateInterruptBeginStatus.Draining,
@@ -543,6 +513,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                     pendingId: null,
                     lastCancelledId: normalizedId);
                 _draining = false;
+                PublishStatusObservation();
                 return new RunnerUpdateInterruptCancelResult(normalizedId, RunnerUpdateInterruptCancelStatus.Cancelled);
             }
 
@@ -571,6 +542,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             if (!string.IsNullOrWhiteSpace(_state.State?.UpdateInterruptFence?.PendingId))
                 return;
             _draining = false;
+            PublishStatusObservation();
         }
         finally
         {
@@ -641,7 +613,11 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
             if (expectation is not null
                 && (!string.Equals(expectation.OwnerId, agentJobId, StringComparison.Ordinal)
-                    || !RunnerCapabilityGate.Matches(_info, _readinessConnectionGeneration, _runtimeReadiness, expectation)))
+                    || !RunnerCapabilityGate.Matches(
+                        _info,
+                        _dispatchObservation?.ConnectionGeneration,
+                        RuntimeReadinessByName(),
+                        expectation)))
                 return null;
 
             var activeWorkflowCount = await _workflowRuns.CountRunningAssignedToAsync(RunnerId);
@@ -683,71 +659,28 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     private async Task<RunnerRuntimeState> BuildRuntimeStateAsync()
     {
-        // Both owner ledgers are projected into the unified runtime view.
-        var activeWorks = new List<RunnerActiveWorkItem>();
-        var workerId = RunnerId;
-
-        foreach (var workflowRunId in await _workflowRuns.FindRunningAssignedToAsync(workerId))
-        {
-            var run = await _workflowRuns.LoadAsync(workflowRunId);
-            if (run is null) continue;
-            // Issue metadata lives on the run (annotations), not the work
-            // item — project it so the read model keeps the issue reference
-            // for active workflow work.
-            var issue = IssueFromRun(run);
-            var stage = run.CurrentStage();
-            var task = stage.RunningTask;
-            if (task is not null)
-            {
-                activeWorks.Add(new RunnerActiveWorkItem(
-                    WorkId: task.WorkId ?? task.Id,
-                    OwnerKind: WorkDispatchOwnerKinds.Workflow,
-                    OwnerId: workflowRunId,
-                    WorkType: "task",
-                    Stage: stage.Id,
-                    Title: task.Title,
-                    Issue: issue,
-                    TakenAt: task.StartedAt,
-                    ActionAttemptId: task.Id,
-                    IsAgentWork: false));
-                continue;
-            }
-            if (!string.IsNullOrWhiteSpace(stage.ChecksWorkId))
-            {
-                activeWorks.Add(new RunnerActiveWorkItem(
-                    WorkId: stage.ChecksWorkId,
-                    OwnerKind: WorkDispatchOwnerKinds.Workflow,
-                    OwnerId: workflowRunId,
-                    WorkType: "checks",
-                    Stage: stage.Id,
-                    Title: "Stage checks",
-                    Issue: issue,
-                    TakenAt: null));
-            }
-        }
-
-        foreach (var w in await _agentJobStore.ListRunningForRunnerAsync(workerId))
-        {
-            activeWorks.Add(new RunnerActiveWorkItem(
-                WorkId: w.WorkId!,
-                OwnerKind: WorkDispatchOwnerKinds.AgentJob,
-                OwnerId: w.JobKey,
-                WorkType: w.WorkType ?? "agent-job",
-                Stage: w.Stage,
-                Title: w.Title,
-                Issue: w.IssueProjectId is not null && w.IssueNumber is not null
-                    ? new WorkIssueRef(w.IssueProjectId, w.IssueNumber.Value)
-                    : null,
-                TakenAt: w.RunningSince));
-        }
-
+        var activeWorks = await _activeWorkReader.ListAsync(RunnerId);
         return new RunnerRuntimeState(
             _status,
             _lastPresenceAt,
             activeWorks,
             _draining,
             _state.State?.UpdateInterruptFence?.PendingId,
-            _info?.ConnectionGeneration);
+            _info?.ConnectionGeneration,
+            CloneDispatchObservation(_dispatchObservation));
+    }
+
+    private void PublishStatusObservation()
+    {
+        _statusObservations.Set(
+            RunnerId,
+            new RunnerStatusObservation(
+                _status,
+                _lastPresenceAt,
+                _info,
+                _draining,
+                _state.State?.UpdateInterruptFence?.PendingId,
+                CloneDispatchObservation(_dispatchObservation)));
     }
 
     private async Task UpsertRegistryAsync()
@@ -824,9 +757,11 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
             _pollAdmissionToken = null;
             _status = RunnerStatus.Offline;
+            state.LastPresenceAt ??= _lastPresenceAt;
             state.PresenceLeaseExpiresAt = null;
             BeginDurableCloseout();
             await PersistAsync();
+            PublishStatusObservation();
             await EnsurePresenceReminderAsync();
             var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
             try

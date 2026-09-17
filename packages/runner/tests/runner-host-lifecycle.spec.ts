@@ -310,14 +310,22 @@ describe('RunnerHost', () => {
         try {
           await connected.promise
           await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2)
-          expect(poll).not.toHaveBeenCalled()
+          expect(poll).toHaveBeenCalled()
+          expect(poll.mock.calls.at(-1)?.[1]).toEqual(
+            expect.objectContaining({
+              admissionReady: false,
+              admissionReasonCodes: ['provider-policy-invalid'],
+            }),
+          )
           expect(capturedLogs()).toEqual(
             expect.arrayContaining([
               expect.objectContaining({ level: 'ERROR', message: 'provider error policy invalid', component: 'host' }),
               expect.objectContaining({
                 level: 'WARN',
-                message: 'runner not ready; skipping poll',
-                fields: expect.objectContaining({ reason: expect.stringContaining('provider error policy invalid') }),
+                message: 'runner admission blocked; continuing reconciliation',
+                fields: expect.objectContaining({
+                  reasonCodes: ['provider-policy-invalid'],
+                }),
               }),
             ]),
           )

@@ -54,7 +54,12 @@ public sealed class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     {
         var runnerId = $"runner-active-ctx-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "active-ctx-host", "test-project"));
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "active-ctx-host",
+            "test-project",
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration));
 
         var workflowId = $"wf-ctx-{Guid.NewGuid():N}";
         var issue = new WorkIssueRef("test-project", 42);
@@ -83,7 +88,12 @@ public sealed class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
     {
         var runnerId = $"runner-no-issue-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "no-issue-host", "test-project"));
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "no-issue-host",
+            "test-project",
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration));
 
         var workflowId = $"wf-no-issue-{Guid.NewGuid():N}";
         await AssignActiveWorkForTestAsync(runnerId, workflowId, "task-1.1", "task", "build", "Task 1");

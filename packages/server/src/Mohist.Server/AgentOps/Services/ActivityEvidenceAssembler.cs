@@ -27,25 +27,21 @@ public sealed class ActivityEvidenceAssembler : IScopedService
     public async Task<IReadOnlyList<ActivityEntryDto>> ListAsync(string projectId, int limit, CancellationToken ct = default)
     {
         var waiting = await _waiting.ListAsync(projectId, ct);
-        var runners = await _runnerStatus.GetRunnersAsync(projectId);
-        var capacity = SumCapacity(runners);
+        var runnerSnapshot = await _runnerStatus.GetGlobalRunnersAsync(ct);
+        var capacity = RunnerStatusService.ProjectAvailability(runnerSnapshot).Capacity;
         var activity = await _agentActivity.GetActivityAsync(projectId, SourceLimit, waiting, capacity, ct);
         var events = await _events.ListAsync(projectId, SourceLimit, ct: ct);
 
         return events.Select(ActivityEntryDto.FromRecorded)
             .Concat(activity.Sessions.Select(ActivityEntryDto.FromSession))
             .Concat(activity.Waiting.Select(ActivityEntryDto.FromWaiting))
-            .Concat(runners.Select(ActivityEntryDto.FromRunner))
+            .Concat(runnerSnapshot.Runners.Select(ActivityEntryDto.FromRunner))
             .OrderByDescending(entry => entry.Time)
             .ThenBy(entry => entry.Id, StringComparer.Ordinal)
             .Take(limit)
             .ToList();
     }
 
-    private static RunnerCapacityView SumCapacity(IReadOnlyList<RunnerStatusView> runners) =>
-        new(
-            runners.Sum(runner => runner.Capacity?.UsedSlots ?? 0),
-            runners.Sum(runner => runner.Capacity?.TotalSlots ?? 0));
 }
 
 public sealed record ActivityEntryDto(
@@ -104,17 +100,17 @@ public sealed record ActivityEntryDto(
             IssueNumber: entry.IssueNumber,
             Status: "waiting");
 
-    public static ActivityEntryDto FromRunner(RunnerStatusView entry) =>
+    public static ActivityEntryDto FromRunner(RunnerStatusEntry entry) =>
         new(
-            $"snapshot:runner:{entry.Id}",
+            $"snapshot:runner:{entry.Identity.Id}",
             "snapshot",
             "global",
             "runner",
-            entry.LastHeartbeatAt ?? entry.RegisteredAt ?? DateTimeOffset.MinValue,
-            $"Runner {entry.Id}",
-            $"{entry.Kind} runner on {entry.Hostname}",
-            RunnerId: entry.Id,
-            Status: entry.Status);
+            entry.Presence.LastObservedAt ?? DateTimeOffset.MinValue,
+            $"Runner {entry.Identity.Id}",
+            $"{entry.Identity.Kind ?? "unknown"} runner on {entry.Identity.Hostname ?? "unknown host"}",
+            RunnerId: entry.Identity.Id,
+            Status: entry.Admission.State);
 
     private static string RecordedTitle(ProjectEventEnvelope entry) => entry.SourceAggregateKind switch
     {

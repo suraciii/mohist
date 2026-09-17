@@ -33,7 +33,11 @@ let agentActivity: AgentActivity = {
   sessions: [],
   waiting: [],
 }
-let runners: RunnerStatusListResponse = { runners: [] }
+let runners: RunnerStatusListResponse = {
+  observedAt: '2026-01-01T00:00:00Z',
+  inventory: { state: 'ready', nextActions: [] },
+  runners: [],
+}
 let projectEventsFailed = false
 let agentActivityFailed = false
 let runnersFailed = false
@@ -51,7 +55,7 @@ useMswServer(
     if (agentActivityFailed) return new HttpResponse(null, { status: 500 })
     return HttpResponse.json({ success: true, data: agentActivity })
   }),
-  http.get('*/api/projects/:projectId/runners', () => {
+  http.get('*/api/runners', () => {
     if (runnersFailed) return new HttpResponse(null, { status: 500 })
     return HttpResponse.json({ success: true, data: runners })
   }),
@@ -64,7 +68,7 @@ beforeEach(() => {
     sessions: [],
     waiting: [],
   }
-  runners = { runners: [] }
+  runners = { observedAt: '2026-01-01T00:00:00Z', inventory: { state: 'ready', nextActions: [] }, runners: [] }
   projectEventsFailed = false
   agentActivityFailed = false
   runnersFailed = false
@@ -135,9 +139,9 @@ describe('Activity evidence view', () => {
       expect(screen.getByTestId('activity-attention-zone')).toBeInTheDocument()
     })
     expect(screen.getByTestId('activity-routine-zone')).toBeInTheDocument()
-    expect(within(screen.getByTestId('activity-attention-zone')).getByTestId('activity-event-primary-link')).toHaveTextContent(
-      /needs approval/,
-    )
+    expect(
+      within(screen.getByTestId('activity-attention-zone')).getByTestId('activity-event-primary-link'),
+    ).toHaveTextContent(/needs approval/)
   })
 
   it('omits the attention zone when there are no attention events', async () => {
@@ -249,7 +253,10 @@ describe('Activity evidence view', () => {
     const genericLink = within(generic!).getByTestId('activity-event-primary-link')
     expect(genericLink).toHaveAttribute('href', expect.stringContaining('/sessions/generic-session-1'))
     expect(genericLink).toHaveAttribute('href', expect.stringContaining('from=activity'))
-    expect(within(generic!).getByTestId('activity-event-issue-link')).toHaveAttribute('href', expect.stringContaining('/issues/42?from=activity'))
+    expect(within(generic!).getByTestId('activity-event-issue-link')).toHaveAttribute(
+      'href',
+      expect.stringContaining('/issues/42?from=activity'),
+    )
   })
 
   it('links recorded issue-bound sessions directly with an Activity return target', async () => {
@@ -261,7 +268,7 @@ describe('Activity evidence view', () => {
         sourceAggregateId: 'session-42',
         source: '/mohist/agent-session/session-42',
         type: 'coder_session_started',
-        data: { issueNumber: 42, },
+        data: { issueNumber: 42 },
       }),
     ]
 
@@ -297,8 +304,14 @@ describe('Activity evidence view', () => {
     await waitFor(() => {
       expect(screen.getByTestId('activity-event-session-link')).toBeInTheDocument()
     })
-    expect(screen.getByTestId('activity-event-session-link')).toHaveAttribute('href', expect.stringContaining('/sessions/agent-session-42'))
-    expect(screen.getByTestId('activity-event-issue-link')).toHaveAttribute('href', expect.stringContaining('/issues/42?from=activity'))
+    expect(screen.getByTestId('activity-event-session-link')).toHaveAttribute(
+      'href',
+      expect.stringContaining('/sessions/agent-session-42'),
+    )
+    expect(screen.getByTestId('activity-event-issue-link')).toHaveAttribute(
+      'href',
+      expect.stringContaining('/issues/42?from=activity'),
+    )
   })
 
   it('requests filtered recorded evidence so an older attention event remains discoverable', async () => {

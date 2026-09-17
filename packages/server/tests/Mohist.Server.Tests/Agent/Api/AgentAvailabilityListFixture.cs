@@ -23,24 +23,42 @@ namespace Mohist.Server.Tests.Agent.Api;
 /// </summary>
 public sealed class CountingRunnerStatusSource : IRunnerStatusSource
 {
-    private IReadOnlyList<RunnerStatusView> _onlineRunners;
+    private RunnerStatusListSnapshot _snapshot;
 
     public CountingRunnerStatusSource(IReadOnlyList<RunnerStatusView> onlineRunners)
     {
-        _onlineRunners = onlineRunners;
+        _snapshot = SnapshotFrom(onlineRunners);
     }
 
-    public IReadOnlyList<RunnerStatusView> OnlineRunners => _onlineRunners;
     public int CallCount { get; private set; }
 
-    public void SetOnlineRunners(IReadOnlyList<RunnerStatusView> runners) => _onlineRunners = runners;
+    public void SetOnlineRunners(IReadOnlyList<RunnerStatusView> runners) =>
+        _snapshot = SnapshotFrom(runners);
 
     public void Reset() => CallCount = 0;
 
-    public Task<IReadOnlyList<RunnerStatusView>> GetOnlineRunnersAsync(string projectId, CancellationToken ct = default)
+    public Task<RunnerStatusListSnapshot> GetGlobalRunnersAsync(CancellationToken ct = default)
     {
         CallCount++;
-        return Task.FromResult(_onlineRunners);
+        return Task.FromResult(_snapshot);
+    }
+
+    private static RunnerStatusListSnapshot SnapshotFrom(IReadOnlyList<RunnerStatusView> runners)
+    {
+        var entries = runners
+            .Select(runner => new RunnerStatusEntry(
+                new RunnerIdentityStatusView(runner.Id, runner.Hostname, runner.Kind, null, null, null, null),
+                new RunnerPresenceStatusView("online", runner.LastHeartbeatAt),
+                new RunnerControlStatusView(runner.ConnectionState ?? "disconnected", null),
+                new RunnerAdmissionStatusView("ready", []),
+                runner.Capabilities,
+                [],
+                new RunnerStatusCapacityView(runner.Capacity?.UsedSlots, runner.Capacity?.TotalSlots ?? 0),
+                runner.ActiveWorks,
+                null,
+                []))
+            .ToList();
+        return new RunnerStatusListSnapshot(DateTimeOffset.UnixEpoch, entries);
     }
 }
 

@@ -81,11 +81,40 @@ public class RunnerConnectionTracker : ISingletonService, IAgentSessionConnectio
             && string.Equals(req.ConnectionId, currentConnectionId, StringComparison.Ordinal)
             ? GetConnectionGeneration(runnerId)
             : null;
+        var observation = NormalizeAdmissionObservation(req, connectionGeneration);
         return req with
         {
             ConnectionGeneration = connectionGeneration,
-            AdmissionReady = req.AdmissionReady ?? true,
+            AdmissionReady = observation.Ready,
+            AdmissionReasonCodes = observation.ReasonCodes,
         };
+    }
+
+    private static (bool Ready, List<string> ReasonCodes) NormalizeAdmissionObservation(
+        RunnerPollRequest request,
+        string? connectionGeneration)
+    {
+        var suppliedReasons = request.AdmissionReasonCodes;
+        var knownReasons = suppliedReasons is null
+            ? []
+            : RunnerAdmissionReasonCodes.Local
+                .Where(suppliedReasons.Contains)
+                .OrderBy(reason => reason, StringComparer.Ordinal)
+                .ToList();
+        var reasonsAreValid = suppliedReasons is not null
+            && suppliedReasons.Count == knownReasons.Count
+            && suppliedReasons.Distinct(StringComparer.Ordinal).Count() == suppliedReasons.Count;
+        var admissionIsConsistent = request.AdmissionReady switch
+        {
+            true => reasonsAreValid && suppliedReasons!.Count == 0,
+            false => reasonsAreValid && suppliedReasons!.Count > 0,
+            _ => false,
+        };
+        var currentConnectionIsValid = !string.IsNullOrWhiteSpace(connectionGeneration);
+        if (!currentConnectionIsValid || !admissionIsConsistent)
+            return (false, [RunnerAdmissionReasonCodes.ObservationInvalid]);
+
+        return (request.AdmissionReady!.Value, knownReasons);
     }
 
     private sealed record RunnerConnectionLease(string ConnectionId, string Generation);

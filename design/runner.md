@@ -56,6 +56,46 @@ by querying both owner stores (`Pending/Running WHERE AssignedRunnerId=R`),
 and no Runner behavior accepts a work record. Runtime state reads use the same
 queries and are never stored.
 
+## Global Runner Status Projection
+
+Runner status is a Server-owned application projection. It joins the durable
+Runner definition, current grain presence, current control connection,
+credential classification, drain fence, Runtime witnesses and catalogs, and the
+active WorkflowRun and AgentJob owner ledgers for reading. No Web or CLI caller
+resolves a Project or reconstructs admission, capacity, credential, or recovery
+semantics.
+
+The public row keeps independent facts visible: identity and build detail,
+presence (`online`, `stale`, `offline`), control (`connected`,
+`disconnected`), admission (`ready`, `blocked`) with ordered reason codes,
+per-Runtime readiness and catalog, used/total capacity, active owner rows, drain,
+and Server-derived next actions. `capacity.used` equals the active owner count
+when the owner snapshot is available; otherwise it is null and the projection
+reports `admission-observation-missing` rather than false free capacity.
+`idle`, `busy`, and a top-level health verdict are not Runner status concepts.
+
+Admission reason ordering is deterministic:
+`presence-offline`, `presence-stale`, credential state,
+`control-disconnected`, `draining`, current Runner-local blockers or
+`admission-observation-missing`, then `capacity-full`. Current stable local
+blockers are `provider-policy-invalid` and
+`runtime-event-queue-unavailable`. Runtime readiness remains per Runtime and
+never substitutes a catalog for a readiness witness.
+
+The canonical HTTP resources are `GET /api/runners` and
+`GET /api/runners/{runnerId}`. They are based on the durable definition list, so
+offline known definitions remain visible and unknown IDs are rejected by that
+list. Each response captures one `observedAt` timestamp at read start. The
+projection is observational: source facts may change while it is assembled,
+and a racing claim or mutation remains authoritative. Reading status never
+mutates a lease, drain fence, work ledger, or claim.
+
+Next actions are Server-derived and limited to install, start, re-enrollment,
+wait-for-drain, wait-for-capacity, wait-for-runtime, or a code-specific local
+correction. `mo service status runner` is outside this remote projection: it
+reads the local service-manager unit without HTTP. The remote `mo runner status`
+and Web Runner routes consume the projection.
+
 ## Enabled Agent Runtimes
 
 One host-local configuration value, `ENABLED_AGENT_RUNTIMES`, is authoritative

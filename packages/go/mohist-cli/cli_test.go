@@ -175,39 +175,23 @@ func TestRunUpdateCLIDefaultsCurrentDirectory(t *testing.T) {
 	}
 }
 
-func TestRunProjectResolutionDefaultsCurrentDirectory(t *testing.T) {
-	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return response(http.StatusInternalServerError, `{"success":false}`), nil
-	}), map[string]string{"MOHIST_TOKEN": "token"})
-	if code := Run(context.Background(), []string{"runner", "list"}, deps); code != ExitOperation {
-		t.Fatalf("code=%d stderr=%q", code, errOut.String())
-	}
-	if got := errOut.String(); got != "project is required; pass --project\n" {
-		t.Fatalf("stderr=%q", got)
-	}
-}
-
-func TestRunPreservesExplicitCurrentDirectoryForProjectResolution(t *testing.T) {
+func TestRunnerStatusUsesGlobalRouteWithoutProjectResolution(t *testing.T) {
 	var gotPath string
-	files := map[string]string{"/injected/.mohist/cli-state.json": `{"activeProjectId":"injected"}`}
+	currentDirectoryCalls := 0
 	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		gotPath = r.URL.Path
-		return response(http.StatusOK, `{"success":true,"data":[]}`), nil
+		return response(http.StatusOK, `{"success":true,"data":{"observedAt":"2026-08-01T12:00:00Z","inventory":{"state":"first-install","nextActions":[{"code":"install-runner","message":"Install and start the first Runner.","command":"mo install runner --repo-root <path>"}]},"runners":[]}}`), nil
 	}), map[string]string{"MOHIST_TOKEN": "token"})
-	deps.CurrentDirectory = func() string { return "/injected" }
-	deps.ReadFile = func(path string) (string, error) {
-		value, ok := files[path]
-		if !ok {
-			return "", os.ErrNotExist
-		}
-		return value, nil
+	deps.CurrentDirectory = func() string {
+		currentDirectoryCalls++
+		return "/injected"
 	}
 
 	if code := Run(context.Background(), []string{"runner", "list"}, deps); code != ExitOK {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
-	if gotPath != "/api/projects/injected/runners" {
-		t.Fatalf("request path=%q", gotPath)
+	if gotPath != "/api/runners" || currentDirectoryCalls != 0 {
+		t.Fatalf("request path=%q current directory calls=%d", gotPath, currentDirectoryCalls)
 	}
 }
 

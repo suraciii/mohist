@@ -8,10 +8,18 @@ import { isApplicationSection, isProjectSection, isSettingsSectionKey } from '..
 import { ProjectGuard, MobileBottomNav, FAB } from '../widgets/app-shell'
 import { Toaster } from 'sonner'
 
-const IssueDetailPage = lazy(() => import('../pages/issue-detail').then(({ IssueDetailPage }) => ({ default: IssueDetailPage })))
-const IssueChangedFilesPage = lazy(() => import('../pages/issue-changed-files').then(({ IssueChangedFilesPage }) => ({ default: IssueChangedFilesPage })))
-const UnifiedSessionPage = lazy(() => import('../pages/session').then(({ UnifiedSessionPage }) => ({ default: UnifiedSessionPage })))
-const CreateIssueDialog = lazy(() => import('../features/create-issue').then(({ CreateIssueDialog }) => ({ default: CreateIssueDialog })))
+const IssueDetailPage = lazy(() =>
+  import('../pages/issue-detail').then(({ IssueDetailPage }) => ({ default: IssueDetailPage })),
+)
+const IssueChangedFilesPage = lazy(() =>
+  import('../pages/issue-changed-files').then(({ IssueChangedFilesPage }) => ({ default: IssueChangedFilesPage })),
+)
+const UnifiedSessionPage = lazy(() =>
+  import('../pages/session').then(({ UnifiedSessionPage }) => ({ default: UnifiedSessionPage })),
+)
+const CreateIssueDialog = lazy(() =>
+  import('../features/create-issue').then(({ CreateIssueDialog }) => ({ default: CreateIssueDialog })),
+)
 const SettingsPage = lazy(() => import('../pages/settings').then(({ SettingsPage }) => ({ default: SettingsPage })))
 const ActivityPage = lazy(() => import('../pages/activity').then(({ ActivityPage }) => ({ default: ActivityPage })))
 const RunnersPage = lazy(() => import('../pages/runners').then(({ RunnersPage }) => ({ default: RunnersPage })))
@@ -21,16 +29,36 @@ const DashboardPage = lazy(() => import('../pages/dashboard').then(({ DashboardP
 const DevicePage = lazy(() => import('../pages/device').then(({ DevicePage }) => ({ default: DevicePage })))
 const IssuesPage = lazy(() => import('../pages/issues').then(({ IssuesPage }) => ({ default: IssuesPage })))
 const EpicListPage = lazy(() => import('../pages/epics').then(({ EpicListPage }) => ({ default: EpicListPage })))
-const EpicDetailPage = lazy(() => import('../pages/epic-detail').then(({ EpicDetailPage }) => ({ default: EpicDetailPage })))
-const RunnerDetailPage = lazy(() => import('../pages/runner-detail').then(({ RunnerDetailPage }) => ({ default: RunnerDetailPage })))
+const EpicDetailPage = lazy(() =>
+  import('../pages/epic-detail').then(({ EpicDetailPage }) => ({ default: EpicDetailPage })),
+)
+const RunnerDetailPage = lazy(() =>
+  import('../pages/runner-detail').then(({ RunnerDetailPage }) => ({ default: RunnerDetailPage })),
+)
 const InboxPage = lazy(() => import('../pages/inbox').then(({ InboxPage }) => ({ default: InboxPage })))
 const InsightsPage = lazy(() => import('../pages/insights').then(({ InsightsPage }) => ({ default: InsightsPage })))
-const AgentListPage = lazy(() => import('../pages/agent-list').then(({ AgentListPage }) => ({ default: AgentListPage })))
-const AgentDetailPage = lazy(() => import('../pages/agent-detail').then(({ AgentDetailPage }) => ({ default: AgentDetailPage })))
-const AgentSessionComposerPage = lazy(() => import('../pages/agent-session-composer').then(({ AgentSessionComposerPage }) => ({ default: AgentSessionComposerPage })))
-const ConnectionDiagnosticPage = lazy(() => import('../pages/connection-diagnostic').then(({ ConnectionDiagnosticPage }) => ({ default: ConnectionDiagnosticPage })))
-const WorkspacesPage = lazy(() => import('../pages/workspaces').then(({ WorkspacesPage }) => ({ default: WorkspacesPage })))
-const WorkspaceDetailPage = lazy(() => import('../pages/workspace-detail').then(({ WorkspaceDetailPage }) => ({ default: WorkspaceDetailPage })))
+const AgentListPage = lazy(() =>
+  import('../pages/agent-list').then(({ AgentListPage }) => ({ default: AgentListPage })),
+)
+const AgentDetailPage = lazy(() =>
+  import('../pages/agent-detail').then(({ AgentDetailPage }) => ({ default: AgentDetailPage })),
+)
+const AgentSessionComposerPage = lazy(() =>
+  import('../pages/agent-session-composer').then(({ AgentSessionComposerPage }) => ({
+    default: AgentSessionComposerPage,
+  })),
+)
+const ConnectionDiagnosticPage = lazy(() =>
+  import('../pages/connection-diagnostic').then(({ ConnectionDiagnosticPage }) => ({
+    default: ConnectionDiagnosticPage,
+  })),
+)
+const WorkspacesPage = lazy(() =>
+  import('../pages/workspaces').then(({ WorkspacesPage }) => ({ default: WorkspacesPage })),
+)
+const WorkspaceDetailPage = lazy(() =>
+  import('../pages/workspace-detail').then(({ WorkspaceDetailPage }) => ({ default: WorkspaceDetailPage })),
+)
 
 export function AppContent({ sessionPage: SessionPage = UnifiedSessionPage }: { sessionPage?: ComponentType } = {}) {
   const { projectId, setProjectId, setProjects } = useProject()
@@ -57,11 +85,19 @@ export function AppContent({ sessionPage: SessionPage = UnifiedSessionPage }: { 
       <SidebarInset>
         <Header onCreateIssue={() => setCreateIssueOpen(true)} />
         <div className="flex-1 min-h-0 min-w-0 flex flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
-          <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>}>
+          <Suspense
+            fallback={
+              <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
+                Loading…
+              </div>
+            }
+          >
             <Routes>
               <Route path="/device" element={<DevicePage />} />
               <Route path="/settings" element={<Navigate to="/settings/ai" replace />} />
               <Route path="/settings/:section" element={<ApplicationSettingsSection />} />
+              <Route path="/runners" element={<RunnersPage />} />
+              <Route path="/runners/:runnerId" element={<RunnerDetailPage />} />
               <Route element={<ProjectGuard />}>
                 <Route path="/" element={<NavigateToCurrentProject />} />
                 <Route path="/:projectName" element={<ProjectRouteScope />}>
@@ -75,7 +111,6 @@ export function AppContent({ sessionPage: SessionPage = UnifiedSessionPage }: { 
                   <Route path="connections/:connectionId" element={<ConnectionDiagnosticPage />} />
                   <Route path="agent-sessions/new" element={<AgentSessionComposerPage />} />
                   <Route path="activity" element={<ActivityPage />} />
-                  <Route path="runners" element={<RunnersPage />} />
                   <Route path="settings" element={<LegacySettingsRedirect />} />
                   <Route path="settings/:section" element={<LegacyProjectSettingsSection />} />
                   <Route path="logs" element={<LogsPage />} />
@@ -86,7 +121,6 @@ export function AppContent({ sessionPage: SessionPage = UnifiedSessionPage }: { 
                   <Route path="workspaces/:name" element={<WorkspaceDetailPage />} />
                   <Route path="inbox" element={<InboxPage />} />
                   <Route path="insights" element={<InsightsPage />} />
-                  <Route path="runners/:runnerId" element={<RunnerDetailPage />} />
                 </Route>
               </Route>
             </Routes>
@@ -168,4 +202,3 @@ function shouldShowCreateIssueFab(pathname: string) {
   if (segments.length === 2 && segments[1] === 'issues') return true
   return false
 }
-

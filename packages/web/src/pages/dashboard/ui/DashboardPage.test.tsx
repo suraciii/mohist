@@ -5,13 +5,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
 import { ProjectProvider } from '../../../entities/project'
-import {
-  IssueHealth,
-  IssueStatus,
-  WorkflowStage,
-  type Issue,
-} from '../../../entities/issue'
+import { IssueHealth, IssueStatus, WorkflowStage, type Issue } from '../../../entities/issue'
 import type { AgentStatus } from '../../../entities/agent'
+import type { RunnerStatusEntry } from '../../../entities/runner'
 import { useMswServer } from '../../../../tests/support/msw'
 import { issueListKeys } from '../../../entities/issue/api/query-keys'
 let _projects: unknown[] = []
@@ -19,34 +15,46 @@ let _agentStatus: AgentStatus
 let _agentStatusLoading = false
 let _agentStatusError = false
 let _agentActivity: unknown = undefined
-const EMPTY_APPROVAL_WAIT = { window: { from: '', to: '' }, sampleCount: 0, averageSeconds: null, medianSeconds: null, maxSeconds: null }
+let _runnerRows: RunnerStatusEntry[] | null = null
+const EMPTY_APPROVAL_WAIT = {
+  window: { from: '', to: '' },
+  sampleCount: 0,
+  averageSeconds: null,
+  medianSeconds: null,
+  maxSeconds: null,
+}
 let _approvalWait: unknown = EMPTY_APPROVAL_WAIT
 let _issuesData: unknown[] = []
 let _issuesLoading = false
 const _createProjectTracker = vi.fn()
 useMswServer(
-  http.get('*/api/projects', () =>
-    HttpResponse.json({ success: true, data: _projects }),
-  ),
+  http.get('*/api/projects', () => HttpResponse.json({ success: true, data: _projects })),
   http.post('*/api/projects', async ({ request }) => {
-    const body = await request.json() as { name: string }
+    const body = (await request.json()) as { name: string }
     _createProjectTracker(body)
     return HttpResponse.json({ success: true, data: { id: 'new-proj', name: body.name, createdAt: '', updatedAt: '' } })
   }),
+  http.get('*/api/runners', () =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        observedAt: '2026-01-01T00:00:00.000Z',
+        inventory: { state: 'ready', nextActions: [] },
+        runners: _runnerRows ?? [],
+      },
+    }),
+  ),
   http.get('*/api/projects/:projectId/agent/status', () => {
     if (_agentStatusLoading) return new Promise(() => {})
-    if (_agentStatusError) return HttpResponse.json({ success: false, error: 'Boom', code: 'INTERNAL_ERROR' }, { status: 500 })
+    if (_agentStatusError)
+      return HttpResponse.json({ success: false, error: 'Boom', code: 'INTERNAL_ERROR' }, { status: 500 })
     return HttpResponse.json({ success: true, data: _agentStatus })
   }),
   http.get('*/api/projects/:projectId/agent/activity', () =>
     HttpResponse.json({ success: true, data: _agentActivity }),
   ),
-  http.get('*/api/projects/:projectId/agent/cost', () =>
-    HttpResponse.json({ success: true, data: {} }),
-  ),
-  http.get('*/api/projects/:projectId/agent/usage', () =>
-    HttpResponse.json({ success: true, data: {} }),
-  ),
+  http.get('*/api/projects/:projectId/agent/cost', () => HttpResponse.json({ success: true, data: {} })),
+  http.get('*/api/projects/:projectId/agent/usage', () => HttpResponse.json({ success: true, data: {} })),
   http.get('*/api/projects/:projectId/issues', () => {
     if (_issuesLoading) return new Promise(() => {})
     return HttpResponse.json({ success: true, data: _issuesData })
@@ -129,6 +137,30 @@ function makeAgentStatus(overrides: Partial<AgentStatus> = {}): AgentStatus {
   }
 }
 
+function makeRunner(overrides: Partial<RunnerStatusEntry> = {}): RunnerStatusEntry {
+  return {
+    identity: {
+      id: 'runner-dashboard',
+      hostname: 'host-1',
+      kind: 'external',
+      component: null,
+      sourceRevision: null,
+      releaseId: null,
+      generation: null,
+    },
+    presence: { state: 'online', lastObservedAt: null },
+    control: { state: 'connected', generation: null },
+    admission: { state: 'ready', reasonCodes: [] },
+    capabilities: [],
+    runtimes: [],
+    capacity: { used: 0, total: 8 },
+    activeWorks: [],
+    drain: null,
+    nextActions: [],
+    ...overrides,
+  }
+}
+
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   queryClients.add(queryClient)
@@ -138,6 +170,15 @@ function renderPage() {
     queryClient.setQueryDefaults(['agent-status', 'p1'], { staleTime: Infinity })
     queryClient.setQueryData(['agent-status', 'p1'], _agentStatus)
   }
+  const runnerRows = _runnerRows ?? [
+    makeRunner({ capacity: { used: _agentStatus.capacity.active, total: _agentStatus.capacity.max } }),
+  ]
+  queryClient.setQueryDefaults(['runners'], { staleTime: Infinity })
+  queryClient.setQueryData(['runners'], {
+    observedAt: '2026-01-01T00:00:00.000Z',
+    inventory: { state: 'ready', nextActions: [] },
+    runners: runnerRows,
+  })
   if (!_issuesLoading) {
     const issueParams = { projectId: 'p1' }
     queryClient.setQueryDefaults(issueListKeys.list(issueParams), { staleTime: Infinity })
@@ -165,6 +206,7 @@ function resetMocks() {
   _agentStatusLoading = false
   _agentStatusError = false
   _agentActivity = undefined
+  _runnerRows = null
   _approvalWait = EMPTY_APPROVAL_WAIT
   _issuesData = []
   _issuesLoading = false
@@ -219,9 +261,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
 
   describe('headline subordination', () => {
     it('always renders the factory status headline above the attention zone when attention exists', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _issuesData = [
         makeIssue({
           number: 11,
@@ -243,9 +283,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('renders the headline as a compact strip (no data-zone attribute, single section)', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
 
       renderPage()
 
@@ -258,9 +296,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
 
   describe('zone priority order', () => {
     it('renders the four levels in priority order (attention → pulse → capacity → digest) when all are populated', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _agentStatus = makeAgentStatus({ capacity: { active: 2, max: 8 } })
       _issuesData = [
         makeIssue({
@@ -294,23 +330,15 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       const capacity = screen.getByTestId('dashboard-zone-capacity')
       const digest = screen.getByTestId('dashboard-zone-digest')
 
-      expect(
-        attention.compareDocumentPosition(pulse) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy()
-      expect(
-        pulse.compareDocumentPosition(capacity) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy()
-      expect(
-        capacity.compareDocumentPosition(digest) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy()
+      expect(attention.compareDocumentPosition(pulse) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(pulse.compareDocumentPosition(capacity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(capacity.compareDocumentPosition(digest) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     })
   })
 
   describe('empty zone collapse', () => {
     it('omits the digest zone from the DOM when the digest has no items', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _issuesData = [
         makeIssue({
           number: 11,
@@ -328,9 +356,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('omits the active-production zone when no running issues and no active sessions', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _issuesData = [
         makeIssue({
           number: 12,
@@ -347,9 +373,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('omits the capacity zone when capacity data is absent', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _agentStatus = makeAgentStatus({ capacity: { active: 0, max: 0 } })
 
       renderPage()
@@ -359,9 +383,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('does not reserve a fixed-height box for absent zones', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _issuesData = [
         makeIssue({
           number: 13,
@@ -379,9 +401,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
 
   describe('ready state when idle', () => {
     it('does not render the ready state while issue data is still loading', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _issuesLoading = true
 
       renderPage()
@@ -391,9 +411,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('does not render the ready state while activity data is still loading', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _issuesData = []
       _activityCardsMock = {
         ...NO_AGENT_ACTIVITY,
@@ -408,9 +426,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('does not render the ready state while runner status is still loading', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _agentStatusLoading = true
       _issuesData = []
 
@@ -421,9 +437,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('does not render the ready state when the issue query has failed without data', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _issuesData = []
       // Remove issues handler data to simulate failure by clearing it and setting _issuesLoading
       // to false with no data - the query will have fetchedIssues: [], so it IS resolved.
@@ -436,9 +450,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('renders the concise ready state when there are no attention items and no active work', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _issuesData = []
 
       renderPage()
@@ -451,10 +463,29 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       expect(screen.queryByTestId('dashboard-zone-pulse')).not.toBeInTheDocument()
     })
 
-    it('does not render the ready state when attention items exist', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
+    it('does not show a healthy ready state when global Runner admission is blocked with no active work', async () => {
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
+      _issuesData = []
+      _runnerRows = [
+        makeRunner({
+          presence: { state: 'offline', lastObservedAt: null },
+          control: { state: 'disconnected', generation: null },
+          admission: { state: 'blocked', reasonCodes: ['presence-offline', 'control-disconnected'] },
+          capacity: { used: null, total: 8 },
+        }),
       ]
+
+      renderPage()
+
+      await screen.findByTestId('factory-status-headline')
+      expect(screen.getByTestId('factory-status-runner')).toHaveTextContent('Admission blocked')
+      expect(screen.getByTestId('factory-status-runner-facts')).toHaveTextContent('offline')
+      expect(screen.getByTestId('factory-status-runner-facts')).toHaveTextContent('control disconnected')
+      expect(screen.queryByTestId('dashboard-ready-state')).not.toBeInTheDocument()
+    })
+
+    it('does not render the ready state when attention items exist', async () => {
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _issuesData = [
         makeIssue({
           number: 14,
@@ -471,9 +502,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('does not render the ready state when running issues exist (active-only state)', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _issuesData = [
         makeIssue({
           number: 20,
@@ -492,9 +521,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('does not render the ready state when runner status lists active agents', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _agentStatus = makeAgentStatus({
         activeAgents: [
           {
@@ -516,9 +543,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('shows the ready state with the digest as a subordinate strip when digest has items', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _issuesData = [
         makeIssue({
           number: 88,
@@ -542,9 +567,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
 
   describe('capacity level rendering and collapse', () => {
     it('renders the dashboard-zone-capacity when capacity data is present', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _agentStatus = makeAgentStatus({ capacity: { active: 4, max: 8 } })
 
       renderPage()
@@ -560,9 +583,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('collapses the capacity level when max is zero', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _agentStatus = makeAgentStatus({ capacity: { active: 0, max: 0 } })
 
       renderPage()
@@ -572,9 +593,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('collapses the capacity level when capacity field has max=0', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _agentStatus = makeAgentStatus({ capacity: { active: 0, max: 0 } })
 
       renderPage()
@@ -584,9 +603,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('renders the capacity level between active-production and digest', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _agentStatus = makeAgentStatus({ capacity: { active: 2, max: 8 } })
       _issuesData = [
         makeIssue({
@@ -612,18 +629,12 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
       const capacity = screen.getByTestId('dashboard-zone-capacity')
       const digest = screen.getByTestId('dashboard-zone-digest')
 
-      expect(
-        pulse.compareDocumentPosition(capacity) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy()
-      expect(
-        capacity.compareDocumentPosition(digest) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy()
+      expect(pulse.compareDocumentPosition(capacity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(capacity.compareDocumentPosition(digest) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     })
 
     it('keeps the capacity level independent of active-production (renders without active work)', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _agentStatus = makeAgentStatus({ capacity: { active: 3, max: 8 } })
       _issuesData = []
 
@@ -637,17 +648,25 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
 
   describe('centralized predicates', () => {
     it('renders the attention zone only when deriveAttentionItems produces items', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _agentStatus = makeAgentStatus({ runnerAvailable: false })
-      _issuesData = [makeIssue({
-        number: 49,
-        title: 'Affected workflow',
-        status: IssueStatus.InProgress,
-        health: IssueHealth.Active,
-        workflowStage: WorkflowStage.Build,
-      })]
+      _runnerRows = [
+        makeRunner({
+          presence: { state: 'offline', lastObservedAt: null },
+          control: { state: 'disconnected', generation: null },
+          admission: { state: 'blocked', reasonCodes: ['presence-offline', 'control-disconnected'] },
+          capacity: { used: null, total: 8 },
+        }),
+      ]
+      _issuesData = [
+        makeIssue({
+          number: 49,
+          title: 'Affected workflow',
+          status: IssueStatus.InProgress,
+          health: IssueHealth.Active,
+          workflowStage: WorkflowStage.Build,
+        }),
+      ]
 
       renderPage()
 
@@ -656,9 +675,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('renders the active-production zone when an in-progress issue is present', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _issuesData = [
         makeIssue({
           number: 50,
@@ -676,9 +693,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
     })
 
     it('renders active-production for an active session without a running issue and does not show the ready state', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _issuesData = []
       const activeCard = makeActiveCard({
         issueNumber: '999',
@@ -705,9 +720,7 @@ describe('DashboardPage — attention-first zone hierarchy', () => {
 
   describe('test-id preservation', () => {
     it('preserves the factory-status-headline, dashboard-zone-attention/-pulse/-digest and dashboard-zone-capacity test-ids', async () => {
-      _projects = [
-        { id: 'p1', name: 'demo', createdAt: '', updatedAt: '' },
-      ]
+      _projects = [{ id: 'p1', name: 'demo', createdAt: '', updatedAt: '' }]
       _agentStatus = makeAgentStatus({ capacity: { active: 1, max: 4 } })
       _issuesData = [
         makeIssue({

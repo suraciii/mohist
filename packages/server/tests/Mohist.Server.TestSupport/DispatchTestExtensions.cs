@@ -34,6 +34,8 @@ public static class DispatchTestExtensions
                 new RuntimeReadinessWitness("opencode", Ready: true, Generation: 1),
             ],
             ConnectionGeneration: ConnectionGeneration,
+            AdmissionReady: true,
+            AdmissionReasonCodes: [],
             ProcessGeneration: processGeneration);
 
     /// <summary>
