@@ -111,7 +111,7 @@ func parseIssue(args []string) (command, error) {
 
 func parseIssueOptions(c command, args []string, action string) (command, error) {
 	for i := 0; i < len(args); i++ {
-		arg := args[i]
+		arg := canonicalFlag(args[i])
 		switch arg {
 		case "--project", "--stage", "--priority", "--risk", "--repo", "--parent", "--model", "--model-variant", "--workflow-profile", "--stage-models", "--stage-models-file", "--stage-model-variants", "--stage-model-variants-file", "--base-branch":
 			if i+1 >= len(args) {
@@ -121,7 +121,7 @@ func parseIssueOptions(c command, args []string, action string) (command, error)
 			i++
 		case "--label":
 			if i+1 >= len(args) {
-				return command{}, usage("--label requires a value")
+				return command{}, usage(arg + " requires a value")
 			}
 			c.args = append(c.args, "label", args[i+1])
 			i++
@@ -142,7 +142,7 @@ func parseIssueOptions(c command, args []string, action string) (command, error)
 		case "--help", "-h":
 			return command{help: true, helpText: leafHelp(c.kind, c.catalog)}, nil
 		default:
-			return command{}, usage("unknown option " + arg)
+			return command{}, usage("unknown option " + args[i])
 		}
 	}
 	if action == "list" && hasArg(c.args, "all") && hasArg(c.args, "archived") {
@@ -323,12 +323,13 @@ func parseIssueNested(area string, args []string) (command, error) {
 		}
 	}
 	for i := start; i < len(args); i++ {
-		switch args[i] {
+		arg := canonicalFlag(args[i])
+		switch arg {
 		case "--project", "--agent", "--display-name", "--body", "--body-file", "--stage", "--value-json":
 			if i+1 >= len(args) {
-				return command{}, usage(args[i] + " requires a value")
+				return command{}, usage(arg + " requires a value")
 			}
-			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), args[i+1])
+			c.args = append(c.args, strings.TrimPrefix(arg, "--"), args[i+1])
 			i++
 		case "--json":
 			if c.catalog == nil {
@@ -406,12 +407,13 @@ func parseEpic(args []string) (command, error) {
 		start = 3
 	}
 	for i := start; i < len(args); i++ {
-		switch args[i] {
+		arg := canonicalFlag(args[i])
+		switch arg {
 		case "--project", "--description", "--description-file", "--priority", "--title":
 			if i+1 >= len(args) {
-				return command{}, usage(args[i] + " requires a value")
+				return command{}, usage(arg + " requires a value")
 			}
-			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), args[i+1])
+			c.args = append(c.args, strings.TrimPrefix(arg, "--"), args[i+1])
 			i++
 		case "--json":
 			if c.catalog == nil {

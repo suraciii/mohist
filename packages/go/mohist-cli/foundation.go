@@ -131,7 +131,7 @@ func parseInfo(args []string) (command, error) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--help", "-h":
-			return command{help: true, helpText: "USAGE\n    mo info [--verbose] [--json [fields]]\n\nShow local CLI, installation, and effective environment information.\n\nJSON FIELDS\n" + strings.Join(infoFields, "\n")}, nil
+			return command{help: true, helpText: "USAGE\n    mo info [-v, --verbose] [--json [fields]]\n\nShow local CLI, installation, and effective environment information.\n\nJSON FIELDS\n" + strings.Join(infoFields, "\n")}, nil
 		case "--verbose", "-v":
 			c.args = append(c.args, "verbose")
 		case "--json":
@@ -142,7 +142,7 @@ func parseInfo(args []string) (command, error) {
 				c.fieldsOnly = true
 			}
 		default:
-			return command{}, &usageError{message: "error: unknown option " + args[i] + "\nusage: mo info [--verbose] [--json [fields]]"}
+			return command{}, &usageError{message: "error: unknown option " + args[i] + "\nusage: mo info [-v, --verbose] [--json [fields]]"}
 		}
 	}
 	if len(c.fields) > 0 {

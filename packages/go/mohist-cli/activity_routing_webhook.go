@@ -202,12 +202,13 @@ func parseWebhook(args []string) (command, error) {
 		start++
 	}
 	for i := start; i < len(args); i++ {
-		switch args[i] {
+		arg := canonicalFlag(args[i])
+		switch arg {
 		case "--project", "--target-url", "--match", "--secret", "--name", "--event", "--auth-type", "--auth-token", "--auth-user", "--auth-password", "--auth-header", "--subscription-id":
 			if i+1 >= len(args) {
-				return command{}, usage(args[i] + " requires a value")
+				return command{}, usage(arg + " requires a value")
 			}
-			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), args[i+1])
+			c.args = append(c.args, strings.TrimPrefix(arg, "--"), args[i+1])
 			i++
 		case "--all":
 			c.args = append(c.args, "all", "true")

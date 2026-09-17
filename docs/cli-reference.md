@@ -133,6 +133,9 @@ two meanings:
   `--body`, `-m` for `--message`, `-y` for `--yes`, `-f` for `--follow`, `-n`
   for `--lines`, and `-v` for `--verbose`. Leaf help must render them. A new
   short flag outside this allowlist must not be added.
+- An allowlisted short flag is executable on every leaf that declares its long
+  flag and is a usage error elsewhere. Values are never rewritten, so a short
+  spelling inside a value is preserved.
 - Default Project references, including the default repository and default
   Workflow Profile, are Project properties. The `project` area owns
   `project repo set-default` and `project workflow set-default`.
