@@ -3,8 +3,11 @@ package mohistcli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -261,5 +264,196 @@ func TestIssue682UnknownAndWrongLeafShortFlagsFailLocally(t *testing.T) {
 				t.Fatalf("stderr=%q", errOut.String())
 			}
 		})
+	}
+}
+
+// packagedSkillCommand pins one representative command to the packaged Skill
+// that ships it. fragments are exact command-text substrings that must appear
+// in the shipped SKILL.md; args is the tokenized command handed to the parser.
+// The guard trips if either the document stops shipping the command text or
+// the binary stops parsing it.
+type packagedSkillCommand struct {
+	skill     string
+	doc       string
+	fragments []string
+	args      []string
+}
+
+// readPackagedSkill loads one shipped Skill document relative to the test
+// package directory, so the contract never hardcodes a checkout path.
+func readPackagedSkill(t *testing.T, skill string) string {
+	t.Helper()
+	path := filepath.Join("skill-data", skill, "SKILL.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read packaged Skill %s: %v", path, err)
+	}
+	return string(data)
+}
+
+// verifyPackagedSkillCommand asserts the command text is present in the
+// shipped document and that the binary parses its tokenized form. It returns
+// the first problem instead of failing the caller so the guard itself can be
+// exercised with a synthetic drift case.
+func verifyPackagedSkillCommand(cmd packagedSkillCommand) error {
+	for _, fragment := range cmd.fragments {
+		if !strings.Contains(cmd.doc, fragment) {
+			return fmt.Errorf("packaged Skill %s does not ship command text %q", cmd.skill, fragment)
+		}
+	}
+	if _, err := parse(cmd.args); err != nil {
+		return fmt.Errorf("parse %q from packaged Skill %s: %w", strings.Join(cmd.args, " "), cmd.skill, err)
+	}
+	return nil
+}
+
+// TestIssue682PackagedSkillCommandsAreShippedAndParse pins the representative
+// commands the mohist-create-issue and mohist-create-epic Skills ship: every
+// command line must still be present in the packaged SKILL.md and the binary
+// must accept it. Drift in either direction fails the test.
+func TestIssue682PackagedSkillCommandsAreShippedAndParse(t *testing.T) {
+	issueDoc := readPackagedSkill(t, "mohist-create-issue")
+	epicDoc := readPackagedSkill(t, "mohist-create-epic")
+	cases := []packagedSkillCommand{
+		{
+			skill:     "mohist-create-issue",
+			doc:       issueDoc,
+			fragments: []string{"mo issue template list"},
+			args:      []string{"issue", "template", "list"},
+		},
+		{
+			skill:     "mohist-create-issue",
+			doc:       issueDoc,
+			fragments: []string{"mo issue template view <id>"},
+			args:      []string{"issue", "template", "view", "feature"},
+		},
+		{
+			skill:     "mohist-create-issue",
+			doc:       issueDoc,
+			fragments: []string{"mo workflow list"},
+			args:      []string{"workflow", "list"},
+		},
+		{
+			skill:     "mohist-create-issue",
+			doc:       issueDoc,
+			fragments: []string{"mo label list"},
+			args:      []string{"label", "list"},
+		},
+		{
+			skill:     "mohist-create-issue",
+			doc:       issueDoc,
+			fragments: []string{"mo issue create <title> --body-file <produced-file>", "-l key=value"},
+			args:      []string{"issue", "create", "Title", "--body-file", "body.md", "-l", "team=core"},
+		},
+		{
+			skill:     "mohist-create-epic",
+			doc:       epicDoc,
+			fragments: []string{`mo epic create "<title>" --description-file ./epic.md --priority p2`},
+			args:      []string{"epic", "create", "Epic", "--description-file", "epic.md", "--priority", "p2"},
+		},
+		{
+			skill:     "mohist-create-epic",
+			doc:       epicDoc,
+			fragments: []string{"mo epic add <epic-id-or-number> <issue-id-or-number>"},
+			args:      []string{"epic", "add", "7", "42"},
+		},
+		{
+			skill:     "mohist-create-epic",
+			doc:       epicDoc,
+			fragments: []string{"mo epic remove <epic-id-or-number> <issue-id>"},
+			args:      []string{"epic", "remove", "7", "42"},
+		},
+		{
+			skill:     "mohist-create-epic",
+			doc:       epicDoc,
+			fragments: []string{"mo epic start <id>"},
+			args:      []string{"epic", "start", "7"},
+		},
+		{
+			skill:     "mohist-create-epic",
+			doc:       epicDoc,
+			fragments: []string{"mo epic pause <id>"},
+			args:      []string{"epic", "pause", "7"},
+		},
+		{
+			skill:     "mohist-create-epic",
+			doc:       epicDoc,
+			fragments: []string{"mo epic resume <id>"},
+			args:      []string{"epic", "resume", "7"},
+		},
+		{
+			skill:     "mohist-create-epic",
+			doc:       epicDoc,
+			fragments: []string{"mo epic done <id>"},
+			args:      []string{"epic", "done", "7"},
+		},
+		{
+			skill:     "mohist-create-epic",
+			doc:       epicDoc,
+			fragments: []string{"mo epic close <id>"},
+			args:      []string{"epic", "close", "7"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			if err := verifyPackagedSkillCommand(tc); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// TestIssue682PackagedSkillReadAndLifecycleCommandsParse parses the read and
+// lifecycle commands the packaged Skills depend on, including the mo skill
+// entry commands that only appear in prose rather than a single command line.
+func TestIssue682PackagedSkillReadAndLifecycleCommandsParse(t *testing.T) {
+	commands := [][]string{
+		{"issue", "template", "list"},
+		{"issue", "template", "view", "feature"},
+		{"workflow", "list"},
+		{"label", "list"},
+		{"epic", "start", "7"},
+		{"epic", "add", "7", "42"},
+		{"epic", "pause", "7"},
+		{"epic", "resume", "7"},
+		{"epic", "done", "7"},
+		{"epic", "close", "7"},
+		{"epic", "remove", "7", "42"},
+		{"skill", "list"},
+		{"skill", "view", "mohist"},
+	}
+	for _, args := range commands {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			if _, err := parse(args); err != nil {
+				t.Fatalf("parse(%v): %v", args, err)
+			}
+		})
+	}
+}
+
+// TestIssue682PackagedSkillGuardDetectsDrift proves the contract guard fails
+// when a Skill ships a command the binary rejects, and when the shipped
+// document no longer contains the expected command text. This is the property
+// that catches Skill/binary drift.
+func TestIssue682PackagedSkillGuardDetectsDrift(t *testing.T) {
+	shipped := "On confirm run `mo issue create Title -m drift` and stop."
+	unparsable := packagedSkillCommand{
+		skill:     "synthetic",
+		doc:       shipped,
+		fragments: []string{"mo issue create Title -m drift"},
+		args:      []string{"issue", "create", "Title", "-m", "drift"},
+	}
+	if err := verifyPackagedSkillCommand(unparsable); err == nil {
+		t.Fatal("expected a shipped but unparsable command to fail the guard")
+	}
+
+	missing := packagedSkillCommand{
+		skill:     "synthetic",
+		doc:       shipped,
+		fragments: []string{"mo issue create Title --not-shipped"},
+		args:      []string{"issue", "create", "Title", "--body", "b"},
+	}
+	if err := verifyPackagedSkillCommand(missing); err == nil {
+		t.Fatal("expected a missing shipped command text to fail the guard")
 	}
 }
