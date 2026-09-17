@@ -314,6 +314,25 @@ metadata or a missing closing delimiter warns on stderr and sends the exact
 original body with no partial metadata, while a body without a leading `---`
 stays byte-exact and silent. The rule is CLI-local and does not change the
 Server DTO, the packaged Skill, or any other body carrier.
+Structured string-map flags such as `--stage-models` and
+`--stage-model-variants` accept a JSON object whose members are all strings,
+with a `-file` twin that reads a file or `-` for stdin. Inline and file forms
+of one field are mutually exclusive, and at most one stdin carrier is allowed
+per command. Every member is validated before any Project-state lookup or HTTP
+request: malformed JSON, a non-object root, and `null`, boolean, number, array,
+or object members are local `ExitUsage=2` errors that name the originating
+flag. A nil-able map tracks presence so an explicit empty object is sent while
+an absent flag is omitted.
+
+`issue edit` composes one atomic patch. A single pre-flight GET reads the
+current labels only to merge them; the validated `key=value` and `-key` tokens
+are applied to that snapshot, and the merged labels plus every other explicit
+field are emitted by one shared builder into exactly one PATCH. The pre-read
+never mutates, so the edit cannot diverge field by field from a non-label edit.
+An `issue edit` with no editable field is a local `ExitUsage=2` error: it would
+otherwise serialize an empty patch. `--project` and a `--json` field selection
+do not count as editable fields, and bare `--json`/`--help` remain local
+discovery with no request.
 
 ### Output and Fields
 

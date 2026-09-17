@@ -554,7 +554,7 @@ func TestCarrierFailureSkipsProjectStateLookup(t *testing.T) {
 }
 
 // TestIssueEditWithLabelsStdinOnceOnly confirms that the pre-flight GET
-// inside issueEditWithLabels is skipped on a stdin carrier failure and the
+// inside the label pre-read is skipped on a stdin carrier failure and the
 // stdin reader is consumed at most once for a successful stdin payload.
 func TestIssueEditWithLabelsSkipsPreflightOnStdinFailure(t *testing.T) {
 	state := map[string]string{"/work/tree/.mohist/cli-state.json": `{"activeProjectId":"proj"}`}
@@ -600,7 +600,7 @@ func TestIssueEditWithLabelsStdinConsumedOnceOnSuccess(t *testing.T) {
 		}
 	})}
 	_ = read
-	code := Run(context.Background(), []string{"issue", "edit", "42", "--label", "bug", "--body-file", "-"}, f.deps)
+	code := Run(context.Background(), []string{"issue", "edit", "42", "--label", "bug=1", "--body-file", "-"}, f.deps)
 	if code != ExitOK {
 		t.Fatalf("code=%d stderr=%q", code, f.stderr.String())
 	}
