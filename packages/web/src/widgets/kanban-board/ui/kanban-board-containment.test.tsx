@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { SidebarInset } from '@/shared/ui/components/sidebar'
 import { KanbanBoard } from './KanbanBoard'
 import type { AgentStatus } from '../../../entities/agent'
+import { deriveRunnerSummary } from '../../../entities/runner'
 import {
   IssueStatus,
   IssueHealth,
@@ -68,7 +69,11 @@ describe('Issue board desktop horizontal scroll containment', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>
-          <KanbanBoard issues={[makeIssue()]} agentStatus={mockAgentStatus} />
+          <KanbanBoard
+            issues={[makeIssue()]}
+            agentStatus={mockAgentStatus}
+            runnerSummaryHook={() => deriveRunnerSummary([])}
+          />
         </MemoryRouter>
       </QueryClientProvider>,
     )
