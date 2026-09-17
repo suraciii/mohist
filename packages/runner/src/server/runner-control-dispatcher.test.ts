@@ -3,13 +3,12 @@ import { RunnerControlDispatcher, type RunnerControlHandlers } from './runner-co
 
 function validQuery() {
   return {
-    workflowRunId: 'run-1',
     projectId: 'project-1',
+    workspaceName: 'issue-1',
     issueNumber: 1,
     repositoryName: 'repo',
     gitUrl: 'https://example.test/repo.git',
-    workspacePath: '/work/run-1',
-    branch: 'run-1',
+    branch: 'mohist/ws-issue-1',
     baseBranch: 'main',
   }
 }

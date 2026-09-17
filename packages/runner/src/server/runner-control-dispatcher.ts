@@ -175,12 +175,11 @@ function nullableString(value: unknown): boolean {
 function isWorkspaceQuery(value: unknown): value is WorkspaceQuery {
   if (!isObject(value)) return false
   return (
-    nullableString(value.workflowRunId) &&
     nullableString(value.projectId) &&
+    nullableString(value.workspaceName) &&
     (value.issueNumber === undefined || value.issueNumber === null || Number.isSafeInteger(value.issueNumber)) &&
     nullableString(value.repositoryName) &&
     nullableString(value.gitUrl) &&
-    nullableString(value.workspacePath) &&
     nullableString(value.branch) &&
     nullableString(value.baseBranch)
   )

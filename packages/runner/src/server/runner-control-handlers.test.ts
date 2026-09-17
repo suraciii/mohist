@@ -23,7 +23,10 @@ describe('createRunnerControlHandlers', () => {
     await expect(handlers.workspaceCommitDiff(query, 'abc')).resolves.toBeNull()
     await expect(handlers.workspaceStatus(query)).resolves.toEqual({ exists: false })
     await expect(handlers.workspaceFileContent(query, 'a.ts')).resolves.toEqual({ base: null, head: null })
-    await expect(handlers.workspaceRemove(query)).resolves.toMatchObject({ status: 'missing' })
+    await expect(handlers.workspaceRemove(query)).resolves.toMatchObject({
+      status: 'failed',
+      reason: 'workspace_identity_mismatch',
+    })
     await expect(handlers.sessionFollowup({ text: 'next', operationId: 'followup', turnId: 'turn' })).resolves.toEqual({
       accepted: false,
       error: 'unavailable',

@@ -40,6 +40,27 @@ public sealed class RunnerWorkspaceClientTests
         Assert.Equal("runner-1", transport.RequestedRunnerId);
     }
 
+    [Fact]
+    public async Task WorkspaceQueryCarriesNamedIdentityAndWorkspaceBranch()
+    {
+        var transport = new RecordingTransport("runner-1");
+        var client = CreateClient("runner-1", [], transport);
+
+        await client.GetDiffAsync(
+            "project-1", "run-1", 657, new("mohist", "https://example.test/mohist.git", "main"), new("/workspace"),
+            TestContext.Current.CancellationToken);
+
+        var parameters = Assert.IsType<WorkspaceQueryParams>(transport.LastParameters);
+        var query = parameters.Query;
+        Assert.Equal("project-1", query.ProjectId);
+        Assert.Equal("issue-657", query.WorkspaceName);
+        Assert.Equal(657, query.IssueNumber);
+        Assert.Equal("mohist", query.RepositoryName);
+        Assert.Equal("https://example.test/mohist.git", query.GitUrl);
+        Assert.Equal("main", query.BaseBranch);
+        Assert.Equal("mohist/ws-issue-657", query.Branch);
+    }
+
     private static RunnerWorkspaceClient CreateClient(
         string? assignedRunnerId,
         IReadOnlyList<RunnerInfo> eligible,
@@ -62,6 +83,7 @@ public sealed class RunnerWorkspaceClientTests
         private readonly HashSet<string> _connected = new(connectedRunnerIds, StringComparer.Ordinal);
 
         public string? RequestedRunnerId { get; private set; }
+        public object? LastParameters { get; private set; }
         public bool IsConnected(string runnerId) => _connected.Contains(runnerId);
 
         public Task<TResult> SendRequestAsync<TParams, TResult>(
@@ -72,6 +94,7 @@ public sealed class RunnerWorkspaceClientTests
             CancellationToken ct = default)
         {
             RequestedRunnerId = runnerId;
+            LastParameters = parameters;
             return Task.FromResult((TResult)(object)new RunnerWorkspaceDiffResult(
                 "base", "head", "merge-base", 1, 0, 1, 1, 0, []));
         }

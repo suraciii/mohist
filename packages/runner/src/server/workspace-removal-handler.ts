@@ -5,28 +5,27 @@
 // exercised independently from the connection lifecycle.
 //
 // Behaviour preserves the control WebSocket reply contract while enforcing the
-// registry-safety invariant:
-//   - runner-root containment check (rejects `workspace_cleanup_refused`)
-//   - paths outside runnerRoot never mutate the registry
-//   - for in-root paths, path inspection, identity validation, deletion, and
-//     registry mutation run inside one directory removal fence
+// Named Workspace safety invariants:
+//   - identity is `(projectId, workspaceName)`; the runner derives the
+//     directory from `namedWorkspacePath(runnerRoot, ...)` and never trusts a
+//     Server-supplied path
+//   - incomplete identity is refused before any delete
+//   - the named marker (`projectId`, `workspaceName`, repository origin) is
+//     validated inside one directory removal fence before deletion
+//   - the Runtime removal fence is mandatory: without it the handler refuses
+//     rather than deleting outside the Runtime lifecycle
+//   - registry mutation drops only the matching named entry
 //   - `workspace_missing` reply when the directory was already absent
 //   - `workspace_cleanup_failed` reply carrying the error message on
 //     delete failure
 //   - reply shape `{ removed, status, path, reason, message }`
-//
-// The handler deps are minimised: `runnerRoot` (needed for the containment
-// check), `registry` (for the consistent-entry drop), a late-bound removal
-// fence, and `pathExists` (kept as an optional injection point, falling
-// through to `existsSync` from `node:fs` when no test seam is supplied).
 
 import { existsSync as defaultExistsSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { deleteDirectory } from '../system/process.js'
 import { hasCompleteWorkspaceIdentity, isUnderRunnerRoot, type WorkspaceQuery } from '../runtime/workspace-query.js'
 import type { WorkspaceRemovalFence } from '../runtime/workspace-removal-fence.js'
-import type { WorkspaceRegistry } from '../runtime/workspace-registry.js'
-import { issueWorkspacePath, validateWorkspaceIdentity, type IssueWorkspaceMarker } from '../runtime/workspace.js'
+import { namedWorkspacePath, validateNamedWorkspaceIdentity } from '../runtime/workspace-entity.js'
+import { namedWorkspaceRegistryKey, type NamedWorkspaceRegistry } from '../runtime/workspace-registry.js'
 import { runnerLogger } from '../system/logger.js'
 import { currentRunnerFileSystem, currentRunnerResources } from '../system/filesystem.js'
 import { withManagedWorkspaceHandle } from '../runtime/workspace-managed.js'
@@ -35,7 +34,7 @@ const log = runnerLogger.child('cleanup')
 
 export interface WorkspaceRemovalHandlerDeps {
   runnerRoot: string
-  registry?: WorkspaceRegistry | null
+  registry?: NamedWorkspaceRegistry | null
   pathExists?: typeof defaultExistsSync
   removalFence?: () => WorkspaceRemovalFence | null
 }
@@ -62,19 +61,10 @@ function registerWorkspaceRemovalHandler(
   const pathExists = deps.pathExists ?? currentRunnerResources()?.controlExistsChecker ?? defaultExistsSync
 
   conn.on('RemoveWorkspace', async (query: WorkspaceQuery) => {
-    if (!query?.workspacePath) {
-      return removal(false, 'missing', query?.workspacePath ?? null, 'workspace_missing', 'Workspace already removed')
-    }
-    const workspacePath = resolve(query.workspacePath)
     if (!hasCompleteWorkspaceIdentity(query)) {
-      return removal(
-        false,
-        'failed',
-        workspacePath,
-        'workspace_identity_mismatch',
-        'Workspace query requires complete identity',
-      )
+      return removal(false, 'failed', null, 'workspace_identity_mismatch', 'Workspace query requires complete identity')
     }
+    const workspacePath = namedWorkspacePath(deps.runnerRoot, query.projectId, query.workspaceName)
     if (!isUnderRunnerRoot(deps.runnerRoot, workspacePath)) {
       return removal(
         false,
@@ -84,33 +74,26 @@ function registerWorkspaceRemovalHandler(
         'Workspace path is outside the runner-managed root',
       )
     }
-    if (workspacePath !== issueWorkspacePath(deps.runnerRoot, query.workflowRunId)) {
+
+    const fence = deps.removalFence?.() ?? null
+    if (!fence) {
       return removal(
         false,
         'failed',
         workspacePath,
         'workspace_cleanup_refused',
-        'Workspace path does not belong to the workflow run',
+        'Runtime removal fence is unavailable',
       )
     }
+
     const removeWorkspace = async () => {
       if (!pathExists(workspacePath)) {
-        await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
+        await dropNamedRegistryEntry(deps.registry ?? null, query.projectId, query.workspaceName)
         return removal(false, 'missing', workspacePath, 'workspace_missing', 'Workspace already removed')
       }
-      const expected: IssueWorkspaceMarker = { workflowRunId: query.workflowRunId, runBranch: query.branch }
-      const removeAt = async (operationPath: string, managed: boolean) => {
+      const removeAt = async (operationPath: string) => {
         try {
-          await validateWorkspaceIdentity(
-            operationPath,
-            expected,
-            query.gitUrl,
-            new AbortController().signal,
-            null,
-            managed ? undefined : deps.runnerRoot,
-            workspacePath,
-            query.repositoryName ?? undefined,
-          )
+          await validateNamedWorkspaceIdentity(operationPath, query, new AbortController().signal)
         } catch (error) {
           return removal(
             false,
@@ -122,7 +105,7 @@ function registerWorkspaceRemovalHandler(
         }
         try {
           await deleteDirectory(operationPath)
-          await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
+          await dropNamedRegistryEntry(deps.registry ?? null, query.projectId, query.workspaceName)
           return removal(true, 'removed', workspacePath, null, 'Workspace removed')
         } catch (error) {
           return removal(
@@ -146,7 +129,7 @@ function registerWorkspaceRemovalHandler(
             deps.runnerRoot,
             workspacePath,
             true,
-            async (managedPath) => await removeAt(managedPath, true),
+            async (managedPath) => await removeAt(managedPath),
           )
         } catch (error) {
           return removal(
@@ -158,11 +141,9 @@ function registerWorkspaceRemovalHandler(
           )
         }
       }
-      return await removeAt(workspacePath, false)
+      return await removeAt(workspacePath)
     }
 
-    const fence = deps.removalFence?.() ?? null
-    if (!fence) return await removeWorkspace()
     try {
       const result = await fence.withRemovalFence(workspacePath, removeWorkspace)
       if (result.kind === 'completed') return result.value
@@ -183,23 +164,23 @@ function registerWorkspaceRemovalHandler(
   })
 }
 
-// Drop the registry entry whose workspace path resolves to `workspacePath`.
+// Drop the named registry entry identified by `(projectId, workspaceName)`.
 // The caller invokes this only after the removal fence has admitted the
 // directory callback. The entry is dropped regardless of whether the
 // directory existed on disk — an already-missing directory is treated as
-// removed and its entry deleted. `null` is accepted for the query branch
-// with no path, where there is no registry identity to match.
-async function dropRegistryEntryForPath(
-  registry: WorkspaceRegistry | null,
-  workspacePath: string | null,
+// removed and its entry deleted.
+async function dropNamedRegistryEntry(
+  registry: NamedWorkspaceRegistry | null,
+  projectId: string,
+  workspaceName: string,
 ): Promise<void> {
-  if (!registry || !workspacePath) return
-  const entry = registry.findByWorkspacePath(workspacePath)
+  if (!registry) return
+  const entry = registry.get(projectId, workspaceName)
   if (!entry) return
   try {
-    await registry.remove(entry.workflowRunId)
+    await registry.remove(namedWorkspaceRegistryKey(projectId, workspaceName))
   } catch (error) {
-    log.error('workspace registry remove failed', { path: workspacePath, run: entry.workflowRunId, exception: error })
+    log.error('named workspace registry remove failed', { workspace: workspaceName, exception: error })
   }
 }
 

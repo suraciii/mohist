@@ -237,7 +237,7 @@ export class RunnerHost {
           },
           workspaceRemoval: {
             runnerRoot: options.runnerRoot,
-            registry: this.workspaceRegistry,
+            registry: this.namedWorkspaceRegistry,
             removalFence: () => this.openCodeRuntime,
           },
           followup: {

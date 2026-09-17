@@ -92,7 +92,12 @@ describe('runner control JSON contract', () => {
     const stop = request<SessionStopParams>(entries.get('session.stop')!).params
     const command = request<SessionCommandRequest>(entries.get('session.command')!).params
 
-    expect(query).toMatchObject({ workflowRunId: 'run_101', issueNumber: 657, baseBranch: 'main' })
+    expect(query).toMatchObject({
+      projectId: 'project_1',
+      workspaceName: 'issue-657',
+      issueNumber: 657,
+      baseBranch: 'main',
+    })
     expect(commit).toMatchObject({ hash: 'def4567890', query })
     expect(file).toMatchObject({ path: 'src/control.ts', query })
     expect(followup).toMatchObject({ operationId: 'operation_followup_1', turnId: 'turn_followup_1' })

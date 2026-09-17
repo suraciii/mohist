@@ -2,7 +2,13 @@ import { join } from 'node:path'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { createWorkspaceRemovalHandler } from '../../src/server/workspace-removal-handler.js'
 import { WorkspaceManager } from '../../src/runtime/workspace.js'
-import { WorkspaceRegistry, defaultWorkspaceRegistryFilePath } from '../../src/runtime/workspace-registry.js'
+import {
+  NamedWorkspaceRegistry,
+  WorkspaceRegistry,
+  defaultWorkspaceRegistryFilePath,
+} from '../../src/runtime/workspace-registry.js'
+import { namedWorkspacePath } from '../../src/runtime/workspace-entity.js'
+import type { WorkspaceRemovalFence, WorkspaceRemovalFenceResult } from '../../src/runtime/workspace-removal-fence.js'
 import type { RunnerFileSystem, RunnerResourceContext } from '../../src/system/filesystem.js'
 import { MemoryFileSystem } from '../support/memory-filesystem.js'
 import { withTestRunnerResources } from '../support/test-resources.js'
@@ -90,15 +96,42 @@ function work(workflowRunId: string, issueNumber: number, gitUrl: string) {
   }
 }
 
-function removalQuery(workflowRunId: string, issueNumber: number, workspacePath: string) {
+function removalQuery(projectId: string, workspaceName: string) {
   return {
-    workflowRunId,
-    gitUrl: testGitUrl,
-    workspacePath,
-    branch: `mohist/run-${workflowRunId}`,
-    baseBranch: 'main',
+    projectId,
+    workspaceName,
+    issueNumber: 1,
     repositoryName: 'main',
+    gitUrl: testGitUrl,
+    branch: `mohist/ws-${workspaceName}`,
+    baseBranch: 'main',
   }
+}
+
+function completedRemovalFence(): WorkspaceRemovalFence {
+  return {
+    async withRemovalFence<T>(_path: string, callback: () => Promise<T>): Promise<WorkspaceRemovalFenceResult<T>> {
+      return { kind: 'completed', value: await callback() }
+    },
+  }
+}
+
+async function registerNamedWorkspace(
+  resources: TestResources,
+  runnerRoot: string,
+  projectId: string,
+  workspaceName: string,
+): Promise<{ registry: NamedWorkspaceRegistry; workspacePath: string }> {
+  const registry = new NamedWorkspaceRegistry(runnerRoot)
+  await registry.load()
+  const workspacePath = namedWorkspacePath(runnerRoot, projectId, workspaceName)
+  await resources.fileSystem.ensureDir(join(workspacePath, 'REPOS', 'main', '.git'))
+  await resources.fileSystem.writeText(
+    join(workspacePath, '.mohist', 'workspace.json'),
+    JSON.stringify({ projectId, workspaceName, repositories: [{ name: 'main', gitUrl: testGitUrl }] }),
+  )
+  await registry.register({ projectId, workspaceName, workspacePath })
+  return { registry, workspacePath }
 }
 
 describe('workspace registry lifecycle', () => {
@@ -205,91 +238,29 @@ describe('workspace registry lifecycle', () => {
     expect(entry?.terminalAt).toBeNull()
   })
 
-  it('manual removal drops the matching registry entry', async (resources) => {
-    const repo = testGitUrl
+  it('manual removal drops the matching named registry entry', async (resources) => {
     const runnerRoot = join(root, 'runner')
-    const registry = new WorkspaceRegistry(runnerRoot)
-    await registry.load()
-    const manager = new WorkspaceManager(runnerRoot, registry)
+    const { registry } = await registerNamedWorkspace(resources, runnerRoot, 'project-1', 'issue-remove')
+    expect(registry.get('project-1', 'issue-remove')).not.toBeNull()
 
-    const info = await manager.prepare(work('wr-remove', 1, repo), new AbortController().signal)
-    expect(registry.get('wr-remove')).not.toBeNull()
+    const removeHandler = createWorkspaceRemovalHandler({ runnerRoot, registry, removalFence: completedRemovalFence })
 
-    const removeHandler = createWorkspaceRemovalHandler({ runnerRoot, registry })
-
-    const result = await removeHandler(removalQuery('wr-remove', 1, info.path))
+    const result = await removeHandler(removalQuery('project-1', 'issue-remove'))
 
     expect(result).toMatchObject({ removed: true, status: 'removed' })
-    expect(registry.get('wr-remove')).toBeNull()
-
-    // The on-disk registry was rewritten.
-    const persisted = JSON.parse(await resources.fileSystem.readText(defaultWorkspaceRegistryFilePath(runnerRoot)))
-    expect(persisted.entries['wr-remove']).toBeUndefined()
+    expect(registry.get('project-1', 'issue-remove')).toBeNull()
   })
 
-  it('manual removal clears the entry when the workspace is already missing', async (resources) => {
-    const repo = testGitUrl
+  it('manual removal clears the named entry when the workspace is already missing', async (resources) => {
     const runnerRoot = join(root, 'runner')
-    const registry = new WorkspaceRegistry(runnerRoot)
-    await registry.load()
-    const manager = new WorkspaceManager(runnerRoot, registry)
+    const { registry, workspacePath } = await registerNamedWorkspace(resources, runnerRoot, 'project-1', 'issue-gone')
+    await resources.fileSystem.deleteDirectory(workspacePath)
+    expect(resources.fileSystem.exists(workspacePath)).toBe(false)
 
-    const info = await manager.prepare(work('wr-gone', 2, repo), new AbortController().signal)
-    await resources.fileSystem.deleteDirectory(info.path)
-    expect(resources.fileSystem.exists(info.path)).toBe(false)
-
-    const removeHandler = createWorkspaceRemovalHandler({ runnerRoot, registry })
-    const result = await removeHandler(removalQuery('wr-gone', 2, info.path))
+    const removeHandler = createWorkspaceRemovalHandler({ runnerRoot, registry, removalFence: completedRemovalFence })
+    const result = await removeHandler(removalQuery('project-1', 'issue-gone'))
 
     expect(result).toMatchObject({ removed: false, status: 'missing' })
-    expect(registry.get('wr-gone')).toBeNull()
-  })
-
-  it('manual removal refuses a path outside the runner root', async (resources) => {
-    const repo = testGitUrl
-    const runnerRoot = join(root, 'runner')
-    const registry = new WorkspaceRegistry(runnerRoot)
-    await registry.load()
-    const manager = new WorkspaceManager(runnerRoot, registry)
-
-    const info = await manager.prepare(work('wr-out', 3, repo), new AbortController().signal)
-
-    const removeHandler = createWorkspaceRemovalHandler({ runnerRoot, registry })
-
-    // Path that resolves outside runnerRoot. The handler should refuse
-    // BEFORE the registry is touched so a misbehaving caller cannot
-    // drop a registry entry for a directory it never managed.
-    await resources.fileSystem.ensureDir(join(root, 'outside'))
-    const outsidePath = join(root, 'outside', 'decoy')
-    await resources.fileSystem.writeText(outsidePath, 'not a workspace')
-
-    const result = await removeHandler(removalQuery('wr-out', 3, outsidePath))
-    expect(result).toMatchObject({ removed: false, reason: 'workspace_cleanup_refused' })
-    expect(registry.get('wr-out')).not.toBeNull()
-
-    // Sanity: the real workspace entry is unchanged and the directory
-    // still exists.
-    expect(resources.fileSystem.exists(info.path)).toBe(true)
-  })
-
-  it('manual removal preserves a registry entry outside the runner root', async (resources) => {
-    const runnerRoot = join(root, 'runner')
-    const registry = new WorkspaceRegistry(runnerRoot)
-    await registry.load()
-    const outsidePath = join(root, 'outside-root-workspace')
-    await resources.fileSystem.ensureDir(outsidePath)
-    await registry.register({
-      issueNumber: 4,
-      workflowRunId: 'wr-outside-entry',
-      workspacePath: outsidePath,
-    })
-
-    const removeHandler = createWorkspaceRemovalHandler({ runnerRoot, registry })
-
-    const result = await removeHandler({ workspacePath: outsidePath } as never)
-
-    expect(result).toMatchObject({ removed: false, status: 'failed', reason: 'workspace_identity_mismatch' })
-    expect(registry.get('wr-outside-entry')).toMatchObject({ workspacePath: outsidePath })
-    expect(resources.fileSystem.exists(outsidePath)).toBe(true)
+    expect(registry.get('project-1', 'issue-gone')).toBeNull()
   })
 })

@@ -8,10 +8,11 @@ import type { TaskLogger } from './task-log.js'
 import {
   sanitizeWorkspaceDiagnostic,
   workspaceNetworkTimeout,
+  WorkspaceCorruptError,
   WorkspaceIdentityMismatchError,
 } from './workspace-errors.js'
 import { repositoryWorkspacePath } from './workspace-identity.js'
-import { validateWorkspaceOrigin, workspacePrepSink } from './workspace-managed.js'
+import { validateWorkspaceOrigin, withManagedRepositoryHandle, workspacePrepSink } from './workspace-managed.js'
 import type { NamedWorkspaceRegistry } from './workspace-registry.js'
 import { slugify, withManagedWorkspaceHandle } from './workspace.js'
 
@@ -76,6 +77,53 @@ export async function readNamedWorkspaceMarker(workspacePath: string): Promise<N
   } catch {
     return null
   }
+}
+
+// Marker + repository-origin check for control operations. It is invoked
+// inside a managed workspace directory handle so a symlink swap cannot
+// redirect the probe. The marker is the identity authority: a Server-supplied
+// path never selects which directory is trusted.
+export interface NamedWorkspaceIdentityCheck {
+  projectId: string
+  workspaceName: string
+  repositoryName?: string | null
+  gitUrl?: string | null
+}
+
+export async function validateNamedWorkspaceIdentity(
+  workspacePath: string,
+  expected: NamedWorkspaceIdentityCheck,
+  signal: AbortSignal,
+  log?: TaskLogger | null,
+  displayPath = workspacePath,
+): Promise<void> {
+  const marker = await readNamedWorkspaceMarker(workspacePath)
+  if (!marker) {
+    throw new WorkspaceCorruptError(`Named workspace ${displayPath} has no readable identity marker`, displayPath)
+  }
+  if (marker.projectId !== expected.projectId || marker.workspaceName !== expected.workspaceName) {
+    throw new WorkspaceIdentityMismatchError(
+      `Named workspace ${displayPath} marker identity does not match the requested workspace`,
+      displayPath,
+    )
+  }
+  if (!expected.repositoryName || !expected.gitUrl) return
+  const repository = marker.repositories.find((candidate) => candidate.name === expected.repositoryName)
+  if (!repository) {
+    throw new WorkspaceIdentityMismatchError(
+      `Named workspace ${displayPath} does not declare repository ${expected.repositoryName}`,
+      displayPath,
+    )
+  }
+  if (repository.gitUrl.trim() !== expected.gitUrl.trim()) {
+    throw new WorkspaceIdentityMismatchError(
+      `Named workspace ${displayPath} repository ${expected.repositoryName} origin does not match the requested repository`,
+      displayPath,
+    )
+  }
+  await withManagedRepositoryHandle(workspacePath, expected.repositoryName, async (managedRepositoryPath) => {
+    await validateWorkspaceOrigin(managedRepositoryPath, expected.gitUrl!, signal, log, displayPath)
+  })
 }
 
 export interface NamedWorkspaceMaterializeOptions {

@@ -23,7 +23,7 @@ public sealed class RunnerWorkspaceClient(IRunnerControlTransport control, IGrai
         var runnerId = await ResolveRunnerIdAsync(projectId, workflowRunId);
         if (runnerId is null) return null;
         return await ReadOrNullAsync<WorkspaceQueryParams, RunnerWorkspaceDiffResult?>(
-            runnerId, "workspace.diff", new(BuildQuery(projectId, workflowRunId, issueNumber, repository, workspace)), ct);
+            runnerId, "workspace.diff", new(BuildQuery(projectId, issueNumber, repository)), ct);
     }
 
     public async Task<RunnerWorkspaceCommitsResult?> GetCommitsAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default)
@@ -31,7 +31,7 @@ public sealed class RunnerWorkspaceClient(IRunnerControlTransport control, IGrai
         var runnerId = await ResolveRunnerIdAsync(projectId, workflowRunId);
         if (runnerId is null) return null;
         return await ReadOrNullAsync<WorkspaceQueryParams, RunnerWorkspaceCommitsResult?>(
-            runnerId, "workspace.commits", new(BuildQuery(projectId, workflowRunId, issueNumber, repository, workspace)), ct);
+            runnerId, "workspace.commits", new(BuildQuery(projectId, issueNumber, repository)), ct);
     }
 
     public async Task<RunnerWorkspaceCommitDiffResult?> GetCommitDiffAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, string hash, CancellationToken ct = default)
@@ -39,7 +39,7 @@ public sealed class RunnerWorkspaceClient(IRunnerControlTransport control, IGrai
         var runnerId = await ResolveRunnerIdAsync(projectId, workflowRunId);
         if (runnerId is null) return null;
         return await ReadOrNullAsync<WorkspaceCommitDiffParams, RunnerWorkspaceCommitDiffResult?>(
-            runnerId, "workspace.commit-diff", new(BuildQuery(projectId, workflowRunId, issueNumber, repository, workspace), hash), ct);
+            runnerId, "workspace.commit-diff", new(BuildQuery(projectId, issueNumber, repository), hash), ct);
     }
 
     public async Task<WorkspaceStatus> GetWorkspaceStatusAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default)
@@ -49,7 +49,7 @@ public sealed class RunnerWorkspaceClient(IRunnerControlTransport control, IGrai
         try
         {
             return await control.SendRequestAsync<WorkspaceQueryParams, WorkspaceStatus>(
-                runnerId, "workspace.status", new(BuildQuery(projectId, workflowRunId, issueNumber, repository, workspace)), ct: ct);
+                runnerId, "workspace.status", new(BuildQuery(projectId, issueNumber, repository)), ct: ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { return UnavailableStatus(); }
@@ -62,7 +62,7 @@ public sealed class RunnerWorkspaceClient(IRunnerControlTransport control, IGrai
         try
         {
             return await control.SendRequestAsync<WorkspaceFileContentParams, RunnerWorkspaceFileContentResult>(
-                runnerId, "workspace.file-content", new(BuildQuery(projectId, workflowRunId, issueNumber, repository, workspace), path), ct: ct);
+                runnerId, "workspace.file-content", new(BuildQuery(projectId, issueNumber, repository), path), ct: ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { return UnavailableFile(); }
@@ -75,7 +75,7 @@ public sealed class RunnerWorkspaceClient(IRunnerControlTransport control, IGrai
         try
         {
             return await control.SendRequestAsync<WorkspaceQueryParams, WorkspaceRemovalResult>(
-                runnerId, "workspace.remove", new(BuildQuery(projectId, workflowRunId, issueNumber, repository, workspace)), ct: ct);
+                runnerId, "workspace.remove", new(BuildQuery(projectId, issueNumber, repository)), ct: ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { return UnavailableRemoval(workspace.Path); }
@@ -101,9 +101,10 @@ public sealed class RunnerWorkspaceClient(IRunnerControlTransport control, IGrai
     private static WorkspaceRemovalResult UnavailableRemoval(string? path) =>
         new(false, "failed", path, "runner_unavailable", "Runner is not connected");
 
-    private static RunnerWorkspaceQuery BuildQuery(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace)
+    private static RunnerWorkspaceQuery BuildQuery(string projectId, int issueNumber, WorkflowRepositoryContext repository)
     {
-        var branch = string.IsNullOrWhiteSpace(workspace.Branch) ? WorkflowRunBranch.For(workflowRunId) : workspace.Branch;
-        return new(workflowRunId, projectId, issueNumber, repository.Name, repository.GitUrl, workspace.Path, branch, repository.BaseBranch);
+        var workspaceName = $"issue-{issueNumber}";
+        var branch = $"mohist/ws-{workspaceName}";
+        return new(projectId, workspaceName, issueNumber, repository.Name, repository.GitUrl, repository.BaseBranch, branch);
     }
 }

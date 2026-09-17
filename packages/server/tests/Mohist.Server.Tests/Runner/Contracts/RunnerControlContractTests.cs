@@ -201,10 +201,13 @@ public sealed class RunnerControlContractTests
 
     private static void AssertWorkspaceQuery(RunnerWorkspaceQuery query)
     {
-        Assert.Equal("run_101", query.WorkflowRunId);
         Assert.Equal("project_1", query.ProjectId);
+        Assert.Equal("issue-657", query.WorkspaceName);
         Assert.Equal(657, query.IssueNumber);
+        Assert.Equal("mohist", query.RepositoryName);
+        Assert.Equal("https://example.test/mohist.git", query.GitUrl);
         Assert.Equal("main", query.BaseBranch);
+        Assert.Equal("mohist/ws-issue-657", query.Branch);
     }
 
     private static void AssertStandardError(JsonRpcError error)
