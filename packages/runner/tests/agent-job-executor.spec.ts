@@ -178,17 +178,19 @@ function buildAgentJobWork(overrides: Partial<DispatchWorkItem> = {}): DispatchW
 
 const ANCHOR = `[mohist-workspace-anchor]\n${buildWorkspaceAnchor('/tmp/agent-job-ws')}\n[/mohist-workspace-anchor]\n\n`
 
+function makeExecutor(connection: unknown, accessors: unknown, workDir: string | null = null) {
+  return new AgentJobExecutor(connection as never, accessors as never, workDir, undefined, wsManager())
+}
+
+function wsManager() {
+  return verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null })
+}
+
 describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
   it('rejects an explicit Slack source without context before selecting or invoking a Runtime', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const result = await executor.execute(
       buildAgentJobWork({
@@ -204,13 +206,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
   it('maps a missing Skill resolver category to the declared result code', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const result = await executor.execute(
       buildAgentJobWork({
@@ -243,13 +239,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
     if (failure) runtime.setTurnResult(failure)
     const connection = makeFakeConnection()
     connection.setAgentSession({ runtimeSessionId: 'ses-bound' })
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
     const work = buildAgentJobWork({ initialTurnId: 'turn-real' })
 
     const result = await executor.execute(work, new AbortController().signal)
@@ -270,13 +260,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
     })
     const connection = makeFakeConnection()
     connection.setAgentSession({ runtimeSessionId: 'ses-bound' })
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const result = await executor.execute(
       buildAgentJobWork({ initialTurnId: 'turn-real' }),
@@ -305,13 +289,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
     const connection = makeFakeConnection()
     connection.setAgentSession({ runtimeSessionId: 'ses-bound' })
     const runtime = runtimeOverride ? ({ ...makeFakeRuntime().runtime, ...runtimeOverride } as OpenCodeRuntime) : null
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime))
 
     const result = await executor.execute(
       buildAgentJobWork({ initialTurnId: 'turn-real' }),
@@ -339,13 +317,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
   ])('omits an OpenCode binding when %s without persisted physical facts', async (_case, runtimeOverride) => {
     const connection = makeFakeConnection()
     const runtime = runtimeOverride ? ({ ...makeFakeRuntime().runtime, ...runtimeOverride } as OpenCodeRuntime) : null
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime))
 
     const result = await executor.execute(
       buildAgentJobWork({ initialTurnId: 'turn-real' }),
@@ -367,13 +339,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
   ])('preserves the resolved physical binding when Manager runtime setup %s', async (_case, openCodeRuntime) => {
     const connection = makeFakeConnection()
     connection.setAgentSession({ runtimeSessionId: 'ses-bound' })
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(makeFakeRuntime().runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(makeFakeRuntime().runtime))
     const managerExecution = {
       openCodeRuntime,
     } as never
@@ -405,13 +371,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
   ])('does not create an isolated Manager OpenCode runtime when the shared runtime is %s', async (_case, shared) => {
     const connection = makeFakeConnection()
     const isolatedOpenCodeRuntime = vi.fn(async () => makeFakeRuntime().runtime)
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(shared),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(shared))
 
     const result = await executor.execute(buildAgentJobWork(), new AbortController().signal, {
       openCodeRuntime: isolatedOpenCodeRuntime,
@@ -424,13 +384,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
   it('calls OpenCodeRuntime.runTurn with a flat Agent-owned request', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({
       with: {
@@ -458,13 +412,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
   it('returns the legacy {kind, status, runtimeSessionId, model, variant, text, error} envelope', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({
       with: {
@@ -504,13 +452,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
   it('never resolves a Workflow Action for an AgentJob dispatch', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     // Even if `with.uses` was stamped (it should never be in the
     // new server-side envelope), the executor does not consult an
@@ -532,13 +474,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
   it('rejects a non-agent-job dispatch with a clear failure', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({ ownerKind: 'workflow', agentJobId: null })
     const result = await executor.execute(work, new AbortController().signal)
@@ -549,13 +485,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
 
   it('requires the OpenCode runtime to be present', async () => {
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(null),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(null))
     const work = buildAgentJobWork()
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe('failed')
@@ -571,13 +501,7 @@ describe('AgentJobExecutor drives OpenCodeRuntime directly', () => {
         throw new Error('should not be called')
       },
     }
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime as OpenCodeRuntime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime as OpenCodeRuntime))
     const work = buildAgentJobWork()
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe('failed')
@@ -590,13 +514,7 @@ describe('AgentJobExecutor reports the runtime session binding', () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
     connection.setAgentSession({ runtimeSessionId: null })
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     runtime.setTurnResult({
       ok: true,
@@ -640,13 +558,7 @@ describe('AgentJobExecutor reports the runtime session binding', () => {
   it('forwards matching runtime events to the canonical AgentSession', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
     runtime.setTurnEvents([
       {
         type: 'message.delta',
@@ -681,13 +593,7 @@ describe('AgentJobExecutor reports the runtime session binding', () => {
   it('does not let transcript event write failures adjudicate the AgentJob', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
     runtime.setTurnEvents([
       { type: 'message.delta', runtimeSessionId: 'ses_default', workDir: '/tmp/ws', payload: { text: 'working' } },
     ])
@@ -714,13 +620,7 @@ describe('AgentJobExecutor reports the runtime session binding', () => {
   it('writes runtime events in observation order', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
     let releaseFirst!: () => void
     let markFirstStarted!: () => void
     const firstStarted = new Promise<void>((resolve) => {
@@ -754,13 +654,7 @@ describe('AgentJobExecutor reports the runtime session binding', () => {
   it('does not report a binding when the dispatch carries no AgentSessionId', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({ agentSessionId: null })
     const result = await executor.execute(work, new AbortController().signal)
@@ -775,13 +669,7 @@ describe('AgentJobExecutor reports the runtime session binding', () => {
         throw new Error('session lookup offline')
       },
     } as unknown as ServerConnection
-    const executor = new AgentJobExecutor(
-      connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection, makeAccessors(runtime.runtime))
 
     const result = await executor.execute(buildAgentJobWork(), new AbortController().signal)
 
@@ -794,13 +682,7 @@ describe('AgentJobExecutor reports the runtime session binding', () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
     connection.setAgentSession({ runtimeSessionId: 'ses_existing' })
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({ agentSessionId: 'session-existing' })
     const result = await executor.execute(work, new AbortController().signal)
@@ -833,13 +715,7 @@ describe('AgentJobExecutor reports the runtime session binding', () => {
         return { runtimeSessionId: null } as never
       },
     } as unknown as ServerConnection
-    const executor = new AgentJobExecutor(
-      connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({ initialTurnId: 'turn-real' })
     const result = await executor.execute(work, new AbortController().signal)
@@ -870,13 +746,7 @@ describe('AgentJobExecutor materialises the launch-time snapshot', () => {
     // already wrote into the dispatch envelope.
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const launchTimeInstructions = 'be brief; cite line numbers'
     const launchTimeModel = 'openai/gpt-5.5'
@@ -903,13 +773,7 @@ describe('AgentJobExecutor materialises the launch-time snapshot', () => {
   it('does not mutate state across calls; each invocation reads a fresh dispatch snapshot', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     // First launch pins one snapshot
     await executor.execute(
@@ -936,13 +800,7 @@ describe('AgentJobExecutor parses the dispatch payload', () => {
   it('rejects a dispatch without a prompt', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({ with: { instructions: 'no prompt', executionSource: 'non-slack' } })
     const result = await executor.execute(work, new AbortController().signal)
@@ -954,13 +812,7 @@ describe('AgentJobExecutor parses the dispatch payload', () => {
   it('rejects a malformed model identifier', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({
       with: { prompt: 'go', runtime: 'opencode', model: 'not a model id', executionSource: 'non-slack' },
@@ -996,13 +848,7 @@ describe('AgentJobExecutor parses the dispatch payload', () => {
   it('rejects a direct AgentJob without a workspace as an invalid dispatch', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const result = await executor.execute(buildAgentJobWork({ variables: {} }), new AbortController().signal)
 
@@ -1015,13 +861,7 @@ describe('AgentJobExecutor parses the dispatch payload', () => {
   it('does not flag `runtime` as an unknown dispatch option key', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({
       with: { prompt: 'audit', runtime: 'opencode', executionSource: 'non-slack' },
@@ -1039,13 +879,7 @@ describe('AgentJobExecutor parses the dispatch payload', () => {
     // frozen payload, never from a re-read Agent definition.
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({
       with: {
@@ -1073,13 +907,7 @@ describe('AgentJobExecutor parses the dispatch payload', () => {
     // and must not surface as an unknown dispatch option key.
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({
       with: {
@@ -1102,13 +930,7 @@ describe('AgentJobExecutor surfaces a missing-session turn as a Reset hint', () 
   it("returns the legacy {kind, status, ..., hint: 'reset'} envelope on a missing session", async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessors(runtime.runtime),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     runtime.setTurnResult({
       ok: false,

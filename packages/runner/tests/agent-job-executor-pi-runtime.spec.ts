@@ -292,21 +292,23 @@ function buildAgentJobWork(overrides: Partial<DispatchWorkItem> = {}): DispatchW
 
 const ANCHOR = `[mohist-workspace-anchor]\n${buildWorkspaceAnchor('/tmp/agent-job-ws')}\n[/mohist-workspace-anchor]\n\n`
 
+function makeExecutor(connection: unknown, accessors: unknown, workDir: string | null = null) {
+  return new AgentJobExecutor(connection as never, accessors as never, workDir, undefined, wsManager())
+}
+
+function wsManager() {
+  return verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null })
+}
+
 describe('AgentJobExecutor selects the runtime from the dispatch', () => {
   it('selects OpenCodeRuntime for a dispatch with runtime: opencode', async () => {
     const openCode = makeFakeOpenCodeRuntime()
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      {
-        openCode: openCode.runtime,
-        pi: pi.runtime,
-      },
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, {
+      openCode: openCode.runtime,
+      pi: pi.runtime,
+    })
 
     const work = buildAgentJobWork({
       with: { prompt: 'ship it', runtime: 'opencode', executionSource: 'non-slack' },
@@ -324,16 +326,10 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     const openCode = makeFakeOpenCodeRuntime()
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      {
-        openCode: openCode.runtime,
-        pi: pi.runtime,
-      },
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, {
+      openCode: openCode.runtime,
+      pi: pi.runtime,
+    })
     const startup = {
       projectId: 'proj_1',
       sessionId: 'sess_child',
@@ -402,16 +398,10 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     const openCode = makeFakeOpenCodeRuntime()
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      {
-        openCode: openCode.runtime,
-        pi: pi.runtime,
-      },
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, {
+      openCode: openCode.runtime,
+      pi: pi.runtime,
+    })
 
     const work = buildAgentJobWork({
       with: { prompt: 'ship it on pi', runtime: 'pi', executionSource: 'non-slack' },
@@ -433,16 +423,10 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     const openCode = makeFakeOpenCodeRuntime()
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      {
-        openCode: openCode.runtime,
-        pi: pi.runtime,
-      },
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, {
+      openCode: openCode.runtime,
+      pi: pi.runtime,
+    })
 
     const withPayload: JsonObject =
       runtime === null
@@ -469,16 +453,10 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     if (ready === false) pi.setReady(false)
     const connection = makeFakeConnection()
     connection.setAgentSession({ runtimeSessionId: '/virtual/sessions/persisted.jsonl' })
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      {
-        openCode: openCode.runtime,
-        pi: ready === null ? null : pi.runtime,
-      },
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, {
+      openCode: openCode.runtime,
+      pi: ready === null ? null : pi.runtime,
+    })
 
     const work = buildAgentJobWork({
       initialTurnId: 'turn-persisted',
@@ -506,16 +484,10 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     const pi = makeFakePiRuntime()
     if (ready === false) pi.setReady(false)
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      {
-        openCode: openCode.runtime,
-        pi: ready === null ? null : pi.runtime,
-      },
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, {
+      openCode: openCode.runtime,
+      pi: ready === null ? null : pi.runtime,
+    })
 
     const work = buildAgentJobWork({
       initialTurnId: 'turn-logical-only',
@@ -536,16 +508,10 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     openCode.runtime.diagnostic = () => ({ severity: 'warning', code: 'opencode-not-ready', message: 'opencode down' })
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      {
-        openCode: openCode.runtime,
-        pi: pi.runtime,
-      },
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, {
+      openCode: openCode.runtime,
+      pi: pi.runtime,
+    })
 
     const work = buildAgentJobWork({
       with: { prompt: 'opencode unavailable', runtime: 'opencode', executionSource: 'non-slack' },
@@ -563,16 +529,10 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     const openCode = makeFakeOpenCodeRuntime()
     const connection = makeFakeConnection()
     // Late-binding accessor returns null (e.g. Pi runtime not constructed yet).
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      {
-        openCode: openCode.runtime,
-        pi: () => null,
-      },
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, {
+      openCode: openCode.runtime,
+      pi: () => null,
+    })
 
     const work = buildAgentJobWork({
       with: { prompt: 'pi accessor null', runtime: 'pi', executionSource: 'non-slack' },
@@ -588,13 +548,7 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
   it('does not flag `runtime` as an unknown dispatch option key (pi path)', async () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessorsFromFake(pi, 'pi'),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
       with: { prompt: 'audit pi', runtime: 'pi', executionSource: 'non-slack' },
@@ -611,13 +565,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
     connection.setAgentSession({ runtimeSessionId: null })
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessorsFromFake(pi, 'pi'),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
       initialTurnId: 'turn-created-success',
@@ -655,13 +603,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     connection.setAttachWriter(async () => {
       throw new Error('attach endpoint offline')
     })
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessorsFromFake(pi, 'pi'),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const result = await executor.execute(
       buildAgentJobWork({
@@ -685,13 +627,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
   it('rejects a Pi runtime-specific variant instead of treating it as reasoning effort', async () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessorsFromFake(pi, 'pi'),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const result = await executor.execute(
       buildAgentJobWork({
@@ -708,13 +644,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
   it('rejects reasoning effort without an explicit model before opening a Pi session', async () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessorsFromFake(pi, 'pi'),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const result = await executor.execute(
       buildAgentJobWork({
@@ -753,13 +683,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
       ],
     })
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessorsFromFake(pi, 'pi'),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const result = await executor.execute(
       buildAgentJobWork({ with: { prompt: 'create a Pi session', runtime: 'pi', executionSource: 'non-slack' } }),
@@ -775,13 +699,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
     connection.setAgentSession({ runtimeSessionId: '/virtual/sessions/existing.jsonl' })
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessorsFromFake(pi, 'pi'),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
       with: { prompt: 'follow-up', runtime: 'pi', executionSource: 'non-slack' },
@@ -797,13 +715,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
     const pi = makeFakePiRuntime()
     pi.setNextSessionId('/virtual/sessions/labeled.jsonl')
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessorsFromFake(pi, 'pi'),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
       initialTurnId: 'turn-final-projection',
@@ -828,13 +740,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
   it('projects Pi turn facts through the existing AgentSession observer channel', async () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessorsFromFake(pi, 'pi'),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
       agentSessionId: 'session-pi',
@@ -883,13 +789,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
       ],
     })
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessorsFromFake(pi, 'pi'),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
       initialTurnId: 'turn-created-failure',
@@ -930,13 +830,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
       diagnostics: [],
     })
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessorsFromFake(pi, 'pi'),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
       with: { prompt: 'stale binding', runtime: 'pi', executionSource: 'non-slack' },
@@ -953,13 +847,7 @@ describe('AgentJobExecutor drives PiRuntime end-to-end', () => {
   it('passes a fresh prompt from the dispatch through the composed prompt helper', async () => {
     const pi = makeFakePiRuntime()
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      makeAccessorsFromFake(pi, 'pi'),
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, makeAccessorsFromFake(pi, 'pi'))
 
     const work = buildAgentJobWork({
       with: { prompt: 'main task', instructions: 'be terse', runtime: 'pi', executionSource: 'non-slack' },
@@ -978,13 +866,7 @@ describe('AgentJobExecutor reports bounded Pi failures', () => {
     const runtime = new PiRuntime({ agentDir: '/agent', sdkFactory: controlledPiSdk(session) })
     expect((await runtime.start()).ok).toBe(true)
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      { openCode: null, pi: runtime },
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, { openCode: null, pi: runtime })
     const work = buildAgentJobWork({
       initialTurnId: 'turn-idle-pi',
       initialInputId: 'input-idle-pi',
@@ -1028,13 +910,7 @@ describe('AgentJobExecutor reports bounded Pi failures', () => {
     const runtime = new PiRuntime({ agentDir: '/agent', sdkFactory: controlledPiSdk(session), masker })
     expect((await runtime.start()).ok).toBe(true)
     const connection = makeFakeConnection()
-    const executor = new AgentJobExecutor(
-      connection.connection,
-      { openCode: null, pi: runtime },
-      null,
-      undefined,
-      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
-    )
+    const executor = makeExecutor(connection.connection, { openCode: null, pi: runtime })
     const controller = new AbortController()
     const work = buildAgentJobWork({
       initialTurnId: 'turn-bounded-pi',
