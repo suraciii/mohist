@@ -144,7 +144,7 @@ func parseRun(args []string) (command, error) {
 		case "--help", "-h":
 			return command{help: true, helpText: leafHelp(c.kind, c.catalog)}, nil
 		default:
-			return command{}, usage("unknown option " + arg)
+			return command{}, usage("unknown option " + args[i])
 		}
 	}
 	if action == "stop" && !hasArg(c.args, "yes") { /* interactive confirmation is handled after target validation */

@@ -142,7 +142,7 @@ func parseIssueOptions(c command, args []string, action string) (command, error)
 		case "--help", "-h":
 			return command{help: true, helpText: leafHelp(c.kind, c.catalog)}, nil
 		default:
-			return command{}, usage("unknown option " + arg)
+			return command{}, usage("unknown option " + args[i])
 		}
 	}
 	if action == "list" && hasArg(c.args, "all") && hasArg(c.args, "archived") {
@@ -343,7 +343,7 @@ func parseIssueNested(area string, args []string) (command, error) {
 		case "--help", "-h":
 			return command{help: true, helpText: leafHelp(c.kind, c.catalog)}, nil
 		default:
-			return command{}, usage("unknown option " + arg)
+			return command{}, usage("unknown option " + args[i])
 		}
 	}
 	if area == "comment" && !hasArg(c.args, "body") && !hasArg(c.args, "body-file") {
@@ -427,7 +427,7 @@ func parseEpic(args []string) (command, error) {
 		case "--help", "-h":
 			return command{help: true, helpText: leafHelp(c.kind, c.catalog)}, nil
 		default:
-			return command{}, usage("unknown option " + arg)
+			return command{}, usage("unknown option " + args[i])
 		}
 	}
 	if action == "create" && hasArg(c.args, "description") && hasArg(c.args, "description-file") {

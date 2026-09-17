@@ -164,7 +164,7 @@ func parseAgentFlags(c command, action string, args []string) (command, error) {
 			continue
 		}
 		if strings.HasPrefix(arg, "--clear-") && !isKnownAgentClearFlag(arg) {
-			return command{}, usage("unknown option " + arg)
+			return command{}, usage("unknown option " + args[i])
 		}
 		if arg == "--all" || arg == "--continue" || strings.HasPrefix(arg, "--clear-") || arg == "--yes" {
 			if arg == "--continue" && action == "edit" && i+1 < len(args) && (args[i+1] == "true" || args[i+1] == "false") {
@@ -184,7 +184,7 @@ func parseAgentFlags(c command, action string, args []string) (command, error) {
 			c.args = append(c.args, name, args[i+1])
 			i++
 		default:
-			return command{}, usage("unknown option " + arg)
+			return command{}, usage("unknown option " + args[i])
 		}
 	}
 	if err := validateFields(c.fields, c.catalog, "mo "+strings.ReplaceAll(c.kind, "-", " ")); err != nil {
@@ -309,7 +309,7 @@ func parseSession(args []string) (command, error) {
 			c.args = append(c.args, name, args[i+1])
 			i++
 		default:
-			return command{}, usage("unknown option " + arg)
+			return command{}, usage("unknown option " + args[i])
 		}
 	}
 	if action == "list" {

@@ -429,7 +429,7 @@ func parsePrompt(args []string) (command, error) {
 		case "--help", "-h":
 			return command{help: true, helpText: leafHelp(c.kind, catalog)}, nil
 		default:
-			return command{}, usage("unknown option " + arg)
+			return command{}, usage("unknown option " + args[i])
 		}
 	}
 	if action == "set" && (hasArg(c.args, "body") == hasArg(c.args, "body-file")) {

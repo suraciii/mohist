@@ -223,7 +223,7 @@ func parseWebhook(args []string) (command, error) {
 		case "--help", "-h":
 			return command{help: true, helpText: leafHelp("webhook-subscription-"+action, catalog)}, nil
 		default:
-			return command{}, usage("unknown option " + arg)
+			return command{}, usage("unknown option " + args[i])
 		}
 	}
 	if action == "create" && !hasArg(c.args, "target-url") {

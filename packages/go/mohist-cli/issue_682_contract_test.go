@@ -241,11 +241,12 @@ func TestIssue682UnknownAndWrongLeafShortFlagsFailLocally(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
+		flag string
 	}{
-		{name: "allowlisted short flag wrong leaf", args: []string{"issue", "create", "Title", "--body", "b", "-m", "x", "--project", "proj"}},
-		{name: "allowlisted short flag other wrong leaf", args: []string{"run", "stop", "wr1", "-l", "x"}},
-		{name: "short flag outside allowlist", args: []string{"issue", "list", "-x", "--project", "proj"}},
-		{name: "short flag with no long flag on leaf", args: []string{"issue", "create", "Title", "--body", "b", "-f", "--project", "proj"}},
+		{name: "allowlisted short flag wrong leaf", args: []string{"issue", "create", "Title", "--body", "b", "-m", "x", "--project", "proj"}, flag: "-m"},
+		{name: "allowlisted short flag other wrong leaf", args: []string{"run", "stop", "wr1", "-l", "x"}, flag: "-l"},
+		{name: "short flag outside allowlist", args: []string{"issue", "list", "-x", "--project", "proj"}, flag: "-x"},
+		{name: "short flag with no long flag on leaf", args: []string{"issue", "create", "Title", "--body", "b", "-f", "--project", "proj"}, flag: "-f"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -260,7 +261,8 @@ func TestIssue682UnknownAndWrongLeafShortFlagsFailLocally(t *testing.T) {
 			if calls != 0 {
 				t.Fatalf("HTTP requests issued=%d", calls)
 			}
-			if !strings.Contains(errOut.String(), "unknown option") {
+			// The diagnostic names the token the user typed, not its long form.
+			if !strings.Contains(errOut.String(), "unknown option "+tc.flag) {
 				t.Fatalf("stderr=%q", errOut.String())
 			}
 		})
