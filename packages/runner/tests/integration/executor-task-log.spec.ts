@@ -44,6 +44,7 @@ function buildWork(workDir: string, overrides: Partial<DispatchWorkItem> = {}): 
     workflowRunId: 'wf-task-log-integration',
     workId: 'task-log-process-output',
     workType: 'task',
+    projectId: 'project-1',
     title: 'Task-log process output',
     uses: 'core/process',
     with: {},
