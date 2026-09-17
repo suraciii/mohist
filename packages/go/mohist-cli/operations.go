@@ -177,10 +177,11 @@ func parseOperations(area string, args []string) (command, error) {
 	leafUsage := opsLeafHelp(c.kind, c.catalog)
 	leaf := operationsFlags[area][action]
 	for i := start; i < len(args); i++ {
-		if args[i] == "--help" || args[i] == "-h" {
+		arg := canonicalFlag(args[i])
+		if arg == "--help" || arg == "-h" {
 			return command{help: true, helpText: leafUsage}, nil
 		}
-		if args[i] == "--json" {
+		if arg == "--json" {
 			var err error
 			i, err = jsonFlag(args, i, &c)
 			if err != nil {
@@ -188,10 +189,10 @@ func parseOperations(area string, args []string) (command, error) {
 			}
 			continue
 		}
-		if !strings.HasPrefix(args[i], "--") {
+		if !strings.HasPrefix(arg, "--") {
 			return command{}, usageWithLeaf("unexpected argument "+args[i], leafUsage)
 		}
-		name := strings.TrimPrefix(args[i], "--")
+		name := strings.TrimPrefix(arg, "--")
 		if area == "slack" && contains([]string{"bot-token", "app-token", "configuration-token", "configuration-refresh-token", "token"}, name) {
 			return command{}, usage("Slack credentials must be supplied through a protected credentials file")
 		}

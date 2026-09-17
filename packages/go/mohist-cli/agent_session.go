@@ -151,7 +151,7 @@ func parseAgentNested(area string, args []string) (command, error) {
 
 func parseAgentFlags(c command, action string, args []string) (command, error) {
 	for i := 0; i < len(args); i++ {
-		arg := args[i]
+		arg := canonicalFlag(args[i])
 		if arg == "--help" || arg == "-h" {
 			return command{help: true, helpText: leafHelp(c.kind, c.catalog)}, nil
 		}
@@ -284,7 +284,7 @@ func parseSession(args []string) (command, error) {
 		start = 2
 	}
 	for i := start; i < len(args); i++ {
-		arg := args[i]
+		arg := canonicalFlag(args[i])
 		if arg == "--help" || arg == "-h" {
 			return command{help: true, helpText: leafHelp(c.kind, c.catalog)}, nil
 		}
