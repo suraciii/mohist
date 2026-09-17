@@ -939,7 +939,8 @@ function context(
     variables: {
       project: { id: 'proj_1' },
       issue: { number: 217 },
-      workspace: { path: '/fake/worktree', branch: EXPECTED_BRANCH, changeDir: null },
+      workspace: { name: 'issue-9', branch: EXPECTED_BRANCH, changeDir: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
       ...variables,
     },
     workDir: '/fake/worktree',

@@ -187,11 +187,20 @@ public sealed class DiagnosisAssembler
         return stage.Tasks.FirstOrDefault(task => task.Status == WorkflowActionAttemptStatus.Running);
     }
 
-    private static DiagnosisWorkspaceView WorkspaceOf(WorkflowRun run) =>
-        run.Workspace is { Path: { Length: > 0 } workspace
+    private static DiagnosisWorkspaceView WorkspaceOf(WorkflowRun run)
+    {
+        if (run.Metadata.IssueNumber is > 0 and var issueNumber)
+        {
+            return new DiagnosisWorkspaceView(
+                run.Workspace?.Path is { Length: > 0 } path ? path : null,
+                "named",
+                run.Workspace?.Branch ?? $"mohist/ws-issue-{issueNumber}");
         }
-            ? new DiagnosisWorkspaceView(workspace, "named", run.Workspace.Branch ?? WorkflowRunBranch.For(run.Id))
-            : new DiagnosisWorkspaceView(null, "fallback", run.Workspace?.Branch ?? WorkflowRunBranch.For(run.Id));
+
+        return run.Workspace is { Path: { Length: > 0 } workspace }
+            ? new DiagnosisWorkspaceView(workspace, "named", run.Workspace.Branch ?? string.Empty)
+            : new DiagnosisWorkspaceView(null, "fallback", run.Workspace?.Branch ?? string.Empty);
+    }
 
     private static int? ReadExitCode(JsonElement? output)
     {

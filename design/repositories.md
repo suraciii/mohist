@@ -147,8 +147,6 @@ named `issue-N` Workspace, and the Runner materializes it through the first-clas
 Workspace path.
 
 Legacy `WorkflowRepositoryContext` and `WorkspaceIdentity` copies remain in
-WorkflowRun. Some Workspace query wires still carry Project, Issue, Repository,
-path, and branch, and the Runner retains a per-WorkflowRun Workspace manager
-and registry for dispatches without a named Workspace. The `workspaces.json`
-fallback is also a retired implementation path. These paths do not define
-Workspace identity. Callers are converging on `(ProjectId, WorkspaceName)`.
+WorkflowRun for execution context. Workspace operations use
+`(ProjectId, WorkspaceName)`; a WorkflowRun ID may locate history but never
+identifies a Workspace directory, branch, or local registry entry.

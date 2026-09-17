@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { AgentJobExecutor } from '../src/runtime/agent-job-executor.js'
+import { verifyOnlyNamedWorkspaceManager } from './support/workspace-mock.js'
+import { AgentJobExecutor, buildWorkspaceAnchor } from '../src/runtime/agent-job-executor.js'
 import type { AgentJobRuntimeAccessors } from '../src/runtime/agent-job-executor.js'
 import type { DispatchWorkItem } from '../src/core/types.js'
 import type { ServerConnection } from '../src/server/connection.js'
@@ -50,7 +51,10 @@ function makeWork(workId: string, model: string, variant: string): DispatchWorkI
     agentSessionId: null,
     projectId: null,
     with: { prompt: workId, runtime: 'opencode', model, variant, executionSource: 'non-slack' },
-    variables: { workspace: { path: '/virtual/workspace' } },
+    variables: {
+      workspace: { name: 'issue-9', branch: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+    },
   }
 }
 
@@ -82,19 +86,28 @@ function unavailableResult(): RuntimeResult<RuntimeTurnResult> {
   }
 }
 
+const ANCHOR = `[mohist-workspace-anchor]\n${buildWorkspaceAnchor('/tmp/agent-job-ws')}\n[/mohist-workspace-anchor]\n\n`
+
 describe('AgentJobExecutor model policy', () => {
   it('retries a temporarily unavailable model with the same model and variant', async () => {
     const runtime = makeRuntime()
     runtime.queue(unavailableResult())
     const delays: number[] = []
-    const executor = new AgentJobExecutor(makeConnection(), accessors(runtime.runtime), '/virtual', undefined, null, {
-      modelRetryInitialDelayMs: 5,
-      modelRetryMaxDelayMs: 5,
-      waitForModelRetry: async (delayMs, signal) => {
-        delays.push(delayMs)
-        return !signal.aborted
+    const executor = new AgentJobExecutor(
+      makeConnection(),
+      accessors(runtime.runtime),
+      '/virtual',
+      undefined,
+      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
+      {
+        modelRetryInitialDelayMs: 5,
+        modelRetryMaxDelayMs: 5,
+        waitForModelRetry: async (delayMs, signal) => {
+          delays.push(delayMs)
+          return !signal.aborted
+        },
       },
-    })
+    )
 
     const work = makeWork('same-work', 'opencode-go/gpt-5.6-luna', 'max')
     const result = await executor.execute(work, new AbortController().signal)
@@ -107,7 +120,7 @@ describe('AgentJobExecutor model policy', () => {
       { providerID: 'opencode-go', modelID: 'gpt-5.6-luna' },
     ])
     expect(runtime.calls.map((call) => call.options?.variant)).toEqual(['max', 'max'])
-    expect(runtime.calls.map((call) => call.prompt)).toEqual(['same-work', 'same-work'])
+    expect(runtime.calls.map((call) => call.prompt)).toEqual([ANCHOR + 'same-work', ANCHOR + 'same-work'])
     expect(work.workId).toBe('same-work')
   })
 
@@ -119,13 +132,20 @@ describe('AgentJobExecutor model policy', () => {
     const waiting = new Promise<void>((resolve) => {
       markWaiting = resolve
     })
-    const executor = new AgentJobExecutor(makeConnection(), accessors(runtime.runtime), '/virtual', undefined, null, {
-      waitForModelRetry: (_delayMs, signal) =>
-        new Promise<boolean>((resolve) => {
-          markWaiting()
-          signal.addEventListener('abort', () => resolve(false), { once: true })
-        }),
-    })
+    const executor = new AgentJobExecutor(
+      makeConnection(),
+      accessors(runtime.runtime),
+      '/virtual',
+      undefined,
+      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
+      {
+        waitForModelRetry: (_delayMs, signal) =>
+          new Promise<boolean>((resolve) => {
+            markWaiting()
+            signal.addEventListener('abort', () => resolve(false), { once: true })
+          }),
+      },
+    )
 
     const execution = executor.execute(makeWork('aborted-work', 'opencode-go/gpt-5.6-luna', 'max'), controller.signal)
     await waiting
@@ -144,14 +164,21 @@ describe('AgentJobExecutor model policy', () => {
     const waiting = new Promise<void>((resolve) => {
       markWaiting = resolve
     })
-    const executor = new AgentJobExecutor(makeConnection(), accessors(runtime.runtime), '/virtual', undefined, null, {
-      waitForModelRetry: (_delayMs, signal) =>
-        new Promise<boolean>((resolve) => {
-          markWaiting()
-          releaseWaiting = () => resolve(!signal.aborted)
-          signal.addEventListener('abort', () => resolve(false), { once: true })
-        }),
-    })
+    const executor = new AgentJobExecutor(
+      makeConnection(),
+      accessors(runtime.runtime),
+      '/virtual',
+      undefined,
+      verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
+      {
+        waitForModelRetry: (_delayMs, signal) =>
+          new Promise<boolean>((resolve) => {
+            markWaiting()
+            releaseWaiting = () => resolve(!signal.aborted)
+            signal.addEventListener('abort', () => resolve(false), { once: true })
+          }),
+      },
+    )
 
     const blocked = executor.execute(
       makeWork('blocked-work', 'opencode-go/gpt-5.6-luna', 'max'),

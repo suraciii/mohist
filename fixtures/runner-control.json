@@ -8,14 +8,13 @@
         "method": "workspace.diff",
         "params": {
           "query": {
-            "workflowRunId": "run_101",
             "projectId": "project_1",
+            "workspaceName": "issue-657",
             "issueNumber": 657,
             "repositoryName": "mohist",
             "gitUrl": "https://example.test/mohist.git",
-            "workspacePath": "/work/run_101",
-            "branch": "mohist/run-run_101",
-            "baseBranch": "main"
+            "baseBranch": "main",
+            "branch": "mohist/ws-issue-657"
           }
         }
       },
@@ -24,7 +23,7 @@
         "id": "rpc_workspace_diff",
         "result": {
           "base": "main",
-          "head": "mohist/run-run_101",
+          "head": "mohist/ws-issue-657",
           "mergeBase": "abc123",
           "ahead": 1,
           "behind": 0,
@@ -61,14 +60,13 @@
         "method": "workspace.commits",
         "params": {
           "query": {
-            "workflowRunId": "run_101",
             "projectId": "project_1",
+            "workspaceName": "issue-657",
             "issueNumber": 657,
             "repositoryName": "mohist",
             "gitUrl": "https://example.test/mohist.git",
-            "workspacePath": "/work/run_101",
-            "branch": "mohist/run-run_101",
-            "baseBranch": "main"
+            "baseBranch": "main",
+            "branch": "mohist/ws-issue-657"
           }
         }
       },
@@ -77,7 +75,7 @@
         "id": "rpc_workspace_commits",
         "result": {
           "base": "main",
-          "head": "mohist/run-run_101",
+          "head": "mohist/ws-issue-657",
           "mergeBase": "abc123",
           "ahead": 1,
           "behind": 0,
@@ -115,14 +113,13 @@
         "method": "workspace.commit-diff",
         "params": {
           "query": {
-            "workflowRunId": "run_101",
             "projectId": "project_1",
+            "workspaceName": "issue-657",
             "issueNumber": 657,
             "repositoryName": "mohist",
             "gitUrl": "https://example.test/mohist.git",
-            "workspacePath": "/work/run_101",
-            "branch": "mohist/run-run_101",
-            "baseBranch": "main"
+            "baseBranch": "main",
+            "branch": "mohist/ws-issue-657"
           },
           "hash": "def4567890"
         }
@@ -151,14 +148,13 @@
         "method": "workspace.status",
         "params": {
           "query": {
-            "workflowRunId": "run_101",
             "projectId": "project_1",
+            "workspaceName": "issue-657",
             "issueNumber": 657,
             "repositoryName": "mohist",
             "gitUrl": "https://example.test/mohist.git",
-            "workspacePath": "/work/run_101",
-            "branch": "mohist/run-run_101",
-            "baseBranch": "main"
+            "baseBranch": "main",
+            "branch": "mohist/ws-issue-657"
           }
         }
       },
@@ -167,7 +163,7 @@
         "id": "rpc_workspace_status",
         "result": {
           "exists": true,
-          "branch": "mohist/run-run_101",
+          "branch": "mohist/ws-issue-657",
           "baseBranch": "main",
           "ahead": 1,
           "behind": 0,
@@ -189,14 +185,13 @@
         "method": "workspace.file-content",
         "params": {
           "query": {
-            "workflowRunId": "run_101",
             "projectId": "project_1",
+            "workspaceName": "issue-657",
             "issueNumber": 657,
             "repositoryName": "mohist",
             "gitUrl": "https://example.test/mohist.git",
-            "workspacePath": "/work/run_101",
-            "branch": "mohist/run-run_101",
-            "baseBranch": "main"
+            "baseBranch": "main",
+            "branch": "mohist/ws-issue-657"
           },
           "path": "src/control.ts"
         }
@@ -220,14 +215,13 @@
         "method": "workspace.remove",
         "params": {
           "query": {
-            "workflowRunId": "run_101",
             "projectId": "project_1",
+            "workspaceName": "issue-657",
             "issueNumber": 657,
             "repositoryName": "mohist",
             "gitUrl": "https://example.test/mohist.git",
-            "workspacePath": "/work/run_101",
-            "branch": "mohist/run-run_101",
-            "baseBranch": "main"
+            "baseBranch": "main",
+            "branch": "mohist/ws-issue-657"
           }
         }
       },
@@ -376,16 +370,6 @@
         "jsonrpc": "2.0",
         "id": "rpc_session_command",
         "error": { "code": -32603, "message": "Internal error" }
-      }
-    }
-  ],
-  "notifications": [
-    {
-      "method": "workflow.status-changed",
-      "notification": {
-        "jsonrpc": "2.0",
-        "method": "workflow.status-changed",
-        "params": { "workflowRunId": "run_101", "status": "Completed" }
       }
     }
   ]

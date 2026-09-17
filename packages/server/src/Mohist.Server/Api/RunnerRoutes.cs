@@ -151,43 +151,6 @@ public static partial class RunnerRoutes
 
         MapReportRoute(group);
 
-        // Batch status query for the runner's convergence backstop. The
-        // runner only asks about workflow runs it still tracks in its local
-        // active workspace registry; the server returns the current lifecycle
-        // status of every requested run id that exists, dropping unknown
-        // ones. The server does not scan or enumerate runs the runner did
-        // not request — that backstop is owned by the runner, not the
-        // server.
-        group.MapPost("/workflow-runs/status", async (
-            string runnerId,
-            RunnerWorkflowStatusRequest req,
-            IGrainFactory grains,
-            CancellationToken ct) =>
-        {
-            if (req is null)
-                return ApiResults.BadRequest("request body is required");
-            if (req.WorkflowRunIds is null || req.WorkflowRunIds.Length == 0)
-                return ApiResults.BadRequest("workflowRunIds must contain at least one run id");
-
-            var unique = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var id in req.WorkflowRunIds)
-            {
-                if (!string.IsNullOrWhiteSpace(id))
-                    unique.Add(id);
-            }
-
-            var statuses = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var workflowRunId in unique)
-            {
-                var workflow = grains.GetGrain<IWorkflowGrain>(workflowRunId);
-                var status = await workflow.GetRunStatusAsync();
-                if (!string.IsNullOrEmpty(status))
-                    statuses[workflowRunId] = status;
-            }
-
-            return Results.Ok(new RunnerWorkflowStatusResponse(statuses));
-        });
-
         group.MapGet("/agent-sessions/reconcile", async (
             string runnerId,
             AgentSessionReconcileQuerier sessions,
@@ -772,18 +735,6 @@ public record CleanupPolicyDto(
 /// runner-facing config fields to be added additively.
 /// </summary>
 public record RunnerConfigResponse(CleanupPolicyDto? CleanupPolicy);
-/// <summary>
-/// Body for <c>POST /api/runner/{runnerId}/workflow-runs/status</c>. The
-/// runner lists its still-active registry entries; the server answers
-/// with the current lifecycle status of each requested workflow run.
-/// </summary>
-public record RunnerWorkflowStatusRequest(string[] WorkflowRunIds);
-
-/// <summary>
-/// Response body for the batch status endpoint. Only the requested run ids
-/// are echoed back; unknown / untracked run ids are simply absent.
-/// </summary>
-public record RunnerWorkflowStatusResponse(Dictionary<string, string> Statuses);
 
 /// <summary>
 /// Body for <c>POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/materialized</c>.

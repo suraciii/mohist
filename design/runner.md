@@ -613,8 +613,7 @@ preserve results across a crash but would create a second authority; this
 design deliberately declines that trade-off (see
 [Restart and Crash Semantics](#restart-and-crash-semantics)).
 
-A Runner may keep the rebuildable Workspace materialization indexes at
-`<runnerRoot>/.mohist/workspaces.json` and
+A Runner may keep the rebuildable Named Workspace materialization index at
 `<runnerRoot>/.mohist/named-workspaces.json`. It does not persist operation
 journals, execution receipts, or terminal task-log delivery stores. Indexes are
 never authoritative and fail open: a corrupt or missing index is rebuilt from

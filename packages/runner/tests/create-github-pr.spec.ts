@@ -90,7 +90,7 @@ function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): Ac
         gitUrl: 'https://example.com/repo.git',
         baseBranch: 'master',
       },
-      workspace: { path: WORKSPACE_PATH, branch: 'mohist/run-wr-gh-pr-1' },
+      workspace: { name: 'issue-9', branch: 'mohist/run-wr-gh-pr-1' },
       ...variables,
     },
     workDir: WORKSPACE_PATH,

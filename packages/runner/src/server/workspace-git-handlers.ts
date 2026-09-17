@@ -2,8 +2,8 @@ import { existsSync as defaultExistsSync } from 'node:fs'
 import { NETWORK_COMMAND_TIMEOUT_MS } from '../actions/git.js'
 import { runCommand as defaultRunCommand, type CommandLineOptions } from '../system/process.js'
 import { currentRunnerResources } from '../system/filesystem.js'
-import { resolveWorkspaceQuery, type WorkspaceQuery, hasCompleteWorkspaceIdentity } from '../runtime/workspace-query.js'
-import { issueWorkspacePath, validateWorkspaceIdentity, type IssueWorkspaceMarker } from '../runtime/workspace.js'
+import { resolveWorkspaceQuery, type WorkspaceQuery } from '../runtime/workspace-query.js'
+import { validateNamedWorkspaceIdentity } from '../runtime/workspace-entity.js'
 import { withManagedRepositoryHandle, withManagedWorkspaceHandle } from '../runtime/workspace-managed.js'
 import { parseAheadBehind, parseCommits, parseDiffFiles, parseNumstatTotal } from './git-parsers.js'
 
@@ -60,6 +60,7 @@ export async function isGitWorkTree(workDir: string, signal: AbortSignal): Promi
 
 function registerWorkspaceGitHandlers(conn: HandlerRegistrar, deps: WorkspaceGitHandlerDeps): void {
   const resolveQuery = deps.resolveQuery
+  const resolveForHandler = (query: WorkspaceQuery) => (deps.runnerRoot ? resolveQuery(query, deps.runnerRoot) : null)
 
   async function runGit(workDir: string, args: string[], signal: AbortSignal, options?: CommandLineOptions) {
     const runner = deps.runCommand ?? currentRunnerResources()?.controlGitRunner ?? defaultRunCommand
@@ -73,35 +74,27 @@ function registerWorkspaceGitHandlers(conn: HandlerRegistrar, deps: WorkspaceGit
     return result.exitCode === 0 && result.stdout.trim() === 'true'
   }
 
+  // Resolve the Named Workspace directory from `(projectId, workspaceName)`
+  // (never from a Server-supplied path), then validate the on-disk marker and
+  // the `REPOS/<repository>` origin inside the managed directory handles so a
+  // symlink swap cannot redirect a Git command.
   async function withValidatedRepository<T>(
     query: WorkspaceQuery,
     signal: AbortSignal,
     fallback: T,
     operation: (workDir: string) => Promise<T>,
   ): Promise<T> {
-    const resolved = resolveQuery(query)
+    const resolved = resolveForHandler(query)
     if (!resolved) return fallback
     if (deps.allowUnverifiedWorkspaceQueriesForTest) return await operation(resolved.workDir)
-    if (!hasCompleteWorkspaceIdentity(query) || !deps.runnerRoot || !query.repositoryName) return fallback
-    if (query.workspacePath !== issueWorkspacePath(deps.runnerRoot, query.workflowRunId)) return fallback
-    const expected: IssueWorkspaceMarker = { workflowRunId: query.workflowRunId, runBranch: query.branch }
     try {
       return await withManagedWorkspaceHandle(
-        deps.runnerRoot,
-        query.workspacePath,
+        deps.runnerRoot!,
+        resolved.workspacePath,
         true,
         async (managedWorkspacePath) => {
-          await validateWorkspaceIdentity(
-            managedWorkspacePath,
-            expected,
-            query.gitUrl,
-            signal,
-            null,
-            undefined,
-            query.workspacePath,
-            query.repositoryName!,
-          )
-          return await withManagedRepositoryHandle(managedWorkspacePath, query.repositoryName!, operation)
+          await validateNamedWorkspaceIdentity(managedWorkspacePath, resolved.identity, signal)
+          return await withManagedRepositoryHandle(managedWorkspacePath, resolved.identity.repositoryName, operation)
         },
       )
     } catch {
@@ -110,7 +103,7 @@ function registerWorkspaceGitHandlers(conn: HandlerRegistrar, deps: WorkspaceGit
   }
 
   conn.on('GetDiff', async (query: WorkspaceQuery) => {
-    const workspace = resolveQuery(query)
+    const workspace = resolveForHandler(query)
     if (!workspace) return null
     const ac = new AbortController()
     return await withValidatedRepository(query, ac.signal, null, async (workDir) => {
@@ -147,7 +140,7 @@ function registerWorkspaceGitHandlers(conn: HandlerRegistrar, deps: WorkspaceGit
   })
 
   conn.on('GetCommits', async (query: WorkspaceQuery) => {
-    const workspace = resolveQuery(query)
+    const workspace = resolveForHandler(query)
     if (!workspace) return null
     const ac = new AbortController()
     return await withValidatedRepository(query, ac.signal, null, async (workDir) => {
@@ -185,7 +178,7 @@ function registerWorkspaceGitHandlers(conn: HandlerRegistrar, deps: WorkspaceGit
   })
 
   conn.on('GetCommitDiff', async (query: WorkspaceQuery, hash: string) => {
-    if (!resolveQuery(query)) return null
+    if (!resolveForHandler(query)) return null
     const ac = new AbortController()
     return await withValidatedRepository(query, ac.signal, null, async (workDir) => {
       if (!(await isWorkTree(workDir, ac.signal))) return null
@@ -195,7 +188,7 @@ function registerWorkspaceGitHandlers(conn: HandlerRegistrar, deps: WorkspaceGit
   })
 
   conn.on('GetWorkspaceStatus', async (query: WorkspaceQuery) => {
-    const workspace = resolveQuery(query)
+    const workspace = resolveForHandler(query)
     if (!workspace) return { exists: false }
     const ac = new AbortController()
     return await withValidatedRepository(
@@ -238,7 +231,7 @@ function registerWorkspaceGitHandlers(conn: HandlerRegistrar, deps: WorkspaceGit
   })
 
   conn.on('GetFileContent', async (query: WorkspaceQuery, path: string) => {
-    const workspace = resolveQuery(query)
+    const workspace = resolveForHandler(query)
     if (!workspace) return { base: null, head: null }
     const ac = new AbortController()
     return await withValidatedRepository(query, ac.signal, { base: null, head: null }, async (workDir) => {

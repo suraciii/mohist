@@ -81,7 +81,8 @@ function buildAgentJobWork(overrides: Partial<DispatchWorkItem> = {}): DispatchW
     projectId: 'proj-1',
     with: { prompt: 'do the agent thing', runtime: 'opencode', executionSource: 'non-slack' },
     variables: {
-      workspace: { path: '/tmp/agent-job-ws', branch: null, changeDir: null },
+      workspace: { name: 'issue-9', branch: null, changeDir: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
     },
     ...overrides,
   }
@@ -172,18 +173,23 @@ describe('AgentJobExecutor resolves a named workspace binding', () => {
     expect(request.prompt).toContain('mohist/ws-pay')
   })
 
-  it('skips the anchor when bound through the legacy workspace.path branch', async () => {
+  it('rejects a dispatch that binds through the legacy workspace.path branch', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
     const executor = new AgentJobExecutor(connection.connection, makeAccessors(runtime.runtime))
 
     const work = buildAgentJobWork({
-      variables: { workspace: { path: '/legacy/path' } },
+      variables: {
+        workspace: { path: '/legacy/path', branch: null, changeDir: null },
+      },
     })
-    await executor.execute(work, new AbortController().signal)
+    const result = await executor.execute(work, new AbortController().signal)
 
-    expect(runtime.runTurnCalls[0]?.target.workDir).toBe('/legacy/path')
-    expect(runtime.runTurnCalls[0]?.prompt).not.toContain('[mohist-workspace-anchor]')
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('invalid-dispatch')
+    expect(result.message).toContain("'workspace.name' to be a non-empty string")
+    expect(result.message).toContain('workspace.path is not a Workspace binding')
+    expect(runtime.runTurnCalls).toHaveLength(0)
   })
 
   it('fails with workspace-home-claimed when another runner owns the home', async () => {

@@ -220,7 +220,6 @@ public class ArchitectureRules
             ["Issue"] = ["IssueWorkflowStartHandler.cs", "IssueWorkflowCompletionHandler.cs", "IssueEpicChangedHandler.cs", "IssueCompositeHandlers.cs"],
             ["Epic"] = ["EpicHandlers.cs"],
             ["Workflow"] = ["WorkflowStageLockReleaseHandler.cs", "AgentJobWorkflowTerminalHandler.cs"],
-            ["Runner"] = ["RunnerWorkflowTerminalStatusHandler.cs"],
             ["Agent"] = ["RoutingDispatchHandler.cs", "MentionDispatchHandler.cs", "RoutedAgentLaunchContextResolver.cs", "ResponsePromptRenderer.cs", "MentionTokenParser.cs", "AgentJobSubagentTerminalHandler.cs"],
             ["Inbox"] = ["InboxProjectionHandler.cs"],
             ["Notifications"] = ["HermesIssueNotificationHandler.cs"],

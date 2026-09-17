@@ -277,18 +277,6 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
         CancellationToken ct) =>
         SendRequestAsync<TParams, TResult>(runnerId, method, parameters, requestEnqueued: null, ct);
 
-    public Task SendNotificationAsync<TParams>(
-        string runnerId,
-        string method,
-        TParams parameters,
-        CancellationToken ct = default)
-    {
-        if (!string.Equals(method, "workflow.status-changed", StringComparison.Ordinal)
-            || typeof(TParams) != typeof(WorkflowRunStatusNotification))
-            throw new ArgumentException($"Unsupported Runner control notification contract '{method}'", nameof(method));
-        return GetConnection(runnerId).SendNotificationAsync(method, parameters, ct);
-    }
-
     internal async Task WaitForConnectionAsync(string runnerId, CancellationToken ct)
     {
         while (!HasReadyConnection(runnerId))

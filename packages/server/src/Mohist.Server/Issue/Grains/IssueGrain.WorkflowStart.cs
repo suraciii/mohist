@@ -21,7 +21,7 @@ public partial class IssueGrain
         var issue = _issue!;
         var projectInfo = await GrainFactory.GetGrain<IProjectGrain>(issue.ProjectId).GetAsync();
         var projectContext = BuildWorkflowProjectContext(issue, project, projectInfo, repo);
-        var workspace = BuildWorkspaceIdentity(issue, projectContext, wrId);
+        var workspace = BuildWorkspaceIdentity(issue);
         var repositoryContext = new Mohist.Server.Workflow.Domain.Run.WorkflowRepositoryContext(
             Name: repo.Name,
             GitUrl: repo.GitUrl,

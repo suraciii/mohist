@@ -1,9 +1,9 @@
 /**
  * Shared internal semantic model for workspace health.
  *
- * Both the `mohist/workspace-prepare` action and `WorkspaceManager`
- * preparation / verification use these snapshot and evaluation types so
- * that detached HEAD, branch mismatch, dirty worktrees, and residual
+ * Both the `mohist/workspace-prepare` action and the named workspace
+ * preparation use these snapshot and evaluation types so that detached
+ * HEAD, branch mismatch, dirty worktrees, and residual
  * rebase / merge / cherry-pick state are judged identically.
  *
  * This module deliberately owns no Git process adapter. Each consumer

@@ -3,7 +3,7 @@ import type { JsonObject, DispatchWorkItem } from '../src/core/types.js'
 import type { ActionHost } from '../src/actions/host.js'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import type { GitRunner } from '../src/runtime/git-probe.js'
-import { verifyOnlyWorkspaceManager } from './support/workspace-mock.js'
+import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
 import { defineTestAction, ActionRegistry } from './support/action-registry-test.js'
 import { withTestRunnerResources } from './support/test-resources.js'
 
@@ -75,7 +75,7 @@ describe('WorkExecutor action input boundary', () => {
 
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )
@@ -87,12 +87,14 @@ describe('WorkExecutor action input boundary', () => {
       workflowRunId: 'wf-raw-with',
       workId: 'work-raw-with',
       workType: 'task',
+      projectId: 'project-1',
       stage: 'build',
       title: 'Test action input boundary',
       uses: 'test/capture-inputs',
       with: { task: { with: { options: placeholder } } },
       variables: {
-        workspace: { path: workDir, branch: null },
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
         vars: { agent: agentObject },
       },
     }
@@ -131,7 +133,7 @@ describe('WorkExecutor action input boundary', () => {
     ])
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )
@@ -139,10 +141,14 @@ describe('WorkExecutor action input boundary', () => {
       workflowRunId: 'wf-parent-context',
       workId: 'work-parent-context',
       workType: 'task',
+      projectId: 'project-1',
       stage: 'plan',
       uses: 'test/capture-inputs-boundary',
       with: { prompt: 'child prompt' },
-      variables: { workspace: { path: workDir, branch: null } },
+      variables: {
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
       parentIssueContext: { title: 'Parent', body: 'Parent body' },
     }
 
@@ -178,7 +184,7 @@ describe('WorkExecutor action input boundary', () => {
         ])
         const executor = new WorkExecutor(
           registry,
-          verifyOnlyWorkspaceManager({ path: workDir, branch: 'main' }),
+          verifyOnlyWorkspacePreparer({ path: workDir, branch: 'main' }),
           {} as never,
           workDir,
         )
@@ -188,6 +194,7 @@ describe('WorkExecutor action input boundary', () => {
             workflowRunId: 'wf-context-roots',
             workId: 'work-context-roots',
             workType: 'task',
+            projectId: 'project-1',
             uses: 'test/context-roots',
             with: {
               context: { value: '${{ vars.foo }}', path: '${{ workspace.path }}', branch: '${{ workspace.branch }}' },
@@ -196,7 +203,8 @@ describe('WorkExecutor action input boundary', () => {
               foo: 'bare',
               runner: { os: 'fake' },
               failure: { output: 'not available' },
-              workspace: { path: '/dispatch/path', branch: 'dispatch-branch' },
+              workspace: { name: 'issue-9', branch: 'main' },
+              repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
               vars: { foo: 'namespaced' },
             },
           },
@@ -211,9 +219,15 @@ describe('WorkExecutor action input boundary', () => {
             workflowRunId: 'wf-context-roots',
             workId: 'work-context-roots-fail',
             workType: 'task',
+            projectId: 'project-1',
             uses: 'test/context-roots',
             with: { context: { value: '${{ foo }}' } },
-            variables: { foo: 'bare', vars: { foo: 'namespaced' }, workspace: { path: workDir } },
+            variables: {
+              foo: 'bare',
+              vars: { foo: 'namespaced' },
+              workspace: { name: 'issue-9', branch: null },
+              repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+            },
           },
           new AbortController().signal,
         )
@@ -244,7 +258,7 @@ describe('WorkExecutor action input boundary', () => {
 
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )
@@ -254,11 +268,13 @@ describe('WorkExecutor action input boundary', () => {
         workflowRunId: 'wf-engine-input',
         workId: 'work-engine-input',
         workType: 'task',
+        projectId: 'project-1',
         title: 'Engine input',
         uses: 'test/engine-input',
         with: { archiveHint: 'profile-provided value' },
         variables: {
-          workspace: { path: workDir, branch: null },
+          workspace: { name: 'issue-9', branch: null },
+          repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
           prompts: { build: 'build instructions' },
           vars: {},
         },
@@ -273,11 +289,13 @@ describe('WorkExecutor action input boundary', () => {
         workflowRunId: 'wf-engine-input-replay',
         workId: 'work-engine-input-replay',
         workType: 'task',
+        projectId: 'project-1',
         title: 'Engine input replay',
         uses: 'test/engine-input',
         with: { archiveHint: 'profile-provided value' },
         variables: {
-          workspace: { path: workDir, branch: null },
+          workspace: { name: 'issue-9', branch: null },
+          repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
           prompts: { build: 'build instructions' },
           vars: { archive: 'artifacts/changes/archive/2026-08-14-issue-589' },
         },
@@ -316,7 +334,7 @@ describe('Dispatch rendering boundary', () => {
     ])
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )
@@ -328,11 +346,13 @@ describe('Dispatch rendering boundary', () => {
       workflowRunId: 'wf-render',
       workId: 'work-render',
       workType: 'task',
+      projectId: 'project-1',
       stage: 'plan',
       uses: 'test/render-snapshot',
       with: rawWith,
       variables: {
-        workspace: { path: workDir, branch: null, changeDir: null },
+        workspace: { name: 'issue-9', branch: null, changeDir: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
         vars: { message: 'do work', mode: 'fast', retries: 2 },
       },
     }
@@ -373,7 +393,7 @@ describe('Dispatch rendering boundary', () => {
       ])
       const executor = new WorkExecutor(
         registry,
-        verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+        verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
         {} as never,
         workDir,
       )
@@ -381,11 +401,13 @@ describe('Dispatch rendering boundary', () => {
         workflowRunId: 'wf-json-types',
         workId: 'work-json-types',
         workType: 'task',
+        projectId: 'project-1',
         stage: 'plan',
         uses: 'test/json-types',
         with: { agent: '${{ vars.value }}' },
         variables: {
-          workspace: { path: workDir, branch: null, changeDir: null },
+          workspace: { name: 'issue-9', branch: null, changeDir: null },
+          repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
           vars: { value: resolved },
         },
       }
@@ -411,7 +433,7 @@ describe('Dispatch rendering boundary', () => {
     ])
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )
@@ -419,11 +441,13 @@ describe('Dispatch rendering boundary', () => {
       workflowRunId: 'wf-unresolved',
       workId: 'work-unresolved',
       workType: 'task',
+      projectId: 'project-1',
       stage: 'plan',
       uses: 'test/missing-ref',
       with: { agent: '${{ vars.missing }}' },
       variables: {
-        workspace: { path: workDir, branch: null, changeDir: null },
+        workspace: { name: 'issue-9', branch: null, changeDir: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
         vars: {},
       },
     }
@@ -451,7 +475,7 @@ describe('Dispatch rendering boundary', () => {
     ])
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )
@@ -465,11 +489,13 @@ describe('Dispatch rendering boundary', () => {
       workflowRunId: 'wf-deferred',
       workId: 'work-deferred',
       workType: 'task',
+      projectId: 'project-1',
       stage: 'plan',
       uses: 'test/deferred-tasks',
       with: { tasks: deferredTasks.items as unknown as JsonObject },
       variables: {
-        workspace: { path: workDir, branch: null, changeDir: null },
+        workspace: { name: 'issue-9', branch: null, changeDir: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
         vars: { agent: { model: 'model-a' } },
       },
     }
@@ -505,7 +531,7 @@ describe('Dispatch rendering boundary', () => {
     ])
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       {} as never,
       workDir,
     )
@@ -513,11 +539,13 @@ describe('Dispatch rendering boundary', () => {
       workflowRunId: 'wf-mutation',
       workId: 'work-mutation',
       workType: 'task',
+      projectId: 'project-1',
       stage: 'plan',
       uses: 'test/deferred-mutation',
       with: { tasks: [originalDeferred] },
       variables: {
-        workspace: { path: workDir, branch: null, changeDir: null },
+        workspace: { name: 'issue-9', branch: null, changeDir: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
         vars: { agent: 'model-a' },
       },
     }

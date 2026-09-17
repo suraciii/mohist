@@ -1,15 +1,22 @@
-import type { WorkItem } from "../../src/core/types.js"
-import type { TaskLogger } from "../../src/runtime/task-log.js"
-import type { WorkspaceManager, WorkspaceInfo } from "../../src/runtime/workspace.js"
+import type { NamedWorkspaceManager } from '../../src/runtime/workspace-entity.js'
 
-// Test helper: build a `WorkspaceManager` mock that satisfies the contract
-// used by `WorkExecutor`. Tests that just want to say "the workspace is
-// ready, here it is" plug in `verifyOnlyWorkspaceManager(...)` so `prepare`
-// returns the supplied workspace triple without touching git.
-export function verifyOnlyWorkspaceManager(workspace: WorkspaceInfo, onPrepare?: (log: TaskLogger | null) => void): WorkspaceManager {
-  const prepare = async (_work: WorkItem, _signal: AbortSignal, log: TaskLogger | null = null) => {
-    onPrepare?.(log)
-    return workspace
-  }
-  return { prepare } as unknown as WorkspaceManager
+export interface WorkspaceInfo {
+  path: string
+  branch?: string | null
 }
+
+// Test helper: build a `NamedWorkspaceManager` mock that satisfies the
+// contract used by `WorkExecutor`. Tests that just want to say "the
+// workspace is ready, here it is" plug in
+// `verifyOnlyNamedWorkspaceManager(...)` so materialization returns the
+// supplied path without touching git.
+export function verifyOnlyNamedWorkspaceManager(workspace: WorkspaceInfo): NamedWorkspaceManager {
+  const info = { path: workspace.path, branch: workspace.branch ?? null }
+  return {
+    materializeForIssue: async () => info,
+    materialize: async () => info,
+  } as unknown as NamedWorkspaceManager
+}
+
+// Retained alias for call sites written against the removed preparer seam.
+export const verifyOnlyWorkspacePreparer = verifyOnlyNamedWorkspaceManager

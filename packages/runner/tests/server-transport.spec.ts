@@ -452,7 +452,7 @@ describe('ServerConnection transport contract', () => {
               projectId: 'project-1',
               ownerKind: 'workflow',
               uses: 'mohist/rebase',
-              variables: JSON.stringify({ workspace: { path: '/virtual/workspace' } }),
+              variables: JSON.stringify({ workspace: { name: 'issue-9', branch: null } }),
             },
           ],
         }),

@@ -171,9 +171,4 @@ export interface RunnerStopReply {
   interruptUnconfirmed?: boolean | null
 }
 
-export interface WorkflowRunStatusNotification {
-  workflowRunId: string
-  status: string
-}
-
 export type { SessionCommandRequest, SessionCommandResult }

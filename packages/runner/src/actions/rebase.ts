@@ -573,8 +573,8 @@ interface ResidualProbe {
  * Capture the shared workspace-health snapshot used by the completion
  * invariant. The snapshot records residual rebase / merge / cherry-pick
  * markers, the attached branch or detached ref, worktree status, and any
- * probe failure — exactly the model `workspace-prepare` and
- * `WorkspaceManager` share.
+ * probe failure — exactly the model `workspace-prepare` and the named
+ * workspace preparation share.
  */
 async function captureHealthSnapshot(
   workDir: string,

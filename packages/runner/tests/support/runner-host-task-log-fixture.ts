@@ -17,7 +17,7 @@ export function taskLogWork(overrides: WorkOverrides = {}): DispatchWorkItem {
     ...(overrides.actionWorkId ? { with: { workId: overrides.actionWorkId } } : {}),
     variables: {
       executionSource: 'non-slack',
-      workspace: { path: '/virtual/mohist-runner-host-task-log' },
+      workspace: { name: 'issue-9', branch: null },
       repository: {
         gitUrl: 'https://example.test/repository.git',
         baseBranch: 'main',

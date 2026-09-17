@@ -1,57 +1,71 @@
 import { isAbsolute, relative, resolve } from 'node:path'
-import { repositoryWorkspacePath } from './workspace-identity.js'
+import { namedWorkspacePath } from './workspace-entity.js'
+import { repositoryWorkspacePath } from './workspace-managed.js'
 
-// Wire shape for workspace-scoped control WebSocket queries. `workspacePath` is the
-// on-disk worktree the runner materialized; `branch` is the head ref the
-// dispatch put into the worktree (e.g. `mohist/run-${workflowRunId}`);
-// `baseBranch` is the upstream branch the server-side review APIs diff
-// against. `issueNumber` is preserved for log/telemetry only — it is NOT
-// used to derive a head ref.
+// Wire shape for workspace-scoped control WebSocket queries. The only
+// disk-backed identity is the Named Workspace `(projectId, workspaceName)`;
+// the runner derives the directory from `namedWorkspacePath(runnerRoot, ...)`
+// and validates the on-disk marker. `repositoryName` selects the
+// `REPOS/<repository>` checkout, `gitUrl` is the expected origin, `branch` is
+// the Named Workspace head ref (`mohist/ws-<workspaceName>`) and `baseBranch`
+// is the upstream ref the server-side review APIs diff against. `issueNumber`
+// is preserved for log/telemetry only — it is NOT used to derive a head ref.
 export interface WorkspaceQuery {
-  workflowRunId?: string | null
   projectId?: string | null
+  workspaceName?: string | null
   issueNumber?: number | null
   repositoryName?: string | null
   gitUrl?: string | null
-  workspacePath?: string | null
   branch?: string | null
   baseBranch?: string | null
 }
 
-type ResolvedWorkspaceQuery =
-  | { workDir: string; baseBranch: string; head: string }
-  | { workDir: string; baseBranch: string; head: string; identity: WorkspaceQuery }
-
-// Resolve a workspace query into the triple every git-backed handler
-// needs. Returns `null` when ANY of `workspacePath` / `baseBranch` /
-// `branch` is missing — the server-side review APIs surface that as
-// `branch_missing` rather than the handler falling through to a phantom
-// ref. The resolver MUST NOT synthesize a head ref from `issueNumber`:
-// the runner only ever creates `mohist/run-${workflowRunId}` refs, so a
-// synthesized ref would never resolve.
-export function resolveWorkspaceQuery(query: WorkspaceQuery | null | undefined): ResolvedWorkspaceQuery | null {
-  if (!query?.workspacePath || !query.baseBranch) return null
-  const head = query.branch ?? null
-  if (!head) return null
-  const identityFields = [query.workflowRunId, query.gitUrl]
-  const hasIdentity = identityFields.some((value) => value !== undefined && value !== null)
-  if (hasIdentity && (!query.workflowRunId || !query.gitUrl)) return null
-  const workDir = query.repositoryName
-    ? repositoryWorkspacePath(query.workspacePath, query.repositoryName)
-    : query.workspacePath
-  const resolved = { workDir, baseBranch: query.baseBranch, head }
-  return hasIdentity ? { ...resolved, identity: query } : resolved
-}
-
-export function hasCompleteWorkspaceIdentity(query: WorkspaceQuery | null | undefined): query is WorkspaceQuery & {
-  workflowRunId: string
+export interface CompleteWorkspaceIdentity extends WorkspaceQuery {
+  projectId: string
+  workspaceName: string
+  repositoryName: string
   gitUrl: string
-  workspacePath: string
   branch: string
   baseBranch: string
-} {
-  const resolved = resolveWorkspaceQuery(query)
-  return resolved !== null && 'identity' in resolved
+}
+
+export interface ResolvedWorkspaceQuery {
+  workspacePath: string
+  workDir: string
+  baseBranch: string
+  head: string
+  identity: CompleteWorkspaceIdentity
+}
+
+// Resolve a workspace query into the triple every git-backed handler needs,
+// deriving the directory from the Named Workspace identity. Returns `null`
+// when the query does not carry a complete named identity or when the runner
+// root is unavailable — the server-side review APIs surface that as
+// `branch_missing` / `workspace_identity_mismatch` rather than the handler
+// falling through to a phantom ref. The resolver MUST NOT accept a
+// Server-supplied path as identity.
+export function resolveWorkspaceQuery(
+  query: WorkspaceQuery | null | undefined,
+  runnerRoot: string | null | undefined,
+): ResolvedWorkspaceQuery | null {
+  if (!runnerRoot || !hasCompleteWorkspaceIdentity(query)) return null
+  const workspacePath = namedWorkspacePath(runnerRoot, query.projectId, query.workspaceName)
+  const workDir = repositoryWorkspacePath(workspacePath, query.repositoryName)
+  return {
+    workspacePath,
+    workDir,
+    baseBranch: query.baseBranch,
+    head: query.branch,
+    identity: query,
+  }
+}
+
+export function hasCompleteWorkspaceIdentity(
+  query: WorkspaceQuery | null | undefined,
+): query is CompleteWorkspaceIdentity {
+  return Boolean(
+    query?.projectId && query.workspaceName && query.repositoryName && query.gitUrl && query.branch && query.baseBranch,
+  )
 }
 
 // Containment check: is `candidate` nested strictly under the runner root

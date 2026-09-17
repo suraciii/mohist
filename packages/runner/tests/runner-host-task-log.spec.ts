@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { verifyOnlyNamedWorkspaceManager } from './support/workspace-mock.js'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost, startTaskLogFlushTrigger } from '../src/runtime/host.js'
 import type { PolledDispatch } from '../src/core/types.js'
@@ -147,25 +148,9 @@ vi.mock('../src/actions/registry.js', async (importOriginal) => {
   }
 })
 
-vi.mock('../src/runtime/workspace.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/runtime/workspace.js')>()
-  return {
-    ...actual,
-    WorkspaceManager: class {
-      // These host tests exercise task-log delivery, not branch stability;
-      // a null branch keeps the executor boundary probe observational.
-      async prepare() {
-        return { path: '/virtual/mohist-runner-host-task-log', branch: null, changeDir: null }
-      }
-      async verify() {
-        return { path: '/virtual/mohist-runner-host-task-log', branch: null, changeDir: null }
-      }
-    },
-  }
-})
-
 function buildHost() {
   return new RunnerHost({
+    namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
     serverUrl: 'https://runner.test',
     runnerId: 'runner-test',
     runnerRoot: '/virtual/mohist-runner-host-task-log',
@@ -192,6 +177,8 @@ function it(name: string, body: () => Promise<void>): void {
     })
   })
 }
+
+const runnerWorkspacePath = '/virtual/runner-workspace'
 
 describe('RunnerHost flushes task logs before reporting work', () => {
   it('UploadsIncrementalLogBeforeWorkCompletes', async () => {
@@ -226,6 +213,7 @@ describe('RunnerHost flushes task logs before reporting work', () => {
 
     const controller = new AbortController()
     const host = new RunnerHost({
+      namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       serverUrl: 'https://runner.test',
       runnerId: 'runner-test',
       runnerRoot: '/virtual/mohist-runner-host-task-log-live',
@@ -301,6 +289,7 @@ describe('RunnerHost flushes task logs before reporting work', () => {
 
     const controller = new AbortController()
     const host = new RunnerHost({
+      namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       serverUrl: 'https://runner.test',
       runnerId: 'runner-test',
       runnerRoot: '/virtual/mohist-runner-host-task-log-concurrent',
@@ -400,6 +389,7 @@ describe('RunnerHost flushes task logs before reporting work', () => {
 
     const controller = new AbortController()
     const host = new RunnerHost({
+      namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       serverUrl: 'https://runner.test',
       runnerId: 'runner-test',
       runnerRoot: '/virtual/mohist-runner-host-task-log-fail',
@@ -492,6 +482,7 @@ describe('RunnerHost flushes task logs before reporting work', () => {
 
     const controller = new AbortController()
     const host = new RunnerHost({
+      namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       serverUrl: 'https://runner.test',
       runnerId: 'runner-test',
       runnerRoot: '/virtual/mohist-runner-host-task-log-verdict',

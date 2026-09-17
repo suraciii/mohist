@@ -8,7 +8,7 @@ import { defineAction } from '../src/actions/define-action.js'
 import type { ServerConnection } from '../src/server/connection.js'
 import type { ActionResult, JsonObject, DispatchWorkItem } from '../src/core/types.js'
 import type { ActionHost } from '../src/actions/host.js'
-import { verifyOnlyWorkspaceManager } from './support/workspace-mock.js'
+import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
 
 const mockFallbackWorkDir = '/tmp'
 
@@ -20,7 +20,7 @@ describe('Check verdict validation', () => {
 
   beforeEach(async () => {
     workspacePath = await mkdtemp(join(tmpdir(), 'mohist-check-verdict-'))
-    const mockWorkspaceManager = verifyOnlyWorkspaceManager({ path: workspacePath, branch: 'main' })
+    const mockWorkspacePreparer = verifyOnlyWorkspacePreparer({ path: workspacePath, branch: 'main' })
 
     const mockConnection = {} as unknown as ServerConnection
 
@@ -46,7 +46,7 @@ describe('Check verdict validation', () => {
         .mockImplementation(() => ({ kind: 'definition', definition, canonicalName: definition.manifest.name })),
     } as unknown as ActionRegistry
 
-    executor = new WorkExecutor(mockActionRegistry, mockWorkspaceManager as any, mockConnection, mockFallbackWorkDir)
+    executor = new WorkExecutor(mockActionRegistry, mockWorkspacePreparer as any, mockConnection, mockFallbackWorkDir)
   })
 
   afterEach(async () => {
@@ -65,7 +65,11 @@ describe('Check verdict validation', () => {
     title: 'Run checks',
     uses: 'mohist/opencode',
     with: { checks },
-    variables: { workspace: { path: workspacePath }, ...variables },
+    variables: {
+      workspace: { name: 'issue-9', branch: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      ...variables,
+    },
     projectId: 'project-1',
     issueNumber: 1,
   })

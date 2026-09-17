@@ -28,21 +28,16 @@ public class WorkflowItemTranslatorWorkspaceDispatchTests
     }
 
     [Fact]
-    public void WorkspacePayload_NonIssueRun_FallsBackToPath()
+    public void WorkspacePayload_NonIssueRun_HasNoWorkspaceIdentity()
     {
-        // When IssueNumber is null/0, ReadIssueNumber returns null,
-        // and the translator emits {path, branch} from run.Workspace —
-        // it must NOT emit {name}. This test asserts the contract.
+        // When IssueNumber is null/0, ReadIssueNumber returns null and the
+        // translator emits a null workspace. The removed run-derived
+        // workspace.path fallback must never come back.
         var metadataNull = new WorkflowRunMetadata(null, default, IssueNumber: null);
         Assert.Null(ReadIssueNumber(metadataNull));
 
         var metadataZero = new WorkflowRunMetadata(null, default, IssueNumber: 0);
         Assert.Null(ReadIssueNumber(metadataZero));
-
-        // Verify the old workspace identity fields are still available
-        var workspace = new WorkspaceIdentity("/custom/path", "mohist/run-legacy", "/change");
-        Assert.Equal("/custom/path", workspace.Path);
-        Assert.Equal("mohist/run-legacy", workspace.Branch);
     }
 
     private static int? ReadIssueNumber(WorkflowRunMetadata metadata) =>

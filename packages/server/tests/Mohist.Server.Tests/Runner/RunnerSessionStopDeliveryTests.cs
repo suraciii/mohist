@@ -67,8 +67,5 @@ public sealed class RunnerSessionStopDeliveryTests
             if (cancellation.IsCancellationRequested) return Task.FromCanceled<TResult>(cancellation);
             return Task.FromException<TResult>(new InvalidOperationException("transport failed"));
         }
-
-        public Task SendNotificationAsync<TParams>(string runnerId, string method, TParams parameters, CancellationToken ct = default) =>
-            throw new NotSupportedException();
     }
 }

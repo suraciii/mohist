@@ -31,7 +31,7 @@ public class IssueVariableBuilderTests
 
     private static readonly WorkspaceIdentity Workspace = new(
         Path: "/tmp/mohist/test/issue-80",
-        Branch: "mohist/run-wr_x",
+        Branch: "mohist/ws-issue-80",
         ChangeDir: "artifacts/changes/issue-80");
 
     private static MohistIssue TestIssue(int number = 80) => new()
