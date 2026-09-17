@@ -402,7 +402,13 @@ public class RunnerStatusApiSpecs
             var availabilityResponse = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents/availability");
             availabilityResponse.EnsureSuccessStatusCode();
             var availabilityPayload = await availabilityResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-            var availability = Assert.Single(availabilityPayload.GetProperty("data").EnumerateArray());
+            var blockedAgentId = (await agentResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>())
+                .GetProperty("data").GetProperty("id").GetString();
+            // The list also serves the built-in Workflow Agents; assert on the
+            // Agent this scenario created.
+            var availability = Assert.Single(
+                availabilityPayload.GetProperty("data").EnumerateArray(),
+                e => e.GetProperty("agentId").GetString() == blockedAgentId);
             Assert.False(availability.GetProperty("canStartNow").GetBoolean());
             Assert.Equal(RunnerAdmissionReasonCodes.ProviderPolicyInvalid, availability.GetProperty("waitingReason").GetString());
         }
@@ -474,7 +480,9 @@ public class RunnerStatusApiSpecs
             var listResponse = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents/availability");
             listResponse.EnsureSuccessStatusCode();
             var listPayload = await listResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
-            var entry = Assert.Single(listPayload.GetProperty("data").EnumerateArray());
+            var entry = Assert.Single(
+                listPayload.GetProperty("data").EnumerateArray(),
+                e => e.GetProperty("agentId").GetString() == agentId);
             Assert.False(entry.GetProperty("canStartNow").GetBoolean());
             Assert.Equal("runtime-not-ready", entry.GetProperty("waitingReason").GetString());
         }

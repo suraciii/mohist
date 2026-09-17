@@ -516,7 +516,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     private const string ReplacementGeneration = "replacement-generation";
 
     private RunnerInfo RunnerInfoFor(string runnerId, string workflowRunId) =>
-        new(runnerId, ["spec/*"], "test-host", TestProjectId(workflowRunId));
+        new(runnerId, ["spec/*"], "test-host", TestProjectId(workflowRunId),
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration);
 
     /// <summary>
     /// Drops the presence reminder the earlier registration left behind, so a
