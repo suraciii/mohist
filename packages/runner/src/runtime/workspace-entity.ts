@@ -11,10 +11,9 @@ import {
   WorkspaceCorruptError,
   WorkspaceIdentityMismatchError,
 } from './workspace-errors.js'
-import { repositoryWorkspacePath } from './workspace-identity.js'
 import { validateWorkspaceOrigin, withManagedRepositoryHandle, workspacePrepSink } from './workspace-managed.js'
+import { repositoryWorkspacePath, slugify, withManagedWorkspaceHandle } from './workspace-managed.js'
 import type { NamedWorkspaceRegistry } from './workspace-registry.js'
-import { slugify, withManagedWorkspaceHandle } from './workspace.js'
 
 // Named workspace materialization keeps the Workspace root as the shared
 // boundary for plans and repository checkouts. Issue-bound workflow work

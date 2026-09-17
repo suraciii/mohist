@@ -4,7 +4,6 @@ import { createRunnerControlHandlers } from './runner-control-handlers.js'
 describe('createRunnerControlHandlers', () => {
   it('binds all nine methods to the existing transport-neutral domain handlers', async () => {
     const command = vi.fn(async () => ({ ok: true }))
-    const statusChanged = vi.fn()
     const handlers = createRunnerControlHandlers({
       workspaceGit: {
         resolveQuery: () => null,
@@ -14,7 +13,6 @@ describe('createRunnerControlHandlers', () => {
       followup: {},
       cancel: {},
       sessionCommand: { handler: command },
-      onWorkflowStatusChanged: statusChanged,
     })
     const query = {}
 
@@ -56,8 +54,6 @@ describe('createRunnerControlHandlers', () => {
         processGeneration: 'generation',
       }),
     ).resolves.toEqual({ ok: true })
-    await handlers.workflowStatusChanged({ workflowRunId: 'run', status: 'Completed' })
     expect(command).toHaveBeenCalledOnce()
-    expect(statusChanged).toHaveBeenCalledOnce()
   })
 })

@@ -620,7 +620,7 @@ describe('RunnerHost', () => {
       await vi.advanceTimersByTimeAsync(AWAITING_ACK_RETRY_INTERVAL_MS)
       await thirdReport.promise
 
-      expect(report.mock.calls.map((calls) => calls[1]?.status)).toEqual(['failed', 'failed', 'failed'])
+      expect(report.mock.calls.map((calls) => calls[1]?.status)).toEqual(['completed', 'completed', 'completed'])
 
       controller.abort()
       await expect(run).resolves.toBeUndefined()

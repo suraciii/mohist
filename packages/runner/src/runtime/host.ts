@@ -9,8 +9,7 @@ import { reportAndRequireDurableAck } from './work-report.js'
 import { buildRegistrationState } from './registration-state.js'
 import { ActionRegistry, createDefaultRegistry } from '../actions/registry.js'
 import '../core/prompt-registry.js'
-import { WorkspaceManager } from './workspace.js'
-import { WorkspaceRegistry, NamedWorkspaceRegistry } from './workspace-registry.js'
+import { NamedWorkspaceRegistry } from './workspace-registry.js'
 import { NamedWorkspaceManager } from './workspace-entity.js'
 import { createNamedWorkspaceCleanupLoop, NamedWorkspaceReclaimProbe } from './named-workspace-cleanup.js'
 import {
@@ -18,8 +17,6 @@ import {
   type AgentSessionRuntimeEventQueue,
 } from '../server/runtime-event-queue.js'
 import { createServerRuntimeEventDelivery } from '../server/runtime-event-queue-delivery.js'
-import { ConvergenceBackstop, ServerConnectionConvergenceAdapter } from './cleanup-convergence.js'
-import { CleanupLoop, DefaultCleanupRunner } from './cleanup-loop.js'
 import { WorkExecutor } from './executor.js'
 import { AgentJobExecutor } from './agent-job-executor.js'
 import { TaskLogCollector } from './task-log.js'
@@ -115,18 +112,13 @@ export interface RunnerHostDependencies {
 export class RunnerHost {
   private readonly connection: ServerConnection
   private readonly control: RunnerControlWebSocketClient
-  private readonly workspace: WorkspaceManager
-  private readonly workspaceRegistry: WorkspaceRegistry
   private readonly namedWorkspaceRegistry: NamedWorkspaceRegistry
   private readonly namedWorkspaceManager: NamedWorkspaceManager
   private readonly namedWorkspaceReclaimProbe: NamedWorkspaceReclaimProbe
   private readonly agentSessionRuntimeEventQueue: AgentSessionRuntimeEventQueue
   private readonly taskLogDeliveryQueue: TaskLogDeliveryQueue
-  private readonly convergence: ConvergenceBackstop
-  private readonly cleanupLoop: CleanupLoop
   private readonly namedCleanupLoop: ReturnType<typeof createNamedWorkspaceCleanupLoop>
   private readonly cleanup: ReturnType<typeof createHostCleanup>
-  private readonly cleanupConvergenceIntervalMs: number
   private readonly cleanupLoopIntervalMs: number
   private readonly modelRediscoveryIntervalMs: number
   private readonly workflowSessionTurnCoordinator = new WorkflowSessionTurnCoordinator()
@@ -152,7 +144,6 @@ export class RunnerHost {
   private readonly waitForConnectionRetry: (delayMs: number, signal: AbortSignal) => Promise<void>
   private readonly heartbeatLifecycle: MaintenanceLifecycle
   private readonly livenessLifecycle: MaintenanceLifecycle
-  private readonly convergenceLifecycle: MaintenanceLifecycle
   private readonly cleanupLifecycle: MaintenanceLifecycle
   private readonly modelCatalogLifecycle: MaintenanceLifecycle
   private readonly skillResolver = new SkillResolver()
@@ -175,23 +166,12 @@ export class RunnerHost {
     dependencies: RunnerHostDependencies = {},
   ) {
     this.enabledAgentRuntimes = normalizeEnabledAgentRuntimes(options.enabledAgentRuntimes)
-    this.cleanupConvergenceIntervalMs = Math.max(1000, Math.floor(options.cleanupConvergenceIntervalMs ?? 5 * 60_000))
     this.cleanupLoopIntervalMs = Math.max(1000, Math.floor(options.cleanupLoopIntervalMs ?? 2 * 60_000))
     this.modelRediscoveryIntervalMs = Math.max(60_000, Math.floor(options.modelRediscoveryIntervalMs ?? 30 * 60_000))
     const build = loadBuildInfo()
     this.buildInfo = build
     this.buildGitHash = build.gitHash
     this.connection = new ServerConnection(options, this.buildGitHash, build)
-    // Runner-local registry of workspaces this host has materialized.
-    // Loaded eagerly at startup so the in-memory cache is hot before the
-    // first dispatch or control RPC: active
-    // entries remain active until a terminal transition is observed.
-    // The registry is shared with WorkspaceManager (for materialize /
-    // verify registration hooks) and control handlers (for the
-    // RemoveWorkspace entry-removal hook).
-    this.workspaceRegistry = new WorkspaceRegistry(options.runnerRoot, {
-      runnerId: options.runnerId,
-    })
     this.namedWorkspaceRegistry = new NamedWorkspaceRegistry(options.runnerRoot)
     this.agentSessionRuntimeEventQueue = createAgentSessionRuntimeEventQueue({
       deliver: createServerRuntimeEventDelivery({
@@ -199,10 +179,6 @@ export class RunnerHost {
       }),
     })
     this.taskLogDeliveryQueue = createHostTaskLogDeliveryQueue(this.connection, options)
-    this.convergence = new ConvergenceBackstop(
-      this.workspaceRegistry,
-      new ServerConnectionConvergenceAdapter(this.connection),
-    )
     this.namedWorkspaceManager = new NamedWorkspaceManager(
       options.runnerRoot,
       this.namedWorkspaceRegistry,
@@ -214,13 +190,6 @@ export class RunnerHost {
       options.runnerRoot,
       () => this.openCodeRuntime,
     )
-    this.cleanupLoop = new CleanupLoop(
-      this.workspaceRegistry,
-      new DefaultCleanupRunner(options.runnerRoot),
-      options.runnerRoot,
-      () => this.openCodeRuntime,
-    )
-    this.workspace = new WorkspaceManager(options.runnerRoot, this.workspaceRegistry, options.runnerId)
     this.waitForConnectionRetry = dependencies.waitForConnectionRetry ?? hostDelay
     this.shutdownStopBudgetMs = positiveBudget(dependencies.shutdownStopBudgetMs, 2_000)
     this.control = new RunnerControlWebSocketClient(
@@ -269,7 +238,6 @@ export class RunnerHost {
               this.agentSessionRuntimeEventQueue,
             ),
           },
-          onWorkflowStatusChanged: () => this.convergenceLifecycle.trigger(),
         }),
         agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
         processGeneration: this.processGeneration,
@@ -280,12 +248,9 @@ export class RunnerHost {
       runnerRoot: options.runnerRoot,
       connection: this.connection,
       control: this.control,
-      workspaceRegistry: this.workspaceRegistry,
       namedWorkspaceRegistry: this.namedWorkspaceRegistry,
       namedWorkspaceReclaimProbe: this.namedWorkspaceReclaimProbe,
       namedCleanupLoop: this.namedCleanupLoop,
-      cleanupLoop: this.cleanupLoop,
-      convergence: this.convergence,
       openCodeRuntime: () => this.openCodeRuntime,
     })
     this.hostShutdown = createHostShutdown({
@@ -294,7 +259,6 @@ export class RunnerHost {
     })
     this.heartbeatLifecycle = createMaintenanceLifecycle((signal) => this.heartbeatOnce(signal))
     this.livenessLifecycle = createMaintenanceLifecycle((signal) => this.cleanup.runSelfCheck(signal))
-    this.convergenceLifecycle = createMaintenanceLifecycle((signal) => this.cleanup.runConvergenceOnce(signal))
     this.cleanupLifecycle = createMaintenanceLifecycle((signal) => this.cleanup.runCleanupOnce(signal))
     this.modelCatalogLifecycle = createMaintenanceLifecycle((signal) => this.runModelCatalogMaintenance(signal))
   }
@@ -320,20 +284,9 @@ export class RunnerHost {
   }
 
   async run(signal: AbortSignal) {
-    // Load the runner-local workspace registry before any dispatch /
-    // control WebSocket RPC can fire. A missing file is treated as an empty
-    // registry; corrupt JSON is similarly tolerated (see
-    // WorkspaceRegistry.loadFromDisk). The load is best-effort — a
-    // failed read does not block startup.
-    try {
-      await this.workspaceRegistry.load()
-    } catch (error) {
-      log.error('failed to load workspace registry; starting empty', {
-        exception: error,
-      })
-    }
-    // Named workspace registry: same rebuildable-index rules as the
-    // workflow registry — a missing or corrupt file starts empty.
+    // Named workspace registry: a missing or corrupt file starts empty
+    // (see NamedWorkspaceRegistry.loadFromDisk). The load is best-effort —
+    // a failed read does not block startup.
     try {
       await this.namedWorkspaceRegistry.load()
     } catch (error) {
@@ -343,7 +296,6 @@ export class RunnerHost {
     }
     let heartbeat: ReturnType<typeof setInterval> | undefined
     let selfCheck: ReturnType<typeof setInterval> | undefined
-    let convergenceTimer: ReturnType<typeof setInterval> | undefined
     let cleanupTimer: ReturnType<typeof setInterval> | undefined
     let modelRediscoveryTimer: ReturnType<typeof setInterval> | undefined
     const stopMaintenance = () => {
@@ -363,14 +315,8 @@ export class RunnerHost {
         if (this.agentSessionRuntimeEventQueue.ready()) {
           void this.agentSessionRuntimeEventQueue.kick().catch(() => undefined)
         }
-        // Startup convergence: pick up any terminal events the runner
-        // missed while it was offline (e.g. completed while the previous
-        // process was down). Runs immediately after control WebSocket is up so the
-        // push channel is available in parallel.
-        await this.convergenceLifecycle.triggerAndWait()
         heartbeat = setInterval(() => this.heartbeatLifecycle.trigger(), this.options.heartbeatIntervalMs)
         selfCheck = setInterval(() => this.livenessLifecycle.trigger(), this.options.dispatchLivenessProbeIntervalMs)
-        convergenceTimer = setInterval(() => this.convergenceLifecycle.trigger(), this.cleanupConvergenceIntervalMs)
         cleanupTimer = setInterval(() => this.cleanupLifecycle.trigger(), this.cleanupLoopIntervalMs)
         if (this.enabledAgentRuntimes.has('opencode')) {
           modelRediscoveryTimer = setInterval(
@@ -383,7 +329,6 @@ export class RunnerHost {
     } finally {
       if (heartbeat) clearInterval(heartbeat)
       if (selfCheck) clearInterval(selfCheck)
-      if (convergenceTimer) clearInterval(convergenceTimer)
       if (cleanupTimer) clearInterval(cleanupTimer)
       if (modelRediscoveryTimer) clearInterval(modelRediscoveryTimer)
       signal.removeEventListener('abort', stopMaintenance)
@@ -399,7 +344,6 @@ export class RunnerHost {
     return Promise.all([
       this.heartbeatLifecycle.stop(),
       this.livenessLifecycle.stop(),
-      this.convergenceLifecycle.stop(),
       this.cleanupLifecycle.stop(),
       this.modelCatalogLifecycle.stop(),
     ])
@@ -407,7 +351,6 @@ export class RunnerHost {
 
   private onDispatchReconnected() {
     this.heartbeatLifecycle.trigger()
-    this.convergenceLifecycle.trigger()
     this.cleanupLifecycle.trigger()
   }
 
@@ -507,7 +450,7 @@ export class RunnerHost {
     }
     this.workExecutor = new WorkExecutor(
       this.actions,
-      this.workspace,
+      null,
       this.connection,
       this.options.runnerRoot,
       undefined,

@@ -22,12 +22,10 @@ import { transportFetch, withFakeTransport } from './support/fake-transport.js'
 import type {
   FollowupParams,
   JsonRpcErrorResponse,
-  JsonRpcNotification,
   JsonRpcRequest,
   JsonRpcSuccessResponse,
   SessionCommandRequest,
   SessionStopParams,
-  WorkflowRunStatusNotification,
   WorkspaceCommitDiffParams,
   WorkspaceFileContentParams,
   WorkspaceQueryParams,
@@ -64,7 +62,6 @@ interface FixtureEntry {
 
 interface FixtureCatalog {
   requests: FixtureEntry[]
-  notifications: Array<{ method: string; notification: unknown }>
 }
 
 describe('runner control JSON contract', () => {
@@ -103,19 +100,6 @@ describe('runner control JSON contract', () => {
     expect(followup).toMatchObject({ operationId: 'operation_followup_1', turnId: 'turn_followup_1' })
     expect(stop).toMatchObject({ sessionId: 'session_1', turnId: 'turn_stop_1', operationId: 'operation_stop_1' })
     expect(command).toMatchObject({ command: 'reset', operationId: 'operation_command_1' })
-  })
-
-  it('covers the workflow status notification', () => {
-    const entry = readCatalog().notifications[0]!
-    const notification = entry.notification as JsonRpcNotification<WorkflowRunStatusNotification>
-
-    expect(entry.method).toBe('workflow.status-changed')
-    expect(notification).toEqual({
-      jsonrpc: '2.0',
-      method: 'workflow.status-changed',
-      params: { workflowRunId: 'run_101', status: 'Completed' },
-    })
-    expect(notification).not.toHaveProperty('id')
   })
 })
 

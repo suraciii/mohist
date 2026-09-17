@@ -425,11 +425,6 @@ export interface RunnerOptions {
    * present it as <c>Authorization: Bearer</c>.
    */
   credential?: string
-  // Optional override for the convergence backstop cadence.
-  // Defaults to 5 minutes inside RunnerHost. Set to a very large value
-  // to effectively disable the periodic tick while keeping startup /
-  // reconnect convergence. Used by tests to drive ticks deterministically.
-  cleanupConvergenceIntervalMs?: number
 
   // Optional override for the cleanup loop cadence.
   // Defaults to 2 minutes inside RunnerHost. The cleanup loop runs

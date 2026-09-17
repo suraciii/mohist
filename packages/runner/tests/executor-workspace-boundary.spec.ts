@@ -2,16 +2,16 @@ import { describe, expect, it as vitestIt } from 'vitest'
 import { NETWORK_COMMAND_TIMEOUT_MS } from '../src/actions/git.js'
 import type { ActionResult, JsonObject, DispatchWorkItem } from '../src/core/types.js'
 import type { ActionHost } from '../src/actions/host.js'
-import { WorkExecutor } from '../src/runtime/executor.js'
+import { WorkExecutor, type WorkspacePreparer } from '../src/runtime/executor.js'
 import { buildCleanupPrompt } from '../src/runtime/worktree-cleanup.js'
 import { AgentJobExecutor } from '../src/runtime/agent-job-executor.js'
-import { WorkspaceManager, WorkspaceNetworkTimeoutError } from '../src/runtime/workspace.js'
+import { WorkspaceNetworkTimeoutError } from '../src/runtime/workspace-errors.js'
 import type { ServerConnection } from '../src/server/connection.js'
 import type { OpenCodeRuntime } from '../src/runtime/opencode/index.js'
 import type { RuntimeResult, RuntimeTurnResult } from '../src/runtime/opencode/types.js'
 import { createTestTempDir } from './support/temp-dir.js'
 import { defineTestActions, type ActionRegistry } from './support/action-registry-test.js'
-import { verifyOnlyWorkspaceManager } from './support/workspace-mock.js'
+import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
 import { StatefulFakeWorktree } from './support/fake-worktree.js'
 import { withTestRunnerResources } from './support/test-resources.js'
 
@@ -29,7 +29,7 @@ describe('workspace preparation across stages', () => {
         recorded.prepare += 1
         throw new Error('prepare must not be called for agent-job dispatches')
       },
-    } as unknown as WorkspaceManager
+    } as unknown as WorkspacePreparer
 
     const executor = new WorkExecutor(
       buildRegistry(async () => ({ output: { reached: false } })),
@@ -57,7 +57,7 @@ describe('workspace preparation across stages', () => {
         prepareCalls += 1
         throw new Error('workspace preparation must not start')
       },
-    } as unknown as WorkspaceManager
+    } as unknown as WorkspacePreparer
     const executor = new WorkExecutor(
       buildRegistry(async () => ({ output: { reached: false } })),
       workspaceManager,
@@ -94,7 +94,7 @@ describe('workspace preparation across stages', () => {
       async prepare() {
         throw timeout
       },
-    } as unknown as WorkspaceManager
+    } as unknown as WorkspacePreparer
     const executor = new WorkExecutor(
       buildRegistry(async () => ({ output: { reached: false } })),
       failingManager,
@@ -174,7 +174,7 @@ describe('branch-integrity task boundaries', () => {
   function boundaryExecutor(registry: ActionRegistry, branch: string | null): WorkExecutor {
     return new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: WORKSPACE_ROOT, branch }),
+      verifyOnlyWorkspacePreparer({ path: WORKSPACE_ROOT, branch }),
       connection() as never,
       '/runner',
     )
@@ -290,7 +290,7 @@ describe('branch-integrity task boundaries', () => {
     })
     const executor = new WorkExecutor(
       registry,
-      verifyOnlyWorkspaceManager({ path: WORKSPACE_ROOT, branch: EXPECTED_BRANCH }),
+      verifyOnlyWorkspacePreparer({ path: WORKSPACE_ROOT, branch: EXPECTED_BRANCH }),
       connection() as never,
       '/runner',
       undefined,

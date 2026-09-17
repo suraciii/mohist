@@ -5,9 +5,9 @@ import { errorMessage } from '../core/errors.js'
 import { stringAt } from '../core/json-path.js'
 import { renderTemplate, unresolvedReferences } from '../core/template.js'
 import { ensureDir } from '../system/process.js'
-import { WorkspaceManager, WorkspaceNetworkTimeoutError } from './workspace.js'
 import { openWorkspaceDirectoryHandle } from './workspace-managed.js'
-import { repositoryWorkspacePath } from './workspace-identity.js'
+import { repositoryWorkspacePath } from './workspace-managed.js'
+import { WorkspaceNetworkTimeoutError } from './workspace-errors.js'
 import type { NamedWorkspaceManager } from './workspace-entity.js'
 import type { ActionRegistry } from '../actions/registry.js'
 import type { ServerConnection } from '../server/connection.js'
@@ -52,10 +52,22 @@ const CHECK_STATUS_BY_ACTION_STATUS = new Map([
 ])
 const CHECK_WORK_TYPES = new Set(['check', 'checks'])
 
+// Minimal filesystem-preparation seam for workflow-owned work that does not
+// carry a complete Named Workspace binding. Production wires the Named
+// Workspace manager and never a WorkflowRun-keyed preparer; the seam exists
+// only so the executor can be exercised without a real clone.
+export interface WorkspacePreparer {
+  prepare(
+    work: DispatchWorkItem,
+    signal: AbortSignal,
+    log?: TaskLogger | null,
+  ): Promise<{ path: string; branch?: string | null }>
+}
+
 export class WorkExecutor {
   constructor(
     private readonly actions: ActionRegistry,
-    private readonly workspaceManager: WorkspaceManager,
+    private readonly workspacePreparer: WorkspacePreparer | null,
     private readonly connection: ServerConnection,
     private readonly fallbackWorkDir: string | null = null,
     private readonly now: () => Date = () => new Date(),
@@ -144,11 +156,18 @@ export class WorkExecutor {
           }
         }
       }
-      const info = await this.workspaceManager.prepare(work, signal, log)
-      const workspace = infoToResolved(info)
-      if (!workspace.path.trim())
-        throw new Error('Workflow workspace preparation did not resolve a non-empty workspace path')
-      return { kind: 'ok', workspace }
+      if (this.workspacePreparer) {
+        const info = await this.workspacePreparer.prepare(work, signal, log)
+        const workspace = infoToResolved(info)
+        if (!workspace.path.trim())
+          throw new Error('Workflow workspace preparation did not resolve a non-empty workspace path')
+        return { kind: 'ok', workspace }
+      }
+      if (workspaceRoot) {
+        const branch = stringAt(work.variables ?? {}, ['workspace', 'branch'])
+        return { kind: 'ok', workspace: { path: workspaceRoot, branch: branch ?? null } }
+      }
+      throw new Error('Workflow dispatch has no Named Workspace binding')
     } catch (error) {
       return { kind: 'failure', result: workspaceSetupFailure(work, error) }
     }

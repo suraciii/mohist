@@ -1,7 +1,6 @@
 import { NETWORK_COMMAND_TIMEOUT_MS } from '../actions/git.js'
 import type { CommandResult } from '../system/process.js'
 import { createCredentialMaskerFromEnvironment } from './task-log.js'
-import type { IssueWorkspaceMarker } from './workspace-identity.js'
 
 export class WorkspaceMissingError extends Error {
   readonly kind = 'workspace-missing'
@@ -32,8 +31,6 @@ export class WorkspaceIdentityMismatchError extends Error {
   constructor(
     message: string,
     readonly workspacePath?: string,
-    readonly expected?: IssueWorkspaceMarker,
-    readonly actual?: Partial<IssueWorkspaceMarker>,
     readonly cause?: unknown,
     readonly originDiagnostic?: WorkspaceOriginDiagnostic,
   ) {

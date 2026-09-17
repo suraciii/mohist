@@ -5,7 +5,7 @@ import { createDefaultRegistry } from '../src/actions/registry.js'
 import type { ActionResult, DispatchWorkItem, JsonObject } from '../src/core/types.js'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import type { GitRunner } from '../src/runtime/git-probe.js'
-import { verifyOnlyWorkspaceManager } from './support/workspace-mock.js'
+import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
 import { defineTestAction, ActionRegistry } from './support/action-registry-test.js'
 import { withTestRunnerResources } from './support/test-resources.js'
 
@@ -52,7 +52,7 @@ function createExecutor(
 ): WorkExecutor {
   return new WorkExecutor(
     createScriptRegistry(handler),
-    verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+    verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
     { async patchRunVars() {} } as never,
     workDir,
   )

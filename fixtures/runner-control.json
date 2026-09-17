@@ -372,15 +372,5 @@
         "error": { "code": -32603, "message": "Internal error" }
       }
     }
-  ],
-  "notifications": [
-    {
-      "method": "workflow.status-changed",
-      "notification": {
-        "jsonrpc": "2.0",
-        "method": "workflow.status-changed",
-        "params": { "workflowRunId": "run_101", "status": "Completed" }
-      }
-    }
   ]
 }

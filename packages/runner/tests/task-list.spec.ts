@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { taskListAction } from '../src/actions/task-list.js'
-import { isSafeRepositoryName } from '../src/runtime/workspace-identity.js'
+import { isSafeRepositoryName } from '../src/runtime/workspace-managed.js'
 
 function host(workDir: string): any {
   return { workDir, signal: new AbortController().signal }

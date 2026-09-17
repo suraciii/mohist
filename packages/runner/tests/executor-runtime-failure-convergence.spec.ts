@@ -6,7 +6,7 @@ import type { DispatchWorkItem } from '../src/core/types.js'
 import { currentRunnerFileSystem } from '../src/system/filesystem.js'
 import { makeRecordingOutbox } from './support/outbox-test-helpers.js'
 import { defineTestActions } from './support/action-registry-test.js'
-import { verifyOnlyWorkspaceManager } from './support/workspace-mock.js'
+import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
 import { withTestRunnerResources } from './support/test-resources.js'
 
 const workDir = '/virtual/mohist-runtime-failure-convergence'
@@ -92,7 +92,7 @@ function createExecutor(
 ) {
   const executor = new WorkExecutor(
     actionRegistry(),
-    verifyOnlyWorkspaceManager({ path: executionWorkDir, branch: null }),
+    verifyOnlyWorkspacePreparer({ path: executionWorkDir, branch: null }),
     connection as never,
     executionWorkDir,
     undefined,

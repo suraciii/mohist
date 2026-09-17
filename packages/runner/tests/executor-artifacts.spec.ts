@@ -11,7 +11,7 @@ import { defineTestActions, type ActionRegistry } from './support/action-registr
 import type { CapturedArtifact } from '../src/runtime/artifact-capture.js'
 import type { OpenCodeRuntime } from '../src/runtime/opencode/index.js'
 import type { RuntimeResult, RuntimeTurnResult } from '../src/runtime/opencode/types.js'
-import { verifyOnlyWorkspaceManager } from './support/workspace-mock.js'
+import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
 import { withTestRunnerResources } from './support/test-resources.js'
 import { MemoryDirectoryHandleFileSystem } from './support/memory-filesystem.js'
 
@@ -117,7 +117,7 @@ describe('WorkExecutor artifact capture', () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ error: { code: 'base-moved', message: 'base moved' } }), [{ code: 'base-moved' }]),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -193,7 +193,7 @@ describe('WorkExecutor artifact capture', () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: { done: true } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -213,7 +213,7 @@ describe('WorkExecutor artifact capture', () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: { done: true } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -235,7 +235,7 @@ describe('WorkExecutor artifact capture', () => {
     connection.uploadFailures.set('review.md', new Error('server 503'))
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: { done: true } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -259,7 +259,7 @@ describe('WorkExecutor artifact capture', () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: null })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -282,7 +282,7 @@ describe('WorkExecutor artifact capture', () => {
         status: 'success',
         output: { producedArtifacts: [{ path: 'diagnostic.log' }] },
       })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -308,7 +308,7 @@ describe('WorkExecutor artifact capture', () => {
         status: 'success',
         output: { producedArtifacts: [{ path: 'diagnostic.log' }] },
       })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -327,7 +327,7 @@ describe('WorkExecutor artifact capture', () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ error: { code: 'action-failed', message: 'agent crashed' } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -347,7 +347,7 @@ describe('WorkExecutor artifact capture', () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: { ok: true } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -377,7 +377,7 @@ describe('WorkExecutor artifact capture', () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: { done: true } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -409,7 +409,7 @@ describe('WorkExecutor artifact capture', () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: null })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -436,7 +436,7 @@ describe('WorkExecutor artifact capture', () => {
         actionWorkDir = host.workDir
         return { output: null }
       }),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -470,7 +470,7 @@ describe('WorkExecutor artifact capture', () => {
           await fileSystem.writeText(join(host.workDir, 'written.txt'), 'held')
           return { output: null }
         }),
-        verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+        verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
         new FakeServerConnection() as never,
         workDir,
       )
@@ -494,7 +494,7 @@ describe('WorkExecutor artifact capture', () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: null })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -514,7 +514,7 @@ describe('WorkExecutor artifact capture', () => {
     const connection = new FakeServerConnection()
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: { ok: true } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
     )
@@ -534,7 +534,7 @@ describe('WorkExecutor artifact capture', () => {
     const fakeRuntime = makeFakeRuntimeReturningCompleted(workDir)
     const executor = new WorkExecutor(
       makeRegistry(async () => ({ output: { reached: false } })),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
       undefined,
@@ -577,7 +577,7 @@ describe('WorkExecutor artifact capture', () => {
         registryInvoked = true
         return { output: { reached: false } }
       }),
-      verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+      verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
       connection as never,
       workDir,
       undefined,

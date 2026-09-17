@@ -33,7 +33,6 @@ function handlerSet(): RunnerControlHandlers {
     sessionFollowup: vi.fn(async () => 'followup'),
     sessionStop: vi.fn(async () => 'stopped'),
     sessionCommand: vi.fn(async () => 'command'),
-    workflowStatusChanged: vi.fn(),
   }
 }
 
@@ -138,38 +137,6 @@ describe('RunnerControlDispatcher', () => {
     await settle()
     expect(h.sent).toContainEqual({ jsonrpc: '2.0', id: 'read', result: null })
     expect(h.sent).toContainEqual({ jsonrpc: '2.0', id: 'stop', result: { state: 'unavailable' } })
-  })
-
-  it('invokes status reconciliation without a response', async () => {
-    const h = harness()
-    h.receive({
-      jsonrpc: '2.0',
-      method: 'workflow.status-changed',
-      params: { workflowRunId: 'run-1', status: 'Completed' },
-    })
-    await settle()
-    expect(h.handlers.workflowStatusChanged).toHaveBeenCalledWith({ workflowRunId: 'run-1', status: 'Completed' })
-    expect(h.sent).toEqual([])
-  })
-
-  it('swallows synchronous throws and asynchronous rejections from notifications', async () => {
-    const handlers = handlerSet()
-    handlers.workflowStatusChanged = vi
-      .fn()
-      .mockImplementationOnce(() => {
-        throw new Error('sync')
-      })
-      .mockRejectedValueOnce(new Error('async'))
-    const h = harness(handlers)
-    const notification = {
-      jsonrpc: '2.0',
-      method: 'workflow.status-changed',
-      params: { workflowRunId: 'run-1', status: 'Completed' },
-    }
-    expect(() => h.receive(notification)).not.toThrow()
-    expect(() => h.receive(notification)).not.toThrow()
-    await settle()
-    expect(h.sent).toEqual([])
   })
 
   it('normalizes omitted nullable command and binding members before dispatch', async () => {

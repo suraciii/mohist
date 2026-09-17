@@ -2,7 +2,7 @@ import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import { rebaseAction } from '../src/actions/rebase.js'
 import { pushAction } from '../src/actions/push.js'
-import { verifyOnlyWorkspaceManager } from './support/workspace-mock.js'
+import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
 import type { ActionResult, JsonObject, DispatchWorkItem } from '../src/core/types.js'
 import type { ActionTestContext as ActionContext } from './support/action-test-context.js'
 import type { ActionHost } from '../src/actions/host.js'
@@ -119,7 +119,7 @@ function buildExecutor(
 ): WorkExecutor {
   return new WorkExecutor(
     registry,
-    verifyOnlyWorkspaceManager({ path: worktree.workDir, branch: worktree.branch }),
+    verifyOnlyWorkspacePreparer({ path: worktree.workDir, branch: worktree.branch }),
     connection as never,
     worktree.workDir,
   )

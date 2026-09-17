@@ -1,15 +1,23 @@
-import type { WorkItem } from "../../src/core/types.js"
-import type { TaskLogger } from "../../src/runtime/task-log.js"
-import type { WorkspaceManager, WorkspaceInfo } from "../../src/runtime/workspace.js"
+import type { DispatchWorkItem } from '../../src/core/types.js'
+import type { TaskLogger } from '../../src/runtime/task-log.js'
+import type { WorkspacePreparer } from '../../src/runtime/executor.js'
 
-// Test helper: build a `WorkspaceManager` mock that satisfies the contract
+export interface WorkspaceInfo {
+  path: string
+  branch?: string | null
+}
+
+// Test helper: build a `WorkspacePreparer` mock that satisfies the contract
 // used by `WorkExecutor`. Tests that just want to say "the workspace is
-// ready, here it is" plug in `verifyOnlyWorkspaceManager(...)` so `prepare`
+// ready, here it is" plug in `verifyOnlyWorkspacePreparer(...)` so `prepare`
 // returns the supplied workspace triple without touching git.
-export function verifyOnlyWorkspaceManager(workspace: WorkspaceInfo, onPrepare?: (log: TaskLogger | null) => void): WorkspaceManager {
-  const prepare = async (_work: WorkItem, _signal: AbortSignal, log: TaskLogger | null = null) => {
+export function verifyOnlyWorkspacePreparer(
+  workspace: WorkspaceInfo,
+  onPrepare?: (log: TaskLogger | null) => void,
+): WorkspacePreparer {
+  const prepare = async (_work: DispatchWorkItem, _signal: AbortSignal, log: TaskLogger | null = null) => {
     onPrepare?.(log)
     return workspace
   }
-  return { prepare } as unknown as WorkspaceManager
+  return { prepare }
 }

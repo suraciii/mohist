@@ -3,7 +3,7 @@ import type { JsonObject } from '../src/core/types.js'
 import type { GitRunner } from '../src/runtime/git-probe.js'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import { ServerConnection } from '../src/server/connection.js'
-import { verifyOnlyWorkspaceManager } from './support/workspace-mock.js'
+import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
 import { defineTestActions } from './support/action-registry-test.js'
 import { transportFetch, withFakeTransport } from './support/fake-transport.js'
 
@@ -44,7 +44,7 @@ function executor(workDir: string): WorkExecutor {
   })
   const result = new WorkExecutor(
     registry,
-    verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+    verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
     {} as never,
     workDir,
   )

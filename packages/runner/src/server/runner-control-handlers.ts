@@ -4,7 +4,6 @@ import { createFollowupHandler, type FollowupHandlerDeps } from './followup-hand
 import { createSessionCommandHandler, type SessionCommandHandlerDeps } from './session-command-handler.js'
 import { createWorkspaceGitHandlers, type WorkspaceGitHandlerDeps } from './workspace-git-handlers.js'
 import { createWorkspaceRemovalHandler, type WorkspaceRemovalHandlerDeps } from './workspace-removal-handler.js'
-import type { ReceiveWorkflowRunStatusPayload } from './session-target.js'
 
 export interface RunnerControlHandlerDeps {
   workspaceGit: WorkspaceGitHandlerDeps
@@ -12,7 +11,6 @@ export interface RunnerControlHandlerDeps {
   followup: FollowupHandlerDeps
   cancel: CancelHandlerDeps
   sessionCommand: SessionCommandHandlerDeps
-  onWorkflowStatusChanged(params: ReceiveWorkflowRunStatusPayload): Promise<void> | void
 }
 
 export function createRunnerControlHandlers(deps: RunnerControlHandlerDeps): RunnerControlHandlers {
@@ -31,6 +29,5 @@ export function createRunnerControlHandlers(deps: RunnerControlHandlerDeps): Run
     sessionFollowup: followup,
     sessionStop: cancel,
     sessionCommand: command,
-    workflowStatusChanged: deps.onWorkflowStatusChanged,
   }
 }

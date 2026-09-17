@@ -1,9 +1,5 @@
 import type { WorkspaceQuery } from '../runtime/workspace-query.js'
-import type {
-  CancelAgentSessionPayload,
-  ReceiveFollowupPayload,
-  ReceiveWorkflowRunStatusPayload,
-} from './session-target.js'
+import type { CancelAgentSessionPayload, ReceiveFollowupPayload } from './session-target.js'
 import type { SessionCommandRequest } from './session-command-handler.js'
 import { readExecutionSourceContext } from '../runtime/slack-execution-context.js'
 
@@ -23,7 +19,6 @@ export interface RunnerControlHandlers {
   sessionFollowup(params: ReceiveFollowupPayload): Promise<unknown>
   sessionStop(params: CancelAgentSessionPayload): Promise<unknown>
   sessionCommand(params: SessionCommandRequest): Promise<unknown>
-  workflowStatusChanged(params: ReceiveWorkflowRunStatusPayload): Promise<void> | void
 }
 
 export interface RunnerControlDispatcherOutput {
@@ -67,7 +62,8 @@ export class RunnerControlDispatcher {
       return
     }
     if (notification) {
-      this.dispatchNotification(value.method, value.params)
+      // Notifications are fire-and-forget and carry no handler today; the
+      // JSON-RPC envelope is still validated above.
       return
     }
     if (this.live.has(id!)) {
@@ -101,19 +97,6 @@ export class RunnerControlDispatcher {
         return
     }
     complete()
-  }
-
-  private dispatchNotification(method: string, params: ObjectValue): void {
-    if (method !== 'workflow.status-changed') return
-    if (!isWorkflowStatus(params)) {
-      this.output.protocolError()
-      return
-    }
-    try {
-      void Promise.resolve(this.handlers.workflowStatusChanged(params)).catch(() => undefined)
-    } catch {
-      // Notifications never produce a response, including callback failures.
-    }
   }
 
   private requestCall(method: string, params: ObjectValue): (() => Promise<unknown>) | 'unknown' | 'invalid' {
@@ -303,8 +286,4 @@ function normalizeSessionCommand(params: ObjectValue): SessionCommandRequest {
     projectId: params.projectId ?? null,
     processGeneration: params.processGeneration,
   } as unknown as SessionCommandRequest
-}
-
-function isWorkflowStatus(value: ObjectValue): value is ObjectValue & ReceiveWorkflowRunStatusPayload {
-  return nonempty(value.workflowRunId) && nonempty(value.status)
 }

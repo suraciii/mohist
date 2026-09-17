@@ -5,7 +5,7 @@ import { createDefaultRegistry } from '../src/actions/registry.js'
 import type { GitRunner } from '../src/runtime/git-probe.js'
 import type { RunnerResourceContext } from '../src/system/filesystem.js'
 import { StatefulFakeWorktree } from './support/fake-worktree.js'
-import { verifyOnlyWorkspaceManager } from './support/workspace-mock.js'
+import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
 import type { ActionResult, JsonObject, DispatchWorkItem } from '../src/core/types.js'
 import type { ActionTestContext as ActionContext } from './support/action-test-context.js'
 import type { ActionHost } from '../src/actions/host.js'
@@ -88,7 +88,7 @@ function installWorkspacePrepareGit(residual: { rebase: boolean }): GitRunner {
 function buildExecutor(registry: ActionRegistry): WorkExecutor {
   return new WorkExecutor(
     registry,
-    verifyOnlyWorkspaceManager({ path: workspacePath, branch: EXPECTED_BRANCH }),
+    verifyOnlyWorkspacePreparer({ path: workspacePath, branch: EXPECTED_BRANCH }),
     {
       async report() {},
       async uploadArtifact() {

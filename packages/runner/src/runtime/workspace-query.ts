@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve } from 'node:path'
 import { namedWorkspacePath } from './workspace-entity.js'
-import { repositoryWorkspacePath } from './workspace-identity.js'
+import { repositoryWorkspacePath } from './workspace-managed.js'
 
 // Wire shape for workspace-scoped control WebSocket queries. The only
 // disk-backed identity is the Named Workspace `(projectId, workspaceName)`;
