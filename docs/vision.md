@@ -43,6 +43,9 @@ visualization plane, not a workspace that users must adopt.
   recover from interruption.
 - **Quality has a gate:** Automated checks control stage exits. Approval Points
   stop important work until a person approves or requests changes.
+- **Results are traceable to a cause:** Each result points to its stage,
+  change, or check, with evidence. An Agent can find why a step failed
+  without reading full logs.
 - **Events keep work moving:** Event routing can trigger supervision, failure
   handling, and progress responses without making a person watch every step.
 - **Exceptions reach people:** When work stops, Mohist shows where it stopped,
@@ -59,6 +62,21 @@ visualization plane, not a workspace that users must adopt.
 - **Agent-friendly interfaces first:** A Mohist Agent has a stable invocation
   interface. An External Agent can discover and operate Mohist with a Skill and
   `mo`. Critical capabilities must not exist only in the Web UI.
+- **Issues carry complete objectives:** An Issue contains everything an Agent
+  needs to finish the work: requirements, acceptance criteria, and boundaries.
+  The Agent must not have to ask for decisions after the work starts.
+- **Feedback density over volume:** Each result is local to a change or a
+  stage, quick to get, and objectively verifiable. An Agent uses the cheapest
+  check that can answer its current question. Feedback that is slow or has no
+  clear cause is a product defect.
+- **Each run reduces the cost of the next:** Verified lessons go back into
+  Skills, repository context, and automated checks. A defect that gets past
+  the checks becomes a new check. The next task starts with what the last
+  task learned.
+- **Delegation follows three properties:** Work can run unattended when its
+  objective is complete, its feedback shows causes, and its lessons return to
+  the system. Mohist raises these three properties so more work can be
+  delegated safely. People keep objectives, boundaries, and risk judgment.
 - **One state arbiter:** The Server decides production-line state. A Runner
   reports execution facts.
 - **Reliability before breadth:** Add no mechanism that Mohist does not need.
@@ -93,5 +111,12 @@ notifications extend that direction without moving daily collaboration into
 Mohist. See [Subagents and Session Trees](subagents.md), [Planning with
 Epics](epics.md), [Composite Issues and Child Issues](composite-issues.md), and
 [Web UI Guide](web-ui.md).
+
+Parallel work depends on structure more than on scale. Workers need
+non-overlapping groups, written assignments, isolated work areas, interfaces
+that stay unchanged, and a commit after each verified step. Clear, verifiable
+bulk work, such as cleanup, migration, and hardening, rarely gets scheduled
+by hand. This is the first class of work that parallel delegation makes
+economical.
 
 This document describes the future product, not a delivery-status list.
