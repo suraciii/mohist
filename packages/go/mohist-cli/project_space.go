@@ -406,7 +406,8 @@ func parsePrompt(args []string) (command, error) {
 		start = 2
 	}
 	for i := start; i < len(args); i++ {
-		switch args[i] {
+		arg := canonicalFlag(args[i])
+		switch arg {
 		case "--project":
 			if i+1 >= len(args) {
 				return command{}, usage("--project requires a value")
@@ -415,9 +416,9 @@ func parsePrompt(args []string) (command, error) {
 			i++
 		case "--body", "--body-file":
 			if i+1 >= len(args) {
-				return command{}, usage(args[i] + " requires a value")
+				return command{}, usage(arg + " requires a value")
 			}
-			c.args = append(c.args, strings.TrimPrefix(args[i], "--"), args[i+1])
+			c.args = append(c.args, strings.TrimPrefix(arg, "--"), args[i+1])
 			i++
 		case "--json":
 			var e error
@@ -428,7 +429,7 @@ func parsePrompt(args []string) (command, error) {
 		case "--help", "-h":
 			return command{help: true, helpText: leafHelp(c.kind, catalog)}, nil
 		default:
-			return command{}, usage("unknown option " + args[i])
+			return command{}, usage("unknown option " + arg)
 		}
 	}
 	if action == "set" && (hasArg(c.args, "body") == hasArg(c.args, "body-file")) {
