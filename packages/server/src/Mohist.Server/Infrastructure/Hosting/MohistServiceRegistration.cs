@@ -430,7 +430,6 @@ public static class MohistServiceRegistration
         services.AddScoped<IRunnerStatusSource>(sp => sp.GetRequiredService<RunnerStatusService>());
         services.AddScoped<IRunnerActiveWorkReader>(sp => sp.GetRequiredService<RunnerActiveWorkReader>());
         services.AddScoped<IRunnerDurableStatusReader>(sp => sp.GetRequiredService<RunnerDurableStatusReader>());
-        services.AddSingleton<IRunnerWorkflowStatusRouter, RunnerWorkflowStatusRouter>();
         services.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(o =>
         {
             CopyJsonOptions(JSON.Options, o.SerializerOptions);

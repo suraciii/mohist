@@ -47,8 +47,9 @@ public static class MohistWorkspaceLayout
     /// <summary>
     /// Slugifies a project name to a safe directory component. MUST stay in
     /// sync with the runner's <c>slug()</c> helper in
-    /// <c>packages/runner/src/runtime/workspace.ts</c> so the server-computed
-    /// workspace path and the runner-computed cache path are identical.
+    /// <c>packages/runner/src/runtime/workspace-managed.ts</c> so the
+    /// server-computed workspace path and the runner-computed cache path are
+    /// identical.
     /// </summary>
     public static string Slug(string value)
     {

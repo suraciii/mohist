@@ -86,7 +86,7 @@ time=2025-01-15T10:30:46.567Z level=ERROR msg="report failed" service=runner com
   segment, remove a `Service`, `Grain`, `Handler`, `Routes`, or `Provider`
   suffix, and lowercase its first letter. For example,
   `DispatchService -> dispatch` and
-  `RunnerWorkflowStatusRouter -> runnerWorkflowStatus`.
+  `IssueWorkflowStartHandler -> issueWorkflowStart`.
 - `service` identifies the writing process, `server` or `runner`, and matches
   the log filename.
 - Domain IDs appear only in log keys and Trace attributes, never metric labels.

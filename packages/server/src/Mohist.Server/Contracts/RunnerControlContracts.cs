@@ -125,5 +125,3 @@ public sealed record GitCommit(string Hash, string ShortHash, string Message, st
 public sealed record WorkspaceRemovalResult(bool Removed, string Status, string? Path, string? Reason, string Message);
 
 public sealed record RunnerFollowupDeliveryResult(bool Accepted, string? Error = null);
-
-public sealed record WorkflowRunStatusNotification(string WorkflowRunId, string Status);

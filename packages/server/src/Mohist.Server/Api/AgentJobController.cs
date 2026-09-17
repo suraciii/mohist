@@ -23,10 +23,10 @@ namespace Mohist.Server.Api;
 /// no polling, and no read-model. It must NOT be exposed on a production edge
 /// as-is; treat it as a developer smoke-test endpoint.
 ///
-/// The dispatch variables always populate <c>workspace.path</c> so the runner's
-/// <c>WorkspaceManager.ensure</c> takes the existing early-return branch
-/// (<c>workspace.ts:32-36</c>) — no runner-side code change is required
-/// (Design Decision 8).
+/// The dispatch variables forward the supplied workspace binding to the
+/// AgentJob: a Named Workspace carries <c>workspace.name</c> and
+/// <c>workspace.projectId</c>, while the standalone validation path may carry
+/// <c>workspace.path</c>.
 /// </summary>
 public static class AgentJobController
 {

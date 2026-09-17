@@ -1,7 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Events.WebSocket;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Runner.Subscriptions;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -23,15 +22,5 @@ public sealed class EventPushRegistrationSpecs
         var push = _fixture.Services.GetRequiredService<IEnumerable<EventPushSubscription>>();
         Assert.DoesNotContain(durable, subscription => subscription.Handler is EventSocketDomainBridge);
         Assert.Contains(push, subscription => subscription.Handler is EventSocketDomainBridge);
-    }
-
-    [Fact]
-    public void RunnerTerminalStatusHandler_IsAbsentFromDurableSubscriptions()
-    {
-        var durable = _fixture.Services.GetRequiredService<IEnumerable<Subscription>>();
-        var push = _fixture.Services.GetRequiredService<IEnumerable<EventPushSubscription>>();
-
-        Assert.DoesNotContain(durable, subscription => subscription.Handler is RunnerWorkflowTerminalStatusHandler);
-        Assert.Contains(push, subscription => subscription.Handler is RunnerWorkflowTerminalStatusHandler);
     }
 }

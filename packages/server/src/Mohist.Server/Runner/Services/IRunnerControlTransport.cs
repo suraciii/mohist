@@ -10,12 +10,6 @@ public interface IRunnerControlTransport
         TParams parameters,
         Action? requestEnqueued = null,
         CancellationToken ct = default);
-
-    Task SendNotificationAsync<TParams>(
-        string runnerId,
-        string method,
-        TParams parameters,
-        CancellationToken ct = default);
 }
 
 public interface IRunnerSessionCommandTransport

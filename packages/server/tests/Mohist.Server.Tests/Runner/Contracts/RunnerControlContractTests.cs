@@ -56,25 +56,6 @@ public sealed class RunnerControlContractTests
             requests.Select(entry => entry.GetProperty("error").GetProperty("error").GetProperty("code").GetInt32()).Distinct().Order());
     }
 
-    [Fact]
-    public void Shared_catalog_decodes_the_workflow_status_notification()
-    {
-        var catalog = ReadCatalog();
-        var entries = catalog.RootElement.GetProperty("notifications").EnumerateArray().ToArray();
-        var entry = Assert.Single(entries);
-        Assert.Equal("workflow.status-changed", entry.GetProperty("method").GetString());
-
-        var notification = Deserialize<JsonRpcNotification<WorkflowRunStatusNotification>>(
-            entry.GetProperty("notification"));
-        AssertCanonical(entry.GetProperty("notification"), notification);
-        Assert.Equal("2.0", notification.JsonRpc);
-        Assert.Equal("workflow.status-changed", notification.Method);
-        Assert.Equal("run_101", notification.Params.WorkflowRunId);
-        Assert.Equal("Completed", notification.Params.Status);
-        Assert.False(entry.GetProperty("notification").TryGetProperty("id", out _));
-        AssertCamelCaseObjectNames(entry);
-    }
-
     private static void DecodeMethod(string method, JsonElement entry)
     {
         switch (method)

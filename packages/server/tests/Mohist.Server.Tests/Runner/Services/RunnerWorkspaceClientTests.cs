@@ -98,12 +98,6 @@ public sealed class RunnerWorkspaceClientTests
             return Task.FromResult((TResult)(object)new RunnerWorkspaceDiffResult(
                 "base", "head", "merge-base", 1, 0, 1, 1, 0, []));
         }
-
-        public Task SendNotificationAsync<TParams>(
-            string runnerId,
-            string method,
-            TParams parameters,
-            CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     private class WorkflowProxy : DispatchProxy
