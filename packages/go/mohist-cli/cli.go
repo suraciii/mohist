@@ -470,6 +470,18 @@ type command struct {
 	// permission, or partial-read failure stops the command locally with
 	// ExitUsage=2 instead of being silently coerced to an empty string.
 	preflightedInput string
+	// stageModels and stageModelVariants are nil-able maps resolved from the
+	// inline/-file stage-model carriers. nil means the flag was absent; a
+	// non-nil map (possibly empty) means the flag was supplied. They are
+	// written as JSON objects so the Server's Dictionary<string,string> DTOs
+	// bind them instead of receiving a dropped JSON string.
+	stageModels        map[string]string
+	stageModelVariants map[string]string
+	// mergedLabels holds the result of the issue-edit label pre-read: the
+	// current Issue labels with every --label set/remove token applied. It is
+	// only populated for an edit that carries --label, and buildIssueEditBody
+	// emits it as the labels member of the one atomic PATCH.
+	mergedLabels map[string]string
 }
 
 var diagnosisFields = []string{"workflowRunId", "status", "failure", "tasks", "dispatch", "events"}
