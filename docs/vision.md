@@ -67,15 +67,15 @@ visualization plane, not a workspace that users must adopt.
   The Agent must not have to ask for decisions after the work starts.
 - **Feedback density over volume:** Each result is local to a change or a
   stage, quick to get, and objectively verifiable. An Agent uses the cheapest
-  check that can answer its current question. Feedback that is slow or has no
-  clear cause is a product defect.
+  check that can answer its current question. Feedback that is slow or does
+  not identify a cause is a product defect.
 - **Each run reduces the cost of the next:** Verified lessons go back into
   Skills, repository context, and automated checks. A defect that gets past
   the checks becomes a new check. The next task starts with what the last
   task learned.
 - **Delegation follows three properties:** Work can run unattended when its
   objective is complete, its feedback shows causes, and its lessons return to
-  the system. Mohist raises these three properties so more work can be
+  the system. Mohist improves these three properties so more work can be
   delegated safely. People keep objectives, boundaries, and risk judgment.
 - **One state arbiter:** The Server decides production-line state. A Runner
   reports execution facts.
@@ -115,7 +115,7 @@ Epics](epics.md), [Composite Issues and Child Issues](composite-issues.md), and
 Parallel work depends on structure more than on scale. Workers need
 non-overlapping groups, written assignments, isolated work areas, interfaces
 that stay unchanged, and a commit after each verified step. Clear, verifiable
-bulk work, such as cleanup, migration, and hardening, rarely gets scheduled
+bulk work, such as cleanup, migration, and hardening, is rarely scheduled
 by hand. This is the first class of work that parallel delegation makes
 economical.
 
