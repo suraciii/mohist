@@ -414,6 +414,147 @@ public class RunnerStatusApiSpecs
     }
 
     [Fact]
+    public async Task AgentAvailability_AdmissionReadyButRequiredRuntimeNotReady_IsNotAvailable()
+    {
+        await ResetRunnerReadModelsAsync();
+        var projectId = await CreateProjectIdAsync($"proj-agent-runtime-{Guid.NewGuid():N}");
+        var runnerId = $"runner-agent-runtime-{Guid.NewGuid():N}";
+        var connectionTracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var connectionGeneration = connectionTracker.Register(runnerId, "runtime-connection");
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "runtime-host",
+            projectId,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create(),
+            ConnectionGeneration: connectionGeneration),
+            TestRunnerGenerationExtensions.ProcessGeneration);
+        await CreateActiveCredentialAsync(runnerId);
+        await runner.ObserveDispatchObservationAsync(
+            TestRunnerGenerationExtensions.ProcessGeneration,
+            new RunnerDispatchObservation(
+                connectionGeneration,
+                AdmissionReady: true,
+                AdmissionReasonCodes: [],
+                RuntimeReadiness: [new RuntimeReadinessWitness("pi", Ready: false, Generation: 7)]));
+        var agentResponse = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/agents",
+            new
+            {
+                name = "runtime-blocked-agent",
+                description = "runtime readiness coverage",
+                instructions = "wait for runtime",
+                agentConfig = new { runtime = "pi", model = "openai/gpt-5.6" },
+                skills = Array.Empty<string>(),
+                maxConcurrentRuns = 1,
+            });
+        agentResponse.EnsureSuccessStatusCode();
+        var agentPayload = await agentResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+        var agentId = agentPayload.GetProperty("data").GetProperty("id").GetString()!;
+
+        try
+        {
+            // Admission is ready and a slot is free; only the required Runtime
+            // is unavailable, so availability must still refuse to advertise work.
+            var detailResponse = await _fixture.Client.GetAsync($"/api/runners/{runnerId}");
+            var detailPayload = await detailResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+            var detail = detailPayload.GetProperty("data").GetProperty("runner");
+            Assert.Equal("ready", detail.GetProperty("admission").GetProperty("state").GetString());
+            Assert.Equal(0, detail.GetProperty("capacity").GetProperty("used").GetInt32());
+            Assert.Equal(1, detail.GetProperty("capacity").GetProperty("total").GetInt32());
+
+            var statusResponse = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents/{agentId}/status");
+            statusResponse.EnsureSuccessStatusCode();
+            var statusPayload = await statusResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+            var availability = statusPayload.GetProperty("data").GetProperty("availability");
+            Assert.False(availability.GetProperty("canStartNow").GetBoolean());
+            Assert.Equal("runtime-not-ready", availability.GetProperty("waitingReason").GetString());
+
+            var listResponse = await _fixture.Client.GetAsync($"/api/projects/{projectId}/agents/availability");
+            listResponse.EnsureSuccessStatusCode();
+            var listPayload = await listResponse.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+            var entry = Assert.Single(listPayload.GetProperty("data").EnumerateArray());
+            Assert.False(entry.GetProperty("canStartNow").GetBoolean());
+            Assert.Equal("runtime-not-ready", entry.GetProperty("waitingReason").GetString());
+        }
+        finally
+        {
+            connectionTracker.Unregister(runnerId);
+            await runner.UnregisterAsync();
+        }
+    }
+
+    [Fact]
+    public async Task GetRunner_ColdObservationStore_KeepsDurablePresenceIdentityAndDrain()
+    {
+        await ResetRunnerReadModelsAsync();
+        var projectId = await CreateProjectIdAsync($"proj-durable-{Guid.NewGuid():N}");
+        var runnerId = $"runner-durable-{Guid.NewGuid():N}";
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "durable-host",
+            projectId,
+            RuntimeCatalogs: CapabilityCatalogTestHelpers.Create(),
+            Component: "mohist-runner",
+            SourceRevision: "durable-source",
+            ReleaseId: "durable-release",
+            Generation: 11,
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration),
+            TestRunnerGenerationExtensions.ProcessGeneration);
+        await runner.UpdateAsync(2);
+        await CreateActiveCredentialAsync(runnerId);
+
+        var workflowId = $"wf-durable-{Guid.NewGuid():N}";
+        await AssignActiveWorkForTestAsync(runnerId, workflowId, "work-durable-1", "task", "build", "Durable status", projectId);
+        var fenceId = Guid.NewGuid().ToString("N");
+        Assert.NotNull(await runner.BeginUpdateInterruptAsync(fenceId));
+
+        try
+        {
+            await TestLifecycle.DeactivateAndWait(runner, _fixture.Grains);
+            var storage = _fixture.Services.GetRequiredService<IGrainStorage>();
+            var stored = new GrainState<RunnerState>();
+            await storage.ReadStateAsync("runner", runner.GetGrainId(), stored);
+            var durablePresence = stored.State.LastPresenceAt;
+            Assert.NotNull(durablePresence);
+            Assert.Equal(fenceId, stored.State.UpdateInterruptFence?.PendingId);
+            stored.State.ClosingProcessGeneration = TestRunnerGenerationExtensions.ProcessGeneration;
+            await storage.WriteStateAsync("runner", runner.GetGrainId(), stored);
+
+            // A Server restart empties the process-local lifecycle projection;
+            // status must rebuild durable facts without activating the grain.
+            _fixture.Services.GetRequiredService<RunnerStatusObservationStore>().Clear();
+
+            using var response = await _fixture.Client.GetAsync($"/api/runners/{runnerId}");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<global::System.Text.Json.JsonElement>();
+            var detail = payload.GetProperty("data").GetProperty("runner");
+
+            Assert.Equal("durable-host", detail.GetProperty("identity").GetProperty("hostname").GetString());
+            Assert.Equal("mohist-runner", detail.GetProperty("identity").GetProperty("component").GetString());
+            Assert.Equal("durable-source", detail.GetProperty("identity").GetProperty("sourceRevision").GetString());
+            Assert.Equal("durable-release", detail.GetProperty("identity").GetProperty("releaseId").GetString());
+            Assert.Equal(11, detail.GetProperty("identity").GetProperty("generation").GetInt64());
+            Assert.Equal(
+                durablePresence!.Value.ToUnixTimeMilliseconds(),
+                detail.GetProperty("presence").GetProperty("lastObservedAt").GetDateTimeOffset().ToUnixTimeMilliseconds());
+            var drain = detail.GetProperty("drain");
+            Assert.True(drain.GetProperty("active").GetBoolean());
+            Assert.Equal(fenceId, drain.GetProperty("updateInterruptId").GetString());
+
+            // The status read stayed diagnostic: the dormant closeout is still owed.
+            Assert.Equal("Running", await _fixture.Grains.GetGrain<IWorkflowGrain>(workflowId).GetRunStatusAsync());
+        }
+        finally
+        {
+            await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+        }
+    }
+
+    [Fact]
     public async Task GetRunner_UnknownRunner_Returns404WithRunnerNotFoundReason()
     {
         var projectId = await CreateProjectIdAsync($"proj-{Guid.NewGuid():N}");

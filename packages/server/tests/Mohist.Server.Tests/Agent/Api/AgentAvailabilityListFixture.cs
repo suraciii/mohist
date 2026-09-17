@@ -23,43 +23,42 @@ namespace Mohist.Server.Tests.Agent.Api;
 /// </summary>
 public sealed class CountingRunnerStatusSource : IRunnerStatusSource
 {
-    private RunnerAvailabilitySnapshot _availability;
+    private RunnerStatusListSnapshot _snapshot;
 
     public CountingRunnerStatusSource(IReadOnlyList<RunnerStatusView> onlineRunners)
     {
-        _availability = ProjectAvailability(onlineRunners);
+        _snapshot = SnapshotFrom(onlineRunners);
     }
 
     public int CallCount { get; private set; }
 
     public void SetOnlineRunners(IReadOnlyList<RunnerStatusView> runners) =>
-        _availability = ProjectAvailability(runners);
-
-    public void SetAvailability(RunnerAvailabilitySnapshot availability) =>
-        _availability = availability;
+        _snapshot = SnapshotFrom(runners);
 
     public void Reset() => CallCount = 0;
 
-    public Task<RunnerAvailabilitySnapshot> GetAvailabilityAsync(CancellationToken ct = default)
+    public Task<RunnerStatusListSnapshot> GetGlobalRunnersAsync(CancellationToken ct = default)
     {
         CallCount++;
-        return Task.FromResult(_availability);
+        return Task.FromResult(_snapshot);
     }
 
-    private static RunnerAvailabilitySnapshot ProjectAvailability(IReadOnlyList<RunnerStatusView> runners)
+    private static RunnerStatusListSnapshot SnapshotFrom(IReadOnlyList<RunnerStatusView> runners)
     {
-        var capacity = new RunnerCapacityView(
-            runners.Sum(runner => runner.Capacity?.UsedSlots ?? 0),
-            runners.Sum(runner => runner.Capacity?.TotalSlots ?? 0));
-        var canAcceptWork = runners.Any(runner =>
-            runner.Capacity is { } runnerCapacity
-            && runnerCapacity.UsedSlots < runnerCapacity.TotalSlots);
-        return new RunnerAvailabilitySnapshot(
-            capacity,
-            runners.Count > 0,
-            canAcceptWork,
-            runners.Count > 0 && !canAcceptWork ? "capacity-full" : null,
-            DateTimeOffset.UnixEpoch);
+        var entries = runners
+            .Select(runner => new RunnerStatusEntry(
+                new RunnerIdentityStatusView(runner.Id, runner.Hostname, runner.Kind, null, null, null, null),
+                new RunnerPresenceStatusView("online", runner.LastHeartbeatAt),
+                new RunnerControlStatusView(runner.ConnectionState ?? "disconnected", null),
+                new RunnerAdmissionStatusView("ready", []),
+                runner.Capabilities,
+                [],
+                new RunnerStatusCapacityView(runner.Capacity?.UsedSlots, runner.Capacity?.TotalSlots ?? 0),
+                runner.ActiveWorks,
+                null,
+                []))
+            .ToList();
+        return new RunnerStatusListSnapshot(DateTimeOffset.UnixEpoch, entries);
     }
 }
 

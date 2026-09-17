@@ -116,4 +116,12 @@ public sealed record RunnerAvailabilitySnapshot(
     bool HasOnlineRunner,
     bool CanAcceptWork,
     string? BlockingReason,
-    DateTimeOffset ObservedAt);
+    DateTimeOffset ObservedAt,
+    bool CapacityIncomplete = false);
+
+/// <summary>
+/// The Runtime/model an Agent would require from a Runner at claim time.
+/// Availability projects this over the current canonical Runner facts so the
+/// read surface never advertises work the capability gate would reject.
+/// </summary>
+public sealed record RunnerRuntimeRequirement(string Runtime, string? Model, string? Variant);

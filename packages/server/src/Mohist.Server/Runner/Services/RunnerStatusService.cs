@@ -14,6 +14,7 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
     private readonly IRunnerCredentialStatusReader? _credentials;
     private readonly RunnerStatusObservationStore? _observations;
     private readonly IRunnerActiveWorkReader? _activeWorks;
+    private readonly IRunnerDurableStatusReader? _durableStatus;
     private static readonly TimeSpan StaleThreshold = TimeSpan.FromMinutes(2);
 
     public RunnerStatusService(
@@ -41,7 +42,8 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
         RunnerDefinitionStore? definitions,
         IRunnerCredentialStatusReader? credentials,
         RunnerStatusObservationStore? observations,
-        IRunnerActiveWorkReader? activeWorks)
+        IRunnerActiveWorkReader? activeWorks,
+        IRunnerDurableStatusReader? durableStatus = null)
     {
         _grainFactory = grainFactory;
         _connectionTracker = connectionTracker;
@@ -50,6 +52,7 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
         _credentials = credentials;
         _observations = observations;
         _activeWorks = activeWorks;
+        _durableStatus = durableStatus;
     }
 
     /// <summary>
@@ -74,27 +77,48 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
     public async Task<RunnerAvailabilitySnapshot> GetAvailabilityAsync(CancellationToken ct = default) =>
         ProjectAvailability(await GetGlobalRunnersAsync(ct));
 
-    public static RunnerAvailabilitySnapshot ProjectAvailability(RunnerStatusListSnapshot snapshot)
+    public static RunnerAvailabilitySnapshot ProjectAvailability(RunnerStatusListSnapshot snapshot) =>
+        ProjectAvailability(snapshot, requirement: null);
+
+    /// <summary>
+    /// Projects canonical Runner availability. Rows whose owner-ledger usage is
+    /// unknown are excluded from the aggregate instead of being counted as
+    /// zero used with their full slots apparently free. When a Runtime/model
+    /// requirement is supplied, a Runner only counts as able to accept work if
+    /// its current Runtime witness is ready and its catalog accepts the
+    /// requested model/variant; this mirrors the capability gate claim applies.
+    /// </summary>
+    public static RunnerAvailabilitySnapshot ProjectAvailability(
+        RunnerStatusListSnapshot snapshot,
+        RunnerRuntimeRequirement? requirement)
     {
         var online = snapshot.Runners
             .Where(row => string.Equals(row.Presence.State, "online", StringComparison.Ordinal))
             .ToList();
+        var known = online
+            .Where(row => row.Capacity?.Used is not null)
+            .ToList();
         var capacity = new RunnerCapacityView(
-            online.Sum(row => row.Capacity?.Used ?? 0),
-            online.Sum(row => row.Capacity?.Total ?? 0));
-        var canAcceptWork = online.Any(row =>
+            known.Sum(row => row.Capacity!.Used!.Value),
+            known.Sum(row => row.Capacity!.Total));
+        var capacityIncomplete = online.Count != known.Count;
+        var free = known
+            .Where(row => row.Capacity!.Used < row.Capacity.Total)
+            .ToList();
+        var canAcceptWork = free.Any(row =>
             string.Equals(row.Admission.State, "ready", StringComparison.Ordinal)
-            && row.Capacity?.Used is { } used
-            && used < row.Capacity.Total);
+            && SatisfiesRuntime(row, requirement));
 
         string? blockingReason = null;
         if (online.Count > 0 && !canAcceptWork)
         {
-            blockingReason = online
-                .Where(row => row.Capacity?.Used is not { } used || used < row.Capacity.Total)
+            blockingReason = free
                 .SelectMany(row => row.Admission.ReasonCodes)
-                .FirstOrDefault(reason => !string.Equals(reason, "capacity-full", StringComparison.Ordinal))
-                ?? "capacity-full";
+                .FirstOrDefault(reason => !string.Equals(reason, "capacity-full", StringComparison.Ordinal));
+            if (blockingReason is null && free.Count == 0)
+                blockingReason = capacityIncomplete ? "capacity-unknown" : "capacity-full";
+            if (blockingReason is null)
+                blockingReason = "runtime-not-ready";
         }
 
         return new RunnerAvailabilitySnapshot(
@@ -102,7 +126,36 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
             online.Count > 0,
             canAcceptWork,
             blockingReason,
-            snapshot.ObservedAt);
+            snapshot.ObservedAt,
+            capacityIncomplete);
+    }
+
+    private static bool SatisfiesRuntime(
+        RunnerStatusEntry row,
+        RunnerRuntimeRequirement? requirement)
+    {
+        if (requirement is null || string.IsNullOrWhiteSpace(requirement.Runtime))
+            return true;
+
+        var runtime = row.Runtimes.FirstOrDefault(candidate =>
+            string.Equals(candidate.Name, requirement.Runtime, StringComparison.OrdinalIgnoreCase));
+        if (runtime is null
+            || !string.Equals(runtime.Readiness.State, "ready", StringComparison.Ordinal))
+            return false;
+
+        if (string.IsNullOrWhiteSpace(requirement.Model))
+            return true;
+
+        var catalog = runtime.Catalog;
+        if (catalog is null
+            || !catalog.Models.Contains(requirement.Model, StringComparer.OrdinalIgnoreCase))
+            return false;
+
+        if (string.IsNullOrWhiteSpace(requirement.Variant))
+            return true;
+
+        return catalog.Variants.TryGetValue(requirement.Model, out var variants)
+            && variants.Contains(requirement.Variant, StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task<RunnerStatusDetailSnapshot?> GetGlobalRunnerAsync(
@@ -208,6 +261,13 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
     {
         ct.ThrowIfCancellationRequested();
         var status = _observations!.Get(definition.Id);
+        // Durable facts survive a Server restart. They are read straight from
+        // grain storage (never by activating the grain) so an offline Runner
+        // keeps its build identity, last presence and update fence visible
+        // without triggering closeout reconciliation.
+        var durable = _durableStatus is null
+            ? null
+            : await _durableStatus.ReadAsync(definition.Id, ct);
         IReadOnlyList<RunnerActiveWorkItem>? ownerWorks = null;
         try
         {
@@ -219,24 +279,30 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
             // activate lifecycle authority to reconstruct the value.
         }
 
-        var runtime = status is null
+        var info = status?.Info ?? durable?.Info;
+        var lastPresenceAt = status?.LastPresenceAt is { } observedPresence
+            && observedPresence != default
+                ? observedPresence
+                : durable?.LastPresenceAt;
+        var updateInterruptId = status?.UpdateInterruptId ?? durable?.UpdateInterruptId;
+        var draining = status?.Draining == true || !string.IsNullOrWhiteSpace(updateInterruptId);
+        var runtime = status is null && durable is null
             ? null
             : new RunnerRuntimeState(
-                status.Status,
-                status.LastPresenceAt,
+                status?.Status ?? RunnerStatus.Offline,
+                lastPresenceAt ?? default,
                 ownerWorks ?? [],
-                status.Draining,
-                status.UpdateInterruptId,
-                status.Info?.ConnectionGeneration,
-                status.DispatchObservation);
-        var info = status?.Info;
+                draining,
+                updateInterruptId,
+                info?.ConnectionGeneration,
+                status?.DispatchObservation);
         var connectionId = _connectionTracker.GetConnectionId(definition.Id);
         var connectionGeneration = _connectionTracker.GetConnectionGeneration(definition.Id);
         var connected = connectionId is not null;
         var presenceState = DerivePresenceState(runtime, observedAt);
-        DateTimeOffset? lastObservedAt = runtime?.LastHeartbeatAt is { } heartbeat
-            && heartbeat != default
-                ? heartbeat
+        DateTimeOffset? lastObservedAt = lastPresenceAt is { } presence
+            && presence != default
+                ? presence
                 : null;
         int? knownUsage = ownerWorks is null
             || (status is null && ownerWorks.Count == 0)
