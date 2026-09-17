@@ -8,11 +8,7 @@ import { SidebarInset } from '@/shared/ui/components/sidebar'
 import { KanbanBoard } from './KanbanBoard'
 import type { AgentStatus } from '../../../entities/agent'
 import { deriveRunnerSummary } from '../../../entities/runner'
-import {
-  IssueStatus,
-  IssueHealth,
-  type Issue,
-} from '../../../entities/issue'
+import { IssueStatus, IssueHealth, type Issue } from '../../../entities/issue'
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
