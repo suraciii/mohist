@@ -104,12 +104,14 @@ function work(workId: string, uses: string, overrides: Partial<DispatchWorkItem>
     workflowRunId: WORKFLOW_RUN_ID,
     workId,
     workType: 'task',
+    projectId: 'project-1',
     stage: 'integrate',
     title: workId,
     uses,
     with: uses === 'mohist/workspace-prepare' ? { expectedBranch: EXPECTED_BRANCH } : {},
     variables: {
-      workspace: { path: workspacePath, branch: EXPECTED_BRANCH },
+      workspace: { name: 'issue-9', branch: EXPECTED_BRANCH },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
     },
     ...overrides,
   }

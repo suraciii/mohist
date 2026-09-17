@@ -1,8 +1,9 @@
+import type { NamedWorkspaceManager } from '../src/runtime/workspace-entity.js'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { ActionRegistry, createDefaultRegistry } from '../src/actions/registry.js'
 import type { ActionResult, JsonObject, DispatchWorkItem, WorkItemResult } from '../src/core/types.js'
 import type { ActionHost } from '../src/actions/host.js'
-import { WorkExecutor, type WorkspacePreparer } from '../src/runtime/executor.js'
+import { WorkExecutor } from '../src/runtime/executor.js'
 import { TaskLogCollector } from '../src/runtime/task-log.js'
 import type { GitRunner } from '../src/runtime/git-probe.js'
 import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
@@ -41,7 +42,7 @@ function makeRegistry(handler: (inputs: JsonObject, host: ActionHost) => Promise
 function buildExecutor(
   registry: ActionRegistry,
   workDir: string,
-  workspaceManager: WorkspacePreparer = verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
+  workspaceManager: NamedWorkspaceManager = verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
 ): WorkExecutor {
   return new WorkExecutor(registry, workspaceManager, {} as never, workDir, () => new Date('2026-07-01T00:00:00.000Z'))
 }
@@ -51,10 +52,14 @@ function buildWork(workDir: string, overrides: Partial<DispatchWorkItem> = {}): 
     workflowRunId: 'wf-336',
     workId: 'work-336',
     workType: 'task',
+    projectId: 'project-1',
     title: 'Task-log wiring',
     uses: 'mohist/test-action',
     with: {},
-    variables: { workspace: { path: workDir, branch: null, changeDir: null } },
+    variables: {
+      workspace: { name: 'issue-9', branch: null, changeDir: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+    },
     ...overrides,
   }
 }
@@ -63,7 +68,7 @@ async function runWith(
   registry: ActionRegistry,
   workDir: string,
   work: DispatchWorkItem = buildWork(workDir),
-  workspaceManager?: WorkspacePreparer,
+  workspaceManager?: NamedWorkspaceManager,
 ): Promise<{ result: WorkItemResult; collector: TaskLogCollector }> {
   const executor = buildExecutor(registry, workDir, workspaceManager)
   const collector = new TaskLogCollector()
@@ -133,18 +138,6 @@ describe('WorkExecutor forwards action output to the task log', () => {
     expect(patches).toEqual([{ release: { result: 'release-ready', exitCode: 0 } }])
   })
 
-  it('PassesWorkspacePreparationOutputThroughWorkspacePrepSource', async (workDir) => {
-    const registry = makeRegistry(async () => ({ output: { ok: true } }))
-    const workspaceManager = verifyOnlyWorkspacePreparer({ path: workDir, branch: null }, (log) =>
-      log?.write('workspace-prep', 'clone output from workspace preparation'),
-    )
-
-    const { collector } = await runWith(registry, workDir, buildWork(workDir), workspaceManager)
-
-    const entries = collector.flush().entries.filter((entry) => entry.source === 'workspace-prep')
-    expect(entries.map((entry) => entry.text)).toContain('clone output from workspace preparation')
-  })
-
   it('CapturesBranchCheckOutputWithBranchCheckSource', async (workDir) => {
     const gitRunner: GitRunner = async (_workDir, args, _signal, options) => {
       options?.sink?.log.write(options.sink.source, `git ${args.join(' ')}`)
@@ -163,7 +156,12 @@ describe('WorkExecutor forwards action output to the task log', () => {
         await runWith(
           registry,
           workDir,
-          buildWork(workDir, { variables: { workspace: { path: workDir, branch: 'main', changeDir: null } } }),
+          buildWork(workDir, {
+            variables: {
+              workspace: { name: 'issue-9', branch: 'main', changeDir: null },
+              repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+            },
+          }),
         ),
       gitRunner,
     )
@@ -196,7 +194,12 @@ describe('WorkExecutor forwards action output to the task log', () => {
         await runWith(
           registry,
           workDir,
-          buildWork(workDir, { variables: { workspace: { path: workDir, branch: 'main', changeDir: null } } }),
+          buildWork(workDir, {
+            variables: {
+              workspace: { name: 'issue-9', branch: 'main', changeDir: null },
+              repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+            },
+          }),
         ),
       gitRunner,
     )

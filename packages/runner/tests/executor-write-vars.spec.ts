@@ -69,11 +69,15 @@ function buildWork(workDir: string): DispatchWorkItem {
     workflowRunId: 'wf-write-vars',
     workId: 'work-write-vars',
     workType: 'task',
+    projectId: 'project-1',
     stage: 'check',
     title: 'Write runtime vars',
     uses: 'test/write-vars',
     with: {},
     setVars: { checkpoint: 'output.checkpoint' },
-    variables: { workspace: { path: workDir, branch: null } },
+    variables: {
+      workspace: { name: 'issue-9', branch: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+    },
   }
 }

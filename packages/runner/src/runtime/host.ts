@@ -179,11 +179,9 @@ export class RunnerHost {
       }),
     })
     this.taskLogDeliveryQueue = createHostTaskLogDeliveryQueue(this.connection, options)
-    this.namedWorkspaceManager = new NamedWorkspaceManager(
-      options.runnerRoot,
-      this.namedWorkspaceRegistry,
-      this.connection,
-    )
+    this.namedWorkspaceManager =
+      options.namedWorkspaceManager ??
+      new NamedWorkspaceManager(options.runnerRoot, this.namedWorkspaceRegistry, this.connection)
     this.namedWorkspaceReclaimProbe = new NamedWorkspaceReclaimProbe(this.namedWorkspaceRegistry, this.connection)
     this.namedCleanupLoop = createNamedWorkspaceCleanupLoop(
       this.namedWorkspaceRegistry,
@@ -450,7 +448,7 @@ export class RunnerHost {
     }
     this.workExecutor = new WorkExecutor(
       this.actions,
-      null,
+      this.namedWorkspaceManager,
       this.connection,
       this.options.runnerRoot,
       undefined,
@@ -476,7 +474,6 @@ export class RunnerHost {
       undefined,
       this.piRuntime,
       this.skillResolver,
-      this.namedWorkspaceManager,
     )
   }
 

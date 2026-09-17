@@ -5,8 +5,8 @@ import { errorMessage } from '../core/errors.js'
 import { stringAt } from '../core/json-path.js'
 import { renderTemplate, unresolvedReferences } from '../core/template.js'
 import { ensureDir } from '../system/process.js'
-import { openWorkspaceDirectoryHandle } from './workspace-managed.js'
-import { repositoryWorkspacePath } from './workspace-managed.js'
+import { openWorkspaceDirectoryHandle, repositoryWorkspacePath } from './workspace-managed.js'
+import type { RunnerDirectoryHandle } from '../system/filesystem.js'
 import { WorkspaceNetworkTimeoutError } from './workspace-errors.js'
 import type { NamedWorkspaceManager } from './workspace-entity.js'
 import type { ActionRegistry } from '../actions/registry.js'
@@ -52,22 +52,13 @@ const CHECK_STATUS_BY_ACTION_STATUS = new Map([
 ])
 const CHECK_WORK_TYPES = new Set(['check', 'checks'])
 
-// Minimal filesystem-preparation seam for workflow-owned work that does not
-// carry a complete Named Workspace binding. Production wires the Named
-// Workspace manager and never a WorkflowRun-keyed preparer; the seam exists
-// only so the executor can be exercised without a real clone.
-export interface WorkspacePreparer {
-  prepare(
-    work: DispatchWorkItem,
-    signal: AbortSignal,
-    log?: TaskLogger | null,
-  ): Promise<{ path: string; branch?: string | null }>
-}
+// The Named Workspace manager materializes the single disk-backed
+// Workspace identity; tests inject a mock here.
 
 export class WorkExecutor {
   constructor(
     private readonly actions: ActionRegistry,
-    private readonly workspacePreparer: WorkspacePreparer | null,
+    private namedWorkspaceManager: NamedWorkspaceManager | null,
     private readonly connection: ServerConnection,
     private readonly fallbackWorkDir: string | null = null,
     private readonly now: () => Date = () => new Date(),
@@ -77,7 +68,6 @@ export class WorkExecutor {
     private readonly runtimeEventRecordId: () => string = defaultRuntimeEventRecordId,
     private piRuntime: PiRuntime | null = null,
     private readonly skillResolver: SkillResolver = new SkillResolver(),
-    private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
@@ -127,47 +117,49 @@ export class WorkExecutor {
   private async prepareWorkspace(
     work: DispatchWorkItem,
     signal: AbortSignal,
-    log: TaskLogger,
+    _log: TaskLogger,
   ): Promise<{ kind: 'ok'; workspace: ResolvedWorkspace } | { kind: 'failure'; result: WorkItemResult }> {
     try {
-      const workspaceRoot = this.workspaceRoot(work.variables ?? {})
       const wsName = readWorkspaceName(work)
-      if (!workspaceRoot && !wsName) {
+      if (!wsName) {
         throw new Error(
-          "Workflow dispatch requires an explicit non-empty 'variables.workspace.path' or 'variables.workspace.name'",
+          "Workflow dispatch requires a Named Workspace binding: 'variables.workspace.name' must be a non-empty string",
         )
       }
-      if (wsName && this.namedWorkspaceManager && work.projectId) {
-        const repositoryName = stringAt(work.variables ?? {}, ['repository', 'name'])
-        const gitUrl = stringAt(work.variables ?? {}, ['repository', 'gitUrl'])
-        const baseBranch = stringAt(work.variables ?? {}, ['repository', 'baseBranch'])
-        if (repositoryName && gitUrl && baseBranch) {
-          const info = await this.namedWorkspaceManager.materializeForIssue(
-            work.projectId,
-            wsName,
-            repositoryName,
-            gitUrl,
-            baseBranch,
-            signal,
-          )
-          return {
-            kind: 'ok',
-            workspace: { path: info.path, branch: `mohist/ws-${wsName}` },
-          }
-        }
+      if (!this.namedWorkspaceManager || !work.projectId) {
+        throw new Error('Workflow dispatch requires projectId and an available Named Workspace manager')
       }
-      if (this.workspacePreparer) {
-        const info = await this.workspacePreparer.prepare(work, signal, log)
-        const workspace = infoToResolved(info)
-        if (!workspace.path.trim())
-          throw new Error('Workflow workspace preparation did not resolve a non-empty workspace path')
-        return { kind: 'ok', workspace }
+      const repositoryName = stringAt(work.variables ?? {}, ['repository', 'name'])
+      const gitUrl = stringAt(work.variables ?? {}, ['repository', 'gitUrl'])
+      const baseBranch = stringAt(work.variables ?? {}, ['repository', 'baseBranch'])
+      if (!repositoryName || !gitUrl || !baseBranch) {
+        throw new Error(
+          'Workflow dispatch requires repository.name, repository.gitUrl and repository.baseBranch for the Named Workspace',
+        )
       }
-      if (workspaceRoot) {
-        const branch = stringAt(work.variables ?? {}, ['workspace', 'branch'])
-        return { kind: 'ok', workspace: { path: workspaceRoot, branch: branch ?? null } }
+      const info = await this.namedWorkspaceManager.materializeForIssue(
+        work.projectId,
+        wsName,
+        repositoryName,
+        gitUrl,
+        baseBranch,
+        signal,
+      )
+      // An explicit branch pins the invariant guard; an explicit null opts out
+      // (tests, branchless dispatches); any other shape derives the Named
+      // Workspace convention so the guard stays active for real dispatches.
+      const ws = work.variables?.['workspace']
+      const rawBranch = isObject(ws) ? ws['branch'] : undefined
+      const branch =
+        rawBranch === null
+          ? null
+          : typeof rawBranch === 'string' && rawBranch.trim()
+            ? rawBranch
+            : `mohist/ws-${wsName}`
+      return {
+        kind: 'ok',
+        workspace: { path: info.path, branch },
       }
-      throw new Error('Workflow dispatch has no Named Workspace binding')
     } catch (error) {
       return { kind: 'failure', result: workspaceSetupFailure(work, error) }
     }
@@ -340,7 +332,6 @@ export class WorkExecutor {
           ? { ...withVarsResult, addTasks: effects.addTasks }
           : withVarsResult
       } finally {
-        await directories.repository?.close()
         await directories.action.close()
       }
     } catch (error) {
@@ -438,15 +429,14 @@ export class WorkExecutor {
     withInput: JsonObject | null,
     variables: JsonObject,
     workspaceRoot: string,
-  ) {
+  ): Promise<{ action: RunnerDirectoryHandle; repository: { path: string } | null }> {
     const action = await this.resolveWorkDir(withInput, workspaceRoot)
     try {
       const repositoryName = stringAt(variables, ['repository', 'name'])
       if (!repositoryName) return { action, repository: null }
-      const root = resolve(workspaceRoot)
-      const repositoryPath = repositoryWorkspacePath(root, repositoryName)
-      const repository = await openWorkspaceDirectoryHandle(root, repositoryPath)
-      return { action, repository }
+      // Pure path resolution: the Named Workspace materialization owns REPOS/
+      // creation, and the executor must not fabricate or open a checkout.
+      return { action, repository: { path: repositoryWorkspacePath(resolve(workspaceRoot), repositoryName) } }
     } catch (error) {
       await action.close()
       throw error
@@ -549,10 +539,6 @@ export interface WorkExecution {
 }
 
 type ResolvedWorkspace = { path: string; branch: string | null }
-
-function infoToResolved(info: { path: string; branch?: string | null }): ResolvedWorkspace {
-  return { path: info.path, branch: info.branch ?? null }
-}
 
 function resolvedWorkspaceToVariables(workspace: ResolvedWorkspace): JsonObject {
   return { path: workspace.path, branch: workspace.branch }

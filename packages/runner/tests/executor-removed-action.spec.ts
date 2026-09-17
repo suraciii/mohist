@@ -44,11 +44,15 @@ function buildWork(workDir: string, overrides: Partial<DispatchWorkItem>): Dispa
     workflowRunId: 'wf-removed-action',
     workId: 'review.1',
     workType: 'task',
+    projectId: 'project-1',
     stage: 'check',
     title: 'Removed Action test',
     uses: 'mohist/acp-agent',
     with: {},
-    variables: { workspace: { path: workDir, branch: null } },
+    variables: {
+      workspace: { name: 'issue-9', branch: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+    },
     ...overrides,
   }
 }

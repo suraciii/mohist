@@ -30,7 +30,10 @@ function work(workspacePath = workDir): DispatchWorkItem {
     uses: 'test/agent',
     with: {},
     projectId: 'project-1',
-    variables: { workspace: { path: workspacePath } },
+    variables: {
+      workspace: { name: 'issue-9', branch: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+    },
   }
 }
 
@@ -105,7 +108,6 @@ function createExecutor(
     })(),
     piRuntime as never,
     undefined,
-    null,
   )
   return { executor, outbox }
 }

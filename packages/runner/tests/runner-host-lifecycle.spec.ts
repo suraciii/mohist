@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { verifyOnlyNamedWorkspaceManager } from './support/workspace-mock.js'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
 import { RunnerTransportError, RUNNER_REENROLL_ACTION } from '../src/server/connection-errors.js'
@@ -200,6 +201,8 @@ function it(name: string, body: (state: LifecycleTestState) => Promise<void> | v
   })
 }
 
+const runnerWorkspacePath = '/virtual/runner-workspace'
+
 describe('RunnerHost', () => {
   it("treats 'opencode' (any casing) as the configured runtime", () => {
     // Issue-410 T-004 retired the SessionCommand handler. The runner
@@ -224,6 +227,7 @@ describe('RunnerHost', () => {
     stopControl.mockResolvedValue(undefined)
     const controller = new AbortController()
     const host = new RunnerHost({
+      namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       serverUrl: 'https://runner.test',
       runnerId: 'runner-test',
       projectId: 'project-1',
@@ -297,6 +301,7 @@ describe('RunnerHost', () => {
         stopControl.mockResolvedValue(undefined)
         const controller = new AbortController()
         const host = new RunnerHost({
+          namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
           serverUrl: 'https://runner.test',
           runnerId: 'runner-test',
           projectId: 'project-1',
@@ -359,7 +364,10 @@ describe('RunnerHost', () => {
       agentJobId: `job-${id}`,
       projectId: 'project-1',
       with: { prompt: `work ${id}`, runtime: 'opencode', executionSource: 'non-slack' },
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      variables: {
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
     })
     let pollIndex = 0
     poll.mockImplementation(async () => {
@@ -372,6 +380,7 @@ describe('RunnerHost', () => {
       return [{ work: work(String(pollIndex)) }]
     })
     const host = new RunnerHost({
+      namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       serverUrl: 'https://runner.test',
       runnerId: 'runner-test',
       projectId: 'project-1',
@@ -456,7 +465,10 @@ describe('RunnerHost', () => {
       agentJobId: 'job-affected',
       projectId: 'project-1',
       with: { prompt: 'blocked execution', runtime: 'opencode', executionSource: 'non-slack' },
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      variables: {
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
     }
     const unaffected = {
       ...affected,
@@ -479,6 +491,7 @@ describe('RunnerHost', () => {
         heartbeatIntervalMs: QUIET_INTERVAL_MS,
         dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
         enabledAgentRuntimes: ['pi', 'opencode'],
+        namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       },
       undefined,
       { shutdownStopBudgetMs: 25 },
@@ -544,6 +557,7 @@ describe('RunnerHost', () => {
         return []
       })
     const host = new RunnerHost({
+      namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       serverUrl: 'https://runner.test',
       runnerId: 'runner-test',
       projectId: 'project-1',
@@ -616,6 +630,7 @@ describe('RunnerHost', () => {
     })
     const controller = new AbortController()
     const host = new RunnerHost({
+      namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       serverUrl: 'https://runner.test',
       runnerId: 'runner-test',
       projectId: 'project-1',
@@ -692,6 +707,7 @@ describe('RunnerHost', () => {
         return []
       })
     const host = new RunnerHost({
+      namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       serverUrl: 'https://runner.test',
       runnerId: 'runner-test',
       projectId: 'project-1',
@@ -739,6 +755,7 @@ describe('RunnerHost', () => {
     stopControl.mockResolvedValue(undefined)
     const controller = new AbortController()
     const host = new RunnerHost({
+      namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       serverUrl: 'https://runner.test',
       runnerId: 'runner-test',
       runnerRoot: '/virtual/mohist-runner-test',

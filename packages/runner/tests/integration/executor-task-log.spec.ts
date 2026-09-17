@@ -1,7 +1,8 @@
+import type { NamedWorkspaceManager } from '../../src/runtime/workspace-entity.js'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { createDefaultRegistry } from '../../src/actions/registry.js'
 import type { DispatchWorkItem, WorkItemResult } from '../../src/core/types.js'
-import { WorkExecutor, type WorkspacePreparer } from '../../src/runtime/executor.js'
+import { WorkExecutor } from '../../src/runtime/executor.js'
 import type { GitRunner } from '../../src/runtime/git-probe.js'
 import { TaskLogCollector } from '../../src/runtime/task-log.js'
 
@@ -27,7 +28,7 @@ const withTaskLogResources = <T>(body: (workDir: string, processSpawner: FakePro
 
 function buildExecutor(
   workDir: string,
-  workspaceManager: WorkspacePreparer = verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
+  workspaceManager: NamedWorkspaceManager = verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
 ): WorkExecutor {
   return new WorkExecutor(
     createDefaultRegistry(),
@@ -46,7 +47,10 @@ function buildWork(workDir: string, overrides: Partial<DispatchWorkItem> = {}): 
     title: 'Task-log process output',
     uses: 'core/process',
     with: {},
-    variables: { workspace: { path: workDir, branch: null } },
+    variables: {
+      workspace: { name: 'issue-9', branch: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+    },
     ...overrides,
   }
 }

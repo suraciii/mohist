@@ -449,10 +449,11 @@ type WorkspaceBindingResolution =
 //     workspace's persistent directory and report the home to the
 //     server (first writer wins — a claimed home fails the dispatch
 //     so the job retries against the home runner);
-//   - `path` (legacy free-path binding, routed/workflow dimension):
-//     use the path verbatim;
 //   - absent or malformed: reject the dispatch rather than choosing
-//     a directory owned by the runner process.
+//     a directory owned by the runner process. `workspace.path` is
+//     not a Server-owned Workspace binding and never selects a
+//     directory; the Manager isolated turn receives its explicit
+//     Runner-root workDir from the Manager execution boundary.
 async function resolveWorkspaceBinding(
   work: DispatchWorkItem,
   signal: AbortSignal,
@@ -524,10 +525,7 @@ async function resolveWorkspaceBinding(
     }
   }
 
-  const path = ws['path']
-  return typeof path === 'string' && path.trim().length > 0
-    ? { kind: 'path', workDir: path }
-    : invalidWorkspaceBinding()
+  return invalidWorkspaceBinding()
 }
 
 function invalidWorkspaceBinding(): WorkspaceBindingResolution {
@@ -535,7 +533,7 @@ function invalidWorkspaceBinding(): WorkspaceBindingResolution {
     kind: 'failure',
     result: failureResult(
       'invalid-dispatch',
-      "AgentJob requires 'workspace.name' or 'workspace.path' to be a non-empty string in dispatch variables",
+      "AgentJob requires 'workspace.name' to be a non-empty string in dispatch variables; workspace.path is not a Workspace binding",
     ),
   }
 }
@@ -543,7 +541,7 @@ function invalidWorkspaceBinding(): WorkspaceBindingResolution {
 // The prompt anchor injected when the execution is bound to a named
 // workspace. Workflow-bound jobs receive the canonical checkout and branch
 // so the AgentJob and mechanical actions address one physical repository.
-function buildWorkspaceAnchor(workDir: string, repositoryName?: string, workspaceName?: string): string {
+export function buildWorkspaceAnchor(workDir: string, repositoryName?: string, workspaceName?: string): string {
   if (repositoryName && workspaceName) {
     return `Working directory: ${workDir}. All workspace files live here — do not search $HOME. The repository checkout is the absolute path ${workDir}/REPOS/${repositoryName} on branch mohist/ws-${workspaceName}; use that checkout for repository work. Plans, research, and other work products belong at the workspace root.`
   }

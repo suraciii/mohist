@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { verifyOnlyNamedWorkspaceManager } from './support/workspace-mock.js'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
 import type { PolledDispatch } from '../src/core/types.js'
@@ -210,6 +211,7 @@ function it(name: string, body: () => Promise<void> | void): void {
 
 function newRunnerHost(pollIntervalMs: number = QUIET_INTERVAL_MS): RunnerHost {
   return new RunnerHost({
+    namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
     serverUrl: 'https://runner.test',
     runnerId: 'runner-test',
     projectId: 'project-1',
@@ -219,6 +221,8 @@ function newRunnerHost(pollIntervalMs: number = QUIET_INTERVAL_MS): RunnerHost {
     dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
   })
 }
+
+const runnerWorkspacePath = '/virtual/runner-workspace'
 
 describe('RunnerHost', () => {
   it('settles a synchronously invalid dispatch before the next poll reports it as in flight', async () => {
@@ -232,7 +236,10 @@ describe('RunnerHost', () => {
       agentJobId: 'aj-invalid-envelope',
       projectId: 'project-1',
       with: { prompt: 'must not execute', runtime: 'opencode' },
-      variables: { workspace: { path: '/virtual/mohist-runner-test' } },
+      variables: {
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
     }
     let pollCount = 0
     let secondPollBody: { inFlight: string[]; awaitingAck: string[] } | null = null
@@ -288,7 +295,11 @@ describe('RunnerHost', () => {
       uses: 'test/block',
       ownerKind: 'workflow',
       projectId: 'project-1',
-      variables: { executionSource: 'non-slack', workspace: { path: '/virtual/mohist-runner-test' } },
+      variables: {
+        executionSource: 'non-slack',
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
     }
     const reported = deferred<void>()
     const executeWithLog = vi
@@ -330,7 +341,11 @@ describe('RunnerHost', () => {
       ownerKind: 'workflow',
       projectId: 'project-1',
       capabilityRevision: 'revision-from-an-older-catalog',
-      variables: { executionSource: 'non-slack', workspace: { path: '/virtual/stale-capability' } },
+      variables: {
+        executionSource: 'non-slack',
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
     }
     let pollCount = 0
     poll.mockImplementation(async () => {
@@ -347,6 +362,7 @@ describe('RunnerHost', () => {
     )
     const controller = new AbortController()
     const host = new RunnerHost({
+      namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       serverUrl: 'https://runner.test',
       runnerId: 'runner-stale-capability',
       projectId: 'project-1',
@@ -390,7 +406,11 @@ describe('RunnerHost', () => {
       uses: 'test/block',
       ownerKind: 'workflow',
       projectId: 'project-1',
-      variables: { executionSource: 'non-slack', workspace: { path: '/virtual/mohist-runner-test' } },
+      variables: {
+        executionSource: 'non-slack',
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
     }
     let pollIndex = 0
     poll.mockImplementation(async () => {
@@ -448,7 +468,11 @@ describe('RunnerHost', () => {
       uses: 'test/block',
       ownerKind: 'workflow',
       projectId: 'project-1',
-      variables: { executionSource: 'non-slack', workspace: { path: '/virtual/mohist-runner-test' } },
+      variables: {
+        executionSource: 'non-slack',
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
     }
     let pollIndex = 0
     poll.mockImplementation(async () => {
@@ -495,7 +519,11 @@ describe('RunnerHost', () => {
         uses: 'test/block',
         ownerKind: 'workflow',
         projectId: 'project-1',
-        variables: { executionSource: 'non-slack', workspace: { path: '/virtual/mohist-runner-test' } },
+        variables: {
+          executionSource: 'non-slack',
+          workspace: { name: 'issue-9', branch: null },
+          repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+        },
       },
       {
         workflowRunId: 'wr-binding-failure',
@@ -504,7 +532,11 @@ describe('RunnerHost', () => {
         uses: 'test/block',
         ownerKind: 'workflow',
         projectId: 'project-1',
-        variables: { executionSource: 'non-slack', workspace: { path: '/virtual/mohist-runner-test' } },
+        variables: {
+          executionSource: 'non-slack',
+          workspace: { name: 'issue-9', branch: null },
+          repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+        },
       },
     ]
     poll.mockResolvedValueOnce(works.map((work) => ({ work }))).mockResolvedValue([])
@@ -601,7 +633,11 @@ describe('RunnerHost', () => {
       uses: 'test/block',
       ownerKind: 'workflow',
       projectId: 'project-1',
-      variables: { executionSource: 'non-slack', workspace: { path: '/virtual/mohist-runner-test' } },
+      variables: {
+        executionSource: 'non-slack',
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
     }
     poll.mockResolvedValueOnce([{ work }]).mockResolvedValue([])
     const host = newRunnerHost()
@@ -686,7 +722,11 @@ describe('RunnerHost', () => {
       uses: 'test/block',
       ownerKind: 'workflow',
       projectId: 'project-1',
-      variables: { executionSource: 'non-slack', workspace: { path: '/virtual/mohist-runner-test' } },
+      variables: {
+        executionSource: 'non-slack',
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
     }
     poll.mockResolvedValueOnce([{ work }]).mockResolvedValue([])
     const executeWithLog = vi

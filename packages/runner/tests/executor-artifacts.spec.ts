@@ -104,10 +104,14 @@ function buildWork(workDir: string, artifacts: JsonObject | null, uses = 'test/a
     workflowRunId: 'wf-1',
     workId: 'work-1',
     workType: 'task',
+    projectId: 'project-1',
     title: 'Test task',
     uses,
     with: {},
-    variables: { workspace: { path: workDir, branch: null } },
+    variables: {
+      workspace: { name: 'issue-9', branch: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+    },
     artifacts,
   }
 }
@@ -539,7 +543,13 @@ describe('WorkExecutor artifact capture', () => {
       workDir,
       undefined,
       fakeRuntime as never,
-      new AgentJobExecutor(connection as never, { openCode: fakeRuntime as never, pi: null }),
+      new AgentJobExecutor(
+        connection as never,
+        { openCode: fakeRuntime as never, pi: null },
+        null,
+        undefined,
+        verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
+      ),
     )
 
     const work = buildWork(workDir, { files: [{ path: 'review.md' }] })
@@ -582,7 +592,13 @@ describe('WorkExecutor artifact capture', () => {
       workDir,
       undefined,
       fakeRuntime as never,
-      new AgentJobExecutor(connection as never, { openCode: fakeRuntime as never, pi: null }),
+      new AgentJobExecutor(
+        connection as never,
+        { openCode: fakeRuntime as never, pi: null },
+        null,
+        undefined,
+        verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
+      ),
     )
 
     const work = buildWork(workDir, { files: [{ path: 'review.md' }] })

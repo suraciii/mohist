@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { verifyOnlyNamedWorkspaceManager } from './support/workspace-mock.js'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { RunnerHost } from '../src/runtime/host.js'
 import type { PolledDispatch } from '../src/core/types.js'
@@ -233,6 +234,7 @@ function baseHostOptions(): ConstructorParameters<typeof RunnerHost>[0] {
     pollIntervalMs: POLL_INTERVAL_MS,
     heartbeatIntervalMs: QUIET_INTERVAL_MS,
     dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
+    namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
   }
 }
 
@@ -250,9 +252,9 @@ function hostWithFakeTerminalDelivery(): RunnerHost {
 function workflowVariables(): Record<string, unknown> {
   return {
     executionSource: 'non-slack',
-    repository: { gitUrl: 'https://example.com/repo.git', baseBranch: 'main' },
+    repository: { name: 'master', gitUrl: 'https://example.com/repo.git', baseBranch: 'main' },
     issue: { number: 1 },
-    workspace: { path: '/virtual/mohist-runner-host-opencode-runtime' },
+    workspace: { name: 'issue-9', branch: null },
     mohist: { runId: 'wr-test' },
   }
 }
@@ -290,6 +292,8 @@ function runtimeActionRegistry(): ActionRegistry {
   })
   return new ActionRegistry([definition('mohist/opencode'), definition('mohist/pi'), definition('test/shared')])
 }
+
+const runnerWorkspacePath = '/virtual/runner-workspace'
 
 describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
   it('defaults to Pi without constructing OpenCode and advertises only Pi runtime surfaces', async (resources) => {
@@ -459,6 +463,7 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
     connect.mockImplementation(async () => connected.resolve())
     const controller = new AbortController()
     const host = new RunnerHost({
+      namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       ...hostOptions(),
       pollIntervalMs: QUIET_INTERVAL_MS,
     })
@@ -495,6 +500,7 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
     poll.mockResolvedValue([])
     const controller = new AbortController()
     const host = new RunnerHost({
+      namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       ...hostOptions(),
       runtimeIdleGraceMs: 50,
     })
@@ -644,6 +650,7 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
     })
     const controller = new AbortController()
     const host = new RunnerHost({
+      namedWorkspaceManager: verifyOnlyNamedWorkspaceManager({ path: runnerWorkspacePath, branch: null }),
       ...hostOptions(),
       pollIntervalMs: QUIET_INTERVAL_MS,
       heartbeatIntervalMs: POLL_INTERVAL_MS,
@@ -893,11 +900,7 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
           return undefined
         },
       } as never,
-      {
-        async prepare() {
-          return { path: '/virtual/agent-job', branch: null, changeDir: null }
-        },
-      } as never,
+      verifyOnlyNamedWorkspaceManager({ path: '/virtual/agent-job', branch: null }),
       {
         async attachAgentSession() {
           return undefined
@@ -909,17 +912,27 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
       '/virtual/agent-job',
       undefined,
       fakeRuntime,
-      new AgentJobExecutor({} as never, { openCode: fakeRuntime, pi: null }),
+      new AgentJobExecutor(
+        {} as never,
+        { openCode: fakeRuntime, pi: null },
+        null,
+        undefined,
+        verifyOnlyNamedWorkspaceManager({ path: '/virtual/agent-job', branch: null }),
+      ),
     )
     const result = await executor.execute(
       {
         workflowRunId: '',
         workId: 'aj-1',
         workType: 'task',
+        projectId: 'project-1',
         ownerKind: 'agent-job',
         agentJobId: 'aj-1',
         with: { prompt: 'do the agent-job thing', runtime: 'opencode', executionSource: 'non-slack' },
-        variables: { workspace: { path: '/virtual/agent-job', branch: null, changeDir: null } },
+        variables: {
+          workspace: { name: 'issue-9', branch: null, changeDir: null },
+          repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+        },
       },
       new AbortController().signal,
     )
@@ -943,7 +956,10 @@ describe('RunnerHost wires the OpenCodeRuntime lifecycle', () => {
             agentJobId: 'aj-1',
             projectId: 'project-1',
             with: { prompt: 'agent job', runtime: 'opencode', executionSource: 'non-slack' },
-            variables: { workspace: { path: '/virtual/mohist-runner-host-opencode-runtime' } },
+            variables: {
+              workspace: { name: 'issue-9', branch: null },
+              repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+            },
           },
         },
       ])

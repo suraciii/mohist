@@ -32,11 +32,15 @@ function execute(result: ActionResult, workDir: string) {
     workflowRunId: 'wf-completion',
     workId: 'review.1',
     workType: 'task',
+    projectId: 'project-1',
     stage: 'check',
     title: 'Review',
     uses: 'test/action',
     with: {},
-    variables: { workspace: { path: workDir, branch: null } },
+    variables: {
+      workspace: { name: 'issue-9', branch: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+    },
   }
   return executor.execute(work, new AbortController().signal)
 }

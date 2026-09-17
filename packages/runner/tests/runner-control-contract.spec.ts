@@ -235,7 +235,8 @@ function workflowDispatch(): WorkDispatchResponse {
     expect: null,
     variables: JSON.stringify({
       executionSource: 'non-slack',
-      workspace: { path: '/virtual/workflow-2' },
+      workspace: { name: 'issue-9', branch: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
     }),
     projectId: 'project-1',
     issueNumber: 685,
@@ -353,7 +354,7 @@ function executionHarness(
   )
   const workExecutor = new WorkExecutor(
     {} as never,
-    { prepare: workspacePrepare } as never,
+    namedWorkspaceManager as never,
     connection,
     null,
     undefined,
@@ -363,7 +364,6 @@ function executionHarness(
     undefined,
     null,
     undefined,
-    namedWorkspaceManager as never,
   )
   const workExecutorRef = vi.fn(() => workExecutor)
   const currentCatalogRevision = vi.fn(() => null)
@@ -419,6 +419,8 @@ function withoutAgentField(field: string, value?: string): WorkDispatchResponse 
     delete withPayload.slackExecutionContext
   } else if (field === 'workspace') {
     delete variables.workspace
+  } else if (field === 'workspace-path-only') {
+    variables.workspace = { path: '/legacy/workspace', branch: null, changeDir: null }
   }
 
   dispatch.with = JSON.stringify(withPayload)
@@ -476,6 +478,11 @@ const invalidEnvelopeVectors: ReadonlyArray<{
     field: 'workspace',
     dispatch: () => withoutAgentField('workspace'),
   },
+  {
+    name: 'workspace binds through the legacy path instead of a name',
+    field: 'workspace',
+    dispatch: () => withoutAgentField('workspace-path-only'),
+  },
 ]
 
 describe('runner control strict envelope contract', () => {
@@ -504,7 +511,10 @@ describe('runner control strict envelope contract', () => {
         issueNumber: 685,
         ownerKind: 'workflow',
         with: { prompt: 'run the workflow action' },
-        variables: { workspace: { path: '/virtual/workflow-2' } },
+        variables: {
+          workspace: { name: 'issue-9', branch: null },
+          repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+        },
       })
       expect(validateDispatchEnvelope(workflow.work)).toBeUndefined()
       expect(workflow.reportOwner).toEqual({ ownerKind: 'workflow', workflowRunId: 'workflow-2' })

@@ -1,8 +1,9 @@
+import type { NamedWorkspaceManager } from '../src/runtime/workspace-entity.js'
 import { describe, expect, it as vitestIt } from 'vitest'
 import { NETWORK_COMMAND_TIMEOUT_MS } from '../src/actions/git.js'
 import type { ActionResult, JsonObject, DispatchWorkItem } from '../src/core/types.js'
 import type { ActionHost } from '../src/actions/host.js'
-import { WorkExecutor, type WorkspacePreparer } from '../src/runtime/executor.js'
+import { WorkExecutor } from '../src/runtime/executor.js'
 import { buildCleanupPrompt } from '../src/runtime/worktree-cleanup.js'
 import { AgentJobExecutor } from '../src/runtime/agent-job-executor.js'
 import { WorkspaceNetworkTimeoutError } from '../src/runtime/workspace-errors.js'
@@ -21,15 +22,18 @@ const it = Object.assign(
 ) as typeof vitestIt
 
 describe('workspace preparation across stages', () => {
-  it('skips workspace preparation for agent jobs', async () => {
+  it('rejects an agent-job dispatch that binds through workspace.path', async () => {
     const workspacePath = await createTestTempDir('mohist-agent-job-workspace-')
-    const recorded = { prepare: 0 }
+    let materializeCalls = 0
     const recordingManager = {
-      async prepare() {
-        recorded.prepare += 1
-        throw new Error('prepare must not be called for agent-job dispatches')
+      async materializeForIssue() {
+        materializeCalls += 1
+        throw new Error('materializeForIssue must not be called for agent-job dispatches')
       },
-    } as unknown as WorkspacePreparer
+      async materialize() {
+        throw new Error('materialize must not be called for agent-job dispatches')
+      },
+    } as unknown as NamedWorkspaceManager
 
     const executor = new WorkExecutor(
       buildRegistry(async () => ({ output: { reached: false } })),
@@ -46,18 +50,23 @@ describe('workspace preparation across stages', () => {
       new AbortController().signal,
     )
 
-    expect(result.status).toBe('completed')
-    expect(recorded).toEqual({ prepare: 0 })
+    expect(result.status).toBe('failed')
+    expect(result.error?.code).toBe('invalid-dispatch')
+    expect(result.message).toContain('workspace.name')
+    expect(materializeCalls).toBe(0)
   })
 
-  it('fails an unresolved workflow workspace before preparing it', async () => {
-    let prepareCalls = 0
+  it('fails an unresolved workflow workspace before materializing it', async () => {
+    let materializeCalls = 0
     const workspaceManager = {
-      async prepare() {
-        prepareCalls += 1
-        throw new Error('workspace preparation must not start')
+      async materializeForIssue() {
+        materializeCalls += 1
+        throw new Error('workspace materialization must not start')
       },
-    } as unknown as WorkspacePreparer
+      async materialize() {
+        throw new Error('workspace materialization must not start')
+      },
+    } as unknown as NamedWorkspaceManager
     const executor = new WorkExecutor(
       buildRegistry(async () => ({ output: { reached: false } })),
       workspaceManager,
@@ -74,8 +83,8 @@ describe('workspace preparation across stages', () => {
 
     expect(result.status).toBe('failed')
     expect(result.error?.code).toBe('workspace-setup')
-    expect(result.message).toMatch(/explicit non-empty.*workspace\.(path|name)/)
-    expect(prepareCalls).toBe(0)
+    expect(result.message).toMatch(/Named Workspace binding.*workspace\.name/)
+    expect(materializeCalls).toBe(0)
   })
 
   it('serializes a workspace network timeout as a retry-safe failure', async () => {
@@ -91,10 +100,13 @@ describe('workspace preparation across stages', () => {
       },
     )
     const failingManager = {
-      async prepare() {
+      async materializeForIssue() {
         throw timeout
       },
-    } as unknown as WorkspacePreparer
+      async materialize() {
+        throw timeout
+      },
+    } as unknown as NamedWorkspaceManager
     const executor = new WorkExecutor(
       buildRegistry(async () => ({ output: { reached: false } })),
       failingManager,
@@ -179,19 +191,19 @@ describe('branch-integrity task boundaries', () => {
       '/runner',
     )
   }
-
   function boundaryWork(overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem {
     return {
       workflowRunId: 'wf-branch-boundary',
       workId: 'work-branch-boundary',
       workType: 'task',
+      projectId: 'project-1',
       stage: 'build',
       title: 'Branch boundary',
       uses: 'core/script',
       with: { run: 'echo ok' },
       variables: {
-        workspace: { path: WORKSPACE_ROOT, branch: EXPECTED_BRANCH },
-        repository: { name: 'mohist' },
+        workspace: { name: 'issue-branch-boundary', branch: EXPECTED_BRANCH },
+        repository: { name: 'mohist', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
       },
       ...overrides,
     }
@@ -520,8 +532,14 @@ describe('branch-integrity task boundaries', () => {
       }),
       null,
     )
+    const work = boundaryWork({
+      variables: {
+        workspace: { name: 'issue-branch-boundary', branch: null },
+        repository: { name: 'mohist', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
+    })
     await withBoundaryResources(fake, async () => {
-      const result = await executor.execute(boundaryWork(), new AbortController().signal)
+      const result = await executor.execute(work, new AbortController().signal)
       expect(result.status).toBe('completed')
       expect(invoked).toBe(true)
     })
@@ -554,11 +572,12 @@ function buildWork(
     title: `${stage} task`,
     uses: 'core/script',
     with: { run: 'echo ok' },
+    projectId: 'project-1',
     variables: {
       workflow: { runId: workflowRunId },
       issue: { number: 9, projectId: 'project-1' },
       repository: { name: 'master', gitUrl: repo, baseBranch: 'master' },
-      workspace: { path: '/runner' },
+      workspace: { name: 'issue-9', branch: 'mohist/ws-issue-9' },
     },
     ...overrides,
   }
@@ -569,6 +588,7 @@ function buildAgentJobWork(suppliedPath: string, workflowRunId: string, agentJob
     workflowRunId,
     workId: 'agent:job.1',
     workType: 'task',
+    projectId: 'project-1',
     stage: 'agent-job',
     title: 'agent-job dispatch',
     // After #410 T-001, AgentJob dispatches carry a flat
@@ -577,7 +597,7 @@ function buildAgentJobWork(suppliedPath: string, workflowRunId: string, agentJob
     with: { prompt: 'echo ok', runtime: 'opencode', executionSource: 'non-slack' },
     variables: {
       mohist: { runId: workflowRunId },
-      workspace: { path: suppliedPath, branch: null, changeDir: null },
+      workspace: { name: 'issue-9', branch: null, changeDir: null },
       project: { id: 'project-1', name: 'Mohist Local' },
       repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
     },

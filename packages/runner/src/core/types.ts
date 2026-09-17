@@ -1,3 +1,4 @@
+import type { NamedWorkspaceManager } from '../runtime/workspace-entity.js'
 import type { ActionCatalog } from '../actions/manifest.js'
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
@@ -425,6 +426,9 @@ export interface RunnerOptions {
    * present it as <c>Authorization: Bearer</c>.
    */
   credential?: string
+
+  /** Test seam: replaces the internally constructed NamedWorkspaceManager. */
+  namedWorkspaceManager?: NamedWorkspaceManager
 
   // Optional override for the cleanup loop cadence.
   // Defaults to 2 minutes inside RunnerHost. The cleanup loop runs

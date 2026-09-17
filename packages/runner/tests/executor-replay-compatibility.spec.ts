@@ -63,6 +63,7 @@ function historicalWork(workDir: string, overrides: Partial<DispatchWorkItem> = 
     workflowRunId: 'wf-replay-compatibility',
     workId: 'script.1',
     workType: 'task',
+    projectId: 'project-1',
     stage: 'build',
     title: 'Run historical script',
     uses: 'core/script',
@@ -76,7 +77,8 @@ function historicalWork(workDir: string, overrides: Partial<DispatchWorkItem> = 
       },
     },
     variables: {
-      workspace: { path: workDir, branch: null },
+      workspace: { name: 'issue-9', branch: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
       vars: { run: 'echo replayed', shell: 'bash', timeout: 125, marker: 'present' },
     },
     ...overrides,
