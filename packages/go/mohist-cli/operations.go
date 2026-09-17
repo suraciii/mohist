@@ -20,6 +20,10 @@ var otelTraceFields = []string{"trace_id", "service_name", "start_time", "end_ti
 var githubFields = []string{"id", "projectId", "owner", "repo", "repositoryName", "approvers", "status", "installationId", "repositoryNodeId", "reconnectRequired", "needsAttention", "needsReprojection", "lastError", "webhookSecret", "ingressUrl", "createdAt", "updatedAt"}
 var slackFields = []string{"id", "projectId", "agentId", "workspaceTeamId", "status", "connectionState", "botName", "owner", "accessPolicy", "nextAction", "createdAt", "updatedAt"}
 
+// slackEditFields mirrors the manage-access response envelope, not the flat
+// Connection projection used by `slack list`/`slack view`.
+var slackEditFields = []string{"connection", "accessPolicy", "allowMembers", "anyoneDisclosure"}
+
 const maxSlackReplyFileBytes = 10 * 1024 * 1024
 
 const notificationSetupUsage = "USAGE\n    mo notification setup [--health-base URL] [--webhook-url URL] [--secret VALUE] [--config-file PATH]\n\nConfigure local Hermes notifications without contacting the Server."
@@ -67,7 +71,7 @@ var operationsFlags = map[string]map[string]map[string]flagShape{
 		"view":             {"project": flagValue},
 		"diagnostics":      {"project": flagValue},
 		"claim-owner":      {"project": flagValue},
-		"edit":             {"project": flagValue},
+		"edit":             {"project": flagValue, "access-policy": flagValue, "allow-member": flagValue},
 		"transfer-owner":   {"project": flagValue},
 		"enable":           {"project": flagValue},
 		"disable":          {"project": flagValue},
@@ -135,7 +139,7 @@ func parseOperations(area string, args []string) (command, error) {
 		return command{}, usage("unknown " + area + " command")
 	}
 	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
-		return command{help: true, helpText: opsLeafHelp("ops-"+area+"-"+action, fieldsFor(area))}, nil
+		return command{help: true, helpText: opsLeafHelp("ops-"+area+"-"+action, catalogFor(area, action))}, nil
 	}
 	if action == "message" {
 		if len(args) < 2 || args[1] != "send" {
@@ -143,9 +147,9 @@ func parseOperations(area string, args []string) (command, error) {
 		}
 		action = "message-send"
 	} else if len(args) > 1 && (args[1] == "--help" || args[1] == "-h") {
-		return command{help: true, helpText: opsLeafHelp("ops-"+area+"-"+action, fieldsFor(area))}, nil
+		return command{help: true, helpText: opsLeafHelp("ops-"+area+"-"+action, catalogFor(area, action))}, nil
 	}
-	c := command{kind: "ops-" + area + "-" + action, catalog: fieldsFor(area)}
+	c := command{kind: "ops-" + area + "-" + action, catalog: catalogFor(area, action)}
 	if discovered, ok, err := discoverLeaf(args[1:], c.kind, c.catalog, opsLeafHelp(c.kind, c.catalog)); ok {
 		return discovered, err
 	}
@@ -231,6 +235,29 @@ func parseOperations(area string, args []string) (command, error) {
 			return command{}, usage("repository must be owner/repo")
 		}
 	}
+	if area == "slack" && action == "edit" {
+		// Selected JSON fields are part of the edit leaf contract, so reject an
+		// unknown field before validating the editable payload.
+		if err := validateFields(c.fields, c.catalog, "mo slack edit"); err != nil {
+			return command{}, err
+		}
+		policy := strings.ToLower(strings.TrimSpace(argValue(c.args, "access-policy", "")))
+		if policy == "" {
+			return command{}, usageWithLeaf("slack edit requires --access-policy", leafUsage)
+		}
+		if policy != "owner_only" && policy != "allowlist" && policy != "anyone" {
+			return command{}, usageWithLeaf("--access-policy must be owner_only, allowlist, or anyone", leafUsage)
+		}
+		members := valuesFor(c.args, "allow-member")
+		for _, member := range members {
+			if strings.TrimSpace(member) == "" {
+				return command{}, usageWithLeaf("--allow-member values must be non-blank", leafUsage)
+			}
+		}
+		if policy != "allowlist" && len(members) > 0 {
+			return command{}, usageWithLeaf("--allow-member is only allowed with --access-policy allowlist", leafUsage)
+		}
+	}
 	if area == "slack" && action == "permanent-delete" && !hasArg(c.args, "yes") {
 		return command{}, usage("--yes is required for permanent deletion")
 	}
@@ -255,6 +282,13 @@ func parseOperations(area string, args []string) (command, error) {
 		return command{}, usage("slack status requires non-blank --workspace-team")
 	}
 	return c, validateFields(c.fields, c.catalog, "mo "+area+" "+strings.ReplaceAll(action, "-", " "))
+}
+
+func catalogFor(area, action string) []string {
+	if area == "slack" && action == "edit" {
+		return slackEditFields
+	}
+	return fieldsFor(area)
 }
 
 func fieldsFor(area string) []string {
@@ -751,6 +785,10 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 			if isManagerMode(deps.Lookup) {
 				path = "/api/slack-manager/reply"
 			}
+		} else if action == "edit" {
+			path += "/" + url.PathEscape(argValue(cmd.args, "id", "")) + "/manage-access"
+			method = http.MethodPost
+			body = slackEditBody(cmd)
 		} else if action != "list" {
 			path += "/" + url.PathEscape(argValue(cmd.args, "id", ""))
 		}
@@ -763,6 +801,23 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 		collection = true
 	}
 	return remoteOperation(ctx, deps, c, method, path, body, cmd, collection)
+}
+
+func slackEditBody(cmd command) map[string]any {
+	members := []string{}
+	seen := map[string]bool{}
+	for _, value := range valuesFor(cmd.args, "allow-member") {
+		member := strings.TrimSpace(value)
+		if seen[member] {
+			continue
+		}
+		seen[member] = true
+		members = append(members, member)
+	}
+	return map[string]any{
+		"accessPolicy": strings.ToLower(strings.TrimSpace(argValue(cmd.args, "access-policy", ""))),
+		"allowMembers": members,
+	}
 }
 
 func slackMessageBody(deps Dependencies, cmd command) (map[string]any, error) {
