@@ -618,9 +618,13 @@ Mohist App.
   it remaining alive.
 - `mo slack list <agent>` reads all integrations for that Agent.
   `view/claim-owner/edit/transfer-owner/enable/disable <id>` manages one
-  integration. `edit --access-policy allowlist` atomically replaces non-Owner
-  members through repeatable `--allow-member <slack-member-id>`. A new one-time
-  claim transfers the Owner.
+  integration. `mo slack edit <id> --access-policy <owner_only|allowlist|anyone>
+  [--allow-member <slack-member-id>]...` atomically replaces the access policy
+  and the non-Owner member list. `--allow-member` is repeatable; `allowlist`
+  with no members clears the list, while `owner_only` and `anyone` reject the
+  flag. A missing or invalid policy, a blank member value, or an undeclared flag
+  (including `--bot-name` and `--avatar-hash`) is a LOCAL ERROR (exit 2) and no
+  request is sent. A new one-time claim transfers the Owner.
 - `disable` is recoverable and preserves the Agent and all execution history.
   `remove-binding` removes the Connection but preserves Agent App management
   facts. `permanent-delete --yes` permanently deletes the Agent App when no

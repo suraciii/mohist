@@ -206,8 +206,12 @@ resumes a record created from a Mohist App conversation. App creation, manifest
 updates, credential submission, and delivery recovery are installation steps,
 not separate commands.
 
-`--allow-member` can be repeated and replaces the complete member list except
-the Owner. Owner only and Anyone reject `--allow-member` before modification.
+`mo slack edit <id> --access-policy <owner_only|allowlist|anyone>` atomically
+replaces the access policy and the member list. `--allow-member` can be
+repeated and replaces the complete member list except the Owner; `allowlist`
+with no members clears the list. Owner only and Anyone reject `--allow-member`
+before modification, and the CLI rejects that combination, a missing or invalid
+policy, a blank member, or an undeclared flag with exit 2 before any request.
 Member IDs are the CLI automation interface; the Web UI and Slack use member
 search and avatars.
 

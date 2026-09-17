@@ -79,7 +79,7 @@ func issue680ValidArgs(leaf issue680OpsLeaf) []string {
 		"slack.view":             {"--project", "proj"},
 		"slack.diagnostics":      {"--project", "proj"},
 		"slack.claim-owner":      {"--project", "proj"},
-		"slack.edit":             {"--project", "proj"},
+		"slack.edit":             {"--project", "proj", "--access-policy", "allowlist"},
 		"slack.transfer-owner":   {"--project", "proj"},
 		"slack.enable":           {"--project", "proj"},
 		"slack.disable":          {"--project", "proj"},
