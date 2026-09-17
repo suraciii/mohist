@@ -119,6 +119,59 @@ public sealed class RunnerEnrollmentStoreTests
     }
 
     [Fact]
+    public async Task CreateRunnerCredential_SameTimestampReplacement_StaysActive()
+    {
+        // Re-enrollment revokes the predecessor at the replacement's
+        // CreatedAt; the fixed clock makes both rows share one timestamp.
+        // Status must still resolve the live replacement as active.
+        using var setup = CreateStore();
+        var first = await setup.Store.CreateRunnerCredentialAsync("admin", "runner-a");
+        var second = await setup.Store.CreateRunnerCredentialAsync("admin", "runner-a");
+
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.Equal(first!.Credential.CreatedAt, second!.Credential.CreatedAt);
+        Assert.Equal(RunnerCredentialStatus.Active, await setup.Store.GetStatusAsync("runner-a"));
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_TimestampTie_PrefersLiveCredentialOverRevokedPredecessor()
+    {
+        using var setup = CreateStore();
+        var createdAt = setup.Time.GetUtcNow();
+        // The revoked predecessor's ID sorts after the live replacement's ID,
+        // so CreatedAt-then-Id ordering alone would select the terminal row.
+        await setup.Store.CreateAsync(new Credential(
+            "runner_zzzz_revoked",
+            "admin",
+            CredentialKind.Runner,
+            CredentialToken.Hash("revoked"),
+            [Scope.Runner],
+            "runner-tie",
+            null,
+            null,
+            null,
+            null,
+            createdAt,
+            createdAt));
+        await setup.Store.CreateAsync(new Credential(
+            "runner_aaaa_live",
+            "admin",
+            CredentialKind.Runner,
+            CredentialToken.Hash("live"),
+            [Scope.Runner],
+            "runner-tie",
+            null,
+            null,
+            null,
+            null,
+            null,
+            createdAt));
+
+        Assert.Equal(RunnerCredentialStatus.Active, await setup.Store.GetStatusAsync("runner-tie"));
+    }
+
+    [Fact]
     public async Task CreateRunnerCredential_DoesNotAffectOtherRunners()
     {
         using var setup = CreateStore();

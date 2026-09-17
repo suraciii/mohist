@@ -250,18 +250,30 @@ public sealed class CredentialStore : ICredentialStore, IRunnerCredentialStatusR
             .Where(candidate => candidate.Kind.ToLower() == "runner" && candidate.Name == runnerId)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+        var now = _time.GetUtcNow();
+        // Re-enrollment revokes the predecessor at the replacement row's
+        // CreatedAt, so both rows can share one timestamp. Classify any live
+        // credential as active before considering terminal rows; otherwise the
+        // random credential ID tie-break could surface the revoked predecessor
+        // as revoked even though a live replacement exists.
+        var live = rows
+            .Where(candidate => candidate.RevokedAt is null
+                && (candidate.ExpiresAt is null || candidate.ExpiresAt.Value > now))
+            .OrderByDescending(candidate => candidate.CreatedAt)
+            .ThenByDescending(candidate => candidate.Id, StringComparer.Ordinal)
+            .FirstOrDefault();
+        if (live is not null)
+            return RunnerCredentialStatus.Active;
+
         var row = rows
             .OrderByDescending(candidate => candidate.CreatedAt)
             .ThenByDescending(candidate => candidate.Id, StringComparer.Ordinal)
             .FirstOrDefault();
-
         if (row is null)
             return RunnerCredentialStatus.Missing;
-        if (row.RevokedAt is not null)
-            return RunnerCredentialStatus.Revoked;
-        if (row.ExpiresAt is not null && row.ExpiresAt.Value <= _time.GetUtcNow())
-            return RunnerCredentialStatus.Missing;
-        return RunnerCredentialStatus.Active;
+        return row.RevokedAt is not null
+            ? RunnerCredentialStatus.Revoked
+            : RunnerCredentialStatus.Missing;
     }
 
     public async Task<bool> RevokeRunnerCredentialAsync(
