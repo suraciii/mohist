@@ -22,12 +22,10 @@ import { transportFetch, withFakeTransport } from './support/fake-transport.js'
 import type {
   FollowupParams,
   JsonRpcErrorResponse,
-  JsonRpcNotification,
   JsonRpcRequest,
   JsonRpcSuccessResponse,
   SessionCommandRequest,
   SessionStopParams,
-  WorkflowRunStatusNotification,
   WorkspaceCommitDiffParams,
   WorkspaceFileContentParams,
   WorkspaceQueryParams,
@@ -64,7 +62,6 @@ interface FixtureEntry {
 
 interface FixtureCatalog {
   requests: FixtureEntry[]
-  notifications: Array<{ method: string; notification: unknown }>
 }
 
 describe('runner control JSON contract', () => {
@@ -92,25 +89,17 @@ describe('runner control JSON contract', () => {
     const stop = request<SessionStopParams>(entries.get('session.stop')!).params
     const command = request<SessionCommandRequest>(entries.get('session.command')!).params
 
-    expect(query).toMatchObject({ workflowRunId: 'run_101', issueNumber: 657, baseBranch: 'main' })
+    expect(query).toMatchObject({
+      projectId: 'project_1',
+      workspaceName: 'issue-657',
+      issueNumber: 657,
+      baseBranch: 'main',
+    })
     expect(commit).toMatchObject({ hash: 'def4567890', query })
     expect(file).toMatchObject({ path: 'src/control.ts', query })
     expect(followup).toMatchObject({ operationId: 'operation_followup_1', turnId: 'turn_followup_1' })
     expect(stop).toMatchObject({ sessionId: 'session_1', turnId: 'turn_stop_1', operationId: 'operation_stop_1' })
     expect(command).toMatchObject({ command: 'reset', operationId: 'operation_command_1' })
-  })
-
-  it('covers the workflow status notification', () => {
-    const entry = readCatalog().notifications[0]!
-    const notification = entry.notification as JsonRpcNotification<WorkflowRunStatusNotification>
-
-    expect(entry.method).toBe('workflow.status-changed')
-    expect(notification).toEqual({
-      jsonrpc: '2.0',
-      method: 'workflow.status-changed',
-      params: { workflowRunId: 'run_101', status: 'Completed' },
-    })
-    expect(notification).not.toHaveProperty('id')
   })
 })
 
@@ -246,7 +235,8 @@ function workflowDispatch(): WorkDispatchResponse {
     expect: null,
     variables: JSON.stringify({
       executionSource: 'non-slack',
-      workspace: { path: '/virtual/workflow-2' },
+      workspace: { name: 'issue-9', branch: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
     }),
     projectId: 'project-1',
     issueNumber: 685,
@@ -364,7 +354,7 @@ function executionHarness(
   )
   const workExecutor = new WorkExecutor(
     {} as never,
-    { prepare: workspacePrepare } as never,
+    namedWorkspaceManager as never,
     connection,
     null,
     undefined,
@@ -374,7 +364,6 @@ function executionHarness(
     undefined,
     null,
     undefined,
-    namedWorkspaceManager as never,
   )
   const workExecutorRef = vi.fn(() => workExecutor)
   const currentCatalogRevision = vi.fn(() => null)
@@ -430,6 +419,8 @@ function withoutAgentField(field: string, value?: string): WorkDispatchResponse 
     delete withPayload.slackExecutionContext
   } else if (field === 'workspace') {
     delete variables.workspace
+  } else if (field === 'workspace-path-only') {
+    variables.workspace = { path: '/legacy/workspace', branch: null, changeDir: null }
   }
 
   dispatch.with = JSON.stringify(withPayload)
@@ -487,6 +478,11 @@ const invalidEnvelopeVectors: ReadonlyArray<{
     field: 'workspace',
     dispatch: () => withoutAgentField('workspace'),
   },
+  {
+    name: 'workspace binds through the legacy path instead of a name',
+    field: 'workspace',
+    dispatch: () => withoutAgentField('workspace-path-only'),
+  },
 ]
 
 describe('runner control strict envelope contract', () => {
@@ -515,7 +511,10 @@ describe('runner control strict envelope contract', () => {
         issueNumber: 685,
         ownerKind: 'workflow',
         with: { prompt: 'run the workflow action' },
-        variables: { workspace: { path: '/virtual/workflow-2' } },
+        variables: {
+          workspace: { name: 'issue-9', branch: null },
+          repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+        },
       })
       expect(validateDispatchEnvelope(workflow.work)).toBeUndefined()
       expect(workflow.reportOwner).toEqual({ ownerKind: 'workflow', workflowRunId: 'workflow-2' })

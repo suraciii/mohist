@@ -45,14 +45,13 @@ public sealed record WorkspaceFileContentParams(
     [property: JsonPropertyName("path")] string Path);
 
 public sealed record RunnerWorkspaceQuery(
-    string? WorkflowRunId,
     string? ProjectId,
+    string? WorkspaceName,
     int? IssueNumber,
     string? RepositoryName,
     string? GitUrl,
-    string? WorkspacePath,
-    string? Branch,
-    string? BaseBranch);
+    string? BaseBranch,
+    string? Branch);
 
 public sealed record RunnerSessionBinding(
     [property: JsonPropertyName("runtime")] string Runtime,
@@ -126,5 +125,3 @@ public sealed record GitCommit(string Hash, string ShortHash, string Message, st
 public sealed record WorkspaceRemovalResult(bool Removed, string Status, string? Path, string? Reason, string Message);
 
 public sealed record RunnerFollowupDeliveryResult(bool Accepted, string? Error = null);
-
-public sealed record WorkflowRunStatusNotification(string WorkflowRunId, string Status);

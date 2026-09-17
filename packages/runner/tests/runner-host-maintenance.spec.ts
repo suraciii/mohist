@@ -132,19 +132,6 @@ vi.mock('../src/actions/registry.js', async (importOriginal) => {
   }
 })
 
-vi.mock('../src/runtime/workspace.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/runtime/workspace.js')>()
-  class FakeWorkspaceManager {
-    async prepare() {
-      return { path: '/virtual/mohist-runner-host-maintenance', branch: null, changeDir: null }
-    }
-    async verify() {
-      return { path: '/virtual/mohist-runner-host-maintenance', branch: null, changeDir: null }
-    }
-  }
-  return { ...actual, WorkspaceManager: FakeWorkspaceManager }
-})
-
 interface HostTestResources extends OpenCodeRuntimeTestResources {
   fileSystem: RunnerFileSystem
   gitRunner: GitRunner

@@ -171,24 +171,6 @@ export class ServerConnection {
     return payload?.cleanupPolicy ?? null
   }
 
-  async workflowRunsStatus(workflowRunIds: string[], signal: AbortSignal): Promise<Record<string, string>> {
-    if (workflowRunIds.length === 0) return {}
-    const response = await this.requestTransport.request('workflowRunsStatus', this.url('workflow-runs/status'), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ workflowRunIds }),
-      signal,
-    })
-    const payload = await this.requestTransport.readJson<unknown>(response, 'workflowRunsStatus')
-    const statuses = readObject(payload, ['statuses'])
-    if (!statuses) return {}
-    const result: Record<string, string> = {}
-    for (const [key, value] of Object.entries(statuses)) {
-      if (typeof value === 'string') result[key] = value
-    }
-    return result
-  }
-
   async report(
     work: DispatchWorkItem,
     result: WorkItemResult,

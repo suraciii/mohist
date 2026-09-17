@@ -2,10 +2,8 @@ import { join } from 'node:path'
 import type { CleanupPolicy } from '../core/types.js'
 import type { ServerConnection } from '../server/connection.js'
 import type { RunnerControlWebSocketClient } from '../server/runner-control-websocket.js'
-import type { WorkspaceRegistry, NamedWorkspaceRegistry } from './workspace-registry.js'
+import type { NamedWorkspaceRegistry } from './workspace-registry.js'
 import { createNamedWorkspaceCleanupLoop, type NamedWorkspaceReclaimProbe } from './named-workspace-cleanup.js'
-import type { ConvergenceBackstop } from './cleanup-convergence.js'
-import type { CleanupLoop } from './cleanup-loop.js'
 import type { OpenCodeRuntime } from './opencode/index.js'
 import { formatDirectoryReclaimSummary } from './opencode/reclaim-summary.js'
 import { runnerLogger } from '../system/logger.js'
@@ -19,29 +17,14 @@ export interface HostCleanupDeps {
   readonly runnerRoot: string
   readonly connection: ServerConnection
   readonly control: RunnerControlWebSocketClient
-  readonly workspaceRegistry: WorkspaceRegistry
   readonly namedWorkspaceRegistry: NamedWorkspaceRegistry
   readonly namedWorkspaceReclaimProbe: NamedWorkspaceReclaimProbe
   readonly namedCleanupLoop: ReturnType<typeof createNamedWorkspaceCleanupLoop>
-  readonly cleanupLoop: CleanupLoop
-  readonly convergence: ConvergenceBackstop
   readonly openCodeRuntime: () => OpenCodeRuntime | null
 }
 
 export function createHostCleanup(deps: HostCleanupDeps) {
   let lastCleanupPolicy: CleanupPolicy | null = null
-
-  async function runConvergenceOnce(signal: AbortSignal): Promise<void> {
-    try {
-      await deps.convergence.runOnce(signal)
-    } catch (error) {
-      // Convergence is best-effort; the next tick or reconnect retries.
-      cleanupLog.error(
-        'workspace cleanup convergence pass failed',
-        runnerTransportDiagnostics(error, { includeCredentialGuidance: true }),
-      )
-    }
-  }
 
   async function executeCleanupOnce(signal: AbortSignal): Promise<void> {
     try {
@@ -64,7 +47,7 @@ export function createHostCleanup(deps: HostCleanupDeps) {
         let reclaim: Awaited<ReturnType<OpenCodeRuntime['reclaimWhere']>>
         try {
           reclaim = await runtime.reclaimWhere((directory) => {
-            const entry = deps.workspaceRegistry.findByWorkspacePath(directory)
+            const entry = deps.namedWorkspaceRegistry.findByWorkspacePath(directory)
             return entry?.phase === 'eligible' || entry?.phase === 'stuck'
           })
         } catch (error) {
@@ -114,17 +97,6 @@ export function createHostCleanup(deps: HostCleanupDeps) {
           })
         }
       }
-      const result = await deps.cleanupLoop.runOnce(policy, signal, blockedPaths)
-      if (
-        result.retentionRemoved > 0 ||
-        result.budgetRemoved > 0 ||
-        result.guardAborted > 0 ||
-        result.stuckResolved > 0
-      ) {
-        cleanupLog.info('workspace cleanup completed', {
-          reason: `retention=${result.retentionRemoved} budget=${result.budgetRemoved} guardAborted=${result.guardAborted} stuck=${result.stuckResolved} usage=${result.workspaceUsageBytes ?? 'unknown'}`,
-        })
-      }
     } catch (error) {
       // Cleanup is best-effort; the next tick retries. fetchConfig failures
       // (network blip, server restart) flow through this same catch so the
@@ -154,5 +126,5 @@ export function createHostCleanup(deps: HostCleanupDeps) {
     }
   }
 
-  return { runConvergenceOnce, runCleanupOnce: executeCleanupOnce, runSelfCheck }
+  return { runCleanupOnce: executeCleanupOnce, runSelfCheck }
 }

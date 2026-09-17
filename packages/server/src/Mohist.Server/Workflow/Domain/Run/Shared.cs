@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 namespace Mohist.Server.Workflow.Domain.Run;
 
 // ContextExhaustion is legacy: produced only by the removed session-health
@@ -24,23 +23,6 @@ public sealed record TaskResult(
     string Status,
     string? Reason = null,
     ExecutionError? Error = null);
-
-/// <summary>
-/// The per-run head ref the execution plane prepares inside the workflow
-/// workspace. MUST stay in sync with the runner's <c>runBranchName()</c>
-/// helper in <c>packages/runner/src/runtime/workspace.ts</c>.
-/// </summary>
-public static class WorkflowRunBranch
-{
-    private static readonly Regex SafeChars = new("[^A-Za-z0-9_-]", RegexOptions.Compiled);
-
-    public static string For(string? runId)
-    {
-        if (string.IsNullOrEmpty(runId)) return "mohist/run";
-        var safe = SafeChars.Replace(runId, string.Empty);
-        return string.IsNullOrEmpty(safe) ? "mohist/run" : $"mohist/run-{safe}";
-    }
-}
 
 public static partial class WorkflowRunExtensions
 {

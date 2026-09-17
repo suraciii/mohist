@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { verifyOnlyNamedWorkspaceManager } from './support/workspace-mock.js'
 import type { DispatchWorkItem } from '../src/core/types.js'
 import { AgentJobExecutor } from '../src/runtime/agent-job-executor.js'
 import type { ManagerExecutionBoundary } from '../src/runtime/manager-execution-boundary.js'
@@ -60,7 +61,7 @@ describe('Manager AgentJob runtime binding', () => {
         { openCode: { ready: () => true } as OpenCodeRuntime, pi: null },
         '/work/manager',
         undefined,
-        null,
+        verifyOnlyNamedWorkspaceManager({ path: '/tmp/agent-job-ws', branch: null }),
         { onManagerRuntimeSessionReady },
       )
       const work: DispatchWorkItem = {
@@ -74,7 +75,10 @@ describe('Manager AgentJob runtime binding', () => {
         initialInputId: 'input-1',
         initialTurnId: 'turn-1',
         with: { prompt: 'run', runtime: 'opencode', executionSource: 'non-slack' },
-        variables: { workspace: { path: '/work/manager' } },
+        variables: {
+          workspace: { name: 'issue-9', branch: null },
+          repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+        },
       }
 
       await expect(executor.execute(work, new AbortController().signal, boundary)).resolves.toMatchObject({

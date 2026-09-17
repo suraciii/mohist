@@ -50,9 +50,11 @@ export function validateDispatchEnvelope(work: DispatchWorkItem): void | WorkIte
   if (!workspace && !managerDispatch) return invalidDispatch('workspace', 'dispatch requires a workspace binding')
   if (workspace) {
     const namedWorkspace = nonEmptyString(workspace['name'])
-    const freePath = nonEmptyString(workspace['path'])
-    if (!namedWorkspace && !freePath) {
-      return invalidDispatch('workspace', 'workspace.name or workspace.path must be a non-empty string')
+    if (!namedWorkspace) {
+      return invalidDispatch('workspace', 'workspace.name is required; workspace.path is not a Workspace binding')
+    }
+    if (nonEmptyString(workspace['path'])) {
+      return invalidDispatch('workspace.path', 'workspace.path is not an accepted Workspace binding')
     }
     if (namedWorkspace && nonEmptyString(work.workflowRunId)) {
       const missingRepositoryField = ['name', 'gitUrl', 'baseBranch'].find(

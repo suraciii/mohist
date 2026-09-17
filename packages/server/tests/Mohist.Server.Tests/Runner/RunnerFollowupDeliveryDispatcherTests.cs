@@ -58,11 +58,5 @@ public sealed class RunnerFollowupDeliveryDispatcherTests
             Method = method;
             return Task.FromResult((TResult)(object)response);
         }
-
-        public Task SendNotificationAsync<TParams>(
-            string runnerId,
-            string method,
-            TParams parameters,
-            CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

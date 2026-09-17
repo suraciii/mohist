@@ -86,7 +86,8 @@ public sealed class RunnerControlWebSocketApiSpecs(DefaultMohistIntegrationFixtu
             TestContext.Current.CancellationToken);
         var registry = fixture.Services.GetRequiredService<RunnerControlWebSocketRegistry>();
         await registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
-        var query = new RunnerWorkspaceQuery(null, "project-1", null, "repo", null, "/work", "branch", "main");
+        var query = new RunnerWorkspaceQuery(
+            "project-1", "issue-1", 1, "repo", "https://repo.test/repo.git", "main", "mohist/ws-issue-1");
 
         var pending = registry.SendRequestAsync<WorkspaceCommitDiffParams, RunnerWorkspaceCommitDiffResult>(
             runnerId,
@@ -195,7 +196,8 @@ public sealed class RunnerControlWebSocketApiSpecs(DefaultMohistIntegrationFixtu
             TestContext.Current.CancellationToken);
         var registry = fixture.Services.GetRequiredService<RunnerControlWebSocketRegistry>();
         await registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
-        var query = new RunnerWorkspaceQuery(null, "project-1", null, "repo", null, "/work", "branch", "main");
+        var query = new RunnerWorkspaceQuery(
+            "project-1", "issue-1", 1, "repo", "https://repo.test/repo.git", "main", "mohist/ws-issue-1");
         var interrupted = registry.SendRequestAsync<WorkspaceCommitDiffParams, RunnerWorkspaceCommitDiffResult>(
             runnerId,
             "workspace.commit-diff",

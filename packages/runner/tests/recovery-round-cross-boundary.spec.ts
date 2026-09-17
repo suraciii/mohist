@@ -3,7 +3,7 @@ import type { JsonObject } from '../src/core/types.js'
 import type { GitRunner } from '../src/runtime/git-probe.js'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import { ServerConnection } from '../src/server/connection.js'
-import { verifyOnlyWorkspaceManager } from './support/workspace-mock.js'
+import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
 import { defineTestActions } from './support/action-registry-test.js'
 import { transportFetch, withFakeTransport } from './support/fake-transport.js'
 
@@ -44,7 +44,7 @@ function executor(workDir: string): WorkExecutor {
   })
   const result = new WorkExecutor(
     registry,
-    verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+    verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
     {} as never,
     workDir,
   )
@@ -70,11 +70,16 @@ function dispatch(workDir: string, workId: string, recoveryRemaining: number | n
     workflowRunId: 'wf-recovery-round',
     workId,
     workType: 'task',
+    projectId: 'project-1',
     stage: 'check',
     title: 'Review',
     uses: 'test/matching',
     with: JSON.stringify({ options: '${{ vars.agent }}' }),
-    variables: JSON.stringify({ vars: { agent: { model } }, workspace: { path: workDir, branch: null } }),
+    variables: JSON.stringify({
+      vars: { agent: { model } },
+      workspace: { name: 'issue-9', branch: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+    }),
     recovery: JSON.stringify(recovery),
     recoveryRemaining,
   }

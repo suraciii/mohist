@@ -518,9 +518,7 @@ public sealed class WorkflowItemTranslator : IScopedService
                 name = $"issue-{issueNumber}",
                 branch = $"mohist/ws-issue-{issueNumber}",
             })
-            : run.Workspace is { } workspace
-                ? JSON.SerializeToElement(new { path = workspace.Path, branch = workspace.Branch })
-                : JSON.SerializeToElement<object?>(null);
+            : JSON.SerializeToElement<object?>(null);
 
         WorkflowDispatchHelpers.MergeTaskOutputsIntoPayload(payload, run);
 

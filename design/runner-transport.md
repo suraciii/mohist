@@ -18,8 +18,7 @@ identity, or the domain event bus.
 
 - HTTP carries registration, heartbeat, work poll, work reports, Runtime event
   delivery, task-log delivery, and reconciliation reads.
-- WebSocket carries Workspace reads, Session commands, and the loss-tolerant
-  Workflow status notification.
+- WebSocket carries Workspace reads and Session commands.
 - WorkflowRun and AgentJob remain the work owners. The WebSocket does not carry
   work, replace HTTP poll/report, or become a second event bus.
 - The control connection is authenticated, outbound from Runner, and singular
@@ -39,8 +38,6 @@ identity, or the domain event bus.
   across restart.
 - Workspace queries keep their domain inputs and results. This transport does
   not change Workspace or Repository cleanup.
-- Workflow terminal status remains a best-effort notification. Runner's HTTP
-  status reconciliation remains the correctness backstop.
 - Runtime events, logs, progress, readiness, and snapshots remain on their
   current HTTP paths. The WebSocket is not a second event bus.
 
@@ -162,16 +159,6 @@ Runner response:
 }
 ```
 
-Server notification:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "workflow.status-changed",
-  "params": {}
-}
-```
-
 Mohist's WebSocket profile is deliberately small:
 
 - One UTF-8 WebSocket text message contains exactly one JSON-RPC object.
@@ -232,7 +219,7 @@ The request methods are:
 - `session.stop`
 - `session.command`
 
-The only notification method is `workflow.status-changed`.
+No Server-to-Runner notification method is currently defined.
 
 Every method has one named `params` object:
 
@@ -245,7 +232,6 @@ Every method has one named `params` object:
 - `session.followup` takes `FollowupParams` and returns `RunnerFollowupDeliveryResult`.
 - `session.stop` takes `SessionStopParams` and returns `RunnerStopReply`.
 - `session.command` takes `SessionCommandRequest` and returns `SessionCommandResult`.
-- `workflow.status-changed` takes `WorkflowRunStatusNotification` and returns none.
 
 JSON `null` is a valid result only for `workspace.diff`, `workspace.commits`,
 and `workspace.commit-diff`. Every other request method requires a non-null
@@ -261,9 +247,8 @@ contains the current `target`, `sessionId`, `turnId`, and `operationId` fields.
 
 The nested wire values are:
 
-- `RunnerWorkspaceQuery` has nullable `workflowRunId`, `projectId`,
-  `issueNumber`, `repositoryName`, `gitUrl`, `workspacePath`, `branch`, and
-  `baseBranch` fields.
+- `RunnerWorkspaceQuery` has nullable `projectId`, `workspaceName`,
+  `issueNumber`, `repositoryName`, `gitUrl`, `baseBranch`, and `branch` fields.
 - `target` is a discriminated object. Both kinds require `kind`, `projectId`,
   and `binding`. The `workflow` kind requires non-empty `workflowRunId` and
   `sessionName` and may carry `sessionId`; the `generic` kind requires a
@@ -327,21 +312,12 @@ Server adapters map transport failures at their existing domain boundaries:
 - Workspace status, file content, and removal retain their existing
   `runner_unavailable` or domain fallback results; Workspace read RPCs retain
   their existing route-level unavailable behavior, and cleanup never exposes a
-  remote transport exception as an HTTP 500; and
-- Workflow notification failures are logged and dropped.
+  remote transport exception as an HTTP 500.
 
 `workspace.remove` remains an idempotent, checkable local operation. Repeating
 the same Workspace removal may report already absent. It must still use the
 existing Runtime removal fence before deleting a directory. The transport adds
 no Workspace removal aggregate or Runner journal.
-
-### Notification
-
-`workflow.status-changed` has no response and no replay cursor. Runner treats it
-as a prompt to perform its existing HTTP Workflow status reconciliation. Losing
-or duplicating the notification changes latency, not the cleanup decision.
-It never marks a Workspace eligible directly; final host wiring maps the
-notification callback to one status-convergence pass.
 
 ## Non-Goals
 
@@ -357,12 +333,11 @@ This transport does not add:
 
 ## Status
 
-Native WebSocket control is active for all nine request methods and the
-Workflow status notification. Runner opens the client after HTTP registration
-and uses the transport-neutral handler catalog. SignalR control endpoints,
-clients, handlers, test fakes, and dependencies are removed. The project-scoped
-native event WebSocket replaces `/hubs/events`. HTTP registration, heartbeat,
-work poll and report, Runtime event and task-log queues, and Workflow status
-reconciliation remain unchanged. Runner keeps no operation journals; Server
-identity and admission state survive Runner restart, while Runner effect memory
-does not.
+Native WebSocket control is active for all nine request methods. Runner opens
+the client after HTTP registration and uses the transport-neutral handler
+catalog. SignalR control endpoints, clients, handlers, test fakes, and
+dependencies are removed. The project-scoped native event WebSocket replaces
+`/hubs/events`. HTTP registration, heartbeat, work poll and report, Runtime
+event and task-log queues remain unchanged. Runner keeps no operation journals;
+Server identity and admission state survive Runner restart, while Runner effect
+memory does not.

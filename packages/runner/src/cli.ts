@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { hostname } from 'node:os'
 import { RunnerHost } from './runtime/host.js'
-import { defaultRunnerRoot } from './runtime/workspace.js'
+import { defaultRunnerRoot } from './runtime/workspace-managed.js'
 import { configureRunnerLogger } from './system/logger.js'
 import { requireRunnerCredential } from './system/runner-credential.js'
 import { parseEnabledAgentRuntimes } from './runtime/enabled-agent-runtimes.js'
@@ -43,7 +43,6 @@ try {
     heartbeatIntervalMs: numberEnv('HEARTBEAT_INTERVAL_MS') ?? 15_000,
     dispatchLivenessProbeIntervalMs: numberEnv('DISPATCH_LIVENESS_PROBE_INTERVAL_MS') ?? 10_000,
     enabledAgentRuntimes,
-    cleanupConvergenceIntervalMs: positiveNumberEnv('CLEANUP_CONVERGENCE_INTERVAL_MS') ?? 5 * 60_000,
     cleanupLoopIntervalMs: positiveNumberEnv('CLEANUP_LOOP_INTERVAL_MS') ?? 2 * 60_000,
     runtimeIdleGraceMs: positiveNumberEnv('RUNTIME_IDLE_GRACE_MS') ?? 5 * 60_000,
     quarantineDrainTimeoutMs: positiveNumberEnv('QUARANTINE_DRAIN_TIMEOUT_MS') ?? 60_000,

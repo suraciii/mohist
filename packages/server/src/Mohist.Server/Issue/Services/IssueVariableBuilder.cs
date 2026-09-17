@@ -142,11 +142,11 @@ public static class IssueVariableBuilder
 
     public static WorkspaceIdentity BuildWorkspaceIdentity(string workflowRunId, MohistIssue issue, WorkflowProjectContext project, string runnerRoot)
     {
-        var changeDir = MohistDefaultWorkflowProjection.ChangeDir(issue.Number);
+        var workspaceName = $"issue-{issue.Number}";
         return new WorkspaceIdentity(
-            Path: Mohist.Server.Infrastructure.Workspace.MohistWorkspaceLayout.WorkflowRunWorkspacePath(runnerRoot, workflowRunId),
-            Branch: WorkflowRunBranch.For(workflowRunId),
-            ChangeDir: changeDir);
+            Path: string.Empty,
+            Branch: $"mohist/ws-{workspaceName}",
+            ChangeDir: MohistDefaultWorkflowProjection.ChangeDir(issue.Number));
     }
 
     /// <summary>

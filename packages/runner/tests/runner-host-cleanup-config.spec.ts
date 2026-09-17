@@ -158,7 +158,6 @@ vi.mock('../src/runtime/cleanup-loop.js', () => {
         return state.stubRunOnceResult
       }
     },
-    DefaultCleanupRunner: class {},
   }
 })
 
@@ -243,6 +242,26 @@ describe('RunnerHost idle-system cleanup', () => {
       await withDefaultRunnerTestResources(async (resources) => {
         const runtimeHandles = installReadyOpenCodeRuntimeFactory(resources)
         const state = createCleanupTestState(resources, runtimeHandles)
+        // Seed one eligible Named Workspace so the host's named cleanup loop
+        // (the only cleanup dimension) runs on every tick. The registry is a
+        // rebuildable index; the mocked CleanupLoop ignores the entry shape.
+        await resources.fileSystem.ensureDir(join(state.root, '.mohist'))
+        await resources.fileSystem.writeText(
+          join(state.root, '.mohist', 'named-workspaces.json'),
+          JSON.stringify({
+            version: 1,
+            entries: {
+              'ws:project-1:seeded': {
+                projectId: 'project-1',
+                workspaceName: 'seeded',
+                workspacePath: join(state.root, 'workspaces', 'seeded'),
+                phase: 'eligible',
+                materializedAt: '2026-07-01T00:00:00.000Z',
+                terminalAt: '2026-07-01T00:00:00.000Z',
+              },
+            },
+          }),
+        )
         await cleanupTestStorage.run(state, async () => {
           try {
             await body()
@@ -646,18 +665,15 @@ describe('RunnerHost idle-system cleanup', () => {
     await expect(run).resolves.toBeUndefined()
   })
 
-  it('HostIntervals_ClampSubSecondCleanupAndConvergenceConfigurationToOneSecond', async () => {
+  it('HostIntervals_ClampSubSecondCleanupConfigurationToOneSecond', async () => {
     const host = new RunnerHost({
       ...defaultOptions(),
       cleanupLoopIntervalMs: 1,
-      cleanupConvergenceIntervalMs: 1,
     })
     const resolved = host as unknown as {
       cleanupLoopIntervalMs: number
-      cleanupConvergenceIntervalMs: number
     }
 
     expect(resolved.cleanupLoopIntervalMs).toBe(CLEANUP_INTERVAL_FLOOR_MS)
-    expect(resolved.cleanupConvergenceIntervalMs).toBe(CLEANUP_INTERVAL_FLOOR_MS)
   })
 })

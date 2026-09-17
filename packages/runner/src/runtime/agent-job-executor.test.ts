@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { AgentJobExecutor } from './agent-job-executor.js'
+import { verifyOnlyNamedWorkspaceManager } from '../../tests/support/workspace-mock.js'
 import { PUBLISHED_SLACK_SKILL_NAME, PUBLISHED_SLACK_SKILL_VERSION } from './slack-execution-context.js'
 import type { DispatchWorkItem } from '../core/types.js'
 import { MemoryFileSystem } from '../../tests/support/memory-filesystem.js'
@@ -18,6 +19,10 @@ function it(name: string, body: (fileSystem: MemoryFileSystem) => Promise<void>)
       if (fileSystem.exists('/')) throw new Error('agent job test filesystem was not cleaned up')
     }
   })
+}
+
+function namedWorkspaceManagerStub(path = '/virtual/agent-job-ws') {
+  return verifyOnlyNamedWorkspaceManager({ path, branch: null })
 }
 
 describe('AgentJobExecutor attachment delivery', () => {
@@ -62,7 +67,10 @@ describe('AgentJobExecutor attachment delivery', () => {
       agentSessionId: 'session-1',
       initialInputId: 'input-1',
       initialTurnId: 'turn-1',
-      variables: { workspace: { path: workDir } },
+      variables: {
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
       with: {
         runtime: 'opencode',
         executionSource: 'non-slack',
@@ -74,6 +82,8 @@ describe('AgentJobExecutor attachment delivery', () => {
       connection as never,
       { openCode: runtime as never, pi: null },
       workDir,
+      undefined,
+      namedWorkspaceManagerStub(workDir),
     ).execute(work, new AbortController().signal)
 
     expect(result.status).toBe('completed')
@@ -136,7 +146,10 @@ describe('AgentJobExecutor attachment delivery', () => {
       agentSessionId: 'session-1',
       initialInputId: 'input-1',
       initialTurnId: 'turn-1',
-      variables: { workspace: { path: workDir } },
+      variables: {
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
       with: {
         prompt: 'inspect the image',
         runtime: 'opencode',
@@ -149,6 +162,8 @@ describe('AgentJobExecutor attachment delivery', () => {
       connection as never,
       { openCode: runtime as never, pi: null },
       workDir,
+      undefined,
+      namedWorkspaceManagerStub(workDir),
     ).execute(work, new AbortController().signal)
 
     expect(result.status).toBe('completed')
@@ -177,7 +192,10 @@ describe('AgentJobExecutor transport metadata classification', () => {
       agentSessionId: 'session-1',
       initialInputId: 'input-1',
       initialTurnId: 'turn-1',
-      variables: { workspace: { path: workDir } },
+      variables: {
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
       with: { prompt: 'must not run', runtime: 'opencode' },
     }
 
@@ -188,6 +206,8 @@ describe('AgentJobExecutor transport metadata classification', () => {
         pi: null,
       },
       workDir,
+      undefined,
+      namedWorkspaceManagerStub(workDir),
     ).execute(work, new AbortController().signal)
 
     expect(result.status).toBe('failed')
@@ -230,7 +250,10 @@ describe('AgentJobExecutor transport metadata classification', () => {
       agentSessionId: 'session-1',
       initialInputId: 'input-1',
       initialTurnId: 'turn-1',
-      variables: { workspace: { path: workDir } },
+      variables: {
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
       with: { prompt: 'PI_MIGRATION_SMOKE_OK', runtime: 'pi', executionSource: 'non-slack' },
     }
 
@@ -238,6 +261,8 @@ describe('AgentJobExecutor transport metadata classification', () => {
       connection as never,
       { openCode: null, pi: piRuntime as never },
       workDir,
+      undefined,
+      namedWorkspaceManagerStub(workDir),
     ).execute(work, new AbortController().signal)
 
     expect(result.status).toBe('completed')
@@ -277,7 +302,10 @@ describe('AgentJobExecutor transport metadata classification', () => {
       agentSessionId: 'session-1',
       initialInputId: 'input-1',
       initialTurnId: 'turn-1',
-      variables: { workspace: { path: workDir } },
+      variables: {
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
       with: {
         prompt: 'reply in thread',
         runtime: 'opencode',
@@ -290,6 +318,8 @@ describe('AgentJobExecutor transport metadata classification', () => {
       connection as never,
       { openCode: openCodeRuntime as never, pi: null },
       workDir,
+      undefined,
+      namedWorkspaceManagerStub(workDir),
     ).execute(work, new AbortController().signal)
 
     expect(result.status).toBe('completed')
@@ -330,7 +360,10 @@ describe('AgentJobExecutor transport metadata classification', () => {
       agentSessionId: 'session-1',
       initialInputId: 'input-1',
       initialTurnId: 'turn-1',
-      variables: { workspace: { path: workDir } },
+      variables: {
+        workspace: { name: 'issue-9', branch: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
       with: { prompt: 'hi', runtime: 'pi', executionSource: 'non-slack', rogueKey: 'x' },
     }
 
@@ -338,6 +371,8 @@ describe('AgentJobExecutor transport metadata classification', () => {
       connection as never,
       { openCode: null, pi: piRuntime as never },
       workDir,
+      undefined,
+      namedWorkspaceManagerStub(workDir),
     ).execute(work, new AbortController().signal)
 
     expect(result.status).toBe('completed')

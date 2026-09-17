@@ -119,28 +119,6 @@ public sealed class RecordingRunnerControlTransport : IRunnerControlTransport, I
         return response is null ? default! : (TResult)response;
     }
 
-    public Task SendNotificationAsync<TParams>(
-        string runnerId,
-        string method,
-        TParams parameters,
-        CancellationToken ct = default)
-    {
-        ct.ThrowIfCancellationRequested();
-        var message = new RecordedRunnerControlMessage(runnerId, method, [parameters]);
-        var owner = FindOwner(runnerId);
-        if (owner is null && !_owners.IsEmpty && !GlobalState.IsActive)
-            throw new RunnerControlUnavailableException($"Runner '{runnerId}' has no recording control owner");
-        if (owner is null)
-        {
-            lock (GlobalState.Gate) GlobalState.SentMessages.Add(message);
-        }
-        else
-        {
-            lock (owner.Gate) owner.SentMessages.Add(message);
-        }
-        return Task.CompletedTask;
-    }
-
     private RecordingRunnerControlOwnerState? FindOwner(string runnerId)
     {
         return _owners.GetValueOrDefault(runnerId);

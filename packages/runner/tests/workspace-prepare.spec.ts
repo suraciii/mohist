@@ -78,12 +78,14 @@ function context(variables: JsonObject = {}): ActionContext {
     workflowRunId: 'wr-prepare-1',
     workId: 'workspace-prepare',
     workType: 'task',
+    projectId: 'project-1',
     stage: 'build',
     title: 'Prepare workspace',
     uses: 'mohist/workspace-prepare',
     with: { expectedBranch: EXPECTED_BRANCH },
     variables: {
-      workspace: { path: WORKSPACE_PATH, branch: EXPECTED_BRANCH, changeDir: null },
+      workspace: { name: 'issue-9', branch: EXPECTED_BRANCH, changeDir: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
       ...variables,
     },
     workDir: WORKSPACE_PATH,
@@ -168,7 +170,10 @@ describe('mohist/workspace-prepare', () => {
       ...context(),
       workDir: '/host-workspace',
       with: { expectedBranch: EXPECTED_BRANCH },
-      variables: { workspace: { path: '/hidden-workspace', branch: 'hidden-branch' } },
+      variables: {
+        workspace: { name: 'issue-9', branch: 'hidden-branch' },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
     }
     const result = await callAction(workspacePrepareAction, contextWithHiddenVariables)
 
@@ -676,7 +681,10 @@ describe('mohist/workspace-prepare', () => {
     const contextWithHiddenVariables: ActionContext = {
       ...context(),
       with: {},
-      variables: { workspace: { path: WORKSPACE_PATH, branch: EXPECTED_BRANCH, changeDir: null } },
+      variables: {
+        workspace: { name: 'issue-9', branch: EXPECTED_BRANCH, changeDir: null },
+        repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+      },
     }
     const result = await callAction(workspacePrepareAction, contextWithHiddenVariables)
     const output = result.output as Record<string, unknown>

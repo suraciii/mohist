@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { verifyOnlyNamedWorkspaceManager } from './support/workspace-mock.js'
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentJobExecutor } from '../src/runtime/agent-job-executor.js'
@@ -72,7 +73,10 @@ function buildWork(overrides: Partial<DispatchWorkItem> = {}): DispatchWorkItem 
     projectId: 'project-1',
     initialInputId: 'input-1',
     initialTurnId: 'turn-1',
-    variables: { workspace: { path: WORK_DIR } },
+    variables: {
+      workspace: { name: 'issue-9', branch: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
+    },
     with: {
       prompt: 'Inspect the change and report the result.',
       runtime: 'opencode',
@@ -259,7 +263,13 @@ function makePiRuntime(
 
 test('guards an unpublished initial OpenCode turn with one bounded advisory and preserves its result', async () => {
   const runtime = makeOpenCodeRuntime({ followupMode: 'silent' })
-  const result = await new AgentJobExecutor(connection(), { openCode: runtime.runtime, pi: null }).execute(
+  const result = await new AgentJobExecutor(
+    connection(),
+    { openCode: runtime.runtime, pi: null },
+    null,
+    undefined,
+    verifyOnlyNamedWorkspaceManager({ path: WORK_DIR, branch: null }),
+  ).execute(
     buildWork({
       with: {
         prompt: 'Inspect the change.',
@@ -288,7 +298,13 @@ test('guards an unpublished initial OpenCode turn with one bounded advisory and 
 
 test('guards an unpublished initial Pi turn through the same follow-up path', async () => {
   const runtime = makePiRuntime({ followupMode: 'silent' })
-  const result = await new AgentJobExecutor(connection(), { openCode: null, pi: runtime.runtime }).execute(
+  const result = await new AgentJobExecutor(
+    connection(),
+    { openCode: null, pi: runtime.runtime },
+    null,
+    undefined,
+    verifyOnlyNamedWorkspaceManager({ path: WORK_DIR, branch: null }),
+  ).execute(
     buildWork({
       with: {
         prompt: 'Inspect the change.',
@@ -311,7 +327,13 @@ test('does not advise after an accepted or rejected reply action attempt', async
   const runtime = makeOpenCodeRuntime({
     turnEvents: [replyOpenCodeEvent(), replyOpenCodeEvent('tool_call.completed')],
   })
-  const result = await new AgentJobExecutor(connection(), { openCode: runtime.runtime, pi: null }).execute(
+  const result = await new AgentJobExecutor(
+    connection(),
+    { openCode: runtime.runtime, pi: null },
+    null,
+    undefined,
+    verifyOnlyNamedWorkspaceManager({ path: WORK_DIR, branch: null }),
+  ).execute(
     buildWork({
       with: {
         prompt: 'Publish the result.',
@@ -329,7 +351,13 @@ test('does not advise after an accepted or rejected reply action attempt', async
 
 test('does not advise after a Pi reply action attempt even when the action later fails', async () => {
   const runtime = makePiRuntime({ turnEvents: [replyPiEvent()] })
-  const result = await new AgentJobExecutor(connection(), { openCode: null, pi: runtime.runtime }).execute(
+  const result = await new AgentJobExecutor(
+    connection(),
+    { openCode: null, pi: runtime.runtime },
+    null,
+    undefined,
+    verifyOnlyNamedWorkspaceManager({ path: WORK_DIR, branch: null }),
+  ).execute(
     buildWork({
       with: {
         prompt: 'Publish the Pi result.',
@@ -350,10 +378,13 @@ test('stops after an Agent-authored reply during the first advisory', async () =
     followupMode: 'reply',
     followupEvents: [replyOpenCodeEvent()],
   })
-  const result = await new AgentJobExecutor(connection(), { openCode: runtime.runtime, pi: null }).execute(
-    buildWork(),
-    new AbortController().signal,
-  )
+  const result = await new AgentJobExecutor(
+    connection(),
+    { openCode: runtime.runtime, pi: null },
+    null,
+    undefined,
+    verifyOnlyNamedWorkspaceManager({ path: WORK_DIR, branch: null }),
+  ).execute(buildWork(), new AbortController().signal)
 
   expect(result.status).toBe('completed')
   expect(runtime.followupCalls).toHaveLength(1)
@@ -364,10 +395,13 @@ test('preserves a failed initial WorkItemResult when an advisory invocation fail
     turnResult: failedOpenCodeResult(),
     followupMode: 'failure',
   })
-  const result = await new AgentJobExecutor(connection(), { openCode: runtime.runtime, pi: null }).execute(
-    buildWork(),
-    new AbortController().signal,
-  )
+  const result = await new AgentJobExecutor(
+    connection(),
+    { openCode: runtime.runtime, pi: null },
+    null,
+    undefined,
+    verifyOnlyNamedWorkspaceManager({ path: WORK_DIR, branch: null }),
+  ).execute(buildWork(), new AbortController().signal)
 
   expect(result).toMatchObject({
     status: 'failed',
@@ -382,10 +416,13 @@ test('preserves the original result and does not retry after an advisory timeout
   vi.useFakeTimers()
   const runtime = makeOpenCodeRuntime({ followupMode: 'hang' })
   const controller = new AbortController()
-  const execution = new AgentJobExecutor(connection(), { openCode: runtime.runtime, pi: null }).execute(
-    buildWork(),
-    controller.signal,
-  )
+  const execution = new AgentJobExecutor(
+    connection(),
+    { openCode: runtime.runtime, pi: null },
+    null,
+    undefined,
+    verifyOnlyNamedWorkspaceManager({ path: WORK_DIR, branch: null }),
+  ).execute(buildWork(), controller.signal)
   await vi.waitFor(() => expect(runtime.followupCalls).toHaveLength(1))
   await vi.advanceTimersByTimeAsync(30_000)
 
@@ -414,10 +451,13 @@ test('bypasses the guard for absent and malformed Slack contexts', async () => {
   ] as const
   for (const item of workItems) {
     const runtime = makeOpenCodeRuntime()
-    const result = await new AgentJobExecutor(connection(), { openCode: runtime.runtime, pi: null }).execute(
-      item.work,
-      new AbortController().signal,
-    )
+    const result = await new AgentJobExecutor(
+      connection(),
+      { openCode: runtime.runtime, pi: null },
+      null,
+      undefined,
+      verifyOnlyNamedWorkspaceManager({ path: WORK_DIR, branch: null }),
+    ).execute(item.work, new AbortController().signal)
 
     expect(result.status).toBe(item.status)
     expect(runtime.followupCalls).toHaveLength(0)
@@ -426,7 +466,13 @@ test('bypasses the guard for absent and malformed Slack contexts', async () => {
 
 test('does not treat final assistant output alone as a reply attempt on Pi', async () => {
   const runtime = makePiRuntime({ followupMode: 'silent' })
-  const result = await new AgentJobExecutor(connection(), { openCode: null, pi: runtime.runtime }).execute(
+  const result = await new AgentJobExecutor(
+    connection(),
+    { openCode: null, pi: runtime.runtime },
+    null,
+    undefined,
+    verifyOnlyNamedWorkspaceManager({ path: WORK_DIR, branch: null }),
+  ).execute(
     buildWork({
       with: {
         prompt: 'Text only.',

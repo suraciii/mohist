@@ -2,7 +2,7 @@ import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import { rebaseAction } from '../src/actions/rebase.js'
 import { pushAction } from '../src/actions/push.js'
-import { verifyOnlyWorkspaceManager } from './support/workspace-mock.js'
+import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
 import type { ActionResult, JsonObject, DispatchWorkItem } from '../src/core/types.js'
 import type { ActionTestContext as ActionContext } from './support/action-test-context.js'
 import type { ActionHost } from '../src/actions/host.js'
@@ -65,7 +65,8 @@ function createFakeWorktree(): FakeWorktree {
 
 function installExecutorGit(resources: WorktreeTestResources, state: FakeWorktree) {
   resources.gitRunner = async (workDir, args) => {
-    expect(workDir).toBe(state.workDir)
+    // Named Workspace probes the nested repository checkout under REPOS/.
+    expect(workDir === state.workDir || workDir === `${state.workDir}/REPOS/master`).toBe(true)
     switch (args.join(' ')) {
       case 'rev-parse --git-path rebase-merge':
       case 'rev-parse --git-path rebase-apply':
@@ -119,7 +120,7 @@ function buildExecutor(
 ): WorkExecutor {
   return new WorkExecutor(
     registry,
-    verifyOnlyWorkspaceManager({ path: worktree.workDir, branch: worktree.branch }),
+    verifyOnlyWorkspacePreparer({ path: worktree.workDir, branch: worktree.branch }),
     connection as never,
     worktree.workDir,
   )
@@ -130,11 +131,13 @@ function buildWork(worktree: FakeWorktree, overrides: Partial<DispatchWorkItem> 
     workflowRunId: 'wf-worktree-cleanup',
     workId: 'build:agent.1',
     workType: 'task',
+    projectId: 'project-1',
     title: 'Agent-backed task',
     uses: 'mohist/opencode',
     with: { prompt: 'do the work' },
     variables: {
-      workspace: { path: worktree.workDir, branch: worktree.branch, changeDir: null },
+      workspace: { name: 'issue-9', branch: worktree.branch, changeDir: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
       project: { path: worktree.workDir },
       issue: { title: 'Worktree cleanup delivery', number: 42 },
     },
@@ -147,6 +150,7 @@ function rebaseContext(worktree: FakeWorktree, overrides: JsonObject = {}, varia
     workflowRunId: 'wf-worktree-cleanup',
     workId: 'integrate:rebase.1',
     workType: 'task',
+    projectId: 'project-1',
     stage: 'integrate',
     title: 'Rebase and squash branch',
     uses: 'mohist/rebase',
@@ -160,7 +164,8 @@ function rebaseContext(worktree: FakeWorktree, overrides: JsonObject = {}, varia
     },
     variables: {
       project: { path: worktree.workDir },
-      workspace: { path: worktree.workDir, branch: worktree.branch, changeDir: null },
+      workspace: { name: 'issue-9', branch: worktree.branch, changeDir: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
       issue: { title: 'Worktree cleanup delivery', number: 42 },
       ...variables,
     },
@@ -175,14 +180,15 @@ function pushContext(worktree: FakeWorktree, overrides: JsonObject = {}, variabl
     workflowRunId: 'wf-worktree-cleanup',
     workId: 'integrate:push.1',
     workType: 'task',
+    projectId: 'project-1',
     stage: 'integrate',
     title: 'Push changes',
     uses: 'mohist/push',
     with: { source: worktree.branch, target: 'master', remote: 'origin', ...overrides },
     variables: {
       project: { path: '/not/the/workspace' },
-      repository: { baseBranch: 'master' },
-      workspace: { path: worktree.workDir, branch: worktree.branch, changeDir: null },
+      workspace: { name: 'issue-9', branch: worktree.branch, changeDir: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
       issue: { title: 'Worktree cleanup delivery', number: 42 },
       ...variables,
     },
@@ -386,7 +392,8 @@ describe('worktree cleanup before delivery', () => {
     const agentResult = await executor.execute(
       buildWork(worktree, {
         variables: {
-          workspace: { path: worktree.workDir, branch: worktree.branch, changeDir: null },
+          workspace: { name: 'issue-9', branch: worktree.branch, changeDir: null },
+          repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
           project: { path: worktree.workDir },
           issue: { title: 'Worktree cleanup delivery', number: 42 },
           runner: { cleanup: { maxAttempts: 3 } },

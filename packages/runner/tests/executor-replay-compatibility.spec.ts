@@ -5,7 +5,7 @@ import { createDefaultRegistry } from '../src/actions/registry.js'
 import type { ActionResult, DispatchWorkItem, JsonObject } from '../src/core/types.js'
 import { WorkExecutor } from '../src/runtime/executor.js'
 import type { GitRunner } from '../src/runtime/git-probe.js'
-import { verifyOnlyWorkspaceManager } from './support/workspace-mock.js'
+import { verifyOnlyWorkspacePreparer } from './support/workspace-mock.js'
 import { defineTestAction, ActionRegistry } from './support/action-registry-test.js'
 import { withTestRunnerResources } from './support/test-resources.js'
 
@@ -52,7 +52,7 @@ function createExecutor(
 ): WorkExecutor {
   return new WorkExecutor(
     createScriptRegistry(handler),
-    verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+    verifyOnlyWorkspacePreparer({ path: workDir, branch: null }),
     { async patchRunVars() {} } as never,
     workDir,
   )
@@ -63,6 +63,7 @@ function historicalWork(workDir: string, overrides: Partial<DispatchWorkItem> = 
     workflowRunId: 'wf-replay-compatibility',
     workId: 'script.1',
     workType: 'task',
+    projectId: 'project-1',
     stage: 'build',
     title: 'Run historical script',
     uses: 'core/script',
@@ -76,7 +77,8 @@ function historicalWork(workDir: string, overrides: Partial<DispatchWorkItem> = 
       },
     },
     variables: {
-      workspace: { path: workDir, branch: null },
+      workspace: { name: 'issue-9', branch: null },
+      repository: { name: 'master', gitUrl: 'https://example.test/repository.git', baseBranch: 'master' },
       vars: { run: 'echo replayed', shell: 'bash', timeout: 125, marker: 'present' },
     },
     ...overrides,

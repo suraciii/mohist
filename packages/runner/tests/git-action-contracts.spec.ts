@@ -62,7 +62,7 @@ describe('local Git Action manifests', () => {
       injectEngineInputs(
         resolved.definition.manifest,
         { baseBranch: 'master' },
-        { workspace: { path: '/ws', branch: 'mohist/run-wr-1' } },
+        { workspace: { name: 'issue-9', branch: 'mohist/run-wr-1' } },
       ),
     ).toMatchObject({ baseBranch: 'master', expectedBranch: 'mohist/run-wr-1' })
   })

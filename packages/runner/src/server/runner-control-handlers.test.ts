@@ -4,7 +4,6 @@ import { createRunnerControlHandlers } from './runner-control-handlers.js'
 describe('createRunnerControlHandlers', () => {
   it('binds all nine methods to the existing transport-neutral domain handlers', async () => {
     const command = vi.fn(async () => ({ ok: true }))
-    const statusChanged = vi.fn()
     const handlers = createRunnerControlHandlers({
       workspaceGit: {
         resolveQuery: () => null,
@@ -14,7 +13,6 @@ describe('createRunnerControlHandlers', () => {
       followup: {},
       cancel: {},
       sessionCommand: { handler: command },
-      onWorkflowStatusChanged: statusChanged,
     })
     const query = {}
 
@@ -23,7 +21,10 @@ describe('createRunnerControlHandlers', () => {
     await expect(handlers.workspaceCommitDiff(query, 'abc')).resolves.toBeNull()
     await expect(handlers.workspaceStatus(query)).resolves.toEqual({ exists: false })
     await expect(handlers.workspaceFileContent(query, 'a.ts')).resolves.toEqual({ base: null, head: null })
-    await expect(handlers.workspaceRemove(query)).resolves.toMatchObject({ status: 'missing' })
+    await expect(handlers.workspaceRemove(query)).resolves.toMatchObject({
+      status: 'failed',
+      reason: 'workspace_identity_mismatch',
+    })
     await expect(handlers.sessionFollowup({ text: 'next', operationId: 'followup', turnId: 'turn' })).resolves.toEqual({
       accepted: false,
       error: 'unavailable',
@@ -53,8 +54,6 @@ describe('createRunnerControlHandlers', () => {
         processGeneration: 'generation',
       }),
     ).resolves.toEqual({ ok: true })
-    await handlers.workflowStatusChanged({ workflowRunId: 'run', status: 'Completed' })
     expect(command).toHaveBeenCalledOnce()
-    expect(statusChanged).toHaveBeenCalledOnce()
   })
 })

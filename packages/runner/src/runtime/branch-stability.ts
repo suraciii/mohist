@@ -241,8 +241,8 @@ export async function checkBranchStability(
 /**
  * Capture the shared workspace-health snapshot for the boundary probes.
  * Mirrors the residual / head / porcelain model shared by
- * `mohist/workspace-prepare`, `mohist/rebase`, and `WorkspaceManager`,
- * using the executor's narrow git probe.
+ * `mohist/workspace-prepare`, `mohist/rebase`, and the named workspace
+ * preparations, using the executor's narrow git probe.
  */
 async function captureHealthSnapshot(
   workDir: string,

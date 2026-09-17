@@ -8,11 +8,9 @@ import { currentRunnerFileSystem, type RunnerDirectoryHandle } from '../system/f
 import type { TaskLogger } from './task-log.js'
 import {
   sanitizeWorkspaceDiagnostic,
-  WorkspaceCorruptError,
   WorkspaceIdentityMismatchError,
   WorkspaceMissingError,
 } from './workspace-errors.js'
-import { readMarker, repositoryWorkspacePath, type IssueWorkspaceMarker } from './workspace-identity.js'
 
 /**
  * `source` tag recorded against every captured workspace-preparation
@@ -61,8 +59,6 @@ export async function withManagedReposHandle<T>(
     throw new WorkspaceIdentityMismatchError(
       `Repository root ${reposPath} is unavailable or symlinked`,
       reposPath,
-      undefined,
-      undefined,
       error,
     )
   } finally {
@@ -95,8 +91,6 @@ export async function withManagedRepositoryHandle<T>(
       throw new WorkspaceIdentityMismatchError(
         `Repository path ${repositoryPath} is unavailable or symlinked`,
         repositoryPath,
-        undefined,
-        undefined,
         error,
       )
     } finally {
@@ -120,39 +114,41 @@ async function assertDirectoryEntry(path: string, displayPath: string): Promise<
   }
 }
 
-export async function validateWorkspaceIdentity(
-  workspacePath: string,
-  expected: IssueWorkspaceMarker,
-  gitUrl: string,
-  signal: AbortSignal,
-  log: TaskLogger | null = null,
-  runnerRoot?: string,
-  displayPath = workspacePath,
-  repositoryName?: string,
-): Promise<void> {
-  if (runnerRoot) await assertManagedWorkspacePath(runnerRoot, workspacePath, true)
-  const marker = await readMarker(workspacePath)
-  if (!marker) {
-    throw new WorkspaceCorruptError(`Workflow workspace ${displayPath} has no readable identity marker`, displayPath)
+const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i
+
+// Repository names are user-controlled and become the single path segment
+// under `REPOS`. Reject anything that could traverse or alias the parent
+// directory, carry control characters, or collide with a Windows device name.
+export function isSafeRepositoryName(repositoryName: string): boolean {
+  return (
+    !!repositoryName &&
+    repositoryName !== '.' &&
+    repositoryName !== '..' &&
+    !/[<>:"/\\|?*]/.test(repositoryName) &&
+    !/\p{Cc}/u.test(repositoryName) &&
+    !/[. ]$/.test(repositoryName) &&
+    !WINDOWS_DEVICE_NAME.test(repositoryName)
+  )
+}
+
+// Fixed `REPOS/<repositoryName>` checkout path shared by Named and
+// workflow workspaces. The guards are path-safety only; identity is owned
+// by the caller's marker validation.
+export function repositoryWorkspacePath(workspacePath: string, repositoryName: string) {
+  if (!isSafeRepositoryName(repositoryName)) {
+    throw new WorkspaceIdentityMismatchError(`Invalid repository name '${repositoryName}'`)
   }
-  const fields: (keyof IssueWorkspaceMarker)[] = ['workflowRunId', 'runBranch']
-  if (fields.some((field) => marker[field] !== expected[field])) {
+  const reposRoot = resolve(join(workspacePath, 'REPOS'))
+  const repositoryPath = resolve(join(reposRoot, repositoryName))
+  if (
+    repositoryPath === reposRoot ||
+    !repositoryPath.startsWith(`${reposRoot}${process.platform === 'win32' ? '\\' : '/'}`)
+  ) {
     throw new WorkspaceIdentityMismatchError(
-      `Workflow workspace ${displayPath} marker identity does not match the requested run`,
-      displayPath,
-      expected,
-      marker,
+      `Repository name '${repositoryName}' escapes the Workspace REPOS directory`,
     )
   }
-  if (repositoryName) {
-    await withManagedRepositoryHandle(
-      workspacePath,
-      repositoryName,
-      async (gitPath) => await validateWorkspaceOrigin(gitPath, gitUrl, signal, log, displayPath),
-    )
-  } else {
-    await validateWorkspaceOrigin(workspacePath, gitUrl, signal, log, displayPath)
-  }
+  return repositoryPath
 }
 
 export async function validateWorkspaceOrigin(
@@ -182,8 +178,6 @@ export async function validateWorkspaceOrigin(
       `Workflow workspace ${displayPath} origin probe failed (exit ${result.exitCode}): ${diagnostic || 'no diagnostic'}`,
       displayPath,
       undefined,
-      undefined,
-      undefined,
       { kind: 'probe-failed', exitCode: result.exitCode, diagnostic: diagnostic || `exit ${result.exitCode}` },
     )
   }
@@ -194,8 +188,6 @@ export async function validateWorkspaceOrigin(
     throw new WorkspaceIdentityMismatchError(
       `Workflow workspace ${displayPath} origin value does not match the requested repository: ${mismatch}`,
       displayPath,
-      undefined,
-      undefined,
       undefined,
       { kind: 'value-mismatch', exitCode: result.exitCode, diagnostic: mismatch },
     )
@@ -299,13 +291,7 @@ export async function openWorkspaceDirectoryHandle(
   } catch (error) {
     for (const opened of handles.reverse()) await opened.close()
     if (error instanceof WorkspaceIdentityMismatchError) throw error
-    throw new WorkspaceIdentityMismatchError(
-      `Working directory ${target} is unavailable or symlinked`,
-      target,
-      undefined,
-      undefined,
-      error,
-    )
+    throw new WorkspaceIdentityMismatchError(`Working directory ${target} is unavailable or symlinked`, target, error)
   }
 }
 
@@ -366,8 +352,6 @@ export async function withManagedWorkspaceHandle<T>(
     throw new WorkspaceIdentityMismatchError(
       `Managed workspace parent ${workspaceParent} is unavailable or symlinked`,
       target,
-      undefined,
-      undefined,
       error,
     )
   }

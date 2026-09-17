@@ -5,14 +5,17 @@ import {
   type WorkspaceRemovalHandlerDeps,
 } from '../src/server/workspace-removal-handler.js'
 import type { WorkspaceRemovalFence, WorkspaceRemovalFenceResult } from '../src/runtime/workspace-removal-fence.js'
-import type { WorkspaceRegistry } from '../src/runtime/workspace-registry.js'
-import { issueWorkspacePath } from '../src/runtime/workspace.js'
+import type { NamedWorkspaceRegistry } from '../src/runtime/workspace-registry.js'
+import { namedWorkspacePath } from '../src/runtime/workspace-entity.js'
 import { MemoryDirectoryHandleFileSystem } from './support/memory-filesystem.js'
 import { withTestRunnerResources } from './support/test-resources.js'
 
 const removalTestRuntime = vi.hoisted(() => {
   type State = {
-    readonly mocks: { deleteDirectory: ReturnType<typeof vi.fn>; validateWorkspaceIdentity: ReturnType<typeof vi.fn> }
+    readonly mocks: {
+      deleteDirectory: ReturnType<typeof vi.fn>
+      validateNamedWorkspaceIdentity: ReturnType<typeof vi.fn>
+    }
   }
   const { AsyncLocalStorage } = process.getBuiltinModule('node:async_hooks') as typeof import('node:async_hooks')
   const storage = new AsyncLocalStorage<State>()
@@ -21,7 +24,7 @@ const removalTestRuntime = vi.hoisted(() => {
     if (!state) throw new Error('workspace removal test context is not active')
     return state
   }
-  const scoped = (name: 'deleteDirectory' | 'validateWorkspaceIdentity') => {
+  const scoped = (name: 'deleteDirectory' | 'validateNamedWorkspaceIdentity') => {
     const target = (() => undefined) as (...args: unknown[]) => unknown
     Object.defineProperty(target, '_isMockFunction', { value: true })
     return new Proxy(target, {
@@ -40,39 +43,44 @@ const removalTestRuntime = vi.hoisted(() => {
   return {
     storage,
     deleteDirectory: scoped('deleteDirectory'),
-    validateWorkspaceIdentity: scoped('validateWorkspaceIdentity'),
+    validateNamedWorkspaceIdentity: scoped('validateNamedWorkspaceIdentity'),
   }
 })
 
 const deleteDirectory = removalTestRuntime.deleteDirectory
-const validateWorkspaceIdentity = removalTestRuntime.validateWorkspaceIdentity
+const validateNamedWorkspaceIdentity = removalTestRuntime.validateNamedWorkspaceIdentity
 
 vi.mock('../src/system/process.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/system/process.js')>()),
   deleteDirectory: removalTestRuntime.deleteDirectory,
 }))
-vi.mock('../src/runtime/workspace.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../src/runtime/workspace.js')>()),
-  validateWorkspaceIdentity: removalTestRuntime.validateWorkspaceIdentity,
+vi.mock('../src/runtime/workspace-entity.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/runtime/workspace-entity.js')>()),
+  validateNamedWorkspaceIdentity: removalTestRuntime.validateNamedWorkspaceIdentity,
 }))
 
-const workspacePath = '/runner/workspaces/wr-1'
+const runnerRoot = '/runner'
+const projectId = 'project-1'
+const workspaceName = 'issue-1'
+const workspacePath = namedWorkspacePath(runnerRoot, projectId, workspaceName)
 const query = {
-  workflowRunId: 'wr-1',
+  projectId,
+  workspaceName,
+  issueNumber: 1,
+  repositoryName: 'main',
   gitUrl: 'https://repo.test/mohist.git',
-  workspacePath,
-  branch: 'mohist/run-wr-1',
+  branch: `mohist/ws-${workspaceName}`,
   baseBranch: 'main',
 }
 
-function createRegistry(calls: string[]): WorkspaceRegistry {
+function createRegistry(calls: string[]): NamedWorkspaceRegistry {
   return {
-    findByWorkspacePath: vi.fn(() => ({ workflowRunId: query.workflowRunId })),
+    get: vi.fn(() => ({ projectId, workspaceName })),
     remove: vi.fn(async () => {
       calls.push('registry-remove')
       return true
     }),
-  } as unknown as WorkspaceRegistry
+  } as unknown as NamedWorkspaceRegistry
 }
 
 function createHandler(deps: WorkspaceRemovalHandlerDeps) {
@@ -96,7 +104,7 @@ describe('RemoveWorkspace removal fence', () => {
       {
         mocks: {
           deleteDirectory: vi.fn(async () => undefined),
-          validateWorkspaceIdentity: vi.fn(async () => undefined),
+          validateNamedWorkspaceIdentity: vi.fn(async () => undefined),
         },
       },
       body,
@@ -111,7 +119,7 @@ describe('RemoveWorkspace removal fence', () => {
     const calls: string[] = []
     const registry = createRegistry(calls)
     const handler = createHandler({
-      runnerRoot: '/runner',
+      runnerRoot,
       registry,
       pathExists: vi.fn(() => {
         calls.push('path-exists')
@@ -119,7 +127,7 @@ describe('RemoveWorkspace removal fence', () => {
       }),
       removalFence: () => completedFence(calls),
     })
-    validateWorkspaceIdentity.mockImplementation(async () => {
+    validateNamedWorkspaceIdentity.mockImplementation(async () => {
       calls.push('identity')
     })
     deleteDirectory.mockImplementation(async () => {
@@ -151,7 +159,7 @@ describe('RemoveWorkspace removal fence', () => {
             return { kind }
           },
         }
-        const handler = createHandler({ runnerRoot: '/runner', registry, pathExists, removalFence: () => fence })
+        const handler = createHandler({ runnerRoot, registry, pathExists, removalFence: () => fence })
 
         await expect(handler(query)).resolves.toEqual({
           removed: false,
@@ -161,17 +169,55 @@ describe('RemoveWorkspace removal fence', () => {
           message,
         })
         expect(pathExists).not.toHaveBeenCalled()
-        expect(validateWorkspaceIdentity).not.toHaveBeenCalled()
+        expect(validateNamedWorkspaceIdentity).not.toHaveBeenCalled()
         expect(deleteDirectory).not.toHaveBeenCalled()
         expect(registry.remove).not.toHaveBeenCalled()
       }),
   )
 
+  it('refuses an unfenced removal before inspecting or deleting the directory', async () => {
+    const calls: string[] = []
+    const registry = createRegistry(calls)
+    const pathExists = vi.fn(() => true)
+    const handler = createHandler({ runnerRoot, registry, pathExists })
+
+    await expect(handler(query)).resolves.toEqual({
+      removed: false,
+      status: 'failed',
+      path: workspacePath,
+      reason: 'workspace_cleanup_refused',
+      message: 'Runtime removal fence is unavailable',
+    })
+    expect(pathExists).not.toHaveBeenCalled()
+    expect(validateNamedWorkspaceIdentity).not.toHaveBeenCalled()
+    expect(deleteDirectory).not.toHaveBeenCalled()
+    expect(registry.remove).not.toHaveBeenCalled()
+  })
+
+  it('refuses incomplete named identity before deriving or deleting a directory', async () => {
+    const calls: string[] = []
+    const registry = createRegistry(calls)
+    const pathExists = vi.fn(() => true)
+    const handler = createHandler({ runnerRoot, registry, pathExists, removalFence: () => completedFence(calls) })
+
+    await expect(handler({ projectId })).resolves.toEqual({
+      removed: false,
+      status: 'failed',
+      path: null,
+      reason: 'workspace_identity_mismatch',
+      message: 'Workspace query requires complete identity',
+    })
+    expect(pathExists).not.toHaveBeenCalled()
+    expect(validateNamedWorkspaceIdentity).not.toHaveBeenCalled()
+    expect(deleteDirectory).not.toHaveBeenCalled()
+    expect(registry.remove).not.toHaveBeenCalled()
+  })
+
   it('drops registry identity for a missing directory only after fence admission', async () => {
     const calls: string[] = []
     const registry = createRegistry(calls)
     const handler = createHandler({
-      runnerRoot: '/runner',
+      runnerRoot,
       registry,
       pathExists: vi.fn(() => {
         calls.push('path-exists')
@@ -188,73 +234,82 @@ describe('RemoveWorkspace removal fence', () => {
       message: 'Workspace already removed',
     })
     expect(calls).toEqual([`fence-enter:${workspacePath}`, 'path-exists', 'registry-remove', 'fence-exit'])
-    expect(validateWorkspaceIdentity).not.toHaveBeenCalled()
+    expect(validateNamedWorkspaceIdentity).not.toHaveBeenCalled()
     expect(deleteDirectory).not.toHaveBeenCalled()
   })
 
-  it('keeps the existing behavior when no Runtime fence is available', async () => {
-    const calls: string[] = []
-    const registry = createRegistry(calls)
-    const handler = createHandler({
-      runnerRoot: '/runner',
-      registry,
-      pathExists: vi.fn(() => true),
+  vitestIt('refuses an out-of-root named directory swapped for a symlink', async () => {
+    await withRemovalMocks(async () => {
+      const fileSystem = new MemoryDirectoryHandleFileSystem()
+      const root = '/managed-runner'
+      const path = namedWorkspacePath(root, projectId, workspaceName)
+      const outside = '/outside-workspaces'
+      await fileSystem.ensureDir(join(outside, workspaceName))
+      await fileSystem.symlink(outside, path)
+      const result = await withTestRunnerResources(
+        async () => {
+          const handler = createWorkspaceRemovalHandler({
+            runnerRoot: root,
+            removalFence: () => completedFence([]),
+          })
+          return await handler(query)
+        },
+        { fileSystem, controlExistsChecker: (candidate) => fileSystem.exists(candidate) },
+      )
+      expect(result).toMatchObject({ removed: false, status: 'failed' })
+      expect(fileSystem.exists(join(outside, workspaceName))).toBe(true)
     })
-
-    await expect(handler(query)).resolves.toMatchObject({ removed: true, status: 'removed' })
-    expect(registry.remove).toHaveBeenCalledOnce()
-    expect(deleteDirectory).toHaveBeenCalledOnce()
   })
 
   vitestIt('deletes through the held parent after the public workspace path is replaced', async () => {
     await withRemovalMocks(async () => {
       const fileSystem = new MemoryDirectoryHandleFileSystem()
-      const runnerRoot = '/managed-runner'
-      const path = issueWorkspacePath(runnerRoot, 'wr-held-delete')
-      const heldWorkspaces = join(runnerRoot, 'workspaces-held')
+      const root = '/managed-runner'
+      const path = namedWorkspacePath(root, projectId, workspaceName)
+      const heldWorkspaces = join(root, 'workspaces-held')
       const outside = '/outside-workspaces'
       await fileSystem.ensureDir(join(path, 'REPOS', 'main', '.git'))
       await fileSystem.ensureDir(outside)
       await fileSystem.writeText(
         join(path, '.mohist', 'workspace.json'),
-        JSON.stringify({ workflowRunId: 'wr-held-delete', runBranch: 'mohist/run-wr-held-delete' }),
+        JSON.stringify({
+          projectId,
+          workspaceName,
+          repositories: [{ name: 'main', gitUrl: query.gitUrl }],
+        }),
       )
       let swapped = false
-      validateWorkspaceIdentity.mockImplementation(async () => {
+      validateNamedWorkspaceIdentity.mockImplementation(async () => {
         if (swapped) return
         swapped = true
-        await fileSystem.rename(join(runnerRoot, 'workspaces'), heldWorkspaces)
-        await fileSystem.symlink(outside, join(runnerRoot, 'workspaces'))
+        await fileSystem.rename(join(root, 'workspaces'), heldWorkspaces)
+        await fileSystem.symlink(outside, join(root, 'workspaces'))
       })
       deleteDirectory.mockImplementation(async (operationPath: string) => {
         await fileSystem.deleteDirectory(operationPath)
       })
       const result = await withTestRunnerResources(
         async () => {
-          const handler = createWorkspaceRemovalHandler({ runnerRoot })
-          return await handler({
-            workflowRunId: 'wr-held-delete',
-            repositoryName: 'main',
-            gitUrl: 'https://repo.test/mohist.git',
-            workspacePath: path,
-            branch: 'mohist/run-wr-held-delete',
-            baseBranch: 'main',
+          const handler = createWorkspaceRemovalHandler({
+            runnerRoot: root,
+            removalFence: () => completedFence([]),
           })
+          return await handler({ ...query, projectId, workspaceName })
         },
         { fileSystem, controlExistsChecker: (candidate) => fileSystem.exists(candidate) },
       )
       expect(result).toMatchObject({ removed: true, status: 'removed' })
-      expect(fileSystem.exists(join(outside, 'wr-held-delete'))).toBe(false)
-      expect(fileSystem.exists(join(heldWorkspaces, 'wr-held-delete'))).toBe(false)
+      expect(fileSystem.exists(join(outside, workspaceName))).toBe(false)
+      expect(fileSystem.exists(join(heldWorkspaces, workspaceName))).toBe(false)
     })
   })
 
   it('preserves identity failure semantics inside the fence', async () => {
     const calls: string[] = []
     const registry = createRegistry(calls)
-    validateWorkspaceIdentity.mockRejectedValue(new Error('marker mismatch'))
+    validateNamedWorkspaceIdentity.mockRejectedValue(new Error('marker mismatch'))
     const handler = createHandler({
-      runnerRoot: '/runner',
+      runnerRoot,
       registry,
       pathExists: vi.fn(() => true),
       removalFence: () => completedFence(calls),

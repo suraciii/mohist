@@ -157,16 +157,6 @@ export interface ReceiveFollowupPayload {
   originMarker?: string | null
 }
 
-// Payload delivered by the server-side `ReceiveWorkflowRunStatus` control WebSocket
-// method when a workflow run reaches a terminal state. The status string
-// is the canonical WorkflowRunStatus enum name (`Completed`, `Stopped`,
-// `Failed` for terminal; non-terminal statuses are not delivered by the
-// router — see RunnerWorkflowStatusRouter).
-export interface ReceiveWorkflowRunStatusPayload {
-  workflowRunId: string
-  status: string
-}
-
 /**
  * Payload delivered by the server-side `CancelAgentSession` control WebSocket
  * invocation. Distinct from
