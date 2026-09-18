@@ -47,7 +47,9 @@ public static partial class RunnerRoutes
                 TreeHash: NormalizeIdentity(req.TreeHash),
                 ArtifactDigest: NormalizeIdentity(req.ArtifactDigest),
                 ReleaseId: NormalizeIdentity(req.ReleaseId),
-                Generation: req.Generation > 0 ? req.Generation : null), req.ProcessGeneration);
+                Generation: req.Generation > 0 ? req.Generation : null,
+                EnvironmentVersion: NormalizeIdentity(req.EnvironmentVersion),
+                EnvironmentLoadedAt: req.EnvironmentLoadedAt), req.ProcessGeneration);
             return Results.Ok();
         });
 
@@ -593,7 +595,9 @@ public record RunnerRegisterRequest(
     string? TreeHash = null,
     string? ArtifactDigest = null,
     string? ReleaseId = null,
-    long? Generation = null);
+    long? Generation = null,
+    string? EnvironmentVersion = null,
+    DateTimeOffset? EnvironmentLoadedAt = null);
 public record RunnerSlotsPatchRequest(int Slots);
 public record RunnerSlotsPatchResponse(string RunnerId, int Slots);
 public record RunnerHeartbeatRequest(
@@ -612,7 +616,9 @@ public record RunnerHeartbeatRequest(
     string? TreeHash = null,
     string? ArtifactDigest = null,
     string? ReleaseId = null,
-    long? Generation = null);
+    long? Generation = null,
+    string? EnvironmentVersion = null,
+    DateTimeOffset? EnvironmentLoadedAt = null);
 public record RunnerReportResponse(string Verdict);
 public record RunnerAgentSessionReconcileResponse(
     string SessionId,

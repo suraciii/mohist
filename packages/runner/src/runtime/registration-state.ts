@@ -45,6 +45,8 @@ export function buildRegistrationState(
     actionCatalog: actionsCatalog,
     projectId: options.projectId,
     connectionId: getConnectionId(),
+    environmentVersion: options.environmentVersion ?? null,
+    environmentLoadedAt: options.environmentLoadedAt ?? null,
     runtimeCatalogs: {
       // OpenCode discovery assists configuration only. Execution still lets
       // OpenCode validate the operator-selected model and variant. The Pi

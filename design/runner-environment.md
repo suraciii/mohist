@@ -213,6 +213,8 @@ evidence without a new privileged channel.
 
 ## Status
 
-This document is the target design for Issue #1009. The current implementation
-has the Runner status projection and update fence, but it has no environment
-snapshot, application state, or environment observation fields.
+The install snapshot and Runner environment observation fields are implemented.
+The update fence now retains current-generation settlement counts even while a
+draining poll cannot claim new work. Environment application state, recovery,
+sanitized status projection, CLI refresh commands, and tool checks remain
+unimplemented slices of Issue #1009.
