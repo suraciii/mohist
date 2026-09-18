@@ -62,14 +62,17 @@ mo runner environment initialize
 
 `initialize` measures the allowlisted environment of the currently running
 Runner process through its systemd `MainPID`, writes the active snapshot, and
-idempotently adds the fixed `EnvironmentFile` directive. It does not use the
-invoking terminal, contact Server, restart the Runner, pause admission, or
-change current work. It verifies the process digest after `daemon-reload` and
-restores the unit and snapshot if any step fails. A stopped service, missing
-process environment, or process identity change fails closed. Existing active
-snapshots are verified rather than replaced. Initialization is migration
-evidence only; candidate apply still requires the normal fence and new-process
-activation witness.
+idempotently adds the fixed `EnvironmentFile` directive. For legacy units it
+also removes inline `Environment=` assignments for the fixed allowlist, while
+preserving unrelated service settings; this is required for a candidate to
+remove a previously inherited variable. Ambiguous continued environment
+directives fail closed. It does not use the invoking terminal, contact Server,
+restart the Runner, pause admission, or change current work. It verifies the
+process digest after `daemon-reload` and restores the unit and snapshot if any
+step fails. A stopped service, missing process environment, or process identity
+change fails closed. Existing active snapshots are verified rather than
+replaced. Initialization is migration evidence only; candidate apply still
+requires the normal fence and new-process activation witness.
 
 The local transaction files are also fixed under `~/.config/mohist/`:
 
