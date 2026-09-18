@@ -14,8 +14,26 @@ public sealed class WorkflowArtifactDirectoryLimits
     public const long DefaultMaxTotalBytes = 256L * 1024L * 1024L;
     public const long DefaultMaxFileBytes = 64L * 1024L * 1024L;
 
+    /// <summary>
+    /// Default cap on the encoded directory envelope (the NDJSON bytes
+    /// carried in the upload body). It covers the default
+    /// <see cref="DefaultMaxTotalBytes"/> after base64 inflation (4/3)
+    /// plus JSON framing overhead. Operators that raise
+    /// <see cref="MaxTotalBytes"/> must raise this with it; when the two
+    /// disagree the smaller value is the effective gate.
+    /// </summary>
+    public const long DefaultMaxEnvelopeBytes = 384L * 1024L * 1024L;
+
     /// <summary>Maximum number of regular files inside a directory artifact.</summary>
     public int MaxFileCount { get; set; } = DefaultMaxFileCount;
+
+    /// <summary>
+    /// Maximum size of the encoded directory envelope in bytes. The
+    /// upload service rejects a declared envelope above this before
+    /// opening the content stream, and the reader never pulls more than
+    /// this from the body.
+    /// </summary>
+    public long MaxEnvelopeBytes { get; set; } = DefaultMaxEnvelopeBytes;
 
     /// <summary>
     /// Maximum total bytes across all contained files. Files exceeding
