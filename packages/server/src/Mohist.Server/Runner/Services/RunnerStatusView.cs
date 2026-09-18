@@ -47,7 +47,24 @@ public sealed record RunnerStatusEntry(
     RunnerStatusCapacityView? Capacity,
     IReadOnlyList<RunnerActiveWorkView> ActiveWorks,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] RunnerDrainStatusView? Drain,
-    IReadOnlyList<RunnerNextActionView> NextActions);
+    IReadOnlyList<RunnerNextActionView> NextActions,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] RunnerEnvironmentStatusView? Environment = null);
+
+public sealed record RunnerEnvironmentStatusView(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ActiveVersion,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] DateTimeOffset? ActiveLoadedAt,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] RunnerEnvironmentApplicationStatusView? Application);
+
+public sealed record RunnerEnvironmentApplicationStatusView(
+    string UpdateId,
+    string TargetVersion,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? PreviousVersion,
+    string Phase,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? FailureCode,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? BaseProcessGeneration,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? BaseConnectionGeneration,
+    DateTimeOffset RequestedAt,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] DateTimeOffset? CompletedAt);
 
 public sealed record RunnerIdentityStatusView(
     string Id,

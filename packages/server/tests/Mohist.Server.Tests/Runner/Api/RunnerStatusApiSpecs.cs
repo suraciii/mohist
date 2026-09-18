@@ -500,6 +500,7 @@ public class RunnerStatusApiSpecs
         var projectId = await CreateProjectIdAsync($"proj-durable-{Guid.NewGuid():N}");
         var runnerId = $"runner-durable-{Guid.NewGuid():N}";
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        var environmentLoadedAt = DateTimeOffset.Parse("2026-08-01T11:00:00Z");
         await runner.RegisterAsync(new RunnerInfo(
             runnerId,
             ["spec/*"],
@@ -510,7 +511,9 @@ public class RunnerStatusApiSpecs
             SourceRevision: "durable-source",
             ReleaseId: "durable-release",
             Generation: 11,
-            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration),
+            ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration,
+            EnvironmentVersion: "environment-v1",
+            EnvironmentLoadedAt: environmentLoadedAt),
             TestRunnerGenerationExtensions.ProcessGeneration);
         await runner.UpdateAsync(2);
         await CreateActiveCredentialAsync(runnerId);
@@ -518,7 +521,12 @@ public class RunnerStatusApiSpecs
         var workflowId = $"wf-durable-{Guid.NewGuid():N}";
         await AssignActiveWorkForTestAsync(runnerId, workflowId, "work-durable-1", "task", "build", "Durable status", projectId);
         var fenceId = Guid.NewGuid().ToString("N");
-        Assert.NotNull(await runner.BeginUpdateInterruptAsync(fenceId));
+        var environmentApplication = await runner.BeginEnvironmentApplicationAsync(
+            fenceId,
+            "environment-v2",
+            TestRunnerGenerationExtensions.ProcessGeneration,
+            DispatchTestExtensions.ConnectionGeneration);
+        Assert.Equal(RunnerEnvironmentApplicationBeginStatus.Waiting, environmentApplication?.Status);
 
         try
         {
@@ -552,6 +560,14 @@ public class RunnerStatusApiSpecs
             var drain = detail.GetProperty("drain");
             Assert.True(drain.GetProperty("active").GetBoolean());
             Assert.Equal(fenceId, drain.GetProperty("updateInterruptId").GetString());
+            var environment = detail.GetProperty("environment");
+            Assert.Equal("environment-v1", environment.GetProperty("activeVersion").GetString());
+            Assert.Equal(environmentLoadedAt, environment.GetProperty("activeLoadedAt").GetDateTimeOffset());
+            var application = environment.GetProperty("application");
+            Assert.Equal(fenceId, application.GetProperty("updateId").GetString());
+            Assert.Equal("waiting", application.GetProperty("phase").GetString());
+            Assert.Equal("environment-v2", application.GetProperty("targetVersion").GetString());
+            Assert.Equal("environment-v1", application.GetProperty("previousVersion").GetString());
 
             // The status read stayed diagnostic: the dormant closeout is still owed.
             Assert.Equal("Running", await _fixture.Grains.GetGrain<IWorkflowGrain>(workflowId).GetRunStatusAsync());

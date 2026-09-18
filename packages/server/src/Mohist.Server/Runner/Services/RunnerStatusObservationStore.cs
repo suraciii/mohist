@@ -10,7 +10,8 @@ public sealed record RunnerStatusObservation(
     RunnerInfo? Info,
     bool Draining,
     string? UpdateInterruptId,
-    RunnerDispatchObservation? DispatchObservation);
+    RunnerDispatchObservation? DispatchObservation,
+    RunnerEnvironmentApplicationObservation? EnvironmentApplication = null);
 
 /// <summary>
 /// Process-local read projection for ephemeral Runner lifecycle facts. Status
