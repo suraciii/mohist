@@ -214,7 +214,7 @@ async function ensureIssueWorkspaceRepository(options: IssueWorkspaceRepositoryO
     }
     try {
       await validateWorkspaceOrigin(preparationPath, options.gitUrl, options.signal, options.log, displayRepositoryPath)
-      await restoreIssueWorkspaceBranch(
+      await ensureIssueWorkspaceBranch(
         preparationPath,
         displayRepositoryPath,
         options.baseBranch,
@@ -240,7 +240,7 @@ async function ensureIssueWorkspaceRepository(options: IssueWorkspaceRepositoryO
   await reenterIssueWorkspaceBranch(options, displayRepositoryPath)
 }
 
-async function restoreIssueWorkspaceBranch(
+async function ensureIssueWorkspaceBranch(
   repositoryPath: string,
   displayRepositoryPath: string,
   baseBranch: string,

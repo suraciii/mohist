@@ -56,7 +56,7 @@ describe('NamedWorkspaceRegistry restart safety', () => {
             workflowRunId: 'wr-legacy',
             workspacePath: join(root, 'workspaces', 'wr-legacy'),
             phase: 'active',
-            materializedAt: now.toISOString(),
+            provisionedAt: now.toISOString(),
             terminalAt: null,
           },
         },
@@ -102,7 +102,7 @@ describe('NamedWorkspaceRegistry restart safety', () => {
     expect(Object.keys(raw.entries)).toEqual([namedWorkspaceRegistryKey('project', 'pay')])
   })
 
-  it('never reports a Home for a leftover run directory when materializing a named workspace', async (root) => {
+  it('never reports a Home for a leftover run directory when provisioning a named workspace', async (root) => {
     await mkdir(join(root, 'workspaces', 'wr-leftover'), { recursive: true })
     const registry = new NamedWorkspaceRegistry(root, { now: () => now })
     await registry.load()

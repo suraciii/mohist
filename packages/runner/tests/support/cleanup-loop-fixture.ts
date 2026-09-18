@@ -165,7 +165,7 @@ export async function createCleanupLoopFixture(fileSystem: RunnerFileSystem): Pr
             workspaceName: workflowRunId,
             workspacePath: path,
             phase: 'eligible',
-            materializedAt: now.toISOString(),
+            provisionedAt: now.toISOString(),
             terminalAt: null,
           },
         },

@@ -66,7 +66,7 @@ describe('namedWorkspacePath', () => {
   })
 })
 
-describe('materializeNamedWorkspace', () => {
+describe('provisionNamedWorkspaceHome', () => {
   it('creates an empty persistent directory with an identity marker and an active registry entry', async () => {
     const { root, registry } = context()
     const result = await provisionNamedWorkspaceHome({
@@ -93,11 +93,11 @@ describe('materializeNamedWorkspace', () => {
       workspaceName: 'pay',
       workspacePath: result.path,
       phase: 'active',
-      materializedAt: now.toISOString(),
+      provisionedAt: now.toISOString(),
     })
   })
 
-  it('keeps an existing directory and reports created=false on re-materialization', async () => {
+  it('keeps an existing directory and reports created=false on re-provisioning', async () => {
     const { root, registry } = context()
     const first = await provisionNamedWorkspaceHome({
       runnerRoot: root,
@@ -117,7 +117,7 @@ describe('materializeNamedWorkspace', () => {
     expect(registry.get('mohist', 'pay')).toMatchObject({ workspacePath: first.path, phase: 'active' })
   })
 
-  it('re-materializes an empty directory after the old one was recycled', async () => {
+  it('re-provisions an empty directory after the old one was recycled', async () => {
     const { root, registry } = context()
     await provisionNamedWorkspaceHome({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
     await rm(namedWorkspacePath(root, 'mohist', 'pay'), { recursive: true, force: true })
@@ -154,7 +154,7 @@ describe('materializeNamedWorkspace', () => {
 })
 
 describe('NamedWorkspaceManager', () => {
-  it('reports the materialized path to the server', async () => {
+  it('reports the provisioned path to the server', async () => {
     const { root, registry } = context()
     const report = vi.fn(async () => ({ runnerId: 'runner-1', path: namedWorkspacePath(root, 'mohist', 'pay') }))
     const manager = new NamedWorkspaceManager(root, registry, { reportWorkspaceProvisioned: report } as never)
@@ -167,7 +167,7 @@ describe('NamedWorkspaceManager', () => {
 
   it('yields (deleting only a directory it created) when the home is claimed by another runner', async () => {
     const { root, registry } = context()
-    const claimed = new WorkspaceHomeClaimedError('already materialized on runner-2')
+    const claimed = new WorkspaceHomeClaimedError('already provisioned on runner-2')
     const report = vi.fn(async () => {
       throw claimed
     })
@@ -183,7 +183,7 @@ describe('NamedWorkspaceManager', () => {
     await provisionNamedWorkspaceHome({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
     await registry.remove('ws:mohist:pay')
     const report = vi.fn(async () => {
-      throw new WorkspaceHomeClaimedError('already materialized on runner-2')
+      throw new WorkspaceHomeClaimedError('already provisioned on runner-2')
     })
     const manager = new NamedWorkspaceManager(root, registry, { reportWorkspaceProvisioned: report } as never)
 
@@ -194,7 +194,7 @@ describe('NamedWorkspaceManager', () => {
     expect(marker?.workspaceName).toBe('pay')
   })
 
-  it('propagates non-claim materialization report failures', async () => {
+  it('propagates non-claim provisioning report failures', async () => {
     const { root, registry } = context()
     const report = vi.fn(async () => {
       throw new Error('workspace Home provisioning failed: 500')
