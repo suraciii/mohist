@@ -387,6 +387,7 @@ export async function uploadCapturedArtifacts(
   for (const capture of captures) {
     const request: ArtifactUploadRequest = {
       path: capture.path,
+      kind: capture.kind,
       contentType: capture.contentType,
       contentHash: capture.contentHash,
       size: capture.size,

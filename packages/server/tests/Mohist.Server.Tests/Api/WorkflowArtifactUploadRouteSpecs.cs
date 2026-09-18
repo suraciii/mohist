@@ -265,7 +265,63 @@ public class WorkflowArtifactUploadRouteSpecs
                 "sha256:bad", envelope.LongLength);
 
             using var response = await _fixture.Client.PostAsync(
+                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-directory-uploads",
+                form);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.False(string.IsNullOrEmpty(body.GetProperty("error").GetString()));
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task FileUploadEndpoint_RejectsDirectoryContentType()
+    {
+        var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
+        try
+        {
+            // Directory envelopes must use the dedicated directory route so a
+            // directory payload can never ride the smaller file-upload
+            // transport boundary. The file route fails closed early.
+            var envelope = DirectoryEnvelopeTestData.Create(
+                new DirectoryEnvelopeTestFile("a.md", Encoding.UTF8.GetBytes("alpha"), "text/markdown"));
+            using var form = BuildMultipart(
+                "specs", envelope, WorkflowArtifactDirectoryEnvelopeReader.ContentType,
+                "sha256:dir", envelope.LongLength);
+
+            using var response = await _fixture.Client.PostAsync(
                 $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
+                form);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Contains(
+                "artifact-directory-uploads",
+                body.GetProperty("error").GetString() ?? string.Empty,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task DirectoryUploadEndpoint_RejectsNonDirectoryContentType()
+    {
+        var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
+        try
+        {
+            var payload = Encoding.UTF8.GetBytes("regular file");
+            using var form = BuildMultipart(
+                "review.md", payload, "text/markdown", "sha256:file", payload.LongLength);
+
+            using var response = await _fixture.Client.PostAsync(
+                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-directory-uploads",
                 form);
 
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -353,7 +409,7 @@ public class WorkflowArtifactUploadRouteSpecs
                 envelope.LongLength);
 
             using var upload = await _fixture.Client.PostAsync(
-                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
+                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-directory-uploads",
                 form);
             Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
             var uploadData = (await upload.Content.ReadFromJsonAsync<JsonElement>())

@@ -11,7 +11,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Api;
-using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Services.Artifacts;
 using Mohist.Server.Workflow.Storage;
@@ -20,12 +19,10 @@ using Xunit;
 namespace Mohist.Server.Tests.Api;
 
 /// <summary>
-/// Transport-limit alignment: the configured directory envelope limit is the
-/// effective gate. The global form limit and both artifact upload routes'
-/// request-size metadata are derived from <c>MaxEnvelopeBytes</c> plus a fixed
-/// multipart-framing slack, so a multipart directory at the configured limit
-/// is admitted by the form layer and one over the derived bound is rejected
-/// before the whole body is buffered.
+/// Transport-limit separation: only the directory upload routes raise the
+/// request-body and form limits to the configured envelope bound. The
+/// single-file routes keep the default Kestrel/form boundary, so the
+/// directory envelope relaxation cannot silently widen regular file uploads.
 /// </summary>
 [Trait("level", "L1")]
 public sealed class WorkflowArtifactTransportLimitSpecs
@@ -34,8 +31,17 @@ public sealed class WorkflowArtifactTransportLimitSpecs
     private const long SlackBytes = WorkflowArtifactDirectoryLimits.MultipartFramingSlackBytes;
     private const long BodyLimitBytes = EnvelopeBytes + SlackBytes;
 
+    private const string WorkflowFileRoute =
+        "/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads";
+    private const string WorkflowDirectoryRoute =
+        "/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-directory-uploads";
+    private const string AgentFileRoute =
+        "/api/agent-jobs/{agentJobId}/work/{workId}/artifact-uploads";
+    private const string AgentDirectoryRoute =
+        "/api/agent-jobs/{agentJobId}/work/{workId}/artifact-directory-uploads";
+
     [Fact]
-    public void RequestSizeLimitMetadata_AndFormOptions_DeriveFromConfiguredEnvelopeLimit()
+    public void DirectoryRoutesCarryEnvelopeRequestSizeLimit_FileRoutesKeepDefaultBoundary()
     {
         using var host = BuildHost(mapProbe: false);
 
@@ -43,24 +49,43 @@ public sealed class WorkflowArtifactTransportLimitSpecs
             .SelectMany(source => source.Endpoints)
             .OfType<RouteEndpoint>()
             .Where(endpoint => endpoint.RoutePattern.RawText is
-                "/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads"
-                or "/api/agent-jobs/{agentJobId}/work/{workId}/artifact-uploads")
+                WorkflowFileRoute or WorkflowDirectoryRoute or AgentFileRoute or AgentDirectoryRoute)
             .ToList();
 
-        Assert.Equal(2, routes.Count);
-        foreach (var route in routes)
+        Assert.Equal(4, routes.Count);
+
+        var directoryRoutes = routes
+            .Where(route => route.RoutePattern.RawText!.EndsWith(
+                WorkflowArtifactUploadRoutes.DirectoryUploadRouteSuffix, StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(2, directoryRoutes.Count);
+        foreach (var route in directoryRoutes)
         {
             var metadata = route.Metadata.GetMetadata<IRequestSizeLimitMetadata>();
             Assert.NotNull(metadata);
             Assert.Equal(BodyLimitBytes, metadata!.MaxRequestBodySize);
         }
 
+        var fileRoutes = routes
+            .Where(route => route.RoutePattern.RawText!.EndsWith("artifact-uploads", StringComparison.Ordinal)
+                && !route.RoutePattern.RawText!.EndsWith(
+                    WorkflowArtifactUploadRoutes.DirectoryUploadRouteSuffix, StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(2, fileRoutes.Count);
+        foreach (var route in fileRoutes)
+        {
+            Assert.Null(route.Metadata.GetMetadata<IRequestSizeLimitMetadata>());
+        }
+
+        // The form limit is raised per-request only on the directory routes, so
+        // the process-global default still bounds single-file and attachment
+        // multipart parsing.
         var formOptions = host.Services.GetRequiredService<IOptions<FormOptions>>().Value;
-        Assert.Equal(BodyLimitBytes, formOptions.MultipartBodyLengthLimit);
+        Assert.Equal(FormOptions.DefaultMultipartBodyLengthLimit, formOptions.MultipartBodyLengthLimit);
     }
 
     [Fact]
-    public async Task MultipartDirectory_AtEnvelopeLimit_IsAdmittedByFormLayer()
+    public async Task DirectoryFormLimit_AtEnvelopeLimit_IsAdmittedByFormLayer()
     {
         using var host = BuildHost(mapProbe: true);
         using var client = host.GetTestServer().CreateClient();
@@ -72,7 +97,7 @@ public sealed class WorkflowArtifactTransportLimitSpecs
     }
 
     [Fact]
-    public async Task MultipartDirectory_OverTransportBound_IsRejectedBeforeFormBuffering()
+    public async Task DirectoryFormLimit_OverTransportBound_IsRejectedBeforeFormBuffering()
     {
         using var host = BuildHost(mapProbe: true);
         using var client = host.GetTestServer().CreateClient();
@@ -97,7 +122,6 @@ public sealed class WorkflowArtifactTransportLimitSpecs
             {
                 MaxEnvelopeBytes = EnvelopeBytes,
             });
-        builder.Services.ConfigureWorkflowArtifactTransportLimits();
 
         var app = builder.Build();
         app.MapWorkflowArtifactUploadRoutes();
@@ -105,6 +129,9 @@ public sealed class WorkflowArtifactTransportLimitSpecs
         {
             app.MapPost("/probe", async (HttpRequest request) =>
             {
+                // Exercise the production helper the directory route applies
+                // before parsing its multipart body.
+                WorkflowArtifactUploadRoutes.ApplyDirectoryFormLimit(request, BodyLimitBytes);
                 try
                 {
                     var form = await request.ReadFormAsync();

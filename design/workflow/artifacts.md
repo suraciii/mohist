@@ -82,13 +82,20 @@ Enforcement is fail-closed and two-layered:
 ### Transport limits
 
 Kestrel's default request-body cap and `FormOptions.MultipartBodyLengthLimit` are below a legal
-default envelope. Both derive from `MaxEnvelopeBytes` plus the framing slack:
+default envelope. Directory ingestion therefore uses dedicated routes whose request-body and
+multipart/form limits derive from `MaxEnvelopeBytes` plus the framing slack:
 
-- `FormOptions.MultipartBodyLengthLimit` is configured from `MaxMultipartBodyBytes`.
-- Both artifact upload routes carry a `RequestSizeLimitAttribute` with the same bound.
+- `POST /api/workflow-runs/{workflowRunId}/work/{workId}/artifact-directory-uploads`
+- `POST /api/agent-jobs/{agentJobId}/work/{workId}/artifact-directory-uploads`
 
-The configured envelope limit is therefore the effective gate. Attachment enforcement remains under
-`AttachmentStorageOptions.MaxFileBytes`.
+Those routes carry a `RequestSizeLimitAttribute` with `MaxMultipartBodyBytes` and replace the
+request's form feature with a `MultipartBodyLengthLimit` of the same bound before reading the form.
+
+Only the directory routes raise the limits. The original `artifact-uploads` routes keep the
+default Kestrel/form boundary, so the directory relaxation cannot widen regular file uploads or
+attachments; the file routes reject the directory content type and the directory routes reject a
+non-directory content type. `FormOptions.MultipartBodyLengthLimit` stays at its framework default,
+so `AttachmentStorageOptions.MaxFileBytes` enforcement is unchanged.
 
 ### Streaming storage
 
@@ -140,5 +147,6 @@ probe before the extra bytes are retained.
 ## Status
 
 Implemented. The directory transport, `MaxEnvelopeBytes`, streaming reader and storage, and the
-transport-limit alignment ship together; the Runner emits the same NDJSON sequence. Single-file
-artifact ingestion is unchanged.
+dedicated directory upload routes ship together; the Runner selects the directory route for
+directory captures. Single-file artifact ingestion and its default transport boundary are
+unchanged.

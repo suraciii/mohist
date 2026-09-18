@@ -191,6 +191,58 @@ describe('ServerConnection.uploadArtifact', () => {
     expect(url).toContain('/api/agent-jobs/agent-job-1/work/agent-work-1/artifact-uploads')
     expect(url).not.toContain('/api/workflow-runs//')
   })
+
+  it('usesDirectoryEndpointWhenUploadKindIsDirectory', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        status: 200,
+        body: JSON.stringify({
+          data: {
+            uploadId: 'artup_dir',
+            workflowRunId: 'wf-1',
+            workId: 'work-1',
+            path: 'specs',
+            size: 6,
+          },
+        }),
+      }),
+    )
+    const connection = new ServerConnection(options())
+
+    await connection.uploadArtifact(
+      'wf-1',
+      'work-1',
+      { path: 'specs', kind: 'directory', size: 6, content: new TextEncoder().encode('{}') },
+      new AbortController().signal,
+    )
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/api/workflow-runs/wf-1/work/work-1/artifact-directory-uploads')
+    expect(url).not.toContain('/api/workflow-runs/wf-1/work/work-1/artifact-uploads')
+  })
+
+  it('usesAgentJobDirectoryEndpointWhenOwnerKindAndKindAreDirectory', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        status: 200,
+        body: JSON.stringify({
+          data: { uploadId: 'artup_agent_dir', workflowRunId: 'agent-job-1', workId: 'agent-work-1' },
+        }),
+      }),
+    )
+    const connection = new ServerConnection(options())
+
+    await connection.uploadArtifact(
+      'agent-job-1',
+      'agent-work-1',
+      { path: 'specs', kind: 'directory', size: 6, content: new Uint8Array([0x7b, 0x7d]) },
+      new AbortController().signal,
+      'agent-job',
+    )
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/api/agent-jobs/agent-job-1/work/agent-work-1/artifact-directory-uploads')
+  })
 })
 
 describe('ServerConnection.report', () => {
