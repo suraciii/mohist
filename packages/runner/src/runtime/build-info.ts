@@ -58,6 +58,7 @@ export function loadBuildInfo(
       const raw = fileSystem.readText(path)
       const parsed = JSON.parse(raw) as {
         gitHash?: unknown
+        buildGitHash?: unknown
         builtAt?: unknown
         component?: unknown
         version?: unknown
@@ -68,7 +69,12 @@ export function loadBuildInfo(
         generation?: unknown
         runnerId?: unknown
       }
-      const gitHash = typeof parsed.gitHash === 'string' && parsed.gitHash.length > 0 ? parsed.gitHash : null
+      const gitHash =
+        typeof parsed.gitHash === 'string' && parsed.gitHash.length > 0
+          ? parsed.gitHash
+          : typeof parsed.buildGitHash === 'string' && parsed.buildGitHash.length > 0
+            ? parsed.buildGitHash
+            : null
       const builtAt = typeof parsed.builtAt === 'number' && Number.isFinite(parsed.builtAt) ? parsed.builtAt : null
       const text = (value: unknown) => (typeof value === 'string' && value.length > 0 ? value : null)
       const generation =
