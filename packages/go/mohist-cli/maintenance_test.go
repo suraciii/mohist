@@ -139,6 +139,91 @@ func TestInstallRunnerPersistsEnabledAgentRuntimes(t *testing.T) {
 	}
 }
 
+func TestInstallRunnerCapturesEnvironmentSnapshotAndLoadsItFromSystemd(t *testing.T) {
+	home := t.TempDir()
+	repoRoot := t.TempDir()
+	files := map[string]string{}
+	modes := map[string]os.FileMode{}
+	var commands [][]string
+	deps, _, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodPost || request.URL.Path != "/api/runners/enrollment-tokens" {
+			t.Fatalf("unexpected enrollment request: %s %s", request.Method, request.URL.Path)
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"token":"enrollment-token"}}`), nil
+	}), map[string]string{
+		"MOHIST_SERVER_URL": "http://server",
+		"MOHIST_TOKEN":      "operator-token",
+		"PATH":              "/opt/go/bin:/tmp/injected:/opt/go/bin:/opt/node/bin",
+		"TMPDIR":            "/tmp/session",
+		"GOROOT":            "/opt/go",
+	})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.CurrentDirectory = func() string { return repoRoot }
+	deps.WriteFile = func(path, value string, mode os.FileMode) error {
+		files[path] = value
+		modes[path] = mode
+		return nil
+	}
+	deps.WriteFileAtomic = func(path string, value []byte, mode os.FileMode) error {
+		files[path] = string(value)
+		modes[path] = mode
+		return nil
+	}
+	deps.Execute = func(_ context.Context, name string, args []string) error {
+		commands = append(commands, append([]string{name}, args...))
+		return nil
+	}
+
+	if code := Run(context.Background(), []string{"install", "runner", "--repo-root", repoRoot}, deps); code != ExitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
+	}
+	snapshotPath := filepath.Join(home, ".config", "mohist", "runner-environment.env")
+	if got, want := files[snapshotPath], "GOROOT=\"/opt/go\"\nPATH=\"/opt/go/bin:/opt/node/bin\"\n"; got != want {
+		t.Fatalf("snapshot = %q, want %q", got, want)
+	}
+	if modes[snapshotPath] != 0o600 {
+		t.Fatalf("snapshot mode = %o", modes[snapshotPath])
+	}
+	unit := files[filepath.Join(home, ".config", "systemd", "user", "mohist-runner.service")]
+	for _, line := range []string{
+		"EnvironmentFile=-%h/.config/mohist/runner-environment.env\n",
+		"EnvironmentFile=-%h/.config/mohist/runner.env\n",
+		"EnvironmentFile=-%h/.config/mohist/runner-managed.env\n",
+	} {
+		if !strings.Contains(unit, line) {
+			t.Fatalf("unit does not contain %q: %q", line, unit)
+		}
+	}
+	if len(commands) != 3 {
+		t.Fatalf("systemd commands = %#v", commands)
+	}
+}
+
+func TestInstallRunnerSnapshotWriteFailureHasNoSystemdEffects(t *testing.T) {
+	home := t.TempDir()
+	commands := 0
+	deps, _, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"success":true,"data":{"token":"enrollment-token"}}`), nil
+	}), map[string]string{
+		"MOHIST_SERVER_URL": "http://server",
+		"MOHIST_TOKEN":      "operator-token",
+		"PATH":              "/opt/go/bin",
+	})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.WriteFile = func(string, string, os.FileMode) error { return nil }
+	deps.WriteFileAtomic = func(string, []byte, os.FileMode) error { return errors.New("snapshot disk full") }
+	deps.Execute = func(context.Context, string, []string) error { commands++; return nil }
+	if code := Run(context.Background(), []string{"install", "runner"}, deps); code != ExitOperation {
+		t.Fatalf("exit code = %d, stderr = %s", code, errOut.String())
+	}
+	if commands != 0 {
+		t.Fatalf("systemd commands after snapshot failure = %d", commands)
+	}
+	if !strings.Contains(errOut.String(), "snapshot could not be written") {
+		t.Fatalf("stderr = %q", errOut.String())
+	}
+}
+
 func TestInstallRunnerEnabledAgentRuntimesValidation(t *testing.T) {
 	tests := []struct {
 		name string
@@ -226,6 +311,14 @@ func TestInstallRunnerWithoutRuntimeFlagDoesNotCreateEnvironmentFile(t *testing.
 	}
 	if !strings.Contains(string(unit), "EnvironmentFile=-%h/.config/mohist/runner.env\n") {
 		t.Fatalf("unit does not tolerate the absent environment file: %q", unit)
+	}
+	snapshotPath := filepath.Join(home, ".config", "mohist", "runner-environment.env")
+	snapshot, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot) != 0 {
+		t.Fatalf("empty environment snapshot = %q", snapshot)
 	}
 }
 
