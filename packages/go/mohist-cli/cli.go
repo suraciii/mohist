@@ -33,6 +33,7 @@ const (
 type EnvLookup func(string) (string, bool)
 type ReadFile func(string) (string, error)
 type WriteFile func(string, string, os.FileMode) error
+type WriteFileAtomic func(string, []byte, os.FileMode) error
 type Execute func(context.Context, string, []string) error
 type ExecuteOutput func(context.Context, string, []string) (string, error)
 type Wait func(context.Context, time.Duration) error
@@ -48,6 +49,7 @@ type Dependencies struct {
 	Lookup                  EnvLookup
 	ReadFile                ReadFile
 	WriteFile               WriteFile
+	WriteFileAtomic         WriteFileAtomic
 	HomeDir                 func() (string, error)
 	Execute                 Execute
 	ExecuteOutput           ExecuteOutput
@@ -96,6 +98,9 @@ func defaultDependencies() Dependencies {
 				return err
 			}
 			return os.Chmod(path, mode)
+		},
+		WriteFileAtomic: func(path string, value []byte, mode os.FileMode) error {
+			return (realManagedFiles{}).WriteFileAtomic(path, value, mode)
 		},
 		HomeDir: os.UserHomeDir,
 		Execute: func(ctx context.Context, name string, args []string) error {
@@ -331,6 +336,9 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	}
 	if deps.WriteFile == nil {
 		deps.WriteFile = defaults.WriteFile
+	}
+	if deps.WriteFileAtomic == nil {
+		deps.WriteFileAtomic = defaults.WriteFileAtomic
 	}
 	if deps.Execute == nil {
 		deps.Execute = defaults.Execute

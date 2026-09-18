@@ -19,6 +19,7 @@ var skillPathFields = []string{"name", "path"}
 
 const runnerEnvironmentFile = "%h/.config/mohist/runner.env"
 const runnerManagedEnvironmentFile = "%h/.config/mohist/runner-managed.env"
+const runnerEnvironmentSnapshotFile = "%h/.config/mohist/runner-environment.env"
 const runnerEnrollmentTokenFile = "enrollment-token"
 
 type localSkill struct {
@@ -841,7 +842,24 @@ func installComponent(
 			writeError(deps.Stderr, err)
 			return ExitOperation
 		}
-		environmentFileLine = "EnvironmentFile=-" + runnerEnvironmentFile + "\n" +
+		snapshot, _, err := captureRunnerEnvironment(deps.Lookup)
+		if err != nil {
+			writeError(deps.Stderr, err)
+			return ExitOperation
+		}
+		writeAtomic := deps.WriteFileAtomic
+		if writeAtomic == nil {
+			writeAtomic = func(path string, value []byte, mode os.FileMode) error {
+				return (realManagedFiles{}).WriteFileAtomic(path, value, mode)
+			}
+		}
+		snapshotPath := filepath.Join(home, ".config", "mohist", "runner-environment.env")
+		if err := writeAtomic(snapshotPath, []byte(snapshot.Content), 0o600); err != nil {
+			writeError(deps.Stderr, fmt.Errorf("runner environment snapshot could not be written: %w", err))
+			return ExitOperation
+		}
+		environmentFileLine = "EnvironmentFile=-" + runnerEnvironmentSnapshotFile + "\n" +
+			"EnvironmentFile=-" + runnerEnvironmentFile + "\n" +
 			"EnvironmentFile=-" + runnerManagedEnvironmentFile + "\n"
 		if runtimes := argValue(c.args, "enabled-agent-runtimes", ""); runtimes != "" {
 			environmentPath := filepath.Join(home, ".config", "mohist", "runner.env")
