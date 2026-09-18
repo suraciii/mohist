@@ -104,6 +104,9 @@ func (updater *managedUpdater) Update(ctx context.Context, request ManagedUpdate
 		if activeErr != nil || verifiedErr != nil || !reflect.DeepEqual(activeTarget, verifiedTarget) {
 			return fmt.Errorf("managed %s active and verified targets do not agree", component)
 		}
+		if err := validateManagedInstalledReleaseManifest(env.files, activeTarget); err != nil {
+			return err
+		}
 	}
 
 	transactionID := env.newID()
@@ -148,8 +151,8 @@ func (updater *managedUpdater) Update(ctx context.Context, request ManagedUpdate
 		if err != nil {
 			return fmt.Errorf("managed %s runtime could not be observed before update", component)
 		}
-		if differences := managedIdentityDifferences(observation.Identity, previousTarget.Identity); len(differences) > 0 {
-			return fmt.Errorf("managed %s runtime does not match the verified target in %s", component, strings.Join(differences, ", "))
+		if err := validateManagedLiveIdentity(component, observation, previousTarget.Identity); err != nil {
+			return err
 		}
 		previousObservations[component] = observation
 	}
@@ -163,6 +166,13 @@ func (updater *managedUpdater) Update(ctx context.Context, request ManagedUpdate
 	)
 	if err != nil {
 		return err
+	}
+	for _, component := range components {
+		if err := validateManagedStagedCandidate(
+			env.files, filepath.Join(transactionRoot, "candidate", component), targets[component], source, generation,
+		); err != nil {
+			return err
+		}
 	}
 	for _, component := range components {
 		targets[component].Arguments = append([]string(nil), services[component].PreviousTarget.Arguments...)

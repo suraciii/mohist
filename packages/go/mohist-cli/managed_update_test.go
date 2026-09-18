@@ -706,6 +706,172 @@ func TestManagedUpdateRequiresActiveAndVerifiedTargetsToAgreeBeforeCapture(t *te
 	}
 }
 
+func TestManagedUpdateRejectsInstalledManifestDisagreementBeforeBuild(t *testing.T) {
+	fixture := newManagedUpdateFixture(t)
+	target, err := pointerTarget(fixture.pointer("active.json"), "server")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := target.Identity
+	tampered.TreeHash = strings.Repeat("f", 40)
+	value, _ := json.MarshalIndent(tampered, "", "  ")
+	fixture.files.put(filepath.Join(target.WorkingDirectory, "runtime-identity.json"), append(value, '\n'), 0o600)
+	originalUnit := fixture.files.text(fixture.unitPath)
+	originalActive := fixture.files.text(filepath.Join(fixture.runtimeRoot, "active.json"))
+	originalVerified := fixture.files.text(filepath.Join(fixture.runtimeRoot, "verified.json"))
+
+	err = fixture.updater.Update(context.Background(), ManagedUpdateRequest{
+		Components: []string{"server"}, RepoRoot: "/repo",
+	})
+	if err == nil || !strings.Contains(err.Error(), "release manifest does not match its pointer target") {
+		t.Fatalf("error = %v", err)
+	}
+	for _, call := range fixture.commands.calls {
+		if call.Name != "git" {
+			t.Fatalf("side effect before manifest gate: %#v", call)
+		}
+	}
+	if fixture.commands.hasSystemctlMutation() {
+		t.Fatalf("systemd mutation after manifest rejection: %#v", fixture.commands.calls)
+	}
+	if fixture.files.text(fixture.unitPath) != originalUnit ||
+		fixture.files.text(filepath.Join(fixture.runtimeRoot, "active.json")) != originalActive ||
+		fixture.files.text(filepath.Join(fixture.runtimeRoot, "verified.json")) != originalVerified {
+		t.Fatal("manifest rejection changed the service or active/verified pointers")
+	}
+}
+
+func TestManagedUpdateRejectsLiveRuntimeMismatchBeforeActivation(t *testing.T) {
+	fixture := newManagedUpdateFixture(t)
+	fixture.control.initialMismatch = true
+	originalUnit := fixture.files.text(fixture.unitPath)
+	originalActive := fixture.files.text(filepath.Join(fixture.runtimeRoot, "active.json"))
+	originalVerified := fixture.files.text(filepath.Join(fixture.runtimeRoot, "verified.json"))
+
+	err := fixture.updater.Update(context.Background(), ManagedUpdateRequest{
+		Components: []string{"server"}, RepoRoot: "/repo",
+	})
+	if err == nil || !strings.Contains(err.Error(), "live runtime does not match the active target") {
+		t.Fatalf("error = %v", err)
+	}
+	for _, call := range fixture.commands.calls {
+		if call.Name == "dotnet" || call.Name == "npm" {
+			t.Fatalf("build ran before live-runtime rejection: %#v", call)
+		}
+	}
+	if fixture.commands.hasSystemctlMutation() {
+		t.Fatalf("systemd mutation after live-runtime rejection: %#v", fixture.commands.calls)
+	}
+	if fixture.files.text(fixture.unitPath) != originalUnit ||
+		fixture.files.text(filepath.Join(fixture.runtimeRoot, "active.json")) != originalActive ||
+		fixture.files.text(filepath.Join(fixture.runtimeRoot, "verified.json")) != originalVerified {
+		t.Fatal("live-runtime rejection changed the service or active/verified pointers")
+	}
+	if fixture.files.Exists(filepath.Join(fixture.runtimeRoot, "pending.json")) {
+		t.Fatal("live-runtime rejection left a pending marker")
+	}
+}
+
+func TestManagedUpdateRejectsStagedCandidateIdentityBeforeActivation(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*managedRuntimeIdentity)
+		wantErr string
+	}{
+		{
+			name: "schema version", mutate: func(identity *managedRuntimeIdentity) { identity.SchemaVersion = 2 },
+			wantErr: "release manifest is not canonical",
+		},
+		{
+			name: "wrong component",
+			mutate: func(identity *managedRuntimeIdentity) {
+				identity.Component = "runner"
+				identity.RunnerID = "runner-1"
+			},
+			wantErr: "reports component",
+		},
+		{
+			name:    "source revision",
+			mutate:  func(identity *managedRuntimeIdentity) { identity.SourceRevision = strings.Repeat("f", 40) },
+			wantErr: "sourceRevision does not match the captured commit",
+		},
+		{
+			name:    "tree hash",
+			mutate:  func(identity *managedRuntimeIdentity) { identity.TreeHash = strings.Repeat("f", 40) },
+			wantErr: "treeHash does not match the captured tree",
+		},
+		{
+			name:    "generation",
+			mutate:  func(identity *managedRuntimeIdentity) { identity.Generation++ },
+			wantErr: "generation does not match the update transaction",
+		},
+		{
+			name:    "build git hash",
+			mutate:  func(identity *managedRuntimeIdentity) { identity.BuildGitHash = strings.Repeat("f", 40) },
+			wantErr: "buildGitHash does not match the captured commit",
+		},
+		{
+			name:    "empty artifact digest",
+			mutate:  func(identity *managedRuntimeIdentity) { identity.ArtifactDigest = "" },
+			wantErr: "release manifest is not canonical",
+		},
+		{
+			name:    "empty release id",
+			mutate:  func(identity *managedRuntimeIdentity) { identity.ReleaseID = "" },
+			wantErr: "release manifest is not canonical",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newManagedUpdateFixture(t)
+			fixture.files.mutateCandidateIdentity = test.mutate
+			originalUnit := fixture.files.text(fixture.unitPath)
+			originalActive := fixture.files.text(filepath.Join(fixture.runtimeRoot, "active.json"))
+			originalVerified := fixture.files.text(filepath.Join(fixture.runtimeRoot, "verified.json"))
+
+			err := fixture.updater.Update(context.Background(), ManagedUpdateRequest{
+				Components: []string{"server"}, RepoRoot: "/repo",
+			})
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("error = %v, want %q", err, test.wantErr)
+			}
+			if fixture.commands.hasSystemctlMutation() {
+				t.Fatalf("systemd mutation after candidate rejection: %#v", fixture.commands.calls)
+			}
+			if fixture.files.text(fixture.unitPath) != originalUnit ||
+				fixture.files.text(filepath.Join(fixture.runtimeRoot, "active.json")) != originalActive ||
+				fixture.files.text(filepath.Join(fixture.runtimeRoot, "verified.json")) != originalVerified {
+				t.Fatal("candidate rejection changed the service or active/verified pointers")
+			}
+			if fixture.files.Exists(filepath.Join(fixture.runtimeRoot, "pending.json")) {
+				t.Fatal("candidate rejection left a pending marker")
+			}
+		})
+	}
+}
+
+func TestManagedUpdateRejectsMissingStagedCandidateIdentityBeforeActivation(t *testing.T) {
+	fixture := newManagedUpdateFixture(t)
+	fixture.files.removeCandidateIdentity = true
+	originalUnit := fixture.files.text(fixture.unitPath)
+
+	err := fixture.updater.Update(context.Background(), ManagedUpdateRequest{
+		Components: []string{"server"}, RepoRoot: "/repo",
+	})
+	if err == nil || !strings.Contains(err.Error(), "release manifest is unavailable") {
+		t.Fatalf("error = %v", err)
+	}
+	if fixture.commands.hasSystemctlMutation() {
+		t.Fatalf("systemd mutation after missing candidate rejection: %#v", fixture.commands.calls)
+	}
+	if fixture.files.text(fixture.unitPath) != originalUnit {
+		t.Fatal("missing candidate rejection changed the service")
+	}
+	if fixture.files.Exists(filepath.Join(fixture.runtimeRoot, "pending.json")) {
+		t.Fatal("missing candidate rejection left a pending marker")
+	}
+}
+
 type managedUpdateFixture struct {
 	t           testing.TB
 	runtimeRoot string
@@ -743,6 +909,8 @@ func newManagedUpdateFixture(t testing.TB) *managedUpdateFixture {
 	files.put(filepath.Join(runtimeRoot, "active.json"), append(pointerValue, '\n'), 0o600)
 	files.put(filepath.Join(runtimeRoot, "verified.json"), append(pointerValue, '\n'), 0o600)
 	files.put("/repo/Mohist.sln", []byte("solution"), 0o644)
+	oldServerIdentity, _ := json.MarshalIndent(old.Identity, "", "  ")
+	files.put(filepath.Join("/runtime/old/server", "runtime-identity.json"), append(oldServerIdentity, '\n'), 0o600)
 	unit := "[Unit]\nDescription=Mohist Server\n\n[Service]\nWorkingDirectory=/runtime/old/server\nEnvironment=\"PATH=/usr/bin\"\nEnvironment=\"MOHIST_RUNTIME_IDENTITY_PATH=/runtime/old/server/runtime-identity.json\"\nExecStart=/runtime/old/server/Mohist.Server\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n"
 	files.put(unitPath, []byte(unit), 0o600)
 	commands := &managedUpdateFakeCommands{
@@ -881,12 +1049,19 @@ type managedUpdateFakeFile struct {
 }
 
 type managedUpdateFakeFiles struct {
-	values               map[string]managedUpdateFakeFile
-	events               *[]string
-	lockError            error
-	renameError          error
-	stateWrites          int
-	failStateWriteNumber int
+	values                  map[string]managedUpdateFakeFile
+	events                  *[]string
+	lockError               error
+	renameError             error
+	stateWrites             int
+	failStateWriteNumber    int
+	mutateCandidateIdentity func(*managedRuntimeIdentity)
+	removeCandidateIdentity bool
+}
+
+func isManagedCandidateIdentityPath(path string) bool {
+	slash := filepath.ToSlash(path)
+	return strings.Contains(slash, "/candidate/") && strings.HasSuffix(slash, "/runtime-identity.json")
 }
 
 func (files *managedUpdateFakeFiles) put(path string, value []byte, mode os.FileMode) {
@@ -920,6 +1095,18 @@ func (files *managedUpdateFakeFiles) WriteFileAtomic(path string, value []byte, 
 	}
 	if filepath.Base(path) == "pending.json" {
 		*files.events = append(*files.events, "write-pending:"+path)
+	}
+	if files.mutateCandidateIdentity != nil && isManagedCandidateIdentityPath(path) {
+		var identity managedRuntimeIdentity
+		if err := json.Unmarshal(value, &identity); err == nil {
+			files.mutateCandidateIdentity(&identity)
+			if encoded, err := json.MarshalIndent(identity, "", "  "); err == nil {
+				value = append(encoded, '\n')
+			}
+		}
+	}
+	if files.removeCandidateIdentity && isManagedCandidateIdentityPath(path) {
+		return nil
 	}
 	files.put(path, value, mode)
 	return nil
@@ -1156,10 +1343,16 @@ type managedUpdateFakeControl struct {
 	cancelCalls             int
 	cancelRunnerID          string
 	cancelInterruptID       string
+	initialMismatch         bool
 }
 
 func (control *managedUpdateFakeControl) ObserveServer(context.Context) (managedRuntimeObservation, error) {
 	control.serverCalls++
+	if control.initialMismatch && control.serverCalls == 1 {
+		mismatched := control.old
+		mismatched.TreeHash = strings.Repeat("f", 40)
+		return control.recordServerObservation("initial-mismatch", managedRuntimeObservation{Identity: mismatched, Status: "ok"}), nil
+	}
 	if control.serverCalls == 1 {
 		return control.recordServerObservation("old", managedRuntimeObservation{Identity: control.old, Status: "ok"}), nil
 	}

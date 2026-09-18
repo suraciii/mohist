@@ -24,6 +24,7 @@ func TestRealManagedControlPlaneObserveRunnerUsesRequiredEscapedRunnerID(t *test
   "component": "runner",
   "version": "0.0.0+0123",
   "sourceRevision": "source-0123",
+  "schemaVersion": 1,
   "treeHash": "tree-0123",
   "artifactDigest": "digest-0123",
   "releaseId": "mohist-runner-0123",
@@ -40,7 +41,8 @@ func TestRealManagedControlPlaneObserveRunnerUsesRequiredEscapedRunnerID(t *test
 	}
 	want := managedRuntimeObservation{
 		Identity: managedRuntimeIdentity{
-			Component: "runner", Version: "0.0.0+0123", SourceRevision: "source-0123",
+			SchemaVersion: 1,
+			Component:     "runner", Version: "0.0.0+0123", SourceRevision: "source-0123",
 			TreeHash: "tree-0123", ArtifactDigest: "digest-0123", ReleaseID: "mohist-runner-0123",
 			Generation: 41, RunnerID: runnerID, BuildGitHash: "build-0123",
 		},
@@ -59,6 +61,69 @@ func TestRealManagedControlPlaneObserveRunnerUsesRequiredEscapedRunnerID(t *test
 	}
 	if request.Method != http.MethodGet {
 		t.Fatalf("request method = %q, want GET", request.Method)
+	}
+}
+
+func TestRealManagedControlPlaneObserveServerUsesCanonicalIdentity(t *testing.T) {
+	control := newManagedProbeTestControl(t, func(request *http.Request) (*http.Response, error) {
+		if request.URL.EscapedPath() != "/api/health" {
+			return nil, fmt.Errorf("unexpected path %s", request.URL.EscapedPath())
+		}
+		return managedProbeTestResponse(`{
+  "status": "ok",
+  "version": "0.0.0+0123",
+  "component": "server",
+  "sourceRevision": "source-0123",
+  "buildGitHash": "build-0123",
+  "schemaVersion": 1,
+  "gitHash": "legacy-0123",
+  "treeHash": "tree-0123",
+  "artifactDigest": "digest-0123",
+  "releaseId": "mohist-server-0123",
+  "generation": 41
+}`), nil
+	})
+
+	got, err := control.ObserveServer(context.Background())
+	if err != nil {
+		t.Fatalf("ObserveServer() error = %v", err)
+	}
+	want := managedRuntimeIdentity{
+		SchemaVersion: 1, Component: "server", Version: "0.0.0+0123",
+		SourceRevision: "source-0123", BuildGitHash: "build-0123",
+		TreeHash: "tree-0123", ArtifactDigest: "digest-0123",
+		ReleaseID: "mohist-server-0123", Generation: 41,
+	}
+	if !reflect.DeepEqual(got.Identity, want) {
+		t.Fatalf("identity = %#v, want %#v", got.Identity, want)
+	}
+	if got.Status != "ok" {
+		t.Fatalf("status = %q, want ok", got.Status)
+	}
+}
+
+func TestRealManagedControlPlaneObserveServerFallsBackToLegacyGitHash(t *testing.T) {
+	control := newManagedProbeTestControl(t, func(request *http.Request) (*http.Response, error) {
+		if request.URL.EscapedPath() != "/api/health" {
+			return nil, fmt.Errorf("unexpected path %s", request.URL.EscapedPath())
+		}
+		return managedProbeTestResponse(`{
+  "status": "ok",
+  "version": "0.0.0+legacy",
+  "gitHash": "legacy-0123",
+  "treeHash": "tree-legacy",
+  "artifactDigest": "digest-legacy",
+  "releaseId": "mohist-server-legacy",
+  "generation": 7
+}`), nil
+	})
+
+	got, err := control.ObserveServer(context.Background())
+	if err != nil {
+		t.Fatalf("ObserveServer() error = %v", err)
+	}
+	if got.Identity.Component != "server" || got.Identity.SourceRevision != "legacy-0123" || got.Identity.SchemaVersion != 0 {
+		t.Fatalf("legacy identity = %#v", got.Identity)
 	}
 }
 

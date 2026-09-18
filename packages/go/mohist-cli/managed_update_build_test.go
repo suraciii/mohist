@@ -151,6 +151,8 @@ func TestManagedUpdaterBuildFailurePrecedesServiceActivation(t *testing.T) {
 	commands.failPublish = true
 	control := &managedBuildTestControl{}
 	previous := managedBuildTestServerTarget()
+	previousIdentity, _ := json.MarshalIndent(previous.Identity, "", "  ")
+	files.put("/old/runtime-identity.json", append(previousIdentity, '\n'))
 	runtimeRoot := filepath.Join("/home/test", ".local", "share", "mohist", "runtime")
 	activePath := filepath.Join(runtimeRoot, "active.json")
 	verifiedPath := filepath.Join(runtimeRoot, "verified.json")
