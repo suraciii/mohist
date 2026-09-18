@@ -2,10 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { join } from 'node:path'
 import { describe, expect, it as vitestIt, vi } from 'vitest'
 import { CleanupLoop } from '../src/runtime/cleanup-loop.js'
-import {
-  provisionNamedWorkspaceHome as materializeNamedWorkspace,
-  namedWorkspacePath,
-} from '../src/runtime/workspace-entity.js'
+import { namedWorkspacePath, provisionNamedWorkspaceHome } from '../src/runtime/workspace-entity.js'
 import { NamedWorkspaceCleanupRunner, NamedWorkspaceReclaimProbe } from '../src/runtime/named-workspace-cleanup.js'
 import { NamedWorkspaceRegistry, namedWorkspaceRegistryKey } from '../src/runtime/workspace-registry.js'
 import type { CleanupPolicy } from '../src/core/types.js'
@@ -126,7 +123,7 @@ describe('NamedWorkspaceReclaimProbe', () => {
 describe('NamedWorkspaceCleanupRunner', () => {
   it('reads the named workspace marker identity', async () => {
     const { root, registry, runner } = context()
-    await materializeNamedWorkspace({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
+    await provisionNamedWorkspaceHome({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
     const identity = await runner.readWorkspaceIdentity(namedWorkspacePath(root, 'mohist', 'pay'))
     expect(identity).toBe(namedWorkspaceRegistryKey('mohist', 'pay'))
   })
@@ -138,7 +135,7 @@ describe('NamedWorkspaceCleanupRunner', () => {
 
   it('validates the workspace only when marker and derived path match the entry', async () => {
     const { root, registry, runner } = context()
-    await materializeNamedWorkspace({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
+    await provisionNamedWorkspaceHome({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
     const entry = registry.get('mohist', 'pay')!
     expect(await runner.validateWorkspace(entry)).toBe(true)
 
@@ -153,7 +150,7 @@ describe('named workspace cleanup loop end to end', () => {
     let current = now
     const registry = new NamedWorkspaceRegistry(root, { now: () => current })
     await registry.load()
-    await materializeNamedWorkspace({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
+    await provisionNamedWorkspaceHome({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
     const past = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000)
     current = past
     await registry.markEligible('mohist', 'pay')
@@ -169,7 +166,7 @@ describe('named workspace cleanup loop end to end', () => {
 
   it('refuses (stuck) an eligible entry whose marker identity mismatches the registry', async () => {
     const { root, runner, registry } = context()
-    await materializeNamedWorkspace({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
+    await provisionNamedWorkspaceHome({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
     await registry.markEligible('mohist', 'pay')
     // Corrupt the marker to a different workspace identity.
     await writeFile(

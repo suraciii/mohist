@@ -419,7 +419,7 @@ their default Workspaces automatically.
 - `mo workspace list [--status active|archived] [--origin issue|slack|web|cli|manual]`
   lists Workspaces in the current Project.
 - `mo workspace view <name>` reads the Origin, repository membership, bound
-  Sessions, materialization location, and status.
+  Sessions, provisioning location, and status.
 - `mo workspace create <name> [--repo <repo>...]` creates a `manual` Workspace.
   Its name must be unique within the Project.
 - `mo workspace repo add <name> <repo>` and

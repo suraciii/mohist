@@ -90,7 +90,7 @@ public sealed partial class AgentJobGrain
         // Workspace affinity: a bound job routes to the workspace's home
         // runner first. A stale home (runner offline) is cleared and the
         // job falls back to the generic election; the runner that wins
-        // materializes the workspace and reports the new home.
+        // provisions the workspace and reports the new home.
         if (!string.IsNullOrWhiteSpace(State.Input.WorkspaceName)
             && !string.IsNullOrWhiteSpace(State.Input.ProjectId))
         {

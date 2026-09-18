@@ -60,7 +60,7 @@ changing a document in `design/`.
 
 - [auth.md](auth.md) — Auth and identity: single admin plus service/agent principals, file and signed credentials, device authorization login, Runner machine credentials, Scope enforcement, and attribution.
 - [repositories.md](repositories.md) — Repository execution: Project resource authority, Issue binding, live dispatch resolution.
-- [workspaces.md](workspaces.md) — Workspace: first-class persistent execution environment under a Project, with Origin resolution, named Runner materialization, binding affinity, archival, and reclamation.
+- [workspaces.md](workspaces.md) — Workspace: first-class persistent execution environment under a Project, with Origin resolution, named Runner provisioning, binding affinity, archival, and reclamation.
 - [hermes-webhook.md](hermes-webhook.md) — Hermes notification gateway: event types, payload, signature, delivery reliability.
 - [outbound-webhook.md](outbound-webhook.md) — Outbound webhook: Project-scoped HTTP delivery with CloudEvents, event selection, and configurable authentication.
 - [github-integration.md](github-integration.md) — GitHub integration: signed ingress, intake and close translation, and write-back; product behavior in [`docs/github.md`](../docs/github.md).

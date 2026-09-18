@@ -101,8 +101,8 @@ Approval Points, Feedback Tasks, recovery, and template expressions.
 
 **Runner**:
 The execution-plane process that registers with a Server, claims dispatched
-work, materializes Workspace directories, executes resolved Agent work, and
-reports facts. It never interprets facts or decides production-line state.
+work, provisions Workspace Homes, executes resolved Agent work, and reports
+facts. It never interprets facts or decides production-line state.
 
 **Skill**:
 A reusable description of an Agent capability. An External Agent installs
@@ -216,10 +216,10 @@ A Workspace creation source and unique resolution key: an Issue, an interaction
 context such as a Slack channel or Web conversation, or an explicit creation.
 At most one active Workspace exists for the same Origin at one time.
 
-**Materialization**:
-A Workspace directory instance on one Runner, with routing facts that determine
+**Provisioning**:
+A Workspace Home instance on one Runner, with routing facts that determine
 where subsequent execution is scheduled. Its directory can be reclaimed or
-lost with the Runner; rematerialization starts empty without changing Workspace
+lost with the Runner; reprovisioning starts empty without changing Workspace
 identity.
 
 _Avoid_: worktree or Runner directory as the Workspace identity

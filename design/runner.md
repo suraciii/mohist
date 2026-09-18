@@ -606,7 +606,7 @@ closed out.
 ## Persisted State
 
 The Runner holds no durable state. Everything it needs is configuration (its
-identity), rebuildable (Workspace materializations), or volatile (in-flight
+identity), rebuildable (Workspace Homes), or volatile (in-flight
 work, unacknowledged reports). Cross-process consistency comes from report
 settlement and poll recomputation, not shared files. The Server never reads
 or writes Runner-local files.
@@ -618,7 +618,7 @@ preserve results across a crash but would create a second authority; this
 design deliberately declines that trade-off (see
 [Restart and Crash Semantics](#restart-and-crash-semantics)).
 
-A Runner may keep the rebuildable Named Workspace materialization index at
+A Runner may keep the rebuildable Named Workspace provisioning index at
 `<runnerRoot>/.mohist/named-workspaces.json`. It does not persist operation
 journals, execution receipts, or terminal task-log delivery stores. Indexes are
 never authoritative and fail open: a corrupt or missing index is rebuilt from

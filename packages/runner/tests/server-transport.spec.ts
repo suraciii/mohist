@@ -489,7 +489,7 @@ describe('ServerConnection transport contract', () => {
     ).resolves.toBeNull()
   })
 
-  serverTest('accepts valid Workspace materialization reports', async () => {
+  serverTest('accepts valid Workspace provisioning reports', async () => {
     transportFetch.mockResolvedValueOnce(
       serverResponse(
         200,
@@ -498,7 +498,7 @@ describe('ServerConnection transport contract', () => {
     )
 
     await expect(
-      serverConnection().reportWorkspaceMaterialized(
+      serverConnection().reportWorkspaceProvisioned(
         'project-1',
         'workspace-1',
         '/virtual/workspace',

@@ -251,13 +251,13 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
     public Task<WorkspaceHome?> GetHomeAsync() =>
         Task.FromResult(_state?.ActiveHome());
 
-    public async Task<WorkspaceHome?> EnsureMaterializedOnAsync(string runnerId, string path, DateTimeOffset now)
+    public async Task<WorkspaceHome?> EnsureProvisionedOnAsync(string runnerId, string path, DateTimeOffset now)
     {
         var state = _state;
         if (state is null) return null;
 
         var previous = state.Home;
-        var home = state.EnsureMaterializedOn(runnerId, path);
+        var home = state.EnsureProvisionedOn(runnerId, path);
         if (Equals(previous, home)) return home;
 
         await _store.SaveAsync(state);

@@ -8,7 +8,7 @@ export interface WorkspaceInfo {
 // Test helper: build a `NamedWorkspaceManager` mock that satisfies the
 // contract used by `WorkExecutor`. Tests that just want to say "the
 // workspace is ready, here it is" plug in
-// `verifyOnlyNamedWorkspaceManager(...)` so materialization returns the
+// `verifyOnlyNamedWorkspaceManager(...)` so provisioning returns the
 // supplied path without touching git.
 export function verifyOnlyNamedWorkspaceManager(workspace: WorkspaceInfo): NamedWorkspaceManager {
   const info = { path: workspace.path, branch: workspace.branch ?? null }

@@ -227,8 +227,8 @@ backend, resolver, binding, or workspace code becomes `unexpected-error`.
   option it cannot support.
 - `workspace-home-claimed`: the named Workspace is currently owned by another
   Runner.
-- `workspace-materialization-failed`: the named Workspace could not be
-  materialized.
+- `workspace-provisioning-failed`: the named Workspace could not be
+  provisioned.
 
 Source categories remain diagnostic facts. In particular, `skill_not_found`
 and `unsupported_execution_configuration` are recorded in diagnostics, while

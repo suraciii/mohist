@@ -2,7 +2,7 @@
 
 A Repository is a named execution resource declared by a Project. An Issue
 binds one target Repository, and a WorkflowRun captures that Repository's
-values when it starts. Workspace materialization is not a second authority for
+values when it starts. Workspace provisioning is not a second authority for
 Repository identity.
 
 ## Design Drivers
@@ -48,7 +48,7 @@ WorkflowRun
   branch. It may store one write-once Pull Request identity for that
   Repository.
 - A Workspace stores Repository references as access grants, not Repository
-  definitions. Its identity, materialization, affinity, and loss behavior are
+  definitions. Its identity, provisioning, affinity, and loss behavior are
   defined in [`workspaces.md`](workspaces.md).
 - A normalized Git remote is a temporary validation value. Mohist does not
   persist `RemoteFingerprint` or `RemoteIdentityVersion`.
@@ -119,7 +119,7 @@ Workspace resolution answers where it executes. An Issue holds both
 `RepositoryName` and `WorkspaceName`; WorkflowRun carries the Repository
 snapshot while dispatch passes Workspace independently.
 
-The materialized checkout must belong to the bound Git URL. If the Runner
+The provisioned checkout must belong to the bound Git URL. If the Runner
 cannot confirm the remote, preparation fails before fetch, push, or rebase.
 This check does not make the remote URL, checkout path, or branch part of
 Workspace identity.
@@ -143,7 +143,7 @@ workspaces.md#runner-side-directory-reclamation).
 
 Repository occupancy locking is implemented. Git URL and base branch updates
 and deletion query blockers among unfinished Issues. Issue dispatch passes the
-named `issue-N` Workspace, and the Runner materializes it through the first-class
+named `issue-N` Workspace, and the Runner provisions it through the first-class
 Workspace path.
 
 Legacy `WorkflowRepositoryContext` and `WorkspaceIdentity` copies remain in

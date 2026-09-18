@@ -106,15 +106,15 @@ public sealed class WorkspaceState
                 $"Workspace '{Name}' is already archived.");
     }
 
-    public WorkspaceHome EnsureMaterializedOn(string runnerId, string path)
+    public WorkspaceHome EnsureProvisionedOn(string runnerId, string path)
     {
         if (Status != WorkspaceStatus.Active)
-            throw new WorkspaceDomainException("workspace_archived", $"Workspace '{Name}' is archived and cannot be materialized.");
+            throw new WorkspaceDomainException("workspace_archived", $"Workspace '{Name}' is archived and cannot be provisioned.");
 
         if (Home is not null && !string.Equals(Home.RunnerId, runnerId, StringComparison.Ordinal))
             throw new WorkspaceDomainException(
                 "workspace_home_claimed",
-                $"Workspace '{Name}' is already materialized on runner '{Home.RunnerId}'.",
+                $"Workspace '{Name}' is already provisioned on runner '{Home.RunnerId}'.",
                 hint: "The dispatching runner must yield its local directory; the job retries against the home runner.");
 
         if (Home is not null && string.Equals(Home.Path, path, StringComparison.Ordinal))

@@ -559,7 +559,7 @@ public sealed record AgentJobInput(
     /// <summary>
     /// Named Workspace binding resolved at launch time. When set, the
     /// dispatch envelope carries <c>variables.workspace = { name,
-    /// repositories }</c> and the runner materializes the named
+    /// repositories }</c> and the runner provisions the named
     /// workspace directory instead of using a free-form path.
     /// Append-only Orleans field id (next free after
     /// <see cref="SpawnOrigin"/>).
@@ -673,7 +673,7 @@ public sealed record AgentJobInput(
     [property: Id(15)] string? InitialTurnId = null,
     /// <summary>
     /// Accepted attachment descriptors for the launch-time input.
-    /// The Runner uses these to materialize the workspace and to
+    /// The Runner uses these to provision the workspace and to
     /// build the honest, system-attributed manifest block. Absent on
     /// jobs persisted before attachments were attached to inputs —
     /// the Runner treats an absent or empty list as no attachments.

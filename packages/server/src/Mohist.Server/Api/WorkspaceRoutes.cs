@@ -314,8 +314,8 @@ public static class WorkspaceRoutes
 
     /// <summary>
     /// Resolves the Issue's Named Workspace identity: the derived
-    /// <c>issue-{number}</c> name, the Server-owned materialization Home
-    /// (may be unset before materialization or after archival), and the
+    /// <c>issue-{number}</c> name, the Server-owned provisioning Home
+    /// (may be unset before provisioning or after archival), and the
     /// immutable run-owned repository context used for review. The
     /// WorkflowRun only supplies execution history and assignment routing;
     /// its stored <see cref="WorkspaceIdentity.Path"/> is never consulted.
@@ -340,7 +340,7 @@ public static class WorkspaceRoutes
     /// <summary>
     /// Resolves the Named Workspace directly from the Server-owned
     /// <see cref="IWorkspaceGrain"/>: the name is derived from the Issue and
-    /// the path is the reported materialization Home. A missing Home is not
+    /// the path is the reported provisioning Home. A missing Home is not
     /// treated as an unavailable workspace here — the Runner's own status is
     /// the authority for whether the directory currently exists.
     /// </summary>

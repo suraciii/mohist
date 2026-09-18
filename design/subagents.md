@@ -45,7 +45,7 @@ document records only where a schedule meets spawn, stop, or detach.
   membership. It does not become a second topology model.
 - `AgentSession.Source` explains why a Session was created and never changes.
   Parentage is separate and detach cannot rewrite Source.
-- Server resolves capability, identity, `Workspace`, `Materialization`, and
+- Server resolves capability, identity, `Workspace`, `Provisioning`, and
   Runner binding. The Runner executes only the resolved and pinned child work.
 - Parent-to-child and child-to-parent messages use ordinary `SessionInput` and
   `AgentTurn` paths. The tree adds no inbox, message aggregate, or transcript
@@ -72,7 +72,7 @@ document records only where a schedule meets spawn, stop, or detach.
   launch-plan recovery, and provisional artifact cancellation. It extends the
   existing Agent launch pipeline rather than creating a second launcher.
 - **Runner** receives a resolved prompt, WorkDir, Runtime, and binding
-  constraint. It does not select a parent, resolve capability, or materialize
+  constraint. It does not select a parent, resolve capability, or provision
   an arbitrary path.
 
 ## Model
@@ -782,4 +782,4 @@ schedule nor its delivery identity.
   variables, or Runtime Session, or select a child Runner different from the
   parent binding.
 - Do not claim that the tree replaces Issue, Workflow, Project, Workspace, or
-  Materialization ownership and isolation models.
+  Provisioning ownership and isolation models.

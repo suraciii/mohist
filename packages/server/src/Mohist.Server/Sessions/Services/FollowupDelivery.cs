@@ -30,7 +30,7 @@ public sealed record FollowupDeliveryRequest(
     IReadOnlyList<string> InputTexts,
     /// <summary>
     /// Accepted attachment descriptors for the dispatched turn. Empty
-    /// when the turn is text-only. The Runner uses these to materialize
+    /// when the turn is text-only. The Runner uses these to provision
     /// the workspace and to build the honest, system-attributed manifest
     /// block; bytes are never carried over the wire — content is fetched
     /// via the owning-input scoped content route.

@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { join } from 'node:path'
 import { describe, expect, it as vitestIt } from 'vitest'
 import {
-  provisionIssueWorkspaceHome as materializeIssueWorkspace,
+  provisionIssueWorkspaceHome as provisionIssueWorkspace,
   namedWorkspaceMarkerPath,
   namedWorkspacePath,
   readNamedWorkspaceMarker,
@@ -12,7 +12,7 @@ import { currentRunnerFileSystem, type RunnerResourceContext } from '../src/syst
 import type { CommandLineOptions } from '../src/system/process.js'
 import { withTestRunnerResources } from './support/test-resources.js'
 
-describe('materializeIssueWorkspace', () => {
+describe('provisionIssueWorkspace', () => {
   type FakeCommandResult = {
     success: boolean
     stdout: string
@@ -21,7 +21,7 @@ describe('materializeIssueWorkspace', () => {
     combinedOutput: string
   }
 
-  interface MaterializeTestState {
+  interface ProvisionTestState {
     readonly root: string
     readonly registry: NamedWorkspaceRegistry
     readonly signal: AbortSignal
@@ -35,11 +35,11 @@ describe('materializeIssueWorkspace', () => {
     ) => Promise<FakeCommandResult>
   }
 
-  const materializeTestStorage = new AsyncLocalStorage<MaterializeTestState>()
+  const provisionTestStorage = new AsyncLocalStorage<ProvisionTestState>()
 
-  function currentState(): MaterializeTestState {
-    const state = materializeTestStorage.getStore()
-    if (!state) throw new Error('materialize test resource context is not active')
+  function currentState(): ProvisionTestState {
+    const state = provisionTestStorage.getStore()
+    if (!state) throw new Error('provision test resource context is not active')
     return state
   }
 
@@ -81,8 +81,8 @@ describe('materializeIssueWorkspace', () => {
       }
       await withTestRunnerResources(async (fileSystem) => {
         const state = {
-          root: '/virtual/issue-workspace-materialize',
-          registry: new NamedWorkspaceRegistry('/virtual/issue-workspace-materialize'),
+          root: '/virtual/issue-workspace-provision',
+          registry: new NamedWorkspaceRegistry('/virtual/issue-workspace-provision'),
           signal: new AbortController().signal,
           gitCalls: [],
           fakeGitRefs: new Map<string, string[]>(),
@@ -94,13 +94,13 @@ describe('materializeIssueWorkspace', () => {
             combinedOutput: '',
           }),
         }
-        await materializeTestStorage.run(state, async () => {
+        await provisionTestStorage.run(state, async () => {
           await state.registry.load()
           try {
             await body()
           } finally {
             await fileSystem.deleteDirectory(state.root)
-            if (fileSystem.exists(state.root)) throw new Error(`materialize test root was not cleaned: ${state.root}`)
+            if (fileSystem.exists(state.root)) throw new Error(`provision test root was not cleaned: ${state.root}`)
           }
         })
       }, resources)
@@ -158,7 +158,7 @@ describe('materializeIssueWorkspace', () => {
 
   it('clones the repository when directory does not exist', async () => {
     installFakeGit()
-    const result = await materializeIssueWorkspace({
+    const result = await provisionIssueWorkspace({
       runnerRoot: testRoot(),
       projectId: PROJECT_ID,
       workspaceName: WORKSPACE_NAME,
@@ -196,7 +196,7 @@ describe('materializeIssueWorkspace', () => {
 
   it('skips clone when directory already exists with valid marker', async () => {
     installFakeGit()
-    const first = await materializeIssueWorkspace({
+    const first = await provisionIssueWorkspace({
       runnerRoot: testRoot(),
       projectId: PROJECT_ID,
       workspaceName: WORKSPACE_NAME,
@@ -210,7 +210,7 @@ describe('materializeIssueWorkspace', () => {
     expect(first.created).toBe(true)
     const cloneCount = testGitCalls().filter((c) => c.args.includes('clone')).length
 
-    const second = await materializeIssueWorkspace({
+    const second = await provisionIssueWorkspace({
       runnerRoot: testRoot(),
       projectId: PROJECT_ID,
       workspaceName: WORKSPACE_NAME,
@@ -227,7 +227,7 @@ describe('materializeIssueWorkspace', () => {
     expect(testGitCalls().filter((c) => c.args.includes('clone')).length).toBe(cloneCount)
   })
 
-  it('restores run branch from remote when remote ref exists', async () => {
+  it('ensures run branch from remote when remote ref exists', async () => {
     // Set up remote ref to exist for the run branch
     const wsPath = namedWorkspacePath(testRoot(), PROJECT_ID, WORKSPACE_NAME)
     // We need to mock the git operations more carefully
@@ -236,7 +236,7 @@ describe('materializeIssueWorkspace', () => {
     testGitRefs().set(prepPath, [`refs/remotes/origin/${RUN_BRANCH}`])
 
     installFakeGit()
-    const result = await materializeIssueWorkspace({
+    const result = await provisionIssueWorkspace({
       runnerRoot: testRoot(),
       projectId: PROJECT_ID,
       workspaceName: WORKSPACE_NAME,
@@ -255,7 +255,7 @@ describe('materializeIssueWorkspace', () => {
 
   it('fails closed when an existing checkout has residual Git state', async () => {
     installFakeGit()
-    const first = await materializeIssueWorkspace({
+    const first = await provisionIssueWorkspace({
       runnerRoot: testRoot(),
       projectId: PROJECT_ID,
       workspaceName: WORKSPACE_NAME,
@@ -269,7 +269,7 @@ describe('materializeIssueWorkspace', () => {
     await currentRunnerFileSystem().ensureDir(join(first.path, 'REPOS', REPOSITORY_NAME, '.git', 'rebase-merge'))
 
     await expect(
-      materializeIssueWorkspace({
+      provisionIssueWorkspace({
         runnerRoot: testRoot(),
         projectId: PROJECT_ID,
         workspaceName: WORKSPACE_NAME,
@@ -285,7 +285,7 @@ describe('materializeIssueWorkspace', () => {
 
   it('registers workspace in NamedWorkspaceRegistry only', async () => {
     installFakeGit()
-    await materializeIssueWorkspace({
+    await provisionIssueWorkspace({
       runnerRoot: testRoot(),
       projectId: PROJECT_ID,
       workspaceName: WORKSPACE_NAME,
@@ -321,7 +321,7 @@ describe('materializeIssueWorkspace', () => {
     }
 
     await expect(
-      materializeIssueWorkspace({
+      provisionIssueWorkspace({
         runnerRoot: testRoot(),
         projectId: PROJECT_ID,
         workspaceName: WORKSPACE_NAME,
@@ -373,7 +373,7 @@ describe('materializeIssueWorkspace', () => {
       return { success: true, stdout: '', stderr: '', exitCode: 0, combinedOutput: '' }
     }
 
-    const ws42 = await materializeIssueWorkspace({
+    const ws42 = await provisionIssueWorkspace({
       runnerRoot: testRoot(),
       projectId: PROJECT_ID,
       workspaceName: 'issue-42',
@@ -384,7 +384,7 @@ describe('materializeIssueWorkspace', () => {
       registry: testRegistry(),
       signal: testSignal(),
     })
-    const ws99 = await materializeIssueWorkspace({
+    const ws99 = await provisionIssueWorkspace({
       runnerRoot: testRoot(),
       projectId: PROJECT_ID,
       workspaceName: 'issue-99',
