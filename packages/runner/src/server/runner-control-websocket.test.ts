@@ -104,7 +104,8 @@ function fixture(
       processGeneration: 'process-generation',
     },
     {
-      gitHash: 'manifest-hash',
+      schemaVersion: 1,
+      buildGitHash: 'manifest-hash',
       component: 'runner',
       version: '1.2.3',
       sourceRevision: 'source',
@@ -137,6 +138,30 @@ describe('RunnerControlWebSocketClient', () => {
       'ws://server.test/base/api/runner/runner%20%2F%20one/control?processGeneration=process-generation&buildGitHash=hash',
     )
     expect(new URL(url).searchParams.has('runnerId')).toBe(false)
+
+    const canonical = buildControlUrl('http://server.test/base/', 'runner / one', 'process-generation', 'build-sha', {
+      schemaVersion: 1,
+      component: 'runner',
+      version: '1.2.3',
+      sourceRevision: 'source-sha',
+      buildGitHash: 'build-sha',
+      treeHash: 'tree-sha',
+      artifactDigest: 'artifact-digest',
+      releaseId: 'release-id',
+      generation: 7,
+      runnerId: 'runner-1',
+      builtAt: null,
+    })
+    const canonicalParams = new URL(canonical).searchParams
+    expect(canonicalParams.get('schemaVersion')).toBe('1')
+    expect(canonicalParams.get('buildGitHash')).toBe('build-sha')
+    expect(canonicalParams.get('sourceRevision')).toBe('source-sha')
+    expect(canonicalParams.get('component')).toBe('runner')
+    expect(canonicalParams.get('treeHash')).toBe('tree-sha')
+    expect(canonicalParams.get('artifactDigest')).toBe('artifact-digest')
+    expect(canonicalParams.get('releaseId')).toBe('release-id')
+    expect(canonicalParams.get('generation')).toBe('7')
+
     expect(runnerControlSocketOptions('id', 'token')).toMatchObject({
       headers: { 'X-Runner-Connection-Id': 'id', Authorization: 'Bearer token' },
       maxPayload: RUNNER_CONTROL_MAX_MESSAGE_BYTES,

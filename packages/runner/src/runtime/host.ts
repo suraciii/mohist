@@ -125,7 +125,6 @@ export class RunnerHost {
   private readonly cleanupLoopIntervalMs: number
   private readonly modelRediscoveryIntervalMs: number
   private readonly workflowSessionTurnCoordinator = new WorkflowSessionTurnCoordinator()
-  private readonly buildGitHash: string | null
   private readonly buildInfo: ReturnType<typeof loadBuildInfo>
   private opencodeModelCatalog: OpencodeModelCatalog = { models: [], variants: {} }
 
@@ -175,8 +174,7 @@ export class RunnerHost {
     this.modelRediscoveryIntervalMs = Math.max(60_000, Math.floor(options.modelRediscoveryIntervalMs ?? 30 * 60_000))
     const build = loadBuildInfo()
     this.buildInfo = build
-    this.buildGitHash = build.gitHash
-    this.connection = new ServerConnection(options, this.buildGitHash, build)
+    this.connection = new ServerConnection(options, build)
     this.namedWorkspaceRegistry = new NamedWorkspaceRegistry(options.runnerRoot)
     this.agentSessionRuntimeEventQueue = createAgentSessionRuntimeEventQueue({
       deliver: createServerRuntimeEventDelivery({
@@ -198,7 +196,7 @@ export class RunnerHost {
     this.control = new RunnerControlWebSocketClient(
       options.serverUrl,
       options.runnerId,
-      this.buildGitHash,
+      build.buildGitHash,
       {
         onReconnected: () => this.onDispatchReconnected(),
         credential: options.credential ?? null,
@@ -880,10 +878,11 @@ export class RunnerHost {
         await this.connection.connect(
           {
             ...this.registrationState(),
-            buildGitHash: this.buildGitHash,
+            schemaVersion: this.buildInfo.schemaVersion,
+            buildGitHash: this.buildInfo.buildGitHash,
             component: this.buildInfo.component,
             version: this.buildInfo.version,
-            sourceRevision: this.buildInfo.sourceRevision ?? this.buildInfo.gitHash,
+            sourceRevision: this.buildInfo.sourceRevision,
             treeHash: this.buildInfo.treeHash,
             artifactDigest: this.buildInfo.artifactDigest,
             releaseId: this.buildInfo.releaseId,

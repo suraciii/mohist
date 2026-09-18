@@ -267,6 +267,7 @@ describe('RunnerHost', () => {
         },
       })
       for (const identityField of [
+        'schemaVersion',
         'buildGitHash',
         'component',
         'version',
