@@ -31,36 +31,13 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
     public FileSystemWorkflowArtifactStorage(
         IOptions<WorkflowArtifactStorageOptions> options,
         ILogger<FileSystemWorkflowArtifactStorage> log)
-        : this(options, log, PhysicalWorkflowArtifactFileSystem.Instance)
-    {
-    }
-
-    internal FileSystemWorkflowArtifactStorage(
-        IOptions<WorkflowArtifactStorageOptions> options,
-        ILogger<FileSystemWorkflowArtifactStorage> log,
-        IWorkflowArtifactFileSystem fileSystem)
     {
         _log = log;
-        _fileSystem = fileSystem;
+        _fileSystem = PhysicalWorkflowArtifactFileSystem.Instance;
         var configured = options.Value;
         _root = ResolveStorageRoot(configured);
         _defaultLimits = configured.DirectoryLimits ?? WorkflowArtifactDirectoryLimits.Default;
         _fileSystem.CreateDirectory(_root);
-    }
-
-    /// <summary>Test-only constructor that bypasses the options pipeline.</summary>
-    internal FileSystemWorkflowArtifactStorage(string root, ILogger<FileSystemWorkflowArtifactStorage> log)
-        : this(root, log, WorkflowArtifactDirectoryLimits.Default)
-    {
-    }
-
-    /// <summary>Test-only constructor that accepts explicit directory limits.</summary>
-    internal FileSystemWorkflowArtifactStorage(
-        string root,
-        ILogger<FileSystemWorkflowArtifactStorage> log,
-        WorkflowArtifactDirectoryLimits defaultLimits)
-        : this(root, log, defaultLimits, PhysicalWorkflowArtifactFileSystem.Instance)
-    {
     }
 
     /// <summary>
