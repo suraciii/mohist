@@ -127,11 +127,7 @@ public sealed class WorkspaceHomeContinuitySpecs
         var noAdvancePush = await PollAsync(runnerId);
         Assert.StartsWith("publish-feedback", noAdvancePush.ActionAttemptId);
         AssertIdentity(noAdvancePush, runId, issueNumber);
-        await ReportAsync(
-            runnerId,
-            noAdvancePush,
-            "completed",
-            Output(new { kind = "push", updated = false, landedCommit = "commit-b" }));
+        await ReportPushAsync(runnerId, noAdvancePush, branch, updated: false, landedCommit: "commit-b");
 
         var stillOpen = await LoadRunAsync(runId);
         Assert.Equal(
@@ -158,11 +154,8 @@ public sealed class WorkspaceHomeContinuitySpecs
         var advancingPush = await PollAsync(runnerId);
         Assert.StartsWith("publish-feedback", advancingPush.ActionAttemptId);
         AssertIdentity(advancingPush, runId, issueNumber);
-        await ReportAsync(
-            runnerId,
-            advancingPush,
-            "completed",
-            Output(new { kind = "push", updated = true, landedCommit = "commit-1" }));
+        const string feedbackLandedCommit = "commit-1";
+        await ReportPushAsync(runnerId, advancingPush, branch, updated: true, landedCommit: feedbackLandedCommit);
 
         var resolved = await LoadRunAsync(runId);
         Assert.Equal(
@@ -178,16 +171,20 @@ public sealed class WorkspaceHomeContinuitySpecs
 
         await workflow.ApproveAsync("operator-1");
 
-        // --- Integrate: the push's landedCommit is visible to the next dispatch. ---
+        // --- Integrate: the commit the Check-stage feedback push landed is
+        // still the remote branch head, so the later stage observes the same
+        // remote commit lineage. Feedback resolution reruns the stage and
+        // intentionally drops its feedback-task outputs, so the durable
+        // cross-stage fact is the remote branch read, not a task payload. The
+        // remote advanced when that push was reported, never in this
+        // assertion. ---
         var integratePush = await PollAsync(runnerId);
         Assert.Equal("integrate", integratePush.Stage);
         Assert.Equal("mohist/push", integratePush.Uses);
         AssertIdentity(integratePush, runId, issueNumber);
-        await ReportAsync(
-            runnerId,
-            integratePush,
-            "completed",
-            Output(new { kind = "push", updated = true, landedCommit = "commit-2" }));
+        await AssertCommitsAsync(projectId, issueNumber, branch, feedbackLandedCommit);
+
+        await ReportPushAsync(runnerId, integratePush, branch, updated: true, landedCommit: "commit-2");
         await AssertCommitsAsync(projectId, issueNumber, branch, "commit-2");
 
         var integrateHealth = await PollAsync(runnerId);
@@ -571,6 +568,54 @@ public sealed class WorkspaceHomeContinuitySpecs
             new WorkResult(status, Output: Output, ArtifactUploadIds: artifactUploadIds));
     }
 
+    /// <summary>
+    /// Reports a push task and mirrors the remote side effect the push
+    /// reports. When the push advanced the branch, the fake remote head
+    /// becomes the landed commit the product accepted: the recorded task
+    /// output for an ordinary push, or the resolving feedback task for a
+    /// feedback push (whose stage is rerun and whose task output is dropped).
+    /// A later stage's <c>/commits</c> read is therefore derived from
+    /// product-accepted evidence, not from an assertion that assigns the value
+    /// it then expects.
+    /// </summary>
+    private async Task ReportPushAsync(
+        string runnerId,
+        WorkDispatch push,
+        string branch,
+        bool updated,
+        string landedCommit)
+    {
+        await ReportAsync(
+            runnerId,
+            push,
+            "completed",
+            Output(new { kind = "push", updated, landedCommit }));
+        if (!updated)
+            return;
+
+        var run = await LoadRunAsync(push.WorkflowRunId);
+        var recorded = run.Stages
+            .SelectMany(stage => stage.Tasks)
+            .Where(task => task.Id == push.ActionAttemptId || task.WorkId == push.WorkId)
+            .Select(task => ReadLandedCommit(task.Output))
+            .FirstOrDefault(value => value is not null);
+        var resolvedFeedback = run.Feedback.Any(feedback =>
+            feedback.Status == ApprovalFeedbackStatus.Resolved
+            && feedback.ResolutionTaskId == push.ActionAttemptId);
+        Assert.True(
+            recorded is not null || resolvedFeedback,
+            $"the product did not accept push {push.ActionAttemptId} as remote advancement");
+
+        _fixture.RunnerWorkspace.Commits = Commits(branch, recorded ?? landedCommit);
+    }
+
+    private static string? ReadLandedCommit(JsonElement? output) =>
+        output is { ValueKind: JsonValueKind.Object } value
+        && value.TryGetProperty("landedCommit", out var landed)
+        && landed.ValueKind == JsonValueKind.String
+            ? landed.GetString()
+            : null;
+
     private async Task<string> UploadArtifactAsync(string runId, string workId, string path)
     {
         var content = Encoding.UTF8.GetBytes($"# {path}\n");
@@ -603,7 +648,6 @@ public sealed class WorkspaceHomeContinuitySpecs
 
     private async Task AssertCommitsAsync(string projectId, int issueNumber, string branch, string head)
     {
-        _fixture.RunnerWorkspace.Commits = Commits(branch, head);
         var commits = await _client.GetDataAsync<CommitsDto>(
             $"/api/projects/{projectId}/issues/{issueNumber}/commits");
         Assert.True(commits.Available);
