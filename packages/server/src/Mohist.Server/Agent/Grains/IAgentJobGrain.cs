@@ -559,7 +559,7 @@ public sealed record AgentJobInput(
     /// <summary>
     /// Named Workspace binding resolved at launch time. When set, the
     /// dispatch envelope carries <c>variables.workspace = { name,
-    /// repositories }</c> and the runner materializes the named
+    /// repositories }</c> and the runner provisions the named
     /// workspace directory instead of using a free-form path.
     /// Append-only Orleans field id (next free after
     /// <see cref="SpawnOrigin"/>).
