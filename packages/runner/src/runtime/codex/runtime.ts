@@ -55,6 +55,8 @@ import { type CodexReadinessProbe, evaluateCodexReadiness } from './readiness.js
 import { codexInitializationTransportFromHandle, performCodexInitialization } from './initialization.js'
 import { resumeThread, startThread, type CodexThreadTransport } from './thread.js'
 import { driveTurnToCompletion, submitTurnStart, type CodexTurnEventObserver, type CodexTurnTransport } from './turn.js'
+import { normalizeCodexNotification } from './turn-events.js'
+import { isCodexTurnCompletedEvent } from './protocol-types.js'
 import { assignCodexRequestId, nextCodexRequestId } from './server-process.js'
 
 export interface CodexRuntimeDeps {
@@ -91,9 +93,9 @@ export interface CodexRuntimeDeps {
  *   - `catalog()`: the published catalog snapshot.
  *   - `shutdown()`: bounded shutdown of the app-server child.
  *
- * The full implementations of the turn and Session command entry points
- * land in later runtime tasks; this file wires the boundary types, readiness,
- * and catalog seam implemented here.
+ * The full implementations of the turn and Session command entry
+ * points live in their respective modules; this file wires the
+ * boundary types, readiness, catalog seam, and command entry points.
  */
 export class CodexRuntime {
   private readonly deps: Required<Pick<CodexRuntimeDeps, 'codexHome' | 'cwd'>> & CodexRuntimeDeps
@@ -315,8 +317,10 @@ export class CodexRuntime {
   }
 
   /**
-   * Follow-up on an existing Codex Thread. Full implementation lands
-   * in T-005 / T-008.
+   * Follow-up on an existing Codex Thread. A steerable active Turn
+   * uses `turn/steer` with the frozen `expectedTurnId`; otherwise the
+   * accepted input queues a new `turn/start` on the same Thread. The
+   * caller input id is required and is carried only for correlation.
    */
   async followup(
     request: CodexFollowupRequest,
@@ -418,8 +422,12 @@ export class CodexRuntime {
   }
 
   /**
-   * Cancel an active Codex Turn. Full implementation lands in T-005 /
-   * T-008.
+   * Cancel the exact active Codex Turn. The `turn/interrupt` RPC
+   * response only means the request was accepted; `stopConfirmed` is
+   * true only after the matching `turn/completed` for the frozen
+   * Thread + Turn is observed within the bounded confirmation budget.
+   * An unconfirmed interrupt stays `stopConfirmed: false` so callers
+   * never report a still-running turn as safely stopped.
    */
   async cancel(request: CodexCancelRequest): Promise<CodexResult<CodexCancelResult>> {
     if (!this.state.ready || !this.server.handle) {
@@ -433,19 +441,20 @@ export class CodexRuntime {
     }
     const turnId = this.activeTurns.get(threadId)
     if (!turnId || turnId.startsWith('__compaction_pending_')) {
+      const diagnostics: CodexDiagnostic[] = [
+        { severity: 'info', code: 'cancel-idle', message: 'Codex cancel found no active Turn to interrupt' },
+      ]
       return {
         ok: true,
         value: {
           facts: { runtimeSessionId: threadId, workDir: request.target.workDir, cancelled: true, stopConfirmed: false },
-          diagnostics: [
-            { severity: 'info', code: 'cancel-idle', message: 'Codex cancel found no active Turn to interrupt' },
-          ],
+          diagnostics,
         },
-        diagnostics: [
-          { severity: 'info', code: 'cancel-idle', message: 'Codex cancel found no active Turn to interrupt' },
-        ],
+        diagnostics,
       }
     }
+    const confirmation = this.awaitTurnTerminal(threadId, turnId)
+    let diagnostics: CodexDiagnostic[] = []
     try {
       await this.server.handle.send({
         id: this.takeRequestId(),
@@ -453,33 +462,39 @@ export class CodexRuntime {
         params: { threadId, turnId },
       })
     } catch (cause) {
-      const diagnostic = {
-        severity: 'warning' as const,
-        code: 'interrupt-unconfirmed',
-        message: cause instanceof Error ? cause.message : String(cause),
-      }
-      return {
-        ok: true,
-        value: {
-          facts: { runtimeSessionId: threadId, workDir: request.target.workDir, cancelled: true, stopConfirmed: false },
-          diagnostics: [diagnostic],
+      diagnostics = [
+        {
+          severity: 'warning',
+          code: 'interrupt-unconfirmed',
+          message: redactCodexCredentialString(cause instanceof Error ? cause.message : String(cause)),
         },
-        diagnostics: [diagnostic],
-      }
+      ]
+    }
+    let stopConfirmed: boolean
+    try {
+      // The RPC accepted the interrupt, but acceptance is not the
+      // confirmation. Wait for the exact matching terminal event or
+      // the bounded budget before reporting the outcome.
+      stopConfirmed = await confirmation.confirmed
+    } finally {
+      confirmation.dispose()
     }
     return {
       ok: true,
       value: {
-        facts: { runtimeSessionId: threadId, workDir: request.target.workDir, cancelled: true, stopConfirmed: false },
-        diagnostics: [],
+        facts: { runtimeSessionId: threadId, workDir: request.target.workDir, cancelled: true, stopConfirmed },
+        diagnostics,
       },
-      diagnostics: [],
+      diagnostics,
     }
   }
 
   /**
-   * Idle-only context compaction via `thread/compact/start`. Full
-   * implementation lands in T-008.
+   * Idle-only context compaction via `thread/compact/start`. Compact
+   * is admitted only while the bound Thread has no active Turn; success
+   * requires the matching compaction Turn to reach `turn/completed`
+   * and emit a `contextCompaction` item. The deprecated
+   * `thread/compacted` notification is not completion authority.
    */
   async compact(
     request: CodexCompactRequest,
@@ -566,8 +581,10 @@ export class CodexRuntime {
   }
 
   /**
-   * Reset creates an empty Thread + atomic binding CAS. Full
-   * implementation lands in T-008.
+   * Reset creates an empty Thread in the same working directory and
+   * returns its id so the caller can compare-and-swap the full
+   * binding while preserving AgentSession identity. The previous
+   * transcript is never replayed into the new Thread.
    */
   async reset(request: CodexResetRequest): Promise<CodexResult<CodexResetResult>> {
     if (!this.state.ready || !this.server.handle) {
@@ -864,6 +881,46 @@ export class CodexRuntime {
       severity: 'error',
       code: 'protocol-failure',
       message: redactCodexCredentialString(`Codex app-server ${reason}: ${detail}`),
+    }
+  }
+
+  /**
+   * Bounded confirmation of a `turn/interrupt`. Resolves `true` when
+   * the matching `turn/completed` for the exact frozen Thread + Turn
+   * is observed, `false` when the bounded confirmation budget elapses
+   * first. The caller owns disposal so a subscriber cannot leak.
+   */
+  private awaitTurnTerminal(
+    threadId: string,
+    turnId: string,
+  ): { readonly confirmed: Promise<boolean>; dispose(): void } {
+    const handle = this.server.handle
+    if (!handle) return { confirmed: Promise.resolve(false), dispose: () => undefined }
+    const clock = this.clock
+    let settled = false
+    let resolveFn: (value: boolean) => void = () => undefined
+    const confirmed = new Promise<boolean>((resolve) => {
+      resolveFn = resolve
+    })
+    const settle = (value: boolean): void => {
+      if (settled) return
+      settled = true
+      resolveFn(value)
+    }
+    const unsubscribe = handle.subscribe((message) => {
+      const normalized = normalizeCodexNotification(message)
+      const event = normalized ?? message
+      if (isCodexTurnCompletedEvent(event) && event.threadId === threadId && event.turnId === turnId) {
+        settle(true)
+      }
+    })
+    const timer = clock.setTimeout(() => settle(false), CODEX_DEFAULT_TIMEOUTS.cancelConfirmationMs)
+    return {
+      confirmed,
+      dispose() {
+        clock.clearTimeout(timer)
+        unsubscribe()
+      },
     }
   }
 

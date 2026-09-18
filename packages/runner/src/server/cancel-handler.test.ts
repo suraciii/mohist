@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createCancelHandler } from './cancel-handler.js'
 import { ManagerExecutionRegistry } from '../runtime/manager-execution-registry.js'
+import { makeFakeCodexRuntime } from '../../tests/support/codex-runtime-fixture.js'
 
 function target() {
   return {
@@ -89,5 +90,62 @@ describe('Manager follow-up cancellation', () => {
     expect(registry.findForCancel('session-1', 'opencode', 'isolated-session')).toBeNull()
     await registry.dispose(boundary as never)
     expect(boundary.dispose).toHaveBeenCalledOnce()
+  })
+})
+
+function codexBindingTarget() {
+  return {
+    kind: 'generic' as const,
+    projectId: 'project-1',
+    sessionId: 'session-1',
+    binding: {
+      runtime: 'codex',
+      runtimeSessionId: 'thread_fixture',
+      runnerId: 'runner-1',
+      workDir: '/workspace',
+    },
+  }
+}
+
+describe('Codex cancel acceptance versus confirmed stop', () => {
+  it('reports stop-requested when the interrupt was accepted but no terminal event confirmed it', async () => {
+    const fixture = makeFakeCodexRuntime()
+    fixture.setCancelResult({
+      ok: true,
+      value: {
+        facts: { runtimeSessionId: 'thread_fixture', workDir: '/workspace', cancelled: true, stopConfirmed: false },
+        diagnostics: [],
+      },
+      diagnostics: [],
+    })
+    const receive = createCancelHandler({
+      followupTargetResolver: () => ({
+        projectId: 'project-1',
+        runtimeSessionId: 'thread_fixture',
+        workDir: '/workspace',
+      }),
+      codexRuntime: fixture.runtime,
+    })
+
+    await expect(
+      receive({ target: codexBindingTarget(), turnId: 'turn-1', sessionId: 'session-1', operationId: 'op-1' }),
+    ).resolves.toEqual({ state: 'stop-requested' })
+    expect(fixture.cancelCalls).toHaveLength(1)
+  })
+
+  it('reports stopped only when the matching terminal event confirmed the stop', async () => {
+    const fixture = makeFakeCodexRuntime()
+    const receive = createCancelHandler({
+      followupTargetResolver: () => ({
+        projectId: 'project-1',
+        runtimeSessionId: 'thread_fixture',
+        workDir: '/workspace',
+      }),
+      codexRuntime: fixture.runtime,
+    })
+
+    await expect(
+      receive({ target: codexBindingTarget(), turnId: 'turn-1', sessionId: 'session-1', operationId: 'op-2' }),
+    ).resolves.toEqual({ state: 'stopped' })
   })
 })
