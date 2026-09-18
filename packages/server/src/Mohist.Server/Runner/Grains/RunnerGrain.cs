@@ -261,7 +261,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _pendingRuntimeIdentity = null;
             _slots = await _definitions.GetOrInitAsync(RunnerId);
             if (replacesCurrentProcessGeneration
-                && !string.IsNullOrWhiteSpace(updateInterruptFence.PendingId))
+                && !string.IsNullOrWhiteSpace(updateInterruptFence.PendingId)
+                && !RunnerUpdateInterruptKinds.IsEnvironmentApplication(updateInterruptFence))
             {
                 await PersistUpdateInterruptFenceAsync(
                     updateInterruptFence,
@@ -272,7 +273,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             {
                 await PersistAsync();
             }
-            _draining = !string.IsNullOrWhiteSpace(updateInterruptFence.PendingId);
+            RefreshDurableDrainFlag();
             // The generation is now current: any claim that is not this one
             // belongs to a process that can no longer report or receive it.
             await ReconcileSupersededGenerationAsync();
@@ -463,6 +464,13 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             var fence = UpdateInterruptFence();
             if (!string.IsNullOrWhiteSpace(fence.PendingId))
             {
+                if (RunnerUpdateInterruptKinds.IsEnvironmentApplication(fence))
+                {
+                    return new RunnerUpdateInterruptBeginResult(
+                        fence.PendingId,
+                        RunnerUpdateInterruptBeginStatus.Superseded,
+                        await BuildRuntimeStateAsync());
+                }
                 var status = string.Equals(fence.PendingId, requestedId, StringComparison.Ordinal)
                     ? RunnerUpdateInterruptBeginStatus.Draining
                     : RunnerUpdateInterruptBeginStatus.Superseded;
@@ -480,6 +488,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                     await BuildRuntimeStateAsync());
             }
 
+            fence.Kind = RunnerUpdateInterruptKinds.Release;
             await PersistUpdateInterruptFenceAsync(
                 fence,
                 pendingId: requestedId,
@@ -506,8 +515,11 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         try
         {
             var fence = UpdateInterruptFence();
+            if (RunnerUpdateInterruptKinds.IsEnvironmentApplication(fence))
+                return new RunnerUpdateInterruptCancelResult(normalizedId, RunnerUpdateInterruptCancelStatus.Superseded);
             if (string.Equals(fence.PendingId, normalizedId, StringComparison.Ordinal))
             {
+                fence.Kind = null;
                 await PersistUpdateInterruptFenceAsync(
                     fence,
                     pendingId: null,
@@ -823,6 +835,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         var previousPendingId = fence.PendingId;
         var previousLastCancelledId = fence.LastCancelledId;
+        var previousKind = fence.Kind;
         fence.PendingId = pendingId;
         fence.LastCancelledId = lastCancelledId;
         try
@@ -833,6 +846,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         {
             fence.PendingId = previousPendingId;
             fence.LastCancelledId = previousLastCancelledId;
+            fence.Kind = previousKind;
             throw;
         }
     }
