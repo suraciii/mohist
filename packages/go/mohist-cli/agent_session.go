@@ -1078,7 +1078,20 @@ func runLaunch(ctx context.Context, deps Dependencies, c *client, project string
 	}
 	body := map[string]any{"prompt": prompt}
 	if hasArg(cmd.args, "workspace") || hasArg(cmd.args, "issue") || hasArg(cmd.args, "epic") || hasArg(cmd.args, "repo") {
-		body["context"] = map[string]any{"workspace": argValue(cmd.args, "workspace", ""), "issueNumber": argValue(cmd.args, "issue", ""), "epicNumber": argValue(cmd.args, "epic", ""), "repository": argValue(cmd.args, "repo", "")}
+		context := map[string]any{}
+		if hasArg(cmd.args, "workspace") {
+			context["workspace"] = argValue(cmd.args, "workspace", "")
+		}
+		if hasArg(cmd.args, "issue") {
+			context["issueNumber"] = integerValue(argValue(cmd.args, "issue", ""))
+		}
+		if hasArg(cmd.args, "epic") {
+			context["epicNumber"] = integerValue(argValue(cmd.args, "epic", ""))
+		}
+		if hasArg(cmd.args, "repo") {
+			context["repository"] = argValue(cmd.args, "repo", "")
+		}
+		body["context"] = context
 	}
 	// Task-first creation accepts the effort hint and freezes it on the
 	// created Agent definition. Definition-first launch takes no execution

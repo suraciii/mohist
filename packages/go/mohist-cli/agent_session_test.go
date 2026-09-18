@@ -203,10 +203,47 @@ func TestAgentLaunchPreservesWorkspaceAndParentContext(t *testing.T) {
 		if r.Header.Get("Idempotency-Key") != "launch-1" {
 			t.Fatalf("idempotency key=%q", r.Header.Get("Idempotency-Key"))
 		}
+		var body struct {
+			Context map[string]any `json:"context"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if got, ok := body.Context["issueNumber"].(float64); !ok || got != 42 {
+			t.Fatalf("issueNumber=%#v, want JSON number 42", body.Context["issueNumber"])
+		}
+		if got, ok := body.Context["epicNumber"].(float64); !ok || got != 7 {
+			t.Fatalf("epicNumber=%#v, want JSON number 7", body.Context["epicNumber"])
+		}
+		if got, ok := body.Context["workspace"].(string); !ok || got != "ws-1" {
+			t.Fatalf("workspace=%#v, want ws-1", body.Context["workspace"])
+		}
+		if _, ok := body.Context["repository"]; ok {
+			t.Fatalf("repository should be omitted: %#v", body.Context)
+		}
 		return response(http.StatusOK, `{"success":true,"data":{"jobId":"job-1","sessionId":"sess-1","workspaceId":"ws-1","targetId":"issue-42"}}`), nil
 	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
 
-	if code := Run(context.Background(), []string{"agent", "launch", "agent_1", "--prompt", "inspect", "--workspace", "ws-1", "--issue", "42", "--idempotency-key", "launch-1", "--project", "proj-1"}, deps); code != ExitOK {
+	if code := Run(context.Background(), []string{"agent", "launch", "agent_1", "--prompt", "inspect", "--workspace", "ws-1", "--issue", "42", "--epic", "7", "--idempotency-key", "launch-1", "--project", "proj-1"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+}
+
+func TestAgentLaunchOmitsUnsetContextFields(t *testing.T) {
+	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var body struct {
+			Context map[string]any `json:"context"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if len(body.Context) != 1 || body.Context["workspace"] != "ws-1" {
+			t.Fatalf("context=%#v, want only workspace", body.Context)
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"jobId":"job-1","sessionId":"sess-1","workspaceId":"ws-1","targetId":"workspace"}}`), nil
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+
+	if code := Run(context.Background(), []string{"agent", "launch", "agent_1", "--prompt", "inspect", "--workspace", "ws-1", "--idempotency-key", "launch-1", "--project", "proj-1"}, deps); code != ExitOK {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 }
