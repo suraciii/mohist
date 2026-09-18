@@ -34,7 +34,7 @@ function commandRequest(overrides: Partial<SessionCommandRequest> = {}): Session
 function healthyOutbox() {
   return {
     ready: () => true,
-    enqueueProducedFact: vi.fn(async () => undefined),
+    enqueueProducedFact: vi.fn(async (_record: unknown) => undefined),
   }
 }
 
@@ -120,6 +120,29 @@ describe('codex session command routing', () => {
     expect(fixture.compactCalls[0]).toMatchObject({
       target: { runtime: 'codex', runtimeSessionId: 'thread_fixture', workDir: '/workspace' },
     })
+  })
+
+  it('removes the volatile Codex Turn ID from compact events before enqueueing', async () => {
+    const fixture = makeFakeCodexRuntime()
+    const outbox = healthyOutbox()
+    fixture.setEvents([
+      {
+        type: 'compaction',
+        runtimeSessionId: 'thread_fixture',
+        workDir: '/workspace',
+        turnId: 'codex-turn-secret',
+        payload: { threadId: 'thread_fixture', turnId: 'codex-turn-secret', summary: 'compacted' },
+      },
+    ])
+    const router = createSessionCommandRouter(codexAccessors(fixture.runtime), outbox as never)
+
+    await expect(router(commandRequest())).resolves.toEqual({ ok: true })
+    const record = outbox.enqueueProducedFact.mock.calls[0]?.[0] as
+      | { event: { payload: Record<string, unknown> } }
+      | undefined
+    if (!record) throw new Error('expected compact event to be enqueued')
+    expect(record.event.payload).not.toHaveProperty('turnId')
+    expect(record.event.payload).toMatchObject({ threadId: 'thread_fixture', summary: 'compacted' })
   })
 
   it('maps an idle-gate compact failure to unavailable', async () => {

@@ -421,11 +421,16 @@ describe('Codex event projection into the AgentSession channels', () => {
         payload: { toolName: 'command', status: 'completed' },
       },
       {
-        type: 'file_change.recorded',
+        type: 'tool_call.completed',
         runtimeSessionId: THREAD_ID,
         workDir: WORK_DIR,
         turnId: 'codex-volatile-turn',
-        payload: { path: 'src/index.ts', kind: 'update' },
+        payload: {
+          toolCallId: 'file-change:src/index.ts',
+          toolName: 'file_change',
+          status: 'completed',
+          changedFiles: [{ path: 'src/index.ts', operation: 'modified' }],
+        },
       },
       {
         type: 'usage.updated',
@@ -465,10 +470,9 @@ describe('Codex event projection into the AgentSession channels', () => {
       'reasoning.delta',
       'tool_call.started',
       'tool_call.completed',
-      'file_change.recorded',
       'usage.updated',
       'compaction',
-      'diagnostic',
+      'session.activity',
     ]) {
       expect(types).toContain(expected)
     }
@@ -477,7 +481,9 @@ describe('Codex event projection into the AgentSession channels', () => {
     for (const event of projected) {
       if ('turnId' in event.payload) expect(event.payload.turnId).toBe('turn-1')
     }
-    const diagnosticCodes = projected.filter((event) => event.type === 'diagnostic').map((event) => event.payload.code)
+    const diagnosticCodes = projected
+      .filter((event) => event.type === 'session.activity')
+      .map((event) => event.payload.code)
     expect(diagnosticCodes).toContain('server-request-denied')
     expect(diagnosticCodes).toContain('thread-status')
     expect(JSON.stringify(connection.eventCalls)).not.toContain('codex-volatile-turn')
@@ -534,7 +540,7 @@ describe('Codex event projection into the AgentSession channels', () => {
     expect(result.status).toBe('completed')
     const projected = connection.eventCalls.flatMap((call) => turnEvents(call.body))
     expect(projected.find((event) => event.type === 'message.delta')?.payload.text).toBe('leak ***')
-    expect(projected.find((event) => event.type === 'diagnostic')?.payload.message).toBe('diagnostic ***')
+    expect(projected.find((event) => event.type === 'session.activity')?.payload.message).toBe('diagnostic ***')
     expect((result.output as Record<string, unknown>).text).toBe('final ***')
     expect(JSON.stringify(result)).not.toContain(secret)
   })

@@ -110,6 +110,7 @@ export interface AgentTaskLaunchInput extends AgentSessionLaunchInput {
   name?: string | null
   runtime?: string | null
   model?: string | null
+  reasoningEffort?: string | null
   variant?: string | null
   allowedSubagentAgentIds?: string[] | null
   maxConcurrentRuns?: number | null
@@ -120,8 +121,9 @@ export interface AgentTaskPreflightResponse {
   scopeFingerprint: string
   agentName: string
   execution: {
-    runtime: 'opencode' | 'pi'
+    runtime: 'opencode' | 'pi' | 'codex'
     model: string | null
+    reasoningEffort?: string | null
     variant: string | null
   }
   repository: string | null

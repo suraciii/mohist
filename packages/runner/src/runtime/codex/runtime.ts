@@ -303,6 +303,7 @@ export class CodexRuntime {
         threadId,
         turnId: submission.value.turnId,
         deadlineMs: request.deadlineMs ?? null,
+        signal,
         observer,
         nextRequestId: () => this.takeRequestId(),
       })
@@ -761,6 +762,7 @@ export class CodexRuntime {
     const initResult = await performCodexInitialization(transport, {
       managedCodexHome: this.deps.codexHome,
       startupTimeoutMs: initBudget,
+      requestId: this.takeRequestId(),
       clock: this.clock,
     })
     if (!initResult.ok) {
@@ -785,7 +787,7 @@ export class CodexRuntime {
       }
       return this.recordFailure(diagnostic)
     }
-    const catalogLoader = codexCatalogLoaderFromHandle(handle)
+    const catalogLoader = codexCatalogLoaderFromHandle(handle, () => this.takeRequestId())
     const readinessProbe: CodexReadinessProbe = {
       cli: this.readinessProbe.cli,
       authentication: this.readinessProbe.authentication,
@@ -962,8 +964,11 @@ function readCompactStartResult(
 }
 
 /** Build the retained-snapshot catalog manager over the live app-server handle. */
-function codexCatalogLoaderFromHandle(handle: CodexServerHandle): CodexCatalogManager {
-  return createCodexModelCatalogLoader({
-    send: (request) => handle.send(request),
-  })
+function codexCatalogLoaderFromHandle(handle: CodexServerHandle, nextRequestId: () => number): CodexCatalogManager {
+  return createCodexModelCatalogLoader(
+    {
+      send: (request) => handle.send(request),
+    },
+    { nextRequestId },
+  )
 }

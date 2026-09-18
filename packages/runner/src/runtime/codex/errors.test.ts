@@ -11,9 +11,26 @@ import {
   normalizeUnavailableRuntimeCodex,
   normalizeUnknownCodex,
   normalizeUnsupportedExecutionConfigurationCodex,
+  normalizeCodexProviderError,
 } from './errors.js'
 
 describe('Codex runtime error normalization', () => {
+  it('normalizes a JSON-RPC provider rejection with a redacted diagnostic', () => {
+    const result = normalizeCodexProviderError(
+      { code: 'invalid_model', message: 'invalid model: sk-abcdefghijklmnop', data: { token: 'sk-abcdefghijklmnop' } },
+      'turn/start',
+    )
+
+    expect(result?.kind).toBe('turn-failed')
+    expect(result?.message).toContain('invalid model')
+    expect(result?.diagnostics[0]?.message).not.toContain('sk-abcdefghijklmnop')
+    expect(result?.diagnostics[0]?.details).not.toMatchObject({ token: 'sk-abcdefghijklmnop' })
+  })
+
+  it('keeps a transport Error unknown rather than treating it as a provider rejection', () => {
+    expect(normalizeCodexProviderError(new Error('connection lost'), 'turn/start')).toBeNull()
+  })
+
   it('maps structured thread_not_found to missing-session', () => {
     expect(errorKindForCodex({ message: 'thread_not_found: Thread does not exist', code: 'thread_not_found' })).toBe(
       'missing-session',

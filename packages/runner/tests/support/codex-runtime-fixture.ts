@@ -117,8 +117,9 @@ export function makeFakeCodexRuntime(): FakeCodexRuntimeHandles {
       cancelCalls.push(request)
       return nextCancel
     },
-    async compact(request: CodexCompactRequest, _observer?: CodexTurnEventObserver) {
+    async compact(request: CodexCompactRequest, observer?: CodexTurnEventObserver) {
       compactCalls.push(request)
+      for (const event of events) observer?.onEvent?.(event)
       return nextCompact
     },
     async reset(request: CodexResetRequest) {

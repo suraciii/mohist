@@ -55,10 +55,12 @@ import {
 import {
   normalizeInterruptedCodex,
   normalizeTurnFailedCodex,
-  normalizeDeadlineExceededCodex,
   normalizeUnknownCodex,
+  normalizeCodexProviderError,
 } from './errors.js'
 import { redactCodexCredentialString } from './credential.js'
+import { installAbortCloseout } from './abort-closeout.js'
+import { legacyScheduleDeadlineCloseout } from './legacy-deadline.js'
 import { normalizeCodexNotification, staleItemDiagnostic } from './turn-events.js'
 import {
   buildPermissionRejectionUnconfirmed,
@@ -70,13 +72,13 @@ import {
   type CodexDeadlineInterruptHandle,
   type CodexPermissionRejectionHandle,
 } from './closeout.js'
-import type {
-  CodexClock,
-  CodexDiagnostic,
-  CodexFilePart,
-  CodexResult,
-  CodexTurnFacts,
-  CodexTurnResult,
+import {
+  type CodexClock,
+  type CodexDiagnostic,
+  type CodexFilePart,
+  type CodexResult,
+  type CodexTurnFacts,
+  type CodexTurnResult,
 } from './types.js'
 import { mapCodexCanonicalReasoningEffort, type CodexResolvedTurnConfiguration } from './model-catalog.js'
 
@@ -195,6 +197,8 @@ export async function submitTurnStart(
       params,
     })
   } catch (cause) {
+    const providerError = normalizeCodexProviderError(cause, 'turn/start')
+    if (providerError) return { ok: false, error: providerError, diagnostics: providerError.diagnostics }
     const message = cause instanceof Error ? redactCodexCredentialString(cause.message) : 'unknown transport failure'
     const lost = buildLostTurnStartUnknown({
       threadId: submission.threadId,
@@ -277,6 +281,7 @@ export interface CodexTurnCompletionOptions extends CodexTurnCompletionConfig {
   readonly observer?: CodexTurnEventObserver
   readonly fixedDeadlineResult?: CodexResult<CodexTurnResult> | null
   readonly fixedPermissionResult?: CodexResult<CodexTurnResult> | null
+  readonly signal?: AbortSignal
   readonly nextRequestId: () => number
   readonly onTurnIdDiscovered?: (turnId: string) => void
 }
@@ -343,7 +348,18 @@ export async function driveTurnToCompletion(
   // contract for the live lifecycle: as soon as the deadline
   // fires, the session is resolved with `deadline-exceeded`.
   const legacyHandle =
-    options.deadlineMs !== null ? legacyScheduleDeadlineCloseout(options, session, deadlineHandle) : null
+    options.deadlineMs !== null ? legacyScheduleDeadlineCloseout(options, session, deadlineHandle, closeoutClock) : null
+  const abortHandle = options.signal
+    ? installAbortCloseout(
+        {
+          transport: options.transport,
+          signal: options.signal,
+          clock: closeoutClock,
+          nextRequestId: options.nextRequestId,
+        },
+        session,
+      )
+    : null
   // Permission / user-input rejection state machine. Headless
   // execution fails closed. The `onUnconfirmed` callback fires
   // when the budget expires without a matching terminal event;
@@ -373,6 +389,7 @@ export async function driveTurnToCompletion(
     warningHandle?.dispose()
     deadlineHandle?.dispose()
     legacyHandle?.dispose?.()
+    abortHandle?.dispose()
     permissionRejection.dispose()
     unsubscribe()
   }
@@ -479,52 +496,6 @@ function createTurnSession(options: CodexTurnCompletionOptions, diagnostics: Cod
 interface TurnTextBuffer {
   finalText: string
   agentMessageText: string
-}
-
-interface DeadlineHandle {
-  dispose(): void
-}
-
-/**
- * Legacy deadline closeout scheduler kept for back-compat with the
- * pre-closeout hook. The actual deadline interrupt (including the
- * bounded confirmation of the interrupt RPC) now lives in
- * `./closeout.ts`; this helper remains to drive the early-fix
- * behaviour so the session is resolved with `deadline-exceeded`
- * the instant the deadline fires, regardless of whether the
- * interrupt RPC has been confirmed.
- */
-function legacyScheduleDeadlineCloseout(
-  options: CodexTurnCompletionOptions,
-  session: TurnSession,
-  interrupt: CodexDeadlineInterruptHandle | null,
-): DeadlineHandle {
-  const deadlineMs = options.deadlineMs as number
-  const clock = options.clock ?? defaultTurnClock
-  const fixedAtDeadline = () => {
-    if (session.settled.promise === undefined) return
-    const error = normalizeDeadlineExceededCodex(deadlineMs, [...session.unknownItems])
-    const result: CodexResult<CodexTurnResult> = {
-      ok: false,
-      error,
-      diagnostics: error.diagnostics,
-    }
-    session.fixedDeadline = result
-    session.resolve(result)
-    // The interrupt is best-effort; failure is diagnostic but does
-    // not block the fixed deadline result. The bounded confirmation
-    // observable on `interrupt` is reported through the deadline
-    // closeout helper for diagnostics only.
-    if (interrupt) {
-      void interrupt.awaitConfirmation()
-    }
-  }
-  const timer = clock.setTimeout(fixedAtDeadline, deadlineMs)
-  return {
-    dispose() {
-      clock.clearTimeout(timer)
-    },
-  }
 }
 
 async function sendTurnInterrupt(
@@ -743,6 +714,10 @@ function translateCompletedStatus(event: CodexTurnCompletedEvent, session: TurnS
     }
   }
   if (status === 'failed') {
+    const providerError = event.error
+      ? normalizeCodexProviderError({ code: event.error.code, message: event.error.message }, 'turn/completed')
+      : null
+    if (providerError) return { ok: false, error: providerError, diagnostics: providerError.diagnostics }
     const message = event.error?.message ?? 'Codex turn failed'
     const error = normalizeTurnFailedCodex({ message, code: event.error?.code })
     return { ok: false, error, diagnostics: error.diagnostics }
@@ -840,12 +815,18 @@ function projectItemEvent(event: CodexItemEvent, session: TurnSession): Projecte
       ]
     case 'fileChange':
       return [
-        {
-          event: buildEvent('file_change.recorded', session, {
-            path: event.path,
-            kind: event.kind,
-          }),
-        },
+        toolEvent('tool_call.completed', session, {
+          toolCallId: `file-change:${event.path}`,
+          toolName: 'file_change',
+          status: 'completed',
+          target: event.path,
+          changedFiles: [
+            {
+              path: event.path,
+              operation: event.kind === 'create' ? 'created' : event.kind === 'delete' ? 'deleted' : 'modified',
+            },
+          ],
+        }),
       ]
     case 'mcpToolCall':
       return [

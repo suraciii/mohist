@@ -40,8 +40,10 @@ export interface CodexModelListTransport {
 export interface CodexModelCatalogOptions {
   readonly pageSize?: number
   readonly maxPages?: number
-  /** Starts after the initialize request id. */
+  /** Starts after the initialize request id when no shared allocator is supplied. */
   readonly firstRequestId?: number
+  /** Shared app-server request-id allocator owned by the runtime generation. */
+  readonly nextRequestId?: () => number
 }
 
 export interface CodexCatalogRefreshResult {
@@ -108,6 +110,7 @@ export const nativeReasoningEffortForCodex = mapCodexCanonicalReasoningEffort
 export class CodexCatalogManager implements CodexCatalogRefreshStore {
   private readonly pageSize: number
   private readonly maxPages: number
+  private readonly requestIdAllocator: (() => number) | null
   private nextRequestId: number
   private snapshot: CodexCatalog | null = null
   private currentDiagnostic: CodexDiagnostic | null = null
@@ -118,6 +121,7 @@ export class CodexCatalogManager implements CodexCatalogRefreshStore {
   ) {
     this.pageSize = positiveBoundedNumber(options.pageSize, DEFAULT_CODEX_MODEL_PAGE_SIZE)
     this.maxPages = positiveBoundedNumber(options.maxPages, DEFAULT_CODEX_MAX_MODEL_PAGES)
+    this.requestIdAllocator = options.nextRequestId ?? null
     this.nextRequestId = positiveRequestId(options.firstRequestId ?? 2)
   }
 
@@ -267,6 +271,7 @@ export class CodexCatalogManager implements CodexCatalogRefreshStore {
   }
 
   private takeRequestId(): number {
+    if (this.requestIdAllocator) return this.requestIdAllocator()
     const id = this.nextRequestId
     this.nextRequestId = positiveRequestId(id + 1)
     return id

@@ -39,7 +39,12 @@ import {
   CODEX_APPROVAL_POLICY,
   CODEX_SANDBOX_POLICY,
 } from './protocol-types.js'
-import { normalizeMissingSessionCodex, normalizeTurnFailedCodex, normalizeUnknownCodex } from './errors.js'
+import {
+  normalizeMissingSessionCodex,
+  normalizeTurnFailedCodex,
+  normalizeUnknownCodex,
+  normalizeCodexProviderError,
+} from './errors.js'
 import { redactCodexCredentialString } from './credential.js'
 import type { CodexCanonicalReasoningEffort, CodexDiagnostic, CodexResult } from './types.js'
 import { mapCodexCanonicalReasoningEffort } from './model-catalog.js'
@@ -107,6 +112,8 @@ export async function startThread(
       params,
     })
   } catch (cause) {
+    const providerError = normalizeCodexProviderError(cause, 'thread/start')
+    if (providerError) return { ok: false, error: providerError, diagnostics: providerError.diagnostics }
     const message = cause instanceof Error ? redactCodexCredentialString(cause.message) : 'unknown transport failure'
     const error = normalizeUnknownCodex(
       `thread/start transport failed before the response was observed; outcome is unknown: ${message}`,
@@ -193,6 +200,8 @@ export async function resumeThread(
       ])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
+    const providerError = normalizeCodexProviderError(cause, 'thread/resume')
+    if (providerError) return { ok: false, error: providerError, diagnostics: providerError.diagnostics }
     const message = cause instanceof Error ? redactCodexCredentialString(cause.message) : 'unknown transport failure'
     const error = normalizeUnknownCodex(`thread/resume outcome is unknown after transport failure: ${message}`)
     return { ok: false, error, diagnostics: error.diagnostics }

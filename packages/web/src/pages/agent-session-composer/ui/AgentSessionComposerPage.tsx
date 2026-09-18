@@ -82,21 +82,26 @@ function ContextRefChip({ refItem, onRemove }: { refItem: ContextRef; onRemove: 
 function TaskExecutionConfigControls({
   runtime,
   model,
+  reasoningEffort,
   variant,
   onRuntimeChange,
   onModelChange,
+  onReasoningEffortChange,
   onVariantChange,
 }: {
   runtime: AgentRuntime
   model: string | null
+  reasoningEffort: string | null
   variant: string | null
   onRuntimeChange: (runtime: AgentRuntime) => void
   onModelChange: (model: string | null) => void
+  onReasoningEffortChange: (effort: string | null) => void
   onVariantChange: (variant: string | null) => void
 }) {
   const { data: availableModels } = useAvailableModelIds(runtime)
   const modelVariants = useModelVariants(runtime)
   const models = availableModels?.models ?? []
+  const reasoningEfforts = model ? (availableModels?.reasoningEfforts?.[model] ?? []) : []
 
   return (
     <div data-testid="execution-config-controls" className="space-y-3 rounded-lg border border-border bg-card p-4">
@@ -145,6 +150,26 @@ function TaskExecutionConfigControls({
             }}
           />
         </div>
+        {reasoningEfforts.length > 0 && (
+          <div className="space-y-1.5">
+            <Label htmlFor="task-reasoning-effort">Reasoning effort</Label>
+            <select
+              id="task-reasoning-effort"
+              data-testid="task-reasoning-effort"
+              aria-label="Reasoning effort"
+              value={reasoningEffort ?? ''}
+              onChange={(event) => onReasoningEffortChange(event.target.value || null)}
+              className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+            >
+              <option value="">Runtime default</option>
+              {reasoningEfforts.map((effort) => (
+                <option key={effort} value={effort}>
+                  {effort}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
       <p data-testid="execution-config-catalog-hint" className="text-[11px] text-muted-foreground">
         Models and variants come from the selected Runtime catalog. An unset Model stays unset and means Runtime
@@ -252,6 +277,7 @@ export function AgentSessionComposerPage({
   const [promptTouched, setPromptTouched] = useState(false)
   const [executionRuntime, setExecutionRuntime] = useState<AgentRuntime>(AGENT_RUNTIME_PI)
   const [executionModel, setExecutionModel] = useState<string | null>(null)
+  const [executionReasoningEffort, setExecutionReasoningEffort] = useState<string | null>(null)
   const [executionVariant, setExecutionVariant] = useState<string | null>(null)
   const [allowedCollaboratorIds, setAllowedCollaboratorIds] = useState<string[]>([])
   const [maxConcurrentRunsText, setMaxConcurrentRunsText] = useState('')
@@ -442,6 +468,7 @@ export function AgentSessionComposerPage({
     if (maxConcurrentRunsText.trim()) taskInput.maxConcurrentRuns = Number(maxConcurrentRunsText)
     taskInput.runtime = executionRuntime
     taskInput.model = executionModel
+    if (executionReasoningEffort !== null) taskInput.reasoningEffort = executionReasoningEffort
     taskInput.variant = executionVariant
     if (!preflightTaskMutation) {
       startTaskMutation.mutate({ ...taskInput, idempotencyKey }, { onSuccess })
@@ -458,6 +485,7 @@ export function AgentSessionComposerPage({
     canLaunch,
     contextRefs,
     executionModel,
+    executionReasoningEffort,
     executionRuntime,
     executionVariant,
     allowedCollaboratorIds,
@@ -767,13 +795,19 @@ export function AgentSessionComposerPage({
           <TaskExecutionConfigControls
             runtime={executionRuntime}
             model={executionModel}
+            reasoningEffort={executionReasoningEffort}
             variant={executionVariant}
             onRuntimeChange={(runtime) => {
               setExecutionRuntime(runtime)
               setExecutionModel(null)
+              setExecutionReasoningEffort(null)
               setExecutionVariant(null)
             }}
-            onModelChange={setExecutionModel}
+            onModelChange={(model) => {
+              setExecutionModel(model)
+              setExecutionReasoningEffort(null)
+            }}
+            onReasoningEffortChange={setExecutionReasoningEffort}
             onVariantChange={setExecutionVariant}
           />
         )}
