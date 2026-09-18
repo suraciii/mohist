@@ -240,6 +240,9 @@ func runRunnerEnvironment(ctx context.Context, deps Dependencies, c *client, cmd
 	if action == "capture" {
 		return captureRunnerEnvironmentCandidate(ctx, deps, c, cmd)
 	}
+	if action == "initialize" {
+		return initializeRunnerEnvironment(ctx, deps, cmd)
+	}
 	if action == "check" {
 		return checkRunnerEnvironment(ctx, deps, c, cmd)
 	}
