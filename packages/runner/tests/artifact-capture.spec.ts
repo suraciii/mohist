@@ -104,6 +104,26 @@ function workItem(artifacts: JsonObject | null): DispatchWorkItem {
   }
 }
 
+interface DirectoryEnvelopeFile {
+  path: string
+  size: number
+  contentHash: string
+  contentType: string
+  data: string
+}
+
+/** Parses the newline-delimited directory envelope: a kind header value followed by one value per file. */
+function decodeDirectoryEnvelope(content: Uint8Array): DirectoryEnvelopeFile[] {
+  const text = new TextDecoder().decode(content)
+  expect(text.endsWith('\n')).toBe(true)
+  const values = text
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+  expect(values[0]).toEqual({ kind: 'directory' })
+  return values.slice(1) as unknown as DirectoryEnvelopeFile[]
+}
+
 describe('declaredArtifactPaths', () => {
   it('declaredFiles_AreReturnedWithDeclaredSource', () => {
     const work = workItem({ files: [{ path: 'review.md' }, { path: 'design.md' }] })
@@ -165,20 +185,20 @@ describe('captureOne', () => {
     const capture = await captureOne(paths().workDir, { path: 'specs', source: 'declared' })
     expect(capture.kind).toBe('directory')
     expect(capture.fileCount).toBe(3)
-    const manifest = JSON.parse(new TextDecoder().decode(capture.content))
-    expect(manifest.kind).toBe('directory')
-    const manifestPaths = manifest.files.map((f: { path: string }) => f.path).sort()
+    const files = decodeDirectoryEnvelope(capture.content)
+    const manifestPaths = files.map((f) => f.path).sort()
     expect(manifestPaths).toEqual(['a.md', 'config.json', 'sub/b.md'])
     // Each entry carries the content type the server records in the persisted manifest.
-    expect(
-      manifest.files
-        .map((f: { path: string; contentType: string }) => [f.path, f.contentType])
-        .sort((a: string[], b: string[]) => a[0].localeCompare(b[0])),
-    ).toEqual([
+    expect(files.map((f) => [f.path, f.contentType]).sort((a, b) => a[0]!.localeCompare(b[0]!))).toEqual([
       ['a.md', 'text/markdown'],
       ['config.json', 'application/json'],
       ['sub/b.md', 'text/markdown'],
     ])
+    // Envelope values preserve the per-entry path, decoded size, content hash, and base64 payload.
+    const alpha = files.find((f) => f.path === 'a.md')!
+    expect(alpha.size).toBe(5)
+    expect(Buffer.from(alpha.data, 'base64').toString('utf8')).toBe('alpha')
+    expect(alpha.contentHash).toMatch(/^sha256:[a-f0-9]{64}$/)
   })
 
   it('refusesPathsEscapingWorkspace', async () => {

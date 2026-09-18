@@ -283,17 +283,22 @@ async function collectDirectoryFiles(
 }
 
 function encodeDirectoryArchive(entries: DirectoryFileEntry[]): Uint8Array {
-  const json = JSON.stringify({
-    kind: 'directory',
-    files: entries.map((entry) => ({
-      path: entry.relativePath,
-      size: entry.size,
-      contentHash: entry.contentHash,
-      contentType: entry.contentType,
-      data: Buffer.from(entry.data).toString('base64'),
-    })),
-  })
-  return new TextEncoder().encode(json)
+  // Newline-delimited top-level JSON values: the header followed by one
+  // value per contained file. The Server streams the sequence so it never
+  // retains every entry's payload at once.
+  const values: string[] = [JSON.stringify({ kind: 'directory' })]
+  for (const entry of entries) {
+    values.push(
+      JSON.stringify({
+        path: entry.relativePath,
+        size: entry.size,
+        contentHash: entry.contentHash,
+        contentType: entry.contentType,
+        data: Buffer.from(entry.data).toString('base64'),
+      }),
+    )
+  }
+  return new TextEncoder().encode(`${values.join('\n')}\n`)
 }
 
 async function resolveArtifactPath(workDir: string, rawPath: string): Promise<string> {
