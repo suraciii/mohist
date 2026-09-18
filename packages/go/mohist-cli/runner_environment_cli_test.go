@@ -166,6 +166,20 @@ func TestRunnerEnvironmentApplicationMetadataIsSanitized(t *testing.T) {
 	}
 }
 
+func TestDecodeRunnerEnvironmentApplicationAcceptsCanonicalUuidFormatting(t *testing.T) {
+	data := []byte(`{"runnerId":"runner/pluto","updateId":"11111111111141118111111111111111","status":"waiting","application":{"phase":"waiting"}}`)
+	response, err := decodeRunnerEnvironmentApplication(data, "runner/pluto", "11111111-1111-4111-8111-111111111111", true)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if response.UpdateID != "11111111111141118111111111111111" {
+		t.Fatalf("update id=%q", response.UpdateID)
+	}
+	if sameRunnerEnvironmentUpdateID("", "") || sameRunnerEnvironmentUpdateID("not-a-uuid", "not-a-uuid") {
+		t.Fatal("invalid update IDs were accepted")
+	}
+}
+
 func TestRunnerEnvironmentApplyResumesAfterRestartWithoutSecondRestart(t *testing.T) {
 	home := t.TempDir()
 	root := filepath.Join(home, ".config", "mohist")
