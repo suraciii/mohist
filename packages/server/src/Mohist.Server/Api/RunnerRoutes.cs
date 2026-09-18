@@ -64,6 +64,7 @@ public static partial class RunnerRoutes
         MapRunnerManagerExecutionRoutes(app);
         MapUpdateInterruptRoutes(group);
         MapRunnerUpdateRecoveryRoutes(group);
+        MapEnvironmentApplicationRoutes(group);
         group.MapPatch("", async (string runnerId, RunnerSlotsPatchRequest req, IGrainFactory grains) =>
         {
             if (req is null || req.Slots <= 0)

@@ -47,6 +47,38 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// update-interrupt fence. A stale caller cannot cancel a later update.
     /// </summary>
     Task<RunnerUpdateInterruptCancelResult> CancelUpdateInterruptAsync(string updateInterruptId);
+    /// <summary>Creates or resumes the one durable environment application for this Runner.</summary>
+    Task<RunnerEnvironmentApplicationBeginResult?> BeginEnvironmentApplicationAsync(
+        string updateId,
+        string targetVersion,
+        string processGeneration,
+        string connectionGeneration);
+    /// <summary>Reads an environment application and fresh settlement evidence.</summary>
+    Task<RunnerEnvironmentApplicationCommandResult> GetEnvironmentApplicationAsync(string updateId);
+    /// <summary>Moves a waiting application to the local apply handoff after settlement.</summary>
+    Task<RunnerEnvironmentApplicationCommandResult> BeginEnvironmentApplyAsync(
+        string updateId,
+        string processGeneration);
+    /// <summary>Confirms target activation and releases only the matching environment fence.</summary>
+    Task<RunnerEnvironmentApplicationCommandResult> ConfirmEnvironmentApplicationAsync(
+        string updateId,
+        string processGeneration,
+        string environmentVersion);
+    /// <summary>Records a bounded apply failure while retaining the fence for rollback.</summary>
+    Task<RunnerEnvironmentApplicationCommandResult> FailEnvironmentApplicationAsync(
+        string updateId,
+        string failureCode);
+    /// <summary>Confirms the previous version after a failed activation and releases the fence.</summary>
+    Task<RunnerEnvironmentApplicationCommandResult> ConfirmEnvironmentRollbackAsync(
+        string updateId,
+        string processGeneration,
+        string environmentVersion);
+    /// <summary>Marks an unresolved handoff without releasing its fence.</summary>
+    Task<RunnerEnvironmentApplicationCommandResult> MarkEnvironmentApplicationUnconfirmedAsync(
+        string updateId,
+        string failureCode);
+    /// <summary>Cancels only a waiting environment application owned by this update id.</summary>
+    Task<RunnerEnvironmentApplicationCommandResult> CancelEnvironmentApplicationAsync(string updateId);
     /// <summary>Atomically reopens poll and work claim admission.</summary>
     Task CancelDrainAsync();
     /// <summary>
