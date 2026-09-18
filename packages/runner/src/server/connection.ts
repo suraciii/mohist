@@ -39,8 +39,8 @@ export {
 } from './connection-transport.js'
 import {
   getWorkspaceReclaimability as getWorkspaceReclaimabilityViaTransport,
-  reportWorkspaceMaterialized as reportWorkspaceMaterializedViaTransport,
-  type WorkspaceMaterializedReport,
+  reportWorkspaceProvisioned as reportWorkspaceProvisionedViaTransport,
+  type WorkspaceProvisionedReport,
   type WorkspaceReclaimability,
   type WorkspaceReportTransport,
 } from './connection-workspaces.js'
@@ -58,7 +58,7 @@ export {
 } from './connection-workspace-artifacts.js'
 export {
   parseWorkspaceReclaimability,
-  type WorkspaceMaterializedReport,
+  type WorkspaceProvisionedReport,
   type WorkspaceReclaimability,
 } from './connection-workspaces.js'
 import type {
@@ -638,20 +638,20 @@ export class ServerConnection {
   }
 
   /**
-   * Reports a materialized named workspace directory to the server
-   * (`POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/materialized`).
+   * Reports a provisioned named workspace directory to the server
+   * (`POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/provisioned`).
    * The server records the workspace home (first writer wins); a 409
    * `workspace_home_claimed` answer throws {@link WorkspaceHomeClaimedError}
    * so the dispatching runner can yield its local directory and fail the
    * dispatch (the job retries against the home runner).
    */
-  async reportWorkspaceMaterialized(
+  async reportWorkspaceProvisioned(
     projectId: string,
     workspaceName: string,
     path: string,
     signal: AbortSignal,
-  ): Promise<WorkspaceMaterializedReport> {
-    return await reportWorkspaceMaterializedViaTransport(this.transport(), projectId, workspaceName, path, signal)
+  ): Promise<WorkspaceProvisionedReport> {
+    return await reportWorkspaceProvisionedViaTransport(this.transport(), projectId, workspaceName, path, signal)
   }
 
   /**

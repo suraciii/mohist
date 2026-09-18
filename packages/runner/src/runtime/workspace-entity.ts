@@ -547,7 +547,7 @@ export class NamedWorkspaceManager {
       if (workflowRunId && workId) {
         await provisionWorkspaceArtifacts(this.connection, workflowRunId, workId, result.path, signal)
       }
-      await this.connection.reportWorkspaceMaterialized(projectId, workspaceName, result.path, signal)
+      await this.connection.reportWorkspaceProvisioned(projectId, workspaceName, result.path, signal)
     } catch (error) {
       if (result.created) {
         await deleteDirectory(result.path).catch(() => {})
@@ -573,7 +573,7 @@ export class NamedWorkspaceManager {
       now: this.now,
     })
     try {
-      await this.connection.reportWorkspaceMaterialized(projectId, workspaceName, result.path, signal)
+      await this.connection.reportWorkspaceProvisioned(projectId, workspaceName, result.path, signal)
     } catch (error) {
       if (error instanceof WorkspaceHomeClaimedError) {
         if (result.created) {

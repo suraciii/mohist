@@ -1,4 +1,4 @@
-// Workspace materialization reporting extracted from ServerConnection to
+// Workspace provisioning reporting extracted from ServerConnection to
 // keep the main module within the file-size ratchet. The transport is the
 // connection's authenticated fetch surface; the behavior is unchanged.
 import { getSegments } from '../core/json-path.js'
@@ -8,10 +8,10 @@ import { createRunnerProtocolError, type RunnerRequestTransport } from './connec
 
 /**
  * Answer shape for
- * `POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/materialized`.
+ * `POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/provisioned`.
  * `runnerId` is the workspace home runner recorded by the server (this runner on success).
  */
-export interface WorkspaceMaterializedReport {
+export interface WorkspaceProvisionedReport {
   readonly runnerId: string
   readonly path: string
 }
@@ -33,18 +33,18 @@ export interface WorkspaceReportTransport {
   url(path: string): string
 }
 
-export async function reportWorkspaceMaterialized(
+export async function reportWorkspaceProvisioned(
   transport: WorkspaceReportTransport,
   projectId: string,
   workspaceName: string,
   path: string,
   signal: AbortSignal,
-): Promise<WorkspaceMaterializedReport> {
+): Promise<WorkspaceProvisionedReport> {
   let response: Response
   try {
     response = await transport.request(
-      'reportWorkspaceMaterialized',
-      transport.url(`workspaces/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceName)}/materialized`),
+      'reportWorkspaceProvisioned',
+      transport.url(`workspaces/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceName)}/provisioned`),
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }), signal },
     )
   } catch (error) {
@@ -54,15 +54,15 @@ export async function reportWorkspaceMaterialized(
       error.serverCode === 'workspace_home_claimed'
     ) {
       throw new WorkspaceHomeClaimedError(
-        `workspace materialization rejected: workspace is already materialized on another runner (${error.httpStatus ?? 'unknown status'})`,
+        `workspace provisioning rejected: workspace is already provisioned on another runner (${error.httpStatus ?? 'unknown status'})`,
       )
     }
     throw error
   }
-  const payload = await transport.readJson<unknown>(response, 'reportWorkspaceMaterialized')
+  const payload = await transport.readJson<unknown>(response, 'reportWorkspaceProvisioned')
   const data = isSuccessfulApiResponse(payload) ? payload.data : null
   if (!isObjectRecord(data) || !nonEmptyString(data.runnerId) || !nonEmptyString(data.path)) {
-    throw createRunnerProtocolError('reportWorkspaceMaterialized', 'returned a malformed response')
+    throw createRunnerProtocolError('reportWorkspaceProvisioned', 'returned a malformed response')
   }
   return { runnerId: data.runnerId, path: data.path }
 }

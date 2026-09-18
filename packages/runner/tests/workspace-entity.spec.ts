@@ -157,7 +157,7 @@ describe('NamedWorkspaceManager', () => {
   it('reports the materialized path to the server', async () => {
     const { root, registry } = context()
     const report = vi.fn(async () => ({ runnerId: 'runner-1', path: namedWorkspacePath(root, 'mohist', 'pay') }))
-    const manager = new NamedWorkspaceManager(root, registry, { reportWorkspaceMaterialized: report } as never)
+    const manager = new NamedWorkspaceManager(root, registry, { reportWorkspaceProvisioned: report } as never)
 
     const result = await manager.provision('mohist', 'pay', [], new AbortController().signal)
 
@@ -171,7 +171,7 @@ describe('NamedWorkspaceManager', () => {
     const report = vi.fn(async () => {
       throw claimed
     })
-    const manager = new NamedWorkspaceManager(root, registry, { reportWorkspaceMaterialized: report } as never)
+    const manager = new NamedWorkspaceManager(root, registry, { reportWorkspaceProvisioned: report } as never)
 
     await expect(manager.provision('mohist', 'pay', [], new AbortController().signal)).rejects.toBe(claimed)
     expect(registry.get('mohist', 'pay')).toBeNull()
@@ -185,7 +185,7 @@ describe('NamedWorkspaceManager', () => {
     const report = vi.fn(async () => {
       throw new WorkspaceHomeClaimedError('already materialized on runner-2')
     })
-    const manager = new NamedWorkspaceManager(root, registry, { reportWorkspaceMaterialized: report } as never)
+    const manager = new NamedWorkspaceManager(root, registry, { reportWorkspaceProvisioned: report } as never)
 
     await expect(manager.provision('mohist', 'pay', [], new AbortController().signal)).rejects.toBeInstanceOf(
       WorkspaceHomeClaimedError,
@@ -199,7 +199,7 @@ describe('NamedWorkspaceManager', () => {
     const report = vi.fn(async () => {
       throw new Error('workspace Home provisioning failed: 500')
     })
-    const manager = new NamedWorkspaceManager(root, registry, { reportWorkspaceMaterialized: report } as never)
+    const manager = new NamedWorkspaceManager(root, registry, { reportWorkspaceProvisioned: report } as never)
 
     await expect(manager.provision('mohist', 'pay', [], new AbortController().signal)).rejects.toThrow(
       'workspace Home provisioning failed: 500',

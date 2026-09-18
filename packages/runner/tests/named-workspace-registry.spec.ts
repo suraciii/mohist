@@ -108,7 +108,7 @@ describe('NamedWorkspaceRegistry restart safety', () => {
     await registry.load()
     const report = vi.fn(async () => ({ runnerId: 'runner-1', path: 'ignored' }))
     const manager = new NamedWorkspaceManager(root, registry, {
-      reportWorkspaceMaterialized: report,
+      reportWorkspaceProvisioned: report,
     } as never)
 
     const result = await manager.provision('project', 'pay', [], new AbortController().signal)

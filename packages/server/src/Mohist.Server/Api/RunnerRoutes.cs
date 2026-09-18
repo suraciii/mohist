@@ -402,17 +402,17 @@ public static partial class RunnerRoutes
         // Runner reports a provisioned named workspace directory; the
         // grain records the home (first writer wins) so later dispatches
         // bind to this runner.
-        group.MapPost("/workspaces/{projectId}/{workspaceName}/materialized", async (
+        group.MapPost("/workspaces/{projectId}/{workspaceName}/provisioned", async (
             string runnerId,
             string projectId,
             string workspaceName,
-            WorkspaceMaterializedRequest req,
+            WorkspaceProvisionedRequest req,
             IGrainFactory grains,
             TimeProvider time,
             CancellationToken ct) =>
         {
             if (req is null || string.IsNullOrWhiteSpace(req.Path))
-                return ApiResults.BadRequest("path is required.", "workspace_materialization_invalid");
+                return ApiResults.BadRequest("path is required.", "workspace_provisioning_invalid");
             try
             {
                 var home = await grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
@@ -420,7 +420,7 @@ public static partial class RunnerRoutes
                     .EnsureProvisionedOnAsync(runnerId, req.Path, time.GetUtcNow());
                 return home is null
                     ? ApiResults.NotFound($"Workspace '{workspaceName}' not found")
-                    : ApiResults.Ok(new WorkspaceMaterializedResponse(home.RunnerId, home.Path));
+                    : ApiResults.Ok(new WorkspaceProvisionedResponse(home.RunnerId, home.Path));
             }
             catch (Mohist.Server.Workspace.Domain.WorkspaceDomainException ex)
             {
@@ -753,13 +753,13 @@ public record CleanupPolicyDto(
 public record RunnerConfigResponse(CleanupPolicyDto? CleanupPolicy);
 
 /// <summary>
-/// Body for <c>POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/materialized</c>.
-/// The runner reports the local directory it materialized for a named
+/// Body for <c>POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/provisioned</c>.
+/// The runner reports the local directory it provisioned for a named
 /// workspace; the server records it as the workspace home (first writer
 /// wins) so later dispatches bind to this runner.
 /// </summary>
-public record WorkspaceMaterializedRequest(string? Path);
-public record WorkspaceMaterializedResponse(string RunnerId, string Path);
+public record WorkspaceProvisionedRequest(string? Path);
+public record WorkspaceProvisionedResponse(string RunnerId, string Path);
 
 /// <summary>
 /// Answer for <c>GET /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/reclaimable</c>.

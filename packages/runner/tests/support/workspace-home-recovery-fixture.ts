@@ -104,7 +104,7 @@ export interface FakeProvisioningConnection {
     signal: AbortSignal,
     file?: string,
   ): Promise<Uint8Array>
-  reportWorkspaceMaterialized(
+  reportWorkspaceProvisioned(
     projectId: string,
     workspaceName: string,
     path: string,
@@ -134,7 +134,7 @@ export function createFakeConnection(options: { tamperFileBytes?: boolean } = {}
       if (artifactId === directoryArtifact.artifactId) return encoder.encode(DIRECTORY_ENTRY_CONTENT)
       throw new Error(`unexpected artifact download: ${artifactId}`)
     },
-    async reportWorkspaceMaterialized(projectId, workspaceName, path) {
+    async reportWorkspaceProvisioned(projectId, workspaceName, path) {
       connection.reportCalls.push({ projectId, workspaceName, path })
       return { runnerId: 'runner-1', path }
     },

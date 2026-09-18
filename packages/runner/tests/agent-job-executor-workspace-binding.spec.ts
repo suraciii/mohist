@@ -89,7 +89,7 @@ function buildAgentJobWork(overrides: Partial<DispatchWorkItem> = {}): DispatchW
 }
 
 describe('AgentJobExecutor resolves a named workspace binding', () => {
-  it('materializes the named workspace and anchors the prompt to its directory', async () => {
+  it('provisions the named workspace and anchors the prompt to its directory', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
     const provision = vi.fn(async () => ({ path: '/runner-root/workspaces/mohist-pay-abc123', created: true }))
