@@ -10,6 +10,7 @@ import { isObject } from '../core/json.js'
 import { stringAt } from '../core/json-path.js'
 import { parseModelIdentifier, type OpenCodeRuntime } from './opencode/index.js'
 import type { PiRuntime } from './pi/index.js'
+import type { CodexRuntime } from './codex/index.js'
 import { resolveAccessor, type CommandRuntimeHandle, type RuntimeAccessor } from '../server/command-runtime.js'
 import type { ServerConnection } from '../server/connection.js'
 import { SkillResolver } from './skill-resolver.js'
@@ -28,7 +29,14 @@ import {
   type NamedWorkspaceRepository,
   WorkspaceHomeClaimedError,
 } from './workspace-entity.js'
-import { executeOpenCodeTurn, executePiTurn, failureResult, type AgentJobTurnDeps } from './agent-job-turn.js'
+import {
+  executeCodexTurn,
+  executeOpenCodeTurn,
+  executePiTurn,
+  failureResult,
+  type AgentJobTurnDeps,
+} from './agent-job-turn.js'
+import { runnerLogger } from '../system/logger.js'
 import type { ManagerExecutionBoundary } from './manager-execution-boundary.js'
 import { renderTemplate, unresolvedReferences } from '../core/template.js'
 import { evaluateCompletion } from '../actions/expectations.js'
@@ -83,6 +91,7 @@ export interface AgentJobExecutorOptions {
 export interface AgentJobRuntimeAccessors {
   readonly openCode: RuntimeAccessor<OpenCodeRuntime>
   readonly pi: RuntimeAccessor<PiRuntime>
+  readonly codex?: RuntimeAccessor<CodexRuntime>
 }
 
 export class AgentJobExecutor {
@@ -134,11 +143,11 @@ export class AgentJobExecutor {
       readOptionalString(dispatchAgent, 'reasoningEffort') ??
       (runtimeName === 'pi' ? requestedVariant : null)
     const variant = runtimeName === 'pi' ? null : requestedVariant
-    const model = parseModel(modelInput)
+    const model = runtimeName === 'codex' ? ({ kind: 'absent' } as const) : parseModel(modelInput)
     if (runtimeName === 'pi' && dispatchAgent !== null && !modelInput) {
       return failureResult('invalid-input', "AgentJob Pi execution requires an explicit 'model' in the dispatch")
     }
-    if (modelInput && model.kind === 'failure') {
+    if (runtimeName !== 'codex' && modelInput && model.kind === 'failure') {
       return failureResult('invalid-input', `AgentJob ${model.message}`)
     }
 
@@ -228,6 +237,23 @@ export class AgentJobExecutor {
         binding,
         skills,
         managerExecution,
+      )
+      return this.finalizeWorkflowResult(work, workDir, result, signal)
+    }
+    if (runtimeName === 'codex') {
+      const result = await executeCodexTurn(
+        this.turnDeps(managerExecution),
+        work,
+        signal,
+        payload,
+        composed,
+        modelInput,
+        variant,
+        reasoningEffort,
+        workDir,
+        binding,
+        skills,
+        attachmentDelivery,
       )
       return this.finalizeWorkflowResult(work, workDir, result, signal)
     }
@@ -582,14 +608,14 @@ function readOptionalString(payload: JsonObject | null, key: string): string | n
  */
 function readRuntime(payload: JsonObject | null): ParsedRuntime {
   const value = payload?.['runtime']
-  if (value === 'opencode' || value === 'pi') return { kind: 'ok', value }
+  if (value === 'opencode' || value === 'pi' || value === 'codex') return { kind: 'ok', value }
   return {
     kind: 'invalid',
-    message: "AgentJob requires dispatch 'runtime' to be 'opencode' or 'pi'",
+    message: "AgentJob requires dispatch 'runtime' to be 'opencode', 'pi', or 'codex'",
   }
 }
 
-type ParsedRuntime = { kind: 'ok'; value: 'opencode' | 'pi' } | { kind: 'invalid'; message: string }
+type ParsedRuntime = { kind: 'ok'; value: 'opencode' | 'pi' | 'codex' } | { kind: 'invalid'; message: string }
 
 function composePrompt(prompt: string, instructions: string | null): string {
   if (!instructions) return prompt

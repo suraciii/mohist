@@ -48,6 +48,7 @@ export interface CancelHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
   openCodeRuntime?: CommandRuntimeAccessors['openCode']
   piRuntime?: CommandRuntimeAccessors['pi']
+  codexRuntime?: CommandRuntimeAccessors['codex']
   agentSessionRuntimeEventQueue?: AgentSessionRuntimeEventQueue | null
   managerExecutionRegistry?: ManagerExecutionRegistry | null
   onManagerExecutionFinished?: (executionId: string) => Promise<void> | void
@@ -91,6 +92,7 @@ async function reconcileStartedStop(
     resolveCommandRuntime(binding, {
       openCode: deps.openCodeRuntime,
       pi: deps.piRuntime,
+      codex: deps.codexRuntime,
     })
   if (!handle || !handle.runtime.ready()) return 'indeterminate'
 
@@ -104,13 +106,20 @@ async function reconcileStartedStop(
               workDir: binding.workDir,
             },
           })
-        : await handle.runtime.resolveSession({
-            target: {
-              runtime: 'pi',
-              runtimeSessionId: binding.runtimeSessionId,
-              workDir: binding.workDir,
-            },
-          })
+        : handle.kind === 'codex'
+          ? await handle.runtime.resolveSession({
+              target: {
+                runtimeSessionId: binding.runtimeSessionId ?? '',
+                workDir: binding.workDir,
+              },
+            })
+          : await handle.runtime.resolveSession({
+              target: {
+                runtime: 'pi',
+                runtimeSessionId: binding.runtimeSessionId,
+                workDir: binding.workDir,
+              },
+            })
     if (result.ok) return result.value.activeTurn ? 'active' : 'idle'
     return readErrorKind(result) === 'missing-session' ? 'missing' : 'indeterminate'
   } catch (error) {
@@ -148,6 +157,7 @@ async function handleCancel(
     resolveCommandRuntime(binding, {
       openCode: deps.openCodeRuntime,
       pi: deps.piRuntime,
+      codex: deps.codexRuntime,
     })
   if (!handle) return { state: 'unavailable', error: 'runtime-unavailable' }
   if (!(await ensureCommandRuntimeReady(handle))) {

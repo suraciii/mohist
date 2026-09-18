@@ -18,22 +18,25 @@ namespace Mohist.Server.Infrastructure;
 ///
 /// <para>
 /// The whitelist also carries the execution
-/// backend dimension (<c>runtime</c>: <c>opencode</c> | <c>pi</c>).
-/// Absent / unset resolves to <c>pi</c>; any other value is
-/// rejected as invalid. Agent CRUD uses <see cref="Validate"/> and Issue
-/// configuration uses <see cref="ValidateIssue"/> so runtime has one owner.
+/// backend dimension (<c>runtime</c>: <c>opencode</c> | <c>pi</c> |
+/// <c>codex</c>). Absent / unset resolves to <c>pi</c>; any other value
+/// is rejected as invalid. Agent CRUD uses <see cref="Validate"/> and
+/// Issue configuration uses <see cref="ValidateIssue"/> so runtime has one
+/// owner.
 /// </para>
 /// </summary>
 public static class AgentConfigSchema
 {
     public const string OpenCodeRuntime = "opencode";
     public const string PiRuntime = "pi";
+    public const string CodexRuntime = "codex";
     public const string DefaultRuntime = PiRuntime;
 
     public static readonly IReadOnlySet<string> AllowedRuntimes = new HashSet<string>(StringComparer.Ordinal)
     {
         OpenCodeRuntime,
         PiRuntime,
+        CodexRuntime,
     };
 
     /// <summary>
@@ -164,12 +167,12 @@ public static class AgentConfigSchema
         if (runtime.ValueKind == JsonValueKind.Null) return null;
         if (runtime.ValueKind != JsonValueKind.String)
         {
-            return "agentConfig.runtime must be one of opencode, pi.";
+            return "agentConfig.runtime must be one of opencode, pi, codex.";
         }
         var raw = runtime.GetString();
         if (string.IsNullOrWhiteSpace(raw))
         {
-            return "agentConfig.runtime must be one of opencode, pi.";
+            return "agentConfig.runtime must be one of opencode, pi, codex.";
         }
         if (!AllowedRuntimes.Contains(raw))
         {
@@ -188,7 +191,7 @@ public static class AgentConfigSchema
         if (agentConfig is null || !agentConfig.TryGetValue("runtime", out var value) || value is null)
             return null;
         if (value is not string raw)
-            return "agentConfig.runtime must be one of opencode, pi.";
+            return "agentConfig.runtime must be one of opencode, pi, codex.";
         if (!AllowedRuntimes.Contains(raw))
             return $"agentConfig.runtime '{raw}' is not supported; the agent runtime accepts only {string.Join(", ", AllowedRuntimes)}.";
         return null;

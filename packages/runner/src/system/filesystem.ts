@@ -24,6 +24,8 @@ import type { RunnerLogger } from './logger.js'
 import type { ExternalProcessPolicy } from './process-policy.js'
 import type { PiRuntimeFactory } from '../runtime/pi/factory.js'
 import type { OpenCodeRuntimeFactory } from '../runtime/opencode/factory.js'
+import type { CodexRuntimeFactory } from '../runtime/codex/factory.js'
+import type { CodexServerFactory } from '../runtime/codex/server-process.js'
 import type {
   OpencodeLogFileSystem,
   OpencodeProviderErrorDiagnosticFinder,
@@ -207,6 +209,8 @@ export interface RunnerResourceContext {
   readonly externalProcessPolicy?: ExternalProcessPolicy
   readonly piRuntimeFactory?: PiRuntimeFactory
   readonly openCodeRuntimeFactory?: OpenCodeRuntimeFactory
+  readonly codexRuntimeFactory?: CodexRuntimeFactory
+  readonly codexServerFactory?: CodexServerFactory
   readonly opencodeProviderErrorDiagnosticFinder?: OpencodeProviderErrorDiagnosticFinder
   readonly opencodeModelDiscovery?: OpencodeModelDiscovery
   readonly opencodeLogFileSystem?: OpencodeLogFileSystem

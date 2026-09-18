@@ -90,6 +90,7 @@ public class AgentConfigValidationApiBoundaryTests
     [Theory]
     [InlineData("opencode")]
     [InlineData("pi")]
+    [InlineData("codex")]
     public void IssueModelMetadata_RejectsRuntime(string runtime)
     {
         var raw = JsonDocument.Parse($$"""{"model":"openai/gpt-5.6","variant":"high","runtime":"{{runtime}}"}""").RootElement;

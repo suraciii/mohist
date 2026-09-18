@@ -24,6 +24,7 @@ import type {
 import { extractAttachmentIds } from '../../../entities/issue'
 import { useProject, useProjectPath } from '../../../entities/project'
 import {
+  AGENT_RUNTIME_CODEX,
   AGENT_RUNTIME_OPENCODE,
   AGENT_RUNTIME_PI,
   useAvailableModelIds,
@@ -119,6 +120,7 @@ function TaskExecutionConfigControls({
           >
             <option value={AGENT_RUNTIME_OPENCODE}>OpenCode</option>
             <option value={AGENT_RUNTIME_PI}>Pi</option>
+            <option value={AGENT_RUNTIME_CODEX}>Codex</option>
           </select>
         </div>
         <div className="space-y-1.5">

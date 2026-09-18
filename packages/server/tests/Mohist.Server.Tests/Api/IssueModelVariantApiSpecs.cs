@@ -145,7 +145,7 @@ public class IssueModelVariantApiSpecs
     }
 
     [Fact]
-    public async Task OpencodeModels_RuntimeQueryReturnsSelectedCatalogAndDefaultsToOpenCode()
+    public async Task OpencodeModels_RuntimeQueryAcceptsCodexAndReturnsSelectedCatalogAndDefaultsToOpenCode()
     {
         var projectId = await CreateProjectAsync("runtime-models");
         var runnerId = $"runtime-model-runner-{Guid.NewGuid():N}";
@@ -167,6 +167,12 @@ public class IssueModelVariantApiSpecs
                     variants = new Dictionary<string, string[]> { ["anthropic/catalog-pi"] = ["balanced"] },
                     reasoningEfforts = new Dictionary<string, string[]> { ["anthropic/catalog-pi"] = ["high"] },
                 },
+                codex = new
+                {
+                    models = new[] { "gpt-5-codex" },
+                    variants = new Dictionary<string, string[]>(),
+                    reasoningEfforts = new Dictionary<string, string[]> { ["gpt-5-codex"] = ["xhigh"] },
+                },
             },
         });
 
@@ -174,16 +180,25 @@ public class IssueModelVariantApiSpecs
         {
             var pi = await _fixture.Client.GetDataAsync<CatalogDto>($"/api/projects/{projectId}/opencode/models?runtime=pi");
             var opencode = await _fixture.Client.GetDataAsync<CatalogDto>($"/api/projects/{projectId}/opencode/models?runtime=opencode");
+            var codex = await _fixture.Client.GetDataAsync<CatalogDto>($"/api/projects/{projectId}/opencode/models?runtime=codex");
             var defaultCatalog = await _fixture.Client.GetDataAsync<CatalogDto>($"/api/projects/{projectId}/opencode/models");
 
             Assert.Contains("anthropic/catalog-pi", pi.Models);
             Assert.DoesNotContain("openai/catalog-opencode", pi.Models);
+            Assert.DoesNotContain("gpt-5-codex", pi.Models);
             Assert.Equal(["balanced"], pi.ModelVariants["anthropic/catalog-pi"]);
             Assert.Equal(["high"], pi.ReasoningEfforts["anthropic/catalog-pi"]);
             Assert.Contains("openai/catalog-opencode", opencode.Models);
+            Assert.DoesNotContain("gpt-5-codex", opencode.Models);
             Assert.Equal(["low"], opencode.ModelVariants["openai/catalog-opencode"]);
+            Assert.Contains("gpt-5-codex", codex.Models);
+            Assert.DoesNotContain("anthropic/catalog-pi", codex.Models);
+            Assert.DoesNotContain("openai/catalog-opencode", codex.Models);
+            Assert.Empty(codex.ModelVariants);
+            Assert.Equal(["xhigh"], codex.ReasoningEfforts["gpt-5-codex"]);
             Assert.Contains("openai/catalog-opencode", defaultCatalog.Models);
             Assert.DoesNotContain("anthropic/catalog-pi", defaultCatalog.Models);
+            Assert.DoesNotContain("gpt-5-codex", defaultCatalog.Models);
             Assert.Equal(opencode.ModelVariants, defaultCatalog.ModelVariants);
         }
         finally

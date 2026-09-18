@@ -1,13 +1,15 @@
 import type { OpenCodeRuntime, RuntimeResult, RuntimeSessionCreateResult } from './opencode/index.js'
+import type { CodexResult, CodexRuntime } from './codex/index.js'
 import type { PiResult, PiRuntime, PiSessionResult } from './pi/index.js'
 
 export type RecoverableRuntime =
   | { readonly kind: 'opencode'; readonly runtime: OpenCodeRuntime }
   | { readonly kind: 'pi'; readonly runtime: PiRuntime }
+  | { readonly kind: 'codex'; readonly runtime: CodexRuntime }
 
 export interface RuntimeBinding {
   readonly runnerId: string
-  readonly runtime: 'opencode' | 'pi'
+  readonly runtime: 'opencode' | 'pi' | 'codex'
   readonly runtimeSessionId: string | null
   readonly workDir: string
 }
@@ -106,12 +108,22 @@ export async function resolveOrRecoverBinding(request: ResolveOrRecoverBindingRe
 async function createEmptySession(
   handle: RecoverableRuntime,
   binding: RuntimeBinding,
-): Promise<RuntimeResult<RuntimeSessionCreateResult> | PiResult<PiSessionResult>> {
+): Promise<
+  | RuntimeResult<RuntimeSessionCreateResult>
+  | PiResult<PiSessionResult>
+  | CodexResult<{ readonly runtimeSessionId: string; readonly workDir: string }>
+> {
   if (handle.kind === 'opencode') {
     return await handle.runtime.createSession({
       target: { runtime: 'opencode', runtimeSessionId: null, workDir: binding.workDir },
       model: null,
     })
+  }
+  if (handle.kind === 'codex') {
+    const result = await handle.runtime.createSession({
+      target: { runtimeSessionId: null, workDir: binding.workDir },
+    })
+    return result as CodexResult<{ readonly runtimeSessionId: string; readonly workDir: string }>
   }
   return await handle.runtime.createSession({
     target: { runtime: 'pi', runtimeSessionId: null, workDir: binding.workDir },

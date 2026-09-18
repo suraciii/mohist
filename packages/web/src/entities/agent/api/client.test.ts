@@ -208,6 +208,37 @@ describe('readAgentModelAndVariant', () => {
     })
   })
 
+  it('preserves codex from the raw agent definition', () => {
+    expect(
+      readAgentDefinitionModelAndVariant({
+        agentConfig: { runtime: 'codex' },
+      }),
+    ).toEqual({
+      model: null,
+      variant: null,
+      reasoningEffort: null,
+      runtime: 'codex',
+    })
+  })
+
+  it('preserves codex from the effective execution config', () => {
+    expect(
+      readAgentModelAndVariant({
+        agentConfig: null,
+        effectiveExecutionConfig: {
+          runtime: 'codex',
+          model: 'openai/codex-mini',
+          variant: null,
+        },
+      }),
+    ).toEqual({
+      model: 'openai/codex-mini',
+      variant: null,
+      reasoningEffort: null,
+      runtime: 'codex',
+    })
+  })
+
   it('drops empty/whitespace model and variant', () => {
     expect(
       readAgentModelAndVariant({

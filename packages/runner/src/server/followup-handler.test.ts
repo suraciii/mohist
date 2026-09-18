@@ -6,6 +6,7 @@ import { createFollowupHandler } from './followup-handler.js'
 import { createAgentSessionRuntimeEventQueue } from './runtime-event-queue.js'
 import { MemoryFileSystem } from '../../tests/support/memory-filesystem.js'
 import { withTestRunnerResources } from '../../tests/support/test-resources.js'
+import { makeFakeCodexRuntime } from '../../tests/support/codex-runtime-fixture.js'
 
 function it(name: string, body: (fileSystem: MemoryFileSystem) => Promise<void>): void {
   vitestIt(name, async () => {
@@ -617,6 +618,74 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
 }
+
+function codexFollowupPayload(overrides: { readonly inputId?: string } = {}) {
+  return {
+    target: {
+      kind: 'generic',
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      binding: {
+        runtime: 'codex',
+        runtimeSessionId: 'thread_fixture',
+        runnerId: 'runner-1',
+        workDir: '/workspace',
+      },
+    },
+    text: 'continue',
+    operationId: 'operation-1',
+    turnId: 'turn-1',
+    executionSource: 'non-slack',
+    ...(overrides.inputId ? { inputId: overrides.inputId } : {}),
+  } as never
+}
+
+describe('Codex follow-up admission', () => {
+  it('rejects a codex follow-up without a caller inputId before invoking the runtime', async () => {
+    const fixture = makeFakeCodexRuntime()
+    const enqueueBeforeExecution = vi.fn()
+    const receive = createFollowupHandler({
+      followupTargetResolver: () => ({
+        runtimeSessionId: 'thread_fixture',
+        workDir: '/workspace',
+        projectId: 'project-1',
+      }),
+      agentSessionRuntimeEventQueue: { ready: () => true, enqueueBeforeExecution } as never,
+      codexRuntime: fixture.runtime,
+    })
+
+    await expect(receive(codexFollowupPayload())).resolves.toEqual({ accepted: false, error: 'unavailable' })
+    expect(fixture.followupCalls).toHaveLength(0)
+    expect(enqueueBeforeExecution).not.toHaveBeenCalled()
+  })
+
+  it('routes an admitted codex follow-up to the codex runtime with the caller inputId', async () => {
+    const fixture = makeFakeCodexRuntime()
+    const outbox = {
+      ready: () => true,
+      awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
+      enqueueBeforeExecution: vi.fn(async () => undefined),
+      enqueueProducedFact: vi.fn(async () => undefined),
+    }
+    const receive = createFollowupHandler({
+      followupTargetResolver: () => ({
+        runtimeSessionId: 'thread_fixture',
+        workDir: '/workspace',
+        projectId: 'project-1',
+      }),
+      agentSessionRuntimeEventQueue: outbox as never,
+      codexRuntime: fixture.runtime,
+    })
+
+    await expect(receive(codexFollowupPayload({ inputId: 'input-1' }))).resolves.toEqual({ accepted: true })
+    await flushMicrotasks()
+    expect(fixture.followupCalls).toHaveLength(1)
+    expect(fixture.followupCalls[0]).toMatchObject({
+      clientUserMessageId: 'input-1',
+      prompt: expect.stringContaining('continue'),
+    })
+  })
+})
 
 function genericFollowupPayload(runtime: 'opencode' | 'pi') {
   return {

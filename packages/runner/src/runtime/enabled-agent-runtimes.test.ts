@@ -19,9 +19,14 @@ describe('enabled Agent Runtimes', () => {
     expect(() => parseEnabledAgentRuntimes(value)).toThrow('ENABLED_AGENT_RUNTIMES must contain at least one Runtime')
   })
 
+  it('accepts Codex alongside Pi and OpenCode', () => {
+    expect([...parseEnabledAgentRuntimes('pi,codex')]).toEqual(['pi', 'codex'])
+    expect([...parseEnabledAgentRuntimes('codex,pi,opencode')]).toEqual(['codex', 'pi', 'opencode'])
+  })
+
   it('rejects an unknown Runtime instead of guessing', () => {
-    expect(() => parseEnabledAgentRuntimes('pi,codex')).toThrow(
-      "ENABLED_AGENT_RUNTIMES contains unknown Runtime 'codex'",
+    expect(() => parseEnabledAgentRuntimes('pi,mystery')).toThrow(
+      "ENABLED_AGENT_RUNTIMES contains unknown Runtime 'mystery'",
     )
   })
 
