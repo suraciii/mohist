@@ -7,6 +7,7 @@ using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -135,12 +136,16 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
                         handshake.BuildGitHash,
                         handshake.Component,
                         handshake.Version,
-                        handshake.SourceRevision ?? handshake.BuildGitHash,
+                        RunnerBuildIdentityPolicy.ResolveSourceRevision(
+                            handshake.SchemaVersion,
+                            handshake.SourceRevision,
+                            handshake.BuildGitHash),
                         handshake.TreeHash,
                         handshake.ArtifactDigest,
                         handshake.ReleaseId,
                         handshake.Generation,
-                        generation);
+                        generation,
+                        handshake.SchemaVersion);
 
                     run = connection.RunAsync(ct);
                     if (run.IsCompleted) await run;
@@ -395,7 +400,8 @@ public sealed record RunnerControlHandshake(
     string? ArtifactDigest,
     string? ReleaseId,
     long? Generation,
-    string? ProcessGeneration)
+    string? ProcessGeneration,
+    int? SchemaVersion = null)
 {
     public static RunnerControlHandshake FromQuery(IQueryCollection query) => new(
         Normalize(query["buildGitHash"]),
@@ -406,7 +412,18 @@ public sealed record RunnerControlHandshake(
         Normalize(query["artifactDigest"]),
         Normalize(query["releaseId"]),
         long.TryParse(query["generation"], out var generation) && generation > 0 ? generation : null,
-        Exact(query["processGeneration"]));
+        Exact(query["processGeneration"]),
+        ParseSchemaVersion(query));
+
+    // Only an absent schemaVersion is legacy v0. A present value that is not a
+    // parseable integer is malformed and is reported as 0 so it never triggers
+    // the bounded SourceRevision ?? BuildGitHash fallback.
+    private static int? ParseSchemaVersion(IQueryCollection query)
+    {
+        if (!query.TryGetValue("schemaVersion", out var values))
+            return null;
+        return int.TryParse(values.ToString(), out var schemaVersion) ? schemaVersion : 0;
+    }
 
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

@@ -37,6 +37,10 @@ func (control *realManagedControlPlane) ObserveServer(ctx context.Context) (mana
 	var health struct {
 		Status         string `json:"status"`
 		Version        string `json:"version"`
+		Component      string `json:"component"`
+		SourceRevision string `json:"sourceRevision"`
+		BuildGitHash   string `json:"buildGitHash"`
+		SchemaVersion  int    `json:"schemaVersion"`
 		GitHash        string `json:"gitHash"`
 		TreeHash       string `json:"treeHash"`
 		ArtifactDigest string `json:"artifactDigest"`
@@ -46,10 +50,19 @@ func (control *realManagedControlPlane) ObserveServer(ctx context.Context) (mana
 	if err := json.Unmarshal(data, &health); err != nil {
 		return managedRuntimeObservation{}, fmt.Errorf("server health returned an invalid identity")
 	}
+	sourceRevision := health.SourceRevision
+	if sourceRevision == "" {
+		sourceRevision = health.GitHash
+	}
+	component := health.Component
+	if component == "" {
+		component = "server"
+	}
 	return managedRuntimeObservation{
 		Status: health.Status,
 		Identity: managedRuntimeIdentity{
-			Component: "server", Version: health.Version, SourceRevision: health.GitHash,
+			SchemaVersion: health.SchemaVersion, Component: component, Version: health.Version,
+			SourceRevision: sourceRevision, BuildGitHash: health.BuildGitHash,
 			TreeHash: health.TreeHash, ArtifactDigest: health.ArtifactDigest,
 			ReleaseID: health.ReleaseID, Generation: health.Generation,
 		},
@@ -70,6 +83,7 @@ func (control *realManagedControlPlane) ObserveRunner(ctx context.Context, runne
 		Component            string `json:"component"`
 		Version              string `json:"version"`
 		SourceRevision       string `json:"sourceRevision"`
+		SchemaVersion        int    `json:"schemaVersion"`
 		TreeHash             string `json:"treeHash"`
 		ArtifactDigest       string `json:"artifactDigest"`
 		ReleaseID            string `json:"releaseId"`
@@ -85,7 +99,7 @@ func (control *realManagedControlPlane) ObserveRunner(ctx context.Context, runne
 		Status: runner.Status, ConnectionState: runner.ConnectionState,
 		ConnectionGeneration: runner.ConnectionGeneration,
 		Identity: managedRuntimeIdentity{
-			Component: runner.Component, Version: runner.Version,
+			SchemaVersion: runner.SchemaVersion, Component: runner.Component, Version: runner.Version,
 			SourceRevision: runner.SourceRevision, TreeHash: runner.TreeHash,
 			ArtifactDigest: runner.ArtifactDigest, ReleaseID: runner.ReleaseID,
 			Generation: runner.Generation, RunnerID: runner.RunnerID,
@@ -149,19 +163,19 @@ func managedIdentityDifferences(actual, expected managedRuntimeIdentity) []strin
 			differences = append(differences, name)
 		}
 	}
+	if actual.SchemaVersion != expected.SchemaVersion {
+		differences = append(differences, "schemaVersion")
+	}
 	compare("component", actual.Component, expected.Component)
-	compare("version", actual.Version, expected.Version)
 	compare("sourceRevision", actual.SourceRevision, expected.SourceRevision)
+	compare("buildGitHash", actual.BuildGitHash, expected.BuildGitHash)
 	compare("treeHash", actual.TreeHash, expected.TreeHash)
 	compare("artifactDigest", actual.ArtifactDigest, expected.ArtifactDigest)
 	compare("releaseId", actual.ReleaseID, expected.ReleaseID)
 	if actual.Generation != expected.Generation {
 		differences = append(differences, "generation")
 	}
-	if expected.Component == "runner" {
-		compare("runnerId", actual.RunnerID, expected.RunnerID)
-		compare("buildGitHash", actual.BuildGitHash, expected.BuildGitHash)
-	}
+	compare("runnerId", actual.RunnerID, expected.RunnerID)
 	return differences
 }
 

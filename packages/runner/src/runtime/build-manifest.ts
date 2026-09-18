@@ -1,5 +1,5 @@
 export interface BuildManifest {
-  gitHash: string | null
+  buildGitHash: string | null
   builtAt: number
   component?: string
   version?: string
@@ -17,10 +17,10 @@ export type BuildClock = () => number
 export function buildManifest(
   readGitHead: GitHeadReader,
   now: BuildClock,
-  identity?: Omit<BuildManifest, "gitHash" | "builtAt">,
+  identity?: Omit<BuildManifest, 'buildGitHash' | 'builtAt'>,
 ): BuildManifest {
   const base: BuildManifest = {
-    gitHash: readGitHead(),
+    buildGitHash: readGitHead(),
     builtAt: now(),
   }
   return identity ? { ...base, ...identity } : base

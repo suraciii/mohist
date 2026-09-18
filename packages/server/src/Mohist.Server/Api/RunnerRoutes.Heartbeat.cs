@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Slack.Services;
@@ -34,13 +35,17 @@ public static partial class RunnerRoutes
                 RuntimeCatalogs: NormalizeRuntimeCatalogs(req.RuntimeCatalogs),
                 Component: NormalizeIdentity(req.Component),
                 Version: NormalizeIdentity(req.Version),
-                SourceRevision: NormalizeIdentity(req.SourceRevision) ?? NormalizeBuildGitHash(req.BuildGitHash),
+                SourceRevision: RunnerBuildIdentityPolicy.ResolveSourceRevision(
+                    req.SchemaVersion,
+                    NormalizeIdentity(req.SourceRevision),
+                    NormalizeBuildGitHash(req.BuildGitHash)),
                 TreeHash: NormalizeIdentity(req.TreeHash),
                 ArtifactDigest: NormalizeIdentity(req.ArtifactDigest),
                 ReleaseId: NormalizeIdentity(req.ReleaseId),
                 Generation: req.Generation > 0 ? req.Generation : null,
                 EnvironmentVersion: NormalizeIdentity(req.EnvironmentVersion),
-                EnvironmentLoadedAt: req.EnvironmentLoadedAt);
+                EnvironmentLoadedAt: req.EnvironmentLoadedAt,
+                SchemaVersion: req.SchemaVersion);
             if (connections.Matches(runnerId, req.ConnectionId))
                 await runner.HeartbeatRepairAsync(info);
             else

@@ -123,7 +123,8 @@ public interface IRunnerGrain : IGrainWithStringKey
         string? artifactDigest,
         string? releaseId,
         long? generation,
-        string? connectionGeneration = null);
+        string? connectionGeneration = null,
+        int? schemaVersion = null);
     Task<RunnerInfo?> GetInfoAsync();
 
     /// <summary>
@@ -236,7 +237,8 @@ public record RunnerInfo(
     long? Generation = null,
     string? ConnectionGeneration = null,
     string? EnvironmentVersion = null,
-    DateTimeOffset? EnvironmentLoadedAt = null);
+    DateTimeOffset? EnvironmentLoadedAt = null,
+    int? SchemaVersion = null);
 
 [GenerateSerializer]
 public record WorkDispatch(

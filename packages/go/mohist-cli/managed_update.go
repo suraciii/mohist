@@ -104,6 +104,9 @@ func (updater *managedUpdater) Update(ctx context.Context, request ManagedUpdate
 		if activeErr != nil || verifiedErr != nil || !reflect.DeepEqual(activeTarget, verifiedTarget) {
 			return fmt.Errorf("managed %s active and verified targets do not agree", component)
 		}
+		if err := validateManagedInstalledReleaseManifest(env.files, activeTarget); err != nil {
+			return err
+		}
 	}
 
 	transactionID := env.newID()
@@ -148,8 +151,8 @@ func (updater *managedUpdater) Update(ctx context.Context, request ManagedUpdate
 		if err != nil {
 			return fmt.Errorf("managed %s runtime could not be observed before update", component)
 		}
-		if differences := managedIdentityDifferences(observation.Identity, previousTarget.Identity); len(differences) > 0 {
-			return fmt.Errorf("managed %s runtime does not match the verified target in %s", component, strings.Join(differences, ", "))
+		if err := validateManagedLiveIdentity(component, observation, previousTarget.Identity); err != nil {
+			return err
 		}
 		previousObservations[component] = observation
 	}
@@ -163,6 +166,13 @@ func (updater *managedUpdater) Update(ctx context.Context, request ManagedUpdate
 	)
 	if err != nil {
 		return err
+	}
+	for _, component := range components {
+		if err := validateManagedStagedCandidate(
+			env.files, filepath.Join(transactionRoot, "candidate", component), targets[component], source, generation,
+		); err != nil {
+			return err
+		}
 	}
 	for _, component := range components {
 		targets[component].Arguments = append([]string(nil), services[component].PreviousTarget.Arguments...)
@@ -238,6 +248,9 @@ func (updater *managedUpdater) Update(ctx context.Context, request ManagedUpdate
 		return updater.rollback(ctx, runtimeRoot, statePath, &transaction, activated, interrupt, activeBytes, activeMode, verifiedBytes, verifiedMode, previousObservations, err)
 	}
 	if err := writeManagedPointer(env.files, filepath.Join(runtimeRoot, "active.json"), candidate, activeMode); err != nil {
+		return updater.rollback(ctx, runtimeRoot, statePath, &transaction, activated, interrupt, activeBytes, activeMode, verifiedBytes, verifiedMode, previousObservations, err)
+	}
+	if err := verifyManagedActivatedTargets(ctx, env, runtimeRoot, components, targets); err != nil {
 		return updater.rollback(ctx, runtimeRoot, statePath, &transaction, activated, interrupt, activeBytes, activeMode, verifiedBytes, verifiedMode, previousObservations, err)
 	}
 	transaction.Status = "verified"
@@ -356,16 +369,64 @@ func pointerText(pointer managedPointer, key string) string {
 	return value
 }
 
+// pointerTarget reads a pointer target during the update and recovery flows. It
+// accepts the canonical RuntimeIdentity v1 contract or a bounded v0 legacy
+// payload without schemaVersion (the first update from a pre-v1 installation).
+// A payload with a present schemaVersion other than 1, or an incomplete legacy
+// identity, is rejected. The legacy read path is removed under the condition
+// recorded in design/cli.md#managed-runtime-updates.
 func pointerTarget(pointer managedPointer, component string) (*managedRuntimeTarget, error) {
-	value := pointer[component]
+	target, _, err := readManagedTargetDocument(pointer[component])
+	return target, err
+}
+
+// readManagedTargetDocument parses a serialized pointer target and classifies
+// its identity. The boolean reports that the identity had no schemaVersion and
+// is therefore legacy v0; callers that require the canonical v1 contract
+// (managed preflight and activation) must reject it. Malformed or incomplete
+// identities are always rejected.
+func readManagedTargetDocument(value json.RawMessage) (*managedRuntimeTarget, bool, error) {
 	if len(value) == 0 || string(value) == "null" {
-		return nil, errors.New("installed target is missing")
+		return nil, false, errors.New("installed target is missing")
 	}
 	var target managedRuntimeTarget
-	if err := json.Unmarshal(value, &target); err != nil || target.Identity.SourceRevision == "" || !target.Identity.IsComplete {
-		return nil, errors.New("installed target identity is incomplete")
+	if err := json.Unmarshal(value, &target); err != nil {
+		return nil, false, errors.New("installed target identity is incomplete")
 	}
-	return &target, nil
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(value, &fields); err != nil {
+		return nil, false, errors.New("installed target identity is incomplete")
+	}
+	identity, legacy, err := readManagedIdentityDocument(fields["identity"])
+	if err != nil || (!legacy && !validManagedRuntimeIdentity(identity)) {
+		return nil, false, errors.New("installed target identity is incomplete")
+	}
+	target.Identity = identity
+	if target.Component == "" {
+		target.Component = identity.Component
+	}
+	return &target, legacy, nil
+}
+
+// validManagedRuntimeIdentity reports whether an identity satisfies the
+// canonical RuntimeIdentity v1 contract. A managed identity is complete only
+// when schemaVersion is exactly 1 and every required field is present; the
+// legacy gitHash/isComplete aliases never satisfy it.
+func validManagedRuntimeIdentity(identity managedRuntimeIdentity) bool {
+	if identity.SchemaVersion != 1 {
+		return false
+	}
+	if identity.Component != "server" && identity.Component != "runner" {
+		return false
+	}
+	if identity.SourceRevision == "" || identity.BuildGitHash == "" || identity.TreeHash == "" ||
+		identity.ArtifactDigest == "" || identity.ReleaseID == "" || identity.Generation <= 0 {
+		return false
+	}
+	if identity.Component == "runner" {
+		return identity.RunnerID != ""
+	}
+	return identity.RunnerID == ""
 }
 
 func managedNextGeneration(pointer managedPointer) int64 {

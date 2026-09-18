@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.WebSocket;
@@ -27,6 +28,89 @@ public sealed class RunnerControlWebSocketRegistryTests
         var handshake = RunnerControlHandshake.FromQuery(query);
 
         Assert.Equal("  opaque generation  ", handshake.ProcessGeneration);
+    }
+
+    [Fact]
+    public void HandshakeParsesCanonicalSchemaVersionAndBuildGitHash()
+    {
+        var query = new Microsoft.AspNetCore.Http.QueryCollection(
+            new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>
+            {
+                ["processGeneration"] = "test-generation",
+                ["schemaVersion"] = "1",
+                ["component"] = "runner",
+                ["sourceRevision"] = "source-sha",
+                ["buildGitHash"] = "build-sha",
+            });
+
+        var handshake = RunnerControlHandshake.FromQuery(query);
+
+        Assert.Equal(1, handshake.SchemaVersion);
+        Assert.Equal("build-sha", handshake.BuildGitHash);
+        Assert.Equal("source-sha", handshake.SourceRevision);
+        Assert.Equal("runner", handshake.Component);
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("0", 0)]
+    [InlineData("-1", -1)]
+    [InlineData("2", 2)]
+    [InlineData("abc", 0)]
+    [InlineData("1", 1)]
+    public void HandshakeTreatsOnlyAbsentSchemaVersionAsLegacy(string? raw, int? expected)
+    {
+        var values = new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>
+        {
+            ["processGeneration"] = "test-generation",
+        };
+        if (raw is not null)
+            values["schemaVersion"] = raw;
+
+        var handshake = RunnerControlHandshake.FromQuery(
+            new Microsoft.AspNetCore.Http.QueryCollection(values));
+
+        Assert.Equal(expected, handshake.SchemaVersion);
+    }
+
+    [Fact]
+    public void HandshakeMissingSchemaVersionUsesLegacyBuildGitHashFallback()
+    {
+        var query = new Microsoft.AspNetCore.Http.QueryCollection(
+            new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>
+            {
+                ["processGeneration"] = "test-generation",
+                ["buildGitHash"] = "build-sha",
+            });
+
+        var handshake = RunnerControlHandshake.FromQuery(query);
+
+        Assert.Null(handshake.SchemaVersion);
+        Assert.Equal(
+            "build-sha",
+            RunnerBuildIdentityPolicy.ResolveSourceRevision(
+                handshake.SchemaVersion, handshake.SourceRevision, handshake.BuildGitHash));
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("2")]
+    [InlineData("abc")]
+    public void HandshakeMalformedSchemaVersionFailsClosedWithoutLegacyFallback(string raw)
+    {
+        var query = new Microsoft.AspNetCore.Http.QueryCollection(
+            new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>
+            {
+                ["processGeneration"] = "test-generation",
+                ["schemaVersion"] = raw,
+                ["buildGitHash"] = "build-sha",
+            });
+
+        var handshake = RunnerControlHandshake.FromQuery(query);
+
+        Assert.NotNull(handshake.SchemaVersion);
+        Assert.Null(RunnerBuildIdentityPolicy.ResolveSourceRevision(
+            handshake.SchemaVersion, handshake.SourceRevision, handshake.BuildGitHash));
     }
 
     [Fact]

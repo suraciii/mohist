@@ -9,6 +9,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -43,13 +44,17 @@ public static partial class RunnerRoutes
                 RuntimeCatalogs: NormalizeRuntimeCatalogs(req.RuntimeCatalogs),
                 Component: NormalizeIdentity(req.Component),
                 Version: NormalizeIdentity(req.Version),
-                SourceRevision: NormalizeIdentity(req.SourceRevision) ?? NormalizeBuildGitHash(req.BuildGitHash),
+                SourceRevision: RunnerBuildIdentityPolicy.ResolveSourceRevision(
+                    req.SchemaVersion,
+                    NormalizeIdentity(req.SourceRevision),
+                    NormalizeBuildGitHash(req.BuildGitHash)),
                 TreeHash: NormalizeIdentity(req.TreeHash),
                 ArtifactDigest: NormalizeIdentity(req.ArtifactDigest),
                 ReleaseId: NormalizeIdentity(req.ReleaseId),
                 Generation: req.Generation > 0 ? req.Generation : null,
                 EnvironmentVersion: NormalizeIdentity(req.EnvironmentVersion),
-                EnvironmentLoadedAt: req.EnvironmentLoadedAt), req.ProcessGeneration);
+                EnvironmentLoadedAt: req.EnvironmentLoadedAt,
+                SchemaVersion: req.SchemaVersion), req.ProcessGeneration);
             return Results.Ok();
         });
 
@@ -600,7 +605,8 @@ public record RunnerRegisterRequest(
     string? ReleaseId = null,
     long? Generation = null,
     string? EnvironmentVersion = null,
-    DateTimeOffset? EnvironmentLoadedAt = null);
+    DateTimeOffset? EnvironmentLoadedAt = null,
+    int? SchemaVersion = null);
 public record RunnerSlotsPatchRequest(int Slots);
 public record RunnerSlotsPatchResponse(string RunnerId, int Slots);
 public record RunnerHeartbeatRequest(
@@ -621,7 +627,8 @@ public record RunnerHeartbeatRequest(
     string? ReleaseId = null,
     long? Generation = null,
     string? EnvironmentVersion = null,
-    DateTimeOffset? EnvironmentLoadedAt = null);
+    DateTimeOffset? EnvironmentLoadedAt = null,
+    int? SchemaVersion = null);
 public record RunnerReportResponse(string Verdict);
 public record RunnerAgentSessionReconcileResponse(
     string SessionId,

@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="..\..\..\..\fixtures\runtime-identity.v1.json" LogicalName="Mohist.RuntimeIdentityV1Fixture.json" />
     <EmbeddedResource Include="..\..\..\..\fixtures\runner-control.json" LogicalName="Mohist.RunnerControlFixtures.json" />
     <EmbeddedResource Include="..\..\..\..\fixtures\slack-ingress-response-ownership.json" LogicalName="Mohist.SlackIngressResponseOwnershipFixtures.json" />
     <EmbeddedResource Include="..\..\src\Mohist.Server\Workflow\Services\Profiles\*.workflow.yaml">

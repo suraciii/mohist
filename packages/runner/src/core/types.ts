@@ -499,6 +499,7 @@ export interface RunnerRegistration {
   coderModels?: string[]
   coderModelVariants?: Record<string, string[]>
   runtimeCatalogs?: Record<string, RuntimeCatalogEntry>
+  schemaVersion?: number | null
   buildGitHash?: string | null
   component?: string | null
   version?: string | null

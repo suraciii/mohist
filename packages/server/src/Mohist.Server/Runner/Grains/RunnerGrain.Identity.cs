@@ -42,7 +42,8 @@ public partial class RunnerGrain
         string? artifactDigest,
         string? releaseId,
         long? generation,
-        string? connectionGeneration = null)
+        string? connectionGeneration = null,
+        int? schemaVersion = null)
     {
         await _lifecycleGate.WaitAsync();
         try
@@ -58,7 +59,8 @@ public partial class RunnerGrain
                     NormalizeIdentity(artifactDigest),
                     NormalizeIdentity(releaseId),
                     generation is > 0 ? generation : null,
-                    NormalizeIdentity(connectionGeneration));
+                    NormalizeIdentity(connectionGeneration),
+                    schemaVersion);
                 _pendingBuildGitHash = _pendingRuntimeIdentity.BuildGitHash;
                 return;
             }
@@ -82,6 +84,7 @@ public partial class RunnerGrain
                 ReleaseId = NormalizeIdentity(releaseId) ?? _info.ReleaseId,
                 Generation = generation is > 0 ? generation : _info.Generation,
                 ConnectionGeneration = normalizedConnectionGeneration ?? _info.ConnectionGeneration,
+                SchemaVersion = schemaVersion ?? _info.SchemaVersion,
             };
             if (Equals(next, _info))
                 return;
@@ -138,6 +141,7 @@ public partial class RunnerGrain
             ReleaseId = info.ReleaseId ?? _pendingRuntimeIdentity?.ReleaseId,
             Generation = info.Generation ?? _pendingRuntimeIdentity?.Generation,
             ConnectionGeneration = info.ConnectionGeneration ?? _pendingRuntimeIdentity?.ConnectionGeneration,
+            SchemaVersion = info.SchemaVersion ?? _pendingRuntimeIdentity?.SchemaVersion,
             EnvironmentVersion = NormalizeIdentity(info.EnvironmentVersion),
             EnvironmentLoadedAt = info.EnvironmentLoadedAt,
             RegisteredAt = info.RegisteredAt ?? _timeProvider.GetUtcNow(),
@@ -161,6 +165,7 @@ public partial class RunnerGrain
             ReleaseId = info.ReleaseId ?? _info?.ReleaseId,
             Generation = info.Generation ?? _info?.Generation,
             ConnectionGeneration = info.ConnectionGeneration ?? _info?.ConnectionGeneration,
+            SchemaVersion = info.SchemaVersion ?? _info?.SchemaVersion,
             EnvironmentVersion = info.EnvironmentVersion ?? _info?.EnvironmentVersion,
             EnvironmentLoadedAt = info.EnvironmentLoadedAt ?? _info?.EnvironmentLoadedAt,
             RegisteredAt = _info?.RegisteredAt ?? info.RegisteredAt ?? _timeProvider.GetUtcNow(),
@@ -177,5 +182,6 @@ public partial class RunnerGrain
         string? ArtifactDigest,
         string? ReleaseId,
         long? Generation,
-        string? ConnectionGeneration);
+        string? ConnectionGeneration,
+        int? SchemaVersion);
 }

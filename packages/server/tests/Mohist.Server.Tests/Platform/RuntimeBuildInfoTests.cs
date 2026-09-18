@@ -9,6 +9,48 @@ namespace Mohist.Server.Tests.Platform;
 public class RuntimeBuildInfoTests
 {
     [Fact]
+    public void ManagedIdentity_WhenCanonicalManifest_ReportsEveryCanonicalField()
+    {
+        const string identityPath = "/managed/server/runtime-identity.json";
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        environment[RuntimeBuildInfo.RuntimeIdentityPathEnvironmentVariable] = identityPath;
+        var files = new FakeIdentityFileSystem();
+        files.WriteAllText(
+            identityPath,
+            """
+            {
+              "schemaVersion": 1,
+              "component": "server",
+              "version": "0.0.0+candidate",
+              "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "buildGitHash": "dddddddddddddddddddddddddddddddddddddddd",
+              "treeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "artifactDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "releaseId": "mohist-server-candidate",
+              "generation": 4,
+              "runnerId": ""
+            }
+            """);
+
+        var info = new RuntimeBuildInfo(
+            environment,
+            new StubRuntimeSourceIdentity("source-checkout"),
+            new FakeTimeProvider(TestTime.UtcNow),
+            files);
+
+        Assert.Equal(1, info.SchemaVersion);
+        Assert.Equal("server", info.Component);
+        Assert.Equal("0.0.0+candidate", info.Version);
+        Assert.Equal("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", info.SourceRevision);
+        Assert.Equal("dddddddddddddddddddddddddddddddddddddddd", info.BuildGitHash);
+        Assert.Equal(info.SourceRevision, info.GitHash);
+        Assert.Equal("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", info.TreeHash);
+        Assert.Equal("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", info.ArtifactDigest);
+        Assert.Equal("mohist-server-candidate", info.ReleaseId);
+        Assert.Equal(4, info.Generation);
+    }
+
+    [Fact]
     public void ManagedIdentity_WhenCliManifestIsProvided_ReportsEveryCandidateField()
     {
         const string identityPath = "/managed/server/runtime-identity.json";
@@ -35,6 +77,7 @@ public class RuntimeBuildInfoTests
             new FakeTimeProvider(TestTime.UtcNow),
             files);
 
+        Assert.Null(info.SchemaVersion);
         Assert.Equal("server", info.Component);
         Assert.Equal("0.0.0+candidate", info.Version);
         Assert.Equal("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", info.SourceRevision);
@@ -46,13 +89,26 @@ public class RuntimeBuildInfoTests
     }
 
     [Fact]
-    public void ManagedIdentity_WhenManifestIsIncomplete_DoesNotFallBackToSourceIdentity()
+    public void ManagedIdentity_WhenCanonicalManifestMissingRequiredField_DoesNotFallBackToSourceIdentity()
     {
         const string identityPath = "/managed/server/runtime-identity.json";
         var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
         environment[RuntimeBuildInfo.RuntimeIdentityPathEnvironmentVariable] = identityPath;
         var files = new FakeIdentityFileSystem();
-        files.WriteAllText(identityPath, "{\"component\":\"server\",\"generation\":0}");
+        files.WriteAllText(
+            identityPath,
+            """
+            {
+              "schemaVersion": 1,
+              "component": "server",
+              "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "buildGitHash": "dddddddddddddddddddddddddddddddddddddddd",
+              "treeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "releaseId": "mohist-server-candidate",
+              "generation": 4,
+              "runnerId": ""
+            }
+            """);
 
         var info = new RuntimeBuildInfo(
             environment,
@@ -60,11 +116,182 @@ public class RuntimeBuildInfoTests
             new FakeTimeProvider(TestTime.UtcNow),
             files);
 
-        Assert.Equal("server", info.Component);
-        Assert.Null(info.Version);
+        Assert.Null(info.SchemaVersion);
+        Assert.Null(info.Component);
+        Assert.Null(info.SourceRevision);
+        Assert.Null(info.BuildGitHash);
+        Assert.Null(info.GitHash);
+        Assert.Null(info.TreeHash);
+        Assert.Null(info.ArtifactDigest);
+        Assert.Null(info.ReleaseId);
+        Assert.Equal(0, info.Generation);
+    }
+
+    [Fact]
+    public void ManagedIdentity_WhenSchemaVersionIsUnknown_DoesNotFallBackToSourceIdentity()
+    {
+        const string identityPath = "/managed/server/runtime-identity.json";
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        environment[RuntimeBuildInfo.RuntimeIdentityPathEnvironmentVariable] = identityPath;
+        var files = new FakeIdentityFileSystem();
+        files.WriteAllText(
+            identityPath,
+            """
+            {
+              "schemaVersion": 2,
+              "component": "server",
+              "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "buildGitHash": "dddddddddddddddddddddddddddddddddddddddd",
+              "treeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "artifactDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "releaseId": "mohist-server-candidate",
+              "generation": 4,
+              "runnerId": ""
+            }
+            """);
+
+        var info = new RuntimeBuildInfo(
+            environment,
+            new StubRuntimeSourceIdentity("source-checkout"),
+            new FakeTimeProvider(TestTime.UtcNow),
+            files);
+
+        Assert.Null(info.SchemaVersion);
+        Assert.Null(info.SourceRevision);
+        Assert.Null(info.BuildGitHash);
+        Assert.Null(info.GitHash);
+    }
+
+    [Fact]
+    public void ManagedIdentity_WhenFieldHasWrongJsonType_DoesNotFallBackToSourceIdentity()
+    {
+        const string identityPath = "/managed/server/runtime-identity.json";
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        environment[RuntimeBuildInfo.RuntimeIdentityPathEnvironmentVariable] = identityPath;
+        var files = new FakeIdentityFileSystem();
+        files.WriteAllText(
+            identityPath,
+            """
+            {
+              "schemaVersion": 1,
+              "component": "server",
+              "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "buildGitHash": "dddddddddddddddddddddddddddddddddddddddd",
+              "treeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "artifactDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "releaseId": "mohist-server-candidate",
+              "generation": "4",
+              "runnerId": ""
+            }
+            """);
+
+        var info = new RuntimeBuildInfo(
+            environment,
+            new StubRuntimeSourceIdentity("source-checkout"),
+            new FakeTimeProvider(TestTime.UtcNow),
+            files);
+
         Assert.Null(info.SourceRevision);
         Assert.Null(info.GitHash);
         Assert.Equal(0, info.Generation);
+    }
+
+    [Fact]
+    public void ManagedIdentity_WhenLegacyManifestWithoutSchemaVersion_DoesNotMapBuildGitHashFromSourceRevision()
+    {
+        const string identityPath = "/managed/server/runtime-identity.json";
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        environment[RuntimeBuildInfo.RuntimeIdentityPathEnvironmentVariable] = identityPath;
+        var files = new FakeIdentityFileSystem();
+        files.WriteAllText(
+            identityPath,
+            """
+            {
+              "component": "server",
+              "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "treeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "generation": 4
+            }
+            """);
+
+        var info = new RuntimeBuildInfo(
+            environment,
+            new StubRuntimeSourceIdentity("source-checkout"),
+            new FakeTimeProvider(TestTime.UtcNow),
+            files);
+
+        Assert.Null(info.SchemaVersion);
+        Assert.Equal("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", info.SourceRevision);
+        Assert.Null(info.BuildGitHash);
+        Assert.Equal(info.SourceRevision, info.GitHash);
+        Assert.Equal(4, info.Generation);
+    }
+
+    [Fact]
+    public void ManagedIdentity_WhenLegacyManifestHasBuildGitHash_KeepsItDistinctFromSourceRevision()
+    {
+        const string identityPath = "/managed/server/runtime-identity.json";
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        environment[RuntimeBuildInfo.RuntimeIdentityPathEnvironmentVariable] = identityPath;
+        var files = new FakeIdentityFileSystem();
+        files.WriteAllText(
+            identityPath,
+            """
+            {
+              "component": "server",
+              "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "buildGitHash": "dddddddddddddddddddddddddddddddddddddddd",
+              "treeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "generation": 4
+            }
+            """);
+
+        var info = new RuntimeBuildInfo(
+            environment,
+            new StubRuntimeSourceIdentity("source-checkout"),
+            new FakeTimeProvider(TestTime.UtcNow),
+            files);
+
+        Assert.Null(info.SchemaVersion);
+        Assert.Equal("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", info.SourceRevision);
+        Assert.Equal("dddddddddddddddddddddddddddddddddddddddd", info.BuildGitHash);
+    }
+
+    [Fact]
+    public void ManagedIdentity_WhenLegacyManifestHasGitHashOnly_MapsBothFields()
+    {
+        const string identityPath = "/managed/server/runtime-identity.json";
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        environment[RuntimeBuildInfo.RuntimeIdentityPathEnvironmentVariable] = identityPath;
+        var files = new FakeIdentityFileSystem();
+        files.WriteAllText(identityPath, "{\"gitHash\":\"legacy-checkout\"}");
+
+        var info = new RuntimeBuildInfo(
+            environment,
+            new StubRuntimeSourceIdentity("source-checkout"),
+            new FakeTimeProvider(TestTime.UtcNow),
+            files);
+
+        Assert.Null(info.SchemaVersion);
+        Assert.Equal("legacy-checkout", info.SourceRevision);
+        Assert.Equal("legacy-checkout", info.BuildGitHash);
+        Assert.Equal("legacy-checkout", info.GitHash);
+    }
+
+    [Fact]
+    public void ManagedIdentity_WhenPathIsMissing_UsesSourceIdentity()
+    {
+        var info = new RuntimeBuildInfo(
+            new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false),
+            new StubRuntimeSourceIdentity("source-checkout"),
+            new FakeTimeProvider(TestTime.UtcNow),
+            new FakeIdentityFileSystem());
+
+        Assert.Null(info.SchemaVersion);
+        Assert.Null(info.Component);
+        Assert.Null(info.SourceRevision);
+        Assert.Null(info.BuildGitHash);
+        Assert.NotNull(info.GitHash);
     }
 
     [Fact]

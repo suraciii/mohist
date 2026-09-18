@@ -80,7 +80,6 @@ export type {
 } from './connection-session-models.js'
 
 export class ServerConnection {
-  private readonly buildGitHash: string | null
   private readonly buildInfo: BuildInfo | null
   private readonly credential: string | null
   private readonly requestTransport: RunnerRequestTransport
@@ -89,10 +88,8 @@ export class ServerConnection {
 
   constructor(
     private readonly options: RunnerOptions,
-    buildGitHash: string | null = null,
     buildInfo: BuildInfo | null = null,
   ) {
-    this.buildGitHash = buildGitHash
     this.buildInfo = buildInfo
     this.credential = options.credential ?? null
     this.requestTransport = new RunnerTransport({ credential: this.credential })
@@ -110,10 +107,11 @@ export class ServerConnection {
 
   private identityPayload(): Record<string, unknown> {
     return {
-      buildGitHash: this.buildGitHash,
+      schemaVersion: this.buildInfo?.schemaVersion ?? null,
       component: this.buildInfo?.component ?? null,
       version: this.buildInfo?.version ?? null,
-      sourceRevision: this.buildInfo?.sourceRevision ?? this.buildInfo?.gitHash ?? null,
+      sourceRevision: this.buildInfo?.sourceRevision ?? null,
+      buildGitHash: this.buildInfo?.buildGitHash ?? null,
       treeHash: this.buildInfo?.treeHash ?? null,
       artifactDigest: this.buildInfo?.artifactDigest ?? null,
       releaseId: this.buildInfo?.releaseId ?? null,

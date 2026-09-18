@@ -51,10 +51,23 @@ each connection attempt, Runner generates a new UUID and sends it in
 `X-Runner-Connection-Id`. The identifier is not a credential; it names this
 physical connection for replacement and poll readiness fencing. The header must
 be the canonical lowercase D-format UUID string produced by `Guid.ToString("D")`
-and must not equal any active WebSocket connection ID. Runner's
-existing `buildGitHash`, `component`, `version`, `sourceRevision`, `treeHash`,
-`artifactDigest`, `releaseId`, and `generation` query fields remain handshake
-metadata on this endpoint.
+and must not equal any active WebSocket connection ID. HTTP registration and
+the control handshake both carry the canonical `RuntimeIdentity` v1 fields
+defined in
+[`cli.md#managed-runtime-updates`](cli.md#managed-runtime-updates):
+`schemaVersion`, `component`, `sourceRevision`, `buildGitHash`, `treeHash`,
+`artifactDigest`, `releaseId`, `generation`, and `runnerId`. On this endpoint
+they are query parameters; the handshake and registration name `buildGitHash`
+as its own field instead of collapsing it into the source revision. `version`
+may also appear as display metadata and is never identity.
+
+Registration and the handshake read a payload **without** `schemaVersion` as
+legacy v0: `buildGitHash` then falls back to `gitHash` and `sourceRevision` to
+`buildGitHash` or `gitHash`. `gitHash` is accepted only as a read input and is
+never emitted. A payload carrying any other `schemaVersion` is malformed and is
+rejected without a source-identity fallback. This fallback is bounded and is
+removed under the condition recorded in
+[`cli.md#managed-runtime-updates`](cli.md#managed-runtime-updates).
 
 Server keeps one current control connection for each Runner. A new connection
 replaces the old connection. Request correlation belongs to one connection and
