@@ -108,7 +108,7 @@ public class WorkflowArtifactStorageContractTests
 
         var result = await _storage.WriteDirectoryAsync(
             storagePath,
-            entries,
+            AsAsyncEnumerable(entries),
             new WorkflowArtifactFileWrite { SourcePath = "specs/", Size = 25, ContentType = "inode/directory" },
             SampleRecordedAt);
 
@@ -133,10 +133,10 @@ public class WorkflowArtifactStorageContractTests
             "wr_recorded", "design", "art_recorded", WorkflowArtifactStorageKind.Directory);
         await _storage.WriteDirectoryAsync(
             storagePath,
-            [
+            AsAsyncEnumerable([
                 Entry("specs/data.md", "data-spec", Sha256("data-spec"), "text/markdown"),
                 Entry("index.md", "index-x", Sha256("index-x"), "text/markdown"),
-            ],
+            ]),
             WriteFor("specs/", 16),
             SampleRecordedAt);
 
@@ -158,7 +158,7 @@ public class WorkflowArtifactStorageContractTests
             "wr_tamper", "design", "art_tamper", WorkflowArtifactStorageKind.Directory);
         await _storage.WriteDirectoryAsync(
             storagePath,
-            [Entry("index.md", "index-x", Sha256("index-x"), "text/markdown")],
+            AsAsyncEnumerable([Entry("index.md", "index-x", Sha256("index-x"), "text/markdown")]),
             WriteFor("specs/", 7),
             SampleRecordedAt);
 
@@ -191,7 +191,7 @@ public class WorkflowArtifactStorageContractTests
         await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
             _storage.WriteDirectoryAsync(
                 storagePath,
-                [new WorkflowArtifactDirectoryEntryInput { RelativePath = relativePath, Size = 1, OpenContent = () => Bytes("x"u8.ToArray()) }],
+                AsAsyncEnumerable([new WorkflowArtifactDirectoryEntryInput { RelativePath = relativePath, Size = 1, OpenContent = () => Bytes("x"u8.ToArray()) }]),
                 new WorkflowArtifactFileWrite { SourcePath = "specs/", Size = 1 },
                 SampleRecordedAt));
     }
@@ -202,19 +202,19 @@ public class WorkflowArtifactStorageContractTests
         var fileCountPath = _storage.GenerateStoragePath("wr_c", "t_c", "a_c", WorkflowArtifactStorageKind.Directory);
         var limits = new WorkflowArtifactDirectoryLimits { MaxFileCount = 1, MaxTotalBytes = 5, MaxFileBytes = 4 };
         await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
-            _storage.WriteDirectoryAsync(fileCountPath, [Entry("a", "a"), Entry("b", "b")], WriteFor("specs/", 2), SampleRecordedAt, limits));
+            _storage.WriteDirectoryAsync(fileCountPath, AsAsyncEnumerable([Entry("a", "a"), Entry("b", "b")]), WriteFor("specs/", 2), SampleRecordedAt, limits));
 
         var totalPath = _storage.GenerateStoragePath("wr_s", "t_s", "a_s", WorkflowArtifactStorageKind.Directory);
         await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
-            _storage.WriteDirectoryAsync(totalPath, [Entry("a", "aaa"), Entry("b", "bbb")], WriteFor("specs/", 6), SampleRecordedAt, limits));
+            _storage.WriteDirectoryAsync(totalPath, AsAsyncEnumerable([Entry("a", "aaa"), Entry("b", "bbb")]), WriteFor("specs/", 6), SampleRecordedAt, limits));
 
         var singlePath = _storage.GenerateStoragePath("wr_f", "t_f", "a_f", WorkflowArtifactStorageKind.Directory);
         await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
-            _storage.WriteDirectoryAsync(singlePath, [Entry("a", "aaaaa")], WriteFor("specs/", 5), SampleRecordedAt, limits));
+            _storage.WriteDirectoryAsync(singlePath, AsAsyncEnumerable([Entry("a", "aaaaa")]), WriteFor("specs/", 5), SampleRecordedAt, limits));
 
         var duplicatePath = _storage.GenerateStoragePath("wr_d", "t_d", "a_d", WorkflowArtifactStorageKind.Directory);
         await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
-            _storage.WriteDirectoryAsync(duplicatePath, [Entry("same", "a"), Entry("same", "b")], WriteFor("specs/", 2), SampleRecordedAt));
+            _storage.WriteDirectoryAsync(duplicatePath, AsAsyncEnumerable([Entry("same", "a"), Entry("same", "b")]), WriteFor("specs/", 2), SampleRecordedAt));
     }
 
     [Fact]
@@ -241,7 +241,7 @@ public class WorkflowArtifactStorageContractTests
         await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
             _storage.WriteDirectoryAsync(
                 storagePath,
-                [entry],
+                AsAsyncEnumerable([entry]),
                 WriteFor("specs/", 0),
                 SampleRecordedAt,
                 limits));
@@ -261,7 +261,7 @@ public class WorkflowArtifactStorageContractTests
         };
 
         var result = await _storage.WriteDirectoryAsync(
-            storagePath, entries, WriteFor("specs/", 25), SampleRecordedAt);
+            storagePath, AsAsyncEnumerable(entries), WriteFor("specs/", 25), SampleRecordedAt);
 
         Assert.Equal(25, result.Size);
         Assert.Equal(3, result.FileCount);
@@ -290,7 +290,7 @@ public class WorkflowArtifactStorageContractTests
             "wr_computed", "design", "art_computed", WorkflowArtifactStorageKind.Directory);
 
         await _storage.WriteDirectoryAsync(
-            storagePath, [Entry("a.md", "alpha")], WriteFor("specs/", 5), SampleRecordedAt);
+            storagePath, AsAsyncEnumerable([Entry("a.md", "alpha")]), WriteFor("specs/", 5), SampleRecordedAt);
 
         var metadata = await _storage.ReadMetadataAsync(storagePath);
         var entry = Assert.Single(metadata!.Entries!);
@@ -320,7 +320,7 @@ public class WorkflowArtifactStorageContractTests
             "wr_json_manifest", "t", "dir", WorkflowArtifactStorageKind.Directory);
         await _storage.WriteDirectoryAsync(
             directoryPath,
-            [Entry("a.md", "alpha", Sha256("alpha"), "text/markdown")],
+            AsAsyncEnumerable([Entry("a.md", "alpha", Sha256("alpha"), "text/markdown")]),
             WriteFor("specs/", 5),
             SampleRecordedAt);
 
@@ -350,7 +350,7 @@ public class WorkflowArtifactStorageContractTests
         var bad = Entry("a.md", "actual", $"sha256:{new string('0', 64)}", "text/markdown");
 
         await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
-            _storage.WriteDirectoryAsync(storagePath, [bad], WriteFor("specs/", 6), SampleRecordedAt));
+            _storage.WriteDirectoryAsync(storagePath, AsAsyncEnumerable([bad]), WriteFor("specs/", 6), SampleRecordedAt));
 
         Assert.False(_storage.Contains(storagePath));
         Assert.Null(await _storage.ReadMetadataAsync(storagePath));
@@ -359,7 +359,7 @@ public class WorkflowArtifactStorageContractTests
 
         var retry = await _storage.WriteDirectoryAsync(
             storagePath,
-            [Entry("a.md", "actual", Sha256("actual"), "text/markdown")],
+            AsAsyncEnumerable([Entry("a.md", "actual", Sha256("actual"), "text/markdown")]),
             WriteFor("specs/", 6),
             SampleRecordedAt);
         Assert.Equal(6, retry.Size);
@@ -379,7 +379,7 @@ public class WorkflowArtifactStorageContractTests
         };
 
         await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
-            _storage.WriteDirectoryAsync(storagePath, [bad], WriteFor("specs/", 6), SampleRecordedAt));
+            _storage.WriteDirectoryAsync(storagePath, AsAsyncEnumerable([bad]), WriteFor("specs/", 6), SampleRecordedAt));
 
         Assert.False(_storage.Contains(storagePath));
         Assert.Null(await _storage.ReadMetadataAsync(storagePath));
@@ -387,7 +387,7 @@ public class WorkflowArtifactStorageContractTests
             _storage.ListDirectoryEntriesAsync(storagePath));
 
         var retry = await _storage.WriteDirectoryAsync(
-            storagePath, [Entry("a.md", "actual")], WriteFor("specs/", 6), SampleRecordedAt);
+            storagePath, AsAsyncEnumerable([Entry("a.md", "actual")]), WriteFor("specs/", 6), SampleRecordedAt);
         Assert.Equal(6, retry.Size);
         Assert.True(_storage.Contains(storagePath));
     }
@@ -406,7 +406,7 @@ public class WorkflowArtifactStorageContractTests
             "wr_cleanup", "t", "count", WorkflowArtifactStorageKind.Directory);
         await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
             _storage.WriteDirectoryAsync(
-                countPath, [Entry("a", "a"), Entry("b", "b")], WriteFor("s/", 2), SampleRecordedAt, limits));
+                countPath, AsAsyncEnumerable([Entry("a", "a"), Entry("b", "b")]), WriteFor("s/", 2), SampleRecordedAt, limits));
         Assert.False(_storage.Contains(countPath));
         Assert.Null(await _storage.ReadMetadataAsync(countPath));
 
@@ -414,15 +414,132 @@ public class WorkflowArtifactStorageContractTests
             "wr_cleanup", "t", "dup", WorkflowArtifactStorageKind.Directory);
         await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
             _storage.WriteDirectoryAsync(
-                duplicatePath, [Entry("same", "a"), Entry("same", "b")], WriteFor("s/", 2), SampleRecordedAt));
+                duplicatePath, AsAsyncEnumerable([Entry("same", "a"), Entry("same", "b")]), WriteFor("s/", 2), SampleRecordedAt));
         Assert.False(_storage.Contains(duplicatePath));
         Assert.Null(await _storage.ReadMetadataAsync(duplicatePath));
 
         // The clean rejection must leave the path retryable.
         var retry = await _storage.WriteDirectoryAsync(
-            duplicatePath, [Entry("same", "a")], WriteFor("s/", 1), SampleRecordedAt);
+            duplicatePath, AsAsyncEnumerable([Entry("same", "a")]), WriteFor("s/", 1), SampleRecordedAt);
         Assert.Equal(1, retry.Size);
         Assert.True(_storage.Contains(duplicatePath));
+    }
+
+    [Fact]
+    public async Task WriteDirectoryAsync_EnumeratesOneEntryAtATime()
+    {
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_stream", "t", "a", WorkflowArtifactStorageKind.Directory);
+        var firstOpened = false;
+        var first = new WorkflowArtifactDirectoryEntryInput
+        {
+            RelativePath = "a.md",
+            Size = 5,
+            OpenContent = () =>
+            {
+                firstOpened = true;
+                return Bytes("alpha"u8.ToArray());
+            },
+        };
+
+        async IAsyncEnumerable<WorkflowArtifactDirectoryEntryInput> Stream()
+        {
+            yield return first;
+            await Task.CompletedTask.ConfigureAwait(false);
+            Assert.True(
+                firstOpened,
+                "storage requested the next entry before completing the current one");
+            yield return Entry("b.md", "beta");
+        }
+
+        var result = await _storage.WriteDirectoryAsync(
+            storagePath, Stream(), WriteFor("specs/", 9), SampleRecordedAt);
+
+        Assert.Equal(2, result.FileCount);
+        var listing = await _storage.ListDirectoryEntriesAsync(storagePath);
+        Assert.Equal(["a.md", "b.md"], listing.Entries.Select(entry => entry.RelativePath));
+    }
+
+    [Fact]
+    public async Task WriteDirectoryAsync_MidStreamFailureRegistersNothingAndLeavesPathRetryable()
+    {
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_midfail", "t", "a", WorkflowArtifactStorageKind.Directory);
+        var mismatched = new WorkflowArtifactDirectoryEntryInput
+        {
+            RelativePath = "b.md",
+            Size = 4,
+            ContentHash = $"sha256:{new string('0', 64)}",
+            OpenContent = () => Bytes("beta"u8.ToArray()),
+        };
+
+        async IAsyncEnumerable<WorkflowArtifactDirectoryEntryInput> Stream()
+        {
+            yield return Entry("a.md", "alpha");
+            await Task.CompletedTask.ConfigureAwait(false);
+            yield return mismatched;
+        }
+
+        await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
+            _storage.WriteDirectoryAsync(storagePath, Stream(), WriteFor("specs/", 9), SampleRecordedAt));
+
+        Assert.False(_storage.Contains(storagePath));
+        Assert.Null(await _storage.ReadMetadataAsync(storagePath));
+        await Assert.ThrowsAsync<WorkflowArtifactNotFoundException>(() =>
+            _storage.ListDirectoryEntriesAsync(storagePath));
+
+        // The partial write must leave the path retryable.
+        var retry = await _storage.WriteDirectoryAsync(
+            storagePath, AsAsyncEnumerable([Entry("a.md", "alpha")]), WriteFor("specs/", 5), SampleRecordedAt);
+        Assert.Equal(5, retry.Size);
+        Assert.True(_storage.Contains(storagePath));
+    }
+
+    [Fact]
+    public async Task WriteDirectoryAsync_RejectsNegativeDeclaredSizeAndLeavesPathRetryable()
+    {
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_negative", "t", "a", WorkflowArtifactStorageKind.Directory);
+        var negative = new WorkflowArtifactDirectoryEntryInput
+        {
+            RelativePath = "a.md",
+            Size = -1,
+            OpenContent = () => Bytes("alpha"u8.ToArray()),
+        };
+
+        await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
+            _storage.WriteDirectoryAsync(
+                storagePath, AsAsyncEnumerable([negative]), WriteFor("specs/", 5), SampleRecordedAt));
+
+        Assert.False(_storage.Contains(storagePath));
+        Assert.Null(await _storage.ReadMetadataAsync(storagePath));
+
+        var retry = await _storage.WriteDirectoryAsync(
+            storagePath, AsAsyncEnumerable([Entry("a.md", "alpha")]), WriteFor("specs/", 5), SampleRecordedAt);
+        Assert.Equal(5, retry.Size);
+        Assert.True(_storage.Contains(storagePath));
+    }
+
+    [Fact]
+    public async Task WriteDirectoryAsync_EmptyDirectoryRejectedAndLeavesPathRetryable()
+    {
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_empty", "t", "a", WorkflowArtifactStorageKind.Directory);
+
+        await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
+            _storage.WriteDirectoryAsync(
+                storagePath,
+                AsAsyncEnumerable(Array.Empty<WorkflowArtifactDirectoryEntryInput>()),
+                WriteFor("specs/", 0),
+                SampleRecordedAt));
+
+        Assert.False(_storage.Contains(storagePath));
+        Assert.Null(await _storage.ReadMetadataAsync(storagePath));
+
+        var retry = await _storage.WriteDirectoryAsync(
+            storagePath, AsAsyncEnumerable([Entry("a.md", "alpha")]), WriteFor("specs/", 5), SampleRecordedAt);
+        Assert.Equal(5, retry.Size);
+        Assert.True(_storage.Contains(storagePath));
     }
 
     [Fact]
@@ -470,4 +587,13 @@ public class WorkflowArtifactStorageContractTests
         ContentType = "text/markdown",
         ContentHash = "sha256:abc",
     };
+
+    private static async IAsyncEnumerable<T> AsAsyncEnumerable<T>(IEnumerable<T> source)
+    {
+        foreach (var item in source)
+        {
+            yield return item;
+            await Task.CompletedTask.ConfigureAwait(false);
+        }
+    }
 }

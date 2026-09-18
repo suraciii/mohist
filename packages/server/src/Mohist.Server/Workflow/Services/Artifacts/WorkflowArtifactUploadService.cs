@@ -156,7 +156,7 @@ public sealed class WorkflowArtifactUploadService : IScopedService
                 fileCount = envelope.Entries.Count;
                 writeResult = await _storage.WriteDirectoryAsync(
                     storagePath,
-                    envelope.Entries,
+                    AsAsyncEnumerable(envelope.Entries),
                     new WorkflowArtifactFileWrite
                     {
                         SourcePath = request.Path,
@@ -253,6 +253,16 @@ public sealed class WorkflowArtifactUploadService : IScopedService
             ExpiresAt: row.ExpiresAt);
 
     private static string NewUploadId() => $"artup_{Guid.NewGuid():N}";
+
+    private static async IAsyncEnumerable<WorkflowArtifactDirectoryEntryInput> AsAsyncEnumerable(
+        IReadOnlyList<WorkflowArtifactDirectoryEntryInput> entries)
+    {
+        foreach (var entry in entries)
+        {
+            yield return entry;
+            await Task.CompletedTask.ConfigureAwait(false);
+        }
+    }
 
     private static bool HashesMatch(string? left, string? right)
     {

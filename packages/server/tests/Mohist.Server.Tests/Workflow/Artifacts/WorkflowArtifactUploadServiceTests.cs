@@ -73,7 +73,7 @@ public sealed class WorkflowArtifactUploadServiceTests
 
         public Task<WorkflowArtifactStorageWriteResult> WriteDirectoryAsync(
             string storagePath,
-            IReadOnlyList<WorkflowArtifactDirectoryEntryInput> entries,
+            IAsyncEnumerable<WorkflowArtifactDirectoryEntryInput> entries,
             WorkflowArtifactFileWrite write,
             DateTimeOffset recordedAt,
             WorkflowArtifactDirectoryLimits? limits = null,

@@ -138,7 +138,7 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
 
     public async Task<WorkflowArtifactStorageWriteResult> WriteDirectoryAsync(
         string storagePath,
-        IReadOnlyList<WorkflowArtifactDirectoryEntryInput> entries,
+        IAsyncEnumerable<WorkflowArtifactDirectoryEntryInput> entries,
         WorkflowArtifactFileWrite write,
         DateTimeOffset recordedAt,
         WorkflowArtifactDirectoryLimits? limits = null,
@@ -158,20 +158,42 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
             ?? throw new WorkflowArtifactStorageException(
                 $"Unable to resolve collection root for '{storagePath}'.");
 
-        // Validate every declared value before touching the filesystem. A
-        // rejection here must not strand a directory or metadata file that
-        // would block a later retry against the same storage path.
-        var validated = ValidateDirectoryEntries(entries, effectiveLimits);
-
         try
         {
             _fileSystem.CreateDirectory(filesRoot);
 
+            long declaredTotalBytes = 0;
             long totalBytes = 0;
-            var manifest = new List<WorkflowArtifactDirectoryEntry>(validated.Count);
-            foreach (var (entry, normalizedPath) in validated)
+            var seenPaths = new HashSet<string>(StringComparer.Ordinal);
+            var manifest = new List<WorkflowArtifactDirectoryEntry>();
+
+            await foreach (var entry in entries
+                               .WithCancellation(cancellationToken)
+                               .ConfigureAwait(false))
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                if (entry is null)
+                    throw new WorkflowArtifactStorageException(
+                        $"Directory entry at index {manifest.Count} is null.");
+
+                var normalizedPath = WorkflowArtifactContainedPath.Parse(entry.RelativePath).Value;
+                if (!seenPaths.Add(normalizedPath))
+                    throw new WorkflowArtifactStorageException(
+                        $"Directory entry '{entry.RelativePath}' appears more than once in a single write.");
+
+                if (manifest.Count >= effectiveLimits.MaxFileCount)
+                    throw new WorkflowArtifactStorageException(
+                        $"Directory artifact exceeds file count limit ({manifest.Count + 1} > {effectiveLimits.MaxFileCount}).");
+
+                if (entry.Size < 0)
+                    throw new WorkflowArtifactStorageException(
+                        $"Directory entry '{entry.RelativePath}' has a negative declared size ({entry.Size}).");
+                if (entry.Size > effectiveLimits.MaxFileBytes)
+                    throw new WorkflowArtifactStorageException(
+                        $"Directory entry '{entry.RelativePath}' exceeds single-file size limit ({entry.Size} > {effectiveLimits.MaxFileBytes}).");
+                if (declaredTotalBytes + entry.Size > effectiveLimits.MaxTotalBytes)
+                    throw new WorkflowArtifactStorageException(
+                        $"Directory entry '{entry.RelativePath}' would exceed total size limit ({effectiveLimits.MaxTotalBytes}).");
+                declaredTotalBytes += entry.Size;
 
                 var destination = Path.Combine(
                     filesRoot,
@@ -224,6 +246,17 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
                 });
             }
 
+            if (manifest.Count == 0)
+                throw new WorkflowArtifactStorageException(
+                    "Directory artifact must contain at least one contained file.");
+
+            // Entries are written in arrival order so each buffer can be
+            // released before the next is pulled; the durable manifest is
+            // sorted by ordinal relative path to keep the listing contract
+            // stable.
+            manifest.Sort(static (left, right) =>
+                string.CompareOrdinal(left.RelativePath, right.RelativePath));
+
             var metadata = new WorkflowArtifactStorageMetadata
             {
                 Path = write.SourcePath,
@@ -257,48 +290,6 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
             TryRemoveDirectory(collectionRoot);
             throw;
         }
-    }
-
-    private static IReadOnlyList<(WorkflowArtifactDirectoryEntryInput Entry, string NormalizedPath)> ValidateDirectoryEntries(
-        IReadOnlyList<WorkflowArtifactDirectoryEntryInput> entries,
-        WorkflowArtifactDirectoryLimits limits)
-    {
-        if (entries.Count > limits.MaxFileCount)
-            throw new WorkflowArtifactStorageException(
-                $"Directory artifact exceeds file count limit ({entries.Count} > {limits.MaxFileCount}).");
-
-        long declaredTotalBytes = 0;
-        var seenPaths = new HashSet<string>(StringComparer.Ordinal);
-        var validated = new List<(WorkflowArtifactDirectoryEntryInput Entry, string NormalizedPath)>(entries.Count);
-        for (var index = 0; index < entries.Count; index++)
-        {
-            var entry = entries[index];
-            if (entry is null)
-                throw new WorkflowArtifactStorageException(
-                    $"Directory entry at index {index} is null.");
-
-            var containedPath = WorkflowArtifactContainedPath.Parse(entry.RelativePath);
-            if (!seenPaths.Add(containedPath.Value))
-                throw new WorkflowArtifactStorageException(
-                    $"Directory entry '{entry.RelativePath}' appears more than once in a single write.");
-
-            if (entry.Size < 0)
-                throw new WorkflowArtifactStorageException(
-                    $"Directory entry '{entry.RelativePath}' has a negative declared size ({entry.Size}).");
-            if (entry.Size > limits.MaxFileBytes)
-                throw new WorkflowArtifactStorageException(
-                    $"Directory entry '{entry.RelativePath}' exceeds single-file size limit ({entry.Size} > {limits.MaxFileBytes}).");
-            if (declaredTotalBytes + entry.Size > limits.MaxTotalBytes)
-                throw new WorkflowArtifactStorageException(
-                    $"Directory entry '{entry.RelativePath}' would exceed total size limit ({limits.MaxTotalBytes}).");
-
-            declaredTotalBytes += entry.Size;
-            validated.Add((entry, containedPath.Value));
-        }
-
-        return validated
-            .OrderBy(value => value.NormalizedPath, StringComparer.Ordinal)
-            .ToList();
     }
 
     private void TryRemoveDirectory(string directory)
