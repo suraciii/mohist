@@ -19,15 +19,8 @@ import {
 import { canInlineStartRow, EpicStatus, type EpicProgressIssue, type LinkedIssue } from '../../../entities/epic'
 import { EditEpicDialog } from '../../../features/edit-epic'
 import { ApiError } from '../../../shared/api/client'
-import {
-  primaryLifecycleAction,
-  type PrimaryLifecycleAction,
-} from '../model/primaryLifecycleAction'
-import {
-  advancementCopy,
-  deriveAdvancementState,
-  type AdvancementState,
-} from '../model/advancement'
+import { primaryLifecycleAction, type PrimaryLifecycleAction } from '../model/primaryLifecycleAction'
+import { advancementCopy, deriveAdvancementState, type AdvancementState } from '../model/advancement'
 import { deriveStartBlockerReason } from '../model/startBlockerReason'
 import { deriveGraphBannerState } from '../model/graphBanner'
 import { Button } from '@/shared/ui/components/button'
@@ -43,7 +36,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/shared/ui/components/dialog'
-import { MarkdownReader } from '@/shared/ui'
+import { MarkdownReader } from '@/shared/ui/markdown-reader'
 import {
   DependencyGraphErrorBoundary as DefaultDependencyGraphErrorBoundary,
   DependencyGraphWidget as DefaultDependencyGraphWidget,
@@ -81,11 +74,7 @@ function PriorityBadge({ priority }: { priority: string }) {
     p4: 'bg-gray-100 text-gray-700',
   }
 
-  return (
-    <Badge className={colors[priority] || 'bg-gray-100 text-gray-700'}>
-      {priority.toUpperCase()}
-    </Badge>
-  )
+  return <Badge className={colors[priority] || 'bg-gray-100 text-gray-700'}>{priority.toUpperCase()}</Badge>
 }
 
 function StatusBadge({ status }: { status: EpicStatus }) {
@@ -97,11 +86,7 @@ function StatusBadge({ status }: { status: EpicStatus }) {
     [EpicStatus.Closed]: 'bg-gray-100 text-gray-700',
   }
 
-  return (
-    <Badge className={colors[status]}>
-      {status}
-    </Badge>
-  )
+  return <Badge className={colors[status]}>{status}</Badge>
 }
 
 function toTitleCase(value: string) {
@@ -138,9 +123,7 @@ function LinkedIssueRow({
   const toProjectPath = useProjectPath()
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false)
   const showStart = canInlineStartRow(issue, hasInProgress)
-  const blockerReason = showStart
-    ? null
-    : deriveStartBlockerReason({ issue, hasInProgress })
+  const blockerReason = showStart ? null : deriveStartBlockerReason({ issue, hasInProgress })
 
   function handleConfirmRemove() {
     setRemoveConfirmOpen(false)
@@ -165,16 +148,18 @@ function LinkedIssueRow({
           {issue.title}
         </span>
       </div>
-      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" data-testid="linked-issue-metadata-row">
-        <span className={`rounded px-2 py-0.5 text-xs font-medium ${issueStatusTone(issue.health)}`}>{issue.health}</span>
+      <div
+        className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"
+        data-testid="linked-issue-metadata-row"
+      >
+        <span className={`rounded px-2 py-0.5 text-xs font-medium ${issueStatusTone(issue.health)}`}>
+          {issue.health}
+        </span>
         <Badge variant="secondary">{toTitleCase(issue.status)}</Badge>
         {issue.priority && <Badge variant="secondary">{issue.priority.toUpperCase()}</Badge>}
       </div>
       {blockerReason && (
-        <p
-          className="text-xs text-muted-foreground [overflow-wrap:anywhere]"
-          data-testid="linked-issue-blocker-reason"
-        >
+        <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]" data-testid="linked-issue-blocker-reason">
           {blockerReason}
         </p>
       )}
@@ -204,7 +189,8 @@ function LinkedIssueRow({
           <DialogHeader>
             <DialogTitle>Remove #{issue.number} from this Epic?</DialogTitle>
             <DialogDescription>
-              Unlinking does not change the issue&apos;s workflow state. The issue will remain in the project and can be re-linked to this or another Epic later.
+              Unlinking does not change the issue&apos;s workflow state. The issue will remain in the project and can be
+              re-linked to this or another Epic later.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -237,7 +223,9 @@ function formatAddIssueError(error: unknown): string {
   if (error instanceof ApiError && error.code === 'DUPLICATE_EPIC_MEMBERSHIP') {
     const details = error.details as { existingEpicNumber?: number; existingEpicTitle?: string } | undefined
     if (details?.existingEpicTitle) {
-      const epicLabel = details.existingEpicNumber ? `#${details.existingEpicNumber} ${details.existingEpicTitle}` : details.existingEpicTitle
+      const epicLabel = details.existingEpicNumber
+        ? `#${details.existingEpicNumber} ${details.existingEpicTitle}`
+        : details.existingEpicTitle
       return `Issue already belongs to Epic ${epicLabel}.`
     }
   }
@@ -265,10 +253,10 @@ function isCandidateSelectable(issue: Issue): boolean {
 
 function graphInputKey(linkedIssues: LinkedIssue[]): string {
   return linkedIssues
-    .map(issue => {
+    .map((issue) => {
       const prerequisites = (issue.prerequisiteNumbers ?? []).join(',')
       const externals = (issue.externalPrerequisites ?? [])
-        .map(external => `${external.number}:${external.status}:${external.title}`)
+        .map((external) => `${external.number}:${external.status}:${external.title}`)
         .join(',')
       return `${issue.number}:${prerequisites}:${externals}`
     })
@@ -301,21 +289,12 @@ function CurrentActivityEntry({ issue, toProjectPath }: CurrentActivityEntryProp
   )
 }
 
-function CurrentActivityList({
-  active,
-  blocked,
-}: {
-  active: EpicProgressIssue[]
-  blocked: EpicProgressIssue[]
-}) {
+function CurrentActivityList({ active, blocked }: { active: EpicProgressIssue[]; blocked: EpicProgressIssue[] }) {
   const toProjectPath = useProjectPath()
   const total = active.length + blocked.length
   if (total === 0) {
     return (
-      <div
-        className="mt-2 text-sm text-muted-foreground"
-        data-testid="current-activity-empty"
-      >
+      <div className="mt-2 text-sm text-muted-foreground" data-testid="current-activity-empty">
         No current activity.
       </div>
     )
@@ -328,7 +307,7 @@ function CurrentActivityList({
       data-active-count={active.length}
       data-blocked-count={blocked.length}
     >
-      {[...blocked, ...active].map(issue => (
+      {[...blocked, ...active].map((issue) => (
         <li key={issue.number}>
           <CurrentActivityEntry issue={issue} toProjectPath={toProjectPath} />
         </li>
@@ -349,10 +328,7 @@ function NextIssueAdvancementCopy({ advancement, copy, toProjectPath }: NextIssu
   }
   if (copy.linkNumbers.length === 0) {
     return (
-      <div
-        className="mt-1.5 text-sm text-foreground/80"
-        data-testid="advancement-copy"
-      >
+      <div className="mt-1.5 text-sm text-foreground/80" data-testid="advancement-copy">
         {copy.text}
       </div>
     )
@@ -361,7 +337,7 @@ function NextIssueAdvancementCopy({ advancement, copy, toProjectPath }: NextIssu
     <div className="mt-1.5 space-y-1" data-testid="advancement-copy">
       <div className="text-sm text-foreground/80">{copy.text}</div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
-        {copy.linkNumbers.map(number => (
+        {copy.linkNumbers.map((number) => (
           <Link
             key={number}
             to={toProjectPath(`/issues/${number}`)}
@@ -389,7 +365,7 @@ function EpicIssueSelector({ candidates, value, onChange, hasSelectableCandidate
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
-  const selected = candidates.find(candidate => candidate.number === value) ?? null
+  const selected = candidates.find((candidate) => candidate.number === value) ?? null
   const isDisabled = disabled || (!hasSelectableCandidate && !selected)
 
   useEffect(() => {
@@ -407,10 +383,9 @@ function EpicIssueSelector({ candidates, value, onChange, hasSelectableCandidate
   const filteredCandidates = useMemo(() => {
     const query = search.trim().toLowerCase()
     if (!query) return candidates
-    return candidates.filter(candidate => {
+    return candidates.filter((candidate) => {
       if (candidate.title.toLowerCase().includes(query)) return true
-      return `#${candidate.number}`.toLowerCase().includes(query)
-        || String(candidate.number).includes(query)
+      return `#${candidate.number}`.toLowerCase().includes(query) || String(candidate.number).includes(query)
     })
   }, [candidates, search])
 
@@ -440,18 +415,18 @@ function EpicIssueSelector({ candidates, value, onChange, hasSelectableCandidate
             aria-expanded={open}
             disabled={isDisabled}
             className={`flex-1 justify-between gap-1.5 min-h-[40px] ${
-              open
-                ? 'border-blue-500 bg-blue-50 text-blue-700'
-                : selected
-                  ? 'text-foreground'
-                  : 'text-muted-foreground'
+              open ? 'border-blue-500 bg-blue-50 text-blue-700' : selected ? 'text-foreground' : 'text-muted-foreground'
             }`}
           />
         }
       >
         <span className="truncate">{triggerLabel}</span>
         <svg className="h-4 w-4 shrink-0 text-muted-foreground" viewBox="0 0 20 20" fill="currentColor">
-          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+          <path
+            fillRule="evenodd"
+            d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+            clipRule="evenodd"
+          />
         </svg>
       </PopoverTrigger>
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
@@ -459,7 +434,11 @@ function EpicIssueSelector({ candidates, value, onChange, hasSelectableCandidate
           <div className="relative">
             <div className="absolute left-3 top-1/2 -translate-y-1/2">
               <svg className="h-4 w-4 text-muted-foreground" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clipRule="evenodd" />
+                <path
+                  fillRule="evenodd"
+                  d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
+                  clipRule="evenodd"
+                />
               </svg>
             </div>
             <Input
@@ -475,15 +454,13 @@ function EpicIssueSelector({ candidates, value, onChange, hasSelectableCandidate
         </div>
         <div className="max-h-64 overflow-y-auto border-t" role="listbox" data-testid="epic-issue-listbox">
           {candidates.length === 0 ? (
-            <div className="px-3 py-6 text-center text-sm text-muted-foreground">
-              No issues available
-            </div>
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">No issues available</div>
           ) : filteredCandidates.length === 0 ? (
             <div className="px-3 py-6 text-center text-sm text-muted-foreground">
               No issues match &quot;{search}&quot;
             </div>
           ) : (
-            filteredCandidates.map(candidate => {
+            filteredCandidates.map((candidate) => {
               const reason = getCandidateUnavailableReason(candidate)
               const selectable = reason === null
               return (
@@ -506,12 +483,11 @@ function EpicIssueSelector({ candidates, value, onChange, hasSelectableCandidate
                         : 'cursor-not-allowed bg-muted/40 text-muted-foreground'
                   }`}
                 >
-                  <span className="font-medium">#{candidate.number} {candidate.title}</span>
+                  <span className="font-medium">
+                    #{candidate.number} {candidate.title}
+                  </span>
                   {!selectable && (
-                    <span
-                      data-testid="epic-issue-option-reason"
-                      className="text-xs text-muted-foreground"
-                    >
+                    <span data-testid="epic-issue-option-reason" className="text-xs text-muted-foreground">
                       {reason}
                     </span>
                   )}
@@ -532,10 +508,7 @@ export function EpicDetailPage({
   components?: Partial<EpicDetailPageComponents>
   dependencies?: Partial<EpicDetailPageDependencies>
 } = {}) {
-  const {
-    DependencyGraphErrorBoundary,
-    DependencyGraphWidget,
-  } = { ...defaultComponents, ...components }
+  const { DependencyGraphErrorBoundary, DependencyGraphWidget } = { ...defaultComponents, ...components }
   const { number: numberParam } = useParams()
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
@@ -580,19 +553,17 @@ export function EpicDetailPage({
 
   const availableIssues = useMemo(() => {
     if (!issues || !epic) return []
-    const linkedNumbers = new Set(epic.linkedIssues.map(issue => issue.number))
-    return issues.filter(issue => !linkedNumbers.has(issue.number))
+    const linkedNumbers = new Set(epic.linkedIssues.map((issue) => issue.number))
+    return issues.filter((issue) => !linkedNumbers.has(issue.number))
   }, [epic, issues])
 
-  const hasSelectableCandidate = useMemo(
-    () => availableIssues.some(isCandidateSelectable),
-    [availableIssues],
-  )
+  const hasSelectableCandidate = useMemo(() => availableIssues.some(isCandidateSelectable), [availableIssues])
 
   const advancement: AdvancementState = useMemo(
-    () => epic
-      ? deriveAdvancementState({ epicStatus: epic.status, linkedIssues: epic.linkedIssues })
-      : { kind: 'nothing-pending' },
+    () =>
+      epic
+        ? deriveAdvancementState({ epicStatus: epic.status, linkedIssues: epic.linkedIssues })
+        : { kind: 'nothing-pending' },
     [epic],
   )
   const advancementInfo = useMemo(() => advancementCopy(advancement), [advancement])
@@ -601,9 +572,7 @@ export function EpicDetailPage({
   const graphSelected = linkedIssuesView === 'graph'
   const linkedIssuesGraphInputKey = graphInputKey(linkedIssuesForGraph)
   const graphEmptyByInput = linkedIssuesForGraph.length < 2
-  const effectiveGraphRenderable = graphEmptyByInput
-    ? { renderable: false, reason: 'empty' as const }
-    : graphRenderable
+  const effectiveGraphRenderable = graphEmptyByInput ? { renderable: false, reason: 'empty' as const } : graphRenderable
   const effectiveGraphRenderError = graphEmptyByInput ? false : graphRenderError
   const graphHasReported = effectiveGraphRenderError || effectiveGraphRenderable.reason !== null
   const graphUnrenderable = graphSelected && graphHasReported && !effectiveGraphRenderable.renderable
@@ -629,12 +598,7 @@ export function EpicDetailPage({
       <div className="mx-auto max-w-4xl p-6">
         <Card className="p-8 text-center">
           <div className="text-lg font-medium text-foreground">Epic not found</div>
-          <Button
-            type="button"
-            variant="link"
-            onClick={() => navigate(toProjectPath('/epics'))}
-            className="mt-4"
-          >
+          <Button type="button" variant="link" onClick={() => navigate(toProjectPath('/epics'))} className="mt-4">
             Back to Epics
           </Button>
         </Card>
@@ -642,9 +606,8 @@ export function EpicDetailPage({
     )
   }
 
-  const progressPercent = epic.progress.totalIssueCount > 0
-    ? (epic.progress.deliveredCount / epic.progress.totalIssueCount) * 100
-    : 0
+  const progressPercent =
+    epic.progress.totalIssueCount > 0 ? (epic.progress.deliveredCount / epic.progress.totalIssueCount) * 100 : 0
   const submitDisabled = selectedIssueNumber === null || addEpicIssue.isPending
   const unfinishedCount = Math.max(epic.progress.totalIssueCount - epic.progress.deliveredCount, 0)
   const isPaused = epic.status === EpicStatus.Paused
@@ -705,17 +668,12 @@ export function EpicDetailPage({
     })
   }
 
-  const inProgressIssueNumber = epic.linkedIssues.find(i => i.status === IssueStatus.InProgress)?.number ?? null
+  const inProgressIssueNumber = epic.linkedIssues.find((i) => i.status === IssueStatus.InProgress)?.number ?? null
 
   return (
     <div className="mx-auto w-full min-w-0 max-w-4xl space-y-6 p-6">
       <div>
-        <Button
-          type="button"
-          variant="link"
-          onClick={() => navigate(toProjectPath('/epics'))}
-          className="px-0"
-        >
+        <Button type="button" variant="link" onClick={() => navigate(toProjectPath('/epics'))} className="px-0">
           Back to Epics
         </Button>
       </div>
@@ -724,9 +682,7 @@ export function EpicDetailPage({
         <div className="flex flex-col gap-4 md:flex-row md:flex-wrap md:items-start md:justify-between">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <span data-testid="epic-number">
-                #{epic.number}
-              </span>
+              <span data-testid="epic-number">#{epic.number}</span>
               <StatusBadge status={epic.status} />
               <PriorityBadge priority={epic.priority} />
               {epic.pauseReason && (
@@ -761,7 +717,7 @@ export function EpicDetailPage({
             {primaryAction?.kind === 'start-epic' && (
               <Button
                 type="button"
-      onClick={() => startEpic.mutate(epic.number)}
+                onClick={() => startEpic.mutate(epic.number)}
                 disabled={startEpic.isPending}
                 data-testid="start-epic-trigger"
               >
@@ -809,16 +765,8 @@ export function EpicDetailPage({
               </Button>
             )}
             {!isTerminal && !isMarkDonePrimary && (
-              <div
-                className="flex flex-col items-start gap-1 md:items-end"
-                data-testid="mark-done-disabled-region"
-              >
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled
-                  data-testid="mark-epic-done"
-                >
+              <div className="flex flex-col items-start gap-1 md:items-end" data-testid="mark-done-disabled-region">
+                <Button type="button" variant="outline" disabled data-testid="mark-epic-done">
                   Mark Done
                 </Button>
                 {markDoneDisabledReason && (
@@ -883,10 +831,7 @@ export function EpicDetailPage({
                 />
               </div>
             ) : epic.progress.readyToMarkDone ? (
-              <div
-                className="mt-2 text-sm font-medium text-green-700"
-                data-testid="next-issue-ready-to-mark-done"
-              >
+              <div className="mt-2 text-sm font-medium text-green-700" data-testid="next-issue-ready-to-mark-done">
                 Ready to mark done
               </div>
             ) : epic.linkedIssues.length === 0 ? (
@@ -896,7 +841,7 @@ export function EpicDetailPage({
                 <div className="text-sm text-foreground/80">{advancementInfo.text}</div>
                 {advancementInfo.linkNumbers.length > 0 && (
                   <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
-                    {advancementInfo.linkNumbers.map(number => (
+                    {advancementInfo.linkNumbers.map((number) => (
                       <Link
                         key={number}
                         to={toProjectPath(`/issues/${number}`)}
@@ -912,20 +857,14 @@ export function EpicDetailPage({
               </div>
             )}
             {isPaused && (
-              <p
-                data-testid="resume-re-evaluation-hint"
-                className="mt-2 text-xs text-muted-foreground"
-              >
+              <p data-testid="resume-re-evaluation-hint" className="mt-2 text-xs text-muted-foreground">
                 Resuming will re-evaluate advancement (readiness and the next startable issue).
               </p>
             )}
           </div>
           <div className="rounded-lg bg-muted p-4">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Current Activity</div>
-            <CurrentActivityList
-              active={epic.progress.activeIssues}
-              blocked={epic.progress.blockedIssues}
-            />
+            <CurrentActivityList active={epic.progress.activeIssues} blocked={epic.progress.blockedIssues} />
           </div>
         </div>
       </Card>
@@ -937,12 +876,7 @@ export function EpicDetailPage({
             className="mt-3 text-sm leading-6 text-foreground/80 [overflow-wrap:anywhere]"
             data-testid="epic-description"
           >
-            <MarkdownReader
-              content={epic.description}
-              baseHeadingLevel={3}
-              mode="collapsible"
-              collapsedHeight={320}
-            />
+            <MarkdownReader content={epic.description} baseHeadingLevel={3} mode="collapsible" collapsedHeight={320} />
           </div>
         </Card>
       )}
@@ -995,11 +929,7 @@ export function EpicDetailPage({
             onChange={setSelectedIssueNumber}
             hasSelectableCandidate={hasSelectableCandidate}
           />
-          <Button
-            type="submit"
-            disabled={submitDisabled}
-            data-testid="add-issue-submit"
-          >
+          <Button type="submit" disabled={submitDisabled} data-testid="add-issue-submit">
             {addEpicIssue.isPending ? 'Adding...' : 'Add Issue'}
           </Button>
         </form>
@@ -1022,10 +952,7 @@ export function EpicDetailPage({
                   : (effectiveGraphRenderable.reason ?? 'loading')
             }
           >
-            <p
-              className="mb-2 text-xs text-muted-foreground md:hidden"
-              data-testid="linked-issues-graph-narrow-hint"
-            >
+            <p className="mb-2 text-xs text-muted-foreground md:hidden" data-testid="linked-issues-graph-narrow-hint">
               Graph works best on wider screens — swipe to explore.
             </p>
             {(() => {
@@ -1045,10 +972,7 @@ export function EpicDetailPage({
               )
             })()}
             {!graphUnrenderable && (
-              <div
-                className="overflow-x-auto md:overflow-visible"
-                data-testid="linked-issues-graph-scroll-container"
-              >
+              <div className="overflow-x-auto md:overflow-visible" data-testid="linked-issues-graph-scroll-container">
                 <DependencyGraphErrorBoundary onError={handleGraphRenderError}>
                   <DependencyGraphWidget
                     linkedIssues={epic.linkedIssues}
@@ -1077,7 +1001,7 @@ export function EpicDetailPage({
                 No linked issues yet.
               </div>
             ) : (
-              epic.linkedIssues.map(issue => {
+              epic.linkedIssues.map((issue) => {
                 const hasInProgressSibling = inProgressIssueNumber !== null && inProgressIssueNumber !== issue.number
                 return (
                   <LinkedIssueRow
@@ -1104,11 +1028,7 @@ export function EpicDetailPage({
 
       <EpicActivityTimelineSection epicNumber={epic.number} />
 
-      <EditEpicDialog
-        open={editDialogOpen}
-        onClose={() => setEditDialogOpen(false)}
-        epic={epic}
-      />
+      <EditEpicDialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} epic={epic} />
 
       <Dialog open={closeConfirmOpen} onOpenChange={(v) => !v && setCloseConfirmOpen(false)}>
         <DialogContent>
@@ -1150,7 +1070,8 @@ export function EpicDetailPage({
           <DialogHeader>
             <DialogTitle>Pause Epic?</DialogTitle>
             <DialogDescription>
-              Pausing this Epic will keep all linked issues connected. The Epic will be hidden from the active view until resumed.
+              Pausing this Epic will keep all linked issues connected. The Epic will be hidden from the active view
+              until resumed.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">

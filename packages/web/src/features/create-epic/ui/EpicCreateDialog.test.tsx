@@ -7,7 +7,7 @@ import { MemoryRouter, useLocation } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ProjectProvider } from '../../../entities/project'
 import { EpicCreateDialog } from './EpicCreateDialog'
-import { EPIC_DESCRIPTION_TEMPLATE, hasEpicDescriptionStructure } from '@/shared/lib/epic-description-template'
+import { EPIC_DESCRIPTION_TEMPLATE, hasEpicDescriptionStructure } from '../../../entities/epic'
 import { useMswServer } from '../../../../tests/support/msw'
 import type { Epic, EpicStatus } from '../../../entities/epic'
 
@@ -36,13 +36,16 @@ const createHandler = vi.fn(async (info: { request: Request }) => {
   return HttpResponse.json({ success: true, data: makeEpic() })
 })
 
-useMswServer(
-  http.post('*/api/projects/:projectId/epics', createHandler),
-)
+useMswServer(http.post('*/api/projects/:projectId/epics', createHandler))
 
 function LocationProbe() {
   const location = useLocation()
-  return <div data-testid="current-path">{location.pathname}{location.search}</div>
+  return (
+    <div data-testid="current-path">
+      {location.pathname}
+      {location.search}
+    </div>
+  )
 }
 
 const project = {

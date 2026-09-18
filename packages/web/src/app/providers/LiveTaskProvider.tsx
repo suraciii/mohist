@@ -9,7 +9,8 @@ import {
 import { dispatchAgentEvent } from '../../entities/agent'
 import type { AgentDetailEventMap } from '../../entities/agent'
 import { useProject } from '../../entities/project'
-import { LiveEventsContext, useEventsConnection, type EventsConnection } from '../../shared/api/live-events'
+import { LiveEventsContext } from '../../shared/api/live-events'
+import { useEventsConnection, type EventsConnection } from './live-events'
 import { parseInboxItemPersistedHint } from '../../entities/inbox'
 import {
   isAgentDetailEvent,

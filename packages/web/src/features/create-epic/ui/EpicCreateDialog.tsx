@@ -1,20 +1,18 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useCreateEpic, type Epic } from '../../../entities/epic'
-import { useProject, useProjectPath } from '../../../entities/project'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/shared/ui/components/dialog'
+  EpicDescriptionField,
+  EPIC_DESCRIPTION_TEMPLATE,
+  hasEpicDescriptionStructure,
+  useCreateEpic,
+  type Epic,
+} from '../../../entities/epic'
+import { useProject, useProjectPath } from '../../../entities/project'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/shared/ui/components/dialog'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
-import { EpicDescriptionField } from '@/shared/ui'
 import { cn } from '@/shared/lib/utils'
-import { EPIC_DESCRIPTION_TEMPLATE, hasEpicDescriptionStructure } from '@/shared/lib/epic-description-template'
 import type { EpicPriority } from '../../../entities/epic'
 
 interface EpicCreateDialogProps {
@@ -108,29 +106,19 @@ export function EpicCreateDialog({ open, onClose }: EpicCreateDialogProps) {
                 </p>
                 <p className="text-sm text-muted-foreground break-words">
                   <span className="font-medium text-foreground">{createdEpic.title}</span>
-                  {createdEpic.number != null ? (
-                    <span className="ml-1">#{createdEpic.number}</span>
-                  ) : null}
-                  {' '}is idle. Start the Epic when you want it to begin autonomous execution.
+                  {createdEpic.number != null ? <span className="ml-1">#{createdEpic.number}</span> : null} is idle.
+                  Start the Epic when you want it to begin autonomous execution.
                 </p>
               </div>
               <p className="text-xs text-muted-foreground">
-                Use <span className="font-medium text-foreground">Open Epic</span> to continue planning linked issues, or{' '}
-                <span className="font-medium text-foreground">Stay</span> on this page.
+                Use <span className="font-medium text-foreground">Open Epic</span> to continue planning linked issues,
+                or <span className="font-medium text-foreground">Stay</span> on this page.
               </p>
             </div>
           ) : (
-            <form
-              id="epic-create-form"
-              onSubmit={handleSubmit}
-              className="space-y-4"
-              data-testid="epic-create-form"
-            >
+            <form id="epic-create-form" onSubmit={handleSubmit} className="space-y-4" data-testid="epic-create-form">
               <div>
-                <label
-                  htmlFor="epic-title"
-                  className="block text-sm font-medium text-foreground mb-1"
-                >
+                <label htmlFor="epic-title" className="block text-sm font-medium text-foreground mb-1">
                   Title
                 </label>
                 <Input
@@ -153,16 +141,10 @@ export function EpicCreateDialog({ open, onClose }: EpicCreateDialogProps) {
               />
 
               <div>
-                <label
-                  htmlFor="epic-priority"
-                  className="block text-sm font-medium text-foreground mb-1"
-                >
+                <label htmlFor="epic-priority" className="block text-sm font-medium text-foreground mb-1">
                   Priority
                 </label>
-                <Select
-                  value={priority}
-                  onValueChange={(value) => value && setPriority(value as EpicPriority)}
-                >
+                <Select value={priority} onValueChange={(value) => value && setPriority(value as EpicPriority)}>
                   <SelectTrigger id="epic-priority" className="w-full max-w-full">
                     <SelectValue placeholder="Select priority" />
                   </SelectTrigger>
@@ -177,10 +159,7 @@ export function EpicCreateDialog({ open, onClose }: EpicCreateDialogProps) {
               </div>
 
               {createEpic.isError && (
-                <div
-                  className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600"
-                  data-testid="epic-create-error"
-                >
+                <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600" data-testid="epic-create-error">
                   {createEpic.error?.message || 'Failed to create epic'}
                 </div>
               )}
@@ -194,30 +173,16 @@ export function EpicCreateDialog({ open, onClose }: EpicCreateDialogProps) {
         >
           {isSuccess ? (
             <>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleStay}
-                data-testid="epic-create-stay"
-              >
+              <Button type="button" variant="outline" onClick={handleStay} data-testid="epic-create-stay">
                 Stay
               </Button>
-              <Button
-                type="button"
-                onClick={handleOpenEpic}
-                data-testid="epic-create-open"
-              >
+              <Button type="button" onClick={handleOpenEpic} data-testid="epic-create-open">
                 Open Epic
               </Button>
             </>
           ) : (
             <>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleClose}
-                data-testid="epic-create-cancel"
-              >
+              <Button type="button" variant="outline" onClick={handleClose} data-testid="epic-create-cancel">
                 Cancel
               </Button>
               <Button
@@ -233,7 +198,9 @@ export function EpicCreateDialog({ open, onClose }: EpicCreateDialogProps) {
         </DialogFooter>
 
         {!projectId ? (
-          <span className="sr-only" data-testid="epic-create-no-project">No project selected.</span>
+          <span className="sr-only" data-testid="epic-create-no-project">
+            No project selected.
+          </span>
         ) : null}
       </DialogContent>
     </Dialog>

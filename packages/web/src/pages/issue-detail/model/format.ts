@@ -1,5 +1,5 @@
 import { IssueStatus, WorkflowStage, type AttachmentInfo } from '../../../entities/issue'
-import type { MarkdownAttachment } from '@/shared/ui/markdown-reader/MarkdownReader'
+import type { MarkdownAttachment } from '@/shared/ui/markdown-reader'
 
 export const WORKFLOW_STAGE_LABELS: Partial<Record<WorkflowStage, string>> = {
   [WorkflowStage.Plan]: 'Plan',

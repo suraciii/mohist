@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { IssueCard } from './IssueCard'
 import { IssueStatus, IssueHealth, WorkflowStage, type Issue } from '../../../entities/issue'
-import { getPriorityStripColor } from '../../../shared/lib/label-colors'
+import { getPriorityStripColor } from '../../../entities/issue'
 import type { AgentStatus } from '../../../entities/agent'
 
 const mockAgentStatus: AgentStatus = {

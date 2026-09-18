@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EPIC_DESCRIPTION_TEMPLATE, hasEpicDescriptionStructure } from './epic-description-template'
+import { EPIC_DESCRIPTION_TEMPLATE, hasEpicDescriptionStructure } from './description-template'
 
 describe('EPIC_DESCRIPTION_TEMPLATE', () => {
   it('is a single markdown string', () => {
@@ -28,7 +28,9 @@ describe('EPIC_DESCRIPTION_TEMPLATE', () => {
 
   it('uses `<…>` placeholders for the section bodies (not empty stubs)', () => {
     expect(EPIC_DESCRIPTION_TEMPLATE).toMatch(/<[^>]+>/)
-    const bodyLines = EPIC_DESCRIPTION_TEMPLATE.split('\n').filter((line) => !line.startsWith('## ') && line.trim() !== '')
+    const bodyLines = EPIC_DESCRIPTION_TEMPLATE.split('\n').filter(
+      (line) => !line.startsWith('## ') && line.trim() !== '',
+    )
     expect(bodyLines.length).toBeGreaterThanOrEqual(4)
   })
 })
@@ -97,13 +99,7 @@ describe('hasEpicDescriptionStructure', () => {
   })
 
   it('returns false when only some of the headers are present', () => {
-    const partial = [
-      '## Goal',
-      'ship it',
-      '',
-      '## Background',
-      'context',
-    ].join('\n')
+    const partial = ['## Goal', 'ship it', '', '## Background', 'context'].join('\n')
 
     expect(hasEpicDescriptionStructure(partial)).toBe(false)
   })

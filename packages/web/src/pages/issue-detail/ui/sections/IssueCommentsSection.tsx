@@ -2,7 +2,8 @@ import { useState, type KeyboardEvent } from 'react'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
-import { AttachmentComposer, MarkdownReader } from '@/shared/ui'
+import { AttachmentComposer } from '@/shared/ui/attachment-composer'
+import { MarkdownReader } from '@/shared/ui/markdown-reader'
 import { commentAttachmentContentPath, type Comment } from '../../../../entities/issue'
 import { formatTime } from '../../../../shared/lib/format-time'
 import { attachmentFromMetadata } from '../../model/format'
@@ -58,9 +59,7 @@ export function IssueCommentsSection({
       data-tier-weight="reading-flow"
       aria-label="Issue comments"
     >
-      <h2 className="text-sm font-semibold text-foreground mb-3">
-        Comments ({comments.length})
-      </h2>
+      <h2 className="text-sm font-semibold text-foreground mb-3">Comments ({comments.length})</h2>
       {comments.length === 0 ? (
         <p className="text-sm text-muted-foreground">No comments yet.</p>
       ) : (
@@ -85,11 +84,13 @@ export function IssueCommentsSection({
                   <MarkdownReader
                     content={comment.body}
                     baseHeadingLevel={3}
-                    resolveAttachment={(id) => attachmentFromMetadata(
-                      id,
-                      comment.attachments,
-                      `/api${commentAttachmentContentPath(issueNumber, comment.id, id, issueProjectId)}`,
-                    )}
+                    resolveAttachment={(id) =>
+                      attachmentFromMetadata(
+                        id,
+                        comment.attachments,
+                        `/api${commentAttachmentContentPath(issueNumber, comment.id, id, issueProjectId)}`,
+                      )
+                    }
                   />
                 </div>
                 <Button
@@ -139,19 +140,14 @@ export function IssueCommentsSection({
           onKeyDown={handleCommentKeyDown}
         />
         <div className="flex items-center justify-between mt-2">
-          {addCommentMutation.error && (
-            <span className="text-xs text-danger">
-              {addCommentMutation.error.message}
-            </span>
-          )}
+          {addCommentMutation.error && <span className="text-xs text-danger">{addCommentMutation.error.message}</span>}
           <div className="ml-auto">
-            <Button
-              onClick={submitComment}
-              disabled={!canSubmit}
-            >
+            <Button onClick={submitComment} disabled={!canSubmit}>
               {addCommentMutation.isPending ? 'Sending...' : 'Comment'}
             </Button>
-            <div className="mt-1 text-right text-xs text-muted-foreground">Use <kbd className="rounded border border-border bg-card px-1 py-0.5 font-mono">Command+Enter</kbd></div>
+            <div className="mt-1 text-right text-xs text-muted-foreground">
+              Use <kbd className="rounded border border-border bg-card px-1 py-0.5 font-mono">Command+Enter</kbd>
+            </div>
           </div>
         </div>
       </div>

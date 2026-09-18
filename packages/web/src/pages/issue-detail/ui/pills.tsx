@@ -1,4 +1,4 @@
-import { formatPriority, getPriorityStyle } from '../../../shared/lib/label-colors'
+import { formatPriority, getPriorityStyle } from '../../../entities/issue'
 
 export function PriorityChip({ priority }: { priority: string | null | undefined }) {
   if (!priority) return null

@@ -6,16 +6,17 @@ import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
 import { EditEpicDialog } from './EditEpicDialog'
 import type { EpicDetail, EpicPriority, EpicStatus } from '../../../entities/epic'
-import { EPIC_DESCRIPTION_TEMPLATE } from '@/shared/lib/epic-description-template'
+import { EPIC_DESCRIPTION_TEMPLATE } from '../../../entities/epic'
 
-const updateHandler = vi.fn(async ({ number, data }: {
-  number: number
-  data: { title: string; description: string; priority: EpicPriority }
-}) => makeEpic({ number, ...data }))
+const updateHandler = vi.fn(
+  async ({ number, data }: { number: number; data: { title: string; description: string; priority: EpicPriority } }) =>
+    makeEpic({ number, ...data }),
+)
 
-const updateHook = () => useMutation({
-  mutationFn: (variables: Parameters<typeof updateHandler>[0]) => updateHandler(variables),
-}) as never
+const updateHook = () =>
+  useMutation({
+    mutationFn: (variables: Parameters<typeof updateHandler>[0]) => updateHandler(variables),
+  }) as never
 
 const project = {
   id: 'proj-edit',
@@ -119,9 +120,11 @@ describe('EditEpicDialog verbatim load', () => {
 
     const { rerender } = render(
       <QueryClientProvider
-        client={new QueryClient({
-          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-        })}
+        client={
+          new QueryClient({
+            defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+          })
+        }
       >
         <ProjectProvider initialProjects={[project]} initialProjectId={project.id}>
           <MemoryRouter>
@@ -135,9 +138,11 @@ describe('EditEpicDialog verbatim load', () => {
 
     rerender(
       <QueryClientProvider
-        client={new QueryClient({
-          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-        })}
+        client={
+          new QueryClient({
+            defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+          })
+        }
       >
         <ProjectProvider initialProjects={[project]} initialProjectId={project.id}>
           <MemoryRouter>

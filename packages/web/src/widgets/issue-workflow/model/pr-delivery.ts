@@ -28,7 +28,8 @@ function readPublishViaPrRecord(value: unknown): Record<string, unknown> | null 
     record['kind'] !== 'publish-via-pr' &&
     record['kind'] !== 'create-pull-request' &&
     record['kind'] !== 'merge-pull-request'
-  ) return null
+  )
+    return null
   return record
 }
 

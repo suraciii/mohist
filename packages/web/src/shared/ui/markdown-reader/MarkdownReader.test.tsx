@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MarkdownReader, type MarkdownAttachment } from './MarkdownReader'
-import * as SharedUiBarrel from '@/shared/ui'
+import { MarkdownReader as SharedMarkdownReader } from './index'
 import { setScopedProperty, setScopedValue } from '../../../../tests/support/scoped-property'
 
 type ResizeObserverCtor = new (callback: ResizeObserverCallback) => ResizeObserver
@@ -37,10 +37,10 @@ function setupResizeObserver() {
   return { instances, spy }
 }
 
-describe('MarkdownReader barrel export', () => {
-  it('is importable from the shared UI barrel', () => {
-    expect(SharedUiBarrel.MarkdownReader).toBeDefined()
-    expect(SharedUiBarrel.MarkdownReader).toBe(MarkdownReader)
+describe('MarkdownReader public entrypoint', () => {
+  it('is importable from its shared UI entrypoint', () => {
+    expect(SharedMarkdownReader).toBeDefined()
+    expect(SharedMarkdownReader).toBe(MarkdownReader)
   })
 })
 

@@ -1,7 +1,7 @@
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { cn } from '@/shared/lib/utils'
-import { EPIC_DESCRIPTION_TEMPLATE } from '@/shared/lib/epic-description-template'
+import { EPIC_DESCRIPTION_TEMPLATE } from '../model/description-template'
 
 export interface EpicDescriptionFieldProps {
   id: string
@@ -57,10 +57,7 @@ export function EpicDescriptionField({
 
   return (
     <div className={cn('w-full max-w-full break-words', className)}>
-      <label
-        htmlFor={id}
-        className="block text-sm font-medium text-foreground mb-1"
-      >
+      <label htmlFor={id} className="block text-sm font-medium text-foreground mb-1">
         {label}
       </label>
       <Textarea
@@ -73,13 +70,7 @@ export function EpicDescriptionField({
       />
       {showInsertAction && (
         <div className="mt-1 flex justify-end">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={handleInsertTemplate}
-            disabled={disabled}
-          >
+          <Button type="button" variant="ghost" size="sm" onClick={handleInsertTemplate} disabled={disabled}>
             {insertActionLabel}
           </Button>
         </div>
