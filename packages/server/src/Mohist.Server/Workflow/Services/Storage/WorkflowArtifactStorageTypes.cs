@@ -24,6 +24,14 @@ public sealed class WorkflowArtifactDirectoryLimits
     /// </summary>
     public const long DefaultMaxEnvelopeBytes = 384L * 1024L * 1024L;
 
+    /// <summary>
+    /// Fixed allowance added to <see cref="MaxEnvelopeBytes"/> to cover the
+    /// multipart framing (boundary lines, part headers, and the non-file form
+    /// fields) when aligning the HTTP request-size limits with the envelope
+    /// limit.
+    /// </summary>
+    public const long MultipartFramingSlackBytes = 64L * 1024L;
+
     /// <summary>Maximum number of regular files inside a directory artifact.</summary>
     public int MaxFileCount { get; set; } = DefaultMaxFileCount;
 
@@ -34,6 +42,14 @@ public sealed class WorkflowArtifactDirectoryLimits
     /// this from the body.
     /// </summary>
     public long MaxEnvelopeBytes { get; set; } = DefaultMaxEnvelopeBytes;
+
+    /// <summary>
+    /// HTTP request body limit that admits a directory envelope at
+    /// <see cref="MaxEnvelopeBytes"/> plus multipart framing. The global form
+    /// limit and the artifact upload routes' request-size metadata derive from
+    /// this value so the configured envelope limit is the effective gate.
+    /// </summary>
+    public long MaxMultipartBodyBytes => MaxEnvelopeBytes + MultipartFramingSlackBytes;
 
     /// <summary>
     /// Maximum total bytes across all contained files. Files exceeding

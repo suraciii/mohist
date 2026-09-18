@@ -1,8 +1,12 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Services.Artifacts;
+using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.Api;
 
@@ -37,6 +41,17 @@ public static class WorkflowArtifactUploadRoutes
 
     public static WebApplication MapWorkflowArtifactUploadRoutes(this WebApplication app)
     {
+        ArgumentNullException.ThrowIfNull(app);
+
+        // The envelope limit is the effective directory-upload gate. Derive
+        // both routes' request-size metadata from it (plus multipart framing)
+        // so the form layer admits a legal envelope that the default Kestrel
+        // and form limits would otherwise reject.
+        var limits = app.Services
+            .GetRequiredService<IOptions<WorkflowArtifactStorageOptions>>()
+            .Value.DirectoryLimits ?? WorkflowArtifactDirectoryLimits.Default;
+        var requestSizeLimit = new RequestSizeLimitAttribute(limits.MaxMultipartBodyBytes);
+
         app.MapPost(
             "/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
             async (
@@ -53,7 +68,8 @@ public static class WorkflowArtifactUploadRoutes
                 var result = await uploadService.UploadAsync(parsed.Request!, cancellationToken);
                 return ToApiResult(result);
             })
-            .RequireScopes(Scope.Runner);
+            .RequireScopes(Scope.Runner)
+            .WithMetadata(requestSizeLimit);
 
         app.MapPost(
             "/api/agent-jobs/{agentJobId}/work/{workId}/artifact-uploads",
@@ -71,7 +87,8 @@ public static class WorkflowArtifactUploadRoutes
                 var result = await uploadService.UploadAsync(parsed.Request!, cancellationToken);
                 return ToApiResult(result);
             })
-            .RequireScopes(Scope.Runner);
+            .RequireScopes(Scope.Runner)
+            .WithMetadata(requestSizeLimit);
 
         return app;
     }

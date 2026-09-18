@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.RequestDecompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -61,6 +62,27 @@ public static class MohistServiceRegistration
     public static IServiceCollection AddMohistServerCore(this IServiceCollection services, IConfiguration configuration)
     {
         return services.ConfigureMohistServices(configuration);
+    }
+
+    /// <summary>
+    /// Aligns the multipart transport limits with the configured directory
+    /// envelope limit. Kestrel's default request-body cap and the form layer's
+    /// default <see cref="FormOptions.MultipartBodyLengthLimit"/> are both below
+    /// a legal default envelope, so without this alignment the envelope limit
+    /// would never be the effective gate.
+    /// </summary>
+    public static IServiceCollection ConfigureWorkflowArtifactTransportLimits(
+        this IServiceCollection services)
+    {
+        services.AddOptions<FormOptions>()
+            .Configure<Microsoft.Extensions.Options.IOptions<WorkflowArtifactStorageOptions>>(
+                (form, storage) =>
+                {
+                    var limits = storage.Value.DirectoryLimits
+                        ?? WorkflowArtifactDirectoryLimits.Default;
+                    form.MultipartBodyLengthLimit = limits.MaxMultipartBodyBytes;
+                });
+        return services;
     }
 
     /// <summary>
@@ -339,6 +361,7 @@ public static class MohistServiceRegistration
         });
         services.AddSingleton<IWorkflowArtifactStorage, FileSystemWorkflowArtifactStorage>();
         services.Configure<WorkflowArtifactStorageOptions>(configuration.GetSection(WorkflowArtifactStorageOptions.SectionName));
+        services.ConfigureWorkflowArtifactTransportLimits();
         services.AddSingleton<IAttachmentStorage, FileSystemAttachmentStorage>();
         services.Configure<AttachmentStorageOptions>(configuration.GetSection(AttachmentStorageOptions.SectionName));
         services.Configure<SecretStoreOptions>(configuration.GetSection(SecretStoreOptions.SectionName));
