@@ -10,6 +10,7 @@ import type {
   CodexResetResult,
   CodexResult,
   CodexRuntime,
+  CodexRuntimeTurnEvent,
   CodexTurnEventObserver,
   CodexTurnRequest,
   CodexTurnResult,
@@ -23,6 +24,8 @@ export interface FakeCodexRuntimeHandles {
   compactCalls: CodexCompactRequest[]
   resetCalls: CodexResetRequest[]
   resolveSessionCalls: Array<{ runtimeSessionId: string; workDir: string }>
+  createSessionCalls: Array<{ target: { runtimeSessionId: null; workDir: string }; model?: string | null }>
+  shutdownCalls: Array<{ clearDiagnostic?: boolean }>
   setReady: (ready: boolean) => void
   setCatalog: (catalog: CodexCatalog | null) => void
   setRunTurnResult: (result: CodexResult<CodexTurnResult>) => void
@@ -30,6 +33,10 @@ export interface FakeCodexRuntimeHandles {
   setCancelResult: (result: CodexResult<CodexCancelResult>) => void
   setCompactResult: (result: CodexResult<CodexCompactResult>) => void
   setResetResult: (result: CodexResult<CodexResetResult>) => void
+  setCreateSessionResult: (result: CodexResult<{ runtimeSessionId: string; workDir: string }>) => void
+  setEmitSessionReady: (emit: boolean) => void
+  setEvents: (events: readonly CodexRuntimeTurnEvent[]) => void
+  setShutdownError: (error: Error | null) => void
 }
 
 const DEFAULT_SESSION = { runtimeSessionId: 'thread_fixture', workDir: '/workspace' }
@@ -41,8 +48,13 @@ export function makeFakeCodexRuntime(): FakeCodexRuntimeHandles {
   const compactCalls: CodexCompactRequest[] = []
   const resetCalls: CodexResetRequest[] = []
   const resolveSessionCalls: Array<{ runtimeSessionId: string; workDir: string }> = []
+  const createSessionCalls: Array<{ target: { runtimeSessionId: null; workDir: string }; model?: string | null }> = []
+  const shutdownCalls: Array<{ clearDiagnostic?: boolean }> = []
   let ready = true
   let catalog: CodexCatalog | null = null
+  let emitSessionReady = true
+  let events: readonly CodexRuntimeTurnEvent[] = []
+  let shutdownError: Error | null = null
   let nextRunTurn: CodexResult<CodexTurnResult> = {
     ok: true,
     value: {
@@ -74,13 +86,27 @@ export function makeFakeCodexRuntime(): FakeCodexRuntimeHandles {
     value: { facts: { runtimeSessionId: 'thread_fixture_reset', workDir: '/workspace' }, diagnostics: [] },
     diagnostics: [],
   }
+  let nextCreateSession: CodexResult<{ runtimeSessionId: string; workDir: string }> = {
+    ok: true,
+    value: { runtimeSessionId: 'thread_fixture_created', workDir: '/workspace' },
+    diagnostics: [],
+  }
 
   const runtime: Partial<CodexRuntime> = {
     ready: () => ready,
     diagnostic: () => null,
     catalog: () => catalog,
-    async runTurn(request: CodexTurnRequest, _signal?: AbortSignal, _observer?: CodexTurnEventObserver) {
+    async runTurn(request: CodexTurnRequest, _signal?: AbortSignal, observer?: CodexTurnEventObserver) {
       runTurnCalls.push(request)
+      if (emitSessionReady) {
+        const session = nextRunTurn.ok
+          ? { runtimeSessionId: nextRunTurn.value.facts.runtimeSessionId, workDir: nextRunTurn.value.facts.workDir }
+          : request.target.runtimeSessionId !== null
+            ? { runtimeSessionId: request.target.runtimeSessionId, workDir: request.target.workDir }
+            : null
+        if (session) await observer?.onSessionReady?.(session)
+      }
+      for (const event of events) observer?.onEvent?.(event)
       return nextRunTurn
     },
     async followup(request: CodexFollowupRequest, _observer?: CodexTurnEventObserver, _signal?: AbortSignal) {
@@ -107,6 +133,14 @@ export function makeFakeCodexRuntime(): FakeCodexRuntimeHandles {
         diagnostics: [],
       }
     },
+    async createSession(request: { target: { runtimeSessionId: null; workDir: string }; model?: string | null }) {
+      createSessionCalls.push(request)
+      return nextCreateSession
+    },
+    async shutdown(options: { clearDiagnostic?: boolean } = {}) {
+      shutdownCalls.push(options)
+      if (shutdownError) throw shutdownError
+    },
   }
 
   return {
@@ -117,6 +151,8 @@ export function makeFakeCodexRuntime(): FakeCodexRuntimeHandles {
     compactCalls,
     resetCalls,
     resolveSessionCalls,
+    createSessionCalls,
+    shutdownCalls,
     setReady(value) {
       ready = value
     },
@@ -137,6 +173,18 @@ export function makeFakeCodexRuntime(): FakeCodexRuntimeHandles {
     },
     setResetResult(result) {
       nextReset = result
+    },
+    setCreateSessionResult(result) {
+      nextCreateSession = result
+    },
+    setEmitSessionReady(value) {
+      emitSessionReady = value
+    },
+    setEvents(value) {
+      events = value
+    },
+    setShutdownError(error) {
+      shutdownError = error
     },
   }
 }

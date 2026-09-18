@@ -18,6 +18,7 @@ describe('Codex runtime fixture', () => {
     await fixture.runtime.resolveSession({
       target: { runtimeSessionId: target.runtimeSessionId!, workDir: target.workDir },
     })
+    await fixture.runtime.shutdown({ clearDiagnostic: true })
 
     expect(fixture.runTurnCalls[0]).toMatchObject({ prompt: 'run once', clientUserMessageId: 'input_1' })
     expect(fixture.followupCalls[0]).toMatchObject({ prompt: 'follow up', clientUserMessageId: 'input_2' })
@@ -25,6 +26,7 @@ describe('Codex runtime fixture', () => {
     expect(fixture.compactCalls).toHaveLength(1)
     expect(fixture.resetCalls).toHaveLength(1)
     expect(fixture.resolveSessionCalls).toEqual([{ runtimeSessionId: 'thread_fixture', workDir: '/workspace' }])
+    expect(fixture.shutdownCalls).toEqual([{ clearDiagnostic: true }])
   })
 
   it('allows readiness, catalog, and result outcomes to be changed without changing the seam', async () => {
@@ -46,5 +48,15 @@ describe('Codex runtime fixture', () => {
         clientUserMessageId: 'input_uncertain',
       }),
     ).resolves.toMatchObject({ ok: false, error: { kind: 'unknown' } })
+  })
+
+  it('records shutdown calls and lets tests inject a deterministic shutdown failure', async () => {
+    const fixture = makeFakeCodexRuntime()
+    await fixture.runtime.shutdown()
+    expect(fixture.shutdownCalls).toEqual([{}])
+
+    fixture.setShutdownError(new Error('shutdown budget exhausted'))
+    await expect(fixture.runtime.shutdown({ clearDiagnostic: true })).rejects.toThrow('shutdown budget exhausted')
+    expect(fixture.shutdownCalls).toHaveLength(2)
   })
 })

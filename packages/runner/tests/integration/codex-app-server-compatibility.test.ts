@@ -11,8 +11,10 @@ import {
   codexInitializationTransportFromHandle,
 } from '../../src/runtime/codex/initialization.js'
 import { isCodexVersionSupported } from '../../src/runtime/codex/readiness.js'
+import { normalizeCodexNotification } from '../../src/runtime/codex/turn-events.js'
 
 const FIXED_CLIENT_USER_MESSAGE_ID = 'mohist-codex-compatibility-smoke-v1'
+const FIXED_SENTINEL = 'codex-compat-ok'
 
 interface SmokeAvailability {
   readonly available: boolean
@@ -95,6 +97,21 @@ function turnIdFromResponse(value: unknown): string | null {
   return stringValue(turn.id) ?? stringValue(turn.turnId) ?? stringValue(root.turnId)
 }
 
+function assistantTextFromNotifications(notifications: readonly unknown[]): string {
+  let text = ''
+  for (const message of notifications) {
+    const event = normalizeCodexNotification(message)
+    if (!event || typeof event !== 'object') continue
+    const candidate = event as { type?: unknown; text?: unknown; delta?: unknown }
+    if (candidate.type !== 'agentMessage') continue
+    if (typeof candidate.text !== 'string') continue
+    // Deltas arrive as fragments; completed items arrive whole. Concatenating
+    // both is safe because the completed item re-states the full text.
+    text += candidate.text
+  }
+  return text
+}
+
 function waitForCompletion(handle: CodexServerHandle, threadId: string, turnId: string): Promise<unknown> {
   return new Promise((resolveCompletion, reject) => {
     const timeout = setTimeout(() => {
@@ -172,7 +189,7 @@ describe.skipIf(!smoke.available)(
             input: [
               {
                 type: 'text',
-                text: 'Respond exactly with codex-compat-ok. Do not call tools or modify files.',
+                text: `Respond exactly with ${FIXED_SENTINEL}. Do not call tools or modify files.`,
                 text_elements: [],
               },
             ],
@@ -187,6 +204,7 @@ describe.skipIf(!smoke.available)(
         const completedParams = objectValue(objectValue(completed).params)
         const completedTurn = nestedObject(completedParams, 'turn')
         expect(completedParams.status ?? completedTurn.status).toBe('completed')
+        expect(assistantTextFromNotifications(notifications)).toContain(FIXED_SENTINEL)
         expect(
           notifications.some((message) => {
             const envelope = objectValue(message)
