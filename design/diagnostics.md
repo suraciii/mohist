@@ -34,15 +34,40 @@ Diagnosis
   Events                   # bounded recent run-event window
 ```
 
-A **Doctor check** is one deployment fact:
+A **Doctor check** is one deployment or configuration fact:
 
 ```text literal
 DoctorCheck
-  Name                     # revision-alignment | migrations |
-                           # verification-command | model-catalog
-  Status                   # ok | fail
-  Detail, NextAction
+  Name                     # canonical check name, see the inventory
+  Status                   # ok | warn | fail
+  Detail                   # evidence: what was observed
+  NextAction               # correction for a non-ok check; null for ok
 ```
+
+A check status means:
+
+```text literal
+ok    the fact is healthy
+warn  the fact deserves attention, but the platform can still serve and
+      execute work; warn never changes the process exit status
+fail  the platform cannot satisfy the contract this check represents; fail
+      sets the process exit status to 1
+```
+
+The canonical checks, in the order the Server returns them and the CLI
+renders them:
+
+| Name | Owner | Reads Project configuration |
+| --- | --- | --- |
+| `revision-alignment` | deployment | no |
+| `migrations` | database | no |
+| `model-catalog` | Runner runtime | no |
+| `verification-command` | required Project configuration | yes |
+| `project-verification-optional` | optional Project configuration | yes |
+
+The platform checks (`revision-alignment`, `migrations`) and the Runner check
+(`model-catalog`) never read Project configuration. Project verification is
+reported independently from Server health and Runner readiness.
 
 ## Semantics
 
@@ -65,18 +90,79 @@ DoctorCheck
 - `mo run why <run>` renders the Diagnosis. The default view is the failure
   chain; `--json` selects fields. Exit status is 0 whenever a diagnosis is
   rendered; an unresolvable Run reference is the only error.
-- `mo doctor` evaluates the check list against the connected Server and
-  local services. `revision-alignment` compares CLI, Server, Runner, and
-  Slack against one revision. `verification-command` reports Projects whose
-  built-in Profile runs would fail closed for a missing command.
-  `model-catalog` reports runtimes whose discovered catalog is empty or
-  incomplete. A failing check prints its next action; exit status is 1 when
-  any check fails.
+- `mo doctor` renders the five canonical checks in order. Each check prints
+  its name, status, and detail; a `warn` or `fail` check also prints its next
+  action. Exit status is 1 when any check is `fail`, and 0 otherwise, so a
+  `warn`-only result exits 0.
+
+### Project verification classification
+
+A Project's verification command is required only when that Project can
+execute a workflow. Otherwise the Project is optional. The classification is
+a pure function of persisted facts:
+
+```text literal
+required(project) = hasActiveExecution(project) AND NOT explicitlyOptional(project)
+
+hasActiveExecution(project) =
+    EXISTS WorkflowRunRow
+      WHERE MetadataProjectId = project.Id
+        AND Status NOT IN ('completed', 'stopped')
+```
+
+- `Completed` and `Stopped` are the only terminal statuses. `Failed` is
+deliberately not terminal because Retry/Rerun revive it, and a revived run
+still needs the frozen verification command.
+- The query filters the stored lowercase `WorkflowRunRow.Status` at the
+  database layer and never deserializes run state.
+- A Project with a verification command produces no finding in either Project
+  check.
+- A required Project without a command makes `verification-command` `fail`.
+- An optional Project without a command makes `project-verification-optional`
+  `warn`.
+- Missing Projects are sorted by name with `StringComparer.Ordinal` before the
+  detail is built, so the message is deterministic.
+
+### Strict mode
+
+Strict mode is a request-scoped flag, not a stored setting. `mo doctor
+--strict` sends `strict=true`, and the Server then treats every Project
+without a verification command as required:
+
+```text literal
+required(project, strict) =
+    strict OR (hasActiveExecution(project) AND NOT explicitlyOptional(project))
+```
+
+- Default: only active, non-optional Projects fail.
+- Strict: every Project without a command fails, restoring the
+  all-invalid-configurations-fail behavior on demand.
+- Strict mode never changes platform or Runner checks.
+
+### Doctor API and CLI
+
+- `GET /api/doctor/checks` (operator scope) accepts an optional `strict`
+  query flag and returns the flat, always-present array of five checks in
+  canonical order.
+- Each check object carries `name`, `status`, `detail`, and `nextAction` in
+  that key order. `status` is one of `ok`, `warn`, `fail`. `nextAction` is
+  present for every non-`ok` check and `null` for `ok`.
+- `mo doctor` rejects any status other than `ok`, `warn`, or `fail` as
+  `invalid_response`.
+- `--json` projects the same fields and discovers fields without a network
+  request.
+
+### Configuration
+
+`Mohist:Doctor:OptionalProjects` is a string array of Project names or ids
+that are explicitly optional (for example, fixtures). A matching Project is
+treated as optional even when it has active execution. Names match
+case-insensitively and ids match ordinally. An absent or empty value means no
+explicit optional Projects. The configuration is read once per doctor
+evaluation and never written.
 
 ## Status
 
-- The dispatch snapshot store records no rows on the live deployment.
-  Diagnosing and closing that persistence gap is part of the first
-  implementation slice.
-- Diagnosis assembly, the doctor check list, and both CLI commands are
-  unimplemented.
+Diagnosis assembly, the doctor check list, and both CLI commands are
+implemented on the Server and the Go CLI. The dispatch snapshot store
+persists one snapshot per WorkflowRun and WorkId.
