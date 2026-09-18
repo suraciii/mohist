@@ -160,6 +160,9 @@ function createCommandRunner(gitCalls: GitCall[]): RunnerResourceContext['comman
       if (command === 'git' && args[2] === 'remote' && args[3] === 'get-url') {
         return { exitCode: 0, stdout: `${GIT_URL}\n`, stderr: '' }
       }
+      if (command === 'git' && args[2] === 'rev-parse' && args[3] === '--abbrev-ref') {
+        return { exitCode: 0, stdout: `${RUN_BRANCH}\n`, stderr: '' }
+      }
       // Every other probe (run-branch `rev-parse --verify`, `checkout -B`)
       // succeeds so the run branch is the one ensured.
       return { exitCode: 0, stdout: '', stderr: '' }

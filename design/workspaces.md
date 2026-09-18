@@ -129,8 +129,10 @@ separate global creation flow.
   R.
 - If R is unreachable or its Home is unavailable, an available Runner
   provisions a new Home and replaces `Home`.
-- Provisioning uses the remote Git branch for Repository contents and the
-  current WorkflowRun's bound artifacts for declared non-repository files.
+- A valid Home is the source of truth, including local edits between tasks.
+  Recovery uses the remote Git branch for Repository contents and the current
+  WorkflowRun's bound artifacts for declared non-repository files only when a
+  new Home is provisioned.
 - Unpushed Git state and unuploaded files are not durable inputs.
 
 ### Layout

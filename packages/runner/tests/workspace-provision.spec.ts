@@ -167,6 +167,49 @@ describe('Workspace Home provisioning', () => {
     })
   })
 
+  it('removes files created earlier when a later artifact fails validation', async () => {
+    await withTestRunnerResources(async (fileSystem) => {
+      const root = '/workspace'
+      await fileSystem.ensureDir(root)
+      const valid = new TextEncoder().encode('valid')
+      const invalid = new TextEncoder().encode('invalid')
+      const client = {
+        async listWorkspaceArtifacts() {
+          return [
+            {
+              artifactId: 'art_valid',
+              path: 'PLANS/first.txt',
+              kind: 'file' as const,
+              contentType: 'text/plain',
+              contentHash: hash('valid'),
+              size: valid.byteLength,
+            },
+            {
+              artifactId: 'art_invalid',
+              path: 'PLANS/second.txt',
+              kind: 'file' as const,
+              contentType: 'text/plain',
+              contentHash: hash('expected'),
+              size: invalid.byteLength,
+            },
+          ]
+        },
+        async readWorkspaceArtifactDirectory() {
+          throw new Error('unexpected directory read')
+        },
+        async downloadWorkspaceArtifact(_runId: string, _workId: string, artifactId: string) {
+          return artifactId === 'art_valid' ? valid : invalid
+        },
+      }
+
+      await expect(
+        provisionWorkspaceArtifacts(client, 'run-1', 'work-1', root, new AbortController().signal),
+      ).rejects.toThrow(/content hash mismatch/)
+      expect(fileSystem.exists(join(root, 'PLANS/first.txt'))).toBe(false)
+      expect(fileSystem.exists(join(root, 'PLANS/second.txt'))).toBe(false)
+    })
+  })
+
   it.each([
     'REPOS/master/secret',
     '.mohist/marker',

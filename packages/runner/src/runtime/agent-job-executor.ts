@@ -502,11 +502,13 @@ async function resolveWorkspaceBinding(
     if (!namedWorkspaceManager) return invalidWorkspaceBinding()
     try {
       const projectId = work.projectId ?? ''
-      const provisioned = await namedWorkspaceManager.provision(projectId, name, readWorkspaceRepositories(ws), signal)
       const repositoryName = stringAt(work.variables ?? {}, ['repository', 'name'])
       const gitUrl = stringAt(work.variables ?? {}, ['repository', 'gitUrl'])
       const baseBranch = stringAt(work.variables ?? {}, ['repository', 'baseBranch'])
       if (work.workflowRunId) {
+        // Workflow-bound provisioning owns Home creation and recovery-artifact
+        // restoration. Do not materialize the generic Home first or the
+        // creation signal would be consumed before recovery runs.
         if (!repositoryName || !gitUrl || !baseBranch) {
           return {
             kind: 'provisioning-failed',
@@ -532,6 +534,7 @@ async function resolveWorkspaceBinding(
           repositoryName,
         }
       }
+      const provisioned = await namedWorkspaceManager.provision(projectId, name, readWorkspaceRepositories(ws), signal)
       return {
         kind: 'named',
         workDir: provisioned.path,
