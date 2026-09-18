@@ -149,9 +149,19 @@ func defaultDependencies() Dependencies {
 				return nil
 			}
 		},
-		Executable:       func() string { return os.Args[0] },
+		Executable:       currentExecutablePath,
 		CurrentDirectory: func() string { value, _ := os.Getwd(); return value },
 	}
+}
+
+func currentExecutablePath() string {
+	if value, err := exec.LookPath(os.Args[0]); err == nil && strings.TrimSpace(value) != "" {
+		return value
+	}
+	if value, err := os.Executable(); err == nil && strings.TrimSpace(value) != "" {
+		return value
+	}
+	return os.Args[0]
 }
 
 func ResolveConfig(deps Dependencies) (Config, error) {
