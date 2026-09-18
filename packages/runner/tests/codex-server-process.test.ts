@@ -8,6 +8,12 @@ import {
 } from '../src/runtime/codex/server-process.js'
 import { FakeChildProcess } from './support/fake-process.js'
 import type { ProcessSpawner } from '../src/system/process.js'
+import {
+  codexInitializationTransportFromHandle,
+  performCodexInitialization,
+} from '../src/runtime/codex/initialization.js'
+
+const MANAGED_CODEX_HOME = '/runner/.mohist/codex'
 
 /**
  * Encoding helper used by the fake child: every JSON-RPC envelope is
@@ -238,5 +244,94 @@ describe('createSpawnedCodexServer', () => {
   it('honours the bounded startup and shutdown timeout constants', () => {
     expect(DEFAULT_CODEX_STARTUP_TIMEOUT_MS).toBe(10_000)
     expect(DEFAULT_CODEX_SHUTDOWN_TIMEOUT_MS).toBe(5_000)
+  })
+})
+
+describe('spawned handle drives the initialize handshake', () => {
+  it('sends initialize without experimental capabilities, then initialized', async () => {
+    const spawner = buildSpawner()
+    const handle: CodexServerHandle = await createSpawnedCodexServer({
+      ...BASE_OPTIONS,
+      codexHome: MANAGED_CODEX_HOME,
+      spawner: spawner.spawn,
+    })
+    const pending = performCodexInitialization(codexInitializationTransportFromHandle(handle), {
+      managedCodexHome: MANAGED_CODEX_HOME,
+      startupTimeoutMs: 5_000,
+    })
+
+    // The handshake admits no other request before initialization; the
+    // first framed line on stdin is the `initialize` envelope.
+    expect(spawner.child.writes).toHaveLength(1)
+    const initializeEnvelope = JSON.parse(spawner.child.writes[0]!) as {
+      id?: number
+      method?: string
+      params?: Record<string, unknown>
+    }
+    expect(initializeEnvelope).toMatchObject({ id: 1, method: 'initialize' })
+    expect(Object.keys(initializeEnvelope.params ?? {}).some((key) => key.includes('experimental'))).toBe(false)
+
+    spawner.child.writeStdout(
+      encode({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { protocolVersion: 'v2', codexHome: MANAGED_CODEX_HOME, userAgent: 'codex/0.153.0' },
+      }),
+    )
+    await expect(pending).resolves.toMatchObject({ ok: true, value: { handshakeComplete: true } })
+
+    const initializedEnvelope = JSON.parse(spawner.child.writes[spawner.child.writes.length - 1]!) as {
+      id?: number
+      method?: string
+    }
+    expect(initializedEnvelope).toMatchObject({ method: 'initialized' })
+    expect(initializedEnvelope.id).toBeUndefined()
+    await shutdownHandle(handle, spawner.child)
+  })
+
+  it('rejects a non-managed codexHome response before admitting any request', async () => {
+    const spawner = buildSpawner()
+    const handle = await createSpawnedCodexServer({
+      ...BASE_OPTIONS,
+      codexHome: MANAGED_CODEX_HOME,
+      spawner: spawner.spawn,
+    })
+    const pending = performCodexInitialization(codexInitializationTransportFromHandle(handle), {
+      managedCodexHome: MANAGED_CODEX_HOME,
+      startupTimeoutMs: 5_000,
+    })
+    spawner.child.writeStdout(
+      encode({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { protocolVersion: 'v2', codexHome: '/home/person/.codex' },
+      }),
+    )
+    await expect(pending).resolves.toMatchObject({ ok: false, error: { kind: 'incompatible-runtime' } })
+    // The `initialized` notification MUST NOT be written once the server
+    // proved it is talking to a non-managed home.
+    expect(
+      spawner.child.writes.some((line) => (JSON.parse(line) as { method?: string }).method === 'initialized'),
+    ).toBe(false)
+    await shutdownHandle(handle, spawner.child)
+  })
+
+  it('reports the runtime not ready when the child exits before initialize completes', async () => {
+    const spawner = buildSpawner()
+    const handle = await createSpawnedCodexServer({
+      ...BASE_OPTIONS,
+      codexHome: MANAGED_CODEX_HOME,
+      spawner: spawner.spawn,
+    })
+    spawner.child.emit('exit', 1, null)
+
+    const result = await performCodexInitialization(codexInitializationTransportFromHandle(handle), {
+      managedCodexHome: MANAGED_CODEX_HOME,
+      startupTimeoutMs: 5_000,
+    })
+    expect(result).toMatchObject({ ok: false, error: { kind: 'unavailable-runtime' } })
+    // A dead child must not receive the initialize request.
+    expect(spawner.child.writes).toHaveLength(0)
+    await handle.close()
   })
 })

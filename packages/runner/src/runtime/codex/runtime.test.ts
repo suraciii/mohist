@@ -439,6 +439,45 @@ describe('CodexRuntime readiness gate', () => {
   })
 })
 
+describe('CodexRuntime app-server generations', () => {
+  it('fences a lost generation and only serves newly admitted work from a fresh child', async () => {
+    let failureListener: ((message: unknown) => void) | null = null
+    const first = fakeHandle()
+    ;(first as { subscribe: (listener: (message: unknown) => void) => () => void }).subscribe = (listener) => {
+      failureListener = listener
+      return () => {
+        failureListener = null
+      }
+    }
+    let spawned = 0
+    const runtime = new CodexRuntime({
+      codexHome: MANAGED_CODEX_HOME,
+      cwd: '/work',
+      serverFactory: async () => {
+        spawned += 1
+        return spawned === 1 ? first : fakeHandle()
+      },
+      readinessProbe: passingProbe(),
+    })
+
+    await expect(runtime.start()).resolves.toMatchObject({ ok: true, value: { generation: 1 } })
+
+    // The child dies. The runtime stops claiming Codex work, drops the
+    // volatile generation, and discards its per-generation Turn
+    // correlation without replaying anything.
+    const listener = failureListener as ((message: unknown) => void) | null
+    listener?.({ jsonrpc: '2.0', method: 'protocol-failure', params: { reason: 'child-exit', message: 'gone' } })
+    expect(runtime.ready()).toBe(false)
+    expect(runtime.generation()).toBeNull()
+
+    // A fresh app-server becomes a new generation and only then does the
+    // runtime claim work again.
+    await expect(runtime.start()).resolves.toMatchObject({ ok: true, value: { generation: 2 } })
+    expect(spawned).toBe(2)
+    await runtime.shutdown({ clearDiagnostic: true })
+  })
+})
+
 describe('CodexRuntime AgentSession operations', () => {
   it('persists a new Thread before turn/start and drives follow-up, compact, and reset through the same app-server', async () => {
     const handle = lifecycleHandle()
