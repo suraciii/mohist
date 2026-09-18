@@ -82,6 +82,32 @@ describe('Codex reasoning effort mapping', () => {
       'catalog-unknown-default-reasoning-effort',
     ])
   })
+
+  it("maps native 'none' in supportedReasoningEfforts and publishes no variants", async () => {
+    const loader = createCodexModelCatalogLoader(
+      catalogTransport(
+        [
+          {
+            data: [
+              {
+                id: 'gpt-5',
+                supportedReasoningEfforts: [{ reasoningEffort: 'none', description: 'no reasoning' }],
+                defaultReasoningEffort: 'none',
+              },
+            ],
+            nextCursor: null,
+          },
+        ],
+        [],
+      ),
+    )
+
+    const result = await loader.refreshCatalog()
+    const model = result.catalog?.models[0]
+    expect(model?.reasoningEfforts).toEqual(['off'])
+    expect(model?.defaultReasoningEffort).toBe('off')
+    expect(model).not.toHaveProperty('variants')
+  })
 })
 
 describe('Codex model catalog refresh', () => {
@@ -144,6 +170,44 @@ describe('Codex model catalog refresh', () => {
       { limit: 2, includeHidden: false },
       { cursor: 'page-2', limit: 2, includeHidden: false },
     ])
+  })
+
+  it('reports changed only when the complete snapshot content differs', async () => {
+    const loader = createCodexModelCatalogLoader(
+      catalogTransport(
+        [
+          { models: [{ id: 'gpt-5', reasoningEfforts: ['none'] }], complete: true },
+          { models: [{ id: 'gpt-5', reasoningEfforts: ['none'] }], complete: true },
+          { models: [{ id: 'gpt-5', reasoningEfforts: ['low'] }], complete: true },
+        ],
+        [],
+      ),
+    )
+
+    const first = await loader.refreshCatalog()
+    const unchanged = await loader.refreshCatalog()
+    const changed = await loader.refreshCatalog()
+
+    expect(first.changed).toBe(true)
+    expect(unchanged.changed).toBe(false)
+    expect(unchanged.catalog).toEqual(first.catalog)
+    expect(changed.changed).toBe(true)
+  })
+
+  it('derives a stable capabilityRevision from model ids and reasoning efforts', async () => {
+    const loaderFor = (reasoningEfforts: readonly string[]) =>
+      createCodexModelCatalogLoader(
+        catalogTransport([{ models: [{ id: 'gpt-5', reasoningEfforts }], complete: true }], []),
+      )
+
+    // Effort order and native spelling normalize before hashing, so the
+    // same capability set yields the same revision regardless of order.
+    const noneLow = await loaderFor(['none', 'low']).refreshCatalog()
+    const lowNone = await loaderFor(['low', 'none']).refreshCatalog()
+    const noneHigh = await loaderFor(['none', 'high']).refreshCatalog()
+
+    expect(noneLow.catalog?.capabilityRevision).toBe(lowNone.catalog?.capabilityRevision)
+    expect(noneLow.catalog?.capabilityRevision).not.toBe(noneHigh.catalog?.capabilityRevision)
   })
 
   it('retains the last complete snapshot when a refresh becomes empty', async () => {
