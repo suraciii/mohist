@@ -235,6 +235,12 @@ launch` returns AgentJob, AgentSession, first Input, and Turn IDs. Use
 its record. Observe `accepted`, `queued`, and `running`; read the result at
 `terminal`; query or retry the original key when state is `unknown`.
 
+Launch context keeps the Server contract's types. `--issue` and `--epic` are
+positive integer references and are sent as JSON numbers; `--workspace`,
+`--repo`, and other text references are JSON strings. The CLI omits context
+properties that were not supplied, so a workspace-only launch does not send
+empty numeric values. Invalid numeric input remains a Server validation error.
+
 ## Launch Entry Points
 
 A task-first launch is available when the caller has a task but does not yet
