@@ -989,7 +989,7 @@ func renderDoctor(out io.Writer, data json.RawMessage) error {
 	}
 	for _, check := range checks {
 		fmt.Fprintf(out, "name: %s\nstatus: %s\ndetail: %s\n", check.Name, check.Status, check.Detail)
-		if check.Status == "fail" && check.NextAction != nil && *check.NextAction != "" {
+		if check.Status != "ok" && check.NextAction != nil && *check.NextAction != "" {
 			fmt.Fprintln(out, "next action: "+*check.NextAction)
 		}
 		fmt.Fprintln(out)
@@ -1022,7 +1022,7 @@ func decodeDoctorChecks(data json.RawMessage) ([]doctorCheck, error) {
 			return nil, errors.New("error: Doctor response has an invalid shape [invalid_response]")
 		}
 		status, ok := doctorStringField(fields, "status")
-		if !ok || (status != "ok" && status != "fail") {
+		if !ok || (status != "ok" && status != "warn" && status != "fail") {
 			return nil, errors.New("error: Doctor response has an invalid shape [invalid_response]")
 		}
 		detail, ok := doctorStringField(fields, "detail")
