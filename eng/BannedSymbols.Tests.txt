@@ -25,7 +25,8 @@ T:Microsoft.Extensions.FileProviders.PhysicalFileProvider; Tests must use an in-
 T:Mohist.Cli.RealFileSystem; Tests must use FakeFileSystem.
 T:Mohist.Server.SystemInfo.PhysicalFileSystem; Tests must use an in-memory filesystem.
 T:Mohist.Server.Workflow.Storage.FileSystemAttachmentStorage; Tests must use an in-memory IAttachmentStorage.
-T:Mohist.Server.Workflow.Storage.FileSystemWorkflowArtifactStorage; Tests must use an in-memory IWorkflowArtifactStorage.
+T:Mohist.Server.Workflow.Storage.PhysicalWorkflowArtifactFileSystem; Tests must inject an in-memory IWorkflowArtifactFileSystem.
+M:Mohist.Server.Workflow.Storage.FileSystemWorkflowArtifactStorage.#ctor(Microsoft.Extensions.Options.IOptions{Mohist.Server.Workflow.Storage.WorkflowArtifactStorageOptions},Microsoft.Extensions.Logging.ILogger{Mohist.Server.Workflow.Storage.FileSystemWorkflowArtifactStorage}); Tests must construct the adapter with an in-memory IWorkflowArtifactFileSystem.
 T:Mohist.Server.SystemInfo.FileSystemSystemUpdateStore; Tests must use an in-memory ISystemUpdateStore.
 T:Mohist.Server.SystemInfo.FileSystemManagedAssetCatalog; Tests must use an in-memory IManagedAssetCatalog.
 T:Mohist.Server.Infrastructure.Config.FileConfigDocumentStore; Tests must use an in-memory IConfigDocumentStore.

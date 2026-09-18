@@ -1,3 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Storage;
 using Xunit;
@@ -122,6 +126,60 @@ public class WorkflowArtifactStorageContractTests
         Assert.Equal(3, metadata.FileCount);
     }
 
+    [Fact]
+    public async Task ListDirectoryEntriesAsync_ReturnsRecordedManifestFields()
+    {
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_recorded", "design", "art_recorded", WorkflowArtifactStorageKind.Directory);
+        await _storage.WriteDirectoryAsync(
+            storagePath,
+            [
+                Entry("specs/data.md", "data-spec", Sha256("data-spec"), "text/markdown"),
+                Entry("index.md", "index-x", Sha256("index-x"), "text/markdown"),
+            ],
+            WriteFor("specs/", 16),
+            SampleRecordedAt);
+
+        var listing = await _storage.ListDirectoryEntriesAsync(storagePath);
+
+        Assert.Equal(["index.md", "specs/data.md"], listing.Entries.Select(entry => entry.RelativePath));
+        Assert.Equal(
+            [Sha256("index-x"), Sha256("data-spec")],
+            listing.Entries.Select(entry => entry.ContentHash));
+        Assert.Equal([7L, 9L], listing.Entries.Select(entry => entry.Size));
+        Assert.All(listing.Entries, entry => Assert.Equal("text/markdown", entry.ContentType));
+        Assert.Equal(16, listing.TotalSize);
+    }
+
+    [Fact]
+    public async Task ListDirectoryEntriesAsync_ReturnsUploadTimeHashAfterStoredContentMutates()
+    {
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_tamper", "design", "art_tamper", WorkflowArtifactStorageKind.Directory);
+        await _storage.WriteDirectoryAsync(
+            storagePath,
+            [Entry("index.md", "index-x", Sha256("index-x"), "text/markdown")],
+            WriteFor("specs/", 7),
+            SampleRecordedAt);
+
+        var recorded = Assert.Single((await _storage.ReadMetadataAsync(storagePath))!.Entries!);
+
+        // Simulate a post-upload mutation of the bytes the collection serves.
+        _storage.MutateDirectoryEntryContent(storagePath, "index.md", Encoding.UTF8.GetBytes("tampered"));
+
+        var listing = await _storage.ListDirectoryEntriesAsync(storagePath);
+        var listed = Assert.Single(listing.Entries);
+        Assert.Equal(recorded.RelativePath, listed.RelativePath);
+        Assert.Equal(recorded.ContentHash, listed.ContentHash);
+        Assert.Equal(recorded.Size, listed.Size);
+        Assert.Equal(Sha256("index-x"), listed.ContentHash);
+        Assert.Equal(recorded.Size, listing.TotalSize);
+
+        // The served bytes really changed; only the recorded expectation held.
+        using var reader = new StreamReader(_storage.OpenDirectoryEntry(storagePath, "index.md"));
+        Assert.Equal("tampered", await reader.ReadToEndAsync());
+    }
+
     [Theory]
     [InlineData("../escape.md")]
     [InlineData("/etc/passwd")]
@@ -191,6 +249,183 @@ public class WorkflowArtifactStorageContractTests
     }
 
     [Fact]
+    public async Task WriteDirectoryAsync_RecordsEntryManifestInMetadata()
+    {
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_manifest", "design", "art_manifest", WorkflowArtifactStorageKind.Directory);
+        var entries = new[]
+        {
+            Entry("specs/data.md", "data-spec", Sha256("data-spec"), "text/markdown"),
+            Entry("index.md", "index-x", Sha256("index-x"), "text/markdown"),
+            Entry("specs/auth.md", "auth-spec", Sha256("auth-spec"), "text/markdown"),
+        };
+
+        var result = await _storage.WriteDirectoryAsync(
+            storagePath, entries, WriteFor("specs/", 25), SampleRecordedAt);
+
+        Assert.Equal(25, result.Size);
+        Assert.Equal(3, result.FileCount);
+        var metadata = await _storage.ReadMetadataAsync(storagePath);
+        Assert.NotNull(metadata);
+        Assert.Equal("directory", metadata!.Kind);
+        Assert.Equal(3, metadata.FileCount);
+        Assert.Equal(25, metadata.Size);
+        Assert.NotNull(metadata.Entries);
+
+        var manifest = metadata.Entries!.ToArray();
+        Assert.Equal(
+            ["index.md", "specs/auth.md", "specs/data.md"],
+            manifest.Select(entry => entry.RelativePath));
+        Assert.Equal(
+            [Sha256("index-x"), Sha256("auth-spec"), Sha256("data-spec")],
+            manifest.Select(entry => entry.ContentHash));
+        Assert.Equal([7L, 9L, 9L], manifest.Select(entry => entry.Size));
+        Assert.All(manifest, entry => Assert.Equal("text/markdown", entry.ContentType));
+    }
+
+    [Fact]
+    public async Task WriteDirectoryAsync_RecordsComputedHashWhenNoneDeclared()
+    {
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_computed", "design", "art_computed", WorkflowArtifactStorageKind.Directory);
+
+        await _storage.WriteDirectoryAsync(
+            storagePath, [Entry("a.md", "alpha")], WriteFor("specs/", 5), SampleRecordedAt);
+
+        var metadata = await _storage.ReadMetadataAsync(storagePath);
+        var entry = Assert.Single(metadata!.Entries!);
+        Assert.Equal(Sha256("alpha"), entry.ContentHash);
+        Assert.Equal(5, entry.Size);
+        Assert.Equal("a.md", entry.RelativePath);
+    }
+
+    [Fact]
+    public async Task WriteFileAsync_OmitsEntryManifest()
+    {
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_file_manifest", "t", "a", WorkflowArtifactStorageKind.File);
+
+        await _storage.WriteFileAsync(
+            storagePath, Bytes("abc"u8.ToArray()), WriteFor("a.md", 3), SampleRecordedAt);
+
+        var metadata = await _storage.ReadMetadataAsync(storagePath);
+        Assert.NotNull(metadata);
+        Assert.Null(metadata!.Entries);
+    }
+
+    [Fact]
+    public async Task MetadataJson_PinsEntryManifestShapeAndOmitsItForFiles()
+    {
+        var directoryPath = _storage.GenerateStoragePath(
+            "wr_json_manifest", "t", "dir", WorkflowArtifactStorageKind.Directory);
+        await _storage.WriteDirectoryAsync(
+            directoryPath,
+            [Entry("a.md", "alpha", Sha256("alpha"), "text/markdown")],
+            WriteFor("specs/", 5),
+            SampleRecordedAt);
+
+        var directoryMetadata = await _storage.ReadMetadataAsync(directoryPath);
+        using var directoryJson = JsonDocument.Parse(JSON.SerializeIndented(directoryMetadata));
+        var entry = Assert.Single(directoryJson.RootElement.GetProperty("entries").EnumerateArray());
+        Assert.Equal("a.md", entry.GetProperty("relativePath").GetString());
+        Assert.Equal(5, entry.GetProperty("size").GetInt64());
+        Assert.Equal(Sha256("alpha"), entry.GetProperty("contentHash").GetString());
+        Assert.Equal("text/markdown", entry.GetProperty("contentType").GetString());
+
+        var filePath = _storage.GenerateStoragePath(
+            "wr_json_manifest", "t", "file", WorkflowArtifactStorageKind.File);
+        await _storage.WriteFileAsync(
+            filePath, Bytes("abc"u8.ToArray()), WriteFor("a.md", 3), SampleRecordedAt);
+
+        var fileMetadata = await _storage.ReadMetadataAsync(filePath);
+        using var fileJson = JsonDocument.Parse(JSON.SerializeIndented(fileMetadata));
+        Assert.False(fileJson.RootElement.TryGetProperty("entries", out _));
+    }
+
+    [Fact]
+    public async Task WriteDirectoryAsync_RejectsDeclaredHashMismatchAndLeavesPathRetryable()
+    {
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_hash_mismatch", "t", "a", WorkflowArtifactStorageKind.Directory);
+        var bad = Entry("a.md", "actual", $"sha256:{new string('0', 64)}", "text/markdown");
+
+        await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
+            _storage.WriteDirectoryAsync(storagePath, [bad], WriteFor("specs/", 6), SampleRecordedAt));
+
+        Assert.False(_storage.Contains(storagePath));
+        Assert.Null(await _storage.ReadMetadataAsync(storagePath));
+        await Assert.ThrowsAsync<WorkflowArtifactNotFoundException>(() =>
+            _storage.ListDirectoryEntriesAsync(storagePath));
+
+        var retry = await _storage.WriteDirectoryAsync(
+            storagePath,
+            [Entry("a.md", "actual", Sha256("actual"), "text/markdown")],
+            WriteFor("specs/", 6),
+            SampleRecordedAt);
+        Assert.Equal(6, retry.Size);
+        Assert.True(_storage.Contains(storagePath));
+    }
+
+    [Fact]
+    public async Task WriteDirectoryAsync_RejectsDeclaredSizeMismatchAndLeavesPathRetryable()
+    {
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_size_mismatch", "t", "a", WorkflowArtifactStorageKind.Directory);
+        var bad = new WorkflowArtifactDirectoryEntryInput
+        {
+            RelativePath = "a.md",
+            Size = 99,
+            OpenContent = () => Bytes("actual"u8.ToArray()),
+        };
+
+        await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
+            _storage.WriteDirectoryAsync(storagePath, [bad], WriteFor("specs/", 6), SampleRecordedAt));
+
+        Assert.False(_storage.Contains(storagePath));
+        Assert.Null(await _storage.ReadMetadataAsync(storagePath));
+        await Assert.ThrowsAsync<WorkflowArtifactNotFoundException>(() =>
+            _storage.ListDirectoryEntriesAsync(storagePath));
+
+        var retry = await _storage.WriteDirectoryAsync(
+            storagePath, [Entry("a.md", "actual")], WriteFor("specs/", 6), SampleRecordedAt);
+        Assert.Equal(6, retry.Size);
+        Assert.True(_storage.Contains(storagePath));
+    }
+
+    [Fact]
+    public async Task WriteDirectoryAsync_RejectedDeclaredValuesLeaveNoArtifact()
+    {
+        var limits = new WorkflowArtifactDirectoryLimits
+        {
+            MaxFileCount = 1,
+            MaxTotalBytes = 10,
+            MaxFileBytes = 10,
+        };
+
+        var countPath = _storage.GenerateStoragePath(
+            "wr_cleanup", "t", "count", WorkflowArtifactStorageKind.Directory);
+        await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
+            _storage.WriteDirectoryAsync(
+                countPath, [Entry("a", "a"), Entry("b", "b")], WriteFor("s/", 2), SampleRecordedAt, limits));
+        Assert.False(_storage.Contains(countPath));
+        Assert.Null(await _storage.ReadMetadataAsync(countPath));
+
+        var duplicatePath = _storage.GenerateStoragePath(
+            "wr_cleanup", "t", "dup", WorkflowArtifactStorageKind.Directory);
+        await Assert.ThrowsAsync<WorkflowArtifactStorageException>(() =>
+            _storage.WriteDirectoryAsync(
+                duplicatePath, [Entry("same", "a"), Entry("same", "b")], WriteFor("s/", 2), SampleRecordedAt));
+        Assert.False(_storage.Contains(duplicatePath));
+        Assert.Null(await _storage.ReadMetadataAsync(duplicatePath));
+
+        // The clean rejection must leave the path retryable.
+        var retry = await _storage.WriteDirectoryAsync(
+            duplicatePath, [Entry("same", "a")], WriteFor("s/", 1), SampleRecordedAt);
+        Assert.Equal(1, retry.Size);
+        Assert.True(_storage.Contains(duplicatePath));
+    }
+
+    [Fact]
     public async Task DeleteAsync_RemovesArtifact()
     {
         var storagePath = _storage.GenerateStoragePath("wr_d", "t_d", "a_d", WorkflowArtifactStorageKind.File);
@@ -209,6 +444,22 @@ public class WorkflowArtifactStorageContractTests
         Size = System.Text.Encoding.UTF8.GetByteCount(content),
         OpenContent = () => Bytes(System.Text.Encoding.UTF8.GetBytes(content)),
     };
+
+    private static WorkflowArtifactDirectoryEntryInput Entry(
+        string path,
+        string content,
+        string? contentHash,
+        string? contentType) => new()
+        {
+            RelativePath = path,
+            Size = System.Text.Encoding.UTF8.GetByteCount(content),
+            ContentHash = contentHash,
+            ContentType = contentType,
+            OpenContent = () => Bytes(System.Text.Encoding.UTF8.GetBytes(content)),
+        };
+
+    private static string Sha256(string content) =>
+        $"sha256:{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant()}";
 
     private static Stream Bytes(byte[] data) => new MemoryStream(data, writable: false);
 

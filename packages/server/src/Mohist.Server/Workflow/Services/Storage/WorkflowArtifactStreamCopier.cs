@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 namespace Mohist.Server.Workflow.Storage;
 
 internal static class WorkflowArtifactStreamCopier
@@ -8,7 +10,8 @@ internal static class WorkflowArtifactStreamCopier
         long declaredSize,
         long? maxBytes,
         string displayPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IncrementalHash? hash = null)
     {
         if (declaredSize < 0)
             throw new WorkflowArtifactStorageException(
@@ -25,6 +28,7 @@ internal static class WorkflowArtifactStreamCopier
 
             await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
                 .ConfigureAwait(false);
+            hash?.AppendData(buffer, 0, read);
             written += read;
         }
 

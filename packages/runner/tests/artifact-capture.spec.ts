@@ -160,14 +160,25 @@ describe('captureOne', () => {
     const specsDir = join(paths().workDir, 'specs')
     await currentRunnerFileSystem().ensureDir(join(specsDir, 'sub'))
     await currentRunnerFileSystem().writeText(join(specsDir, 'a.md'), 'alpha')
+    await currentRunnerFileSystem().writeText(join(specsDir, 'config.json'), '{}')
     await currentRunnerFileSystem().writeText(join(specsDir, 'sub', 'b.md'), 'beta')
     const capture = await captureOne(paths().workDir, { path: 'specs', source: 'declared' })
     expect(capture.kind).toBe('directory')
-    expect(capture.fileCount).toBe(2)
+    expect(capture.fileCount).toBe(3)
     const manifest = JSON.parse(new TextDecoder().decode(capture.content))
     expect(manifest.kind).toBe('directory')
     const manifestPaths = manifest.files.map((f: { path: string }) => f.path).sort()
-    expect(manifestPaths).toEqual(['a.md', 'sub/b.md'])
+    expect(manifestPaths).toEqual(['a.md', 'config.json', 'sub/b.md'])
+    // Each entry carries the content type the server records in the persisted manifest.
+    expect(
+      manifest.files
+        .map((f: { path: string; contentType: string }) => [f.path, f.contentType])
+        .sort((a: string[], b: string[]) => a[0].localeCompare(b[0])),
+    ).toEqual([
+      ['a.md', 'text/markdown'],
+      ['config.json', 'application/json'],
+      ['sub/b.md', 'text/markdown'],
+    ])
   })
 
   it('refusesPathsEscapingWorkspace', async () => {
