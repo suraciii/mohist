@@ -755,6 +755,23 @@ describe('Codex turn item projection', () => {
     if (!result.ok) throw new Error('expected success')
     expect(result.value.facts.finalAssistantText).toBeNull()
   })
+
+  it('routes item events by exact Thread+Turn IDs and drops stale items as diagnostics', async () => {
+    const transport = buildTransport()
+    const events: CodexRuntimeTurnEvent[] = []
+    const diagnostics: { code: string; message: string }[] = []
+    const completion = driveTurnToCompletion(
+      driveArgs(transport, { onEvent: (e) => events.push(e), onDiagnostic: (d) => diagnostics.push(d) }),
+    )
+    transport.emit({ type: 'agentMessage', threadId: THREAD_ID, turnId: 'turn_other', text: 'stale-turn' })
+    transport.emit({ type: 'agentMessage', threadId: 'thr_other', turnId: TURN_ID, text: 'stale-thread' })
+    transport.emit({ type: 'agentMessage', threadId: THREAD_ID, turnId: TURN_ID, text: 'fresh' })
+    transport.emit({ type: 'turn/completed', threadId: THREAD_ID, turnId: TURN_ID, status: 'completed' })
+    const result = await completion
+    expect(result).toMatchObject({ ok: true, value: { facts: { finalAssistantText: 'fresh' } } })
+    expect(events.filter((e) => e.type === 'message.delta')).toHaveLength(1)
+    expect(diagnostics.filter((d) => d.code === 'item-stale')).toHaveLength(2)
+  })
 })
 
 describe('Codex official app-server notification normalization', () => {
@@ -868,6 +885,28 @@ describe('Codex turn no-replay discipline', () => {
     })
     expect(secondResult).toMatchObject({ ok: false, error: { kind: 'unknown' } })
     expect(transport.calls.length).toBe(callsAfterFirst)
+  })
+
+  it('never attempts turn/interrupt when the exact Turn ID is unknown after a lost turn/start', async () => {
+    // The Turn ID is volatile per-generation correlation. A lost
+    // turn/start response means the exact Turn ID is unknown, so
+    // the runtime must not attempt to interrupt it (an interrupt
+    // with an empty or guessed ID is not the exact active Turn).
+    const transport = buildTransport({ error: new Error('write failed after submission may have occurred') })
+    const result = await submitTurnStart(
+      transport,
+      {
+        threadId: THREAD_ID,
+        workDir: WORK_DIR,
+        prompt: 'hello',
+        fileParts: null,
+        clientUserMessageId: 'sess_input_unknown_turn',
+        resolved: { model: 'gpt-5', reasoningEffort: null, nativeReasoningEffort: null },
+      },
+      4,
+    )
+    expect(result).toMatchObject({ ok: false, error: { kind: 'unknown' } })
+    expect(transport.calls.map((c) => c.method)).toEqual(['turn/start'])
   })
 })
 

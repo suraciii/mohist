@@ -59,7 +59,7 @@ import {
   normalizeUnknownCodex,
 } from './errors.js'
 import { redactCodexCredentialString } from './credential.js'
-import { normalizeCodexNotification } from './turn-events.js'
+import { normalizeCodexNotification, staleItemDiagnostic } from './turn-events.js'
 import {
   buildPermissionRejectionUnconfirmed,
   createPermissionRejection,
@@ -787,6 +787,11 @@ function handleThreadStatus(event: CodexThreadStatusEvent, session: TurnSession)
 
 function handleItem(event: CodexItemEvent, session: TurnSession): void {
   if (!isCodexItemEvent(event)) return
+  const stale = staleItemDiagnostic(event, session.expectedThreadId, session.expectedTurnId)
+  if (stale !== null) {
+    session.observeDiagnostic(stale)
+    return
+  }
   if (event.type === 'agentMessage' && event.delta === true) session.sawAgentMessageDelta = true
   const projected = projectItemEvent(event, session)
   if (projected === null) {

@@ -1,3 +1,33 @@
+import { redactCodexCredentialString } from './credential.js'
+import type { CodexDiagnostic } from './types.js'
+
+/**
+ * Build the diagnostic for an item event whose exact Thread or Turn
+ * identity does not match the active Turn, or `null` when the event
+ * belongs to it. Item events that omit identity are treated as
+ * belonging to the active Turn (the internal projection form); the
+ * wire form produced by {@link normalizeCodexNotification} always
+ * carries both IDs, so exact-ID routing is enforced on real traffic.
+ */
+export function staleItemDiagnostic(
+  event: unknown,
+  activeThreadId: string,
+  activeTurnId: string | null,
+): CodexDiagnostic | null {
+  if (!event || typeof event !== 'object') return null
+  const view = event as { type?: unknown; threadId?: unknown; turnId?: unknown }
+  const staleThread = typeof view.threadId === 'string' && view.threadId !== activeThreadId
+  const staleTurn = typeof view.turnId === 'string' && view.turnId !== activeTurnId
+  if (!staleThread && !staleTurn) return null
+  return {
+    severity: 'info',
+    code: 'item-stale',
+    message: redactCodexCredentialString(
+      `ignored Codex ${typeof view.type === 'string' ? view.type : 'item'} for thread=${String(view.threadId)} turn=${String(view.turnId)}; expected thread=${activeThreadId} turn=${String(activeTurnId)}`,
+    ),
+  }
+}
+
 /** Normalize official Codex app-server notifications into the small internal event subset. */
 export function normalizeCodexNotification(message: unknown): unknown | null {
   if (!message || typeof message !== 'object') return null
