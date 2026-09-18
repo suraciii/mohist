@@ -49,4 +49,13 @@ describe('runner build-info loader', () => {
     expect(result.gitHash).toBe('deadbeef')
     expect(result.builtAt).toBe(1_700_000_000_000)
   })
+
+  it('usesManagedBuildGitHashWhenGitHashIsAbsent', () => {
+    const result = loadBuildInfo({
+      exists: () => true,
+      readText: () => JSON.stringify({ buildGitHash: 'managed-deadbeef' }),
+    })
+
+    expect(result.gitHash).toBe('managed-deadbeef')
+  })
 })
