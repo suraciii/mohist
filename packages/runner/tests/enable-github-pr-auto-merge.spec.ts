@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { enableGitHubPrAutoMergeAction } from '../src/actions/enable-github-pr-auto-merge.js'
-import { classifyPrChecks } from '../src/actions/github-pr-checks.js'
+import { classifyPrChecks, parsePrStatusCheckRollupResult } from '../src/actions/github-pr-checks.js'
 import { withRunnerResources, type RunnerCommandRunner, type RunnerResourceContext } from '../src/system/filesystem.js'
 
 function result(stdout: string, exitCode = 0, stderr = '') {
@@ -421,6 +421,32 @@ describe('enable auto merge', () => {
     expect(out.error.code).toBe('pr-checks-failed')
     expect(gh.mock.calls.filter((call: any) => call[1].includes('--auto'))).toHaveLength(1)
   })
+
+  it.each(['TIMED_OUT', 'STARTUP_FAILURE', 'STALE'])(
+    'classifies %s PR checks as pr-checks-failed, matching the shared classifier',
+    async (conclusion) => {
+      const rollup = [{ name: 'ci', status: 'COMPLETED', conclusion }]
+      const gh = vi
+        .fn()
+        .mockResolvedValueOnce(result('gh version'))
+        .mockResolvedValueOnce(result('auth ok'))
+        .mockResolvedValueOnce(result(view()))
+        .mockResolvedValueOnce(result('enabled'))
+        .mockResolvedValueOnce(result(view({ autoMergeRequest: {}, statusCheckRollup: rollup })))
+      const out: any = await withRunnerResources(resources(gh), () =>
+        enableGitHubPrAutoMergeAction(inputs as any, host()),
+      )
+      expect(out.error.code).toBe('pr-checks-failed')
+      expect(out.error.message).toContain('ci')
+      expect(gh.mock.calls.filter((call: any) => call[1].includes('--auto'))).toHaveLength(1)
+
+      // The Integrate stage must reach the same decision as the Check stage for the
+      // same rollup: both consume this shared classifier, with no separate code path.
+      const parsed = parsePrStatusCheckRollupResult(JSON.stringify({ statusCheckRollup: rollup }))
+      if (parsed.kind !== 'ok') throw new Error(`rollup parse failed: ${parsed.message}`)
+      expect(classifyPrChecks(parsed.checks)).toMatchObject({ kind: 'failed' })
+    },
+  )
 
   it('classifies conflicts', async () => {
     const gh = vi
