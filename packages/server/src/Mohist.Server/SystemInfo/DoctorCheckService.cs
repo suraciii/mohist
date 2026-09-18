@@ -17,22 +17,35 @@ public sealed record DoctorCheck(
 public sealed record DoctorRevisionFacts(
     IReadOnlyDictionary<string, string?> Revisions);
 
+/// <summary>
+/// One Project's verification-relevant facts, read once per doctor evaluation.
+/// The classification into required vs optional is a pure function of these
+/// facts and is performed by <see cref="DoctorCheckService"/>.
+/// </summary>
+public sealed record DoctorProjectFact(
+    string Name,
+    bool HasVerificationCommand,
+    bool HasActiveExecution,
+    bool IsOptional);
+
 public sealed record DoctorFactSnapshot(
     DoctorRevisionFacts Revision,
     bool MigrationsCurrent,
-    IReadOnlyList<string> ProjectsMissingVerificationCommands,
+    IReadOnlyList<DoctorProjectFact> Projects,
     IReadOnlyList<string> IncompleteRuntimeCatalogs);
 
 public interface IDoctorFactSource
 {
     Task<DoctorRevisionFacts> GetRevisionFactsAsync(CancellationToken ct);
     Task<bool> AreMigrationsCurrentAsync(CancellationToken ct);
-    Task<IReadOnlyList<string>> GetProjectsMissingVerificationCommandsAsync(CancellationToken ct);
+    Task<IReadOnlyList<DoctorProjectFact>> GetProjectFactsAsync(CancellationToken ct);
     Task<IReadOnlyList<string>> GetIncompleteRuntimeCatalogsAsync(CancellationToken ct);
 }
 
 public sealed class DoctorFactSource : IDoctorFactSource, IScopedService
 {
+    private const string OptionalProjectsConfigurationKey = "Mohist:Doctor:OptionalProjects";
+
     private readonly IRuntimeBuildInfo _runtime;
     private readonly IGrainFactory _grains;
     private readonly IDbContextFactory<MohistDbContext> _db;
@@ -79,13 +92,52 @@ public sealed class DoctorFactSource : IDoctorFactSource, IScopedService
         return !(await db.Database.GetPendingMigrationsAsync(ct)).Any();
     }
 
-    public async Task<IReadOnlyList<string>> GetProjectsMissingVerificationCommandsAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<DoctorProjectFact>> GetProjectFactsAsync(CancellationToken ct)
     {
         var projects = await _projects.ListAllAsync();
+        var activeProjectIds = await GetActiveProjectIdsAsync(ct);
+        var optionalEntries = _configuration.GetSection(OptionalProjectsConfigurationKey).Get<string[]>() ?? [];
+
         return projects
-            .Where(project => string.IsNullOrWhiteSpace(project.VerificationCommand))
-            .Select(project => project.Name)
+            .Select(project => new DoctorProjectFact(
+                project.Name,
+                HasVerificationCommand: !string.IsNullOrWhiteSpace(project.VerificationCommand),
+                HasActiveExecution: activeProjectIds.Contains(project.Id),
+                IsOptional: IsExplicitlyOptional(project, optionalEntries)))
             .ToArray();
+    }
+
+    private async Task<HashSet<string>> GetActiveProjectIdsAsync(CancellationToken ct)
+    {
+        await using var db = await _db.CreateDbContextAsync(ct);
+        // Terminal statuses whose runs no longer require a verification command.
+        // Keep in sync with WorkflowRunStatusExtensions.IsTerminal: `Failed` is
+        // deliberately absent because Retry/Rerun can revive it. The status
+        // column is the stored lowercase projection, so filter at the DB layer.
+        var active = await db.WorkflowRuns.AsNoTracking()
+            .Where(run => run.MetadataProjectId != null
+                && run.Status != "completed"
+                && run.Status != "stopped")
+            .Select(run => run.MetadataProjectId!)
+            .Distinct()
+            .ToListAsync(ct);
+        return active.ToHashSet(StringComparer.Ordinal);
+    }
+
+    internal static bool IsExplicitlyOptional(ProjectInfo project, IEnumerable<string> optionalEntries)
+    {
+        foreach (var entry in optionalEntries)
+        {
+            var candidate = entry?.Trim();
+            if (string.IsNullOrEmpty(candidate))
+                continue;
+
+            if (string.Equals(candidate, project.Id, StringComparison.Ordinal)
+                || string.Equals(candidate, project.Name, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     public async Task<IReadOnlyList<string>> GetIncompleteRuntimeCatalogsAsync(CancellationToken ct)
@@ -118,13 +170,13 @@ public sealed class DoctorFactSource : IDoctorFactSource, IScopedService
 
 public sealed class DoctorCheckService : IScopedService
 {
-    private static readonly string[] CanonicalNames =
-    [
-        "revision-alignment",
-        "migrations",
-        "verification-command",
-        "model-catalog",
-    ];
+    public const string RevisionAlignment = "revision-alignment";
+    public const string Migrations = "migrations";
+    public const string ModelCatalog = "model-catalog";
+    public const string VerificationCommand = "verification-command";
+    public const string ProjectVerificationOptional = "project-verification-optional";
+
+    private const string SetVerificationCommand = "mo project workflow verification set";
 
     private readonly IDoctorFactSource _facts;
 
@@ -133,25 +185,46 @@ public sealed class DoctorCheckService : IScopedService
         _facts = facts;
     }
 
-    public async Task<IReadOnlyList<DoctorCheck>> GetChecksAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<DoctorCheck>> GetChecksAsync(CancellationToken ct = default, bool strict = false)
     {
-        var checks = new List<DoctorCheck>(CanonicalNames.Length)
-        {
-            await EvaluateAsync("revision-alignment", () => _facts.GetRevisionFactsAsync(ct), EvaluateRevision),
-            await EvaluateAsync("migrations", () => _facts.AreMigrationsCurrentAsync(ct), EvaluateMigrations),
-            await EvaluateAsync("verification-command", () => _facts.GetProjectsMissingVerificationCommandsAsync(ct), EvaluateVerification),
-            await EvaluateAsync("model-catalog", () => _facts.GetIncompleteRuntimeCatalogsAsync(ct), EvaluateCatalog),
-        };
-        return checks;
+        var revision = await EvaluateAsync(RevisionAlignment, () => _facts.GetRevisionFactsAsync(ct), EvaluateRevision);
+        var migrations = await EvaluateAsync(Migrations, () => _facts.AreMigrationsCurrentAsync(ct), EvaluateMigrations);
+        var catalog = await EvaluateAsync(ModelCatalog, () => _facts.GetIncompleteRuntimeCatalogsAsync(ct), EvaluateCatalog);
+        var (verification, optional) = await EvaluateProjectsAsync(ct, strict);
+
+        return [revision, migrations, catalog, verification, optional];
     }
 
-    public static IReadOnlyList<DoctorCheck> Evaluate(DoctorFactSnapshot facts) =>
-    [
-        EvaluateRevision(facts.Revision),
-        EvaluateMigrations(facts.MigrationsCurrent),
-        EvaluateVerification(facts.ProjectsMissingVerificationCommands),
-        EvaluateCatalog(facts.IncompleteRuntimeCatalogs),
-    ];
+    public static IReadOnlyList<DoctorCheck> Evaluate(DoctorFactSnapshot facts, bool strict = false)
+    {
+        var (verification, optional) = EvaluateProjects(facts.Projects, strict);
+        return
+        [
+            EvaluateRevision(facts.Revision),
+            EvaluateMigrations(facts.MigrationsCurrent),
+            EvaluateCatalog(facts.IncompleteRuntimeCatalogs),
+            verification,
+            optional,
+        ];
+    }
+
+    private async Task<(DoctorCheck Verification, DoctorCheck Optional)> EvaluateProjectsAsync(
+        CancellationToken ct,
+        bool strict)
+    {
+        try
+        {
+            return EvaluateProjects(await _facts.GetProjectFactsAsync(ct), strict);
+        }
+        catch (Exception ex)
+        {
+            var detail = $"Unable to read project verification facts: {ex.Message}";
+            const string nextAction = "Repair the project verification fact source and run mo doctor again.";
+            return (
+                Fail(VerificationCommand, detail, nextAction),
+                Fail(ProjectVerificationOptional, detail, nextAction));
+        }
+    }
 
     private static async Task<DoctorCheck> EvaluateAsync<T>(
         string name,
@@ -173,24 +246,58 @@ public sealed class DoctorCheckService : IScopedService
         var known = facts.Revisions.Where(pair => !string.IsNullOrWhiteSpace(pair.Value)).ToArray();
         var distinct = known.Select(pair => pair.Value!).Distinct(StringComparer.Ordinal).ToArray();
         return distinct.Length <= 1
-            ? new DoctorCheck("revision-alignment", "ok", "Known component revisions are aligned", null)
-            : Fail("revision-alignment", $"Component revisions differ: {string.Join(", ", known.Select(pair => $"{pair.Key}={pair.Value}"))}", "Deploy the same revision to CLI, Server, Runner, and Slack, then run mo doctor again.");
+            ? new DoctorCheck(RevisionAlignment, "ok", "Known component revisions are aligned", null)
+            : Fail(RevisionAlignment, $"Component revisions differ: {string.Join(", ", known.Select(pair => $"{pair.Key}={pair.Value}"))}", "Deploy the same revision to CLI, Server, Runner, and Slack, then run mo doctor again.");
     }
 
     private static DoctorCheck EvaluateMigrations(bool current) =>
         current
-            ? new DoctorCheck("migrations", "ok", "Database schema is at the current migration boundary", null)
-            : Fail("migrations", "Database has pending migrations", "Run the Server database migration before starting workflows.");
+            ? new DoctorCheck(Migrations, "ok", "Database schema is at the current migration boundary", null)
+            : Fail(Migrations, "Database has pending migrations", "Run the Server database migration before starting workflows.");
 
-    private static DoctorCheck EvaluateVerification(IReadOnlyList<string> missing) =>
-        missing.Count == 0
-            ? new DoctorCheck("verification-command", "ok", "All Projects have a verification command", null)
-            : Fail("verification-command", $"Projects missing verification commands: {string.Join(", ", missing)}", "Set a verification command for each listed Project with mo project set-verification-command.");
+    private static (DoctorCheck Verification, DoctorCheck Optional) EvaluateProjects(
+        IReadOnlyList<DoctorProjectFact> projects,
+        bool strict)
+    {
+        var requiredMissing = new SortedSet<string>(StringComparer.Ordinal);
+        var optionalMissing = new SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (var project in projects)
+        {
+            if (project.HasVerificationCommand)
+                continue;
+
+            // strict promotes every missing Project to required; otherwise a
+            // Project is required only when it has active execution and is not
+            // explicitly optional.
+            if (strict || (project.HasActiveExecution && !project.IsOptional))
+                requiredMissing.Add(project.Name);
+            else
+                optionalMissing.Add(project.Name);
+        }
+
+        var verification = requiredMissing.Count == 0
+            ? new DoctorCheck(VerificationCommand, "ok", "All required Projects have a verification command", null)
+            : Fail(
+                VerificationCommand,
+                $"Required Projects missing verification commands: {string.Join(", ", requiredMissing)}",
+                $"Set a verification command for each listed Project with {SetVerificationCommand}.");
+
+        var optional = optionalMissing.Count == 0
+            ? new DoctorCheck(ProjectVerificationOptional, "ok", "All optional Projects have a verification command", null)
+            : new DoctorCheck(
+                ProjectVerificationOptional,
+                "warn",
+                $"Optional Projects missing verification commands: {string.Join(", ", optionalMissing)}",
+                $"Set a verification command for each listed Project with {SetVerificationCommand}.");
+
+        return (verification, optional);
+    }
 
     private static DoctorCheck EvaluateCatalog(IReadOnlyList<string> incomplete) =>
         incomplete.Count == 0
-            ? new DoctorCheck("model-catalog", "ok", "All discovered runtime catalogs are complete", null)
-            : Fail("model-catalog", $"Runtime catalogs are empty or incomplete: {string.Join(", ", incomplete)}", "Reconnect or refresh the affected Runner runtime catalogs, then run mo doctor again.");
+            ? new DoctorCheck(ModelCatalog, "ok", "All discovered runtime catalogs are complete", null)
+            : Fail(ModelCatalog, $"Runtime catalogs are empty or incomplete: {string.Join(", ", incomplete)}", "Reconnect or refresh the affected Runner runtime catalogs, then run mo doctor again.");
 
     private static DoctorCheck Fail(string name, string detail, string nextAction) =>
         new(name, "fail", detail, nextAction);

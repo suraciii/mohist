@@ -19,7 +19,7 @@ public sealed class DoctorApiSpecs(DefaultMohistIntegrationFixture fixture) : IC
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
         var checks = payload.GetProperty("data");
-        Assert.Equal(4, checks.GetArrayLength());
+        Assert.Equal(5, checks.GetArrayLength());
         foreach (var check in checks.EnumerateArray())
             Assert.Equal(["name", "status", "detail", "nextAction"], check.EnumerateObject().Select(property => property.Name));
     }
