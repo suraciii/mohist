@@ -53,13 +53,19 @@ public sealed class DispatchService : IScopedService
         ct.ThrowIfCancellationRequested();
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
         var processGeneration = req.ProcessGeneration ?? string.Empty;
+        // Record the process-lifetime report before admission arbitration. A
+        // draining Runner must keep reporting settlement progress even though
+        // this poll is not allowed to claim new work.
+        var observation = await runner.ObserveDispatchObservationAsync(
+            processGeneration,
+            BuildDispatchObservation(req, processGeneration));
         var admission = await runner.TryBeginPollAsync(processGeneration);
         if (!admission.Admitted)
             return new RunnerPollResponse([]);
 
         try
         {
-            var response = await PollCoreAsync(runner, runnerId, req, processGeneration, admission.Slots, ct).WaitAsync(ct);
+            var response = await PollCoreAsync(runner, runnerId, req, processGeneration, admission.Slots, observation, ct).WaitAsync(ct);
             return await runner.ValidatePollAsync(admission.AdmissionToken, processGeneration)
                 ? response
                 : new RunnerPollResponse([]);
@@ -76,6 +82,7 @@ public sealed class DispatchService : IScopedService
         RunnerPollRequest req,
         string processGeneration,
         int slots,
+        RunnerDispatchObservation? observation,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -91,14 +98,6 @@ public sealed class DispatchService : IScopedService
         await _pollObserver.AfterRunnerInfoAsync(runnerId).WaitAsync(ct);
         ct.ThrowIfCancellationRequested();
 
-        var observation = await runner.ObserveDispatchObservationAsync(
-            processGeneration,
-            new RunnerDispatchObservation(
-                req.ConnectionGeneration,
-                req.AdmissionReady == true,
-                req.AdmissionReasonCodes
-                    ?? [RunnerAdmissionReasonCodes.ObservationInvalid],
-                req.RuntimeReadiness ?? []));
         var readiness = observation is null
             ? RunnerRuntimeReadinessSnapshot.Empty
             : new RunnerRuntimeReadinessSnapshot(
@@ -171,6 +170,22 @@ public sealed class DispatchService : IScopedService
 
     private static HashSet<string> ReportedWorkKeys(RunnerPollRequest req) =>
         new((req.InFlight ?? []).Concat(req.AwaitingAck ?? []), StringComparer.Ordinal);
+
+    private static int DistinctCount(IEnumerable<string>? values) =>
+        values?.Distinct(StringComparer.Ordinal).Count() ?? 0;
+
+    private static RunnerDispatchObservation BuildDispatchObservation(
+        RunnerPollRequest req,
+        string processGeneration) =>
+        new(
+            req.ConnectionGeneration,
+            req.AdmissionReady == true,
+            req.AdmissionReasonCodes
+                ?? [RunnerAdmissionReasonCodes.ObservationInvalid],
+            req.RuntimeReadiness ?? [],
+            ProcessGeneration: processGeneration,
+            InFlightCount: DistinctCount(req.InFlight),
+            AwaitingAckCount: DistinctCount(req.AwaitingAck));
 
     private async Task<HashSet<string>> AddMissingRedeliveriesAsync(
         string runnerId,

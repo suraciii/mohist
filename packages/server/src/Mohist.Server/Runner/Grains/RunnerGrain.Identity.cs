@@ -138,6 +138,8 @@ public partial class RunnerGrain
             ReleaseId = info.ReleaseId ?? _pendingRuntimeIdentity?.ReleaseId,
             Generation = info.Generation ?? _pendingRuntimeIdentity?.Generation,
             ConnectionGeneration = info.ConnectionGeneration ?? _pendingRuntimeIdentity?.ConnectionGeneration,
+            EnvironmentVersion = NormalizeIdentity(info.EnvironmentVersion),
+            EnvironmentLoadedAt = info.EnvironmentLoadedAt,
             RegisteredAt = info.RegisteredAt ?? _timeProvider.GetUtcNow(),
             ActionCatalog = info.ActionCatalog,
         };
@@ -159,6 +161,8 @@ public partial class RunnerGrain
             ReleaseId = info.ReleaseId ?? _info?.ReleaseId,
             Generation = info.Generation ?? _info?.Generation,
             ConnectionGeneration = info.ConnectionGeneration ?? _info?.ConnectionGeneration,
+            EnvironmentVersion = info.EnvironmentVersion ?? _info?.EnvironmentVersion,
+            EnvironmentLoadedAt = info.EnvironmentLoadedAt ?? _info?.EnvironmentLoadedAt,
             RegisteredAt = _info?.RegisteredAt ?? info.RegisteredAt ?? _timeProvider.GetUtcNow(),
             ActionCatalog = info.ActionCatalog,
         };

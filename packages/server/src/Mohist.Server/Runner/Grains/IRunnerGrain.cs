@@ -195,7 +195,9 @@ public record RunnerInfo(
     string? ArtifactDigest = null,
     string? ReleaseId = null,
     long? Generation = null,
-    string? ConnectionGeneration = null);
+    string? ConnectionGeneration = null,
+    string? EnvironmentVersion = null,
+    DateTimeOffset? EnvironmentLoadedAt = null);
 
 [GenerateSerializer]
 public record WorkDispatch(
@@ -331,9 +333,20 @@ public sealed record RunnerDispatchObservation(
     [property: Id(0)] string? ConnectionGeneration,
     [property: Id(1)] bool AdmissionReady,
     [property: Id(2)] List<string> AdmissionReasonCodes,
-    [property: Id(3)] List<RuntimeReadinessWitness> RuntimeReadiness)
+    [property: Id(3)] List<RuntimeReadinessWitness> RuntimeReadiness,
+    [property: Id(4)] string? ProcessGeneration = null,
+    [property: Id(5)] int InFlightCount = 0,
+    [property: Id(6)] int AwaitingAckCount = 0)
 {
     public IReadOnlyList<RuntimeReadinessWitness> Witnesses => RuntimeReadiness;
+
+    public bool IsSettled => InFlightCount == 0 && AwaitingAckCount == 0;
+
+    public bool IsSettledFor(string processGeneration) =>
+        IsSettled
+        && !string.IsNullOrWhiteSpace(ConnectionGeneration)
+        && !string.IsNullOrWhiteSpace(ProcessGeneration)
+        && string.Equals(ProcessGeneration, processGeneration, StringComparison.Ordinal);
 }
 
 [GenerateSerializer]

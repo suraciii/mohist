@@ -1,6 +1,7 @@
 using System.Net;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -59,6 +60,50 @@ public class RunnerIdentityConnectionSpecs
         finally
         {
             _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Unregister(runnerId, "connection-1");
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task RunnerEnvironmentIdentity_RegistrationAndHeartbeatPersistVersionAndLoadTime()
+    {
+        var runnerId = $"identity-environment-{Guid.NewGuid():N}";
+        var loadedAt = new DateTimeOffset(2026, 9, 18, 0, 0, 0, TimeSpan.Zero);
+
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            processGeneration = $"environment-generation-{Guid.NewGuid():N}",
+            capabilities = new[] { "spec/*" },
+            hostname = "environment-host",
+            environmentVersion = "version-a",
+            environmentLoadedAt = loadedAt,
+        });
+
+        try
+        {
+            var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+            var registered = await runner.GetInfoAsync();
+            Assert.Equal("version-a", registered?.EnvironmentVersion);
+            Assert.Equal(loadedAt, registered?.EnvironmentLoadedAt);
+
+            var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+            tracker.Register(runnerId, "environment-connection");
+            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/heartbeat", new
+            {
+                capabilities = new[] { "spec/*" },
+                hostname = "environment-host",
+                connectionId = "environment-connection",
+                environmentVersion = "version-b",
+                environmentLoadedAt = loadedAt.AddMinutes(1),
+            });
+
+            var repaired = await runner.GetInfoAsync();
+            Assert.Equal("version-b", repaired?.EnvironmentVersion);
+            Assert.Equal(loadedAt.AddMinutes(1), repaired?.EnvironmentLoadedAt);
+        }
+        finally
+        {
+            _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Unregister(runnerId, "environment-connection");
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
