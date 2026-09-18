@@ -620,6 +620,97 @@ public partial class ApprovalFeedbackTests
         Assert.Equal(publish.Id, resolved.ResolutionTaskId);
     }
 
+    private static WorkflowRun BuildRunWithCompletedPushFeedback(
+        out string feedbackId,
+        out string publishTaskId)
+    {
+        var run = BuildAwaitingApprovalRun();
+        var id = NextFeedbackId(run);
+        feedbackId = id;
+        run.RequestChanges("publish the correction", id, DateTimeOffset.UnixEpoch, TestOperator,
+        [
+            new TaskDefinition("apply-feedback", "Apply approval feedback", "mohist/opencode"),
+            new TaskDefinition("publish-feedback", "Publish approval feedback", "mohist/push"),
+        ]);
+
+        var tasks = run.CurrentStage().Tasks.Where(task => task.CausedByFeedbackId == id).ToList();
+        var apply = tasks.Single(task => task.DefinitionId == "apply-feedback");
+        var publish = tasks.Single(task => task.DefinitionId == "publish-feedback");
+
+        run.StartTask(apply.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
+        run.StartTask(publish.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
+        run.CompleteTask(DateTimeOffset.UnixEpoch);
+
+        publishTaskId = publish.Id;
+        return run;
+    }
+
+    public static IEnumerable<object[]> PushOutputsWithoutRemoteAdvancement() =>
+    [
+        // updated=false
+        new object[] { "{\"kind\":\"push\",\"updated\":false,\"landedCommit\":\"commit-1\"}" },
+        // missing updated
+        new object[] { "{\"kind\":\"push\"}" },
+        // updated=true but missing landedCommit
+        new object[] { "{\"kind\":\"push\",\"updated\":true}" },
+        // updated=true with blank landedCommit
+        new object[] { "{\"kind\":\"push\",\"updated\":true,\"landedCommit\":\"\"}" },
+        new object[] { "{\"kind\":\"push\",\"updated\":true,\"landedCommit\":\"   \"}" },
+        new object[] { "{\"kind\":\"push\",\"updated\":true,\"landedCommit\":null}" },
+        // non-push output
+        new object[] { "\"applied\"" },
+        new object[] { "{\"kind\":\"other\",\"updated\":true,\"landedCommit\":\"commit-1\"}" },
+    ];
+
+    [Theory]
+    [MemberData(nameof(PushOutputsWithoutRemoteAdvancement))]
+    public void ResolveFeedback_PushWithoutRemoteAdvancement_LeavesFeedbackOpenAndRunUnchanged(string outputJson)
+    {
+        var run = BuildRunWithCompletedPushFeedback(out var feedbackId, out var publishTaskId);
+        var feedbackBefore = run.Feedback.Single(feedback => feedback.Id == feedbackId);
+        var stage = run.CurrentStage();
+        var stageStatusBefore = stage.Status;
+        var attemptBefore = stage.Attempt;
+        var runStatusBefore = run.Status;
+        var taskCountBefore = stage.Tasks.Count;
+
+        var resolved = run.ResolveFeedback(
+            feedbackId,
+            publishTaskId,
+            JSON.DeserializeElement(outputJson),
+            DateTimeOffset.UnixEpoch.AddSeconds(5));
+
+        Assert.Null(resolved);
+        var feedbackAfter = run.Feedback.Single(feedback => feedback.Id == feedbackId);
+        Assert.Equal(feedbackBefore, feedbackAfter);
+        Assert.Equal(ApprovalFeedbackStatus.Open, feedbackAfter.Status);
+        Assert.Null(feedbackAfter.ResolutionTaskId);
+        Assert.Null(feedbackAfter.ResolutionSummary);
+        Assert.Null(feedbackAfter.ResolvedAt);
+        Assert.Equal(stageStatusBefore, stage.Status);
+        Assert.Equal(attemptBefore, stage.Attempt);
+        Assert.Equal(runStatusBefore, run.Status);
+        Assert.Equal(taskCountBefore, stage.Tasks.Count);
+    }
+
+    [Fact]
+    public void ResolveFeedback_PushWithRemoteAdvancement_ResolvesFeedback()
+    {
+        var run = BuildRunWithCompletedPushFeedback(out var feedbackId, out var publishTaskId);
+
+        var resolved = run.ResolveFeedback(
+            feedbackId,
+            publishTaskId,
+            JSON.DeserializeElement("{\"kind\":\"push\",\"updated\":true,\"landedCommit\":\"commit-1\"}"),
+            DateTimeOffset.UnixEpoch.AddSeconds(5));
+
+        Assert.NotNull(resolved);
+        Assert.Equal(ApprovalFeedbackStatus.Resolved, resolved!.Status);
+        Assert.Equal(publishTaskId, resolved.ResolutionTaskId);
+        Assert.Equal(ApprovalFeedbackStatus.Resolved, run.Feedback.Single(feedback => feedback.Id == feedbackId).Status);
+    }
+
     [Fact]
     public void FeedbackCompletionBatch_DoesNotResolveOrRequestApprovalBeforeFinalTask()
     {
