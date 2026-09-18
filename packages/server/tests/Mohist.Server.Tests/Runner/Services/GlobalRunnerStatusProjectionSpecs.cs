@@ -146,6 +146,58 @@ public sealed class GlobalRunnerStatusProjectionSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GlobalProjection_EnvironmentSummaryContainsOnlyApplicationMetadata()
+    {
+        const string runnerId = "runner-environment-projection";
+        await _definitions.GetOrInitAsync(runnerId);
+        var loadedAt = Now.AddMinutes(-3);
+        var tracker = new RunnerConnectionTracker();
+        var connectionGeneration = tracker.Register(runnerId, "connection-environment");
+        var updateId = Guid.NewGuid().ToString();
+        var observation = new RunnerStatusObservation(
+            RunnerStatus.Online,
+            Now,
+            new RunnerInfo(
+                runnerId,
+                [],
+                "environment-host",
+                null,
+                ConnectionGeneration: connectionGeneration,
+                EnvironmentVersion: "env-v2",
+                EnvironmentLoadedAt: loadedAt),
+            Draining: true,
+            UpdateInterruptId: updateId,
+            DispatchObservation: new RunnerDispatchObservation(
+                connectionGeneration,
+                AdmissionReady: false,
+                AdmissionReasonCodes: ["draining"],
+                RuntimeReadiness: []),
+            EnvironmentApplication: new RunnerEnvironmentApplicationObservation(
+                updateId,
+                "env-v3",
+                "env-v2",
+                "applying",
+                "PATH=/secret",
+                "process-old",
+                connectionGeneration,
+                Now.AddMinutes(-1),
+                null));
+        var service = CreateService(runnerId, tracker, observation, [], RunnerCredentialStatus.Active);
+
+        var row = Assert.Single((await service.GetGlobalRunnersAsync()).Runners);
+
+        Assert.NotNull(row.Environment);
+        Assert.Equal("env-v2", row.Environment!.ActiveVersion);
+        Assert.Equal(loadedAt, row.Environment.ActiveLoadedAt);
+        Assert.NotNull(row.Environment.Application);
+        Assert.Equal(updateId, row.Environment.Application!.UpdateId);
+        Assert.Equal("applying", row.Environment.Application.Phase);
+        Assert.Equal("env-v3", row.Environment.Application.TargetVersion);
+        Assert.Equal("env-v2", row.Environment.Application.PreviousVersion);
+        Assert.Null(row.Environment.Application.FailureCode);
+    }
+
+    [Fact]
     public async Task GlobalProjection_ConfirmedRevocationShellQuotesValidRunnerId()
     {
         const string runnerId = "build runner'$(touch /tmp/owned);";

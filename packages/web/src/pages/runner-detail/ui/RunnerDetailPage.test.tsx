@@ -147,6 +147,35 @@ describe('RunnerDetailPage', () => {
     expect(screen.getByText(/Runtime readiness and capability catalog are independent facts/i)).toBeInTheDocument()
   })
 
+  it('shows the active environment and durable application without inventing a remote candidate', () => {
+    runner = makeRunner({
+      environment: {
+        activeVersion: 'env-v2',
+        activeLoadedAt: '2026-01-01T11:59:00Z',
+        application: {
+          updateId: '2fb831bf-0319-4f31-8651-f3b0cc55f116',
+          targetVersion: 'env-v3',
+          previousVersion: 'env-v2',
+          phase: 'waiting',
+          failureCode: null,
+          baseProcessGeneration: 'process-2',
+          baseConnectionGeneration: 'server-epoch:12',
+          requestedAt: '2026-01-01T12:00:00Z',
+          completedAt: null,
+        },
+      },
+    })
+
+    renderPage()
+
+    const environment = screen.getByTestId('runner-detail-environment-section')
+    expect(within(environment).getByTestId('runner-environment-active-version')).toHaveTextContent('env-v2')
+    expect(within(environment).getByTestId('runner-environment-application')).toHaveTextContent('waiting')
+    expect(within(environment).getByText('env-v3')).toBeInTheDocument()
+    expect(within(environment).getByText(/mo runner environment status/)).toBeInTheDocument()
+    expect(within(environment).queryByText(/candidate source/i)).not.toBeInTheDocument()
+  })
+
   it('keeps an offline known definition and safely quoted Server re-enrollment action', () => {
     const runnerId = "build runner'$(touch /tmp/owned);"
     const command = "mo install runner --repo-root <path> --runner-id 'build runner'\"'\"'$(touch /tmp/owned);'"

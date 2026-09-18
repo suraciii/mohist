@@ -280,6 +280,8 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
         }
 
         var info = status?.Info ?? durable?.Info;
+        var environmentApplication = status?.EnvironmentApplication
+            ?? durable?.EnvironmentApplication;
         var lastPresenceAt = status?.LastPresenceAt is { } observedPresence
             && observedPresence != default
                 ? observedPresence
@@ -320,6 +322,7 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
             capacity,
             credentialStatus);
         var runtimes = ProjectRuntimes(info, observation);
+        var environment = ProjectEnvironment(info, environmentApplication);
 
         return new RunnerStatusEntry(
             new RunnerIdentityStatusView(
@@ -348,7 +351,8 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
                 credentialStatus,
                 reasonCodes,
                 runtimes,
-                capacity));
+                capacity),
+            environment);
     }
 
     private async Task<RunnerCredentialStatus> ReadCredentialStatusAsync(
@@ -512,6 +516,36 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
                 string.IsNullOrWhiteSpace(runtime.UpdateInterruptId) ? "generic" : "update",
                 runtime.UpdateInterruptId)
             : null;
+
+    private static RunnerEnvironmentStatusView? ProjectEnvironment(
+        RunnerInfo? info,
+        RunnerEnvironmentApplicationObservation? application)
+    {
+        if (info?.EnvironmentVersion is null
+            && info?.EnvironmentLoadedAt is null
+            && application is null)
+            return null;
+
+        var safeApplication = application is null
+            ? null
+            : RunnerEnvironmentApplicationObservationMapper.Sanitize(application);
+
+        return new(
+            info?.EnvironmentVersion,
+            info?.EnvironmentLoadedAt,
+            safeApplication is null
+                ? null
+                : new RunnerEnvironmentApplicationStatusView(
+                    safeApplication.UpdateId,
+                    safeApplication.TargetVersion,
+                    safeApplication.PreviousVersion,
+                    safeApplication.Phase,
+                    safeApplication.FailureCode,
+                    safeApplication.BaseProcessGeneration,
+                    safeApplication.BaseConnectionGeneration,
+                    safeApplication.RequestedAt,
+                    safeApplication.CompletedAt));
+    }
 
     private static IReadOnlyList<RunnerNextActionView> ProjectNextActions(
         string runnerId,

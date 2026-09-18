@@ -693,7 +693,9 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                 _info,
                 _draining,
                 _state.State?.UpdateInterruptFence?.PendingId,
-                CloneDispatchObservation(_dispatchObservation)));
+                CloneDispatchObservation(_dispatchObservation),
+                RunnerEnvironmentApplicationObservationMapper.From(
+                    _state.State?.EnvironmentApplication)));
     }
 
     private async Task UpsertRegistryAsync()

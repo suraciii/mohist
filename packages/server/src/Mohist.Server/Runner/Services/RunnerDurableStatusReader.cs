@@ -15,7 +15,8 @@ namespace Mohist.Server.Runner.Services;
 public sealed record RunnerDurableStatus(
     RunnerInfo? Info,
     DateTimeOffset? LastPresenceAt,
-    string? UpdateInterruptId);
+    string? UpdateInterruptId,
+    RunnerEnvironmentApplicationObservation? EnvironmentApplication = null);
 
 public interface IRunnerDurableStatusReader
 {
@@ -56,6 +57,8 @@ public sealed class RunnerDurableStatusReader(IGrainStorage storage, IGrainFacto
         return new RunnerDurableStatus(
             grainState.State.LastKnownInfo,
             grainState.State.LastPresenceAt,
-            grainState.State.UpdateInterruptFence?.PendingId);
+            grainState.State.UpdateInterruptFence?.PendingId,
+            RunnerEnvironmentApplicationObservationMapper.From(
+                grainState.State.EnvironmentApplication));
     }
 }

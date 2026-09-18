@@ -205,6 +205,70 @@ function RuntimeCatalog({ runtime }: { runtime: RunnerRuntime }) {
   )
 }
 
+function environmentPhaseVariant(phase: string) {
+  if (phase === 'active') return 'secondary' as const
+  if (phase === 'failed' || phase === 'unconfirmed') return 'destructive' as const
+  return 'outline' as const
+}
+
+function EnvironmentSummary({ row }: { row: RunnerStatusEntry }) {
+  const environment = row.environment
+  const application = environment?.application
+
+  return (
+    <CardSection title="Execution environment" data-testid="runner-detail-environment-section">
+      {environment ? (
+        <div className="space-y-3">
+          <dl data-testid="runner-detail-environment-active">
+            <Fact label="Active version" testId="runner-environment-active-version">
+              {displayValue(environment.activeVersion)}
+            </Fact>
+            <Fact label="Loaded at" testId="runner-environment-loaded-at">
+              {formatTimestamp(environment.activeLoadedAt)}
+            </Fact>
+          </dl>
+
+          {application ? (
+            <div className="border-t border-border/60 pt-3" data-testid="runner-environment-application">
+              <div className="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-medium text-foreground">Application</span>
+                <Badge variant={environmentPhaseVariant(application.phase)}>{application.phase}</Badge>
+              </div>
+              <dl>
+                <Fact label="Target version">{application.targetVersion}</Fact>
+                <Fact label="Previous version">{displayValue(application.previousVersion)}</Fact>
+                <Fact label="Update id">
+                  <code className="break-all text-xs">{application.updateId}</code>
+                </Fact>
+                <Fact label="Requested at">{formatTimestamp(application.requestedAt)}</Fact>
+                <Fact label="Completed at">{formatTimestamp(application.completedAt)}</Fact>
+                <Fact label="Failure">{application.failureCode ? reasonLabel(application.failureCode) : 'none'}</Fact>
+                <Fact label="Base process generation">
+                  <code className="break-all text-xs">{displayValue(application.baseProcessGeneration)}</code>
+                </Fact>
+                <Fact label="Base control generation">
+                  <code className="break-all text-xs">{displayValue(application.baseConnectionGeneration)}</code>
+                </Fact>
+              </dl>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No environment application recorded.</p>
+          )}
+
+          <div className="border-t border-border/60 pt-3 text-xs text-muted-foreground">
+            Capture and apply on the Runner host with{' '}
+            <code className="break-all rounded bg-muted px-1.5 py-0.5 text-foreground">
+              mo runner environment status --runner-id &lt;runner-id&gt;
+            </code>
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">No environment identity reported.</p>
+      )}
+    </CardSection>
+  )
+}
+
 function RunnerDetailContent({
   row,
   slotsMutationHook,
@@ -323,6 +387,8 @@ function RunnerDetailContent({
             <RunnerNextActions actions={row.nextActions} />
           </div>
         </CardSection>
+
+        <EnvironmentSummary row={row} />
 
         <CardSection title="Runtimes" data-testid="runner-detail-runtimes-section">
           {row.runtimes.length === 0 ? (
