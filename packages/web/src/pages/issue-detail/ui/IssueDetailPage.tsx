@@ -34,7 +34,7 @@ import { formatTime } from '../../../shared/lib/format-time'
 import { useMediaQuery } from '../../../shared/lib/use-media-query'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
-import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
+import { getLabelStyle, sortLabels } from '../../../entities/issue'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { attachmentFromMetadata } from '../model/format'
@@ -252,7 +252,15 @@ export function IssueDetailPage({ components, mutationDependencies }: IssueDetai
   if (isError) {
     const isNotFound = error instanceof ApiError && error.status === 404
     if (isNotFound) {
-      return <NotFoundState />
+      return (
+        <NotFoundState
+          action={
+            <Link to="/" className="text-blue-600 hover:text-blue-700 text-sm">
+              Back to board
+            </Link>
+          }
+        />
+      )
     }
     return (
       <ErrorState

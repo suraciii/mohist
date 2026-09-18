@@ -1,60 +1,15 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { DOMAIN_EVENT_TYPES, TRANSCRIPT_EVENT_TYPES } from '../lib/canonical-event-types'
-
-export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
-
-export interface TaskLogDeltaEntryWire {
-  seq: number
-  timestamp: string
-  source: string
-  text: string
-}
-
-export interface TaskLogDeltaEnvelopeWire {
-  ownerKind: string
-  ownerId: string
-  projectId: string
-  workId: string
-  taskId: string
-  entries: TaskLogDeltaEntryWire[]
-  truncated: boolean
-}
-
-export interface TaskLogSubscription {
-  workflowRunId: string
-  taskId: string
-}
-
-export interface RegistrationHandle {
-  dispose: () => void
-}
-
-export type TaskLogRegistration = ({ admitted: true } & RegistrationHandle) | { admitted: false }
-
-export interface LiveEventsApi {
-  registerTaskLogScope: (
-    scope: TaskLogSubscription,
-    onDelta: (delta: TaskLogDeltaEnvelopeWire) => void,
-    refetch: (signal: AbortSignal) => Promise<unknown>,
-  ) => TaskLogRegistration
-  registerTranscriptReconciliation: (
-    sessionId: string,
-    runtimeSessionId: string | null,
-    refetch: (signal: AbortSignal) => Promise<unknown>,
-  ) => RegistrationHandle
-}
-
-const unavailableLiveEvents: LiveEventsApi = {
-  registerTaskLogScope: () => ({ admitted: false }),
-  registerTranscriptReconciliation: () => ({ dispose: () => {} }),
-}
-
-export const LiveEventsContext = createContext<LiveEventsApi | undefined>(undefined)
-
-export function useLiveEvents(): LiveEventsApi {
-  return useContext(LiveEventsContext) ?? unavailableLiveEvents
-}
+import { DOMAIN_EVENT_TYPES, TRANSCRIPT_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
+import {
+  unavailableLiveEvents,
+  type ConnectionStatus,
+  type LiveEventsApi,
+  type RegistrationHandle,
+  type TaskLogDeltaEnvelopeWire,
+  type TaskLogRegistration,
+  type TaskLogSubscription,
+} from '../../shared/api/live-events'
 
 interface WebSocketLike {
   readonly readyState: number

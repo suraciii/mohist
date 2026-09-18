@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  getPriorityStyle,
-  getPriorityStripColor,
-  getStripColor,
-} from './label-colors'
+import { getPriorityStyle, getPriorityStripColor, getStripColor } from './label-colors'
 
 function srgbChannel(c: number): number {
   const s = c / 255
@@ -71,14 +67,11 @@ describe('PRIORITY_COLORS (via getPriorityStyle)', () => {
     expect(new Set(bgs).size).toBe(PRIORITIES.length)
   })
 
-  it.each(PRIORITIES)(
-    'p%s chip background/text pair meets WCAG AA (>=4.5:1) contrast',
-    (p) => {
-      const { bg, text } = getPriorityStyle(p)
-      const ratio = contrastRatio(bg, text)
-      expect(ratio).toBeGreaterThanOrEqual(4.5)
-    },
-  )
+  it.each(PRIORITIES)('p%s chip background/text pair meets WCAG AA (>=4.5:1) contrast', (p) => {
+    const { bg, text } = getPriorityStyle(p)
+    const ratio = contrastRatio(bg, text)
+    expect(ratio).toBeGreaterThanOrEqual(4.5)
+  })
 })
 
 describe('getStripColor (label-based helper is unchanged)', () => {

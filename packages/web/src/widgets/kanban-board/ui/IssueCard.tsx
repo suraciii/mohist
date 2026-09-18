@@ -19,7 +19,7 @@ import {
   formatPriority,
   getPriorityStyle,
   sortLabels,
-} from '../../../shared/lib/label-colors'
+} from '../../../entities/issue'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
 import { useProject, useProjectPath } from '../../../entities/project'
 import { getStageColors } from '../model/stage-colors'

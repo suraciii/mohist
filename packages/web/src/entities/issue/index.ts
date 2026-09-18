@@ -1,5 +1,4 @@
 export {
-  issueWorkflowArtifactsQueryOptions,
   issueWorkflowTaskLogQueryOptions,
   useArchivedIssues,
   useCommitDiff,
@@ -8,10 +7,8 @@ export {
   useIssueDiff,
   useIssueEvents,
   useIssues,
-  useLabels,
   useParentIssueCandidates,
   useRequestChangesIssue,
-  useWorkflowRunDetail,
   useWorkflowTimeline,
   useWorkflowYaml,
   useWorkspaceStatus,
@@ -25,12 +22,10 @@ export {
   useIssueWorkflowTaskLog,
 } from './api/queries'
 export {
-  issueArtifactKeys,
   issueCandidateKeys,
   issueDetailKeys,
   issueListKeys,
   issueWorkflowKeys,
-  workflowRunKeys,
 } from './api/query-keys'
 export { invalidateIssueEvent } from './api/invalidation'
 export {
@@ -44,19 +39,10 @@ export {
   commentAttachmentContentPath,
   createIssue,
   deleteComment,
-  deleteIssueWorkflowProfileTemplate,
   extractAttachmentIds,
   forceStopIssue,
   getFileContent,
-  getIssueEvents,
-  getIssueFeedback,
-  getIssueWorkflowTaskLog,
-  getIssueWorkflowArtifacts,
-  getIssueWorkflowArtifactContent,
-  getParentIssueCandidates,
-  getWorkflowRunDetail,
   issueAttachmentContentPath,
-  listIssueFeedback,
   markIssueDone,
   rebaseIssue,
   removePrerequisite,
@@ -66,19 +52,15 @@ export {
   resumeIssue,
   retryIssue,
   startIssue,
-  syncGitHubIssue,
   stopIssue,
   updateIssue,
 } from './api/client'
 export {
-  completionThroughputQueryKey,
-  completionTrendQueryKey,
-  fetchCompletionTrend,
   useCompletionTrend,
   useCompletionThroughput,
 } from './api/completion-trend'
-export type { CompletionBucketPoint, CompletionTotalDto, CompletionTrendResponse } from './api/completion-trend'
-export { fetchQualityMetrics, qualityMetricsQueryKey, useQualityMetrics } from './api/quality-metrics'
+export type { CompletionBucketPoint, CompletionTrendResponse } from './api/completion-trend'
+export { useQualityMetrics } from './api/quality-metrics'
 export type {
   QualityMetricsResponse,
   QualityMetricsWindowDto,
@@ -86,22 +68,20 @@ export type {
   QualityTrendPointDto,
   StageReworkRateDto,
 } from './api/quality-metrics'
-export { approvalWaitQueryKey, fetchApprovalWait, invalidateApprovalWait, useApprovalWait } from './api/approval-wait'
-export type { ApprovalWaitMetricsResponse, ApprovalWaitMetricsWindow } from './api/approval-wait'
-export { deliveryTimeQueryKey, fetchDeliveryTime, useDeliveryTime } from './api/delivery-time'
-export type { DeliveryTimeMetricsResponse, DeliveryTimePointDto } from './api/delivery-time'
-export { fetchStageDuration, stageDurationQueryKey, useStageDuration } from './api/stage-duration'
+export { invalidateApprovalWait, useApprovalWait } from './api/approval-wait'
+export type { ApprovalWaitMetricsResponse } from './api/approval-wait'
+export { useDeliveryTime } from './api/delivery-time'
+export type { DeliveryTimeMetricsResponse } from './api/delivery-time'
+export { useStageDuration } from './api/stage-duration'
 export type {
   StageDurationMetricsResponse,
-  StageDurationMetricsWindow,
   StageDurationStageDto,
-  StageDurationWaitBreakoutDto,
 } from './api/stage-duration'
 export { statusBadge, statusLabel } from './lib/status-badge'
+export { IssueHealth, IssueStatus, WorkflowStage } from './model/issue'
 export { LabelEditor } from './lib/label-editor'
-export type { LabelEditorProps } from './lib/label-editor'
 export { partitionIssueBody, recombineIssueBody } from './lib/issue-frontmatter'
-export type { IssueBodyPartition, IssueFrontmatterKind } from './lib/issue-frontmatter'
+export type { IssueBodyPartition } from './lib/issue-frontmatter'
 export { IssuePrerequisitePicker } from './ui/IssuePrerequisitePicker'
 export type { IssuePrerequisitePickerProps } from './ui/IssuePrerequisitePicker'
 export {
@@ -112,17 +92,59 @@ export {
   serializeLabelSearchParams,
 } from './model/labels'
 export type { LabelMap } from './model/labels'
-export { deriveCompletionSnapshot, useCompletionSnapshot } from './lib/completion-snapshot'
-export type { CompletionSnapshot } from './lib/completion-snapshot'
-export { deriveRecentDigest, useRecentDigest, DIGEST_TOP_N } from './lib/recent-digest'
-export type { RecentDigest, UseRecentDigestResult } from './lib/recent-digest'
+export { deriveRecentDigest, useRecentDigest } from './lib/recent-digest'
+export type { UseRecentDigestResult } from './lib/recent-digest'
 export { dispatchRebaseEvent, onRebaseEvent } from './model/rebase-events'
 export type { RebaseConflictState } from './model/drift'
 export { dispatchTimelineEvent, onTimelineEvent } from './model/timeline-events'
 export type { TimelineLiveEvent } from './model/timeline-events'
 export { LiveTaskContext, useLiveTask } from './model/live-task'
 export type { LiveTaskState } from './model/live-task'
-export { classifyIssueAttention, isIntegrateFailure, issueNeedsOwnerAction } from './model/attention'
+export { classifyIssueAttention } from './model/attention'
 export { isRunningIssue } from './model/running'
-export type { EventMap, EventName } from './@x/events'
-export * from './model/types'
+export type { EventName } from './@x/events'
+export type {
+  ApprovalFeedback,
+  ApprovalState,
+  AttachmentInfo,
+  BaseDriftInfo,
+  ChangesUnavailableReason,
+  Comment,
+  CommitEntry,
+  DiffFile,
+  Issue,
+  IssueChildRef,
+  IssueCommitsResponse,
+  IssueDiffResponse,
+  IssuePrerequisiteSummary,
+  IssueStartBlocker,
+  IssueWatchEntry,
+  IssueWorkflowProfileYamlResponse,
+  RecoveryProjection,
+  StageCheckState,
+  StageStateRead,
+  StageStateStatus,
+  StageTaskState,
+  StageTaskStatus,
+  StoredCloudEventDto,
+  TaskLogLine,
+  TaskLogPage,
+  WorkItemOrigin,
+  WorkflowArtifact,
+  WorkflowArtifactDirectory,
+  WorkflowArtifactDirectoryEntry,
+  WorkflowArtifactSummary,
+  WorkflowConvergenceState,
+  WorkflowRunStatus,
+  WorkflowStageProgress,
+  WorkflowTimeline,
+  WorkflowTimelineTask,
+} from './model/types'
+export {
+  formatPriority,
+  getLabelStyle,
+  getPriorityStripColor,
+  getPriorityStyle,
+  getRiskStyle,
+  sortLabels,
+} from './lib/label-colors'

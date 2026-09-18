@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
-import { AttachmentComposer } from '@/shared/ui'
+import { AttachmentComposer } from '@/shared/ui/attachment-composer'
 import {
   createIssue,
   extractAttachmentIds,
@@ -21,7 +21,7 @@ import { useEffectiveDefaultWorkflowProfile, useWorkflowProfiles } from '../../.
 import type { WorkflowProfileInfo } from '../../../entities/settings'
 import { useIssueTemplate, useIssueTemplates } from '../../../entities/issue-templates'
 import { useProject, useRepositories } from '../../../entities/project'
-import { getPriorityStyle, getRiskStyle } from '../../../shared/lib/label-colors'
+import { getPriorityStyle, getRiskStyle } from '../../../entities/issue'
 import { mapCreateIssueError, pickInitialRepositoryName } from '../lib/assignment'
 
 const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']

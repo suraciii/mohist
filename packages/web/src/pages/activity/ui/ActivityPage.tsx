@@ -1,15 +1,11 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronDownIcon } from 'lucide-react'
-import { StatusBar } from '../../../shared/ui/StatusBar'
+import { StatusBar } from './StatusBar'
 import { useActivityCards } from '../../../entities/agent-ops'
-import {
-  UsageSnapshotLabel,
-  useActivityUsageSnapshot,
-  useActivityEvents,
-  sortActivityEvents,
-  type ActivityEvent,
-} from '../../../widgets/coder-session'
+import { UsageSnapshotLabel } from './UsageSnapshotLabel'
+import { useActivityEvents, sortActivityEvents, type ActivityEvent } from '../model/activity-events'
+import { useActivityUsageSnapshot } from '../model/usage-snapshot'
 import { RunnerSummaryBadge } from '../../../widgets/runner-status'
 import { ActivityEventEntry } from './ActivityEventEntry'
 

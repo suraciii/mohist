@@ -1,5 +1,5 @@
-import { MarkdownReader } from '@/shared/ui'
-import type { MarkdownAttachment } from '@/shared/ui/markdown-reader/MarkdownReader'
+import { MarkdownReader } from '@/shared/ui/markdown-reader'
+import type { MarkdownAttachment } from '@/shared/ui/markdown-reader'
 
 export interface IssueDescriptionSectionProps {
   description: string
@@ -29,11 +29,7 @@ export function IssueDescriptionSection({ description, resolveIssueAttachment }:
   if (!description.trim()) return null
   const previewHint = buildPreviewHint(description)
   return (
-    <section
-      data-testid="description-section"
-      data-tier-weight="reading-flow"
-      aria-label="Issue description"
-    >
+    <section data-testid="description-section" data-tier-weight="reading-flow" aria-label="Issue description">
       <h2 className="text-sm font-semibold text-foreground mb-3">Description</h2>
       {previewHint && (
         <p

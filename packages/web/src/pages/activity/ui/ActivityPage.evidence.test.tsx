@@ -8,7 +8,7 @@ import { TEST_PROJECT } from '../../../../tests/test-utils'
 import { ActivityPage, type ActivityPageDependencies } from './ActivityPage'
 import { RunnerSummary } from '../../../widgets/runner-status'
 import { deriveRunnerSummary } from '../../../entities/runner'
-import type { ActivityEvent, ActivityEventType } from '../../../widgets/coder-session'
+import type { ActivityEvent, ActivityEventType } from '../model/activity-events'
 
 const NOW = Date.parse('2026-01-01T03:00:00.000Z')
 
@@ -78,8 +78,18 @@ describe('ActivityPage evidence feed', () => {
   it('renders event identity and keeps attention ahead of routine evidence', () => {
     renderPage([
       makeEvent('issue-state', 'routine', { id: 'issue-1', title: 'Routine issue' }),
-      makeEvent('workflow-stage', 'approval', { id: 'approval-1', title: 'Needs review', targets: { workflow: { issueNumber: 1, label: 'Workflow context', path: '/issues/1?from=activity' } } }),
-      makeEvent('runner', 'blocked', { id: 'runner-1', title: 'Runner disconnected', targets: { runner: { runnerId: 'runner-1', label: 'Runner runner-1', path: '/runners/runner-1?from=activity' } } }),
+      makeEvent('workflow-stage', 'approval', {
+        id: 'approval-1',
+        title: 'Needs review',
+        targets: { workflow: { issueNumber: 1, label: 'Workflow context', path: '/issues/1?from=activity' } },
+      }),
+      makeEvent('runner', 'blocked', {
+        id: 'runner-1',
+        title: 'Runner disconnected',
+        targets: {
+          runner: { runnerId: 'runner-1', label: 'Runner runner-1', path: '/runners/runner-1?from=activity' },
+        },
+      }),
       makeEvent('failure', 'failure', { id: 'failure-1', title: 'Stage failed' }),
     ])
 
@@ -102,8 +112,14 @@ describe('ActivityPage evidence feed', () => {
     const routine = screen.getByTestId('activity-routine-zone')
     expect(attention.compareDocumentPosition(routine) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(within(attention).getByText('Stage failed')).toBeInTheDocument()
-    expect(within(attention).getByTestId('activity-event-workflow-link')).toHaveAttribute('href', expect.stringContaining('/issues/1?from=activity'))
-    expect(within(attention).getByTestId('activity-event-runner-link')).toHaveAttribute('href', expect.stringContaining('/runners/runner-1?from=activity'))
+    expect(within(attention).getByTestId('activity-event-workflow-link')).toHaveAttribute(
+      'href',
+      expect.stringContaining('/issues/1?from=activity'),
+    )
+    expect(within(attention).getByTestId('activity-event-runner-link')).toHaveAttribute(
+      'href',
+      expect.stringContaining('/runners/runner-1?from=activity'),
+    )
     expect(within(routine).getByText('Issue').className).not.toBe(within(attention).getByText('Workflow').className)
   })
 

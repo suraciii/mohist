@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
-import { DOMAIN_EVENT_TYPES, TRANSCRIPT_EVENT_TYPES } from '../lib/canonical-event-types'
+import { DOMAIN_EVENT_TYPES, TRANSCRIPT_EVENT_TYPES } from '../../shared/lib/canonical-event-types'
 import { LiveEventsController, type WebSocketFactory } from './live-events'
 
 class FakeWebSocket {

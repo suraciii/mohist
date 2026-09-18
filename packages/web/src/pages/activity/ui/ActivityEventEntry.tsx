@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useProjectPath } from '../../../entities/project'
 import { formatElapsedTimeAgo } from '../../../shared/lib/format-time'
-import type { ActivityEvent, ActivityEventTargets } from '../../../widgets/coder-session'
+import type { ActivityEvent, ActivityEventTargets } from '../model/activity-events'
 
 const attentionPresentation = {
   failure: {

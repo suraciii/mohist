@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useArchivedIssues } from '../../../entities/issue'
 import { useProject, useProjectPath } from '../../../entities/project'
-import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
+import { getLabelStyle, sortLabels } from '../../../entities/issue'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { Button } from '@/shared/ui/components/button'
@@ -12,9 +12,7 @@ export function ArchivedPage() {
   const { projectId } = useProject()
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
-  const { data: archivedIssues, isLoading } = useArchivedIssues(
-    projectId ? { projectId } : undefined,
-  )
+  const { data: archivedIssues, isLoading } = useArchivedIssues(projectId ? { projectId } : undefined)
   const [search, setSearch] = useState('')
 
   useDocumentTitle('Archived — Mohist')
@@ -54,18 +52,12 @@ export function ArchivedPage() {
 
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-xl font-bold text-gray-900">Archived Issues</h1>
-          {sorted.length > 0 && (
-            <span className="text-sm text-gray-500">{sorted.length} archived</span>
-          )}
+          {sorted.length > 0 && <span className="text-sm text-gray-500">{sorted.length} archived</span>}
         </div>
 
         {sorted.length > 0 && (
           <div className="mb-4">
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search archived issues..."
-            />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search archived issues..." />
           </div>
         )}
 
@@ -77,9 +69,7 @@ export function ArchivedPage() {
           <div className="flex items-center justify-center py-12">
             <div className="text-center">
               <div className="text-gray-400 text-lg mb-1">No archived issues</div>
-              <div className="text-gray-400 text-sm">
-                Completed issues that you archive will appear here.
-              </div>
+              <div className="text-gray-400 text-sm">Completed issues that you archive will appear here.</div>
             </div>
           </div>
         ) : filtered.length === 0 ? (
@@ -99,13 +89,9 @@ export function ArchivedPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-mono text-gray-400">
-                          #{issue.number}
-                        </span>
+                        <span className="text-xs font-mono text-gray-400">#{issue.number}</span>
                       </div>
-                      <h3 className="text-sm font-medium text-gray-900 truncate">
-                        {issue.title}
-                      </h3>
+                      <h3 className="text-sm font-medium text-gray-900 truncate">{issue.title}</h3>
                       {sortedLabels.length > 0 && (
                         <div className="mt-2 flex items-center gap-1 flex-nowrap overflow-hidden">
                           {sortedLabels.map((label) => {
@@ -128,9 +114,7 @@ export function ArchivedPage() {
                         {(issue.completedAt ?? issue.updatedAt) && (
                           <span>Completed {formatRelativeTime(issue.completedAt ?? issue.updatedAt)}</span>
                         )}
-                        {issue.archivedAt && (
-                          <span>Archived {formatRelativeTime(issue.archivedAt)}</span>
-                        )}
+                        {issue.archivedAt && <span>Archived {formatRelativeTime(issue.archivedAt)}</span>}
                       </div>
                     </div>
                   </div>
