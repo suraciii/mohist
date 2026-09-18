@@ -547,6 +547,78 @@ describe('Codex createPermissionRejection', () => {
     rejection.dispose()
   })
 
+  // The locked fails-closed surface names five categories of
+  // server-initiated request: approval, permission, user-input, MCP
+  // elicitation, and dynamic-tool. The locked subset predicate
+  // (`isCodexServerRequest`) is method-agnostic, so every category is
+  // answered with the same protocol-defined denial and the exact
+  // active Turn is interrupted. The method names below are
+  // representative of each category.
+  const SERVER_REQUEST_METHODS = [
+    'item/tool/requestApproval',
+    'item/permissions/requestApproval',
+    'item/tool/requestUserInput',
+    'mcp/elicitation/request',
+    'item/tool/dynamicTool/request',
+  ] as const
+
+  it.each(SERVER_REQUEST_METHODS)(
+    'denies %s, interrupts the exact active Turn, and only returns permission-required once the Turn is terminal',
+    (method) => {
+      const transport = buildTransport()
+      transport.setResponse('turn/interrupt', {
+        jsonrpc: '2.0',
+        id: 5,
+        result: { threadId: THREAD_ID, turnId: TURN_ID, accepted: true },
+      })
+      const clock = buildClock(0)
+      let nextId = 1
+      const rejection = createPermissionRejection({
+        transport,
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        clock,
+        nextRequestId: () => nextId++,
+      })
+      const outcome = rejection.observeServerRequest({
+        jsonrpc: '2.0',
+        id: 100,
+        method,
+        params: { threadId: THREAD_ID, turnId: TURN_ID, reason: 'headless execution' },
+      })
+      expect(outcome).toBe('active-turn')
+      // Every category is answered with the same protocol-defined
+      // denial; the runtime never answers on the user's behalf.
+      expect(transport.denied).toEqual([
+        {
+          id: 100,
+          reason: 'Codex headless runtime denies approval / permission / user-input requests',
+        },
+      ])
+      // The denial is paired with an interrupt of the exact active
+      // Turn (never a different or empty Turn).
+      expect(transport.calls.find((c) => c.method === 'turn/interrupt')?.params).toEqual({
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+      })
+      // The denial alone is not terminal: no `permission-required`
+      // result exists until the matching interrupted terminal event
+      // arrives.
+      expect(rejection.pending).toBe(true)
+      const result = rejection.observeTurnCompleted({
+        type: 'turn/completed',
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        status: 'interrupted',
+      })
+      expect(result).toMatchObject({ ok: false, error: { kind: 'permission-required' } })
+      // No Workflow Approval Point: the denial was the only response
+      // and there is no transient approval state left behind.
+      expect(rejection.pending).toBe(false)
+      rejection.dispose()
+    },
+  )
+
   it('denies a server-initiated request addressed to a different Turn without interrupting the active Turn', () => {
     const transport = buildTransport()
     const clock = buildClock(0)
