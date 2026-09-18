@@ -3,6 +3,9 @@
 Runner is Mohist's execution backend. Server decides what work means and
 whether it may proceed. Runner performs the assigned work on a host.
 
+Host environment capture, refresh, and diagnostics are specified in
+[`Runner Execution Environment`](runner-environment.md).
+
 ## Product Commitments
 
 - Server retains workflow and execution decisions when Runner crashes,
