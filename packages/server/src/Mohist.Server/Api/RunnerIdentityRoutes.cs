@@ -62,7 +62,10 @@ public static class RunnerIdentityRoutes
                 isOnline ? "online" : "offline",
                 runtime?.LastHeartbeatAt,
                 connectionId is not null ? "connected" : "disconnected",
-                tracker.GetConnectionGeneration(candidate.RunnerId)));
+                tracker.GetConnectionGeneration(candidate.RunnerId),
+                runtime?.ProcessGeneration,
+                candidate.EnvironmentVersion,
+                candidate.EnvironmentLoadedAt));
         }).RequireScopes(Scope.Operator);
 
         return app;
@@ -83,4 +86,7 @@ public sealed record RunnerIdentityView(
     string Status,
     DateTimeOffset? LastHeartbeatAt,
     string ConnectionState,
-    string? ConnectionGeneration = null);
+    string? ConnectionGeneration = null,
+    string? ProcessGeneration = null,
+    string? EnvironmentVersion = null,
+    DateTimeOffset? EnvironmentLoadedAt = null);

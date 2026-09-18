@@ -56,6 +56,7 @@ public class RunnerIdentityConnectionSpecs
             Assert.Equal(hostname, identity.Hostname);
             Assert.Equal("online", identity.Status);
             Assert.Equal("connected", identity.ConnectionState);
+            Assert.Equal(TestRunnerGenerationExtensions.ProcessGeneration, identity.ProcessGeneration);
         }
         finally
         {
@@ -68,11 +69,12 @@ public class RunnerIdentityConnectionSpecs
     public async Task RunnerEnvironmentIdentity_RegistrationAndHeartbeatPersistVersionAndLoadTime()
     {
         var runnerId = $"identity-environment-{Guid.NewGuid():N}";
+        var processGeneration = $"environment-generation-{Guid.NewGuid():N}";
         var loadedAt = new DateTimeOffset(2026, 9, 18, 0, 0, 0, TimeSpan.Zero);
 
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
-            processGeneration = $"environment-generation-{Guid.NewGuid():N}",
+            processGeneration,
             capabilities = new[] { "spec/*" },
             hostname = "environment-host",
             environmentVersion = "version-a",
@@ -100,6 +102,12 @@ public class RunnerIdentityConnectionSpecs
             var repaired = await runner.GetInfoAsync();
             Assert.Equal("version-b", repaired?.EnvironmentVersion);
             Assert.Equal(loadedAt.AddMinutes(1), repaired?.EnvironmentLoadedAt);
+
+            var identity = await _fixture.Client.GetDataAsync<RunnerIdentityDto>(
+                "/api/runner/identity?runnerId=" + Uri.EscapeDataString(runnerId));
+            Assert.Equal(processGeneration, identity.ProcessGeneration);
+            Assert.Equal("version-b", identity.EnvironmentVersion);
+            Assert.Equal(loadedAt.AddMinutes(1), identity.EnvironmentLoadedAt);
         }
         finally
         {
@@ -172,5 +180,8 @@ public class RunnerIdentityConnectionSpecs
         string? BuildGitHash,
         string Status,
         DateTimeOffset? LastHeartbeatAt,
-        string ConnectionState);
+        string ConnectionState,
+        string? ProcessGeneration = null,
+        string? EnvironmentVersion = null,
+        DateTimeOffset? EnvironmentLoadedAt = null);
 }
