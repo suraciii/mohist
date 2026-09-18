@@ -104,6 +104,38 @@ The snapshot file is outside managed release directories, so release promotion
 cannot replace it. The managed update transaction must preserve that directive
 and must not copy its own `PATH` into the snapshot.
 
+### Legacy installation initialization
+
+Installations created before the snapshot contract may have neither the active
+file nor its `EnvironmentFile` directive. They enter the contract through the
+explicit local command `mo runner environment initialize`.
+This is a migration of the existing installation, not an environment refresh:
+
+- The command reads `MainPID` from the effective `mohist-runner.service` and
+  then reads only that process's allowlisted environment from `/proc/<pid>/environ`.
+  It never reads the invoking terminal, starts a shell, contacts Server, or
+  prints raw values.
+- It applies the same canonicalisation and validation rules as capture. A
+  stopped service, missing process environment, empty allowlist, or process
+  identity change during the read fails closed.
+- It writes `runner-environment.env` atomically with mode `0600` and inserts the
+  fixed `EnvironmentFile=-%h/.config/mohist/runner-environment.env` directive
+  into the unit exactly once. It does not rewrite `ExecStart`,
+  `WorkingDirectory`, `runner.env`, managed credentials, or drop-ins.
+- It runs `systemctl --user daemon-reload` but does not restart the Runner,
+  acquire an admission fence, or change current work. The running process keeps
+  the environment that was measured; future process generations load the same
+  snapshot.
+- It re-reads the process environment and verifies the digest after the unit
+  change. If writing, reload, or verification fails, it restores both the unit
+  and any pre-existing active file before returning an error.
+
+If an active snapshot and the directive already exist, initialization is an
+idempotent verification and does not replace the snapshot. A successful
+initialization is not activation evidence for a new environment version; a
+later refresh still uses the normal candidate, fence, restart, and
+process-generation confirmation protocol.
+
 The local manager uses these fixed paths below `~/.config/mohist/`:
 
 | Path | Owner | Meaning |
@@ -245,7 +277,10 @@ Runtime readiness and cannot prove that a project test will compile.
    raw values or command output cross the Server boundary.
 6. Add the observation child projection and Web detail presentation. Prove an
    offline durable report renders without activating Runner lifecycle state.
-7. Run focused tests, then `npm run test:fast`, then the full
+7. Add the legacy installation initialization command and prove process-env
+   capture, idempotent unit patching, no-restart behavior, and rollback with
+   fake process/systemd seams.
+8. Run focused tests, then `npm run test:fast`, then the full
    `npm run verify`. Live validation must first prove Runner occupancy is zero
    before a restart and must record the exact process generation and environment
    version.
@@ -277,5 +312,6 @@ application per Runner, preserves its fence across process replacement, and
 requires a current-generation target-version witness before confirmation. The
 identity read model, local CLI candidate/apply/cancel transaction, explicit
 observation report, bounded tool checks, and sanitized projection are now
-implemented. End-to-end Go task verification and live-runtime validation remain
-separate gates.
+implemented. Legacy installation initialization is the next bounded
+implementation slice; end-to-end Go task verification and live-runtime
+validation remain separate gates.

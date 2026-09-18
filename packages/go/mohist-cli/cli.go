@@ -439,7 +439,7 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if command.kind == "info" {
 		return runInfo(deps, command)
 	}
-	if (command.kind == "runner-environment-capture" || command.kind == "runner-environment-check") && !command.environmentReport {
+	if (command.kind == "runner-environment-capture" || command.kind == "runner-environment-initialize" || command.kind == "runner-environment-check") && !command.environmentReport {
 		return runRunnerEnvironment(ctx, deps, nil, command)
 	}
 	if strings.HasPrefix(command.kind, "skill-") || strings.HasPrefix(command.kind, "install-") || strings.HasPrefix(command.kind, "update-") {
