@@ -90,8 +90,15 @@ describe("mohist/github-pr-checks action", () => {
     expect(result.output).not.toBeNull()
   })
 
-  it("fails with errorCode pr-checks-failed when a check is FAILURE/CANCELLED/ACTION_REQUIRED", async (resources) => {
-    for (const conclusion of ["FAILURE", "CANCELLED", "ACTION_REQUIRED"]) {
+  it("fails with errorCode pr-checks-failed for every terminal check conclusion", async (resources) => {
+    for (const conclusion of [
+      "FAILURE",
+      "CANCELLED",
+      "ACTION_REQUIRED",
+      "TIMED_OUT",
+      "STARTUP_FAILURE",
+      "STALE",
+    ]) {
       installGhFlat(resources, {
         "gh --version": () => ghOk("ok\n"),
         "gh auth status": () => ghOk("ok\n"),
@@ -107,25 +114,27 @@ describe("mohist/github-pr-checks action", () => {
     }
   })
 
-  it("polls while checks are pending, then verifies once they pass", async (resources) => {
+  it("polls every running status instead of failing or verifying, then verifies once a later poll succeeds", async (resources) => {
     resources.githubPrChecksTiming = { pollIntervalMs: 1, noChecksGraceMs: 5_000, unavailableRetryLimit: 3 }
-    let polls = 0
-    installGhFlat(resources, {
-      "gh --version": () => ghOk("ok\n"),
-      "gh auth status": () => ghOk("ok\n"),
-      "gh pr view 42 --json statusCheckRollup --repo github.com/acme/repo": () => {
-        polls += 1
-        if (polls < 3) return ghOk(checksRollup([{ name: "build", status: "IN_PROGRESS" }]))
-        return ghOk(checksRollup([{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }]))
-      },
-    })
+    for (const runningStatus of ["QUEUED", "IN_PROGRESS", "REQUESTED", "WAITING", "PENDING"]) {
+      let polls = 0
+      installGhFlat(resources, {
+        "gh --version": () => ghOk("ok\n"),
+        "gh auth status": () => ghOk("ok\n"),
+        "gh pr view 42 --json statusCheckRollup --repo github.com/acme/repo": () => {
+          polls += 1
+          if (polls < 2) return ghOk(checksRollup([{ name: "build", status: runningStatus }]))
+          return ghOk(checksRollup([{ name: "build", status: "COMPLETED", conclusion: "SUCCESS" }]))
+        },
+      })
 
-    const result = await callAction(githubPrChecksAction, prChecksContext({ prNumber: 42 }))
-    const output = result.output as Record<string, unknown>
+      const result = await callAction(githubPrChecksAction, prChecksContext({ prNumber: 42 }))
+      const output = result.output as Record<string, unknown>
 
-    expect(result.error).toBeUndefined()
-    expect(output).toMatchObject({ status: "verified", prNumber: 42 })
-    expect(polls).toBe(3)
+      expect(result.error).toBeUndefined()
+      expect(output).toMatchObject({ status: "verified", prNumber: 42 })
+      expect(polls).toBe(2)
+    }
   })
 
   it("polls an initially empty rollup until passing checks appear", async (resources) => {
