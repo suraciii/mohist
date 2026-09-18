@@ -232,7 +232,7 @@ func TestInstallRunnerEnabledAgentRuntimesValidation(t *testing.T) {
 	}{
 		{name: "empty", args: []string{"install", "runner", "--enabled-agent-runtimes", ""}, want: "must be a non-empty"},
 		{name: "empty member", args: []string{"install", "runner", "--enabled-agent-runtimes", "pi,"}, want: "must be a non-empty"},
-		{name: "unknown", args: []string{"install", "runner", "--enabled-agent-runtimes", "pi,codex"}, want: "unknown Runtime"},
+		{name: "unknown", args: []string{"install", "runner", "--enabled-agent-runtimes", "pi,mystery"}, want: "unknown Runtime"},
 		{name: "line injection", args: []string{"install", "runner", "--enabled-agent-runtimes", "pi\nINJECTED=value"}, want: "unknown Runtime"},
 		{name: "missing value", args: []string{"install", "runner", "--enabled-agent-runtimes"}, want: "requires a value"},
 		{name: "server scope", args: []string{"install", "server", "--enabled-agent-runtimes", "pi"}, want: "only valid with mo install runner"},
