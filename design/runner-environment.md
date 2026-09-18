@@ -156,11 +156,23 @@ Server fence and local application record for recovery.
 
 Runner registration and heartbeat add nullable `environmentVersion` and
 `environmentLoadedAt` fields. The Server stores them with the Runner identity.
-Candidate and application commands carry only:
+The explicit observation report is a separate command from environment
+application and carries only:
 
-- `runnerId`, `updateId`, and snapshot version;
-- source kind, operating-system user, capture time, and changed variable names;
-- state, failure code, and bounded tool-check metadata.
+- optional process-generation identity and loaded environment witness;
+- candidate source kind, operating-system user, capture time, version, variable
+  names, and name-only diffs;
+- bounded tool-check metadata: executable name, resolved path, selected
+  snapshot kind/version, outcome, exit status, duration, and check time.
+
+The local command is `mo runner environment check <executable>
+[--snapshot active|candidate] [--report] [-- <argument> ...]`. The default is
+the active snapshot. The manager passes an argv directly to a child process,
+sets the Runner root as cwd, provides no stdin, captures no output, and cancels
+after 10 seconds. It bounds the vector to 16 arguments and 4096 total bytes.
+`--report` is opt-in so a local diagnostic never becomes a network operation by
+surprise. Candidate capture may use the same report endpoint to publish its
+source/user/time and name-only diff metadata.
 
 The global Runner projection adds an optional `environment` object. The first
 projection slice exposes the active environment version/load time and a
@@ -174,12 +186,20 @@ sanitized application summary:
 It is assembled from the process-local observation or the persisted Runner
 state, so an offline Runner remains visible without activating a grain merely
 to render status. Active work rows and the existing drain projection continue
-to identify blockers. Candidate source/user metadata, changed variable names,
-and tool observations are local facts until a separate sanitized
-observation-report contract is accepted; they are not inferred from the
-application record. Raw snapshot values, complete path lists, credentials,
-secret-bearing command arguments, and command output are outside the wire
-model.
+to identify blockers. The latest explicit observation report is projected as a
+separate child of `environment`; it is not inferred from the application
+record. Reports are durable, replace candidate metadata only when supplied,
+and retain at most eight latest tool checks. Raw snapshot values, complete
+path lists, credentials, secret-bearing command arguments, and command output
+are outside the wire model.
+
+`POST /api/runner/{runnerId}/environment/observation` accepts the report for
+operator or Runner scope. A report with `processGeneration` must match the
+current Runner generation, otherwise the Server returns a stale-generation
+conflict. A candidate-only report has no process witness and can be retained
+while the Runner is offline. Server-side normalization is authoritative for
+lengths, allowed outcome values, path shape, and name-only lists; malformed
+reports fail closed rather than being displayed.
 
 The latest poll observation must retain enough information to evaluate the
 settled predicate for the current generation. Counts are sufficient for the
@@ -220,10 +240,12 @@ Runtime readiness and cannot prove that a project test will compile.
 4. Add the environment application fence, wait, cancellation, rollback, and
    confirmation protocol. Prove each state transition with injected time and
    fake work ledgers.
-5. Add the sanitized status projection, CLI read/write commands, tool checks,
-   and Web detail presentation. Prove no raw values or command output cross the
-   Server boundary.
-6. Run focused tests, then `npm run test:fast`, then the full
+5. Add the sanitized observation-report contract, CLI read/write commands, and
+   bounded local tool checks. Prove stale process reports are rejected and no
+   raw values or command output cross the Server boundary.
+6. Add the observation child projection and Web detail presentation. Prove an
+   offline durable report renders without activating Runner lifecycle state.
+7. Run focused tests, then `npm run test:fast`, then the full
    `npm run verify`. Live validation must first prove Runner occupancy is zero
    before a restart and must record the exact process generation and environment
    version.
@@ -248,12 +270,12 @@ evidence without a new privileged channel.
 
 ## Status
 
-The install snapshot and Runner environment observation fields are implemented.
+The install snapshot and Runner environment identity fields are implemented.
 The update fence now retains current-generation settlement counts even while a
 draining poll cannot claim new work. Server now persists one environment
 application per Runner, preserves its fence across process replacement, and
 requires a current-generation target-version witness before confirmation. The
-identity read model and local CLI candidate/apply/cancel transaction are now
-implemented. The first sanitized global application projection is the next
-slice; observation reports, tool checks, and the complete Web diagnostics
-surface remain follow-up slices of Issue #1009.
+identity read model, local CLI candidate/apply/cancel transaction, explicit
+observation report, bounded tool checks, and sanitized projection are now
+implemented. End-to-end Go task verification and live-runtime validation remain
+separate gates.

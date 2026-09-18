@@ -99,10 +99,40 @@ export interface RunnerEnvironmentApplication {
   completedAt: string | null
 }
 
+export type RunnerEnvironmentToolCheckOutcome = 'passed' | 'failed' | 'not-found' | 'timed-out' | 'error' | string
+
+export interface RunnerEnvironmentToolCheck {
+  executable: string
+  resolvedPath: string | null
+  snapshotKind: 'active' | 'candidate' | string
+  snapshotVersion: string | null
+  outcome: RunnerEnvironmentToolCheckOutcome
+  exitCode: number | null
+  durationMilliseconds: number
+  checkedAt: string
+}
+
+export interface RunnerEnvironmentObservation {
+  processGeneration: string | null
+  environmentVersion: string | null
+  environmentLoadedAt: string | null
+  candidateSource: string | null
+  candidateUser: string | null
+  candidateVersion: string | null
+  candidateVariables: string[]
+  candidateCapturedAt: string | null
+  candidateAddedVariables: string[]
+  candidateRemovedVariables: string[]
+  candidateChangedVariables: string[]
+  toolChecks: RunnerEnvironmentToolCheck[]
+  reportedAt: string
+}
+
 export interface RunnerEnvironment {
   activeVersion: string | null
   activeLoadedAt: string | null
   application: RunnerEnvironmentApplication | null
+  observation?: RunnerEnvironmentObservation | null
 }
 
 export interface RunnerNextAction {

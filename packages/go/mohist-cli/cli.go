@@ -36,6 +36,7 @@ type WriteFile func(string, string, os.FileMode) error
 type WriteFileAtomic func(string, []byte, os.FileMode) error
 type Execute func(context.Context, string, []string) error
 type ExecuteOutput func(context.Context, string, []string) (string, error)
+type ExecuteTool func(context.Context, string, []string, string, []string) (int, time.Duration, error)
 type Wait func(context.Context, time.Duration) error
 type NewID func() string
 type EventTail func(context.Context, string, []string, string, io.Writer) error
@@ -54,6 +55,7 @@ type Dependencies struct {
 	HomeDir                 func() (string, error)
 	Execute                 Execute
 	ExecuteOutput           ExecuteOutput
+	ExecuteTool             ExecuteTool
 	OpenBrowser             Execute
 	Input                   io.Reader
 	Now                     func() time.Time
@@ -114,6 +116,22 @@ func defaultDependencies() Dependencies {
 			output, err := cmd.CombinedOutput()
 			return string(output), err
 		},
+		ExecuteTool: func(ctx context.Context, name string, args []string, directory string, environment []string) (int, time.Duration, error) {
+			started := time.Now()
+			cmd := exec.CommandContext(ctx, name, args...)
+			cmd.Dir = directory
+			cmd.Env = environment
+			cmd.Stdin = nil
+			cmd.Stdout = io.Discard
+			cmd.Stderr = io.Discard
+			err := cmd.Run()
+			code := 0
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() >= 0 {
+				code = exitErr.ExitCode()
+				err = nil
+			}
+			return code, time.Since(started), err
+		},
 		OpenBrowser: func(ctx context.Context, name string, args []string) error {
 			cmd := exec.CommandContext(ctx, name, args...)
 			return cmd.Run()
@@ -158,6 +176,9 @@ func ResolveConfig(deps Dependencies) (Config, error) {
 	}
 	if deps.ExecuteOutput == nil {
 		deps.ExecuteOutput = defaults.ExecuteOutput
+	}
+	if deps.ExecuteTool == nil {
+		deps.ExecuteTool = defaults.ExecuteTool
 	}
 	if deps.OpenBrowser == nil {
 		deps.OpenBrowser = defaults.OpenBrowser
@@ -408,7 +429,7 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if command.kind == "info" {
 		return runInfo(deps, command)
 	}
-	if command.kind == "runner-environment-capture" {
+	if (command.kind == "runner-environment-capture" || command.kind == "runner-environment-check") && !command.environmentReport {
 		return runRunnerEnvironment(ctx, deps, nil, command)
 	}
 	if strings.HasPrefix(command.kind, "skill-") || strings.HasPrefix(command.kind, "install-") || strings.HasPrefix(command.kind, "update-") {
@@ -477,12 +498,16 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 }
 
 type command struct {
-	kind, path       string
-	fields, catalog  []string
-	fieldsOnly, help bool
-	helpText         string
-	args             []string
-	outcome          *updateOutcomeReporter
+	kind, path            string
+	fields, catalog       []string
+	fieldsOnly, help      bool
+	helpText              string
+	args                  []string
+	environmentExecutable string
+	environmentArguments  []string
+	environmentSnapshot   string
+	environmentReport     bool
+	outcome               *updateOutcomeReporter
 	// preflightedInput holds the text-carrier result for commands whose
 	// request body is built after a fail-closed input resolution. Empty when
 	// the command does not consume a text carrier. Callers must read the

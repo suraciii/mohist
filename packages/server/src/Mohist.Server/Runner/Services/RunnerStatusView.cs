@@ -53,7 +53,8 @@ public sealed record RunnerStatusEntry(
 public sealed record RunnerEnvironmentStatusView(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ActiveVersion,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] DateTimeOffset? ActiveLoadedAt,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] RunnerEnvironmentApplicationStatusView? Application);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] RunnerEnvironmentApplicationStatusView? Application,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] RunnerEnvironmentObservationView? Observation = null);
 
 public sealed record RunnerEnvironmentApplicationStatusView(
     string UpdateId,

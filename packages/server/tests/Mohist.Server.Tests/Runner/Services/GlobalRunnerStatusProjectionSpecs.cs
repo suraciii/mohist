@@ -146,7 +146,7 @@ public sealed class GlobalRunnerStatusProjectionSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GlobalProjection_EnvironmentSummaryContainsOnlyApplicationMetadata()
+    public async Task GlobalProjection_EnvironmentSummaryContainsSanitizedApplicationAndObservation()
     {
         const string runnerId = "runner-environment-projection";
         await _definitions.GetOrInitAsync(runnerId);
@@ -181,7 +181,29 @@ public sealed class GlobalRunnerStatusProjectionSpecs : IAsyncLifetime
                 "process-old",
                 connectionGeneration,
                 Now.AddMinutes(-1),
-                null));
+                null),
+            EnvironmentObservation: new RunnerEnvironmentObservationView(
+                "process-current",
+                "env-v2",
+                loadedAt,
+                "terminal",
+                "runner-user",
+                "env-v3",
+                ["PATH"],
+                loadedAt,
+                ["GOROOT"],
+                [],
+                ["PATH"],
+                [new RunnerEnvironmentToolCheckView(
+                    "go",
+                    "/opt/go/bin/go",
+                    "candidate",
+                    "env-v3",
+                    "passed",
+                    0,
+                    12,
+                    Now)],
+                Now));
         var service = CreateService(runnerId, tracker, observation, [], RunnerCredentialStatus.Active);
 
         var row = Assert.Single((await service.GetGlobalRunnersAsync()).Runners);
@@ -195,6 +217,73 @@ public sealed class GlobalRunnerStatusProjectionSpecs : IAsyncLifetime
         Assert.Equal("env-v3", row.Environment.Application.TargetVersion);
         Assert.Equal("env-v2", row.Environment.Application.PreviousVersion);
         Assert.Null(row.Environment.Application.FailureCode);
+        Assert.NotNull(row.Environment.Observation);
+        Assert.Equal("terminal", row.Environment.Observation!.CandidateSource);
+        Assert.Equal("candidate", row.Environment.Observation.ToolChecks.Single().SnapshotKind);
+        Assert.Equal("/opt/go/bin/go", row.Environment.Observation.ToolChecks.Single().ResolvedPath);
+    }
+
+    [Fact]
+    public async Task GlobalProjection_OfflineDurableObservationDoesNotNeedRunnerActivation()
+    {
+        const string runnerId = "runner-durable-observation";
+        await _definitions.GetOrInitAsync(runnerId);
+        await _definitions.UpdateSlotsAsync(runnerId, 2);
+
+        var observation = new RunnerEnvironmentObservationView(
+            "process-durable",
+            "env-durable",
+            Now.AddMinutes(-2),
+            "terminal",
+            "runner-user",
+            "candidate-durable",
+            ["PATH"],
+            Now.AddMinutes(-3),
+            ["GOROOT"],
+            [],
+            [],
+            [new RunnerEnvironmentToolCheckView(
+                "go",
+                "/opt/go/bin/go",
+                "candidate",
+                "candidate-durable",
+                "not-found",
+                null,
+                0,
+                Now.AddMinutes(-1))],
+            Now.AddMinutes(-1));
+        var service = new RunnerStatusService(
+            null!,
+            new RunnerConnectionTracker(),
+            _time,
+            _definitions,
+            new StatusCredentialReader(new Dictionary<string, RunnerCredentialStatus>
+            {
+                [runnerId] = RunnerCredentialStatus.Active,
+            }),
+            new RunnerStatusObservationStore(),
+            new StubActiveWorkReader(new Dictionary<string, IReadOnlyList<RunnerActiveWorkItem>>
+            {
+                [runnerId] = [],
+            }),
+            new StubDurableStatusReader(new RunnerDurableStatus(
+                new RunnerInfo(
+                    runnerId,
+                    [],
+                    "durable-host",
+                    null,
+                    EnvironmentVersion: "env-durable",
+                    EnvironmentLoadedAt: Now.AddMinutes(-2)),
+                Now.AddMinutes(-1),
+                null,
+                null,
+                observation)));
+
+        var row = Assert.Single((await service.GetGlobalRunnersAsync()).Runners);
+
+        Assert.Equal("offline", row.Presence.State);
+        Assert.Equal("env-durable", row.Environment!.Observation!.EnvironmentVersion);
+        Assert.Equal("not-found", row.Environment.Observation.ToolChecks.Single().Outcome);
     }
 
     [Fact]
@@ -388,6 +477,12 @@ public sealed class GlobalRunnerStatusProjectionSpecs : IAsyncLifetime
             Task.FromResult(values.TryGetValue(runnerId, out var status)
                 ? status
                 : RunnerCredentialStatus.Missing);
+    }
+
+    private sealed class StubDurableStatusReader(RunnerDurableStatus status) : IRunnerDurableStatusReader
+    {
+        public Task<RunnerDurableStatus?> ReadAsync(string runnerId, CancellationToken ct = default) =>
+            Task.FromResult<RunnerDurableStatus?>(status);
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider

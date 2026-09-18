@@ -14,7 +14,7 @@ import (
 )
 
 var runnerFields = []string{"identity", "presence", "control", "admission", "capabilities", "runtimes", "capacity", "activeWorks", "drain", "nextActions"}
-var runnerEnvironmentFields = []string{"runnerId", "activeVersion", "candidateVersion", "candidateVariables", "addedVariables", "removedVariables", "changedVariables", "application", "processGeneration", "connectionGeneration", "status"}
+var runnerEnvironmentFields = []string{"runnerId", "activeVersion", "candidateVersion", "candidateVariables", "addedVariables", "removedVariables", "changedVariables", "application", "observation", "executable", "resolvedPath", "snapshotKind", "snapshotVersion", "outcome", "exitCode", "durationMs", "checkedAt", "processGeneration", "connectionGeneration", "status"}
 var auditFields = []string{"id", "subjectId", "eventType", "targetKind", "targetId", "occurredAt", "metadata"}
 var otelQueryFields = []string{"columns", "rows", "truncated", "truncate_reason"}
 var otelTraceFields = []string{"trace_id", "service_name", "start_time", "end_time", "span_count"}
@@ -322,11 +322,14 @@ func fieldsFor(area string) []string {
 }
 
 func parseRunnerEnvironment(args []string) (command, error) {
-	usageText := "USAGE\n    mo runner environment <capture|status|apply|cancel> [flags]\n\nManage the local Runner environment transaction. Values remain on the host."
+	usageText := "USAGE\n    mo runner environment <capture|status|apply|cancel|check> [flags]\n\nManage the local Runner environment transaction. Values remain on the host."
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		return command{help: true, helpText: usageText}, nil
 	}
 	action := args[0]
+	if action == "check" {
+		return parseRunnerEnvironmentCheck(args[1:])
+	}
 	if !contains([]string{"capture", "status", "apply", "cancel"}, action) {
 		return command{}, usage("unknown runner environment command")
 	}
@@ -364,6 +367,15 @@ func parseRunnerEnvironment(args []string) (command, error) {
 			}
 			c.args = append(c.args, name, args[i+1])
 			i++
+		case "--report":
+			if action != "capture" {
+				return command{}, usageWithLeaf("--report is supported for capture and check only", "USAGE\n    "+leaf)
+			}
+			if hasArg(c.args, "report") {
+				return command{}, usageWithLeaf("--report may be specified only once", "USAGE\n    "+leaf)
+			}
+			c.args = append(c.args, "report", "true")
+			c.environmentReport = true
 		default:
 			return command{}, usageWithLeaf("unknown option "+args[i], "USAGE\n    "+leaf)
 		}
@@ -380,9 +392,96 @@ func parseRunnerEnvironment(args []string) (command, error) {
 	return c, validateFields(c.fields, runnerEnvironmentFields, leaf)
 }
 
+func parseRunnerEnvironmentCheck(args []string) (command, error) {
+	usageText := "USAGE\n    mo runner environment check <executable> [--snapshot active|candidate] [--runner-id <runner-id>] [--report] [--json [fields]] [-- <argument> ...]\n\nRun one bounded, shell-free tool check using the local Runner snapshot. Output and raw environment values remain local."
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+		return command{help: true, helpText: usageText}, nil
+	}
+	separator := -1
+	for index, value := range args {
+		if value == "--" {
+			separator = index
+			break
+		}
+	}
+	prefix := args
+	commandArguments := []string{}
+	if separator >= 0 {
+		prefix = args[:separator]
+		commandArguments = append(commandArguments, args[separator+1:]...)
+	}
+	if len(prefix) == 0 || strings.HasPrefix(prefix[0], "-") {
+		return command{}, usageWithLeaf("check requires an executable", usageText)
+	}
+	c := command{
+		kind:                  "runner-environment-check",
+		catalog:               runnerEnvironmentFields,
+		environmentExecutable: prefix[0],
+		environmentArguments:  commandArguments,
+		environmentSnapshot:   "active",
+	}
+	seen := map[string]bool{}
+	for index := 1; index < len(prefix); index++ {
+		arg := canonicalFlag(prefix[index])
+		switch arg {
+		case "--help", "-h":
+			return command{help: true, helpText: usageText + "\n\nJSON FIELDS\n" + strings.Join(runnerEnvironmentFields, "\n")}, nil
+		case "--json":
+			var err error
+			index, err = jsonFlag(prefix, index, &c)
+			if err != nil {
+				return command{}, err
+			}
+		case "--report":
+			if seen["report"] {
+				return command{}, usageWithLeaf("--report may be specified only once", usageText)
+			}
+			seen["report"] = true
+			c.environmentReport = true
+		case "--snapshot":
+			if seen["snapshot"] {
+				return command{}, usageWithLeaf("--snapshot may be specified only once", usageText)
+			}
+			if index+1 >= len(prefix) || isControlToken(prefix[index+1]) {
+				return command{}, usageWithLeaf("--snapshot requires a value", usageText)
+			}
+			value := strings.ToLower(strings.TrimSpace(prefix[index+1]))
+			if value != "active" && value != "candidate" {
+				return command{}, usageWithLeaf("--snapshot must be active or candidate", usageText)
+			}
+			seen["snapshot"] = true
+			c.environmentSnapshot = value
+			index++
+		case "--runner-id":
+			if seen["runner-id"] {
+				return command{}, usageWithLeaf("--runner-id may be specified only once", usageText)
+			}
+			if index+1 >= len(prefix) || isControlToken(prefix[index+1]) {
+				return command{}, usageWithLeaf("--runner-id requires a value", usageText)
+			}
+			seen["runner-id"] = true
+			c.args = append(c.args, "runner-id", prefix[index+1])
+			index++
+		default:
+			return command{}, usageWithLeaf("unknown option "+prefix[index], usageText)
+		}
+	}
+	if len(c.environmentArguments) > 16 {
+		return command{}, usageWithLeaf("check accepts at most 16 arguments", usageText)
+	}
+	totalBytes := len(c.environmentExecutable)
+	for _, value := range c.environmentArguments {
+		totalBytes += len(value)
+	}
+	if totalBytes > 4096 {
+		return command{}, usageWithLeaf("check argument vector exceeds 4096 bytes", usageText)
+	}
+	return c, validateFields(c.fields, runnerEnvironmentFields, "mo runner environment check")
+}
+
 func operationsHelp(area string) string {
 	if area == "runner" {
-		return "USAGE\n    mo runner <list|status|view|revoke> [flags]\n    mo runner environment <capture|status|apply|cancel> [flags]\n\nRead and manage Server-global Runner resources. Environment capture and apply are local transactions coordinated with Server.\n\nActions: list, view, status, revoke, environment"
+		return "USAGE\n    mo runner <list|status|view|revoke> [flags]\n    mo runner environment <capture|status|apply|cancel|check> [flags]\n\nRead and manage Server-global Runner resources. Environment capture and apply are local transactions coordinated with Server.\n\nActions: list, view, status, revoke, environment"
 	}
 	actions := map[string]string{"server": "status, health, info, logs", "audit": "list", "github": "connect, list, view, update, enable, disable", "slack": "setup, status, install-agent, list, view, claim-owner, edit, transfer-owner, enable, disable, remove-binding, permanent-delete, message, deliveries, resend-delivery, clear-gap, reconcile-create, reconcile-delete"}
 	return "USAGE\n    mo " + area + " <action> [flags]\n\nOperations and integrations.\n\nActions: " + actions[area]
