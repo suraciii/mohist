@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -256,5 +257,162 @@ func TestDiffRunnerEnvironmentSnapshotsReportsNamesOnly(t *testing.T) {
 	}
 	if strings.Contains(formatRunnerEnvironmentNames(diff.Changed), "/new") {
 		t.Fatal("snapshot value leaked from diff")
+	}
+}
+
+func TestRunnerEnvironmentCheckUsesSnapshotArgvAndReportsNonZeroToolExit(t *testing.T) {
+	home := t.TempDir()
+	toolDir := t.TempDir()
+	toolPath := filepath.Join(toolDir, "go")
+	if err := os.WriteFile(toolPath, []byte("#!/bin/sh\nexit 7\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("local check must not contact Server without --report")
+		return nil, nil
+	}), map[string]string{
+		"PATH":        toolDir,
+		"USER":        "runner-user",
+		"RUNNER_ROOT": filepath.Join(home, "projects"),
+		"SECRET":      "must-not-appear",
+	})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.ReadFile = func(path string) (string, error) {
+		if strings.HasSuffix(path, "runner-environment.env") {
+			return "PATH=\"" + toolDir + "\"\nGOROOT=\"/opt/go\"\n", nil
+		}
+		return "", os.ErrNotExist
+	}
+	deps.Now = func() time.Time { return time.Date(2026, 9, 18, 1, 2, 3, 0, time.UTC) }
+	var called bool
+	deps.ExecuteTool = func(_ context.Context, name string, args []string, directory string, environment []string) (int, time.Duration, error) {
+		called = true
+		if name != toolPath || strings.Join(args, " ") != "version --short" || directory != filepath.Join(home, "projects") {
+			t.Fatalf("tool invocation name=%q args=%q directory=%q", name, args, directory)
+		}
+		joined := strings.Join(environment, "\n")
+		if !strings.Contains(joined, "PATH="+toolDir) || !strings.Contains(joined, "GOROOT=/opt/go") || strings.Contains(joined, "SECRET") {
+			t.Fatalf("tool environment=%q", joined)
+		}
+		return 7, 15 * time.Millisecond, nil
+	}
+
+	code := Run(context.Background(), []string{
+		"runner", "environment", "check", "go", "--json", "outcome,resolvedPath,exitCode,durationMs", "--", "version", "--short",
+	}, deps)
+	if code != ExitOK || errOut.Len() != 0 || !called {
+		t.Fatalf("code=%d called=%v stdout=%q stderr=%q", code, called, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), `"outcome":"failed"`) || !strings.Contains(out.String(), `"exitCode":7`) || !strings.Contains(out.String(), toolPath) {
+		t.Fatalf("check output=%q", out.String())
+	}
+	if strings.Contains(out.String(), "must-not-appear") {
+		t.Fatal("check output leaked an unrelated environment value")
+	}
+}
+
+func TestRunnerEnvironmentCheckReportsNotFoundWithoutExecuting(t *testing.T) {
+	home := t.TempDir()
+	deps, out, errOut := testDeps(nil, map[string]string{})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.ReadFile = func(path string) (string, error) {
+		if strings.HasSuffix(path, "runner-environment.env") {
+			return "PATH=\"/missing\"\n", nil
+		}
+		return "", os.ErrNotExist
+	}
+	called := false
+	deps.ExecuteTool = func(context.Context, string, []string, string, []string) (int, time.Duration, error) {
+		called = true
+		return 0, 0, nil
+	}
+
+	if code := Run(context.Background(), []string{"runner", "environment", "check", "go"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if called || !strings.Contains(out.String(), "outcome=not-found") || errOut.Len() != 0 {
+		t.Fatalf("called=%v stdout=%q stderr=%q", called, out.String(), errOut.String())
+	}
+}
+
+func TestRunnerEnvironmentCheckReportsTimeoutWithoutNegativeExitCode(t *testing.T) {
+	home := t.TempDir()
+	var requestBody string
+	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path == "/api/runner/identity" {
+			return response(http.StatusOK, `{"success":true,"data":{"runnerId":"runner-timeout","processGeneration":"process-1","environmentVersion":"env-v1"}}`), nil
+		}
+		body, _ := io.ReadAll(request.Body)
+		requestBody = string(body)
+		return response(http.StatusOK, `{"success":true,"data":{"runnerId":"runner-timeout","status":"accepted","observation":{}}}`), nil
+	}), map[string]string{
+		"MOHIST_SERVER_URL":     "http://server",
+		"MOHIST_OPERATOR_TOKEN": "operator-token",
+		"RUNNER_ID":             "runner-timeout",
+	})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.ReadFile = func(path string) (string, error) {
+		if strings.HasSuffix(path, "runner-environment.env") {
+			return "PATH=\"/opt/bin\"\n", nil
+		}
+		return "", os.ErrNotExist
+	}
+	deps.Now = func() time.Time { return time.Date(2026, 9, 18, 1, 2, 3, 0, time.UTC) }
+	deps.ExecuteTool = func(ctx context.Context, _ string, _ []string, _ string, _ []string) (int, time.Duration, error) {
+		return 0, 10 * time.Second, context.DeadlineExceeded
+	}
+
+	if code := Run(context.Background(), []string{"runner", "environment", "check", "/opt/bin/go", "--report"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "outcome=timed-out") || strings.Contains(requestBody, `"exitCode":-1`) {
+		t.Fatalf("stdout=%q request=%q", out.String(), requestBody)
+	}
+}
+
+func TestRunnerEnvironmentCaptureReportContainsOnlySanitizedCandidateMetadata(t *testing.T) {
+	home := t.TempDir()
+	files := map[string]string{}
+	var requestBody string
+	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(request.Body)
+		requestBody = string(body)
+		return response(http.StatusOK, `{"success":true,"data":{"runnerId":"runner-report","status":"accepted","observation":{}}}`), nil
+	}), map[string]string{
+		"MOHIST_SERVER_URL":     "http://server",
+		"MOHIST_OPERATOR_TOKEN": "operator-token",
+		"RUNNER_ID":             "runner-report",
+		"PATH":                  "/opt/go/bin:/opt/node/bin",
+		"GOROOT":                "/opt/go",
+		"USER":                  "runner-user",
+	})
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.MkdirAll = func(string, os.FileMode) error { return nil }
+	deps.ReadFile = func(path string) (string, error) {
+		if value, ok := files[path]; ok {
+			return value, nil
+		}
+		if strings.HasSuffix(path, "runner-environment.env") {
+			return "PATH=\"/old/bin\"\n", nil
+		}
+		return "", os.ErrNotExist
+	}
+	deps.WriteFileAtomic = func(path string, value []byte, _ os.FileMode) error {
+		files[path] = string(value)
+		return nil
+	}
+	deps.Now = func() time.Time { return time.Date(2026, 9, 18, 1, 2, 3, 0, time.UTC) }
+
+	if code := Run(context.Background(), []string{"runner", "environment", "capture", "--report"}, deps); code != ExitOK {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if strings.Contains(requestBody, "/opt/go") || strings.Contains(requestBody, "operator-token") || strings.Contains(requestBody, "contentHash") {
+		t.Fatalf("report leaked raw candidate data: %s", requestBody)
+	}
+	if !strings.Contains(requestBody, `"source":"terminal"`) || !strings.Contains(requestBody, `"user":"runner-user"`) || !strings.Contains(requestBody, `"version"`) {
+		t.Fatalf("report=%s", requestBody)
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("stderr=%q", errOut.String())
 	}
 }

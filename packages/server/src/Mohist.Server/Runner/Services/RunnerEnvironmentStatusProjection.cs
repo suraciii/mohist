@@ -89,3 +89,112 @@ public static class RunnerEnvironmentApplicationObservationMapper
             : null;
     }
 }
+
+/// <summary>
+/// Bounded read projection for the explicit local environment observation.
+/// The projection contains names and execution facts only; it never contains
+/// snapshot values, command arguments, or command output.
+/// </summary>
+public sealed record RunnerEnvironmentObservationView(
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] string? ProcessGeneration,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] string? EnvironmentVersion,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] DateTimeOffset? EnvironmentLoadedAt,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] string? CandidateSource,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] string? CandidateUser,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] string? CandidateVersion,
+    IReadOnlyList<string> CandidateVariables,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] DateTimeOffset? CandidateCapturedAt,
+    IReadOnlyList<string> CandidateAddedVariables,
+    IReadOnlyList<string> CandidateRemovedVariables,
+    IReadOnlyList<string> CandidateChangedVariables,
+    IReadOnlyList<RunnerEnvironmentToolCheckView> ToolChecks,
+    DateTimeOffset ReportedAt);
+
+public sealed record RunnerEnvironmentToolCheckView(
+    string Executable,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] string? ResolvedPath,
+    string SnapshotKind,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] string? SnapshotVersion,
+    string Outcome,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.Never)] int? ExitCode,
+    long DurationMilliseconds,
+    DateTimeOffset CheckedAt);
+
+public static class RunnerEnvironmentObservationMapper
+{
+    private const int MaxTextLength = 256;
+    private const int MaxPathLength = 512;
+    private const int MaxListLength = 32;
+    private const int MaxToolChecks = 8;
+
+    public static RunnerEnvironmentObservationView? From(RunnerEnvironmentObservation? observation)
+    {
+        if (observation is null)
+            return null;
+
+        return new(
+            Bounded(observation.ProcessGeneration),
+            Bounded(observation.EnvironmentVersion),
+            observation.EnvironmentLoadedAt,
+            Bounded(observation.CandidateSource),
+            Bounded(observation.CandidateUser),
+            Bounded(observation.CandidateVersion),
+            Names(observation.CandidateVariables),
+            observation.CandidateCapturedAt,
+            Names(observation.CandidateAddedVariables),
+            Names(observation.CandidateRemovedVariables),
+            Names(observation.CandidateChangedVariables),
+            (observation.ToolChecks ?? [])
+                .TakeLast(MaxToolChecks)
+                .Select(ToolCheck)
+                .ToArray(),
+            observation.ReportedAt);
+    }
+
+    private static RunnerEnvironmentToolCheckView ToolCheck(RunnerEnvironmentToolCheck value) =>
+        new(
+            BoundedRequired(value.Executable),
+            BoundedPath(value.ResolvedPath),
+            value.SnapshotKind is "active" or "candidate" ? value.SnapshotKind : "unknown",
+            Bounded(value.SnapshotVersion),
+            value.Outcome is "passed" or "failed" or "not-found" or "timed-out" or "error"
+                ? value.Outcome
+                : "error",
+            value.ExitCode is >= 0 and <= 255 ? value.ExitCode : null,
+            Math.Clamp(value.DurationMilliseconds, 0, 10_000),
+            value.CheckedAt);
+
+    private static IReadOnlyList<string> Names(string[]? values) =>
+        (values ?? [])
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Where(value => value.Length <= 128 && !value.Any(char.IsControl))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .Take(MaxListLength)
+            .ToArray();
+
+    private static string BoundedRequired(string value) => Bounded(value) ?? "unknown";
+
+    private static string? BoundedPath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        var normalized = value.Trim();
+        return normalized.Length <= MaxPathLength
+            && !normalized.Any(char.IsControl)
+            && Path.IsPathFullyQualified(normalized)
+            ? normalized
+            : null;
+    }
+
+    private static string? Bounded(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        var normalized = value.Trim();
+        return normalized.Length <= MaxTextLength && !normalized.Any(char.IsControl)
+            ? normalized
+            : null;
+    }
+}

@@ -79,6 +79,13 @@ public interface IRunnerGrain : IGrainWithStringKey
         string failureCode);
     /// <summary>Cancels only a waiting environment application owned by this update id.</summary>
     Task<RunnerEnvironmentApplicationCommandResult> CancelEnvironmentApplicationAsync(string updateId);
+    /// <summary>
+    /// Stores a bounded local environment observation. A supplied process
+    /// generation must still be current; candidate-only reports may be stored
+    /// without a live process witness.
+    /// </summary>
+    Task<RunnerEnvironmentObservationResult> RecordEnvironmentObservationAsync(
+        RunnerEnvironmentObservation observation);
     /// <summary>Atomically reopens poll and work claim admission.</summary>
     Task CancelDrainAsync();
     /// <summary>

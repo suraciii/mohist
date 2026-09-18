@@ -282,6 +282,8 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
         var info = status?.Info ?? durable?.Info;
         var environmentApplication = status?.EnvironmentApplication
             ?? durable?.EnvironmentApplication;
+        var environmentObservation = status?.EnvironmentObservation
+            ?? durable?.EnvironmentObservation;
         var lastPresenceAt = status?.LastPresenceAt is { } observedPresence
             && observedPresence != default
                 ? observedPresence
@@ -322,7 +324,7 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
             capacity,
             credentialStatus);
         var runtimes = ProjectRuntimes(info, observation);
-        var environment = ProjectEnvironment(info, environmentApplication);
+        var environment = ProjectEnvironment(info, environmentApplication, environmentObservation);
 
         return new RunnerStatusEntry(
             new RunnerIdentityStatusView(
@@ -519,11 +521,13 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
 
     private static RunnerEnvironmentStatusView? ProjectEnvironment(
         RunnerInfo? info,
-        RunnerEnvironmentApplicationObservation? application)
+        RunnerEnvironmentApplicationObservation? application,
+        RunnerEnvironmentObservationView? observation)
     {
         if (info?.EnvironmentVersion is null
             && info?.EnvironmentLoadedAt is null
-            && application is null)
+            && application is null
+            && observation is null)
             return null;
 
         var safeApplication = application is null
@@ -544,7 +548,8 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
                     safeApplication.BaseProcessGeneration,
                     safeApplication.BaseConnectionGeneration,
                     safeApplication.RequestedAt,
-                    safeApplication.CompletedAt));
+                    safeApplication.CompletedAt),
+            observation);
     }
 
     private static IReadOnlyList<RunnerNextActionView> ProjectNextActions(

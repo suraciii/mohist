@@ -11,8 +11,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -24,6 +26,8 @@ const (
 	runnerEnvironmentApplicationMetaName = "runner-environment-application.json"
 	runnerEnvironmentPollInterval        = time.Second
 	runnerEnvironmentMaxPolls            = 45
+	runnerEnvironmentToolTimeout         = 10 * time.Second
+	runnerEnvironmentToolMaxChecks       = 8
 )
 
 type runnerEnvironmentCandidateMetadata struct {
@@ -86,6 +90,42 @@ type runnerEnvironmentDiff struct {
 	Added   []string
 	Removed []string
 	Changed []string
+}
+
+type runnerEnvironmentToolCheck struct {
+	Executable      string `json:"executable"`
+	ResolvedPath    string `json:"resolvedPath"`
+	SnapshotKind    string `json:"snapshotKind"`
+	SnapshotVersion string `json:"snapshotVersion"`
+	Outcome         string `json:"outcome"`
+	ExitCode        *int   `json:"exitCode"`
+	DurationMs      int64  `json:"durationMs"`
+	CheckedAt       string `json:"checkedAt"`
+}
+
+type runnerEnvironmentCandidateObservation struct {
+	Source           string   `json:"source"`
+	User             string   `json:"user"`
+	Version          string   `json:"version"`
+	Variables        []string `json:"variables"`
+	CapturedAt       string   `json:"capturedAt"`
+	AddedVariables   []string `json:"addedVariables"`
+	RemovedVariables []string `json:"removedVariables"`
+	ChangedVariables []string `json:"changedVariables"`
+}
+
+type runnerEnvironmentObservationReport struct {
+	ProcessGeneration   string                                 `json:"processGeneration,omitempty"`
+	EnvironmentVersion  string                                 `json:"environmentVersion,omitempty"`
+	EnvironmentLoadedAt string                                 `json:"environmentLoadedAt,omitempty"`
+	Candidate           *runnerEnvironmentCandidateObservation `json:"candidate,omitempty"`
+	ToolChecks          []runnerEnvironmentToolCheck           `json:"toolChecks,omitempty"`
+}
+
+type runnerEnvironmentObservationResponse struct {
+	RunnerID    string         `json:"runnerId"`
+	Status      string         `json:"status"`
+	Observation map[string]any `json:"observation"`
 }
 
 var errRunnerEnvironmentCandidateAbsent = errors.New("no captured Runner environment candidate")
@@ -198,7 +238,10 @@ func writeRunnerEnvironmentJSON(deps Dependencies, path string, value any) error
 func runRunnerEnvironment(ctx context.Context, deps Dependencies, c *client, cmd command) int {
 	action := strings.TrimPrefix(cmd.kind, "runner-environment-")
 	if action == "capture" {
-		return captureRunnerEnvironmentCandidate(deps, cmd)
+		return captureRunnerEnvironmentCandidate(ctx, deps, c, cmd)
+	}
+	if action == "check" {
+		return checkRunnerEnvironment(ctx, deps, c, cmd)
 	}
 	if c == nil {
 		writeError(deps.Stderr, errors.New("Mohist Server client is unavailable"))
@@ -216,7 +259,7 @@ func runRunnerEnvironment(ctx context.Context, deps Dependencies, c *client, cmd
 	}
 }
 
-func captureRunnerEnvironmentCandidate(deps Dependencies, cmd command) int {
+func captureRunnerEnvironmentCandidate(ctx context.Context, deps Dependencies, c *client, cmd command) int {
 	paths, err := runnerEnvironmentPaths(deps)
 	if err != nil {
 		writeError(deps.Stderr, err)
@@ -255,6 +298,13 @@ func captureRunnerEnvironmentCandidate(deps Dependencies, cmd command) int {
 	if err := writeRunnerEnvironmentJSON(deps, paths["candidateMeta"], metadata); err != nil {
 		writeError(deps.Stderr, fmt.Errorf("Runner environment candidate metadata could not be written: %w", err))
 		return ExitOperation
+	}
+	if cmd.environmentReport {
+		runnerID := resolveRunnerEnvironmentRunnerID(deps, cmd)
+		if err := reportRunnerEnvironmentCandidate(ctx, c, deps, runnerID, metadata, diff); err != nil {
+			writeError(deps.Stderr, fmt.Errorf("candidate was captured locally but sanitized observation report failed: %w", err))
+			return ExitOperation
+		}
 	}
 	if len(cmd.fields) > 0 {
 		return writeRunnerEnvironmentFields(deps, map[string]any{
@@ -301,7 +351,14 @@ func runnerEnvironmentAssignments(content string) map[string]string {
 		if index <= 0 {
 			continue
 		}
-		assignments[line[:index]] = line[index+1:]
+		name := strings.TrimSpace(line[:index])
+		value := line[index+1:]
+		if strings.HasPrefix(value, "\"") {
+			if decoded, err := strconv.Unquote(value); err == nil {
+				value = decoded
+			}
+		}
+		assignments[name] = value
 	}
 	return assignments
 }
@@ -311,6 +368,332 @@ func formatRunnerEnvironmentNames(names []string) string {
 		return "none"
 	}
 	return strings.Join(names, ", ")
+}
+
+func checkRunnerEnvironment(ctx context.Context, deps Dependencies, c *client, cmd command) int {
+	paths, err := runnerEnvironmentPaths(deps)
+	if err != nil {
+		writeError(deps.Stderr, err)
+		return ExitOperation
+	}
+	snapshotKind := cmd.environmentSnapshot
+	if snapshotKind == "" {
+		snapshotKind = "active"
+	}
+	version, content, err := readRunnerEnvironmentCheckSnapshot(deps, paths, snapshotKind)
+	if err != nil {
+		writeError(deps.Stderr, err)
+		return ExitOperation
+	}
+	assignments := runnerEnvironmentAssignments(content)
+	root, err := runnerEnvironmentRoot(deps)
+	if err != nil {
+		writeError(deps.Stderr, err)
+		return ExitOperation
+	}
+	resolved, resolveErr := resolveRunnerEnvironmentExecutable(cmd.environmentExecutable, assignments["PATH"])
+	checkedAt := deps.Now().UTC()
+	check := runnerEnvironmentToolCheck{
+		Executable:      cmd.environmentExecutable,
+		ResolvedPath:    resolved,
+		SnapshotKind:    snapshotKind,
+		SnapshotVersion: version,
+		Outcome:         "not-found",
+		CheckedAt:       checkedAt.Format(time.RFC3339Nano),
+	}
+	if resolveErr != nil && !errors.Is(resolveErr, exec.ErrNotFound) {
+		writeError(deps.Stderr, resolveErr)
+		return ExitUsage
+	}
+	if resolveErr == nil {
+		environment := runnerEnvironmentCommandEnvironment(deps, assignments, root)
+		toolContext, cancel := context.WithTimeout(ctx, runnerEnvironmentToolTimeout)
+		defer cancel()
+		executeTool := deps.ExecuteTool
+		if executeTool == nil {
+			executeTool = defaultDependencies().ExecuteTool
+		}
+		exitCode, duration, executeErr := executeTool(
+			toolContext,
+			resolved,
+			cmd.environmentArguments,
+			root,
+			environment)
+		if duration < 0 {
+			duration = 0
+		}
+		check.DurationMs = duration.Milliseconds()
+		if check.DurationMs > runnerEnvironmentToolTimeout.Milliseconds() {
+			check.DurationMs = runnerEnvironmentToolTimeout.Milliseconds()
+		}
+		if executeErr != nil {
+			if errors.Is(executeErr, exec.ErrNotFound) {
+				check.Outcome = "not-found"
+			} else if errors.Is(toolContext.Err(), context.DeadlineExceeded) || errors.Is(executeErr, context.DeadlineExceeded) {
+				check.Outcome = "timed-out"
+			} else {
+				check.Outcome = "error"
+			}
+		} else {
+			check.ExitCode = &exitCode
+			if exitCode == 0 {
+				check.Outcome = "passed"
+			} else {
+				check.Outcome = "failed"
+			}
+		}
+	}
+	result := map[string]any{
+		"runnerId":        resolveRunnerEnvironmentRunnerID(deps, cmd),
+		"executable":      check.Executable,
+		"resolvedPath":    nullableString(check.ResolvedPath),
+		"snapshotKind":    check.SnapshotKind,
+		"snapshotVersion": check.SnapshotVersion,
+		"outcome":         check.Outcome,
+		"exitCode":        check.ExitCode,
+		"durationMs":      check.DurationMs,
+		"checkedAt":       check.CheckedAt,
+		"status":          check.Outcome,
+	}
+	code := ExitOK
+	if len(cmd.fields) > 0 {
+		code = writeRunnerEnvironmentFields(deps, result, cmd.fields)
+	} else {
+		fmt.Fprintf(
+			deps.Stdout,
+			"Checked %s in %s snapshot: outcome=%s path=%s exit=%s duration=%dms\n",
+			check.Executable,
+			check.SnapshotKind,
+			check.Outcome,
+			displayString(check.ResolvedPath),
+			displayAny(check.ExitCode),
+			check.DurationMs,
+		)
+	}
+	if code != ExitOK || !cmd.environmentReport {
+		return code
+	}
+	runnerID := resolveRunnerEnvironmentRunnerID(deps, cmd)
+	if err := reportRunnerEnvironmentToolCheck(ctx, c, deps, runnerID, check); err != nil {
+		writeError(deps.Stderr, fmt.Errorf("tool check completed locally but sanitized observation report failed: %w", err))
+		return ExitOperation
+	}
+	return ExitOK
+}
+
+func readRunnerEnvironmentCheckSnapshot(
+	deps Dependencies,
+	paths map[string]string,
+	snapshotKind string) (string, string, error) {
+	if snapshotKind == "candidate" {
+		metadata, content, err := readRunnerEnvironmentCandidate(deps, paths)
+		if err != nil {
+			return "", "", err
+		}
+		return metadata.Version, content, nil
+	}
+	content, err := deps.ReadFile(paths["active"])
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", "", errors.New("active Runner environment snapshot is unavailable")
+		}
+		return "", "", fmt.Errorf("active Runner environment snapshot could not be read: %w", err)
+	}
+	return runnerEnvironmentVersionFromContent(content), content, nil
+}
+
+func runnerEnvironmentVersionFromContent(content string) string {
+	assignments := runnerEnvironmentAssignments(content)
+	names := make([]string, 0, len(assignments))
+	for name := range assignments {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	canonical := strings.Builder{}
+	for _, name := range names {
+		canonical.WriteString(name)
+		canonical.WriteByte('=')
+		canonical.WriteString(assignments[name])
+		canonical.WriteByte('\n')
+	}
+	digest := sha256.Sum256([]byte(canonical.String()))
+	return hex.EncodeToString(digest[:])
+}
+
+func resolveRunnerEnvironmentExecutable(executable, pathValue string) (string, error) {
+	if strings.TrimSpace(executable) == "" || strings.ContainsAny(executable, "\r\n\x00") {
+		return "", errors.New("tool executable is invalid")
+	}
+	if filepath.IsAbs(executable) {
+		return filepath.Clean(executable), nil
+	}
+	if strings.ContainsRune(executable, filepath.Separator) {
+		return "", errors.New("tool executable must be a name or an absolute path")
+	}
+	for _, directory := range strings.Split(pathValue, string(filepath.ListSeparator)) {
+		if directory == "" || !filepath.IsAbs(directory) {
+			continue
+		}
+		candidate := filepath.Join(directory, executable)
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0 {
+			return candidate, nil
+		}
+	}
+	return "", exec.ErrNotFound
+}
+
+func runnerEnvironmentRoot(deps Dependencies) (string, error) {
+	for _, name := range []string{"RUNNER_ROOT", "RunnerRoot"} {
+		if value, ok := deps.Lookup(name); ok && strings.TrimSpace(value) != "" {
+			if !filepath.IsAbs(value) {
+				return "", errors.New("Runner root must be an absolute path")
+			}
+			return filepath.Clean(value), nil
+		}
+	}
+	home, err := deps.HomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return "", errors.New("home directory is unavailable")
+	}
+	return filepath.Join(home, ".mohist", "projects"), nil
+}
+
+func runnerEnvironmentCommandEnvironment(
+	deps Dependencies,
+	assignments map[string]string,
+	root string) []string {
+	names := make([]string, 0, len(assignments)+3)
+	for name := range assignments {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	environment := make([]string, 0, len(names)+3)
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		environment = append(environment, name+"="+assignments[name])
+		seen[name] = struct{}{}
+	}
+	if _, exists := seen["HOME"]; !exists {
+		if home, err := deps.HomeDir(); err == nil && home != "" {
+			environment = append(environment, "HOME="+home)
+		}
+	}
+	if _, exists := seen["USER"]; !exists {
+		if user, ok := deps.Lookup("USER"); ok && user != "" {
+			environment = append(environment, "USER="+user)
+		}
+	}
+	if _, exists := seen["RUNNER_ROOT"]; !exists {
+		environment = append(environment, "RUNNER_ROOT="+root)
+	}
+	return environment
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func reportRunnerEnvironmentCandidate(
+	ctx context.Context,
+	c *client,
+	deps Dependencies,
+	runnerID string,
+	metadata runnerEnvironmentCandidateMetadata,
+	diff runnerEnvironmentDiff) error {
+	if c == nil {
+		return errors.New("Mohist Server client is unavailable")
+	}
+	user := "unknown"
+	if value, ok := deps.Lookup("USER"); ok && strings.TrimSpace(value) != "" {
+		user = strings.TrimSpace(value)
+	} else if value, ok := deps.Lookup("USERNAME"); ok && strings.TrimSpace(value) != "" {
+		user = strings.TrimSpace(value)
+	}
+	_, err := postRunnerEnvironmentObservation(ctx, c, runnerID, runnerEnvironmentObservationReport{
+		Candidate: &runnerEnvironmentCandidateObservation{
+			Source:           "terminal",
+			User:             user,
+			Version:          metadata.Version,
+			Variables:        metadata.Variables,
+			CapturedAt:       metadata.CapturedAt,
+			AddedVariables:   diff.Added,
+			RemovedVariables: diff.Removed,
+			ChangedVariables: diff.Changed,
+		},
+	})
+	return err
+}
+
+func reportRunnerEnvironmentToolCheck(
+	ctx context.Context,
+	c *client,
+	deps Dependencies,
+	runnerID string,
+	check runnerEnvironmentToolCheck) error {
+	if c == nil {
+		return errors.New("Mohist Server client is unavailable")
+	}
+	identity, err := observeRunnerEnvironmentIdentity(ctx, c, runnerID)
+	if err != nil {
+		return err
+	}
+	returnValue := runnerEnvironmentObservationReport{
+		ProcessGeneration:   identity.ProcessGeneration,
+		EnvironmentVersion:  identity.EnvironmentVersion,
+		EnvironmentLoadedAt: identity.EnvironmentLoadedAt,
+		ToolChecks:          []runnerEnvironmentToolCheck{check},
+	}
+	if paths, pathsErr := runnerEnvironmentPaths(deps); pathsErr == nil {
+		if metadata, _, candidateErr := readRunnerEnvironmentCandidate(deps, paths); candidateErr == nil {
+			active, activeErr := deps.ReadFile(paths["active"])
+			if activeErr != nil {
+				active = ""
+			}
+			diff := diffRunnerEnvironmentSnapshots(active, func() string {
+				candidate, readErr := deps.ReadFile(paths["candidate"])
+				if readErr != nil {
+					return ""
+				}
+				return candidate
+			}())
+			user := "unknown"
+			if value, ok := deps.Lookup("USER"); ok && strings.TrimSpace(value) != "" {
+				user = strings.TrimSpace(value)
+			}
+			returnValue.Candidate = &runnerEnvironmentCandidateObservation{
+				Source:           "terminal",
+				User:             user,
+				Version:          metadata.Version,
+				Variables:        metadata.Variables,
+				CapturedAt:       metadata.CapturedAt,
+				AddedVariables:   diff.Added,
+				RemovedVariables: diff.Removed,
+				ChangedVariables: diff.Changed,
+			}
+		}
+	}
+	_, err = postRunnerEnvironmentObservation(ctx, c, runnerID, returnValue)
+	return err
+}
+
+func postRunnerEnvironmentObservation(
+	ctx context.Context,
+	c *client,
+	runnerID string,
+	report runnerEnvironmentObservationReport) (runnerEnvironmentObservationResponse, error) {
+	data, err := c.request(ctx, http.MethodPost, environmentObservationPath(runnerID), report)
+	if err != nil {
+		return runnerEnvironmentObservationResponse{}, err
+	}
+	var response runnerEnvironmentObservationResponse
+	if json.Unmarshal(data, &response) != nil || response.RunnerID != runnerID {
+		return runnerEnvironmentObservationResponse{}, errors.New("Runner environment observation response was invalid")
+	}
+	return response, nil
 }
 
 func runnerEnvironmentStatus(ctx context.Context, deps Dependencies, c *client, cmd command) int {
@@ -344,6 +727,7 @@ func runnerEnvironmentStatus(ctx context.Context, deps Dependencies, c *client, 
 		"removedVariables":     []string{},
 		"changedVariables":     []string{},
 		"application":          nil,
+		"observation":          nil,
 		"processGeneration":    identity.ProcessGeneration,
 		"connectionGeneration": identity.ConnectionGeneration,
 		"status":               identity.Status,
@@ -375,6 +759,17 @@ func runnerEnvironmentStatus(ctx context.Context, deps Dependencies, c *client, 
 			return ExitOperation
 		}
 		result["application"] = response
+	}
+	if observationData, observationErr := c.get(ctx, environmentObservationPath(runnerID)); observationErr == nil {
+		var response runnerEnvironmentObservationResponse
+		if json.Unmarshal(observationData, &response) != nil || response.RunnerID != runnerID {
+			writeError(deps.Stderr, errors.New("Runner environment observation response was invalid"))
+			return ExitOperation
+		}
+		result["observation"] = response.Observation
+	} else if operationErrorCode(observationErr) != "not_found" {
+		writeError(deps.Stderr, observationErr)
+		return operationCode(observationErr)
 	}
 	if len(cmd.fields) > 0 {
 		return writeRunnerEnvironmentFields(deps, result, cmd.fields)
@@ -873,6 +1268,10 @@ func environmentApplicationPath(runnerID, updateID string) string {
 		path += "/" + urlPathEscape(updateID)
 	}
 	return path
+}
+
+func environmentObservationPath(runnerID string) string {
+	return "/api/runner/" + urlPathEscape(runnerID) + "/environment/observation"
 }
 
 func urlPathEscape(value string) string {

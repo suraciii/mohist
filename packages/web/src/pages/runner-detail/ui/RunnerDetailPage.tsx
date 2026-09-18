@@ -211,9 +211,16 @@ function environmentPhaseVariant(phase: string) {
   return 'outline' as const
 }
 
+function toolCheckVariant(outcome: string) {
+  if (outcome === 'passed') return 'secondary' as const
+  if (outcome === 'failed' || outcome === 'timed-out' || outcome === 'error') return 'destructive' as const
+  return 'outline' as const
+}
+
 function EnvironmentSummary({ row }: { row: RunnerStatusEntry }) {
   const environment = row.environment
   const application = environment?.application
+  const observation = environment?.observation
 
   return (
     <CardSection title="Execution environment" data-testid="runner-detail-environment-section">
@@ -254,6 +261,65 @@ function EnvironmentSummary({ row }: { row: RunnerStatusEntry }) {
           ) : (
             <p className="text-xs text-muted-foreground">No environment application recorded.</p>
           )}
+
+          {observation ? (
+            <div className="border-t border-border/60 pt-3" data-testid="runner-environment-observation">
+              <div className="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-medium text-foreground">Latest observation</span>
+                <span className="text-xs text-muted-foreground">{formatTimestamp(observation.reportedAt)}</span>
+              </div>
+              <dl>
+                <Fact label="Source">{displayValue(observation.candidateSource)}</Fact>
+                <Fact label="User">{displayValue(observation.candidateUser)}</Fact>
+                <Fact label="Candidate version">{displayValue(observation.candidateVersion)}</Fact>
+                <Fact label="Candidate variables">
+                  {observation.candidateVariables.length > 0 ? observation.candidateVariables.join(', ') : 'none'}
+                </Fact>
+                <Fact label="Added variables">
+                  {observation.candidateAddedVariables.length > 0
+                    ? observation.candidateAddedVariables.join(', ')
+                    : 'none'}
+                </Fact>
+                <Fact label="Removed variables">
+                  {observation.candidateRemovedVariables.length > 0
+                    ? observation.candidateRemovedVariables.join(', ')
+                    : 'none'}
+                </Fact>
+                <Fact label="Changed variables">
+                  {observation.candidateChangedVariables.length > 0
+                    ? observation.candidateChangedVariables.join(', ')
+                    : 'none'}
+                </Fact>
+              </dl>
+              <div className="mt-3 border-t border-border/50 pt-3" data-testid="runner-environment-tool-checks">
+                <div className="mb-2 text-xs font-medium text-foreground">Tool checks</div>
+                {observation.toolChecks.length > 0 ? (
+                  <div className="space-y-2">
+                    {observation.toolChecks.map((check, index) => (
+                      <div
+                        key={`${check.executable}-${check.checkedAt}-${index}`}
+                        className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded border border-border/60 px-2 py-2"
+                        data-testid="runner-environment-tool-check"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <code className="break-all text-xs text-foreground">{check.executable}</code>
+                            <Badge variant={toolCheckVariant(check.outcome)}>{check.outcome}</Badge>
+                          </div>
+                          <div className="mt-1 break-all text-xs text-muted-foreground">
+                            {displayValue(check.resolvedPath)} · {check.snapshotKind} · {check.durationMilliseconds}ms
+                          </div>
+                        </div>
+                        <span className="text-xs text-muted-foreground">{formatTimestamp(check.checkedAt)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No tool checks reported.</p>
+                )}
+              </div>
+            </div>
+          ) : null}
 
           <div className="border-t border-border/60 pt-3 text-xs text-muted-foreground">
             Capture and apply on the Runner host with{' '}
