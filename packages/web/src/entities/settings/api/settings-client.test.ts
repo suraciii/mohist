@@ -51,9 +51,9 @@ function errorResponse(error: string, status: number, code: string) {
 }
 
 describe('settings client agent runtime adapter', () => {
-  it('accepts Codex in the runtime allowlist without changing the OpenCode default', () => {
+  it('accepts Codex in the runtime allowlist without changing the Pi default', () => {
     expect(AGENT_RUNTIMES).toEqual(['opencode', 'pi', 'codex'])
-    expect(DEFAULT_AGENT_RUNTIME).toBe('opencode')
+    expect(DEFAULT_AGENT_RUNTIME).toBe('pi')
   })
 
   it('reads runtime config from /api/config instead of the missing /api/agent-runtime endpoint', async () => {
