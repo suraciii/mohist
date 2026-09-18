@@ -33,9 +33,14 @@ public static partial class RunnerRoutes
                     result.UpdateId,
                     BeginStatusValue(result.Status),
                     result.Application);
-                return result.Status == RunnerEnvironmentApplicationBeginStatus.Conflict
-                    ? ApiResults.Conflict("Another Runner environment application or update is active", "environment_application_conflict", response)
-                    : ApiResults.Ok(response);
+                return result.Status switch
+                {
+                    RunnerEnvironmentApplicationBeginStatus.Conflict =>
+                        ApiResults.Conflict("Another Runner environment application or update is active", "environment_application_conflict", response),
+                    RunnerEnvironmentApplicationBeginStatus.NotReady =>
+                        ApiResults.Conflict("Runner process or connection generation is stale", "environment_application_not_ready", response),
+                    _ => ApiResults.Ok(response),
+                };
             }
             catch (ArgumentException ex)
             {

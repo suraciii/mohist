@@ -41,6 +41,13 @@ public sealed class RunnerEnvironmentApplicationSpecs
             Assert.Equal(RunnerEnvironmentApplicationPhase.Waiting, begin.Application!.Phase);
             Assert.True((await runner.GetRuntimeStateAsync()).Draining);
 
+            var staleBegin = await runner.BeginEnvironmentApplicationAsync(
+                Guid.NewGuid().ToString("N"),
+                "other-version",
+                "old-generation",
+                "connection-a");
+            Assert.Equal(RunnerEnvironmentApplicationBeginStatus.NotReady, staleBegin!.Status);
+
             await runner.RegisterAsync(
                 new RunnerInfo(
                     runnerId,

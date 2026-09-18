@@ -18,14 +18,20 @@ public partial class RunnerGrain
         await _lifecycleGate.WaitAsync();
         try
         {
-            if (_status != RunnerStatus.Online
-                || _info is null
-                || !string.Equals(_state.State?.CurrentProcessGeneration, requestedProcessGeneration, StringComparison.Ordinal)
-                || !string.Equals(_info.ConnectionGeneration, requestedConnectionGeneration, StringComparison.Ordinal))
+            if (_status != RunnerStatus.Online || _info is null)
                 return null;
 
             var state = _state.State ??= new RunnerState();
             var existing = state.EnvironmentApplication;
+            if (!string.Equals(state.CurrentProcessGeneration, requestedProcessGeneration, StringComparison.Ordinal)
+                || !string.Equals(_info.ConnectionGeneration, requestedConnectionGeneration, StringComparison.Ordinal))
+            {
+                return new RunnerEnvironmentApplicationBeginResult(
+                    requestedId,
+                    RunnerEnvironmentApplicationBeginStatus.NotReady,
+                    existing is null ? null : await BuildEnvironmentApplicationSnapshotAsync(existing));
+            }
+
             if (existing is not null && string.Equals(existing.UpdateId, requestedId, StringComparison.Ordinal))
             {
                 var sameIdStatus = existing.Phase is RunnerEnvironmentApplicationPhase.Waiting
