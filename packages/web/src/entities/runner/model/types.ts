@@ -78,6 +78,33 @@ export interface RunnerDrain {
   updateInterruptId: string | null
 }
 
+export type RunnerEnvironmentApplicationPhase =
+  | 'waiting'
+  | 'applying'
+  | 'active'
+  | 'failed'
+  | 'cancelled'
+  | 'unconfirmed'
+  | 'unknown'
+
+export interface RunnerEnvironmentApplication {
+  updateId: string
+  targetVersion: string
+  previousVersion: string | null
+  phase: RunnerEnvironmentApplicationPhase
+  failureCode: string | null
+  baseProcessGeneration: string | null
+  baseConnectionGeneration: string | null
+  requestedAt: string
+  completedAt: string | null
+}
+
+export interface RunnerEnvironment {
+  activeVersion: string | null
+  activeLoadedAt: string | null
+  application: RunnerEnvironmentApplication | null
+}
+
 export interface RunnerNextAction {
   code: string
   message: string
@@ -95,6 +122,7 @@ export interface RunnerStatusEntry {
   activeWorks: RunnerActiveWork[]
   drain: RunnerDrain | null
   nextActions: RunnerNextAction[]
+  environment?: RunnerEnvironment | null
 }
 
 /** Canonical row name used by the Web Runner surfaces. */

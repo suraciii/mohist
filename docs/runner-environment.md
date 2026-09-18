@@ -159,12 +159,19 @@ test result.
 
 ## Web and Server Visibility
 
-`GET /api/runners` and `GET /api/runners/{runnerId}` expose an `environment`
-summary with the active version, candidate version, application state, source,
-capture and load times, update id, failure code, and recent tool observations.
+`GET /api/runners` and `GET /api/runners/{runnerId}` expose an optional
+`environment` summary. The first projection slice contains only the active
+version and load time, plus durable application metadata: update id, phase,
+target and previous versions, identity witnesses, request/completion times, and
+a bounded failure code. The summary is available for an offline Runner from
+durable state and does not activate the Runner grain. Active work and the
+existing drain projection remain the source for tasks that block an update.
+
+Candidate source/user metadata, changed variable names, and tool observations
+remain local until an explicit sanitized observation-report contract is added.
 Raw values, full paths from the snapshot, credentials, and command output are
-never returned. The Web detail page may show the summary, blockers, and a
-cancel action. It must direct capture and apply to the local CLI; it must not
+never returned. The Web detail page may show the active/application summary and
+blockers, but capture and apply remain local CLI operations; the page must not
 suggest that a remote browser can read a terminal environment.
 
 The Runner includes the active environment version and load time in registration

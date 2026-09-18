@@ -162,11 +162,24 @@ Candidate and application commands carry only:
 - source kind, operating-system user, capture time, and changed variable names;
 - state, failure code, and bounded tool-check metadata.
 
-The global Runner projection adds an optional `environment` object. It is
-assembled like other Runner status facts and remains visible for an offline
-Runner from durable state. The projection must not activate a grain merely to
-render status. Raw snapshot values, complete path lists, credentials, command
-arguments that contain secrets, and command output are outside the wire model.
+The global Runner projection adds an optional `environment` object. The first
+projection slice exposes the active environment version/load time and a
+sanitized application summary:
+
+- `updateId`, `phase`, `targetVersion`, and `previousVersion`;
+- `baseProcessGeneration` and `baseConnectionGeneration` as identity
+  witnesses;
+- `requestedAt`, `completedAt`, and a bounded `failureCode`.
+
+It is assembled from the process-local observation or the persisted Runner
+state, so an offline Runner remains visible without activating a grain merely
+to render status. Active work rows and the existing drain projection continue
+to identify blockers. Candidate source/user metadata, changed variable names,
+and tool observations are local facts until a separate sanitized
+observation-report contract is accepted; they are not inferred from the
+application record. Raw snapshot values, complete path lists, credentials,
+secret-bearing command arguments, and command output are outside the wire
+model.
 
 The latest poll observation must retain enough information to evaluate the
 settled predicate for the current generation. Counts are sufficient for the
@@ -241,5 +254,6 @@ draining poll cannot claim new work. Server now persists one environment
 application per Runner, preserves its fence across process replacement, and
 requires a current-generation target-version witness before confirmation. The
 identity read model and local CLI candidate/apply/cancel transaction are now
-implemented. Sanitized status projection, Web presentation, and tool checks
-remain unimplemented slices of Issue #1009.
+implemented. The first sanitized global application projection is the next
+slice; observation reports, tool checks, and the complete Web diagnostics
+surface remain follow-up slices of Issue #1009.
