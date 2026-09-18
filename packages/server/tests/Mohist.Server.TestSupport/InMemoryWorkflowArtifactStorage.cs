@@ -161,21 +161,13 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var path = WorkflowArtifactStoragePath.Parse(storagePath);
-        var stored = Get(path.Value);
-        if (stored.DirectoryEntries is null)
-            throw new WorkflowArtifactNotFoundException($"Recorded directory artifact is missing at '{storagePath}'.");
-        var entries = stored.DirectoryEntries
-            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
-            .Select(pair => new WorkflowArtifactDirectoryEntry
-            {
-                RelativePath = pair.Key,
-                Size = pair.Value.Content.LongLength,
-                ContentHash = $"sha256:{Convert.ToHexString(SHA256.HashData(pair.Value.Content)).ToLowerInvariant()}",
-                ContentType = null,
-            })
-            .ToArray();
-        return Task.FromResult(new WorkflowArtifactDirectoryListing(path.Value, entries, entries.Sum(entry => entry.Size)));
+        var path = WorkflowArtifactStoragePath.Parse(storagePath).Value;
+        var stored = Get(path);
+        // The listing is the recorded manifest, not a re-hash of the
+        // bytes currently held. Tampered bytes must not become the new
+        // expectation reported to consumers.
+        return Task.FromResult(
+            WorkflowArtifactDirectoryListingFactory.FromMetadata(path, stored.Metadata));
     }
 
     public Stream OpenDirectoryEntry(string storagePath, string relativePath)
@@ -225,6 +217,24 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
         lock (_gate)
         {
             return _artifacts.ContainsKey(path);
+        }
+    }
+
+    /// <summary>
+    /// Test-only seam that replaces the stored bytes of one directory
+    /// entry without touching its recorded manifest. Lets a Spec prove
+    /// the listing expectation is independent of current content.
+    /// </summary>
+    public void MutateDirectoryEntryContent(string storagePath, string relativePath, byte[] content)
+    {
+        var path = WorkflowArtifactStoragePath.Parse(storagePath).Value;
+        var normalized = WorkflowArtifactContainedPath.Parse(relativePath).Value;
+        lock (_gate)
+        {
+            if (!_artifacts.TryGetValue(path, out var stored) || stored.DirectoryEntries is null)
+                throw new WorkflowArtifactNotFoundException(
+                    $"Recorded directory artifact is missing at '{storagePath}'.");
+            stored.DirectoryEntries[normalized] = new StoredDirectoryEntry(content);
         }
     }
 
@@ -301,7 +311,7 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
     private sealed record StoredArtifact(
         WorkflowArtifactStorageMetadata Metadata,
         byte[]? FileContent,
-        IReadOnlyDictionary<string, StoredDirectoryEntry>? DirectoryEntries);
+        Dictionary<string, StoredDirectoryEntry>? DirectoryEntries);
 
     private sealed record StoredDirectoryEntry(byte[] Content);
 }

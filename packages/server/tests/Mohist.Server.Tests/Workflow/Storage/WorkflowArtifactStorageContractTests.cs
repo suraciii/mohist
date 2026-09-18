@@ -126,6 +126,60 @@ public class WorkflowArtifactStorageContractTests
         Assert.Equal(3, metadata.FileCount);
     }
 
+    [Fact]
+    public async Task ListDirectoryEntriesAsync_ReturnsRecordedManifestFields()
+    {
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_recorded", "design", "art_recorded", WorkflowArtifactStorageKind.Directory);
+        await _storage.WriteDirectoryAsync(
+            storagePath,
+            [
+                Entry("specs/data.md", "data-spec", Sha256("data-spec"), "text/markdown"),
+                Entry("index.md", "index-x", Sha256("index-x"), "text/markdown"),
+            ],
+            WriteFor("specs/", 16),
+            SampleRecordedAt);
+
+        var listing = await _storage.ListDirectoryEntriesAsync(storagePath);
+
+        Assert.Equal(["index.md", "specs/data.md"], listing.Entries.Select(entry => entry.RelativePath));
+        Assert.Equal(
+            [Sha256("index-x"), Sha256("data-spec")],
+            listing.Entries.Select(entry => entry.ContentHash));
+        Assert.Equal([7L, 9L], listing.Entries.Select(entry => entry.Size));
+        Assert.All(listing.Entries, entry => Assert.Equal("text/markdown", entry.ContentType));
+        Assert.Equal(16, listing.TotalSize);
+    }
+
+    [Fact]
+    public async Task ListDirectoryEntriesAsync_ReturnsUploadTimeHashAfterStoredContentMutates()
+    {
+        var storagePath = _storage.GenerateStoragePath(
+            "wr_tamper", "design", "art_tamper", WorkflowArtifactStorageKind.Directory);
+        await _storage.WriteDirectoryAsync(
+            storagePath,
+            [Entry("index.md", "index-x", Sha256("index-x"), "text/markdown")],
+            WriteFor("specs/", 7),
+            SampleRecordedAt);
+
+        var recorded = Assert.Single((await _storage.ReadMetadataAsync(storagePath))!.Entries!);
+
+        // Simulate a post-upload mutation of the bytes the collection serves.
+        _storage.MutateDirectoryEntryContent(storagePath, "index.md", Encoding.UTF8.GetBytes("tampered"));
+
+        var listing = await _storage.ListDirectoryEntriesAsync(storagePath);
+        var listed = Assert.Single(listing.Entries);
+        Assert.Equal(recorded.RelativePath, listed.RelativePath);
+        Assert.Equal(recorded.ContentHash, listed.ContentHash);
+        Assert.Equal(recorded.Size, listed.Size);
+        Assert.Equal(Sha256("index-x"), listed.ContentHash);
+        Assert.Equal(recorded.Size, listing.TotalSize);
+
+        // The served bytes really changed; only the recorded expectation held.
+        using var reader = new StreamReader(_storage.OpenDirectoryEntry(storagePath, "index.md"));
+        Assert.Equal("tampered", await reader.ReadToEndAsync());
+    }
+
     [Theory]
     [InlineData("../escape.md")]
     [InlineData("/etc/passwd")]

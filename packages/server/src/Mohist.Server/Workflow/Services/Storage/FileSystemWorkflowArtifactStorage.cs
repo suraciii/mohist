@@ -333,26 +333,11 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
             throw new WorkflowArtifactNotFoundException(
                 $"Recorded directory artifact is missing at '{filesRoot}'.");
 
-        var listing = new List<WorkflowArtifactDirectoryEntry>();
-        long total = 0;
-        foreach (var file in EnumerateFilesSafe(filesRoot))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var relative = Path.GetRelativePath(filesRoot, file).Replace('\\', '/');
-            var info = new FileInfo(file);
-            total += info.Length;
-            var content = await File.ReadAllBytesAsync(file, cancellationToken).ConfigureAwait(false);
-            listing.Add(new WorkflowArtifactDirectoryEntry
-            {
-                RelativePath = relative,
-                Size = info.Length,
-                ContentHash = $"sha256:{Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant()}",
-                ContentType = null,
-            });
-        }
-
-        listing.Sort((a, b) => StringComparer.Ordinal.Compare(a.RelativePath, b.RelativePath));
-        return new WorkflowArtifactDirectoryListing(storagePath, listing, total);
+        // Serve the upload-time expectation recorded in the manifest.
+        // Enumerating files/ would make the expectation a function of
+        // whatever bytes happen to be on disk now.
+        var metadata = await ReadMetadataAsync(storagePath, cancellationToken).ConfigureAwait(false);
+        return WorkflowArtifactDirectoryListingFactory.FromMetadata(storagePath, metadata);
     }
 
     public Stream OpenDirectoryEntry(string storagePath, string relativePath)
@@ -385,9 +370,8 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
         var metadataPath = Path.Combine(collectionRoot, MetadataFileName);
         if (!File.Exists(metadataPath))
             return null;
-        await using var stream = File.OpenRead(metadataPath);
-        return await JsonSerializer.DeserializeAsync<WorkflowArtifactStorageMetadata>(
-            stream, JSON.Indented, cancellationToken).ConfigureAwait(false);
+        var json = await File.ReadAllTextAsync(metadataPath, cancellationToken).ConfigureAwait(false);
+        return WorkflowArtifactDirectoryListingFactory.ParseMetadata(storagePath, json);
     }
 
     public Task DeleteAsync(
@@ -556,21 +540,6 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
                 File.Move(tempPath, metadataPath);
             }
         }
-    }
-
-    private static IEnumerable<string> EnumerateFilesSafe(string root)
-    {
-        // Refuse to follow symlinks. Directory.EnumerateFiles itself
-        // honors symlinks (it returns the linked target path), so the
-        // service guards by skipping any FileSystemInfo whose
-        // attributes include ReparsePoint. This is the closest
-        // portable refusal of symlink traversal.
-        return Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-            .Where(path =>
-            {
-                var info = new FileInfo(path);
-                return (info.Attributes & FileAttributes.ReparsePoint) == 0;
-            });
     }
 
     private static string EnsureTrailingSeparator(string path) =>

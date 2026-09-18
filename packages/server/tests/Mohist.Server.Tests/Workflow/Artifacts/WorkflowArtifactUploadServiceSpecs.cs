@@ -427,6 +427,13 @@ public class WorkflowArtifactUploadServiceSpecs
         });
         Assert.Equal(WorkflowArtifactUploadResultKind.Created, first.Kind);
 
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var firstRow = await db.WorkflowArtifactPendingUploads
+            .AsNoTracking()
+            .FirstAsync(p => p.UploadId == first.Pending!.UploadId);
+        var recordedManifest = (await _storage.ReadMetadataAsync(firstRow.StoragePath))!.Entries!;
+
         var second = await service.UploadAsync(new WorkflowArtifactUploadRequest
         {
             WorkflowRunId = workflowRunId,
@@ -442,13 +449,17 @@ public class WorkflowArtifactUploadServiceSpecs
         Assert.Equal("directory", second.Pending!.Kind);
         Assert.Equal(first.Pending!.UploadId, second.Pending.UploadId);
 
-        using var scope = _fixture.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var rows = await db.WorkflowArtifactPendingUploads
             .AsNoTracking()
             .Where(p => p.WorkflowRunId == workflowRunId)
             .ToListAsync();
         Assert.Single(rows);
+
+        // The retry must not rewrite the stored manifest.
+        var afterRetryManifest = (await _storage.ReadMetadataAsync(firstRow.StoragePath))!.Entries!;
+        Assert.Equal(
+            recordedManifest.Select(entry => (entry.RelativePath, entry.Size, entry.ContentHash, entry.ContentType)),
+            afterRetryManifest.Select(entry => (entry.RelativePath, entry.Size, entry.ContentHash, entry.ContentType)));
     }
 
     [Fact]
