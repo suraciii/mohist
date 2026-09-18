@@ -33,4 +33,24 @@ public class RunnerBuildIdentityPolicyTests
         Assert.Equal("current", RunnerBuildIdentityPolicy.ResolveForHeartbeat(null, null, "current"));
         Assert.Null(RunnerBuildIdentityPolicy.ResolveForHeartbeat(null, null, null));
     }
+
+    [Fact]
+    public void ResolveSourceRevision_LegacyPayloadFallsBackToBuildGitHash()
+    {
+        Assert.Equal(
+            "build-hash",
+            RunnerBuildIdentityPolicy.ResolveSourceRevision(null, null, "build-hash"));
+        Assert.Equal(
+            "explicit-source",
+            RunnerBuildIdentityPolicy.ResolveSourceRevision(null, "explicit-source", "build-hash"));
+    }
+
+    [Fact]
+    public void ResolveSourceRevision_CanonicalPayloadDoesNotFallBackToBuildGitHash()
+    {
+        Assert.Equal(
+            "canonical-source",
+            RunnerBuildIdentityPolicy.ResolveSourceRevision(1, "canonical-source", "build-hash"));
+        Assert.Null(RunnerBuildIdentityPolicy.ResolveSourceRevision(1, null, "build-hash"));
+    }
 }

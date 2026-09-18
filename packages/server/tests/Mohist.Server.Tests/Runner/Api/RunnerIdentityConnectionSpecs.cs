@@ -163,6 +163,100 @@ public class RunnerIdentityConnectionSpecs
         }
     }
 
+    [Fact]
+    public async Task RunnerIdentity_CanonicalRegistration_PreservesSchemaVersionAndBuildGitHash()
+    {
+        var runnerId = $"identity-canonical-{Guid.NewGuid():N}";
+        var hostname = $"identity-canonical-host-{Guid.NewGuid():N}";
+
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
+            capabilities = new[] { "spec/*" },
+            hostname,
+            schemaVersion = 1,
+            component = "runner",
+            sourceRevision = "source-sha",
+            buildGitHash = "build-sha",
+            treeHash = "tree-sha",
+            artifactDigest = "digest-sha",
+            releaseId = "release-1",
+            generation = 7,
+        });
+
+        try
+        {
+            var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+            var registered = await runner.GetInfoAsync();
+            Assert.Equal(1, registered?.SchemaVersion);
+            Assert.Equal("build-sha", registered?.BuildGitHash);
+            Assert.Equal("source-sha", registered?.SourceRevision);
+
+            var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+            tracker.Register(runnerId, "canonical-connection");
+            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/heartbeat", new
+            {
+                capabilities = new[] { "spec/*" },
+                hostname,
+                connectionId = "canonical-connection",
+                schemaVersion = 1,
+                component = "runner",
+                sourceRevision = "source-sha-2",
+                buildGitHash = "build-sha-2",
+                treeHash = "tree-sha",
+                artifactDigest = "digest-sha",
+                releaseId = "release-1",
+                generation = 7,
+            });
+
+            var repaired = await runner.GetInfoAsync();
+            Assert.Equal(1, repaired?.SchemaVersion);
+            Assert.Equal("build-sha-2", repaired?.BuildGitHash);
+            Assert.Equal("source-sha-2", repaired?.SourceRevision);
+
+            var identity = await _fixture.Client.GetDataAsync<RunnerIdentityDto>(
+                "/api/runner/identity?runnerId=" + Uri.EscapeDataString(runnerId));
+            Assert.Equal(1, identity.SchemaVersion);
+            Assert.Equal("build-sha-2", identity.BuildGitHash);
+            Assert.Equal("source-sha-2", identity.SourceRevision);
+            Assert.Equal("release-1", identity.ReleaseId);
+            Assert.Equal(7, identity.Generation);
+        }
+        finally
+        {
+            _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Unregister(runnerId, "canonical-connection");
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task RunnerIdentity_LegacyRegistration_FallsBackSourceRevisionToBuildGitHash()
+    {
+        var runnerId = $"identity-legacy-{Guid.NewGuid():N}";
+        var hostname = $"identity-legacy-host-{Guid.NewGuid():N}";
+
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
+            capabilities = new[] { "spec/*" },
+            hostname,
+            buildGitHash = "legacy-build-sha",
+        });
+
+        try
+        {
+            var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+            var registered = await runner.GetInfoAsync();
+            Assert.Null(registered?.SchemaVersion);
+            Assert.Equal("legacy-build-sha", registered?.BuildGitHash);
+            Assert.Equal("legacy-build-sha", registered?.SourceRevision);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
     private Task RegisterAsync(string runnerId, string hostname)
         => _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
@@ -181,6 +275,10 @@ public class RunnerIdentityConnectionSpecs
         string Status,
         DateTimeOffset? LastHeartbeatAt,
         string ConnectionState,
+        string? SourceRevision = null,
+        string? ReleaseId = null,
+        long? Generation = null,
+        int? SchemaVersion = null,
         string? ProcessGeneration = null,
         string? EnvironmentVersion = null,
         DateTimeOffset? EnvironmentLoadedAt = null);

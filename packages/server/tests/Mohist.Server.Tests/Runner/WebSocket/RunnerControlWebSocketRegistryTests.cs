@@ -30,6 +30,42 @@ public sealed class RunnerControlWebSocketRegistryTests
     }
 
     [Fact]
+    public void HandshakeParsesCanonicalSchemaVersionAndBuildGitHash()
+    {
+        var query = new Microsoft.AspNetCore.Http.QueryCollection(
+            new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>
+            {
+                ["processGeneration"] = "test-generation",
+                ["schemaVersion"] = "1",
+                ["component"] = "runner",
+                ["sourceRevision"] = "source-sha",
+                ["buildGitHash"] = "build-sha",
+            });
+
+        var handshake = RunnerControlHandshake.FromQuery(query);
+
+        Assert.Equal(1, handshake.SchemaVersion);
+        Assert.Equal("build-sha", handshake.BuildGitHash);
+        Assert.Equal("source-sha", handshake.SourceRevision);
+        Assert.Equal("runner", handshake.Component);
+    }
+
+    [Fact]
+    public void HandshakeIgnoresNonPositiveSchemaVersion()
+    {
+        var query = new Microsoft.AspNetCore.Http.QueryCollection(
+            new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>
+            {
+                ["processGeneration"] = "test-generation",
+                ["schemaVersion"] = "0",
+            });
+
+        var handshake = RunnerControlHandshake.FromQuery(query);
+
+        Assert.Null(handshake.SchemaVersion);
+    }
+
+    [Fact]
     public async Task MissingProcessGenerationIsRejectedBeforeConnectionPublication()
     {
         var fixture = RegistryFixture();
