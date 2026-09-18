@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -297,10 +298,12 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
             var relative = Path.GetRelativePath(filesRoot, file).Replace('\\', '/');
             var info = new FileInfo(file);
             total += info.Length;
+            var content = await File.ReadAllBytesAsync(file, cancellationToken).ConfigureAwait(false);
             listing.Add(new WorkflowArtifactDirectoryEntry
             {
                 RelativePath = relative,
                 Size = info.Length,
+                ContentHash = $"sha256:{Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant()}",
                 ContentType = null,
             });
         }

@@ -53,7 +53,7 @@ describe('Agent Runtime error catalog', () => {
       'unavailable-runtime',
       'unsupported-execution-configuration',
       'workspace-home-claimed',
-      'workspace-materialization-failed',
+      'workspace-provisioning-failed',
     ])
   })
 

@@ -1,14 +1,14 @@
 # Workspace
 
 A Workspace is a named execution environment under a Project. It has a durable
-identity, an Origin, Repository references, and Runner materialization facts.
+identity, an Origin, Repository references, and a Runner-local Workspace Home.
 Its lifecycle is independent of AgentSessions and WorkflowRuns.
 
-The Server owns the logical Workspace. A Runner owns only its local
-materialization and is the only component that touches its filesystem.
-Directory contents and Git layout are execution details, not Workspace fields.
-A Workspace gives multi-repository work a home for plans, research, and other
-products that do not belong to one Repository.
+The Server owns the logical Workspace. A Runner owns its Workspace Home and is
+the only component that touches its filesystem. Directory contents and Git
+layout are execution details, not Workspace fields. A Workspace gives
+multi-repository work a home for plans, research, and other products that do
+not belong to one Repository.
 
 ## Design Drivers
 
@@ -18,8 +18,9 @@ products that do not belong to one Repository.
 - Repository access must stay separate from checkout state and Git layout.
 - Workflow execution needs a clean, repeatable layout. Interactive work needs
   a reusable directory without platform-imposed checkout rules.
-- A lost directory must rematerialize empty. Workflow recovery therefore uses
-  the Workflow branch and uploaded artifacts, not directory continuity.
+- Provisioning must produce a usable Workspace Home after Runner loss. Git
+  state comes from the remote branch. Declared non-repository artifacts come
+  from the WorkflowRun's bound artifacts.
 
 ## Model
 
@@ -29,7 +30,7 @@ Project.Workspace
   Origin               # Source binding; see below
   RepositoryNames[]    # Project Repository references and access grants
   Status               # active | archived
-  Home                 # Materialization route: runnerId + path; empty before materialization
+  Home                 # Workspace Home route: runnerId + path; empty before provisioning
 ```
 
 `Origin` is the source and unique resolution key:
@@ -77,7 +78,8 @@ separate global creation flow.
             |                       |
             vlost or unavailable    v
  +---------------------+   +-----------------+
- | Rematerialize empty |   | No new bindings |
+ | Provision Home      |   | No new bindings |
+ | from durable inputs |   |                 |
  +---------------------+   +-----------------+
 ```
 
@@ -89,7 +91,7 @@ separate global creation flow.
 - `mo workspace create <name>` creates `Origin = { manual }`. The supplied
   Name must be unique within the Project.
 - Creation establishes only the Workspace entity and Repository references. The
-  Runner materializes its directory on first dispatch.
+  Runner provisions its Home on first dispatch.
 - A root Session resolves its ingress context to an active Workspace. For
   Slack, each Project resolves the channel independently, so Agents from
   different Projects use separate Workspaces.
@@ -117,24 +119,26 @@ separate global creation flow.
 - A Workflow Workspace starts with the Issue's Repository. A composite Issue
   may attach more Repositories with `repo add`; attachment timing remains open
   under Status.
-- During materialization, the Runner injects credentials for declared
-  Repositories through the same channel used by Workflow preparation. Agents
-  do not need to know credential details.
+- During Workspace Home provisioning, the Runner injects credentials for
+  declared Repositories through the same channel used by Workflow preparation.
+  Agents do not need to know credential details.
 
-### Scheduling Affinity and Rematerialization
+### Scheduling Affinity and Provisioning
 
-- After materialization on Runner R, later dispatches for the Workspace route
-  to R.
-- If R is unreachable or its directory is reclaimed, an available Runner
-  rematerializes the Workspace with an empty directory and replaces `Home`.
-  Unpushed Git state and unpersisted directory artifacts are lost.
-- Workflow recovery uses the Profile's push discipline. Preparation clones
-  again and checks out the required branch in the new directory.
+- After provisioning on Runner R, later dispatches for the Workspace route to
+  R.
+- If R is unreachable or its Home is unavailable, an available Runner
+  provisions a new Home and replaces `Home`.
+- Provisioning uses the remote Git branch for Repository contents and the
+  current WorkflowRun's bound artifacts for declared non-repository files.
+- Unpushed Git state and unuploaded files are not durable inputs.
 
 ### Layout
 
-Workflow preparation owns this fixed root layout. Prepare creates a clean
-Workspace directory and fresh-clones the target Repository into `REPOS/`.
+Workflow preparation owns this fixed root layout. Provisioning ensures the
+Workspace Home and the target Repository checkout under `REPOS/`. A valid
+existing checkout is preserved; a missing or unavailable checkout is created
+from the required remote branch.
 
 ```text literal
 issue-<number>/
@@ -185,7 +189,7 @@ The Runner may reclaim an active Workspace with no active bound Sessions under
 its disk policy. It must not reclaim an active Workspace with active bindings.
 An archived Workspace may be deleted under the reclamation grant. The logical
 Workspace remains after active-directory reclamation so a later binding can
-rematerialize it.
+provision a new Home.
 
 Every directory deletion must acquire the directory's Runtime removal fence.
 
@@ -200,14 +204,14 @@ prompt conventions define internal layout, not Workspace schema.
 ## Status
 
 Workspace identity, explicit create and archive lifecycle, Issue and ingress
-resolution, named Runner materialization, cross-Session reuse, home affinity,
+resolution, named Runner Home provisioning, cross-Session reuse, home affinity,
 and Workspace-aware reclamation guards are implemented for current owners.
-AgentJob scheduling can clear an offline Home and rematerialize elsewhere.
+AgentJob scheduling can clear an offline Home and provision elsewhere.
 WorkflowRun assignment remains pinned to its original Runner, so cross-Runner
-Workflow rematerialization is not implemented. Slack channel archive events do
+Workflow Home provisioning is not implemented. Slack channel archive events do
 not yet reach the Server archive boundary.
 
 Issue dispatches resolve the named Issue Workspace. A WorkflowRun ID may locate
 execution history and route assignment, but never selects a Workspace directory
 or branch. Compound-Issue Repository attachment and Runtime Binding after
-rematerialization remain open questions.
+Workspace Home provisioning remain open questions.

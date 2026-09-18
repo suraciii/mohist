@@ -92,8 +92,8 @@ describe('AgentJobExecutor resolves a named workspace binding', () => {
   it('materializes the named workspace and anchors the prompt to its directory', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const materialize = vi.fn(async () => ({ path: '/runner-root/workspaces/mohist-pay-abc123', created: true }))
-    const manager = { materialize } as never
+    const provision = vi.fn(async () => ({ path: '/runner-root/workspaces/mohist-pay-abc123', created: true }))
+    const manager = { provision } as never
     const executor = new AgentJobExecutor(
       connection.connection,
       makeAccessors(runtime.runtime),
@@ -114,7 +114,7 @@ describe('AgentJobExecutor resolves a named workspace binding', () => {
     const result = await executor.execute(work, new AbortController().signal)
 
     expect(result.status).toBe('completed')
-    expect(materialize).toHaveBeenCalledWith(
+    expect(provision).toHaveBeenCalledWith(
       'proj-1',
       'pay',
       [{ name: 'server', gitUrl: 'https://github.com/mohist/server.git' }],
@@ -128,11 +128,11 @@ describe('AgentJobExecutor resolves a named workspace binding', () => {
     expect(request.prompt).toContain('repos/')
   })
 
-  it('materializes the workflow repository into REPOS and anchors its branch', async () => {
+  it('provisions the workflow repository into REPOS and anchors its branch', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const materialize = vi.fn(async () => ({ path: '/runner-root/workspaces/mohist-pay-abc123', created: false }))
-    const materializeForIssue = vi.fn(async () => ({
+    const provision = vi.fn(async () => ({ path: '/runner-root/workspaces/mohist-pay-abc123', created: false }))
+    const provisionForIssue = vi.fn(async () => ({
       path: '/runner-root/workspaces/mohist-pay-abc123',
       created: false,
     }))
@@ -141,7 +141,7 @@ describe('AgentJobExecutor resolves a named workspace binding', () => {
       makeAccessors(runtime.runtime),
       '/virtual/runner',
       undefined,
-      { materialize, materializeForIssue } as never,
+      { provision, provisionForIssue } as never,
     )
 
     const work = buildAgentJobWork({
@@ -159,13 +159,15 @@ describe('AgentJobExecutor resolves a named workspace binding', () => {
     const result = await executor.execute(work, new AbortController().signal)
 
     expect(result.status).toBe('completed')
-    expect(materializeForIssue).toHaveBeenCalledWith(
+    expect(provisionForIssue).toHaveBeenCalledWith(
       'proj-1',
       'pay',
       'server',
       'https://github.com/mohist/server.git',
       'main',
       expect.any(AbortSignal),
+      'wr-1',
+      'aj-1',
     )
     const request = runtime.runTurnCalls[0]
     expect(request.target.workDir).toBe('/runner-root/workspaces/mohist-pay-abc123')
@@ -195,15 +197,15 @@ describe('AgentJobExecutor resolves a named workspace binding', () => {
   it('fails with workspace-home-claimed when another runner owns the home', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const materialize = vi.fn(async () => {
-      throw new WorkspaceHomeClaimedError('already materialized on runner-2')
+    const provision = vi.fn(async () => {
+      throw new WorkspaceHomeClaimedError('already provisioned on runner-2')
     })
     const executor = new AgentJobExecutor(
       connection.connection,
       makeAccessors(runtime.runtime),
       '/virtual/runner',
       undefined,
-      { materialize } as never,
+      { provision } as never,
     )
 
     const work = buildAgentJobWork({
@@ -217,18 +219,18 @@ describe('AgentJobExecutor resolves a named workspace binding', () => {
     expect(runtime.runTurnCalls).toHaveLength(0)
   })
 
-  it('fails with workspace-materialization-failed when materialization throws', async () => {
+  it('fails with workspace-provisioning-failed when Workspace Home provisioning throws', async () => {
     const runtime = makeFakeRuntime()
     const connection = makeFakeConnection()
-    const materialize = vi.fn(async () => {
-      throw new Error('workspace materialization failed: 500')
+    const provision = vi.fn(async () => {
+      throw new Error('workspace Home provisioning failed: 500')
     })
     const executor = new AgentJobExecutor(
       connection.connection,
       makeAccessors(runtime.runtime),
       '/virtual/runner',
       undefined,
-      { materialize } as never,
+      { provision } as never,
     )
 
     const work = buildAgentJobWork({
@@ -238,7 +240,7 @@ describe('AgentJobExecutor resolves a named workspace binding', () => {
     const result = await executor.execute(work, new AbortController().signal)
 
     expect(result.status).toBe('failed')
-    expect(result.error?.code).toBe('workspace-materialization-failed')
+    expect(result.error?.code).toBe('workspace-provisioning-failed')
     expect(runtime.runTurnCalls).toHaveLength(0)
   })
 

@@ -188,6 +188,15 @@ public static partial class WorkflowRunExtensions
                 || currentFeedbackTasks.Any(task => task.Status != WorkflowActionAttemptStatus.Completed))
                 return null;
 
+            var resolutionTask = currentFeedbackTasks.FirstOrDefault(task => task.Id == taskId);
+            if (resolutionTask is not null
+                && string.Equals(resolutionTask.DefinitionId, "publish-feedback", StringComparison.Ordinal)
+                && string.Equals(resolutionTask.Uses, "mohist/push", StringComparison.Ordinal)
+                && !HasPublishedFeedbackEvidence(output))
+            {
+                return null;
+            }
+
             var summary = ResolveFeedbackSummary(currentFeedbackTasks, output);
 
             var resolved = feedback with
@@ -255,6 +264,21 @@ public static partial class WorkflowRunExtensions
     /// the inbound report) is reserved for historical compat and never
     /// JSON-serializes an arbitrary object into summary text.
     /// </summary>
+    private static bool HasPublishedFeedbackEvidence(JsonElement? output)
+    {
+        if (!output.HasValue || output.Value.ValueKind != JsonValueKind.Object)
+            return false;
+        var value = output.Value;
+        return value.TryGetProperty("kind", out var kind)
+            && kind.ValueKind == JsonValueKind.String
+            && string.Equals(kind.GetString(), "push", StringComparison.Ordinal)
+            && value.TryGetProperty("updated", out var updated)
+            && updated.ValueKind == JsonValueKind.True
+            && value.TryGetProperty("landedCommit", out var landedCommit)
+            && landedCommit.ValueKind == JsonValueKind.String
+            && !string.IsNullOrWhiteSpace(landedCommit.GetString());
+    }
+
     private static string? ResolveFeedbackSummary(IReadOnlyList<WorkflowActionAttempt> feedbackTasks, JsonElement? reportOutput)
     {
         foreach (var task in feedbackTasks)

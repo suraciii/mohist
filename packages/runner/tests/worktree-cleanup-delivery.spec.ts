@@ -334,6 +334,12 @@ describe('worktree cleanup before delivery', () => {
           return gitOk('squashed-sha\n')
         case 'push origin mo/worktree-cleanup:master':
           return gitOk('To origin\n   base-sha..squashed-sha  mo/worktree-cleanup -> master')
+        case 'ls-remote origin refs/heads/master':
+          return gitOk(
+            pushCalls.filter((call) => call.command === command).length === 1
+              ? 'base-sha\trefs/heads/master\n'
+              : 'squashed-sha\trefs/heads/master\n',
+          )
         default:
           return gitFail(`unexpected git call: ${command}`, 1)
       }
@@ -353,7 +359,9 @@ describe('worktree cleanup before delivery', () => {
     })
     expect(pushCalls).toEqual([
       { workDir: worktree.workDir, command: 'rev-parse mo/worktree-cleanup' },
+      { workDir: worktree.workDir, command: 'ls-remote origin refs/heads/master' },
       { workDir: worktree.workDir, command: 'push origin mo/worktree-cleanup:master' },
+      { workDir: worktree.workDir, command: 'ls-remote origin refs/heads/master' },
     ])
   })
 

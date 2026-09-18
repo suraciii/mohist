@@ -19,7 +19,7 @@ export const AGENT_RUNTIME_ERROR_CODES = [
   'unavailable-runtime',
   'unsupported-execution-configuration',
   'workspace-home-claimed',
-  'workspace-materialization-failed',
+  'workspace-provisioning-failed',
 ] as const
 
 const DECLARED_AGENT_RUNTIME_ERROR_CODES = new Set<string>(AGENT_RUNTIME_ERROR_CODES)

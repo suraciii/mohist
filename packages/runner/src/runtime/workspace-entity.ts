@@ -14,8 +14,9 @@ import {
 import { validateWorkspaceOrigin, withManagedRepositoryHandle, workspacePrepSink } from './workspace-managed.js'
 import { repositoryWorkspacePath, slugify, withManagedWorkspaceHandle } from './workspace-managed.js'
 import type { NamedWorkspaceRegistry } from './workspace-registry.js'
+import { provisionWorkspaceArtifacts } from './workspace-provision.js'
 
-// Named workspace materialization keeps the Workspace root as the shared
+// Named Workspace Home provisioning keeps the Workspace root as the shared
 // boundary for plans and repository checkouts. Issue-bound workflow work
 // uses the fixed REPOS/<repository> layout so AgentJobs and mechanical tasks
 // observe the same checkout and branch.
@@ -31,7 +32,7 @@ export interface NamedWorkspaceMarker {
   repositories: NamedWorkspaceRepository[]
 }
 
-export interface NamedWorkspaceMaterializeResult {
+export interface WorkspaceHomeProvisionResult {
   path: string
   // True when this call created the directory (it did not exist before).
   // The caller uses this to decide whether yielding to a claimed home
@@ -125,7 +126,7 @@ export async function validateNamedWorkspaceIdentity(
   })
 }
 
-export interface NamedWorkspaceMaterializeOptions {
+export interface NamedWorkspaceProvisionOptions {
   runnerRoot: string
   projectId: string
   workspaceName: string
@@ -134,14 +135,12 @@ export interface NamedWorkspaceMaterializeOptions {
   now?: () => Date
 }
 
-// Ensure the named workspace's persistent directory exists and record
-// the identity marker + registry entry. Re-materialization (directory
-// recycled by cleanup) is just ensureDir again: the platform does not
-// promise continuity, so there is nothing to restore — the next agent
-// starts from the empty directory.
-export async function materializeNamedWorkspace(
-  options: NamedWorkspaceMaterializeOptions,
-): Promise<NamedWorkspaceMaterializeResult> {
+// Ensure the named Workspace Home exists and record the identity marker and
+// registry entry. A lost Home is provisioned again from durable inputs; the
+// logical Workspace identity remains on the Server.
+export async function provisionNamedWorkspaceHome(
+  options: NamedWorkspaceProvisionOptions,
+): Promise<WorkspaceHomeProvisionResult> {
   const workspacePath = namedWorkspacePath(options.runnerRoot, options.projectId, options.workspaceName)
   let created = false
   await withManagedWorkspaceHandle(options.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
@@ -420,9 +419,9 @@ export interface IssueWorkspaceCloneOptions {
   log?: TaskLogger | null
 }
 
-export async function materializeIssueWorkspace(
+export async function provisionIssueWorkspaceHome(
   options: IssueWorkspaceCloneOptions,
-): Promise<NamedWorkspaceMaterializeResult> {
+): Promise<WorkspaceHomeProvisionResult> {
   const workspacePath = namedWorkspacePath(options.runnerRoot, options.projectId, options.workspaceName)
   let created = false
   await withManagedWorkspaceHandle(options.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
@@ -497,7 +496,7 @@ export async function materializeIssueWorkspace(
   return { path: workspacePath, created }
 }
 
-// Thrown when the server refused the materialization report because
+// Thrown when the server refused the Workspace Home report because
 // another runner already owns the workspace home (first writer wins).
 export class WorkspaceHomeClaimedError extends Error {
   readonly kind = 'workspace-home-claimed'
@@ -507,8 +506,8 @@ export class WorkspaceHomeClaimedError extends Error {
   }
 }
 
-// Owns the materialize -> report -> registry lifecycle for a named
-// workspace. The server report is the home claim: 409
+// Owns the provision -> report -> registry lifecycle for a named
+// Workspace Home. The server report is the home claim: 409
 // `workspace_home_claimed` means another runner won the race, this
 // runner yields (deleting only a directory it created this attempt) and
 // the dispatch fails; job retry then routes to the home runner via
@@ -521,16 +520,18 @@ export class NamedWorkspaceManager {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  async materializeForIssue(
+  async provisionForIssue(
     projectId: string,
     workspaceName: string,
     repositoryName: string,
     gitUrl: string,
     baseBranch: string,
     signal: AbortSignal,
-  ): Promise<NamedWorkspaceMaterializeResult> {
+    workflowRunId?: string,
+    workId?: string,
+  ): Promise<WorkspaceHomeProvisionResult> {
     const runBranch = `mohist/ws-${workspaceName}`
-    const result = await materializeIssueWorkspace({
+    const result = await provisionIssueWorkspaceHome({
       runnerRoot: this.runnerRoot,
       projectId,
       workspaceName,
@@ -543,27 +544,27 @@ export class NamedWorkspaceManager {
       now: this.now,
     })
     try {
+      if (workflowRunId && workId) {
+        await provisionWorkspaceArtifacts(this.connection, workflowRunId, workId, result.path, signal)
+      }
       await this.connection.reportWorkspaceMaterialized(projectId, workspaceName, result.path, signal)
     } catch (error) {
-      if (error instanceof WorkspaceHomeClaimedError) {
-        if (result.created) {
-          await deleteDirectory(result.path).catch(() => {})
-          await this.registry.remove(`ws:${projectId}:${workspaceName}`).catch(() => {})
-        }
-        throw error
+      if (result.created) {
+        await deleteDirectory(result.path).catch(() => {})
+        await this.registry.remove(`ws:${projectId}:${workspaceName}`).catch(() => {})
       }
       throw error
     }
     return result
   }
 
-  async materialize(
+  async provision(
     projectId: string,
     workspaceName: string,
     repositories: readonly NamedWorkspaceRepository[],
     signal: AbortSignal,
-  ): Promise<NamedWorkspaceMaterializeResult> {
-    const result = await materializeNamedWorkspace({
+  ): Promise<WorkspaceHomeProvisionResult> {
+    const result = await provisionNamedWorkspaceHome({
       runnerRoot: this.runnerRoot,
       projectId,
       workspaceName,

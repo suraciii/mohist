@@ -179,6 +179,16 @@ describe('captureOne', () => {
     )
   })
 
+  it('refusesAbsoluteAndReservedArtifactPaths', async () => {
+    await currentRunnerFileSystem().writeText(join(paths().workDir, 'inside.md'), 'inside')
+    await expect(
+      captureOne(paths().workDir, { path: join(paths().workDir, 'inside.md'), source: 'declared' }),
+    ).rejects.toThrow(/Workspace-relative/)
+    await expect(captureOne(paths().workDir, { path: 'REPOS/main/secret', source: 'declared' })).rejects.toThrow(
+      /artifact boundary/,
+    )
+  })
+
   it('refusesSymlinkedTargetAtTopLevel', async () => {
     const target = join(paths().workDir, 'real.md')
     await currentRunnerFileSystem().writeText(target, 'real content')

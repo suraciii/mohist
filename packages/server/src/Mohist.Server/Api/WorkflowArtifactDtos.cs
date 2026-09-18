@@ -8,6 +8,7 @@ public sealed record WorkflowArtifactDto
     public string path { get; set; } = string.Empty;
     public string kind { get; set; } = "file";
     public string? contentType { get; set; }
+    public string? contentHash { get; set; }
     public long? size { get; set; }
     public string recordedAt { get; set; } = string.Empty;
     public string? displayName { get; set; }
@@ -28,5 +29,6 @@ public sealed record WorkflowArtifactDirectoryEntryDto
 {
     public string relativePath { get; set; } = string.Empty;
     public long size { get; set; }
+    public string? contentHash { get; set; }
     public string? contentType { get; set; }
 }
