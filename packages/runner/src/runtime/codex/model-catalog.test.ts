@@ -85,6 +85,35 @@ describe('Codex reasoning effort mapping', () => {
 })
 
 describe('Codex model catalog refresh', () => {
+  it('accepts the official data response and object reasoning effort options', async () => {
+    const loader = createCodexModelCatalogLoader(
+      catalogTransport(
+        [
+          {
+            data: [
+              {
+                id: 'gpt-6-astra',
+                displayName: 'GPT-6-Astra',
+                supportedReasoningEfforts: [
+                  { reasoningEffort: 'low', description: 'fast' },
+                  { reasoningEffort: 'high', description: 'deep' },
+                ],
+                defaultReasoningEffort: 'low',
+              },
+            ],
+            nextCursor: null,
+          },
+        ],
+        [],
+      ),
+    )
+    const result = await loader.refreshCatalog()
+    expect(result.ok).toBe(true)
+    expect(result.catalog?.models[0]?.id).toBe('gpt-6-astra')
+    expect(result.catalog?.models[0]?.reasoningEfforts).toEqual(['low', 'high'])
+    expect(result.catalog?.models[0]?.defaultReasoningEffort).toBe('low')
+  })
+
   it('pages model/list and replaces the snapshot only after a complete non-empty merge', async () => {
     const calls: Array<{ readonly cursor?: string | null; readonly pageSize?: number }> = []
     const loader = createCodexModelCatalogLoader(
@@ -111,7 +140,10 @@ describe('Codex model catalog refresh', () => {
     expect(result.catalog?.models.map((model) => model.id)).toEqual(['gpt-5', 'o3'])
     expect(result.catalog?.models[0]?.reasoningEfforts).toEqual(['off', 'low'])
     expect(result.catalog?.models[1]?.reasoningEfforts).toEqual(['high'])
-    expect(calls).toEqual([{ pageSize: 2 }, { cursor: 'page-2', pageSize: 2 }])
+    expect(calls).toEqual([
+      { limit: 2, includeHidden: false },
+      { cursor: 'page-2', limit: 2, includeHidden: false },
+    ])
   })
 
   it('retains the last complete snapshot when a refresh becomes empty', async () => {

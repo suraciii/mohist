@@ -109,6 +109,8 @@ export interface CodexTurnOptions {
 export interface CodexTurnRequest {
   readonly target: CodexSessionTarget
   readonly prompt: string
+  /** Mohist SessionInput ID carried for correlation, never as provider idempotency. */
+  readonly clientUserMessageId?: string | null
   readonly deadlineMs?: number | null
   readonly options?: CodexTurnOptions | null
   readonly fileParts?: readonly CodexFilePart[] | null
@@ -136,6 +138,7 @@ export interface CodexTurnResult {
 export interface CodexFollowupRequest {
   readonly target: CodexSessionTarget
   readonly prompt: string
+  readonly clientUserMessageId?: string | null
   readonly options?: CodexTurnOptions | null
   readonly fileParts?: readonly CodexFilePart[] | null
 }

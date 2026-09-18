@@ -308,7 +308,7 @@ describe('Codex turn/start submission', () => {
       },
       4,
     )
-    expect(result).toMatchObject({ ok: false, error: { kind: 'turn-failed' } })
+    expect(result).toMatchObject({ ok: false, error: { kind: 'unknown' } })
   })
 })
 
@@ -757,6 +757,34 @@ describe('Codex turn item projection', () => {
   })
 })
 
+describe('Codex official app-server notification normalization', () => {
+  it('accepts nested official turn results and avoids duplicating delta text from item completion', async () => {
+    const transport = buildTransport({
+      response: {
+        id: 4,
+        result: { turn: { id: TURN_ID, status: 'inProgress' } },
+      },
+    })
+    const events: CodexRuntimeTurnEvent[] = []
+    const completion = driveTurnToCompletion(driveArgs(transport, { onEvent: (event) => events.push(event) }))
+    transport.emit({
+      method: 'item/agentMessage/delta',
+      params: { threadId: THREAD_ID, turnId: TURN_ID, itemId: 'item-1', delta: 'hello' },
+    })
+    transport.emit({
+      method: 'item/completed',
+      params: { threadId: THREAD_ID, turnId: TURN_ID, item: { type: 'agentMessage', id: 'item-1', text: 'hello' } },
+    })
+    transport.emit({
+      method: 'turn/completed',
+      params: { threadId: THREAD_ID, turn: { id: TURN_ID, status: 'completed', error: null } },
+    })
+    const result = await completion
+    expect(result).toMatchObject({ ok: true, value: { facts: { finalAssistantText: 'hello' } } })
+    expect(events.filter((event) => event.type === 'message.delta')).toHaveLength(1)
+  })
+})
+
 describe('Codex turn lost-response helper', () => {
   it('builds an unknown result that preserves the clientUserMessageId for audit', () => {
     const result = buildLostTurnStartUnknown({
@@ -790,7 +818,7 @@ describe('Codex turn no-replay discipline', () => {
       },
       4,
     )
-    expect(firstResult).toMatchObject({ ok: false, error: { kind: 'turn-failed' } })
+    expect(firstResult).toMatchObject({ ok: false, error: { kind: 'unknown' } })
     const transportCallsBefore = transport.calls.length
     // The runtime's response to a lost turn/start is `unknown` —
     // never a resubmission.
@@ -818,7 +846,7 @@ describe('Codex turn no-replay discipline', () => {
       resolved: { model: 'gpt-5', reasoningEffort: null, nativeReasoningEffort: null },
     }
     const firstResult = await submitTurnStart(transport, submission, 4)
-    expect(firstResult).toMatchObject({ ok: false, error: { kind: 'turn-failed' } })
+    expect(firstResult).toMatchObject({ ok: false, error: { kind: 'unknown' } })
     const callsAfterFirst = transport.calls.length
     // The runtime surface `unknown` for the lost submission;
     // buildLostTurnStartUnknown does not invoke the transport.

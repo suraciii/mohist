@@ -346,7 +346,7 @@ export interface AddTaskInput {
 export interface AgentExecutionBinding {
   agentSessionId: string
   agentTurnId: string | null
-  runtime: 'opencode' | 'pi'
+  runtime: 'opencode' | 'pi' | 'codex'
   runtimeSessionId: string | null
 }
 

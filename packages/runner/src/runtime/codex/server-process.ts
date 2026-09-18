@@ -271,7 +271,8 @@ async function buildCodexServerHandle(input: CodexServerHandleBuilder): Promise<
     }
     return new Promise<R>((resolve, reject) => {
       pending.set(id, { resolve: (value) => resolve(value as R), reject })
-      const envelope = JSON.stringify({ jsonrpc: '2.0', id, method: request.method, params: request.params ?? {} })
+      // Codex app-server uses JSON-RPC semantics but omits the jsonrpc header on stdio.
+      const envelope = JSON.stringify({ id, method: request.method, params: request.params ?? {} })
       try {
         child.stdin.write(`${envelope}\n`, (error) => {
           if (error) {
@@ -291,7 +292,6 @@ async function buildCodexServerHandle(input: CodexServerHandleBuilder): Promise<
   function denyServerRequest(id: number | string, reason: string): void {
     if (closed || exited || protocolError) return
     const envelope = JSON.stringify({
-      jsonrpc: '2.0',
       id,
       result: { ok: false, denied: true, reason: redactCodexCredentialString(reason) },
     })
@@ -306,11 +306,7 @@ async function buildCodexServerHandle(input: CodexServerHandleBuilder): Promise<
     if (closed || exited || protocolError) return false
     if (!isCodexLockedMethod(notification.method)) return false
     try {
-      const envelope = JSON.stringify({
-        jsonrpc: '2.0',
-        method: notification.method,
-        params: notification.params ?? {},
-      })
+      const envelope = JSON.stringify({ method: notification.method, params: notification.params ?? {} })
       const accepted = child.stdin.write(`${envelope}\n`, (error) => {
         if (error)
           notifyProtocolFailure('stdin-write', `codex app-server notification write failed: ${errorMessage(error)}`)
@@ -383,7 +379,7 @@ function isJsonRpcEnvelope(value: unknown): value is CodexJsonRpcMessage {
     result?: unknown
     error?: unknown
   }
-  if (candidate.jsonrpc !== '2.0') return false
+  if (candidate.jsonrpc !== undefined && candidate.jsonrpc !== '2.0') return false
   if (candidate.method !== undefined) {
     if (typeof candidate.method !== 'string') return false
     if (candidate.id !== undefined && typeof candidate.id !== 'string' && typeof candidate.id !== 'number') return false

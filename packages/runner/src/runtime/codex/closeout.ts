@@ -223,8 +223,8 @@ async function deliverCloseoutWarning(deps: {
 }): Promise<void> {
   const params: CodexTurnSteerParams = {
     threadId: deps.threadId,
-    turnId: deps.turnId,
-    input: [{ type: 'text', text: CODEX_CLOSEOUT_WARNING_TEXT }],
+    expectedTurnId: deps.turnId,
+    input: [{ type: 'text', text: CODEX_CLOSEOUT_WARNING_TEXT, text_elements: [] }],
   }
   // Defensive: the locked predicate must accept the params we
   // submit. A regression that drops `turn/steer` from the locked

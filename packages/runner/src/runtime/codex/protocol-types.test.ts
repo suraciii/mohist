@@ -345,7 +345,7 @@ describe('Codex locked v2 protocol subset', () => {
     ).toBe(true)
     expect(isCodexServerRequest({ jsonrpc: '2.0', id: 99, method: 7 })).toBe(false)
     expect(isCodexServerRequest({ jsonrpc: '2.0', method: 'x' })).toBe(false)
-    expect(isCodexServerRequest({ id: 99, method: 'x' })).toBe(false)
+    expect(isCodexServerRequest({ id: 99, method: 'x' })).toBe(true)
   })
 
   it('accepts any item-event discriminant but rejects non-objects', () => {

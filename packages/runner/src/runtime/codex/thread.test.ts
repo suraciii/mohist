@@ -77,7 +77,7 @@ describe('Codex thread/start', () => {
       model: 'gpt-5',
       reasoningEffort: 'medium',
     })
-    expect(call.params).not.toHaveProperty('ephemeral')
+    expect(call.params).toHaveProperty('ephemeral', false)
     expect(call.params).not.toHaveProperty('clientUserMessageId')
     // The locked predicate must accept the outbound envelope.
     expect(isCodexThreadStartRequest({ jsonrpc: '2.0', id: call.id, method: call.method, params: call.params })).toBe(
@@ -119,24 +119,24 @@ describe('Codex thread/start', () => {
     expect(result.diagnostics.some((d) => d.code === 'thread-cwd-mismatch')).toBe(true)
   })
 
-  it('returns turn-failed when the response shape is outside the locked v2 subset', async () => {
+  it('returns unknown when the response shape is outside the locked v2 subset', async () => {
     const transport = buildTransport({ response: { not: 'a thread/start result' } })
     const result = await startThread(transport, { workDir: WORK_DIR, model: null, reasoningEffort: null }, 1)
-    expect(result).toMatchObject({ ok: false, error: { kind: 'turn-failed' } })
+    expect(result).toMatchObject({ ok: false, error: { kind: 'unknown' } })
   })
 
-  it('returns turn-failed when the transport rejects', async () => {
+  it('returns unknown when the transport rejects', async () => {
     const transport = buildTransport({ error: new Error('connection refused') })
     const result = await startThread(transport, { workDir: WORK_DIR, model: null, reasoningEffort: null }, 1)
-    expect(result).toMatchObject({ ok: false, error: { kind: 'turn-failed' } })
+    expect(result).toMatchObject({ ok: false, error: { kind: 'unknown' } })
     if (result.ok) throw new Error('expected failure')
     expect(result.error.diagnostics.some((d) => d.message.includes('transport failed'))).toBe(true)
   })
 
-  it('returns turn-failed when the child has exited before the response was observed', async () => {
+  it('returns unknown when the child has exited before the response was observed', async () => {
     const transport = buildTransport({ exited: true })
     const result = await startThread(transport, { workDir: WORK_DIR, model: null, reasoningEffort: null }, 1)
-    expect(result).toMatchObject({ ok: false, error: { kind: 'turn-failed' } })
+    expect(result).toMatchObject({ ok: false, error: { kind: 'unknown' } })
     if (result.ok) throw new Error('expected failure')
     expect(result.error.diagnostics.some((d) => d.message.includes('child exited'))).toBe(true)
   })
@@ -257,16 +257,16 @@ describe('Codex thread/resume', () => {
     expect(result).toMatchObject({ ok: false, error: { kind: 'missing-session' } })
   })
 
-  it('keeps transport / timeout / 5xx / auth / permission failures as turn-failed (not missing-session)', async () => {
+  it('keeps transport / timeout / 5xx / auth / permission failures as unknown (not missing-session)', async () => {
     const transport = buildTransport({ error: new Error('connection reset by peer') })
     const result = await resumeThread(transport, 'thr_1', WORK_DIR, 2)
-    expect(result).toMatchObject({ ok: false, error: { kind: 'turn-failed' } })
+    expect(result).toMatchObject({ ok: false, error: { kind: 'unknown' } })
   })
 
-  it('keeps protocol mismatch as turn-failed (not missing-session)', async () => {
+  it('keeps protocol mismatch as unknown (not missing-session)', async () => {
     const transport = buildTransport({ response: { malformed: true } })
     const result = await resumeThread(transport, 'thr_1', WORK_DIR, 2)
-    expect(result).toMatchObject({ ok: false, error: { kind: 'turn-failed' } })
+    expect(result).toMatchObject({ ok: false, error: { kind: 'unknown' } })
   })
 
   it('records a thread-id mismatch diagnostic when the server returns a different thread id', async () => {

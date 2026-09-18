@@ -9,6 +9,15 @@ import type {
   RuntimeFilePart,
 } from './opencode/index.js'
 import type { PiRuntimeEvent, PiResult, PiTurnObserver, PiTurnRequest, PiTurnResult } from './pi/index.js'
+import type {
+  CodexDiagnostic,
+  CodexResult,
+  CodexRuntimeTurnEvent,
+  CodexTurnOptions,
+  CodexTurnRequest,
+  CodexTurnResult,
+  CodexTurnEventObserver,
+} from './codex/index.js'
 import { callFollowup, resolveAccessor, type CommandRuntimeHandle } from '../server/command-runtime.js'
 import type { ServerConnection } from '../server/connection.js'
 import { boundedWait } from './bounded-wait.js'
@@ -24,7 +33,12 @@ import type {
   ParsedModel,
 } from './agent-job-executor.js'
 import { knownBinding } from './agent-job-executor.js'
-import { mapOpenCodeErrorKind, mapPiErrorKind, normalizeAgentRuntimeErrorCode } from './error-kind-mapping.js'
+import {
+  mapOpenCodeErrorKind,
+  mapPiErrorKind,
+  mapRuntimeErrorKind,
+  normalizeAgentRuntimeErrorCode,
+} from './error-kind-mapping.js'
 
 const log = runnerLogger.child('job')
 
@@ -37,6 +51,113 @@ export interface AgentJobTurnDeps {
   readonly runtimes: AgentJobRuntimeAccessors
   readonly options: AgentJobExecutorOptions
   readonly managerExecution?: ManagerExecutionBoundary | null
+}
+
+export async function executeCodexTurn(
+  deps: AgentJobTurnDeps,
+  work: DispatchWorkItem,
+  signal: AbortSignal,
+  payload: JsonObject | null,
+  composed: string,
+  modelInput: string | null,
+  variant: string | null,
+  reasoningEffort: string | null,
+  workDir: string,
+  binding: BindingResolution,
+  skills: readonly ResolvedSkill[],
+  attachments: readonly DeliveredAttachment[],
+): Promise<WorkItemResult> {
+  let executionBinding: AgentExecutionBinding | null = knownBinding(work, binding, 'codex')
+  const boundResult = (result: WorkItemResult) => withAgentBinding(result, executionBinding)
+  if (variant) {
+    return boundResult(
+      failureResult(
+        'unsupported-execution-configuration',
+        'AgentJob Codex variant is unsupported; configure model and reasoningEffort instead',
+        'codex',
+      ),
+    )
+  }
+  const runtime = resolveAccessor(deps.runtimes.codex)
+  if (!runtime) {
+    return boundResult(
+      failureResult(
+        'runtime-unavailable',
+        'AgentJob requires the Codex runtime; the runner has not yet established the runtime or it is rebuilding',
+        'codex',
+      ),
+    )
+  }
+  if (!runtime.ready()) {
+    const diagnostic = runtime.diagnostic()
+    return boundResult(
+      failureResult(
+        'runtime-unavailable',
+        `AgentJob requires the Codex runtime to be ready: ${diagnostic?.message ?? 'no readiness diagnostic'}`,
+        'codex',
+        diagnostic ? [diagnostic] : undefined,
+      ),
+    )
+  }
+
+  const observation = new ReplyActionObservationTracker()
+  const eventSink = createAgentSessionEventSink(deps.connection, work, signal, binding.agentSessionId, observation)
+  const skipInitialInput = Boolean(work.initialInputId && work.initialTurnId)
+  const fileParts = attachments.flatMap((entry) =>
+    entry.status === 'delivered' && entry.filePart ? [entry.filePart] : [],
+  )
+  const observer: CodexTurnEventObserver = {
+    onSessionReady: async (session) => {
+      executionBinding = physicalBinding(work, binding.agentSessionId, 'codex', session.runtimeSessionId)
+      await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
+      if (!skipInitialInput) await eventSink.publishSessionInput(composed, session.runtimeSessionId)
+    },
+    onEvent: (event) => {
+      eventSink.observeCodexEvent(
+        deps.managerExecution
+          ? { ...event, payload: deps.managerExecution.redact(event.payload) as Record<string, unknown> }
+          : event,
+      )
+    },
+    onDiagnostic: (diagnostic) => {
+      eventSink.observeCodexDiagnostic(
+        deps.managerExecution ? (deps.managerExecution.redact(diagnostic) as CodexDiagnostic) : diagnostic,
+      )
+    },
+  }
+  const request: CodexTurnRequest = {
+    target: { runtime: 'codex', runtimeSessionId: binding.runtimeSessionId, workDir },
+    prompt: composed,
+    clientUserMessageId: work.initialInputId ?? null,
+    fileParts: fileParts.length > 0 ? fileParts : null,
+    options: {
+      model: modelInput,
+      reasoningEffort: reasoningEffort as CodexTurnOptions['reasoningEffort'],
+      variant: variant,
+      unknownKeys: collectUnknownKeys(payload),
+    },
+  }
+
+  let result: CodexResult<CodexTurnResult>
+  try {
+    result = await runtime.runTurn(request, signal, observer)
+  } catch (error) {
+    result = {
+      ok: false,
+      error: {
+        kind: 'turn-failed',
+        message: `AgentJob Codex turn threw: ${errorMessage(error)}`,
+        diagnostics: [{ severity: 'error', code: 'turn-failed', message: errorMessage(error) }],
+      },
+      diagnostics: [],
+    }
+  }
+  await eventSink.drain()
+  if (result.ok)
+    executionBinding = physicalBinding(work, binding.agentSessionId, 'codex', result.value.facts.runtimeSessionId)
+  return boundResult(
+    redactManagerResult(projectCodexTurnToWorkItemResult(result, modelInput, variant), deps.managerExecution ?? null),
+  )
 }
 
 export async function executeOpenCodeTurn(
@@ -594,6 +715,8 @@ interface AgentSessionEventSink {
     readonly payload: Record<string, unknown>
   }): void
   observePiEvent(event: PiRuntimeEvent): void
+  observeCodexEvent(event: CodexRuntimeTurnEvent): void
+  observeCodexDiagnostic(diagnostic: CodexDiagnostic): void
   drain(): Promise<void>
 }
 
@@ -615,6 +738,7 @@ export function createAgentSessionEventSink(
   const deliverySignal = () => AbortSignal.any([signal, AbortSignal.timeout(AGENT_EVENT_DELIVERY_TIMEOUT_MS)])
   const projectId = work.projectId
   const agentTurnId = work.initialTurnId ?? null
+  let latestRuntimeSessionId = ''
   if (!agentSessionId || !projectId) {
     const noop = async () => undefined
     return {
@@ -622,11 +746,14 @@ export function createAgentSessionEventSink(
       publishSessionInput: noop,
       observeEvent: (event) => observation.observe(event),
       observePiEvent: (event) => observation.observe(event),
+      observeCodexEvent: (event) => observation.observe(event),
+      observeCodexDiagnostic: (diagnostic) => observation.observe({ type: 'diagnostic', payload: diagnostic }),
       drain: noop,
     }
   }
   return {
     async attachSession(runtimeSessionId, workDir, model) {
+      latestRuntimeSessionId = runtimeSessionId
       try {
         await connection.openAgentSession(projectId!, agentSessionId, { workDir }, signal)
         await connection.attachAgentSession(
@@ -753,6 +880,73 @@ export function createAgentSessionEventSink(
           })
         })
     },
+    observeCodexEvent(event) {
+      observation.observe(event)
+      pending = pending
+        .then(() =>
+          connection
+            .agentSessionRuntimeEvents(
+              projectId!,
+              agentSessionId,
+              {
+                workId: work.workId,
+                workType: work.workType,
+                stage: work.stage,
+                runtimeSessionId: event.runtimeSessionId,
+                agentTurnId,
+                runtimeEvents: [
+                  {
+                    type: event.type,
+                    payload: agentTurnId ? { ...event.payload, turnId: agentTurnId } : event.payload,
+                  },
+                ],
+              },
+              deliverySignal(),
+            )
+            .then(() => undefined),
+        )
+        .catch((error) => {
+          log.error('agent-session Codex runtime event failed', {
+            job: work.agentJobId,
+            session: agentSessionId,
+            exception: error,
+          })
+        })
+    },
+    observeCodexDiagnostic(diagnostic) {
+      const runtimeSessionId = latestRuntimeSessionId
+      observation.observe({ type: 'diagnostic', payload: diagnostic })
+      pending = pending
+        .then(() =>
+          connection
+            .agentSessionRuntimeEvents(
+              projectId!,
+              agentSessionId,
+              {
+                workId: work.workId,
+                workType: work.workType,
+                stage: work.stage,
+                runtimeSessionId,
+                agentTurnId,
+                runtimeEvents: [
+                  {
+                    type: 'diagnostic',
+                    payload: agentTurnId ? { ...diagnostic, turnId: agentTurnId } : diagnostic,
+                  },
+                ],
+              },
+              deliverySignal(),
+            )
+            .then(() => undefined),
+        )
+        .catch((error) => {
+          log.error('agent-session Codex diagnostic event failed', {
+            job: work.agentJobId,
+            session: agentSessionId,
+            exception: error,
+          })
+        })
+    },
     async drain() {
       const completed = await boundedWait(() => pending, AGENT_EVENT_DRAIN_TIMEOUT_MS)
       if (!completed) {
@@ -769,7 +963,7 @@ export function createAgentSessionEventSink(
 export function failureResult(
   code: string,
   message: string,
-  runtime: 'opencode' | 'pi' = 'opencode',
+  runtime: 'opencode' | 'pi' | 'codex' = 'opencode',
   diagnostics?: readonly { code: string; message: string }[],
 ): WorkItemResult {
   return {
@@ -784,7 +978,7 @@ export function failureResult(
 function buildAgentJobOutput(
   ok: boolean,
   runtimeSessionId: string | null,
-  runtime: 'opencode' | 'pi',
+  runtime: 'opencode' | 'pi' | 'codex',
   model: string | null,
   variant: string | null,
   text: string | null,
@@ -854,6 +1048,53 @@ export function projectTurnToWorkItemResult(
     status: 'completed',
     message: 'AgentJob completed',
     output,
+    exitCode: 0,
+  }
+}
+
+export function projectCodexTurnToWorkItemResult(
+  result: CodexResult<CodexTurnResult>,
+  model: string | null,
+  variant: string | null,
+): WorkItemResult {
+  if (!result.ok) {
+    const error = result.error
+    const diagnostics = [...error.diagnostics, ...result.diagnostics]
+    return {
+      status: 'failed',
+      message: error.message,
+      error: {
+        code: mapRuntimeErrorKind('codex', error.kind, diagnostics),
+        message: error.message,
+      },
+      output: buildAgentJobOutput(
+        false,
+        null,
+        'codex',
+        model,
+        variant,
+        null,
+        error.message,
+        diagnostics,
+        error.kind === 'missing-session' ? 'reset' : undefined,
+      ),
+      exitCode: 1,
+    }
+  }
+  const facts = result.value.facts
+  return {
+    status: 'completed',
+    message: 'AgentJob completed',
+    output: buildAgentJobOutput(
+      true,
+      facts.runtimeSessionId,
+      'codex',
+      model,
+      variant,
+      facts.finalAssistantText,
+      null,
+      result.value.diagnostics,
+    ),
     exitCode: 0,
   }
 }

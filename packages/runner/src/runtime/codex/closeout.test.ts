@@ -193,8 +193,8 @@ describe('Codex scheduleCloseoutWarning', () => {
     expect(call.method).toBe('turn/steer')
     expect(call.params).toEqual({
       threadId: THREAD_ID,
-      turnId: TURN_ID,
-      input: [{ type: 'text', text: CODEX_CLOSEOUT_WARNING_TEXT }],
+      expectedTurnId: TURN_ID,
+      input: [{ type: 'text', text: CODEX_CLOSEOUT_WARNING_TEXT, text_elements: [] }],
     })
     handle.dispose()
   })

@@ -3,21 +3,19 @@
  *
  * The handshake runs once per app-server generation, immediately
  * after the spawned child process is alive. It sends `initialize`
- * with no experimental client capabilities, requires the response's
- * `codexHome` to equal the managed state path, then sends
- * `initialized` to complete the handshake. No further request is
- * admitted before initialization completes; the readiness gate
- * consumes the result.
+ * with the required client identity and no experimental client capabilities,
+ * requires the response's `codexHome` to equal the managed state path,
+ * then sends `initialized` to complete the handshake. No further request
+ * is admitted before initialization completes; the readiness gate consumes
+ * the result.
  *
- * The handshake is intentionally narrow: `initialize` carries no
- * capability negotiation, no `clientInfo` shape beyond the locked
- * compatibility test's narrow allowance, and no experimental fields.
- * Experimental APIs are rejected by the protocol-subset lock, not
- * by this module.
+ * The handshake is intentionally narrow: `initialize` carries the required
+ * `clientInfo` identity and a null capabilities value. It does not opt into
+ * experimental APIs; those are rejected by the protocol-subset lock.
  */
 
 import type { CodexDiagnostic, CodexResult } from './types.js'
-import { isCodexInitializeResult, type CodexInitializeResult } from './protocol-types.js'
+import { CODEX_INITIALIZE_PARAMS, isCodexInitializeResult, type CodexInitializeResult } from './protocol-types.js'
 import { normalizeIncompatibleRuntimeCodex, normalizeUnavailableRuntimeCodex } from './errors.js'
 import { redactCodexCredentialString } from './credential.js'
 
@@ -102,7 +100,10 @@ export async function performCodexInitialization(
       : setTimeout(callback, options.startupTimeoutMs)
   })
   try {
-    response = await Promise.race([transport.send({ id: 1, method: 'initialize', params: {} }), startupTimeout])
+    response = await Promise.race([
+      transport.send({ id: 1, method: 'initialize', params: CODEX_INITIALIZE_PARAMS }),
+      startupTimeout,
+    ])
   } catch (cause) {
     const message = cause instanceof Error ? redactCodexCredentialString(cause.message) : 'initialize request rejected'
     const timedOut = message.includes('initialization exceeded')
@@ -121,7 +122,7 @@ export async function performCodexInitialization(
     }
   }
   const result = initializeResult(response)
-  if (result === null || result.protocolVersion !== 'v2') {
+  if (result === null || (result.protocolVersion !== undefined && result.protocolVersion !== 'v2')) {
     const diagnostic: CodexDiagnostic = {
       severity: 'error',
       code: 'incompatible-runtime',
@@ -173,7 +174,7 @@ export async function performCodexInitialization(
     ok: true,
     value: {
       handshakeComplete: true,
-      protocolVersion: result.protocolVersion,
+      protocolVersion: result.protocolVersion ?? 'v2',
       codexHome: result.codexHome,
       userAgent: result.userAgent ?? null,
       diagnostics,

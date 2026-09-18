@@ -119,7 +119,6 @@ describe('createSpawnedCodexServer', () => {
     expect(spawner.child.writes).toHaveLength(1)
     const written = JSON.parse(spawner.child.writes[0]!)
     expect(written).toMatchObject({
-      jsonrpc: '2.0',
       id: 1,
       method: 'thread/start',
       params: { cwd: '/work' },
@@ -206,7 +205,7 @@ describe('createSpawnedCodexServer', () => {
     expect(ok).toBe(true)
     expect(spawner.child.writes).toHaveLength(1)
     const written = JSON.parse(spawner.child.writes[0]!)
-    expect(written).toMatchObject({ jsonrpc: '2.0', method: 'initialized' })
+    expect(written).toMatchObject({ method: 'initialized' })
     expect(written.id).toBeUndefined()
     await shutdownHandle(handle, spawner.child)
   })
@@ -230,7 +229,6 @@ describe('createSpawnedCodexServer', () => {
     handle.denyServerRequest(42, 'denied-by-mohist')
     const denied = JSON.parse(spawner.child.writes[spawner.child.writes.length - 1]!)
     expect(denied).toMatchObject({
-      jsonrpc: '2.0',
       id: 42,
       result: { ok: false, denied: true, reason: 'denied-by-mohist' },
     })

@@ -168,7 +168,8 @@ export class CodexCatalogManager implements CodexCatalogRefreshStore {
 
     for (let page = 0; page < this.maxPages; page += 1) {
       const params: CodexModelListParams = {
-        pageSize: this.pageSize,
+        limit: this.pageSize,
+        includeHidden: false,
         ...(cursor === null ? {} : { cursor }),
       }
       let response: unknown
@@ -382,11 +383,23 @@ function nativeModel(value: unknown): NativeModel | null {
     id?: unknown
     displayName?: unknown
     reasoningEfforts?: unknown
+    supportedReasoningEfforts?: unknown
     defaultReasoningEffort?: unknown
   }
   if (typeof candidate.id !== 'string' || candidate.id.length === 0) return null
-  const reasoningEfforts = Array.isArray(candidate.reasoningEfforts)
-    ? candidate.reasoningEfforts.filter((effort): effort is string => typeof effort === 'string')
+  const nativeEfforts = candidate.reasoningEfforts ?? candidate.supportedReasoningEfforts
+  const reasoningEfforts = Array.isArray(nativeEfforts)
+    ? nativeEfforts.flatMap((effort): string[] => {
+        if (typeof effort === 'string') return [effort]
+        if (
+          effort &&
+          typeof effort === 'object' &&
+          typeof (effort as { reasoningEffort?: unknown }).reasoningEffort === 'string'
+        ) {
+          return [(effort as { reasoningEffort: string }).reasoningEffort]
+        }
+        return []
+      })
     : []
   return {
     id: candidate.id,
@@ -522,14 +535,22 @@ function readOptionalCanonicalEffort(value: unknown): CodexResult<CodexCanonical
 }
 
 function modelListResult(value: unknown): CodexModelListResult | null {
-  if (isCodexModelListResult(value)) return value.result
-  if (!value || typeof value !== 'object') return null
-  const envelope: CodexJsonRpcSuccess<CodexModelListResult> = {
-    jsonrpc: '2.0',
-    id: 0,
-    result: value as CodexModelListResult,
+  if (isCodexModelListResult(value)) {
+    const result = value.result
+    if (Array.isArray(result.data) && !Array.isArray(result.models)) {
+      return { ...result, models: result.data, complete: result.complete ?? result.nextCursor == null }
+    }
+    return result
   }
-  return isCodexModelListResult(envelope) ? envelope.result : null
+  if (!value || typeof value !== 'object') return null
+  const raw = value as { models?: unknown; data?: unknown; nextCursor?: unknown; complete?: unknown }
+  const models = Array.isArray(raw.models) ? raw.models : Array.isArray(raw.data) ? raw.data : null
+  if (!models) return null
+  return {
+    models: models as CodexModelListResult['models'],
+    nextCursor: typeof raw.nextCursor === 'string' ? raw.nextCursor : null,
+    complete: typeof raw.complete === 'boolean' ? raw.complete : raw.nextCursor == null,
+  }
 }
 
 function catalogDiagnostic(code: string, message: string): CodexDiagnostic {

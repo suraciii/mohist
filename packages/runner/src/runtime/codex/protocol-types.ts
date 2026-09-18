@@ -41,20 +41,21 @@
  * ignored at the consumer layer.
  */
 export interface CodexJsonRpcRequest<P = unknown> {
-  readonly jsonrpc: '2.0'
+  /** Codex app-server omits this JSON-RPC header on the stdio wire. */
+  readonly jsonrpc?: '2.0'
   readonly id: number | string
   readonly method: string
   readonly params?: P
 }
 
 export interface CodexJsonRpcSuccess<TResult = unknown> {
-  readonly jsonrpc: '2.0'
+  readonly jsonrpc?: '2.0'
   readonly id: number | string
   readonly result: TResult
 }
 
 export interface CodexJsonRpcError {
-  readonly jsonrpc: '2.0'
+  readonly jsonrpc?: '2.0'
   readonly id: number | string
   readonly error: {
     readonly code: number
@@ -64,13 +65,13 @@ export interface CodexJsonRpcError {
 }
 
 export interface CodexJsonRpcNotification<P = unknown> {
-  readonly jsonrpc: '2.0'
+  readonly jsonrpc?: '2.0'
   readonly method: string
   readonly params?: P
 }
 
 export interface CodexJsonRpcServerRequest<P = unknown> {
-  readonly jsonrpc: '2.0'
+  readonly jsonrpc?: '2.0'
   readonly id: number | string
   readonly method: string
   readonly params?: P
@@ -123,7 +124,8 @@ export function isCodexLockedMethod(method: string): method is CodexLockedMethod
  */
 export interface CodexInitializeParams {
   readonly protocolVersion?: string
-  readonly clientInfo?: { readonly name: string; readonly version: string }
+  readonly clientInfo?: { readonly name: string; readonly title?: string | null; readonly version: string }
+  readonly capabilities?: null
 }
 
 /**
@@ -131,12 +133,15 @@ export interface CodexInitializeParams {
  * path before any other request is admitted.
  */
 export interface CodexInitializeResult {
-  readonly protocolVersion: string
+  readonly protocolVersion?: string
   readonly codexHome: string
   readonly userAgent?: string
 }
 
-export const CODEX_INITIALIZE_PARAMS: CodexInitializeParams = Object.freeze({})
+export const CODEX_INITIALIZE_PARAMS: CodexInitializeParams = Object.freeze({
+  clientInfo: { name: 'mohist', title: 'Mohist', version: '0.1.0' },
+  capabilities: null,
+})
 
 /**
  * `initialized` notification — body is intentionally empty; declaring
@@ -168,7 +173,7 @@ export function isCodexInitializeResult(value: unknown): value is CodexJsonRpcSu
   const result = value.result
   if (!result || typeof result !== 'object') return false
   const candidate = result as { protocolVersion?: unknown; codexHome?: unknown; userAgent?: unknown }
-  if (typeof candidate.protocolVersion !== 'string') return false
+  if (candidate.protocolVersion !== undefined && typeof candidate.protocolVersion !== 'string') return false
   if (typeof candidate.codexHome !== 'string') return false
   if (candidate.userAgent !== undefined && typeof candidate.userAgent !== 'string') return false
   return true
@@ -193,6 +198,7 @@ export interface CodexThreadStartParams {
   readonly model?: string
   readonly reasoningEffort?: string
   readonly ephemeral?: boolean
+  /** Legacy fixture alias; official app-server uses ephemeral: false. */
   readonly persistHistory?: boolean
 }
 
@@ -246,7 +252,7 @@ export function isCodexThreadResumeRequest(value: unknown): value is CodexJsonRp
 
 export interface CodexThreadCompactStartParams {
   readonly threadId: string
-  readonly cwd: string
+  readonly cwd?: string
 }
 
 export interface CodexThreadCompactStartResult {
@@ -261,7 +267,7 @@ export function isCodexThreadCompactStartRequest(
   const params = value.params
   if (!params || typeof params !== 'object') return false
   const candidate = params as { threadId?: unknown; cwd?: unknown }
-  return typeof candidate.threadId === 'string' && typeof candidate.cwd === 'string'
+  return typeof candidate.threadId === 'string' && (candidate.cwd === undefined || typeof candidate.cwd === 'string')
 }
 
 // ---------------------------------------------------------------------------
@@ -271,18 +277,20 @@ export function isCodexThreadCompactStartRequest(
 export interface CodexTurnStartParams {
   readonly threadId: string
   readonly input: ReadonlyArray<CodexTurnInputItem>
-  readonly model?: string
-  readonly reasoningEffort?: string
+  readonly clientUserMessageId?: string | null
+  readonly model?: string | null
+  /** Official v2 spelling; reasoningEffort remains accepted for locked fixtures. */
+  readonly effort?: string | null
+  readonly reasoningEffort?: string | null
   /**
    * Mohist SessionInput ID for correlation only — not a provider
    * idempotency key. The runtime never resubmits an unconfirmed input
    * even with the same value.
    */
-  readonly clientUserMessageId?: string
 }
 
 export type CodexTurnInputItem =
-  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'text'; readonly text: string; readonly text_elements?: readonly unknown[] }
   | { readonly type: 'image'; readonly url: string; readonly mime: string; readonly filename?: string }
   | { readonly type: 'localImage'; readonly path: string }
 
@@ -307,12 +315,18 @@ export function isCodexTurnInputItem(value: unknown): value is CodexTurnInputIte
   const candidate = value as {
     type?: unknown
     text?: unknown
+    text_elements?: unknown
     url?: unknown
     mime?: unknown
     filename?: unknown
     path?: unknown
   }
-  if (candidate.type === 'text') return typeof candidate.text === 'string'
+  if (candidate.type === 'text') {
+    return (
+      typeof candidate.text === 'string' &&
+      (candidate.text_elements === undefined || Array.isArray(candidate.text_elements))
+    )
+  }
   if (candidate.type === 'image') {
     if (typeof candidate.url !== 'string') return false
     if (typeof candidate.mime !== 'string') return false
@@ -325,7 +339,9 @@ export function isCodexTurnInputItem(value: unknown): value is CodexTurnInputIte
 
 export interface CodexTurnSteerParams {
   readonly threadId: string
-  readonly turnId: string
+  readonly turnId?: string
+  readonly expectedTurnId?: string
+  readonly clientUserMessageId?: string | null
   readonly input: ReadonlyArray<CodexTurnInputItem>
 }
 
@@ -333,9 +349,9 @@ export function isCodexTurnSteerRequest(value: unknown): value is CodexJsonRpcRe
   if (!isCodexRequestEnvelope(value) || value.method !== 'turn/steer') return false
   const params = value.params
   if (!params || typeof params !== 'object') return false
-  const candidate = params as { threadId?: unknown; turnId?: unknown; input?: unknown }
+  const candidate = params as { threadId?: unknown; turnId?: unknown; expectedTurnId?: unknown; input?: unknown }
   if (typeof candidate.threadId !== 'string') return false
-  if (typeof candidate.turnId !== 'string') return false
+  if (typeof candidate.turnId !== 'string' && typeof candidate.expectedTurnId !== 'string') return false
   if (!Array.isArray(candidate.input)) return false
   return candidate.input.every(isCodexTurnInputItem)
 }
@@ -378,6 +394,8 @@ export function isCodexTurnInterruptResult(value: unknown): value is CodexJsonRp
 export interface CodexModelListParams {
   readonly cursor?: string | null
   readonly pageSize?: number
+  readonly limit?: number | null
+  readonly includeHidden?: boolean | null
 }
 
 export interface CodexModelDescriptor {
@@ -392,15 +410,17 @@ export interface CodexModelListResult {
   readonly models: readonly CodexModelDescriptor[]
   readonly nextCursor?: string | null
   readonly complete: boolean
+  /** Official app-server v2 calls this field data. */
+  readonly data?: readonly CodexModelDescriptor[]
 }
 
 export function isCodexModelListResult(value: unknown): value is CodexJsonRpcSuccess<CodexModelListResult> {
   if (!isCodexSuccessEnvelope(value)) return false
   const result = value.result
   if (!result || typeof result !== 'object') return false
-  const candidate = result as { models?: unknown; nextCursor?: unknown; complete?: unknown }
-  if (!Array.isArray(candidate.models)) return false
-  if (typeof candidate.complete !== 'boolean') return false
+  const candidate = result as { models?: unknown; data?: unknown; nextCursor?: unknown; complete?: unknown }
+  if (!Array.isArray(candidate.models) && !Array.isArray(candidate.data)) return false
+  if (candidate.complete !== undefined && typeof candidate.complete !== 'boolean') return false
   if (candidate.nextCursor !== undefined && candidate.nextCursor !== null && typeof candidate.nextCursor !== 'string') {
     return false
   }
@@ -425,7 +445,7 @@ export interface CodexServerRequestParams {
 export function isCodexServerRequest(value: unknown): value is CodexJsonRpcServerRequest<CodexServerRequestParams> {
   if (!value || typeof value !== 'object') return false
   const candidate = value as { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown }
-  if (candidate.jsonrpc !== '2.0') return false
+  if (candidate.jsonrpc !== undefined && candidate.jsonrpc !== '2.0') return false
   if (typeof candidate.method !== 'string') return false
   if (typeof candidate.id !== 'string' && typeof candidate.id !== 'number') return false
   if (candidate.params !== undefined && (candidate.params === null || typeof candidate.params !== 'object')) {
@@ -439,7 +459,7 @@ export function isCodexServerRequest(value: unknown): value is CodexJsonRpcServe
  * unknown types stay as diagnostics and never change execution state.
  */
 export type CodexItemEvent =
-  | { readonly type: 'agentMessage'; readonly text: string }
+  | { readonly type: 'agentMessage'; readonly text: string; readonly delta?: boolean }
   | { readonly type: 'reasoning'; readonly summary: string }
   | { readonly type: 'commandExecution'; readonly command: string; readonly status: string }
   | { readonly type: 'fileChange'; readonly path: string; readonly kind: 'create' | 'modify' | 'delete' }
@@ -504,7 +524,7 @@ export function isCodexThreadStatusEvent(value: unknown): value is CodexThreadSt
 function isCodexRequestEnvelope(value: unknown): value is CodexJsonRpcRequest {
   if (!value || typeof value !== 'object') return false
   const candidate = value as { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown }
-  if (candidate.jsonrpc !== '2.0') return false
+  if (candidate.jsonrpc !== undefined && candidate.jsonrpc !== '2.0') return false
   if (typeof candidate.method !== 'string') return false
   if (typeof candidate.id !== 'string' && typeof candidate.id !== 'number') return false
   if (candidate.params !== undefined && (candidate.params === null || typeof candidate.params !== 'object')) {
@@ -516,7 +536,7 @@ function isCodexRequestEnvelope(value: unknown): value is CodexJsonRpcRequest {
 function isCodexSuccessEnvelope(value: unknown): value is CodexJsonRpcSuccess {
   if (!value || typeof value !== 'object') return false
   const candidate = value as { jsonrpc?: unknown; id?: unknown; result?: unknown }
-  if (candidate.jsonrpc !== '2.0') return false
+  if (candidate.jsonrpc !== undefined && candidate.jsonrpc !== '2.0') return false
   if (typeof candidate.id !== 'string' && typeof candidate.id !== 'number') return false
   return 'result' in candidate
 }

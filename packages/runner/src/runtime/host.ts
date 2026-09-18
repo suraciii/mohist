@@ -217,6 +217,7 @@ export class RunnerHost {
             agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
             openCodeRuntime: () => this.openCodeRuntime,
             piRuntime: () => this.piRuntime,
+            codexRuntime: () => this.codexRuntime,
             connection: this.connection,
             runnerId: options.runnerId,
             runnerRoot: options.runnerRoot,
@@ -228,6 +229,7 @@ export class RunnerHost {
             followupTargetResolver: (target) => resolveFollowupTarget(this.options, target),
             openCodeRuntime: () => this.openCodeRuntime,
             piRuntime: () => this.piRuntime,
+            codexRuntime: () => this.codexRuntime,
             agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
             managerExecutionRegistry: this.managerExecutionRegistry,
             onManagerExecutionFinished: (executionId) => this.revokeManagerExecution(executionId),
@@ -237,6 +239,7 @@ export class RunnerHost {
               {
                 openCode: () => this.openCodeRuntime,
                 pi: () => this.piRuntime,
+                codex: () => this.codexRuntime,
               },
               this.agentSessionRuntimeEventQueue,
             ),
@@ -499,10 +502,10 @@ export class RunnerHost {
       const codexHome = join(this.options.runnerRoot, '.mohist', 'codex')
       this.codexRuntime = factory({
         codexHome,
-        cwd: process.cwd(),
+        cwd: this.options.runnerRoot,
         readinessProbe: createDefaultCodexReadinessProbe({
           managedCodexHome: codexHome,
-          cwd: process.cwd(),
+          cwd: this.options.runnerRoot,
         }),
         ...(this.options.runtimeShutdownTimeoutMs !== undefined
           ? { runtimeShutdownTimeoutMs: this.options.runtimeShutdownTimeoutMs }
@@ -543,6 +546,7 @@ export class RunnerHost {
         {
           openCode: () => this.openCodeRuntime,
           pi: () => this.piRuntime,
+          codex: () => this.codexRuntime,
         },
         this.options.runnerRoot,
         this.skillResolver,

@@ -39,7 +39,12 @@ import type {
 } from './types.js'
 import { defaultCodexClock } from './runtime-clock.js'
 import type { CodexServerFactory, CodexServerHandle } from './server-process.js'
-import { normalizeUnavailableRuntimeCodex } from './errors.js'
+import {
+  normalizeInvalidInputCodex,
+  normalizeTurnFailedCodex,
+  normalizeUnavailableRuntimeCodex,
+  normalizeUnknownCodex,
+} from './errors.js'
 import { redactCodexCredentialString } from './credential.js'
 import {
   createCodexModelCatalogLoader,
@@ -48,6 +53,9 @@ import {
 } from './model-catalog.js'
 import { type CodexReadinessProbe, evaluateCodexReadiness } from './readiness.js'
 import { codexInitializationTransportFromHandle, performCodexInitialization } from './initialization.js'
+import { resumeThread, startThread, type CodexThreadTransport } from './thread.js'
+import { driveTurnToCompletion, submitTurnStart, type CodexTurnEventObserver, type CodexTurnTransport } from './turn.js'
+import { assignCodexRequestId, nextCodexRequestId } from './server-process.js'
 
 export interface CodexRuntimeDeps {
   readonly codexHome: string
@@ -108,6 +116,9 @@ export class CodexRuntime {
   private generationCounter = 0
   private readonly readinessProbe: CodexReadinessProbe | null
   private catalogManager: CodexCatalogManager | null = null
+  private readonly knownThreads = new Set<string>()
+  private readonly activeTurns = new Map<string, string>()
+  private nextRequestId = 1
 
   constructor(deps: CodexRuntimeDeps) {
     this.deps = deps
@@ -197,27 +208,109 @@ export class CodexRuntime {
    * consumer integration is in place.
    */
   async runTurn(
-    _request: CodexTurnRequest,
-    _signal: AbortSignal = new AbortController().signal,
+    request: CodexTurnRequest,
+    signal: AbortSignal = new AbortController().signal,
+    observer?: CodexTurnEventObserver,
   ): Promise<CodexResult<CodexTurnResult>> {
-    if (!this.state.ready) {
+    if (!this.state.ready || !this.server.handle || this.server.closed) {
       const error = normalizeUnavailableRuntimeCodex(this.state.diagnostic ? [this.state.diagnostic] : [])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
-    return {
-      ok: false,
-      error: {
-        kind: 'unavailable-runtime',
-        message: 'Codex turn execution is not yet wired (T-005 pending)',
-        diagnostics: [
-          {
-            severity: 'error',
-            code: 'not-implemented',
-            message: 'Codex Turn execution lands in T-005',
-          },
-        ],
+    if (!request.clientUserMessageId || request.clientUserMessageId.trim().length === 0) {
+      const error = normalizeInvalidInputCodex('Codex turn requires the Mohist SessionInput ID as clientUserMessageId')
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    if (signal.aborted) {
+      const error = normalizeTurnFailedCodex('Codex turn was aborted before submission')
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+
+    const configuration = this.validateTurnConfiguration({
+      model: request.options?.model ?? null,
+      reasoningEffort: request.options?.reasoningEffort ?? null,
+      variant: request.options?.variant ?? null,
+      unknownKeys: request.options?.unknownKeys,
+    })
+    if (!configuration.ok) return configuration
+
+    const handle = this.server.handle
+    const threadTransport: CodexThreadTransport = handle
+    const turnTransport: CodexTurnTransport = handle
+    let threadId = request.target.runtimeSessionId
+    let workDir = request.target.workDir
+
+    if (threadId === null) {
+      const created = await startThread(
+        threadTransport,
+        {
+          workDir,
+          model: configuration.value.model,
+          reasoningEffort: configuration.value.reasoningEffort,
+        },
+        this.takeRequestId(),
+      )
+      if (!created.ok) return created as CodexResult<CodexTurnResult>
+      threadId = created.value.threadId
+      workDir = created.value.workDir
+      this.knownThreads.add(threadId)
+      try {
+        await observer?.onSessionReady?.({ runtimeSessionId: threadId, workDir })
+      } catch (cause) {
+        const error = normalizeTurnFailedCodex(
+          `Codex Session binding could not be persisted before turn/start: ${cause instanceof Error ? cause.message : String(cause)}`,
+        )
+        return { ok: false, error, diagnostics: error.diagnostics }
+      }
+    } else {
+      if (!this.knownThreads.has(threadId)) {
+        const resumed = await resumeThread(threadTransport, threadId, workDir, this.takeRequestId())
+        if (!resumed.ok) return resumed as CodexResult<CodexTurnResult>
+        workDir = resumed.value.workDir
+        this.knownThreads.add(threadId)
+      }
+      try {
+        await observer?.onSessionReady?.({ runtimeSessionId: threadId, workDir })
+      } catch (cause) {
+        const error = normalizeTurnFailedCodex(
+          `Codex Session binding could not be confirmed before turn/start: ${cause instanceof Error ? cause.message : String(cause)}`,
+        )
+        return { ok: false, error, diagnostics: error.diagnostics }
+      }
+    }
+
+    const submission = await submitTurnStart(
+      turnTransport,
+      {
+        threadId,
+        workDir,
+        prompt: request.prompt,
+        fileParts: request.fileParts ?? null,
+        clientUserMessageId: request.clientUserMessageId,
+        resolved: configuration.value,
       },
-      diagnostics: [],
+      this.takeRequestId(),
+    )
+    if (!submission.ok) return submission as CodexResult<CodexTurnResult>
+
+    this.activeTurns.set(threadId, submission.value.turnId)
+    try {
+      const completion = await driveTurnToCompletion({
+        transport: turnTransport,
+        runtimeSessionId: threadId,
+        workDir,
+        threadId,
+        turnId: submission.value.turnId,
+        deadlineMs: request.deadlineMs ?? null,
+        observer,
+        nextRequestId: () => this.takeRequestId(),
+      })
+      if (signal.aborted && completion.ok) {
+        const error = normalizeTurnFailedCodex('Codex turn completed after its owning execution was aborted')
+        return { ok: false, error, diagnostics: error.diagnostics }
+      }
+      return completion
+    } finally {
+      if (this.activeTurns.get(threadId) === submission.value.turnId) this.activeTurns.delete(threadId)
     }
   }
 
@@ -225,25 +318,102 @@ export class CodexRuntime {
    * Follow-up on an existing Codex Thread. Full implementation lands
    * in T-005 / T-008.
    */
-  async followup(_request: CodexFollowupRequest): Promise<CodexResult<CodexFollowupResult>> {
-    if (!this.state.ready) {
+  async followup(
+    request: CodexFollowupRequest,
+    observer?: CodexTurnEventObserver,
+    signal?: AbortSignal,
+  ): Promise<CodexResult<CodexFollowupResult>> {
+    if (!this.state.ready || !this.server.handle) {
       const error = normalizeUnavailableRuntimeCodex(this.state.diagnostic ? [this.state.diagnostic] : [])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
-    return {
-      ok: false,
-      error: {
-        kind: 'unavailable-runtime',
-        message: 'Codex follow-up is not yet wired (T-005 / T-008 pending)',
-        diagnostics: [
-          {
-            severity: 'error',
-            code: 'not-implemented',
-            message: 'Codex follow-up lands in T-005 / T-008',
+    if (!request.prompt || request.prompt.trim().length === 0) {
+      const error = normalizeInvalidInputCodex('Codex follow-up prompt must be non-empty')
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    if (!request.target.runtimeSessionId) {
+      const error = normalizeInvalidInputCodex('Codex follow-up requires a bound Session')
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    if (!request.clientUserMessageId) {
+      const error = normalizeInvalidInputCodex('Codex follow-up requires the Mohist SessionInput ID')
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    if (signal?.aborted) {
+      const error = normalizeTurnFailedCodex('Codex follow-up was interrupted before admission')
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    const configuration = this.validateTurnConfiguration({
+      model: request.options?.model ?? null,
+      reasoningEffort: request.options?.reasoningEffort ?? null,
+      variant: request.options?.variant ?? null,
+    })
+    if (!configuration.ok) return configuration as CodexResult<CodexFollowupResult>
+
+    const threadId = request.target.runtimeSessionId
+    const activeTurnId = this.activeTurns.get(threadId)
+    if (activeTurnId?.startsWith('__compaction_pending_')) {
+      const error = normalizeTurnFailedCodex(
+        'Codex compact is still running; follow-up must wait for the compaction Turn to finish',
+      )
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    if (activeTurnId) {
+      try {
+        const response = await this.server.handle.send({
+          id: this.takeRequestId(),
+          method: 'turn/steer',
+          params: {
+            threadId,
+            input: [
+              { type: 'text', text: request.prompt, text_elements: [] },
+              ...(request.fileParts ?? []).map((part) => ({
+                type: 'image' as const,
+                mime: part.mime,
+                url: part.url,
+                filename: part.filename,
+              })),
+            ],
+            expectedTurnId: activeTurnId,
+            clientUserMessageId: request.clientUserMessageId,
           },
-        ],
+        })
+        if (!response) throw new Error('Codex turn/steer returned an empty response')
+        return {
+          ok: true,
+          value: {
+            facts: { runtimeSessionId: threadId, workDir: request.target.workDir, finalAssistantText: null },
+            diagnostics: [],
+          },
+          diagnostics: [],
+        }
+      } catch (cause) {
+        const error = normalizeUnknownCodex(
+          `Codex turn/steer response was not observed; the follow-up outcome is unknown: ${cause instanceof Error ? cause.message : String(cause)}`,
+        )
+        return { ok: false, error, diagnostics: error.diagnostics }
+      }
+    }
+
+    const result = await this.runTurn(
+      {
+        target: request.target,
+        prompt: request.prompt,
+        clientUserMessageId: request.clientUserMessageId,
+        fileParts: request.fileParts ?? null,
+        options: request.options ?? null,
       },
-      diagnostics: [],
+      signal,
+      observer,
+    )
+    if (!result.ok) return result as CodexResult<CodexFollowupResult>
+    return {
+      ok: true,
+      value: {
+        facts: { ...result.value.facts, finalAssistantText: result.value.facts.finalAssistantText },
+        diagnostics: result.value.diagnostics,
+      },
+      diagnostics: result.diagnostics,
     }
   }
 
@@ -251,23 +421,57 @@ export class CodexRuntime {
    * Cancel an active Codex Turn. Full implementation lands in T-005 /
    * T-008.
    */
-  async cancel(_request: CodexCancelRequest): Promise<CodexResult<CodexCancelResult>> {
-    if (!this.state.ready) {
+  async cancel(request: CodexCancelRequest): Promise<CodexResult<CodexCancelResult>> {
+    if (!this.state.ready || !this.server.handle) {
       const error = normalizeUnavailableRuntimeCodex(this.state.diagnostic ? [this.state.diagnostic] : [])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
-    return {
-      ok: false,
-      error: {
-        kind: 'unavailable-runtime',
-        message: 'Codex cancel is not yet wired (T-005 / T-008 pending)',
+    const threadId = request.target.runtimeSessionId
+    if (!threadId) {
+      const error = normalizeInvalidInputCodex('Codex cancel requires a bound Session')
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    const turnId = this.activeTurns.get(threadId)
+    if (!turnId || turnId.startsWith('__compaction_pending_')) {
+      return {
+        ok: true,
+        value: {
+          facts: { runtimeSessionId: threadId, workDir: request.target.workDir, cancelled: true, stopConfirmed: false },
+          diagnostics: [
+            { severity: 'info', code: 'cancel-idle', message: 'Codex cancel found no active Turn to interrupt' },
+          ],
+        },
         diagnostics: [
-          {
-            severity: 'error',
-            code: 'not-implemented',
-            message: 'Codex cancel lands in T-005 / T-008',
-          },
+          { severity: 'info', code: 'cancel-idle', message: 'Codex cancel found no active Turn to interrupt' },
         ],
+      }
+    }
+    try {
+      await this.server.handle.send({
+        id: this.takeRequestId(),
+        method: 'turn/interrupt',
+        params: { threadId, turnId },
+      })
+    } catch (cause) {
+      const diagnostic = {
+        severity: 'warning' as const,
+        code: 'interrupt-unconfirmed',
+        message: cause instanceof Error ? cause.message : String(cause),
+      }
+      return {
+        ok: true,
+        value: {
+          facts: { runtimeSessionId: threadId, workDir: request.target.workDir, cancelled: true, stopConfirmed: false },
+          diagnostics: [diagnostic],
+        },
+        diagnostics: [diagnostic],
+      }
+    }
+    return {
+      ok: true,
+      value: {
+        facts: { runtimeSessionId: threadId, workDir: request.target.workDir, cancelled: true, stopConfirmed: false },
+        diagnostics: [],
       },
       diagnostics: [],
     }
@@ -277,25 +481,87 @@ export class CodexRuntime {
    * Idle-only context compaction via `thread/compact/start`. Full
    * implementation lands in T-008.
    */
-  async compact(_request: CodexCompactRequest): Promise<CodexResult<CodexCompactResult>> {
-    if (!this.state.ready) {
+  async compact(
+    request: CodexCompactRequest,
+    observer?: CodexTurnEventObserver,
+  ): Promise<CodexResult<CodexCompactResult>> {
+    if (!this.state.ready || !this.server.handle) {
       const error = normalizeUnavailableRuntimeCodex(this.state.diagnostic ? [this.state.diagnostic] : [])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
-    return {
-      ok: false,
-      error: {
-        kind: 'unavailable-runtime',
-        message: 'Codex compact is not yet wired (T-008 pending)',
-        diagnostics: [
-          {
-            severity: 'error',
-            code: 'not-implemented',
-            message: 'Codex compact lands in T-008',
-          },
-        ],
+    const threadId = request.target.runtimeSessionId
+    if (!threadId) {
+      const error = normalizeInvalidInputCodex('Codex compact requires a bound Session')
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    if (this.activeTurns.has(threadId)) {
+      const error = normalizeTurnFailedCodex('Codex compact is only available while the Thread is idle')
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    let response: unknown
+    try {
+      response = await this.server.handle.send({
+        id: this.takeRequestId(),
+        method: 'thread/compact/start',
+        params: { threadId },
+      })
+    } catch (cause) {
+      const error = normalizeUnknownCodex(
+        `Codex compact start response was not observed; the compaction outcome is unknown: ${cause instanceof Error ? cause.message : String(cause)}`,
+      )
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    const compact = readCompactStartResult(response, threadId)
+    if (!compact || compact.threadId !== threadId) {
+      const error = normalizeUnknownCodex(
+        'Codex compact start outcome is unknown because its response shape could not be verified',
+      )
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    let sawCompaction = false
+    const compactObserver: CodexTurnEventObserver = {
+      onSessionReady: observer?.onSessionReady,
+      onDiagnostic: observer?.onDiagnostic,
+      onEvent: (event) => {
+        sawCompaction ||= event.type === 'compaction'
+        observer?.onEvent?.(event)
       },
-      diagnostics: [],
+    }
+    const activeTurnKey = compact.turnId ?? `__compaction_pending_${this.takeRequestId()}`
+    this.activeTurns.set(threadId, activeTurnKey)
+    try {
+      const completion = await driveTurnToCompletion({
+        transport: this.server.handle,
+        runtimeSessionId: threadId,
+        workDir: request.target.workDir,
+        threadId,
+        turnId: compact.turnId,
+        deadlineMs: null,
+        observer: compactObserver,
+        nextRequestId: () => this.takeRequestId(),
+        onTurnIdDiscovered: (turnId) => this.activeTurns.set(threadId, turnId),
+      })
+      if (!completion.ok) return completion as CodexResult<CodexCompactResult>
+      if (!sawCompaction) {
+        const error = normalizeTurnFailedCodex('Codex compact completed without a contextCompaction item')
+        return { ok: false, error, diagnostics: error.diagnostics }
+      }
+      return {
+        ok: true,
+        value: {
+          facts: { runtimeSessionId: threadId, workDir: request.target.workDir },
+          diagnostics: completion.value.diagnostics,
+        },
+        diagnostics: completion.diagnostics,
+      }
+    } finally {
+      if (
+        this.activeTurns.get(threadId) === activeTurnKey ||
+        compact.turnId === null ||
+        this.activeTurns.get(threadId) === compact.turnId
+      ) {
+        this.activeTurns.delete(threadId)
+      }
     }
   }
 
@@ -303,25 +569,89 @@ export class CodexRuntime {
    * Reset creates an empty Thread + atomic binding CAS. Full
    * implementation lands in T-008.
    */
-  async reset(_request: CodexResetRequest): Promise<CodexResult<CodexResetResult>> {
-    if (!this.state.ready) {
+  async reset(request: CodexResetRequest): Promise<CodexResult<CodexResetResult>> {
+    if (!this.state.ready || !this.server.handle) {
       const error = normalizeUnavailableRuntimeCodex(this.state.diagnostic ? [this.state.diagnostic] : [])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
+    if (request.target.runtimeSessionId && this.activeTurns.has(request.target.runtimeSessionId)) {
+      const error = normalizeTurnFailedCodex('Codex reset is only available while the Thread is idle')
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    const created = await startThread(
+      this.server.handle,
+      { workDir: request.target.workDir, model: null, reasoningEffort: null },
+      this.takeRequestId(),
+    )
+    if (!created.ok) return created as CodexResult<CodexResetResult>
+    this.knownThreads.add(created.value.threadId)
     return {
-      ok: false,
-      error: {
-        kind: 'unavailable-runtime',
-        message: 'Codex reset is not yet wired (T-008 pending)',
-        diagnostics: [
-          {
-            severity: 'error',
-            code: 'not-implemented',
-            message: 'Codex reset lands in T-008',
-          },
-        ],
+      ok: true,
+      value: {
+        facts: { runtimeSessionId: created.value.threadId, workDir: created.value.workDir },
+        diagnostics: created.value.diagnostics,
       },
-      diagnostics: [],
+      diagnostics: created.diagnostics,
+    }
+  }
+
+  async resolveSession(request: {
+    readonly target: { readonly runtimeSessionId: string; readonly workDir: string }
+  }): Promise<
+    CodexResult<{ readonly runtimeSessionId: string; readonly workDir: string; readonly activeTurn: boolean }>
+  > {
+    if (!this.state.ready || !this.server.handle) {
+      const error = normalizeUnavailableRuntimeCodex(this.state.diagnostic ? [this.state.diagnostic] : [])
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    const resumed = await resumeThread(
+      this.server.handle,
+      request.target.runtimeSessionId,
+      request.target.workDir,
+      this.takeRequestId(),
+    )
+    if (!resumed.ok)
+      return resumed as CodexResult<{
+        readonly runtimeSessionId: string
+        readonly workDir: string
+        readonly activeTurn: boolean
+      }>
+    this.knownThreads.add(resumed.value.threadId)
+    return {
+      ok: true,
+      value: {
+        runtimeSessionId: resumed.value.threadId,
+        workDir: resumed.value.workDir,
+        activeTurn: this.activeTurns.has(resumed.value.threadId),
+      },
+      diagnostics: resumed.diagnostics,
+    }
+  }
+
+  async createSession(request: {
+    readonly target: { readonly runtimeSessionId: null; readonly workDir: string }
+    readonly model?: string | null
+    readonly reasoningEffort?: string | null
+  }): Promise<CodexResult<{ readonly runtimeSessionId: string; readonly workDir: string }>> {
+    if (!this.state.ready || !this.server.handle) {
+      const error = normalizeUnavailableRuntimeCodex(this.state.diagnostic ? [this.state.diagnostic] : [])
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
+    const created = await startThread(
+      this.server.handle,
+      {
+        workDir: request.target.workDir,
+        model: request.model ?? null,
+        reasoningEffort: (request.reasoningEffort ?? null) as never,
+      },
+      this.takeRequestId(),
+    )
+    if (!created.ok) return created as CodexResult<{ readonly runtimeSessionId: string; readonly workDir: string }>
+    this.knownThreads.add(created.value.threadId)
+    return {
+      ok: true,
+      value: { runtimeSessionId: created.value.threadId, workDir: created.value.workDir },
+      diagnostics: created.diagnostics,
     }
   }
 
@@ -335,6 +665,8 @@ export class CodexRuntime {
     this.state.ready = false
     this.state.generation = null
     this.catalogManager = null
+    this.knownThreads.clear()
+    this.activeTurns.clear()
     if (options.clearDiagnostic) this.state.diagnostic = null
     const handle = this.server.handle
     this.server.unsubscribe?.()
@@ -359,6 +691,8 @@ export class CodexRuntime {
     this.state.ready = false
     this.state.diagnostic = null
     this.state.catalog = null
+    this.knownThreads.clear()
+    this.activeTurns.clear()
     if (this.server.handle && !this.server.closed) {
       await this.tearDownHandle(this.server.handle)
     }
@@ -524,11 +858,19 @@ export class CodexRuntime {
     this.state.ready = false
     this.state.generation = null
     this.state.catalog = null
+    this.knownThreads.clear()
+    this.activeTurns.clear()
     this.state.diagnostic = {
       severity: 'error',
       code: 'protocol-failure',
       message: redactCodexCredentialString(`Codex app-server ${reason}: ${detail}`),
     }
+  }
+
+  private takeRequestId(): number {
+    const id = this.nextRequestId > 0 ? this.nextRequestId : nextCodexRequestId()
+    this.nextRequestId = assignCodexRequestId(id)
+    return id
   }
 
   private async withStartupTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
@@ -545,6 +887,21 @@ export class CodexRuntime {
       if (timer !== undefined) this.clock.clearTimeout(timer)
     }
   }
+}
+
+function readCompactStartResult(
+  response: unknown,
+  expectedThreadId: string,
+): { readonly threadId: string; readonly turnId: string | null } | null {
+  const candidate = response && typeof response === 'object' ? (response as { result?: unknown }) : null
+  const result = candidate && 'result' in candidate ? candidate.result : response
+  if (!result || typeof result !== 'object') return null
+  const view = result as { threadId?: unknown; turnId?: unknown; turn?: unknown }
+  const nestedTurn = view.turn && typeof view.turn === 'object' ? (view.turn as { id?: unknown }) : null
+  const threadId = typeof view.threadId === 'string' ? view.threadId : expectedThreadId
+  const turnId =
+    typeof view.turnId === 'string' ? view.turnId : typeof nestedTurn?.id === 'string' ? nestedTurn.id : null
+  return { threadId, turnId }
 }
 
 /** Build the retained-snapshot catalog manager over the live app-server handle. */

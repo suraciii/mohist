@@ -251,9 +251,7 @@ describe('performCodexInitialization', () => {
     })
     expect(captured).toHaveLength(1)
     const envelope = captured[0] as Record<string, unknown>
-    const experimentKeys = Object.keys(envelope).filter(
-      (key) => key.includes('experimental') || key.includes('capabilities'),
-    )
+    const experimentKeys = Object.keys(envelope).filter((key) => key.includes('experimental'))
     expect(experimentKeys).toEqual([])
   })
 })

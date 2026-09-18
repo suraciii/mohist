@@ -17,7 +17,18 @@ import type {
   RuntimeFollowupResult,
   RuntimeResult,
   RuntimeTurnObserver,
+  RuntimeTurnEvent,
 } from '../runtime/opencode/index.js'
+import type {
+  CodexRuntime,
+  CodexRuntimeTurnEvent,
+  CodexCancelResult,
+  CodexCompactResult,
+  CodexFollowupResult,
+  CodexResetResult,
+  CodexResult,
+  CodexTurnEventObserver,
+} from '../runtime/codex/index.js'
 import type {
   PiCancelFacts,
   PiCancelRequest,
@@ -33,6 +44,7 @@ import type {
   PiResetResult,
   PiResult,
   PiRuntime,
+  PiRuntimeEvent,
   PiTurnObserver,
 } from '../runtime/pi/index.js'
 import { parseModelIdentifier } from '../runtime/opencode/index.js'
@@ -59,6 +71,7 @@ export type RuntimeAccessor<T extends object> = T | (() => T | null) | null
 export interface CommandRuntimeAccessors {
   openCode?: RuntimeAccessor<OpenCodeRuntime>
   pi?: RuntimeAccessor<PiRuntime>
+  codex?: RuntimeAccessor<CodexRuntime>
 }
 
 /**
@@ -71,6 +84,7 @@ export interface CommandRuntimeAccessors {
 export type CommandRuntimeHandle =
   | { readonly kind: 'opencode'; readonly runtime: OpenCodeRuntime }
   | { readonly kind: 'pi'; readonly runtime: PiRuntime }
+  | { readonly kind: 'codex'; readonly runtime: CodexRuntime }
 
 export function resolveAccessor<T extends object>(accessor: RuntimeAccessor<T> | undefined): T | null {
   if (accessor === undefined || accessor === null) return null
@@ -89,6 +103,10 @@ export function resolveCommandRuntime(
   if (name === 'pi') {
     const runtime = resolveAccessor(accessors.pi)
     return runtime ? { kind: 'pi', runtime } : null
+  }
+  if (name === 'codex') {
+    const runtime = resolveAccessor(accessors.codex)
+    return runtime ? { kind: 'codex', runtime } : null
   }
   return null
 }
@@ -110,6 +128,7 @@ export interface FollowupCallTarget {
 export interface FollowupCallRequest {
   readonly target: FollowupCallTarget
   readonly prompt: string
+  readonly inputId?: string | null
   readonly managerExecution?: ManagerExecutionBoundary | null
   readonly fileParts?: readonly RuntimeFilePart[] | null
   readonly options?: {
@@ -126,26 +145,36 @@ export interface CancelCallTarget {
   readonly workDir: string
 }
 
-export type FollowupCallResult = RuntimeResult<RuntimeFollowupResult> | PiResult<PiFollowupFacts>
+export type FollowupCallResult =
+  | RuntimeResult<RuntimeFollowupResult>
+  | PiResult<PiFollowupFacts>
+  | CodexResult<CodexFollowupResult>
 
-export type CancelCallResult = RuntimeResult<RuntimeCancelResult> | PiResult<PiCancelFacts>
+export type CancelCallResult =
+  | RuntimeResult<RuntimeCancelResult>
+  | PiResult<PiCancelFacts>
+  | CodexResult<CodexCancelResult>
 
 export function callFollowup(
   handle: CommandRuntimeHandle,
   request: FollowupCallRequest,
-  observer: PiTurnObserver | RuntimeTurnObserver | null,
+  observer: PiTurnObserver | RuntimeTurnObserver | CodexTurnEventObserver | null,
   signal?: AbortSignal,
 ): Promise<FollowupCallResult> {
   if (handle.kind === 'opencode') {
     return callOpenCodeFollowup(handle.runtime, request, observer as RuntimeTurnObserver | null, signal)
   }
-  return callPiFollowup(handle.runtime, request, observer, signal)
+  if (handle.kind === 'codex') {
+    return callCodexFollowup(handle.runtime, request, observer as CodexTurnEventObserver | null, signal)
+  }
+  return callPiFollowup(handle.runtime, request, observer as PiTurnObserver | null, signal)
 }
 
 export function callCancel(handle: CommandRuntimeHandle, target: CancelCallTarget): Promise<CancelCallResult> {
   if (handle.kind === 'opencode') {
     return callOpenCodeCancel(handle.runtime, target)
   }
+  if (handle.kind === 'codex') return callCodexCancel(handle.runtime, target)
   return callPiCancel(handle.runtime, target)
 }
 
@@ -193,7 +222,7 @@ export async function callSessionCommand(
   handle: CommandRuntimeHandle,
   command: SessionCommand,
   request: SessionCommandDispatchRequest,
-  observer: PiTurnObserver | null,
+  observer: PiTurnObserver | CodexTurnEventObserver | null,
 ): Promise<SessionCommandResult> {
   if (handle.kind === 'opencode') {
     if (command === 'compact') return { ok: false, error: 'unavailable' }
@@ -203,8 +232,12 @@ export async function callSessionCommand(
     if (result.ok) return { ok: true, runtimeSessionId: result.value.runtimeSessionId }
     return { ok: false, error: mapOpenCodeError(result.error.kind) }
   }
+  if (handle.kind === 'codex') {
+    if (command === 'compact') return dispatchCodexCompact(handle.runtime, request, observer)
+    return dispatchCodexReset(handle.runtime, request)
+  }
   if (command === 'compact') {
-    return dispatchPiCompact(handle.runtime, request, observer)
+    return dispatchPiCompact(handle.runtime, request, observer as PiTurnObserver | null)
   }
   return dispatchPiReset(handle.runtime, request)
 }
@@ -220,33 +253,35 @@ export function createSessionCommandRouter(
     if (!request.workDir || (request.command === 'compact' && !request.runtimeSessionId)) {
       return { ok: false, error: 'unavailable' }
     }
-    const observer: PiTurnObserver | null =
+    const enqueueEvent = (event: RuntimeTurnEvent | PiRuntimeEvent | CodexRuntimeTurnEvent): void => {
+      const eventId = 'id' in event && typeof event.id === 'string' ? event.id : `ordinal-${Date.now()}`
+      const record: RuntimeEventRecord = {
+        id: `session-command-event:${request.operationId}:${eventId}`,
+        producerFamily: 'generic-followup',
+        target: { kind: 'generic', projectId: request.projectId!, sessionId: request.sessionId },
+        runtimeSessionId: request.runtimeSessionId!,
+        work: null,
+        event: {
+          type: event.type,
+          payload: {
+            ...event.payload,
+            source: 'session-command',
+            command: request.command,
+            operationId: request.operationId,
+            runtimeSessionId: request.runtimeSessionId,
+          },
+        },
+        acknowledgementPolicy: 'successful-response',
+      }
+      void outbox.enqueueProducedFact(record)
+    }
+    const observer: PiTurnObserver | CodexTurnEventObserver | null =
       outbox.ready() && request.projectId && request.runtimeSessionId
-        ? {
-            onEvent: async (event) => {
-              const record: RuntimeEventRecord = {
-                id: `session-command-event:${request.operationId}:${event.id}`,
-                producerFamily: 'generic-followup',
-                target: { kind: 'generic', projectId: request.projectId!, sessionId: request.sessionId },
-                runtimeSessionId: request.runtimeSessionId!,
-                work: null,
-                event: {
-                  type: event.type,
-                  payload: {
-                    ...event.payload,
-                    source: 'session-command',
-                    command: request.command,
-                    operationId: request.operationId,
-                    runtimeSessionId: request.runtimeSessionId,
-                  },
-                },
-                acknowledgementPolicy: 'successful-response',
-              }
-              await outbox.enqueueProducedFact(record)
-            },
-          }
+        ? handle.kind === 'codex'
+          ? { onEvent: (event: CodexRuntimeTurnEvent) => enqueueEvent(event) }
+          : { onEvent: (event: PiRuntimeEvent) => enqueueEvent(event) }
         : null
-    if (handle.kind === 'pi' && request.command === 'compact' && !observer) {
+    if ((handle.kind === 'pi' || handle.kind === 'codex') && request.command === 'compact' && !observer) {
       return { ok: false, error: 'unavailable' }
     }
     return await callSessionCommand(
@@ -282,6 +317,33 @@ async function callOpenCodeFollowup(
   return signal === undefined
     ? await runtime.followup(opencodeRequest, observer ?? undefined)
     : await runtime.followup(opencodeRequest, observer ?? undefined, signal)
+}
+
+async function callCodexFollowup(
+  runtime: CodexRuntime,
+  request: FollowupCallRequest,
+  observer: PiTurnObserver | RuntimeTurnObserver | CodexTurnEventObserver | null,
+  signal?: AbortSignal,
+): Promise<CodexResult<CodexFollowupResult>> {
+  return await runtime.followup(
+    {
+      target: { runtime: 'codex', runtimeSessionId: request.target.runtimeSessionId, workDir: request.target.workDir },
+      prompt: request.prompt,
+      ...(request.inputId ? { clientUserMessageId: request.inputId } : {}),
+      ...(request.fileParts && request.fileParts.length > 0 ? { fileParts: request.fileParts } : {}),
+      ...(request.options
+        ? {
+            options: {
+              model: request.options.model ?? null,
+              variant: request.options.variant ?? null,
+              reasoningEffort: request.options.reasoningEffort as never,
+            },
+          }
+        : {}),
+    },
+    (observer as CodexTurnEventObserver | null) ?? undefined,
+    signal,
+  )
 }
 
 async function callPiFollowup(
@@ -326,11 +388,44 @@ async function callOpenCodeCancel(
   return await runtime.cancel(opencodeRequest)
 }
 
+async function callCodexCancel(
+  runtime: CodexRuntime,
+  target: CancelCallTarget,
+): Promise<CodexResult<CodexCancelResult>> {
+  return await runtime.cancel({
+    target: { runtime: 'codex', runtimeSessionId: target.runtimeSessionId, workDir: target.workDir },
+  })
+}
+
 async function callPiCancel(runtime: PiRuntime, target: CancelCallTarget): Promise<PiCancelResult> {
   const piRequest: PiCancelRequest = {
     target: { runtime: 'pi', runtimeSessionId: target.runtimeSessionId, workDir: target.workDir },
   }
   return await runtime.cancel(piRequest)
+}
+
+async function dispatchCodexCompact(
+  runtime: CodexRuntime,
+  request: SessionCommandDispatchRequest,
+  observer: PiTurnObserver | CodexTurnEventObserver | null,
+): Promise<SessionCommandResult> {
+  const result: CodexResult<CodexCompactResult> = await runtime.compact(
+    { target: { runtime: 'codex', runtimeSessionId: request.runtimeSessionId, workDir: request.workDir } },
+    (observer as CodexTurnEventObserver | null) ?? undefined,
+  )
+  if (result.ok) return { ok: true }
+  return { ok: false, error: mapCodexError(result.error.kind) }
+}
+
+async function dispatchCodexReset(
+  runtime: CodexRuntime,
+  request: SessionCommandDispatchRequest,
+): Promise<SessionCommandResult> {
+  const result: CodexResult<CodexResetResult> = await runtime.reset({
+    target: { runtime: 'codex', runtimeSessionId: request.runtimeSessionId, workDir: request.workDir },
+  })
+  if (result.ok) return { ok: true, runtimeSessionId: result.value.facts.runtimeSessionId }
+  return { ok: false, error: mapCodexError(result.error.kind) }
 }
 
 async function dispatchPiCompact(
@@ -359,6 +454,11 @@ async function dispatchPiReset(
 }
 
 function mapOpenCodeError(kind: string): SessionCommandError {
+  if (kind === 'missing-session') return 'missing'
+  return 'unavailable'
+}
+
+function mapCodexError(kind: string): SessionCommandError {
   if (kind === 'missing-session') return 'missing'
   return 'unavailable'
 }

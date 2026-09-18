@@ -438,7 +438,7 @@ describe('AgentJobExecutor selects the runtime from the dispatch', () => {
     expect(result.status).toBe('failed')
     expect(result.error).toEqual({
       code: 'invalid-input',
-      message: "AgentJob requires dispatch 'runtime' to be 'opencode' or 'pi'",
+      message: "AgentJob requires dispatch 'runtime' to be 'opencode', 'pi', or 'codex'",
     })
     expect(openCode.runTurnCalls).toHaveLength(0)
     expect(pi.runTurnCalls).toHaveLength(0)

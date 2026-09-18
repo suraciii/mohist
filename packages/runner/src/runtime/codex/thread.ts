@@ -39,7 +39,7 @@ import {
   CODEX_APPROVAL_POLICY,
   CODEX_SANDBOX_POLICY,
 } from './protocol-types.js'
-import { normalizeMissingSessionCodex, normalizeTurnFailedCodex } from './errors.js'
+import { normalizeMissingSessionCodex, normalizeTurnFailedCodex, normalizeUnknownCodex } from './errors.js'
 import { redactCodexCredentialString } from './credential.js'
 import type { CodexCanonicalReasoningEffort, CodexDiagnostic, CodexResult } from './types.js'
 import { mapCodexCanonicalReasoningEffort } from './model-catalog.js'
@@ -86,12 +86,11 @@ export interface CodexThreadStartOutcome {
  * Failure modes (normalized to existing Mohist kinds):
  *   - structured `thread_not_found` ⇒ `missing-session` (only when
  *     raised against an existing binding — see `resumeThread`).
- *   - response shape outside the locked v2 subset ⇒ `turn-failed`
- *     with a structured diagnostic.
+ *   - response shape outside the locked v2 subset ⇒ `unknown` with
+ *     a structured diagnostic because creation may already have taken effect.
  *   - transport / timeout / 5xx / auth / permission / protocol
- *     mismatches ⇒ `turn-failed` with the underlying message in
- *     redacted diagnostics; `thread/start` itself never reports
- *     `missing-session`.
+ *     mismatches ⇒ `unknown` with the underlying message in redacted
+ *     diagnostics; `thread/start` itself never reports `missing-session`.
  */
 export async function startThread(
   transport: CodexThreadTransport,
@@ -109,16 +108,20 @@ export async function startThread(
     })
   } catch (cause) {
     const message = cause instanceof Error ? redactCodexCredentialString(cause.message) : 'unknown transport failure'
-    const error = normalizeTurnFailedCodex(`thread/start transport failed: ${message}`)
+    const error = normalizeUnknownCodex(
+      `thread/start transport failed before the response was observed; outcome is unknown: ${message}`,
+    )
     return { ok: false, error, diagnostics: error.diagnostics }
   }
   if (transport.hasExited?.()) {
-    const error = normalizeTurnFailedCodex('thread/start child exited before response was observed')
+    const error = normalizeUnknownCodex(
+      'thread/start response is unknown because the child exited before it was observed',
+    )
     return { ok: false, error, diagnostics: error.diagnostics }
   }
   const result = threadStartResult(response)
   if (result === null) {
-    const error = normalizeTurnFailedCodex('thread/start response did not match the locked v2 subset')
+    const error = normalizeUnknownCodex('thread/start response is unknown because its shape could not be verified')
     return { ok: false, error, diagnostics: error.diagnostics }
   }
   if (!isCodexThreadStartRequest({ jsonrpc: '2.0', id, method: 'thread/start', params })) {
@@ -175,18 +178,29 @@ export async function resumeThread(
       params,
     })
   } catch (cause) {
-    // Transport / timeout / 5xx / auth / permission / protocol
-    // mismatches stay unknown. The structured `thread_not_found`
-    // signal comes through the response shape, not through the
-    // exception channel; if the underlying transport converted it
-    // into an exception we surface the unknown kind instead of
-    // fabricating a missing-session.
+    // A real JSON-RPC transport may surface the structured error through
+    // its rejection channel. Preserve the one provider-owned missing
+    // signal while keeping all other transport failures unknown.
+    if (isStructuredThreadNotFound({ error: cause })) {
+      const error = normalizeMissingSessionCodex([
+        {
+          severity: 'error',
+          code: 'thread-not-found',
+          message: redactCodexCredentialString(
+            `thread/resume on the bound Runner returned structured thread_not_found for ${threadId}`,
+          ),
+        },
+      ])
+      return { ok: false, error, diagnostics: error.diagnostics }
+    }
     const message = cause instanceof Error ? redactCodexCredentialString(cause.message) : 'unknown transport failure'
-    const error = normalizeTurnFailedCodex(`thread/resume transport failed: ${message}`)
+    const error = normalizeUnknownCodex(`thread/resume outcome is unknown after transport failure: ${message}`)
     return { ok: false, error, diagnostics: error.diagnostics }
   }
   if (transport.hasExited?.()) {
-    const error = normalizeTurnFailedCodex('thread/resume child exited before response was observed')
+    const error = normalizeUnknownCodex(
+      'thread/resume outcome is unknown because the child exited before the response was observed',
+    )
     return { ok: false, error, diagnostics: error.diagnostics }
   }
   const resume = threadResumeResult(response)
@@ -233,7 +247,9 @@ export async function resumeThread(
     ])
     return { ok: false, error, diagnostics: error.diagnostics }
   }
-  const error = normalizeTurnFailedCodex('thread/resume response did not match the locked v2 subset')
+  const error = normalizeUnknownCodex(
+    'thread/resume outcome is unknown because its response shape could not be verified',
+  )
   return { ok: false, error, diagnostics: error.diagnostics }
 }
 
@@ -249,6 +265,7 @@ function buildThreadStartParams(input: CodexThreadStartInput): CodexThreadStartP
     cwd: input.workDir,
     approvalPolicy: CODEX_APPROVAL_POLICY,
     sandbox: CODEX_SANDBOX_POLICY,
+    ephemeral: false,
     persistHistory: true,
     ...(input.model !== null ? { model: input.model } : {}),
     ...(nativeEffort !== null ? { reasoningEffort: nativeEffort } : {}),
@@ -258,36 +275,47 @@ function buildThreadStartParams(input: CodexThreadStartInput): CodexThreadStartP
 
 function threadStartResult(response: unknown): CodexThreadStartResult | null {
   if (isCodexThreadStartResult(response)) return response.result
-  if (!response || typeof response !== 'object') return null
-  const envelope = { jsonrpc: '2.0' as const, id: 0, result: response }
-  return isCodexThreadStartResult(envelope) ? envelope.result : null
+  const result = responseResult(response)
+  if (!result || typeof result !== 'object') return null
+  const view = result as { threadId?: unknown; cwd?: unknown; thread?: unknown }
+  const thread =
+    view.thread && typeof view.thread === 'object' ? (view.thread as { id?: unknown; cwd?: unknown }) : null
+  const threadId =
+    typeof view.threadId === 'string' ? view.threadId : thread && typeof thread.id === 'string' ? thread.id : null
+  const cwd = typeof view.cwd === 'string' ? view.cwd : thread && typeof thread.cwd === 'string' ? thread.cwd : null
+  return threadId && cwd ? { threadId, cwd } : null
 }
 
 function threadResumeResult(response: unknown): CodexThreadResumeResult | null {
-  if (!response || typeof response !== 'object') return null
-  const candidate = response as {
-    jsonrpc?: unknown
-    id?: unknown
-    result?: unknown
-  }
-  if (candidate.jsonrpc === '2.0') {
-    if (typeof candidate.id !== 'string' && typeof candidate.id !== 'number') return null
-    if (!('result' in candidate)) return null
-  } else if (!('result' in candidate)) {
-    return null
-  }
-  const result = candidate.result
+  const result = responseResult(response)
   if (!result || typeof result !== 'object') return null
-  const view = result as { threadId?: unknown; cwd?: unknown; model?: unknown; reasoningEffort?: unknown }
-  if (typeof view.threadId !== 'string' || typeof view.cwd !== 'string') return null
+  const view = result as {
+    threadId?: unknown
+    cwd?: unknown
+    model?: unknown
+    reasoningEffort?: unknown
+    thread?: unknown
+  }
+  const thread =
+    view.thread && typeof view.thread === 'object' ? (view.thread as { id?: unknown; cwd?: unknown }) : null
+  const threadId =
+    typeof view.threadId === 'string' ? view.threadId : thread && typeof thread.id === 'string' ? thread.id : null
+  const cwd = typeof view.cwd === 'string' ? view.cwd : thread && typeof thread.cwd === 'string' ? thread.cwd : null
+  if (!threadId || !cwd) return null
   if (view.model !== undefined && typeof view.model !== 'string') return null
   if (view.reasoningEffort !== undefined && typeof view.reasoningEffort !== 'string') return null
   return {
-    threadId: view.threadId,
-    cwd: view.cwd,
+    threadId,
+    cwd,
     ...(view.model !== undefined ? { model: view.model } : {}),
     ...(view.reasoningEffort !== undefined ? { reasoningEffort: view.reasoningEffort } : {}),
   }
+}
+
+function responseResult(response: unknown): unknown {
+  if (!response || typeof response !== 'object') return null
+  const candidate = response as { result?: unknown }
+  return 'result' in candidate ? candidate.result : response
 }
 
 function responseEnvelopeForError(response: unknown): {

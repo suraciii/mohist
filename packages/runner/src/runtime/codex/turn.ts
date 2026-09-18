@@ -104,6 +104,12 @@ export interface CodexTurnTransport {
 
 export interface CodexTurnEventObserver {
   /**
+   * Called after a Thread is created or resumed and before `turn/start`.
+   * The caller must persist the complete Mohist binding and SessionInput
+   * identity before this callback resolves.
+   */
+  onSessionReady?(session: { readonly runtimeSessionId: string; readonly workDir: string }): void | Promise<void>
+  /**
    * Projected Mohist event. `turnId` is the volatile Turn ID for the
    * active Turn only — callers MUST NOT persist it. `payload` is
    * already masked through the credential redaction rules so callers
@@ -170,7 +176,7 @@ export async function submitTurnStart(
     input: inputItems,
     clientUserMessageId: submission.clientUserMessageId,
     ...(submission.resolved.model !== null ? { model: submission.resolved.model } : {}),
-    ...(nativeEffort !== null ? { reasoningEffort: nativeEffort } : {}),
+    ...(nativeEffort !== null ? { effort: nativeEffort, reasoningEffort: nativeEffort } : {}),
   }
   const id = assertPositiveRequestId(nextRequestId)
   if (!isCodexTurnStartRequest({ jsonrpc: '2.0', id, method: 'turn/start', params })) {
@@ -189,14 +195,24 @@ export async function submitTurnStart(
     })
   } catch (cause) {
     const message = cause instanceof Error ? redactCodexCredentialString(cause.message) : 'unknown transport failure'
-    const error = normalizeTurnFailedCodex(`turn/start transport failed: ${message}`)
-    return { ok: false, error, diagnostics: error.diagnostics }
+    const lost = buildLostTurnStartUnknown({
+      threadId: submission.threadId,
+      clientUserMessageId: submission.clientUserMessageId,
+      workDir: submission.workDir,
+      message: `turn/start transport failed before a response was observed: ${message}`,
+    })
+    return { ok: false, error: lost.error, diagnostics: lost.diagnostics }
   }
   if (transport.hasExited?.()) {
-    const error = normalizeTurnFailedCodex('turn/start child exited before response was observed')
-    return { ok: false, error, diagnostics: error.diagnostics }
+    const lost = buildLostTurnStartUnknown({
+      threadId: submission.threadId,
+      clientUserMessageId: submission.clientUserMessageId,
+      workDir: submission.workDir,
+      message: 'turn/start child exited before response was observed',
+    })
+    return { ok: false, error: lost.error, diagnostics: lost.diagnostics }
   }
-  const result = turnStartResult(response)
+  const result = turnStartResult(response, submission.threadId)
   if (result === null) {
     const error = normalizeTurnFailedCodex('turn/start response did not match the locked v2 subset')
     return { ok: false, error, diagnostics: error.diagnostics }
@@ -215,7 +231,7 @@ export async function submitTurnStart(
 }
 
 function buildTurnInputItems(prompt: string, fileParts: readonly CodexFilePart[] | null): CodexTurnInputItem[] {
-  const items: CodexTurnInputItem[] = [{ type: 'text', text: prompt }]
+  const items: CodexTurnInputItem[] = [{ type: 'text', text: prompt, text_elements: [] }]
   if (fileParts) {
     for (const part of fileParts) {
       items.push({ type: 'image', mime: part.mime, url: part.url, filename: part.filename })
@@ -228,17 +244,18 @@ function buildTurnInputItems(prompt: string, fileParts: readonly CodexFilePart[]
   return items
 }
 
-function turnStartResult(response: unknown): CodexTurnStartResult | null {
+function turnStartResult(response: unknown, expectedThreadId: string): CodexTurnStartResult | null {
   if (!response || typeof response !== 'object') return null
-  const candidate = response as { jsonrpc?: unknown; id?: unknown; result?: unknown }
-  if (!('result' in candidate)) return null
-  const result = candidate.result
+  const candidate = response as { result?: unknown }
+  const result = 'result' in candidate ? candidate.result : response
   if (!result || typeof result !== 'object') return null
-  const view = result as { turnId?: unknown; threadId?: unknown; status?: unknown }
-  if (typeof view.turnId !== 'string' || typeof view.threadId !== 'string' || typeof view.status !== 'string') {
-    return null
-  }
-  return { turnId: view.turnId, threadId: view.threadId, status: view.status }
+  const view = result as { turnId?: unknown; threadId?: unknown; status?: unknown; turn?: unknown }
+  const turn = view.turn && typeof view.turn === 'object' ? (view.turn as { id?: unknown; status?: unknown }) : null
+  const turnId = typeof view.turnId === 'string' ? view.turnId : turn && typeof turn.id === 'string' ? turn.id : null
+  const threadId = typeof view.threadId === 'string' ? view.threadId : expectedThreadId
+  const status =
+    typeof view.status === 'string' ? view.status : turn && typeof turn.status === 'string' ? turn.status : null
+  return turnId && status ? { turnId, threadId, status } : null
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +265,7 @@ function turnStartResult(response: unknown): CodexTurnStartResult | null {
 export interface CodexTurnCompletionConfig {
   readonly runtimeSessionId: string
   readonly workDir: string
-  readonly turnId: string
+  readonly turnId: string | null
   readonly threadId: string
   readonly deadlineMs: number | null
   readonly clock?: CodexClock
@@ -260,6 +277,7 @@ export interface CodexTurnCompletionOptions extends CodexTurnCompletionConfig {
   readonly fixedDeadlineResult?: CodexResult<CodexTurnResult> | null
   readonly fixedPermissionResult?: CodexResult<CodexTurnResult> | null
   readonly nextRequestId: () => number
+  readonly onTurnIdDiscovered?: (turnId: string) => void
 }
 
 /**
@@ -297,7 +315,7 @@ export async function driveTurnToCompletion(
       ? scheduleCloseoutWarning({
           transport: closeoutTransport,
           threadId: options.threadId,
-          turnId: options.turnId,
+          turnId: options.turnId ?? '',
           deadlineMs: options.deadlineMs,
           clock: closeoutClock,
           nextRequestId: options.nextRequestId,
@@ -311,7 +329,7 @@ export async function driveTurnToCompletion(
       ? scheduleDeadlineInterrupt({
           transport: closeoutTransport,
           threadId: options.threadId,
-          turnId: options.turnId,
+          turnId: options.turnId ?? '',
           deadlineMs: options.deadlineMs,
           clock: closeoutClock,
           nextRequestId: options.nextRequestId,
@@ -334,14 +352,14 @@ export async function driveTurnToCompletion(
   const permissionRejection: CodexPermissionRejectionHandle = createPermissionRejection({
     transport: closeoutTransport,
     threadId: options.threadId,
-    turnId: options.turnId,
+    turnId: options.turnId ?? '',
     clock: closeoutClock,
     nextRequestId: options.nextRequestId,
     observer: session,
     onUnconfirmed: () => {
       const unconfirmed = buildPermissionRejectionUnconfirmed({
         threadId: options.threadId,
-        turnId: options.turnId,
+        turnId: options.turnId ?? '',
       })
       session.fixedUnknown = unconfirmed
       session.resolve(unconfirmed)
@@ -361,8 +379,10 @@ export async function driveTurnToCompletion(
 
 interface TurnSession {
   readonly factsState: MutableTurnFacts
-  readonly expectedTurnId: string
+  expectedTurnId: string | null
   readonly expectedThreadId: string
+  readonly onTurnIdDiscovered?: (turnId: string) => void
+  sawAgentMessageDelta: boolean
   readonly settled: DeferredSettled
   readonly textBuffer: TurnTextBuffer
   readonly unknownItems: CodexDiagnostic[]
@@ -414,6 +434,8 @@ function createTurnSession(options: CodexTurnCompletionOptions, diagnostics: Cod
     },
     expectedTurnId: options.turnId,
     expectedThreadId: options.threadId,
+    onTurnIdDiscovered: options.onTurnIdDiscovered,
+    sawAgentMessageDelta: false,
     settled: {
       promise,
       resolve(value) {
@@ -440,7 +462,7 @@ function createTurnSession(options: CodexTurnCompletionOptions, diagnostics: Cod
       options.observer?.onDiagnostic?.(diagnostic)
     },
     async sendInterrupt(transport) {
-      await sendTurnInterrupt(transport, options.threadId, options.turnId, options.nextRequestId)
+      await sendTurnInterrupt(transport, options.threadId, options.turnId ?? '', options.nextRequestId)
     },
     snapshotFacts() {
       return {
@@ -521,6 +543,126 @@ async function sendTurnInterrupt(
   }
 }
 
+function normalizeCodexNotification(message: unknown): unknown | null {
+  if (!message || typeof message !== 'object') return null
+  const envelope = message as { method?: unknown; params?: unknown }
+  if (typeof envelope.method !== 'string' || !envelope.params || typeof envelope.params !== 'object') return null
+  const params = envelope.params as Record<string, unknown>
+  const threadId = typeof params.threadId === 'string' ? params.threadId : null
+  const turnId = typeof params.turnId === 'string' ? params.turnId : null
+  if (envelope.method === 'turn/completed') {
+    const turn = params.turn && typeof params.turn === 'object' ? (params.turn as Record<string, unknown>) : params
+    const id = typeof turn.id === 'string' ? turn.id : turnId
+    const status = typeof turn.status === 'string' ? turn.status : null
+    if (threadId && id && (status === 'completed' || status === 'failed' || status === 'interrupted')) {
+      return {
+        type: 'turn/completed',
+        threadId,
+        turnId: id,
+        status,
+        ...(turn.error && typeof turn.error === 'object' ? { error: turn.error } : {}),
+      }
+    }
+  }
+  if (envelope.method === 'thread/status/changed' || envelope.method === 'thread/status') {
+    const rawStatus =
+      typeof params.status === 'string'
+        ? params.status
+        : params.status && typeof params.status === 'object'
+          ? (params.status as { type?: unknown }).type
+          : params.thread && typeof params.thread === 'object'
+            ? (params.thread as { status?: unknown }).status
+            : null
+    if (threadId && typeof rawStatus === 'string')
+      return { type: 'thread/status', threadId, ...(turnId ? { turnId } : {}), status: rawStatus }
+  }
+  if (envelope.method === 'item/started' || envelope.method === 'item/completed') {
+    const item = params.item && typeof params.item === 'object' ? (params.item as Record<string, unknown>) : null
+    const itemType = item && typeof item.type === 'string' ? item.type : null
+    if (!threadId || !turnId || !itemType) return null
+    return projectOfficialItem(itemType, item!, threadId, turnId)
+  }
+  if (envelope.method === 'item/agentMessage/delta') {
+    const delta = typeof params.delta === 'string' ? params.delta : typeof params.text === 'string' ? params.text : null
+    return threadId && turnId && delta !== null
+      ? { type: 'agentMessage', threadId, turnId, text: delta, delta: true }
+      : null
+  }
+  if (envelope.method === 'item/reasoning/summaryTextDelta' || envelope.method === 'item/reasoning/textDelta') {
+    const delta = typeof params.delta === 'string' ? params.delta : typeof params.text === 'string' ? params.text : null
+    return threadId && turnId && delta !== null ? { type: 'reasoning', threadId, turnId, summary: delta } : null
+  }
+  if (envelope.method === 'item/commandExecution/outputDelta') {
+    return threadId && turnId ? { type: 'commandExecution', threadId, turnId, command: '', status: 'inProgress' } : null
+  }
+  if (envelope.method === 'item/fileChange/patchUpdated') {
+    const changes = Array.isArray(params.changes) ? params.changes : []
+    const first = changes[0] && typeof changes[0] === 'object' ? (changes[0] as Record<string, unknown>) : null
+    return threadId && turnId && typeof first?.path === 'string'
+      ? {
+          type: 'fileChange',
+          threadId,
+          turnId,
+          path: first.path,
+          kind: first.kind === 'create' || first.kind === 'delete' ? first.kind : 'modify',
+        }
+      : null
+  }
+  if (envelope.method === 'item/mcpToolCall/progress') {
+    return threadId && turnId ? { type: 'mcpToolCall', threadId, turnId, tool: '', status: 'inProgress' } : null
+  }
+  if (envelope.method === 'contextCompacted') {
+    return threadId && turnId ? { type: 'contextCompaction', threadId, turnId } : null
+  }
+  return null
+}
+
+function projectOfficialItem(type: string, item: Record<string, unknown>, threadId: string, turnId: string): unknown {
+  if (type === 'agentMessage')
+    return { type, threadId, turnId, text: typeof item.text === 'string' ? item.text : '', delta: false }
+  if (type === 'reasoning')
+    return { type, threadId, turnId, summary: typeof item.summary === 'string' ? item.summary : '' }
+  if (type === 'commandExecution') {
+    return {
+      type,
+      threadId,
+      turnId,
+      command: typeof item.command === 'string' ? item.command : '',
+      status: typeof item.status === 'string' ? item.status : 'unknown',
+    }
+  }
+  if (type === 'fileChange') {
+    const changes = Array.isArray(item.changes) ? item.changes : []
+    const first = changes[0] && typeof changes[0] === 'object' ? (changes[0] as Record<string, unknown>) : null
+    return {
+      type,
+      threadId,
+      turnId,
+      path: typeof first?.path === 'string' ? first.path : '',
+      kind: first?.kind === 'create' || first?.kind === 'delete' ? first.kind : 'modify',
+    }
+  }
+  if (type === 'contextCompaction') return { type, threadId, turnId }
+  if (type === 'usage') {
+    return {
+      type,
+      threadId,
+      turnId,
+      inputTokens: typeof item.inputTokens === 'number' ? item.inputTokens : 0,
+      outputTokens: typeof item.outputTokens === 'number' ? item.outputTokens : 0,
+    }
+  }
+  if (type === 'mcpToolCall')
+    return {
+      type,
+      threadId,
+      turnId,
+      tool: typeof item.name === 'string' ? item.name : '',
+      status: typeof item.status === 'string' ? item.status : 'unknown',
+    }
+  return { type, threadId, turnId, payload: item }
+}
+
 function routeTurnMessage(message: unknown, session: TurnSession, transport: CodexTurnTransport): void {
   if (!message || typeof message !== 'object') return
   // Server-initiated requests: deny with the protocol-defined
@@ -530,11 +672,34 @@ function routeTurnMessage(message: unknown, session: TurnSession, transport: Cod
     handleServerRequest(message as CodexJsonRpcServerRequest<CodexServerRequestParams>, session, transport)
     return
   }
+  const normalized = normalizeCodexNotification(message)
+  if (normalized !== null) message = normalized
+  const possibleCompaction = message as { type?: unknown; threadId?: unknown; turnId?: unknown }
+  if (
+    session.expectedTurnId === null &&
+    possibleCompaction.type === 'contextCompaction' &&
+    possibleCompaction.threadId === session.expectedThreadId &&
+    typeof possibleCompaction.turnId === 'string'
+  ) {
+    session.expectedTurnId = possibleCompaction.turnId
+    session.onTurnIdDiscovered?.(possibleCompaction.turnId)
+  }
   const envelope = message as { method?: unknown; type?: unknown; params?: unknown }
   // JSON-RPC notifications carry their discriminator on `method`;
   // Codex item / terminal events carry it on `type`. Both forms
   // reach this seam through the line-framed JSON-RPC consumer.
   if (typeof envelope.method === 'string') {
+    if (envelope.method === 'protocol-failure') {
+      const params = envelope.params && typeof envelope.params === 'object' ? envelope.params : null
+      const detail =
+        params && typeof (params as { message?: unknown }).message === 'string'
+          ? (params as { message: string }).message
+          : 'Codex app-server protocol failure ended the active Turn before completion'
+      const error = normalizeUnknownCodex(redactCodexCredentialString(detail))
+      session.fixedUnknown = { ok: false, error, diagnostics: error.diagnostics }
+      session.resolve(session.fixedUnknown)
+      return
+    }
     if (envelope.method === 'turn/completed') {
       handleTurnCompleted(message as unknown as CodexTurnCompletedEvent, session)
       return
@@ -631,6 +796,14 @@ function handleServerRequest(
 }
 
 function handleTurnCompleted(event: CodexTurnCompletedEvent, session: TurnSession): void {
+  if (session.expectedTurnId === null) {
+    session.observeDiagnostic({
+      severity: 'info',
+      code: 'turn-completed-before-turn-id',
+      message: 'Ignored Codex turn/completed until the active Turn ID was discovered',
+    })
+    return
+  }
   // Only the matching event for the exact active Thread + Turn IDs
   // may complete the Turn. Anything else is a stale terminal event
   // for an unrelated generation.
@@ -733,6 +906,7 @@ function handleThreadStatus(event: CodexThreadStatusEvent, session: TurnSession)
 
 function handleItem(event: CodexItemEvent, session: TurnSession): void {
   if (!isCodexItemEvent(event)) return
+  if (event.type === 'agentMessage' && event.delta === true) session.sawAgentMessageDelta = true
   const projected = projectItemEvent(event, session)
   if (projected === null) {
     const unknown = event as { type?: unknown }
@@ -766,6 +940,7 @@ interface ProjectedItem {
 function projectItemEvent(event: CodexItemEvent, session: TurnSession): ProjectedItem[] | null {
   switch (event.type) {
     case 'agentMessage':
+      if (event.delta === false && session.sawAgentMessageDelta) return []
       return [textEvent('message.delta', session, { text: event.text }), agentMessageTextUpdate(event.text, session)]
     case 'reasoning':
       return [textEvent('reasoning.delta', session, { summary: event.summary })]
@@ -872,7 +1047,7 @@ function buildEvent(type: string, session: TurnSession, payload: Record<string, 
     type,
     runtimeSessionId: session.factsState.runtimeSessionId,
     workDir: session.factsState.workDir,
-    turnId: session.expectedTurnId,
+    turnId: session.expectedTurnId ?? '',
     payload,
   }
 }
@@ -890,6 +1065,7 @@ export interface CodexLostTurnStartArgs {
   readonly threadId: string
   readonly clientUserMessageId: string
   readonly workDir: string
+  readonly message?: string
 }
 
 /**
@@ -898,9 +1074,11 @@ export interface CodexLostTurnStartArgs {
  * structured unknown result through the existing error-normalization
  * boundary without re-deriving the message.
  */
-export function buildLostTurnStartUnknown(args: CodexLostTurnStartArgs): CodexResult<CodexTurnResult> {
+export function buildLostTurnStartUnknown(
+  args: CodexLostTurnStartArgs,
+): Extract<CodexResult<CodexTurnResult>, { readonly ok: false }> {
   const error = normalizeUnknownCodex(
-    `turn/start response was lost after submission may have occurred for thread=${args.threadId}; Mohist SessionInput ID ${args.clientUserMessageId} will not be resubmitted`,
+    `${args.message ?? 'turn/start response was lost after submission may have occurred'} for thread=${args.threadId}; Mohist SessionInput ID ${args.clientUserMessageId} will not be resubmitted`,
   )
   const diagnostics: CodexDiagnostic[] = [
     ...error.diagnostics,

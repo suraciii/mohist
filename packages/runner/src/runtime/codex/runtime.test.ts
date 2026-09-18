@@ -148,6 +148,86 @@ function passingProbe(
   return { cli, authentication, catalog }
 }
 
+function lifecycleHandle(): CodexServerHandle & { readonly methods: string[] } {
+  const methods: string[] = []
+  const listeners = new Set<(message: unknown) => void>()
+  let turnOrdinal = 0
+  let threadOrdinal = 0
+  const emitLater = (messages: readonly unknown[]) => {
+    setTimeout(() => {
+      for (const message of messages) for (const listener of listeners) listener(message)
+    }, 0)
+  }
+  return {
+    codexHome: MANAGED_CODEX_HOME,
+    methods,
+    async send<P, R>(request: { readonly method: string; readonly params?: P; readonly id: number }): Promise<R> {
+      methods.push(request.method)
+      switch (request.method) {
+        case 'initialize':
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { protocolVersion: 'v2', codexHome: MANAGED_CODEX_HOME, userAgent: 'codex/0.153.0' },
+          } as unknown as R
+        case 'model/list':
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { models: [{ id: 'gpt-5' }], complete: true },
+          } as unknown as R
+        case 'thread/start': {
+          const threadId = `thread-${++threadOrdinal}`
+          return { jsonrpc: '2.0', id: request.id, result: { threadId, cwd: '/work' } } as unknown as R
+        }
+        case 'thread/resume': {
+          const threadId = (request.params as { readonly threadId?: string } | undefined)?.threadId ?? 'thread-1'
+          return { jsonrpc: '2.0', id: request.id, result: { threadId, cwd: '/work' } } as unknown as R
+        }
+        case 'turn/start': {
+          const turnId = `turn-${++turnOrdinal}`
+          const threadId = (request.params as { readonly threadId?: string } | undefined)?.threadId ?? 'thread-1'
+          emitLater([
+            { type: 'agentMessage', text: 'done' },
+            { type: 'turn/completed', threadId, turnId, status: 'completed' },
+          ])
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: { threadId: 'thread-1', turnId, status: 'inProgress' },
+          } as unknown as R
+        }
+        case 'turn/steer':
+          return { jsonrpc: '2.0', id: request.id, result: { accepted: true } } as unknown as R
+        case 'turn/interrupt':
+          return { jsonrpc: '2.0', id: request.id, result: { accepted: true } } as unknown as R
+        case 'thread/compact/start': {
+          const turnId = `compact-${++turnOrdinal}`
+          const threadId = (request.params as { readonly threadId?: string } | undefined)?.threadId ?? 'thread-1'
+          emitLater([
+            { type: 'contextCompaction', threadId, turnId },
+            { type: 'turn/completed', threadId, turnId, status: 'completed' },
+          ])
+          return { jsonrpc: '2.0', id: request.id, result: { threadId, turnId } } as unknown as R
+        }
+        default:
+          throw new Error(`Unexpected method ${request.method}`)
+      }
+    },
+    notify() {
+      return true
+    },
+    denyServerRequest: () => undefined,
+    subscribe(listener: (message: unknown) => void) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    async close() {
+      listeners.clear()
+    },
+  } as unknown as CodexServerHandle & { readonly methods: string[] }
+}
+
 describe('CodexRuntime spawn + handshake happy path', () => {
   it('runs the initialize handshake and reports ready when the probe succeeds', async () => {
     let initializeCount = 0
@@ -356,6 +436,71 @@ describe('CodexRuntime readiness gate', () => {
     expect(wiredRuntime.ready()).toBe(false)
     expect(wiredRuntime.diagnostic()).toMatchObject({ code: 'protocol-failure' })
     await wiredRuntime.shutdown({ clearDiagnostic: true })
+  })
+})
+
+describe('CodexRuntime AgentSession operations', () => {
+  it('persists a new Thread before turn/start and drives follow-up, compact, and reset through the same app-server', async () => {
+    const handle = lifecycleHandle()
+    const runtime = new CodexRuntime({
+      codexHome: MANAGED_CODEX_HOME,
+      cwd: '/work',
+      serverFactory: async () => handle,
+      readinessProbe: passingProbe(),
+    })
+    await expect(runtime.start()).resolves.toMatchObject({ ok: true })
+
+    const readySessions: string[] = []
+    const events: string[] = []
+    const observer = {
+      onSessionReady: ({ runtimeSessionId }: { readonly runtimeSessionId: string }) => {
+        readySessions.push(runtimeSessionId)
+      },
+      onEvent: (event: { readonly type: string }) => {
+        events.push(event.type)
+      },
+    }
+    const first = await runtime.runTurn(
+      {
+        target: { runtime: 'codex', runtimeSessionId: null, workDir: '/work' },
+        prompt: 'hello',
+        clientUserMessageId: 'input-1',
+        options: { model: 'gpt-5', reasoningEffort: null, variant: null },
+      },
+      new AbortController().signal,
+      observer,
+    )
+    expect(first).toMatchObject({
+      ok: true,
+      value: { facts: { runtimeSessionId: 'thread-1', finalAssistantText: 'done' } },
+    })
+    expect(readySessions).toEqual(['thread-1'])
+    expect(handle.methods.indexOf('thread/start')).toBeLessThan(handle.methods.indexOf('turn/start'))
+
+    const followup = await runtime.followup(
+      {
+        target: { runtime: 'codex', runtimeSessionId: 'thread-1', workDir: '/work' },
+        prompt: 'continue',
+        clientUserMessageId: 'input-2',
+      },
+      observer,
+    )
+    expect(followup).toMatchObject({
+      ok: true,
+      value: { facts: { runtimeSessionId: 'thread-1', finalAssistantText: 'done' } },
+    })
+
+    const compact = await runtime.compact(
+      { target: { runtime: 'codex', runtimeSessionId: 'thread-1', workDir: '/work' } },
+      observer,
+    )
+    expect(compact).toMatchObject({ ok: true })
+    expect(events).toContain('compaction')
+
+    const reset = await runtime.reset({ target: { runtime: 'codex', runtimeSessionId: 'thread-1', workDir: '/work' } })
+    expect(reset).toMatchObject({ ok: true, value: { facts: { runtimeSessionId: 'thread-2' } } })
+    expect(handle.methods.filter((method) => method === 'thread/start')).toHaveLength(2)
+    await runtime.shutdown({ clearDiagnostic: true })
   })
 })
 
