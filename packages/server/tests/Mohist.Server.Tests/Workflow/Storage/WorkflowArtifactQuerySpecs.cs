@@ -158,11 +158,11 @@ public class WorkflowArtifactQuerySpecs
 
         await storage.WriteDirectoryAsync(
             storagePath,
-            new List<WorkflowArtifactDirectoryEntryInput>
+            AsAsyncEnumerable(new List<WorkflowArtifactDirectoryEntryInput>
             {
                 Entry("a.md", "# alpha content\n"),
                 Entry("sub/b.md", "# beta content\n"),
-            },
+            }),
             new WorkflowArtifactFileWrite
             {
                 SourcePath = "specs/",
@@ -187,7 +187,7 @@ public class WorkflowArtifactQuerySpecs
 
         await storage.WriteDirectoryAsync(
             storagePath,
-            new List<WorkflowArtifactDirectoryEntryInput> { Entry("a.md", alpha) },
+            AsAsyncEnumerable(new List<WorkflowArtifactDirectoryEntryInput> { Entry("a.md", alpha) }),
             new WorkflowArtifactFileWrite
             {
                 SourcePath = "specs/",
@@ -208,4 +208,13 @@ public class WorkflowArtifactQuerySpecs
         Size = Encoding.UTF8.GetByteCount(content),
         OpenContent = () => new MemoryStream(Encoding.UTF8.GetBytes(content), writable: false),
     };
+
+    private static async IAsyncEnumerable<T> AsAsyncEnumerable<T>(IEnumerable<T> source)
+    {
+        foreach (var item in source)
+        {
+            yield return item;
+            await Task.CompletedTask.ConfigureAwait(false);
+        }
+    }
 }

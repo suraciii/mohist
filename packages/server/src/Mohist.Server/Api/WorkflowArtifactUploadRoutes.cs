@@ -1,20 +1,33 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Services.Artifacts;
+using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.Api;
 
 /// <summary>
-/// Internal multipart upload endpoint used by the Mohist runner to
+/// Internal multipart upload endpoints used by the Mohist runner to
 /// register pending artifact uploads before reporting the task
-/// result. The endpoint is intentionally separate from
-/// <see cref="WorkflowRoutes"/>: it accepts raw multipart bodies
-/// rather than JSON, and the URL is internal (not part of the public
+/// result. The endpoints are intentionally separate from
+/// <see cref="WorkflowRoutes"/>: they accept raw multipart bodies
+/// rather than JSON, and the URLs are internal (not part of the public
 /// issue-scoped query surface).
 /// </summary>
 /// <remarks>
+/// <para>
+/// Single-file and directory artifacts use separate routes so their
+/// transport limits stay separate. A directory envelope can be up to
+/// <c>MaxEnvelopeBytes</c> (hundreds of MiB after base64 inflation), so only
+/// the directory routes raise the request body and form read limits. The
+/// single-file routes keep the default Kestrel/form boundary, preserving the
+/// previous anti-flood ceiling for regular file uploads.
+/// </para>
 /// <para>
 /// The endpoint derives the producing task run id from the active
 /// workflow work context — the runner contract does not include an
@@ -35,55 +48,118 @@ public static class WorkflowArtifactUploadRoutes
     public const string MultipartFieldContentHash = "contentHash";
     public const string MultipartFieldSize = "size";
 
+    /// <summary>Relative path segment that identifies a directory upload route.</summary>
+    public const string DirectoryUploadRouteSuffix = "artifact-directory-uploads";
+
     public static WebApplication MapWorkflowArtifactUploadRoutes(this WebApplication app)
     {
+        ArgumentNullException.ThrowIfNull(app);
+
+        // The envelope limit is the effective directory-upload gate. Only the
+        // directory routes derive their request-size metadata from it (plus
+        // multipart framing); the file routes keep the default transport
+        // boundary.
+        var limits = app.Services
+            .GetRequiredService<IOptions<WorkflowArtifactStorageOptions>>()
+            .Value.DirectoryLimits ?? WorkflowArtifactDirectoryLimits.Default;
+        var directoryBodyLimit = limits.MaxMultipartBodyBytes;
+        var directoryRequestSizeLimit = new RequestSizeLimitAttribute(directoryBodyLimit);
+
         app.MapPost(
             "/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
-            async (
-                HttpRequest request,
-                string workflowRunId,
-                string workId,
-                WorkflowArtifactUploadService uploadService,
-                CancellationToken cancellationToken) =>
-            {
-                var parsed = await ParseUploadRequestAsync(request, workflowRunId, workId, cancellationToken);
-                if (parsed.Result is not null)
-                    return parsed.Result;
-
-                var result = await uploadService.UploadAsync(parsed.Request!, cancellationToken);
-                return ToApiResult(result);
-            })
+            (HttpRequest request, string workflowRunId, string workId,
+                WorkflowArtifactUploadService uploadService, CancellationToken cancellationToken) =>
+                HandleUploadAsync(
+                    request, workflowRunId, workId, ArtifactUploadKind.File, maxMultipartBodyBytes: null,
+                    (parsed, token) => uploadService.UploadAsync(parsed, token),
+                    cancellationToken))
             .RequireScopes(Scope.Runner);
+
+        app.MapPost(
+            "/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-directory-uploads",
+            (HttpRequest request, string workflowRunId, string workId,
+                WorkflowArtifactUploadService uploadService, CancellationToken cancellationToken) =>
+                HandleUploadAsync(
+                    request, workflowRunId, workId, ArtifactUploadKind.Directory, directoryBodyLimit,
+                    (parsed, token) => uploadService.UploadAsync(parsed, token),
+                    cancellationToken))
+            .RequireScopes(Scope.Runner)
+            .WithMetadata(directoryRequestSizeLimit);
 
         app.MapPost(
             "/api/agent-jobs/{agentJobId}/work/{workId}/artifact-uploads",
-            async (
-                HttpRequest request,
-                string agentJobId,
-                string workId,
-                AgentJobArtifactUploadService uploadService,
-                CancellationToken cancellationToken) =>
-            {
-                var parsed = await ParseUploadRequestAsync(request, agentJobId, workId, cancellationToken);
-                if (parsed.Result is not null)
-                    return parsed.Result;
-
-                var result = await uploadService.UploadAsync(parsed.Request!, cancellationToken);
-                return ToApiResult(result);
-            })
+            (HttpRequest request, string agentJobId, string workId,
+                AgentJobArtifactUploadService uploadService, CancellationToken cancellationToken) =>
+                HandleUploadAsync(
+                    request, agentJobId, workId, ArtifactUploadKind.File, maxMultipartBodyBytes: null,
+                    (parsed, token) => uploadService.UploadAsync(parsed, token),
+                    cancellationToken))
             .RequireScopes(Scope.Runner);
 
+        app.MapPost(
+            "/api/agent-jobs/{agentJobId}/work/{workId}/artifact-directory-uploads",
+            (HttpRequest request, string agentJobId, string workId,
+                AgentJobArtifactUploadService uploadService, CancellationToken cancellationToken) =>
+                HandleUploadAsync(
+                    request, agentJobId, workId, ArtifactUploadKind.Directory, directoryBodyLimit,
+                    (parsed, token) => uploadService.UploadAsync(parsed, token),
+                    cancellationToken))
+            .RequireScopes(Scope.Runner)
+            .WithMetadata(directoryRequestSizeLimit);
+
         return app;
+    }
+
+    /// <summary>
+    /// Replaces the request's form feature with one whose
+    /// <see cref="FormOptions.MultipartBodyLengthLimit"/> admits a directory
+    /// envelope. <see cref="FormOptions"/> is process-global, so this is applied
+    /// only to the directory route, after which the file and attachment routes
+    /// keep the framework default.
+    /// </summary>
+    internal static void ApplyDirectoryFormLimit(HttpRequest request, long maxMultipartBodyBytes)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        request.HttpContext.Features.Set<IFormFeature>(
+            new FormFeature(request, new FormOptions
+            {
+                MultipartBodyLengthLimit = maxMultipartBodyBytes,
+            }));
+    }
+
+    private static async Task<IResult> HandleUploadAsync(
+        HttpRequest request,
+        string ownerId,
+        string workId,
+        ArtifactUploadKind expectedKind,
+        long? maxMultipartBodyBytes,
+        Func<WorkflowArtifactUploadRequest, CancellationToken, Task<WorkflowArtifactUploadResult>> upload,
+        CancellationToken cancellationToken)
+    {
+        var parsed = await ParseUploadRequestAsync(
+            request, ownerId, workId, expectedKind, maxMultipartBodyBytes, cancellationToken);
+        if (parsed.Result is not null)
+            return parsed.Result;
+
+        return ToApiResult(await upload(parsed.Request!, cancellationToken));
     }
 
     private static async Task<ParsedUploadRequest> ParseUploadRequestAsync(
         HttpRequest request,
         string ownerId,
         string workId,
+        ArtifactUploadKind expectedKind,
+        long? maxMultipartBodyBytes,
         CancellationToken cancellationToken)
     {
         if (!request.HasFormContentType)
             return new ParsedUploadRequest(null, ApiResults.BadRequest("multipart/form-data is required"));
+
+        if (expectedKind == ArtifactUploadKind.Directory)
+        {
+            ArgumentNullException.ThrowIfNull(maxMultipartBodyBytes);
+            ApplyDirectoryFormLimit(request, maxMultipartBodyBytes.Value);
+        }
 
         IFormCollection form;
         try
@@ -101,6 +177,21 @@ public static class WorkflowArtifactUploadRoutes
 
         var contentType = form[MultipartFieldContentType].ToString();
         if (string.IsNullOrWhiteSpace(contentType)) contentType = null;
+
+        var declaredDirectory = WorkflowArtifactDirectoryEnvelopeReader.IsDirectoryContentType(contentType);
+        if (expectedKind == ArtifactUploadKind.Directory && !declaredDirectory)
+        {
+            return new ParsedUploadRequest(null, ApiResults.BadRequest(
+                $"'{MultipartFieldContentType}' must be '{WorkflowArtifactDirectoryEnvelopeReader.ContentType}'"
+                + " for a directory upload"));
+        }
+
+        if (expectedKind == ArtifactUploadKind.File && declaredDirectory)
+        {
+            return new ParsedUploadRequest(null, ApiResults.BadRequest(
+                $"Directory uploads must use the dedicated directory upload endpoint"
+                + $" ('{DirectoryUploadRouteSuffix}')"));
+        }
 
         var contentHash = form[MultipartFieldContentHash].ToString();
         if (string.IsNullOrWhiteSpace(contentHash)) contentHash = null;
@@ -168,6 +259,12 @@ public static class WorkflowArtifactUploadRoutes
         size = -1;
         if (string.IsNullOrWhiteSpace(raw)) return false;
         return long.TryParse(raw, out size) && size >= 0;
+    }
+
+    private enum ArtifactUploadKind
+    {
+        File,
+        Directory,
     }
 
     private sealed record ParsedUploadRequest(WorkflowArtifactUploadRequest? Request, IResult? Result);

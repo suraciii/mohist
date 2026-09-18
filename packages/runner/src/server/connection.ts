@@ -192,8 +192,9 @@ export class ServerConnection {
   }
 
   /**
-   * Upload a captured artifact to the internal multipart endpoint
-   * (`POST /api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads`).
+   * Upload a captured artifact to the internal multipart endpoint. Directory
+   * artifacts set `upload.kind = 'directory'` to use the dedicated
+   * `.../artifact-directory-uploads` route; files keep their endpoint.
    *
    * The endpoint identifies the producing task run from the active work
    * context (workflow run + work id), so the runner does not pass an
@@ -222,7 +223,7 @@ export class ServerConnection {
     form.set('content', blob, upload.filename ?? 'artifact')
     const response = await this.requestTransport.request(
       'uploadArtifact',
-      this.artifactUrl(ownerId, workId, ownerKind),
+      this.artifactUrl(ownerId, workId, ownerKind, upload.kind === 'directory'),
       {
         method: 'POST',
         body: form,
@@ -249,12 +250,13 @@ export class ServerConnection {
     }
   }
 
-  private artifactUrl(ownerId: string, workId: string, ownerKind: string) {
+  private artifactUrl(ownerId: string, workId: string, ownerKind: string, directory = false) {
+    const resource = directory ? 'artifact-directory-uploads' : 'artifact-uploads'
     if (ownerKind === 'agent-job') {
-      return `${this.options.serverUrl.replace(/\/$/, '')}/api/agent-jobs/${encodeURIComponent(ownerId)}/work/${encodeURIComponent(workId)}/artifact-uploads`
+      return `${this.options.serverUrl.replace(/\/$/, '')}/api/agent-jobs/${encodeURIComponent(ownerId)}/work/${encodeURIComponent(workId)}/${resource}`
     }
 
-    return `${this.options.serverUrl.replace(/\/$/, '')}/api/workflow-runs/${encodeURIComponent(ownerId)}/work/${encodeURIComponent(workId)}/artifact-uploads`
+    return `${this.options.serverUrl.replace(/\/$/, '')}/api/workflow-runs/${encodeURIComponent(ownerId)}/work/${encodeURIComponent(workId)}/${resource}`
   }
 
   /**
@@ -898,6 +900,8 @@ async function parseRuntimeEventReceiptArray(
 }
 export interface ArtifactUploadRequest {
   path: string
+  /** `'directory'` selects the dedicated directory upload route. */
+  kind?: 'file' | 'directory'
   contentType?: string | null
   contentHash?: string | null
   size: number

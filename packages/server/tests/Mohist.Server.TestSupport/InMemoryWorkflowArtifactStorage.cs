@@ -13,12 +13,23 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
     public Action? BeforeDelete { get; set; }
     public string StorageRoot => Root;
 
+    /// <summary>
+    /// Last storage path produced by <see cref="GenerateStoragePath"/>. Lets a
+    /// cleanup Spec assert that the path a failed upload targeted holds no
+    /// listable content without depending on the internal upload id.
+    /// </summary>
+    public string? LastGeneratedStoragePath { get; private set; }
+
     public string GenerateStoragePath(
         string workflowRunId,
         string actionAttemptId,
         string artifactId,
-        WorkflowArtifactStorageKind kind) =>
-        WorkflowArtifactStoragePath.ForArtifact(workflowRunId, actionAttemptId, artifactId, kind).Value;
+        WorkflowArtifactStorageKind kind)
+    {
+        var path = WorkflowArtifactStoragePath.ForArtifact(workflowRunId, actionAttemptId, artifactId, kind).Value;
+        LastGeneratedStoragePath = path;
+        return path;
+    }
 
     public async Task<WorkflowArtifactStorageWriteResult> WriteFileAsync(
         string storagePath,
@@ -52,7 +63,7 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
 
     public async Task<WorkflowArtifactStorageWriteResult> WriteDirectoryAsync(
         string storagePath,
-        IReadOnlyList<WorkflowArtifactDirectoryEntryInput> entries,
+        IAsyncEnumerable<WorkflowArtifactDirectoryEntryInput> entries,
         WorkflowArtifactFileWrite write,
         DateTimeOffset recordedAt,
         WorkflowArtifactDirectoryLimits? limits = null,
@@ -65,24 +76,33 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
             throw new WorkflowArtifactStorageException($"Directory artifact storage path '{storagePath}' must end with 'files'.");
 
         var effectiveLimits = limits ?? WorkflowArtifactDirectoryLimits.Default;
-        if (entries.Count > effectiveLimits.MaxFileCount)
-            throw new WorkflowArtifactStorageException(
-                $"Directory artifact exceeds file count limit ({entries.Count} > {effectiveLimits.MaxFileCount}).");
 
-        // Validate every declared value before materializing any content,
-        // mirroring the filesystem adapter. A rejection never registers the
-        // artifact, so the storage path can be retried.
+        // Pull one entry at a time: validate, copy, and record it before
+        // asking the stream for the next. Nothing is registered until the
+        // whole stream succeeds, so a mid-stream rejection leaves the
+        // storage path retryable.
+        var storedEntries = new Dictionary<string, StoredDirectoryEntry>(StringComparer.Ordinal);
+        var manifest = new List<WorkflowArtifactDirectoryEntry>();
         long declaredTotalBytes = 0;
+        long totalBytes = 0;
         var seenPaths = new HashSet<string>(StringComparer.Ordinal);
-        var validated = new List<(WorkflowArtifactDirectoryEntryInput Entry, string NormalizedPath)>(entries.Count);
-        foreach (var entry in entries)
+
+        await foreach (var entry in entries
+                           .WithCancellation(cancellationToken)
+                           .ConfigureAwait(false))
         {
             if (entry is null)
                 throw new WorkflowArtifactStorageException("Directory entry is null.");
-            var contained = WorkflowArtifactContainedPath.Parse(entry.RelativePath).Value;
-            if (!seenPaths.Add(contained))
+
+            var containedPath = WorkflowArtifactContainedPath.Parse(entry.RelativePath).Value;
+            if (!seenPaths.Add(containedPath))
                 throw new WorkflowArtifactStorageException(
                     $"Directory entry '{entry.RelativePath}' appears more than once in a single write.");
+
+            if (manifest.Count >= effectiveLimits.MaxFileCount)
+                throw new WorkflowArtifactStorageException(
+                    $"Directory artifact exceeds file count limit ({manifest.Count + 1} > {effectiveLimits.MaxFileCount}).");
+
             if (entry.Size < 0)
                 throw new WorkflowArtifactStorageException(
                     $"Directory entry '{entry.RelativePath}' has a negative declared size ({entry.Size}).");
@@ -93,15 +113,6 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
                 throw new WorkflowArtifactStorageException(
                     $"Directory entry '{entry.RelativePath}' would exceed total size limit ({effectiveLimits.MaxTotalBytes}).");
             declaredTotalBytes += entry.Size;
-            validated.Add((entry, contained));
-        }
-
-        var storedEntries = new Dictionary<string, StoredDirectoryEntry>(StringComparer.Ordinal);
-        var manifest = new List<WorkflowArtifactDirectoryEntry>(validated.Count);
-        long totalBytes = 0;
-        foreach (var (entry, containedPath) in validated.OrderBy(value => value.NormalizedPath, StringComparer.Ordinal))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
 
             await using var input = entry.OpenContent()
                 ?? throw new WorkflowArtifactStorageException($"Content supplier for '{containedPath}' returned a null stream.");
@@ -138,6 +149,15 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
                 ContentType = entry.ContentType,
             });
         }
+
+        if (manifest.Count == 0)
+            throw new WorkflowArtifactStorageException(
+                "Directory artifact must contain at least one contained file.");
+
+        // Written in arrival order; the durable manifest is sorted by ordinal
+        // relative path to keep the listing contract stable.
+        manifest.Sort(static (left, right) =>
+            string.CompareOrdinal(left.RelativePath, right.RelativePath));
 
         var metadata = CreateMetadata(path, write, recordedAt, "directory", totalBytes, storedEntries.Count, manifest);
         Add(path.Value, new StoredArtifact(metadata, null, storedEntries));

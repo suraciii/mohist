@@ -53,6 +53,7 @@ changing a document in `design/`.
 - [workflow/task-dispatch.md](workflow/task-dispatch.md) — Single authority for `with` / `expect` template evaluation timing: Server dispatch carries the original declaration and an immutable attempt snapshot; Runner renders once at the execution entry before calling the Action.
 - [workflow/recovery.md](workflow/recovery.md) — Failure recovery: recovery declarations, when matching, runner-built recovery tasks.
 - [workflow/plan-artifacts.md](workflow/plan-artifacts.md) — Plan artifacts: the task list, named artifacts, persistence and recovery, review as approval, prompt realignment, Web evidence surface.
+- [workflow/artifacts.md](workflow/artifacts.md) — Workflow artifact ingestion: directory envelope transport, ingestion limits, streaming retention bound, and failure/cancellation rollback.
 - [workflow/issue-coordination.md](workflow/issue-coordination.md) — Cross-aggregate interaction of Issue, WorkflowRun, Runner, Session.
 
 ## Supporting topics
