@@ -416,7 +416,7 @@ public sealed class WorkspaceHomeContinuitySpecs
         var branch = $"mohist/ws-{workspaceName}";
         var homePath = $"/mohist-tests/runner/{workspaceName}";
         var workspace = _fixture.Grains.GetGrain<IWorkspaceGrain>(GrainKey.Workspace(projectId, workspaceName));
-        Assert.NotNull(await workspace.EnsureMaterializedOnAsync(
+        Assert.NotNull(await workspace.EnsureProvisionedOnAsync(
             runnerId,
             homePath,
             _fixture.TimeProvider.GetUtcNow()));

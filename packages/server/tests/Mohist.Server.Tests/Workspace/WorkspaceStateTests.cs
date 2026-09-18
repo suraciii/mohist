@@ -74,27 +74,27 @@ public class WorkspaceStateTests
     }
 
     [Fact]
-    public void Materialize_SameRunnerCanMoveHomeButAnotherRunnerCannotClaimIt()
+    public void Provision_SameRunnerCanMoveHomeButAnotherRunnerCannotClaimIt()
     {
         var state = Active();
 
-        var first = state.EnsureMaterializedOn("runner-a", "/workspace/pay");
-        Assert.Same(first, state.EnsureMaterializedOn("runner-a", "/workspace/pay"));
-        Assert.Equal("/workspace/pay-2", state.EnsureMaterializedOn("runner-a", "/workspace/pay-2").Path);
+        var first = state.EnsureProvisionedOn("runner-a", "/workspace/pay");
+        Assert.Same(first, state.EnsureProvisionedOn("runner-a", "/workspace/pay"));
+        Assert.Equal("/workspace/pay-2", state.EnsureProvisionedOn("runner-a", "/workspace/pay-2").Path);
 
         var error = Assert.Throws<WorkspaceDomainException>(() =>
-            state.EnsureMaterializedOn("runner-b", "/workspace/pay"));
+            state.EnsureProvisionedOn("runner-b", "/workspace/pay"));
         Assert.Equal("workspace_home_claimed", error.Code);
     }
 
     [Fact]
-    public void Materialize_ArchivedWorkspaceReportsArchived()
+    public void Provision_ArchivedWorkspaceReportsArchived()
     {
         var state = Active();
         state.Close(DateTimeOffset.UnixEpoch);
 
         var error = Assert.Throws<WorkspaceDomainException>(() =>
-            state.EnsureMaterializedOn("runner-a", "/workspace/pay"));
+            state.EnsureProvisionedOn("runner-a", "/workspace/pay"));
 
         Assert.Equal("workspace_archived", error.Code);
     }
@@ -103,7 +103,7 @@ public class WorkspaceStateTests
     public void ClearHomeIf_OnlyOwnerClearsActiveHome()
     {
         var state = Active();
-        var home = state.EnsureMaterializedOn("runner-a", "/workspace/pay");
+        var home = state.EnsureProvisionedOn("runner-a", "/workspace/pay");
 
         Assert.False(state.ClearHomeIf("runner-b"));
         Assert.Same(home, state.ActiveHome());
@@ -115,7 +115,7 @@ public class WorkspaceStateTests
     public void ActiveHome_ArchivedWorkspaceHidesHome()
     {
         var state = Active();
-        state.EnsureMaterializedOn("runner-a", "/workspace/pay");
+        state.EnsureProvisionedOn("runner-a", "/workspace/pay");
         state.Close(DateTimeOffset.UnixEpoch);
 
         Assert.Null(state.ActiveHome());

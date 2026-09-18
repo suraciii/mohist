@@ -369,7 +369,7 @@ public class WorkspaceSpecs
         var workspaceName = $"issue-{issueNumber}";
         await _fixture.Grains
             .GetGrain<IWorkspaceGrain>(GrainKey.Workspace(project.Id, workspaceName))
-            .EnsureMaterializedOnAsync("workspace-spec-runner", NamedWorkspaceHomePath(workspaceName), DateTimeOffset.UnixEpoch);
+            .EnsureProvisionedOnAsync("workspace-spec-runner", NamedWorkspaceHomePath(workspaceName), DateTimeOffset.UnixEpoch);
         return workflowRunId;
     }
 

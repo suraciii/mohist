@@ -673,7 +673,7 @@ public sealed record AgentJobInput(
     [property: Id(15)] string? InitialTurnId = null,
     /// <summary>
     /// Accepted attachment descriptors for the launch-time input.
-    /// The Runner uses these to materialize the workspace and to
+    /// The Runner uses these to provision the workspace and to
     /// build the honest, system-attributed manifest block. Absent on
     /// jobs persisted before attachments were attached to inputs —
     /// the Runner treats an absent or empty list as no attachments.

@@ -399,7 +399,7 @@ public static partial class RunnerRoutes
             return Results.Ok(events);
         });
 
-        // Runner reports a materialized named workspace directory; the
+        // Runner reports a provisioned named workspace directory; the
         // grain records the home (first writer wins) so later dispatches
         // bind to this runner.
         group.MapPost("/workspaces/{projectId}/{workspaceName}/materialized", async (
@@ -417,7 +417,7 @@ public static partial class RunnerRoutes
             {
                 var home = await grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
                         GrainKey.Workspace(projectId, workspaceName))
-                    .EnsureMaterializedOnAsync(runnerId, req.Path, time.GetUtcNow());
+                    .EnsureProvisionedOnAsync(runnerId, req.Path, time.GetUtcNow());
                 return home is null
                     ? ApiResults.NotFound($"Workspace '{workspaceName}' not found")
                     : ApiResults.Ok(new WorkspaceMaterializedResponse(home.RunnerId, home.Path));

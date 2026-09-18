@@ -123,7 +123,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
             GrainKey.Workspace(projectId, workspaceName));
         var now = _fixture.TimeProvider.GetUtcNow();
         await workspace.CreateManualAsync(workspaceName, [], now);
-        var home = await workspace.EnsureMaterializedOnAsync(runnerId, $"/tmp/{workspaceName}", now);
+        var home = await workspace.EnsureProvisionedOnAsync(runnerId, $"/tmp/{workspaceName}", now);
         Assert.NotNull(home);
         Assert.Equal(runnerId, home.RunnerId);
         return workspaceName;

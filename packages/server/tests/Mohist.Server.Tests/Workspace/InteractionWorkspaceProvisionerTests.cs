@@ -427,7 +427,7 @@ public sealed class InteractionWorkspaceProvisionerTests
 
         public Task<WorkspaceHome?> GetHomeAsync() => throw new NotSupportedException();
 
-        public Task<WorkspaceHome?> EnsureMaterializedOnAsync(string runnerId, string path, DateTimeOffset now)
+        public Task<WorkspaceHome?> EnsureProvisionedOnAsync(string runnerId, string path, DateTimeOffset now)
             => throw new NotSupportedException();
 
         public Task ClearHomeIfAsync(string runnerId) => throw new NotSupportedException();
