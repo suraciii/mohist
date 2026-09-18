@@ -16,7 +16,8 @@ public sealed record RunnerDurableStatus(
     RunnerInfo? Info,
     DateTimeOffset? LastPresenceAt,
     string? UpdateInterruptId,
-    RunnerEnvironmentApplicationObservation? EnvironmentApplication = null);
+    RunnerEnvironmentApplicationObservation? EnvironmentApplication = null,
+    RunnerEnvironmentObservationView? EnvironmentObservation = null);
 
 public interface IRunnerDurableStatusReader
 {
@@ -59,6 +60,8 @@ public sealed class RunnerDurableStatusReader(IGrainStorage storage, IGrainFacto
             grainState.State.LastPresenceAt,
             grainState.State.UpdateInterruptFence?.PendingId,
             RunnerEnvironmentApplicationObservationMapper.From(
-                grainState.State.EnvironmentApplication));
+                grainState.State.EnvironmentApplication),
+            RunnerEnvironmentObservationMapper.From(
+                grainState.State.EnvironmentObservation));
     }
 }

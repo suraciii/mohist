@@ -220,5 +220,5 @@ local CLI now owns candidate capture, bounded apply/cancel, atomic
 active/previous rotation, restart confirmation, rollback, and bounded local
 tool checks. Server stores the explicit sanitized observation report and the
 global projection/Web detail page render it without exposing raw values or
-command output. The end-to-end Go task verification and live-runtime proof
-remain separate acceptance work for Issue #1009.
+command output. The remaining acceptance work for Issue #1009 is the
+end-to-end Go task scenario and live-runtime proof.

@@ -275,7 +275,7 @@ The update fence now retains current-generation settlement counts even while a
 draining poll cannot claim new work. Server now persists one environment
 application per Runner, preserves its fence across process replacement, and
 requires a current-generation target-version witness before confirmation. The
-identity read model and local CLI candidate/apply/cancel transaction are now
-implemented. The next slice adds the explicit observation report, local tool
-checks, and its sanitized projection; end-to-end Go task verification and
-live-runtime validation remain separate gates.
+identity read model, local CLI candidate/apply/cancel transaction, explicit
+observation report, bounded tool checks, and sanitized projection are now
+implemented. End-to-end Go task verification and live-runtime validation remain
+separate gates.

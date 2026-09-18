@@ -147,7 +147,7 @@ describe('RunnerDetailPage', () => {
     expect(screen.getByText(/Runtime readiness and capability catalog are independent facts/i)).toBeInTheDocument()
   })
 
-  it('shows the active environment and durable application without inventing a remote candidate', () => {
+  it('shows the active environment, application, and sanitized observation', () => {
     runner = makeRunner({
       environment: {
         activeVersion: 'env-v2',
@@ -163,6 +163,32 @@ describe('RunnerDetailPage', () => {
           requestedAt: '2026-01-01T12:00:00Z',
           completedAt: null,
         },
+        observation: {
+          processGeneration: 'process-2',
+          environmentVersion: 'env-v2',
+          environmentLoadedAt: '2026-01-01T11:59:00Z',
+          candidateSource: 'terminal',
+          candidateUser: 'runner-user',
+          candidateVersion: 'env-v3',
+          candidateVariables: ['PATH', 'GOROOT'],
+          candidateCapturedAt: '2026-01-01T12:00:00Z',
+          candidateAddedVariables: ['GOROOT'],
+          candidateRemovedVariables: [],
+          candidateChangedVariables: ['PATH'],
+          toolChecks: [
+            {
+              executable: 'go',
+              resolvedPath: '/opt/go/bin/go',
+              snapshotKind: 'candidate',
+              snapshotVersion: 'env-v3',
+              outcome: 'passed',
+              exitCode: 0,
+              durationMilliseconds: 12,
+              checkedAt: '2026-01-01T12:00:01Z',
+            },
+          ],
+          reportedAt: '2026-01-01T12:00:02Z',
+        },
       },
     })
 
@@ -171,9 +197,12 @@ describe('RunnerDetailPage', () => {
     const environment = screen.getByTestId('runner-detail-environment-section')
     expect(within(environment).getByTestId('runner-environment-active-version')).toHaveTextContent('env-v2')
     expect(within(environment).getByTestId('runner-environment-application')).toHaveTextContent('waiting')
-    expect(within(environment).getByText('env-v3')).toBeInTheDocument()
+    expect(within(environment).getByTestId('runner-environment-observation')).toHaveTextContent('env-v3')
     expect(within(environment).getByText(/mo runner environment status/)).toBeInTheDocument()
-    expect(within(environment).queryByText(/candidate source/i)).not.toBeInTheDocument()
+    expect(within(environment).getByTestId('runner-environment-observation')).toHaveTextContent('terminal')
+    expect(within(environment).getByTestId('runner-environment-tool-checks')).toHaveTextContent('/opt/go/bin/go')
+    expect(within(environment).getByTestId('runner-environment-tool-checks')).toHaveTextContent('passed')
+    expect(within(environment).queryByText(/MOHIST_TOKEN|PATH=\/opt/i)).not.toBeInTheDocument()
   })
 
   it('keeps an offline known definition and safely quoted Server re-enrollment action', () => {

@@ -22,6 +22,11 @@ public sealed class RunnerState
     /// metadata and activation evidence.
     /// </summary>
     [Id(8)] public RunnerEnvironmentApplication? EnvironmentApplication { get; set; }
+    /// <summary>
+    /// Latest bounded candidate/tool observation. Raw host values and command
+    /// output never enter durable Runner state.
+    /// </summary>
+    [Id(9)] public RunnerEnvironmentObservation? EnvironmentObservation { get; set; }
 }
 
 /// <summary>
