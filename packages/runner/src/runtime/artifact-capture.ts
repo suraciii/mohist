@@ -218,6 +218,7 @@ interface DirectoryFileEntry {
   relativePath: string
   size: number
   contentHash: string
+  contentType: string
   data: Uint8Array
 }
 
@@ -267,10 +268,12 @@ async function collectDirectoryFiles(
         throw new Error(`artifact directory '${sourceLabel}' exceeds the ${limits.maxDirectoryFileCount}-file limit`)
       }
       const content = new Uint8Array(data)
+      const relativePath = relative(absoluteRoot, entryAbsolute).split(sep).join('/')
       out.push({
-        relativePath: relative(absoluteRoot, entryAbsolute).split(sep).join('/'),
+        relativePath,
         size: content.byteLength,
         contentHash: `sha256:${createHash('sha256').update(content).digest('hex')}`,
+        contentType: guessContentType(relativePath),
         data: content,
       })
     }
@@ -286,6 +289,7 @@ function encodeDirectoryArchive(entries: DirectoryFileEntry[]): Uint8Array {
       path: entry.relativePath,
       size: entry.size,
       contentHash: entry.contentHash,
+      contentType: entry.contentType,
       data: Buffer.from(entry.data).toString('base64'),
     })),
   })
