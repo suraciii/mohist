@@ -12,7 +12,7 @@ import (
 func TestRunnerEnvironmentInitializeUsesProcessEnvironmentAndDoesNotRestart(t *testing.T) {
 	home := t.TempDir()
 	unitPath := filepath.Join(home, ".config", "systemd", "user", runnerEnvironmentServiceUnit)
-	unit := "[Unit]\nDescription=Runner\n\n[Service]\nWorkingDirectory=/managed\nEnvironment=RUNNER_ID=runner-pluto\nExecStart=/usr/bin/node /managed/dist/cli.js\n"
+	unit := "[Unit]\nDescription=Runner\n\n[Service]\nWorkingDirectory=/managed\nEnvironment=PATH=/inline/bin DOTNET_ROOT=/inline/dotnet RUNNER_ID=runner-pluto\nExecStart=/usr/bin/node /managed/dist/cli.js\n"
 	files := map[string]string{
 		unitPath:             unit,
 		"/proc/4242/environ": "PATH=/old/bin:/old/bin:/tmp/injected\x00DOTNET_ROOT=/dotnet\x00SECRET=hidden\x00",
@@ -71,6 +71,12 @@ func TestRunnerEnvironmentInitializeUsesProcessEnvironmentAndDoesNotRestart(t *t
 	}
 	if !strings.Contains(files[unitPath], "EnvironmentFile=-%h/.config/mohist/runner-environment.env\n") {
 		t.Fatalf("unit=%q", files[unitPath])
+	}
+	if strings.Contains(files[unitPath], "PATH=/inline/bin") || strings.Contains(files[unitPath], "DOTNET_ROOT=/inline/dotnet") {
+		t.Fatalf("legacy allowlisted assignments remained in unit=%q", files[unitPath])
+	}
+	if !strings.Contains(files[unitPath], "RUNNER_ID=runner-pluto") {
+		t.Fatalf("unrelated Environment assignment was removed: unit=%q", files[unitPath])
 	}
 	if strings.Contains(files[unitPath], "terminal") || strings.Contains(out.String(), "terminal") || strings.Contains(out.String(), "hidden") {
 		t.Fatalf("terminal or secret value leaked: unit=%q output=%q", files[unitPath], out.String())
@@ -254,6 +260,28 @@ func TestParseRunnerProcessEnvironmentAppliesConfiguredTemporaryPathRule(t *test
 func TestEnsureRunnerEnvironmentFileRejectsNonCanonicalSnapshotPath(t *testing.T) {
 	unit := []byte("[Service]\nEnvironmentFile=/other/runner-environment.env\nExecStart=/runner\n")
 	if _, _, err := ensureRunnerEnvironmentFile(unit); err == nil || !strings.Contains(err.Error(), "non-canonical") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestEnsureRunnerEnvironmentFileRemovesOnlyLegacyAllowlistedAssignments(t *testing.T) {
+	unit := []byte("[Service]\nEnvironment=PATH=/old DOTNET_ROOT=/dotnet PATH RUNNER_ID=runner-pluto\nEnvironmentFile=-%h/.config/mohist/runner-environment.env\nExecStart=/runner\n")
+	updated, changed, err := ensureRunnerEnvironmentFile(unit)
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	text := string(updated)
+	if strings.Contains(text, "PATH=/old") || strings.Contains(text, "DOTNET_ROOT=/dotnet") || !strings.Contains(text, "RUNNER_ID=runner-pluto") {
+		t.Fatalf("normalized unit=%q", text)
+	}
+	if strings.Count(text, "EnvironmentFile=-%h/.config/mohist/runner-environment.env") != 1 {
+		t.Fatalf("environment file directive count=%d unit=%q", strings.Count(text, "EnvironmentFile=-%h/.config/mohist/runner-environment.env"), text)
+	}
+}
+
+func TestEnsureRunnerEnvironmentFileRejectsContinuedEnvironmentDirective(t *testing.T) {
+	unit := []byte("[Service]\nEnvironment=PATH=/old \\\n+ DOTNET_ROOT=/dotnet\nExecStart=/runner\n")
+	if _, _, err := ensureRunnerEnvironmentFile(unit); err == nil || !strings.Contains(err.Error(), "ambiguous continued Environment") {
 		t.Fatalf("err=%v", err)
 	}
 }

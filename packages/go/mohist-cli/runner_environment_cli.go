@@ -1062,13 +1062,32 @@ func observeRunnerEnvironmentIdentity(ctx context.Context, c *client, runnerID s
 
 func decodeRunnerEnvironmentApplication(data []byte, runnerID, updateID string, requireSnapshot bool) (runnerEnvironmentApplicationResponse, error) {
 	var response runnerEnvironmentApplicationResponse
-	if json.Unmarshal(data, &response) != nil || response.RunnerID != runnerID || response.UpdateID != updateID {
+	if json.Unmarshal(data, &response) != nil || response.RunnerID != runnerID || !sameRunnerEnvironmentUpdateID(response.UpdateID, updateID) {
 		return runnerEnvironmentApplicationResponse{}, errors.New("Runner environment application response was invalid")
 	}
 	if requireSnapshot && response.Application == nil {
 		return runnerEnvironmentApplicationResponse{}, errors.New("Runner environment application response was incomplete")
 	}
 	return response, nil
+}
+
+// The Server stores UUID update IDs in canonical, hyphen-free form while the
+// local transaction record keeps the generated presentation. Treat those
+// presentations as the same identity at the protocol boundary.
+func sameRunnerEnvironmentUpdateID(left, right string) bool {
+	canonical := func(value string) (string, bool) {
+		value = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(value), "-", ""))
+		if len(value) != 32 {
+			return "", false
+		}
+		if _, err := hex.DecodeString(value); err != nil {
+			return "", false
+		}
+		return value, true
+	}
+	leftCanonical, leftOK := canonical(left)
+	rightCanonical, rightOK := canonical(right)
+	return leftOK && rightOK && leftCanonical == rightCanonical
 }
 
 func beginRunnerEnvironmentApplication(ctx context.Context, c *client, runnerID string, metadata runnerEnvironmentApplicationMetadata) (runnerEnvironmentApplicationResponse, error) {

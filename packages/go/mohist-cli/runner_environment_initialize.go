@@ -249,6 +249,8 @@ func ensureRunnerEnvironmentFile(unit []byte) ([]byte, bool, error) {
 	serviceStart := -1
 	execStart := -1
 	found := 0
+	changed := false
+	resultLines := make([]managedUnitLine, 0, len(lines)+1)
 	for index, line := range lines {
 		body := string(line.body)
 		trimmed := strings.TrimSpace(body)
@@ -258,18 +260,52 @@ func ensureRunnerEnvironmentFile(unit []byte) ([]byte, bool, error) {
 				serviceSections++
 				serviceStart = index
 			}
+			resultLines = append(resultLines, line)
 			continue
 		}
 		if !inService {
+			resultLines = append(resultLines, line)
 			continue
 		}
-		key, value, _, ok := managedUnitDirective(body)
+		key, value, valueOffset, ok := managedUnitDirective(body)
 		if !ok {
+			resultLines = append(resultLines, line)
 			continue
 		}
 		switch key {
 		case "ExecStart":
 			execStart = index
+		case "Environment":
+			if hasManagedLineContinuation(body) {
+				return nil, false, errors.New("Runner unit contains an ambiguous continued Environment directive")
+			}
+			words, err := splitManagedSystemdWords(value)
+			if err != nil {
+				return nil, false, errors.New("Runner unit contains an invalid Environment directive")
+			}
+			remaining := make([]string, 0, len(words))
+			for _, word := range words {
+				name, _, hasValue := strings.Cut(word.value, "=")
+				if !hasValue {
+					name = word.value
+				}
+				if name == "" {
+					remaining = append(remaining, value[word.start:word.end])
+					continue
+				}
+				if _, allowlisted := runnerEnvironmentAllowlistedNames[name]; allowlisted {
+					changed = true
+					continue
+				}
+				remaining = append(remaining, value[word.start:word.end])
+			}
+			if len(remaining) == 0 && len(words) > 0 {
+				continue
+			}
+			if len(remaining) != len(words) {
+				prefix := body[:valueOffset]
+				line = managedUnitLine{body: []byte(prefix + strings.Join(remaining, " ")), ending: line.ending}
+			}
 		case "EnvironmentFile":
 			if hasManagedLineContinuation(body) && strings.Contains(value, "runner-environment") {
 				return nil, false, errors.New("Runner unit contains an ambiguous environment file directive")
@@ -287,6 +323,7 @@ func ensureRunnerEnvironmentFile(unit []byte) ([]byte, bool, error) {
 				}
 			}
 		}
+		resultLines = append(resultLines, line)
 	}
 	if serviceSections != 1 || serviceStart < 0 || execStart < 0 {
 		return nil, false, errors.New("Runner unit must contain one [Service] section and ExecStart")
@@ -294,27 +331,50 @@ func ensureRunnerEnvironmentFile(unit []byte) ([]byte, bool, error) {
 	if found > 1 {
 		return nil, false, errors.New("Runner unit contains multiple managed environment snapshot directives")
 	}
-	if found == 1 {
-		return append([]byte(nil), unit...), false, nil
+	if found == 0 {
+		// Recalculate the insertion point after any legacy Environment lines were
+		// removed. The directive still belongs immediately before ExecStart.
+		execStart = -1
+		inService = false
+		for index, line := range resultLines {
+			trimmed := strings.TrimSpace(string(line.body))
+			if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+				inService = trimmed == "[Service]"
+				continue
+			}
+			if inService {
+				key, _, _, ok := managedUnitDirective(string(line.body))
+				if ok && key == "ExecStart" {
+					execStart = index
+					break
+				}
+			}
+		}
+		if execStart < 0 {
+			return nil, false, errors.New("Runner unit ExecStart disappeared during normalization")
+		}
+		ending := resultLines[execStart].ending
+		if len(ending) == 0 {
+			ending = managedUnitNewline(resultLines)
+		}
+		prefix := managedDirectivePrefix(string(resultLines[execStart].body))
+		inserted := managedUnitLine{
+			body:   []byte(prefix + "EnvironmentFile=-" + runnerEnvironmentSnapshotFile),
+			ending: ending,
+		}
+		resultLines = append(resultLines, managedUnitLine{})
+		copy(resultLines[execStart+1:], resultLines[execStart:])
+		resultLines[execStart] = inserted
+		changed = true
 	}
-
-	ending := lines[execStart].ending
-	if len(ending) == 0 {
-		ending = managedUnitNewline(lines)
-	}
-	prefix := managedDirectivePrefix(string(lines[execStart].body))
-	inserted := managedUnitLine{
-		body:   []byte(prefix + "EnvironmentFile=-" + runnerEnvironmentSnapshotFile),
-		ending: ending,
-	}
-	lines = append(lines, managedUnitLine{})
-	copy(lines[execStart+1:], lines[execStart:])
-	lines[execStart] = inserted
 
 	var result strings.Builder
-	for _, line := range lines {
+	for _, line := range resultLines {
 		result.Write(line.body)
 		result.Write(line.ending)
+	}
+	if !changed {
+		return append([]byte(nil), unit...), false, nil
 	}
 	return []byte(result.String()), true, nil
 }

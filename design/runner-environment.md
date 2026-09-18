@@ -120,8 +120,12 @@ This is a migration of the existing installation, not an environment refresh:
   identity change during the read fails closed.
 - It writes `runner-environment.env` atomically with mode `0600` and inserts the
   fixed `EnvironmentFile=-%h/.config/mohist/runner-environment.env` directive
-  into the unit exactly once. It does not rewrite `ExecStart`,
-  `WorkingDirectory`, `runner.env`, managed credentials, or drop-ins.
+  into the unit exactly once. Legacy inline `Environment=` assignments for the
+  fixed allowlist are removed from the effective `[Service]` fragment so a
+  future candidate can actually remove a variable; unrelated assignments are
+  preserved. Ambiguous continued `Environment=` directives fail closed. The
+  command does not rewrite `ExecStart`, `WorkingDirectory`, `runner.env`,
+  managed credentials, or drop-ins.
 - It runs `systemctl --user daemon-reload` but does not restart the Runner,
   acquire an admission fence, or change current work. The running process keeps
   the environment that was measured; future process generations load the same
