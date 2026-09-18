@@ -13,12 +13,23 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
     public Action? BeforeDelete { get; set; }
     public string StorageRoot => Root;
 
+    /// <summary>
+    /// Last storage path produced by <see cref="GenerateStoragePath"/>. Lets a
+    /// cleanup Spec assert that the path a failed upload targeted holds no
+    /// listable content without depending on the internal upload id.
+    /// </summary>
+    public string? LastGeneratedStoragePath { get; private set; }
+
     public string GenerateStoragePath(
         string workflowRunId,
         string actionAttemptId,
         string artifactId,
-        WorkflowArtifactStorageKind kind) =>
-        WorkflowArtifactStoragePath.ForArtifact(workflowRunId, actionAttemptId, artifactId, kind).Value;
+        WorkflowArtifactStorageKind kind)
+    {
+        var path = WorkflowArtifactStoragePath.ForArtifact(workflowRunId, actionAttemptId, artifactId, kind).Value;
+        LastGeneratedStoragePath = path;
+        return path;
+    }
 
     public async Task<WorkflowArtifactStorageWriteResult> WriteFileAsync(
         string storagePath,
