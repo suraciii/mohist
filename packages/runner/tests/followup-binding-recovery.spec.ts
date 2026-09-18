@@ -199,4 +199,50 @@ describe('follow-up Runtime binding recovery', () => {
     expect(queue.enqueueBeforeExecution).not.toHaveBeenCalled()
     expect(runtime.followup).not.toHaveBeenCalled()
   })
+
+  it('uses the canonical AgentSession id for Workflow binding recovery', async () => {
+    const runtime = {
+      ready: () => true,
+      resolveSession: vi.fn(async () => ({
+        ok: false as const,
+        error: { kind: 'missing-session', message: 'gone' },
+        diagnostics: [],
+      })),
+      createSession: vi.fn(async () => ({
+        ok: true as const,
+        value: { runtimeSessionId: 'runtime-new', workDir: '/work' },
+        diagnostics: [],
+      })),
+      followup: vi.fn(async () => ({
+        ok: true as const,
+        value: { facts: { runtimeSessionId: 'runtime-new' } },
+        diagnostics: [],
+      })),
+    }
+    const recover = vi.fn(async (projectId: string, sessionId: string) => {
+      expect(projectId).toBe('project-1')
+      expect(sessionId).toBe('session-1')
+    })
+    const receive = createFollowupHandler({
+      followupTargetResolver: () => ({ runtimeSessionId: 'runtime-old', workDir: '/work', projectId: 'project-1' }),
+      agentSessionRuntimeEventQueue: eventQueue([]) as never,
+      openCodeRuntime: runtime as never,
+      connection: { recoverMissingAgentSession: recover } as never,
+      runnerId: 'runner-1',
+    })
+    const workflowPayload = {
+      ...payload(),
+      target: {
+        kind: 'workflow',
+        projectId: 'project-1',
+        workflowRunId: 'workflow-1',
+        sessionName: 'agent',
+        sessionId: 'session-1',
+        binding: payload().target.binding,
+      },
+    }
+
+    await expect(receive(workflowPayload as never)).resolves.toEqual({ accepted: true })
+    expect(recover).toHaveBeenCalledOnce()
+  })
 })

@@ -38,6 +38,12 @@ canonical Session transcript on demand through the existing read-only command.
 History is bounded, ordered, and redacted. The system does not inject a full
 transcript by default.
 
+Recovery transport is source-agnostic: the Runner calls the single
+`agent-sessions/{projectId}/{agentSessionId}/recover-missing` endpoint for
+agent-launch, agent-connection, and Workflow Sessions. A Workflow's
+`workflowRunId` and `sessionName` are lookup and presentation identities; they
+are not an alternate recovery route.
+
 If replacement or binding CAS fails, the original binding and canonical history
 remain unchanged and the Turn is reported as retryable/unavailable. A failed
 replacement must not leave a partially adopted physical session as current.
