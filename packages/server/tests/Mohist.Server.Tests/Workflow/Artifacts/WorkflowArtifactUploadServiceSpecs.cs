@@ -350,7 +350,7 @@ public class WorkflowArtifactUploadServiceSpecs
             "\"kind\":\"directory\"," +
             "\"files\":[" +
             $"{{\"path\":\"a.md\",\"size\":{fileA.LongLength},\"contentType\":\"text/markdown\",\"data\":\"{Convert.ToBase64String(fileA)}\"}}," +
-            $"{{\"path\":\"sub/b.md\",\"size\":{fileB.LongLength},\"contentType\":\"text/markdown\",\"data\":\"{Convert.ToBase64String(fileB)}\"}}" +
+            $"{{\"path\":\"sub/b.md\",\"size\":{fileB.LongLength},\"contentType\":\"application/json\",\"data\":\"{Convert.ToBase64String(fileB)}\"}}" +
             "]}";
         var envelopeBytes = Encoding.UTF8.GetBytes(envelopeJson);
         var totalBytes = fileA.LongLength + fileB.LongLength;
@@ -395,6 +395,13 @@ public class WorkflowArtifactUploadServiceSpecs
         var metadata = await _storage.ReadMetadataAsync(row.StoragePath);
         Assert.NotNull(metadata);
         Assert.Equal("directory", metadata!.Kind);
+        Assert.NotNull(metadata.Entries);
+        Assert.Equal(
+            ["a.md", "sub/b.md"],
+            metadata.Entries!.Select(entry => entry.RelativePath));
+        Assert.Equal(
+            ["text/markdown", "application/json"],
+            metadata.Entries!.Select(entry => entry.ContentType));
     }
 
     [Fact]

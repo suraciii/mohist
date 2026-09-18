@@ -26,34 +26,59 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
     private readonly ILogger<FileSystemWorkflowArtifactStorage> _log;
     private readonly WorkflowArtifactDirectoryLimits _defaultLimits;
     private readonly string _root;
+    private readonly IWorkflowArtifactFileSystem _fileSystem;
 
     public FileSystemWorkflowArtifactStorage(
         IOptions<WorkflowArtifactStorageOptions> options,
         ILogger<FileSystemWorkflowArtifactStorage> log)
+        : this(options, log, PhysicalWorkflowArtifactFileSystem.Instance)
+    {
+    }
+
+    internal FileSystemWorkflowArtifactStorage(
+        IOptions<WorkflowArtifactStorageOptions> options,
+        ILogger<FileSystemWorkflowArtifactStorage> log,
+        IWorkflowArtifactFileSystem fileSystem)
     {
         _log = log;
+        _fileSystem = fileSystem;
         var configured = options.Value;
         _root = ResolveStorageRoot(configured);
         _defaultLimits = configured.DirectoryLimits ?? WorkflowArtifactDirectoryLimits.Default;
-        Directory.CreateDirectory(_root);
+        _fileSystem.CreateDirectory(_root);
     }
 
     /// <summary>Test-only constructor that bypasses the options pipeline.</summary>
-    public FileSystemWorkflowArtifactStorage(string root, ILogger<FileSystemWorkflowArtifactStorage> log)
+    internal FileSystemWorkflowArtifactStorage(string root, ILogger<FileSystemWorkflowArtifactStorage> log)
         : this(root, log, WorkflowArtifactDirectoryLimits.Default)
     {
     }
 
     /// <summary>Test-only constructor that accepts explicit directory limits.</summary>
-    public FileSystemWorkflowArtifactStorage(
+    internal FileSystemWorkflowArtifactStorage(
         string root,
         ILogger<FileSystemWorkflowArtifactStorage> log,
         WorkflowArtifactDirectoryLimits defaultLimits)
+        : this(root, log, defaultLimits, PhysicalWorkflowArtifactFileSystem.Instance)
+    {
+    }
+
+    /// <summary>
+    /// Spec constructor that injects the file and directory operations. A Spec
+    /// supplies an in-memory file system so this adapter's real manifest,
+    /// hashing, ordering, and cleanup behavior is exercised hermetically.
+    /// </summary>
+    internal FileSystemWorkflowArtifactStorage(
+        string root,
+        ILogger<FileSystemWorkflowArtifactStorage> log,
+        WorkflowArtifactDirectoryLimits defaultLimits,
+        IWorkflowArtifactFileSystem fileSystem)
     {
         _log = log;
         _defaultLimits = defaultLimits;
+        _fileSystem = fileSystem;
         _root = ResolveStorageRoot(new WorkflowArtifactStorageOptions { Root = root });
-        Directory.CreateDirectory(_root);
+        _fileSystem.CreateDirectory(_root);
     }
 
     public string StorageRoot => _root;
@@ -83,11 +108,11 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
         cancellationToken.ThrowIfCancellationRequested();
 
         var directory = EnsureStorageDirectoryForFile(storagePath);
-        if (Directory.Exists(directory))
+        if (_fileSystem.DirectoryExists(directory))
             throw new WorkflowArtifactStorageException(
                 $"Artifact storage directory '{directory}' already exists; refusing to overwrite a recorded artifact.");
 
-        Directory.CreateDirectory(directory);
+        _fileSystem.CreateDirectory(directory);
 
         var metadata = new WorkflowArtifactStorageMetadata
         {
@@ -148,7 +173,7 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
 
         var effectiveLimits = limits ?? _defaultLimits;
         var filesRoot = EnsureStorageDirectoryForDirectory(storagePath);
-        if (Directory.Exists(filesRoot))
+        if (_fileSystem.DirectoryExists(filesRoot))
             throw new WorkflowArtifactStorageException(
                 $"Artifact storage directory '{filesRoot}' already exists; refusing to overwrite a recorded artifact.");
 
@@ -163,7 +188,7 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
 
         try
         {
-            Directory.CreateDirectory(filesRoot);
+            _fileSystem.CreateDirectory(filesRoot);
 
             long totalBytes = 0;
             var manifest = new List<WorkflowArtifactDirectoryEntry>(validated.Count);
@@ -183,7 +208,7 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
 
                 var destinationDir = Path.GetDirectoryName(resolvedDestination);
                 if (!string.IsNullOrEmpty(destinationDir))
-                    Directory.CreateDirectory(destinationDir);
+                    _fileSystem.CreateDirectory(destinationDir);
 
                 // Hash the bytes while they are streamed so the recorded
                 // digest describes exactly what was written, without a
@@ -299,12 +324,12 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
             .ToList();
     }
 
-    private static void TryRemoveDirectory(string directory)
+    private void TryRemoveDirectory(string directory)
     {
         try
         {
-            if (Directory.Exists(directory))
-                Directory.Delete(directory, recursive: true);
+            if (_fileSystem.DirectoryExists(directory))
+                _fileSystem.DeleteDirectory(directory, recursive: true);
         }
         catch
         {
@@ -317,10 +342,10 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
     public Stream OpenFileContent(string storagePath)
     {
         var contentPath = ResolveAbsoluteFileContentPath(storagePath);
-        if (!File.Exists(contentPath))
+        if (!_fileSystem.FileExists(contentPath))
             throw new WorkflowArtifactNotFoundException(
                 $"Recorded artifact content is missing at '{contentPath}'.");
-        return new FileStream(contentPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return _fileSystem.OpenRead(contentPath);
     }
 
     public async Task<WorkflowArtifactDirectoryListing> ListDirectoryEntriesAsync(
@@ -329,7 +354,7 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
     {
         cancellationToken.ThrowIfCancellationRequested();
         var filesRoot = ResolveAbsoluteDirectoryFilesPath(storagePath);
-        if (!Directory.Exists(filesRoot))
+        if (!_fileSystem.DirectoryExists(filesRoot))
             throw new WorkflowArtifactNotFoundException(
                 $"Recorded directory artifact is missing at '{filesRoot}'.");
 
@@ -351,10 +376,10 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
         if (!destination.StartsWith(safeRoot, StringComparison.Ordinal))
             throw new WorkflowArtifactStorageException(
                 $"Relative path '{relativePath}' resolves outside the artifact collection.");
-        if (!File.Exists(destination))
+        if (!_fileSystem.FileExists(destination))
             throw new WorkflowArtifactNotFoundException(
                 $"Recorded directory entry '{relativePath}' is missing.");
-        return new FileStream(destination, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return _fileSystem.OpenRead(destination);
     }
 
     public async Task<WorkflowArtifactStorageMetadata?> ReadMetadataAsync(
@@ -368,9 +393,9 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
         // for files, `files/` for directories).
         var collectionRoot = Path.GetDirectoryName(absolute) ?? absolute;
         var metadataPath = Path.Combine(collectionRoot, MetadataFileName);
-        if (!File.Exists(metadataPath))
+        if (!_fileSystem.FileExists(metadataPath))
             return null;
-        var json = await File.ReadAllTextAsync(metadataPath, cancellationToken).ConfigureAwait(false);
+        var json = await _fileSystem.ReadAllTextAsync(metadataPath, cancellationToken).ConfigureAwait(false);
         return WorkflowArtifactDirectoryListingFactory.ParseMetadata(storagePath, json);
     }
 
@@ -381,8 +406,8 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
         cancellationToken.ThrowIfCancellationRequested();
         var absolute = ResolveAbsolutePath(storagePath);
         var directory = Path.GetDirectoryName(absolute);
-        if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
-            Directory.Delete(directory, recursive: true);
+        if (!string.IsNullOrWhiteSpace(directory) && _fileSystem.DirectoryExists(directory))
+            _fileSystem.DeleteDirectory(directory, recursive: true);
         return Task.CompletedTask;
     }
 
@@ -439,7 +464,7 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
         return filesRoot;
     }
 
-    private static async Task<long> WriteStreamAsync(
+    private async Task<long> WriteStreamAsync(
         string destination,
         Stream source,
         long declaredSize,
@@ -452,18 +477,11 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
         bool committed = false;
         try
         {
-            // The FileStream is opened and closed inside the using
-            // block. The atomic move is performed after the stream is
-            // fully disposed so that platforms that hold a write
-            // lock on the file (Windows in particular) do not block
-            // the rename.
-            await using (var output = new FileStream(
-                tempPath,
-                FileMode.Create,
-                FileAccess.Write,
-                FileShare.None,
-                bufferSize: 81920,
-                useAsync: true))
+            // The stream is opened and closed inside the using block.
+            // The atomic move is performed after the stream is fully
+            // disposed so that platforms that hold a write lock on the
+            // file (Windows in particular) do not block the rename.
+            await using (var output = _fileSystem.OpenWrite(tempPath))
             {
                 written = await WorkflowArtifactStreamCopier.CopyAsync(
                         source,
@@ -477,17 +495,17 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
                 await output.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            if (File.Exists(destination))
-                File.Delete(destination);
-            File.Move(tempPath, destination);
+            if (_fileSystem.FileExists(destination))
+                _fileSystem.DeleteFile(destination);
+            _fileSystem.MoveFile(tempPath, destination);
             committed = true;
             return written;
         }
         finally
         {
-            if (!committed && File.Exists(tempPath))
+            if (!committed && _fileSystem.FileExists(tempPath))
             {
-                try { File.Delete(tempPath); }
+                try { _fileSystem.DeleteFile(tempPath); }
                 catch { /* best-effort cleanup */ }
             }
         }
@@ -516,28 +534,29 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
     {
         var metadataPath = Path.Combine(directory, MetadataFileName);
         var tempPath = metadataPath + ".tmp";
+        var committed = false;
         try
         {
-            await using (var output = new FileStream(
-                tempPath,
-                FileMode.Create,
-                FileAccess.Write,
-                FileShare.None,
-                bufferSize: 4096,
-                useAsync: true))
+            await using (var output = _fileSystem.OpenWrite(tempPath))
             {
                 await JsonSerializer.SerializeAsync(output, metadata, JSON.Indented, cancellationToken)
                     .ConfigureAwait(false);
                 await output.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
+
+            if (_fileSystem.FileExists(metadataPath))
+                _fileSystem.DeleteFile(metadataPath);
+            _fileSystem.MoveFile(tempPath, metadataPath);
+            committed = true;
         }
         finally
         {
-            if (File.Exists(tempPath))
+            // A serialization failure must not commit a partial metadata
+            // file; the outer write scope removes the whole collection.
+            if (!committed && _fileSystem.FileExists(tempPath))
             {
-                if (File.Exists(metadataPath))
-                    File.Delete(metadataPath);
-                File.Move(tempPath, metadataPath);
+                try { _fileSystem.DeleteFile(tempPath); }
+                catch { /* best-effort cleanup */ }
             }
         }
     }
