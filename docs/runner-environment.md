@@ -53,6 +53,17 @@ and prevents a written-but-unloaded snapshot. The file is mode `0600`. The
 existing `runner.env` file remains the owner of Runner application settings
 such as `ENABLED_AGENT_RUNTIMES`; the two files must not be merged.
 
+The local transaction files are also fixed under `~/.config/mohist/`:
+
+- `runner-environment.candidate.env` is the inactive candidate;
+- `runner-environment.candidate.json` records only its version, variable names,
+  and capture time;
+- `runner-environment.previous.env` is the recoverable pre-apply snapshot; and
+- `runner-environment-application.json` records the update id and the identity
+  witness needed to resume or cancel a fence after the CLI exits.
+
+These files are mode `0600`. Their contents never leave the host.
+
 ## Capture and Preview
 
 Run these commands as the operating-system user that owns the Runner service:
@@ -62,12 +73,12 @@ mo runner environment capture [--runner-id <runner-id>]
 mo runner environment status [--runner-id <runner-id>] [--json]
 ```
 
-`capture` reads the current process environment, writes a candidate atomically,
-and sends only its version, source, user, capture time, and changed variable
-names to Server. It does not restart the service. If the metadata write fails,
-the candidate remains local and inactive; `apply` is refused until the metadata
-is published. `status` shows the active version, candidate version, application
-state, and the latest sanitized tool observations.
+`capture` reads the current process environment and writes the candidate and its
+local metadata atomically. It does not restart the service or contact Server.
+`apply` publishes the candidate version as the target of a Server environment
+application; no raw values or candidate file contents are sent. `status` shows
+the active version, candidate version, application state, and the latest
+sanitized identity/settlement facts.
 
 The preview identifies added, removed, and changed variable names. It never
 prints values. A candidate with an invalid path or unsafe value remains
@@ -111,6 +122,14 @@ or any unrelated admission condition. If the local command exits while waiting,
 the Server fence remains; a later `status` or `cancel` operation must resolve it.
 The system must not release a fence only because its initiating CLI process
 disappeared.
+
+The CLI retries the settlement command with a bounded wait. Each retry first
+refreshes the current `(processGeneration, connectionGeneration)` identity;
+stale or disconnected observations stop the transaction rather than being
+treated as empty work. A successful systemd restart is followed by the same
+identity refresh until a new process generation reports the target version.
+The local application record is removed only after Server confirms activation
+or a confirmed rollback.
 
 If restart or confirmation fails, the manager restores the old snapshot and
 tries one confirmation of the old version. A confirmed rollback records
@@ -166,9 +185,11 @@ Runner's host environment.
 
 The install path now captures the fixed host allowlist into the managed
 systemd environment file. Runner registration and heartbeat report the loaded
-environment version and load time, and poll observations retain current
-process-generation settlement counts. Server now owns one durable environment
-application per Runner, keeps its fence across process replacement, and
-requires a current-generation target-version witness before releasing that
-fence. Local snapshot apply/rollback, tool checks, and the `environment` status
-projection remain target work for Issue #1009.
+environment version and load time, and the identity read model exposes the
+current process generation. Server owns one durable environment application per
+Runner, keeps its fence across process replacement, and requires a
+current-generation target-version witness before releasing that fence. The
+local CLI now owns candidate capture, bounded apply/cancel, atomic
+active/previous rotation, restart confirmation, and rollback. Sanitized global
+projection, tool checks, and Web presentation remain later slices of Issue
+#1009.

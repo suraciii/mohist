@@ -465,7 +465,8 @@ public record RunnerRuntimeState(
     bool Draining = false,
     string? UpdateInterruptId = null,
     string? ConnectionGeneration = null,
-    [property: Id(6)] RunnerDispatchObservation? DispatchObservation = null);
+    [property: Id(6)] RunnerDispatchObservation? DispatchObservation = null,
+    [property: Id(7)] string? ProcessGeneration = null);
 
 [GenerateSerializer]
 public enum RunnerUpdateInterruptBeginStatus

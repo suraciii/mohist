@@ -37,6 +37,7 @@ type WriteFileAtomic func(string, []byte, os.FileMode) error
 type Execute func(context.Context, string, []string) error
 type ExecuteOutput func(context.Context, string, []string) (string, error)
 type Wait func(context.Context, time.Duration) error
+type NewID func() string
 type EventTail func(context.Context, string, []string, string, io.Writer) error
 type HealthProbe func(context.Context, string) error
 type ManagerCredentialBroker func(context.Context, *http.Request) (*http.Response, error)
@@ -57,6 +58,7 @@ type Dependencies struct {
 	Input                   io.Reader
 	Now                     func() time.Time
 	Wait                    Wait
+	NewID                   NewID
 	Executable              func() string
 	CurrentDirectory        func() string
 	EventTail               EventTail
@@ -118,6 +120,7 @@ func defaultDependencies() Dependencies {
 		},
 		Input: os.Stdin,
 		Now:   time.Now,
+		NewID: newRunnerEnvironmentID,
 		Wait: func(ctx context.Context, d time.Duration) error {
 			timer := time.NewTimer(d)
 			defer timer.Stop()
@@ -167,6 +170,9 @@ func ResolveConfig(deps Dependencies) (Config, error) {
 	}
 	if deps.Wait == nil {
 		deps.Wait = defaults.Wait
+	}
+	if deps.NewID == nil {
+		deps.NewID = defaults.NewID
 	}
 	if deps.Executable == nil {
 		deps.Executable = defaults.Executable
@@ -402,6 +408,9 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if command.kind == "info" {
 		return runInfo(deps, command)
 	}
+	if command.kind == "runner-environment-capture" {
+		return runRunnerEnvironment(ctx, deps, nil, command)
+	}
 	if strings.HasPrefix(command.kind, "skill-") || strings.HasPrefix(command.kind, "install-") || strings.HasPrefix(command.kind, "update-") {
 		return runMaintenance(ctx, deps, command)
 	}
@@ -423,6 +432,9 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if err := configureManagerClient(deps, client); err != nil {
 		writeError(deps.Stderr, err)
 		return ExitOperation
+	}
+	if strings.HasPrefix(command.kind, "runner-environment-") {
+		return runRunnerEnvironment(ctx, deps, client, command)
 	}
 	if strings.HasPrefix(command.kind, "auth-") {
 		return runAuth(ctx, deps, client, cfg, command)
