@@ -512,7 +512,7 @@ func TestCaptureAndActivateManagedServiceUsesSnapshotAndEffectiveProperties(t *t
 	dropInPath := filepath.Join("/units", "mohist-runner.service.d", "operator.conf")
 	oldTarget := managedSystemdRunnerTargetAt("/old", nil)
 	candidateTarget := managedSystemdRunnerTarget()
-	original := []byte("[Service]\n# keep\nWorkingDirectory=/old\nEnvironment=MOHIST_RUNTIME_IDENTITY_PATH=/old/runtime-identity.json\nEnvironmentFile=-%h/.config/mohist/runner.env\nLoadCredential=runner:/run/runner\nLimitNOFILE=4096\nExecStart=/usr/bin/node /old/dist/cli.js\n")
+	original := []byte("[Service]\n# keep\nWorkingDirectory=/old\nEnvironment=MOHIST_RUNTIME_IDENTITY_PATH=/old/runtime-identity.json\nEnvironmentFile=-%h/.config/mohist/runner-environment.env\nEnvironmentFile=-%h/.config/mohist/runner.env\nLoadCredential=runner:/run/runner\nLimitNOFILE=4096\nExecStart=/usr/bin/node /old/dist/cli.js\n")
 	files.seed(unitPath, original, 0o640)
 	files.seed(dropInPath, []byte("[Service]\nLimitNOFILE=8192\n"), 0o600)
 	commands.active = true
@@ -554,6 +554,7 @@ func TestCaptureAndActivateManagedServiceUsesSnapshotAndEffectiveProperties(t *t
 	for _, preserved := range []string{
 		"# keep\n",
 		"EnvironmentFile=-%h/.config/mohist/runner.env\n",
+		"EnvironmentFile=-%h/.config/mohist/runner-environment.env\n",
 		"LoadCredential=runner:/run/runner\n",
 		"LimitNOFILE=4096\n",
 	} {
