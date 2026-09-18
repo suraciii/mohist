@@ -47,27 +47,29 @@ export function parsePrStatusCheckRollupResult(stdout: string): PrStatusCheckRol
   return { kind: 'ok', checks: out }
 }
 
+const TERMINAL_FAILURE_OUTCOMES = new Set([
+  'FAILURE',
+  'ERROR',
+  'CANCELLED',
+  'ACTION_REQUIRED',
+  'TIMED_OUT',
+  'STARTUP_FAILURE',
+  'STALE',
+])
+
+function isTerminalFailureOutcome(value: string): boolean {
+  return TERMINAL_FAILURE_OUTCOMES.has(value.toUpperCase())
+}
+
 function classifyRollupBucket(status: string, conclusion: string): string {
   const normalizedStatus = status.toUpperCase()
   const normalizedConclusion = conclusion.toUpperCase()
   if (normalizedConclusion === 'SUCCESS') return 'pass'
   if (normalizedConclusion === 'SKIPPED' || normalizedConclusion === 'NEUTRAL') return 'skip'
-  if (
-    normalizedConclusion === 'FAILURE' ||
-    normalizedConclusion === 'ERROR' ||
-    normalizedConclusion === 'CANCELLED' ||
-    normalizedConclusion === 'ACTION_REQUIRED'
-  )
-    return 'fail'
+  if (isTerminalFailureOutcome(normalizedConclusion)) return 'fail'
   if (normalizedStatus === 'SUCCESS') return 'pass'
   if (normalizedStatus === 'SKIPPED' || normalizedStatus === 'NEUTRAL') return 'skip'
-  if (
-    normalizedStatus === 'FAILURE' ||
-    normalizedStatus === 'ERROR' ||
-    normalizedStatus === 'CANCELLED' ||
-    normalizedStatus === 'ACTION_REQUIRED'
-  )
-    return 'fail'
+  if (isTerminalFailureOutcome(normalizedStatus)) return 'fail'
   return 'pending'
 }
 
