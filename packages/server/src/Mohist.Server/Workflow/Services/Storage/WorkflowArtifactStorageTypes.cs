@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Mohist.Server.Workflow.Storage;
 
 /// <summary>
@@ -58,12 +60,16 @@ public sealed class WorkflowArtifactFileWrite
 /// </summary>
 public sealed class WorkflowArtifactDirectoryEntry
 {
+    [JsonPropertyName("relativePath")]
     public string RelativePath { get; set; } = string.Empty;
 
+    [JsonPropertyName("size")]
     public long Size { get; set; }
 
+    [JsonPropertyName("contentHash")]
     public string? ContentHash { get; set; }
 
+    [JsonPropertyName("contentType")]
     public string? ContentType { get; set; }
 }
 

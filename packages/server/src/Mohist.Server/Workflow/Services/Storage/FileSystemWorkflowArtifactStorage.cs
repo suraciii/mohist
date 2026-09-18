@@ -152,48 +152,28 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
             throw new WorkflowArtifactStorageException(
                 $"Artifact storage directory '{filesRoot}' already exists; refusing to overwrite a recorded artifact.");
 
-        Directory.CreateDirectory(filesRoot);
-
         var collectionRoot = Path.GetDirectoryName(filesRoot)
             ?? throw new WorkflowArtifactStorageException(
                 $"Unable to resolve collection root for '{storagePath}'.");
 
-        if (entries.Count > effectiveLimits.MaxFileCount)
-            throw new WorkflowArtifactStorageException(
-                $"Directory artifact exceeds file count limit ({entries.Count} > {effectiveLimits.MaxFileCount}).");
-
-        long totalBytes = 0;
-        var sortedEntries = entries
-            .Select((entry, index) => (entry, index))
-            .OrderBy(t => t.entry.RelativePath, StringComparer.Ordinal)
-            .ToList();
-        var seenPaths = new HashSet<string>(StringComparer.Ordinal);
+        // Validate every declared value before touching the filesystem. A
+        // rejection here must not strand a directory or metadata file that
+        // would block a later retry against the same storage path.
+        var validated = ValidateDirectoryEntries(entries, effectiveLimits);
 
         try
         {
-            foreach (var (entry, index) in sortedEntries)
+            Directory.CreateDirectory(filesRoot);
+
+            long totalBytes = 0;
+            var manifest = new List<WorkflowArtifactDirectoryEntry>(validated.Count);
+            foreach (var (entry, normalizedPath) in validated)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (entry is null)
-                    throw new WorkflowArtifactStorageException(
-                        $"Directory entry at index {index} is null.");
 
-                var containedPath = WorkflowArtifactContainedPath.Parse(entry.RelativePath);
-                if (!seenPaths.Add(containedPath.Value))
-                    throw new WorkflowArtifactStorageException(
-                        $"Directory entry '{entry.RelativePath}' appears more than once in a single write.");
-
-                if (entry.Size < 0)
-                    throw new WorkflowArtifactStorageException(
-                        $"Directory entry '{entry.RelativePath}' has a negative declared size ({entry.Size}).");
-                if (entry.Size > effectiveLimits.MaxFileBytes)
-                    throw new WorkflowArtifactStorageException(
-                        $"Directory entry '{entry.RelativePath}' exceeds single-file size limit ({entry.Size} > {effectiveLimits.MaxFileBytes}).");
-                if (totalBytes + entry.Size > effectiveLimits.MaxTotalBytes)
-                    throw new WorkflowArtifactStorageException(
-                        $"Directory entry '{entry.RelativePath}' would exceed total size limit ({effectiveLimits.MaxTotalBytes}).");
-
-                var destination = Path.Combine(filesRoot, containedPath.Value.Replace('/', Path.DirectorySeparatorChar));
+                var destination = Path.Combine(
+                    filesRoot,
+                    normalizedPath.Replace('/', Path.DirectorySeparatorChar));
                 var resolvedDestination = Path.GetFullPath(destination);
                 if (!resolvedDestination.StartsWith(
                         EnsureTrailingSeparator(filesRoot),
@@ -205,21 +185,41 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
                 if (!string.IsNullOrEmpty(destinationDir))
                     Directory.CreateDirectory(destinationDir);
 
-                await using (var input = SafeOpenContent(entry, containedPath.Value))
+                // Hash the bytes while they are streamed so the recorded
+                // digest describes exactly what was written, without a
+                // second read that could race a mutation.
+                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                long written;
+                await using (var input = SafeOpenContent(entry, normalizedPath))
                 {
                     var remainingTotalBytes = effectiveLimits.MaxTotalBytes - totalBytes;
                     var maximumBytes = Math.Min(
                         effectiveLimits.MaxFileBytes,
                         remainingTotalBytes);
-                    var written = await WriteStreamAsync(
+                    written = await WriteStreamAsync(
                             resolvedDestination,
                             input,
                             entry.Size,
                             maximumBytes,
-                            cancellationToken)
+                            cancellationToken,
+                            hash)
                         .ConfigureAwait(false);
-                    totalBytes += written;
                 }
+                totalBytes += written;
+
+                var computedHash = WorkflowArtifactContentHash.Complete(hash);
+                if (!string.IsNullOrWhiteSpace(entry.ContentHash)
+                    && !string.Equals(entry.ContentHash, computedHash, StringComparison.OrdinalIgnoreCase))
+                    throw new WorkflowArtifactStorageException(
+                        $"Content hash mismatch for directory entry '{normalizedPath}': declared '{entry.ContentHash}', wrote '{computedHash}'.");
+
+                manifest.Add(new WorkflowArtifactDirectoryEntry
+                {
+                    RelativePath = normalizedPath,
+                    Size = written,
+                    ContentHash = computedHash,
+                    ContentType = entry.ContentType,
+                });
             }
 
             var metadata = new WorkflowArtifactStorageMetadata
@@ -229,7 +229,8 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
                 ContentType = write.ContentType,
                 ContentHash = write.ContentHash,
                 Size = totalBytes,
-                FileCount = entries.Count,
+                FileCount = manifest.Count,
+                Entries = manifest,
                 RecordedAt = recordedAt,
             };
             PopulateIdentityMetadata(metadata, storagePath);
@@ -238,13 +239,13 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
 
             _log.LogDebug(
                 "Persisted directory artifact {Storage} ({Files} files, {Bytes} bytes, source '{Source}')",
-                storagePath, entries.Count, totalBytes, write.SourcePath);
+                storagePath, manifest.Count, totalBytes, write.SourcePath);
 
             return new WorkflowArtifactStorageWriteResult(
                 StoragePath: storagePath,
                 Kind: WorkflowArtifactStorageKind.Directory,
                 Size: totalBytes,
-                FileCount: entries.Count);
+                FileCount: manifest.Count);
         }
         catch
         {
@@ -254,6 +255,48 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
             TryRemoveDirectory(collectionRoot);
             throw;
         }
+    }
+
+    private static IReadOnlyList<(WorkflowArtifactDirectoryEntryInput Entry, string NormalizedPath)> ValidateDirectoryEntries(
+        IReadOnlyList<WorkflowArtifactDirectoryEntryInput> entries,
+        WorkflowArtifactDirectoryLimits limits)
+    {
+        if (entries.Count > limits.MaxFileCount)
+            throw new WorkflowArtifactStorageException(
+                $"Directory artifact exceeds file count limit ({entries.Count} > {limits.MaxFileCount}).");
+
+        long declaredTotalBytes = 0;
+        var seenPaths = new HashSet<string>(StringComparer.Ordinal);
+        var validated = new List<(WorkflowArtifactDirectoryEntryInput Entry, string NormalizedPath)>(entries.Count);
+        for (var index = 0; index < entries.Count; index++)
+        {
+            var entry = entries[index];
+            if (entry is null)
+                throw new WorkflowArtifactStorageException(
+                    $"Directory entry at index {index} is null.");
+
+            var containedPath = WorkflowArtifactContainedPath.Parse(entry.RelativePath);
+            if (!seenPaths.Add(containedPath.Value))
+                throw new WorkflowArtifactStorageException(
+                    $"Directory entry '{entry.RelativePath}' appears more than once in a single write.");
+
+            if (entry.Size < 0)
+                throw new WorkflowArtifactStorageException(
+                    $"Directory entry '{entry.RelativePath}' has a negative declared size ({entry.Size}).");
+            if (entry.Size > limits.MaxFileBytes)
+                throw new WorkflowArtifactStorageException(
+                    $"Directory entry '{entry.RelativePath}' exceeds single-file size limit ({entry.Size} > {limits.MaxFileBytes}).");
+            if (declaredTotalBytes + entry.Size > limits.MaxTotalBytes)
+                throw new WorkflowArtifactStorageException(
+                    $"Directory entry '{entry.RelativePath}' would exceed total size limit ({limits.MaxTotalBytes}).");
+
+            declaredTotalBytes += entry.Size;
+            validated.Add((entry, containedPath.Value));
+        }
+
+        return validated
+            .OrderBy(value => value.NormalizedPath, StringComparer.Ordinal)
+            .ToList();
     }
 
     private static void TryRemoveDirectory(string directory)
@@ -417,7 +460,8 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
         Stream source,
         long declaredSize,
         long? maxBytes,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IncrementalHash? hash = null)
     {
         var tempPath = destination + ".tmp";
         long written = 0;
@@ -443,7 +487,8 @@ public sealed class FileSystemWorkflowArtifactStorage : IWorkflowArtifactStorage
                         declaredSize,
                         maxBytes,
                         destination,
-                        cancellationToken)
+                        cancellationToken,
+                        hash)
                     .ConfigureAwait(false);
                 await output.FlushAsync(cancellationToken).ConfigureAwait(false);
             }

@@ -52,4 +52,14 @@ public sealed class WorkflowArtifactStorageMetadata
     /// </summary>
     [JsonPropertyName("fileCount")]
     public int? FileCount { get; set; }
+
+    /// <summary>
+    /// Ordered per-entry manifest for directory artifacts; <c>null</c>
+    /// for file artifacts. Each record captures the upload-time
+    /// relative path, size, content hash, and content type so the
+    /// expectation is durable rather than re-derived from stored
+    /// bytes. Stored sorted by <see cref="WorkflowArtifactDirectoryEntry.RelativePath"/>.
+    /// </summary>
+    [JsonPropertyName("entries")]
+    public IReadOnlyList<WorkflowArtifactDirectoryEntry>? Entries { get; set; }
 }
