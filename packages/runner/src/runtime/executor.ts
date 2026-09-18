@@ -52,8 +52,8 @@ const CHECK_STATUS_BY_ACTION_STATUS = new Map([
 ])
 const CHECK_WORK_TYPES = new Set(['check', 'checks'])
 
-// The Named Workspace manager materializes the single disk-backed
-// Workspace identity; tests inject a mock here.
+// The Named Workspace manager provisions the single disk-backed Workspace
+// Home; tests inject a mock here.
 
 export class WorkExecutor {
   constructor(
@@ -137,13 +137,15 @@ export class WorkExecutor {
           'Workflow dispatch requires repository.name, repository.gitUrl and repository.baseBranch for the Named Workspace',
         )
       }
-      const info = await this.namedWorkspaceManager.materializeForIssue(
+      const info = await this.namedWorkspaceManager.provisionForIssue(
         work.projectId,
         wsName,
         repositoryName,
         gitUrl,
         baseBranch,
         signal,
+        work.workflowRunId,
+        work.workId,
       )
       // An explicit branch pins the invariant guard; an explicit null opts out
       // (tests, branchless dispatches); any other shape derives the Named
@@ -434,7 +436,7 @@ export class WorkExecutor {
     try {
       const repositoryName = stringAt(variables, ['repository', 'name'])
       if (!repositoryName) return { action, repository: null }
-      // Pure path resolution: the Named Workspace materialization owns REPOS/
+      // Pure path resolution: Named Workspace Home provisioning owns REPOS/
       // creation, and the executor must not fabricate or open a checkout.
       return { action, repository: { path: repositoryWorkspacePath(resolve(workspaceRoot), repositoryName) } }
     } catch (error) {

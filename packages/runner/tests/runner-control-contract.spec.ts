@@ -314,8 +314,8 @@ interface ExecutionHarness {
   readonly key: string
   readonly runtimeAccessors: ReturnType<typeof vi.fn>[]
   readonly workspacePrepare: ReturnType<typeof vi.fn>
-  readonly namedMaterialize: ReturnType<typeof vi.fn>
-  readonly namedMaterializeForIssue: ReturnType<typeof vi.fn>
+  readonly namedProvision: ReturnType<typeof vi.fn>
+  readonly namedProvisionForIssue: ReturnType<typeof vi.fn>
   readonly workExecutorRef: ReturnType<typeof vi.fn>
   readonly currentCatalogRevision: ReturnType<typeof vi.fn>
 }
@@ -339,11 +339,11 @@ function executionHarness(
   const openCodeAccessor = vi.fn(() => null)
   const piAccessor = vi.fn(() => null)
   const workspacePrepare = vi.fn()
-  const namedMaterialize = vi.fn()
-  const namedMaterializeForIssue = vi.fn()
+  const namedProvision = vi.fn()
+  const namedProvisionForIssue = vi.fn()
   const namedWorkspaceManager = {
-    materialize: namedMaterialize,
-    materializeForIssue: namedMaterializeForIssue,
+    provision: namedProvision,
+    provisionForIssue: namedProvisionForIssue,
   }
   const agentJobExecutor = new AgentJobExecutor(
     connection,
@@ -388,8 +388,8 @@ function executionHarness(
     key,
     runtimeAccessors: [openCodeAccessor, piAccessor],
     workspacePrepare,
-    namedMaterialize,
-    namedMaterializeForIssue,
+    namedProvision,
+    namedProvisionForIssue,
     workExecutorRef,
     currentCatalogRevision,
   }
@@ -672,8 +672,8 @@ describe('runner control strict envelope contract', () => {
         expect(harness.currentCatalogRevision).not.toHaveBeenCalled()
         expect(harness.workExecutorRef).not.toHaveBeenCalled()
         expect(harness.workspacePrepare).not.toHaveBeenCalled()
-        expect(harness.namedMaterialize).not.toHaveBeenCalled()
-        expect(harness.namedMaterializeForIssue).not.toHaveBeenCalled()
+        expect(harness.namedProvision).not.toHaveBeenCalled()
+        expect(harness.namedProvisionForIssue).not.toHaveBeenCalled()
       })
     },
   )

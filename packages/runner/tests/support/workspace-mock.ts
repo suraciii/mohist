@@ -13,8 +13,8 @@ export interface WorkspaceInfo {
 export function verifyOnlyNamedWorkspaceManager(workspace: WorkspaceInfo): NamedWorkspaceManager {
   const info = { path: workspace.path, branch: workspace.branch ?? null }
   return {
-    materializeForIssue: async () => info,
-    materialize: async () => info,
+    provisionForIssue: async () => info,
+    provision: async () => info,
   } as unknown as NamedWorkspaceManager
 }
 

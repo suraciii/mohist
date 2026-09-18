@@ -62,6 +62,8 @@ public sealed class WorkflowArtifactDirectoryEntry
 
     public long Size { get; set; }
 
+    public string? ContentHash { get; set; }
+
     public string? ContentType { get; set; }
 }
 

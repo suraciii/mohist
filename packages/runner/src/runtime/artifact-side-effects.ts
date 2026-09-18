@@ -1,3 +1,4 @@
+import { relative, resolve, isAbsolute, sep } from 'node:path'
 import { renderTemplate, unresolvedReferences } from '../core/template.js'
 import type { ActionResult, JsonObject, DispatchWorkItem, WorkItemResult } from '../core/types.js'
 import {
@@ -86,10 +87,13 @@ export async function captureArtifactsForWork(
   try {
     const declaredOutcome = await captureArtifacts({ work, workDir: workspaceRoot, renderedArtifacts })
     const dynamicInputs = actionProducedArtifacts(actionResult)
+    const dynamicArtifacts = dynamicInputs.map((entry) => ({
+      path: workspaceRelativeArtifactPath(workDir, workspaceRoot, entry.path),
+    }))
     const dynamicOutcome =
-      dynamicInputs.length === 0
+      dynamicArtifacts.length === 0
         ? { captures: [], failures: [] }
-        : await captureArtifacts({ work: { ...work, artifacts: null }, workDir, dynamicArtifacts: dynamicInputs })
+        : await captureArtifacts({ work: { ...work, artifacts: null }, workDir: workspaceRoot, dynamicArtifacts })
     return {
       kind: 'ok',
       captures: [...declaredOutcome.captures, ...dynamicOutcome.captures],
@@ -101,6 +105,16 @@ export async function captureArtifactsForWork(
       message: `artifact capture failed: ${error instanceof Error ? error.message : String(error)}`,
     }
   }
+}
+
+function workspaceRelativeArtifactPath(workDir: string, workspaceRoot: string, rawPath: string): string {
+  const root = resolve(workspaceRoot)
+  const candidate = resolve(workDir, rawPath)
+  const workspaceRelative = relative(root, candidate)
+  if (!workspaceRelative || workspaceRelative.startsWith('..') || isAbsolute(workspaceRelative)) {
+    throw new Error(`artifact path '${rawPath}' escapes the workspace`)
+  }
+  return workspaceRelative.split(sep).join('/')
 }
 
 export async function uploadCapturesForWork(

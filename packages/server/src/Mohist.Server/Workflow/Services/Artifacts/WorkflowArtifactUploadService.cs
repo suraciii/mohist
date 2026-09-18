@@ -305,6 +305,8 @@ public sealed class WorkflowArtifactUploadService : IScopedService
             return WorkflowArtifactUploadResult.Invalid("workId is required");
         if (string.IsNullOrWhiteSpace(request.Path))
             return WorkflowArtifactUploadResult.Invalid("path is required");
+        if (!WorkflowArtifactPathPolicy.TryNormalizeProvisionPath(request.Path, out _, out var pathError))
+            return WorkflowArtifactUploadResult.Invalid(pathError);
         if (request.Size < 0)
             return WorkflowArtifactUploadResult.Invalid("size must be zero or positive");
         if (request.OpenContent is null)

@@ -142,6 +142,8 @@ describe('mohist/push', () => {
           return ok('checkpoint-sha\n')
         case 'push --force origin HEAD:mo/issue-99':
           return ok('To https://example.com/repo.git\n   checkpoint-sha  HEAD -> mo/issue-99')
+        case 'ls-remote origin refs/heads/mo/issue-99':
+          return ok('old-sha\trefs/heads/mo/issue-99\n')
         default:
           return fail(`unexpected git call: ${command}`)
       }
@@ -159,7 +161,12 @@ describe('mohist/push', () => {
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
-    expect(workspaceCalls(calls)).toEqual(['rev-parse HEAD', 'push --force origin HEAD:mo/issue-99'])
+    expect(workspaceCalls(calls)).toEqual([
+      'rev-parse HEAD',
+      'ls-remote origin refs/heads/mo/issue-99',
+      'push --force origin HEAD:mo/issue-99',
+      'ls-remote origin refs/heads/mo/issue-99',
+    ])
     expect(output).toMatchObject({
       source: 'HEAD',
       target: 'mo/issue-99',
@@ -177,6 +184,8 @@ describe('mohist/push', () => {
           return ok('source-sha\n')
         case 'push origin mo/issue-99:master':
           return ok('To https://example.com/repo.git\n   base-sha..source-sha  mo/issue-99 -> master')
+        case 'ls-remote origin refs/heads/master':
+          return ok('base-sha\trefs/heads/master\n')
         default:
           return fail(`unexpected git call: ${command}`)
       }
@@ -186,7 +195,12 @@ describe('mohist/push', () => {
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
-    expect(workspaceCalls(calls)).toEqual(['rev-parse mo/issue-99', 'push origin mo/issue-99:master'])
+    expect(workspaceCalls(calls)).toEqual([
+      'rev-parse mo/issue-99',
+      'ls-remote origin refs/heads/master',
+      'push origin mo/issue-99:master',
+      'ls-remote origin refs/heads/master',
+    ])
     expect(output).toMatchObject({
       kind: 'push',
       status: 'completed',
@@ -216,7 +230,7 @@ describe('mohist/push', () => {
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
-    expect(calls.map((call) => call.workDir)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH])
+    expect(calls.map((call) => call.workDir)).toEqual([WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH, WORKSPACE_PATH])
     expect(calls.some((call) => call.workDir === PROJECT_PATH)).toBe(false)
     expect(output.workDir).toBe(WORKSPACE_PATH)
   })
@@ -362,6 +376,7 @@ describe('mohist/push', () => {
     const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(' ')
       if (command === 'rev-parse other') return ok('explicit-sha\n')
+      if (command === 'ls-remote upstream refs/heads/release') return ok('old-sha\trefs/heads/release\n')
       if (command === 'push upstream other:release') return ok('pushed')
       return fail(`unexpected git call: ${command}`)
     })
@@ -381,7 +396,12 @@ describe('mohist/push', () => {
     )
 
     expect(result.error).toBeUndefined()
-    expect(workspaceCalls(calls)).toEqual(['rev-parse other', 'push upstream other:release'])
+    expect(workspaceCalls(calls)).toEqual([
+      'rev-parse other',
+      'ls-remote upstream refs/heads/release',
+      'push upstream other:release',
+      'ls-remote upstream refs/heads/release',
+    ])
   })
 
   it('ExplicitSourceOption_PushesThatRefAsSource', async (resources) => {
@@ -485,6 +505,7 @@ describe('mohist/push', () => {
       'rev-parse mo/issue-99',
       'ls-remote origin refs/heads/master',
       'push --force-with-lease=master:remote-tip-sha origin mo/issue-99:master',
+      'ls-remote origin refs/heads/master',
     ])
     expect(workspaceCalls(calls).some((cmd) => cmd === 'push origin mo/issue-99:master')).toBe(false)
     expect(workspaceCalls(calls).some((cmd) => cmd === 'push --force-with-lease origin mo/issue-99:master')).toBe(false)
@@ -517,6 +538,7 @@ describe('mohist/push', () => {
       'rev-parse mo/issue-99',
       'ls-remote origin refs/heads/master',
       'push origin mo/issue-99:master',
+      'ls-remote origin refs/heads/master',
     ])
     expect(workspaceCalls(calls).some((cmd) => cmd.includes('--force-with-lease'))).toBe(false)
   })
@@ -572,10 +594,13 @@ describe('mohist/push', () => {
     const absentOutput = absent.output as Record<string, unknown>
     expect(absent.error).toBeUndefined()
     expect(absentOutput.forceWithLease).toBe(false)
-    expect(workspaceCalls(calls)).toEqual(['rev-parse mo/issue-99', 'push origin mo/issue-99:master'])
-    expect(
-      workspaceCalls(calls).some((cmd) => cmd.startsWith('push --force-with-lease') || cmd.startsWith('ls-remote')),
-    ).toBe(false)
+    expect(workspaceCalls(calls)).toEqual([
+      'rev-parse mo/issue-99',
+      'ls-remote origin refs/heads/master',
+      'push origin mo/issue-99:master',
+      'ls-remote origin refs/heads/master',
+    ])
+    expect(workspaceCalls(calls).some((cmd) => cmd.startsWith('push --force-with-lease'))).toBe(false)
   })
 
   it('ForceWithLease_ExplicitLeaseRejected_ClassifiesAsBaseMoved', async (resources) => {
@@ -599,7 +624,7 @@ describe('mohist/push', () => {
     expect(result.error).toMatchObject({ code: 'base-moved' })
   })
 
-  it('ForceTrue_EmitsBareForceAndSkipsLsRemoteProbe', async (resources) => {
+  it('ForceTrue_EmitsBareForceAndVerifiesRemoteTip', async (resources) => {
     const calls = installGit(resources, async (_call, history) => {
       const command = history[history.length - 1].args.join(' ')
       switch (command) {
@@ -609,6 +634,10 @@ describe('mohist/push', () => {
           return ok(
             'To https://example.com/repo.git\n + rewritten-sha...rewritten-sha  mo/issue-99 -> master (forced update)',
           )
+        case 'ls-remote origin refs/heads/master':
+          return history.filter((entry) => entry.args.join(' ') === command).length === 1
+            ? ok('old-sha\trefs/heads/master\n')
+            : ok('rewritten-sha\trefs/heads/master\n')
         default:
           return fail(`unexpected git call: ${command}`)
       }
@@ -618,14 +647,19 @@ describe('mohist/push', () => {
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
-    expect(workspaceCalls(calls)).toEqual(['rev-parse mo/issue-99', 'push --force origin mo/issue-99:master'])
-    expect(workspaceCalls(calls).some((cmd) => cmd.startsWith('ls-remote'))).toBe(false)
+    expect(workspaceCalls(calls)).toEqual([
+      'rev-parse mo/issue-99',
+      'ls-remote origin refs/heads/master',
+      'push --force origin mo/issue-99:master',
+      'ls-remote origin refs/heads/master',
+    ])
     expect(workspaceCalls(calls).some((cmd) => cmd.startsWith('push --force-with-lease'))).toBe(false)
     expect(output).toMatchObject({
       force: true,
       forceWithLease: false,
       pushed: true,
       landedCommit: 'rewritten-sha',
+      updated: true,
     })
   })
 
@@ -637,6 +671,10 @@ describe('mohist/push', () => {
           return ok('rewritten-sha\n')
         case 'push --force origin mo/issue-99:master':
           return ok('ok\n')
+        case 'ls-remote origin refs/heads/master':
+          return history.filter((entry) => entry.args.join(' ') === command).length === 1
+            ? ok('old-sha\trefs/heads/master\n')
+            : ok('rewritten-sha\trefs/heads/master\n')
         default:
           return fail(`unexpected git call: ${command}`)
       }
@@ -646,12 +684,17 @@ describe('mohist/push', () => {
     const output = result.output as Record<string, unknown>
 
     expect(result.error).toBeUndefined()
-    expect(workspaceCalls(calls)).toEqual(['rev-parse mo/issue-99', 'push --force origin mo/issue-99:master'])
-    expect(workspaceCalls(calls).some((cmd) => cmd.startsWith('ls-remote'))).toBe(false)
+    expect(workspaceCalls(calls)).toEqual([
+      'rev-parse mo/issue-99',
+      'ls-remote origin refs/heads/master',
+      'push --force origin mo/issue-99:master',
+      'ls-remote origin refs/heads/master',
+    ])
     expect(output).toMatchObject({
       force: true,
       forceWithLease: false,
       pushed: true,
+      updated: true,
     })
   })
 

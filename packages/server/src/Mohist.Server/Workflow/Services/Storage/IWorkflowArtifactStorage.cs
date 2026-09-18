@@ -90,6 +90,8 @@ public sealed class WorkflowArtifactDirectoryEntryInput
 
     public long Size { get; set; }
 
+    public string? ContentHash { get; set; }
+
     public string? ContentType { get; set; }
 
     /// <summary>

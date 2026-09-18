@@ -111,7 +111,7 @@ describe('NamedWorkspaceRegistry restart safety', () => {
       reportWorkspaceMaterialized: report,
     } as never)
 
-    const result = await manager.materialize('project', 'pay', [], new AbortController().signal)
+    const result = await manager.provision('project', 'pay', [], new AbortController().signal)
 
     expect(result.path).toBe(namedWorkspacePath(root, 'project', 'pay'))
     expect(result.path).not.toContain('wr-leftover')
