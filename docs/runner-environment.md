@@ -47,12 +47,11 @@ current user's `/run/user/<uid>/`, or the configured `TMPDIR`. Other variables
 must contain one absolute path and no newline or NUL. The capture operation
 does not run shell startup files and does not copy any other variable.
 
-The active file is
-`$XDG_CONFIG_HOME/mohist/runner-environment.env`, or
-`~/.config/mohist/runner-environment.env` when `XDG_CONFIG_HOME` is unset. It
-is mode `0600`. The existing `runner.env` file remains the owner of Runner
-application settings such as `ENABLED_AGENT_RUNTIMES`; the two files must not be
-merged.
+The active file is `~/.config/mohist/runner-environment.env`. Version one does
+not follow `XDG_CONFIG_HOME`; the fixed path matches the managed systemd unit
+and prevents a written-but-unloaded snapshot. The file is mode `0600`. The
+existing `runner.env` file remains the owner of Runner application settings
+such as `ENABLED_AGENT_RUNTIMES`; the two files must not be merged.
 
 ## Capture and Preview
 
@@ -65,9 +64,10 @@ mo runner environment status [--runner-id <runner-id>] [--json]
 
 `capture` reads the current process environment, writes a candidate atomically,
 and sends only its version, source, user, capture time, and changed variable
-names to Server. It does not restart the service. `status` shows the active
-version, candidate version, application state, and the latest sanitized tool
-observations.
+names to Server. It does not restart the service. If the metadata write fails,
+the candidate remains local and inactive; `apply` is refused until the metadata
+is published. `status` shows the active version, candidate version, application
+state, and the latest sanitized tool observations.
 
 The preview identifies added, removed, and changed variable names. It never
 prints values. A candidate with an invalid path or unsafe value remains
@@ -107,7 +107,10 @@ activation evidence.
 
 `cancel` is valid only in `waiting`. It discards the candidate application and
 removes the fence created by that application. It does not clear another drain
-or any unrelated admission condition.
+or any unrelated admission condition. If the local command exits while waiting,
+the Server fence remains; a later `status` or `cancel` operation must resolve it.
+The system must not release a fence only because its initiating CLI process
+disappeared.
 
 If restart or confirmation fails, the manager restores the old snapshot and
 tries one confirmation of the old version. A confirmed rollback records

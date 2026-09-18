@@ -74,7 +74,8 @@ below are authoritative.
 An environment snapshot is an immutable set of allowlisted, non-secret values
 identified by a content digest. It is host-scoped and applies at Runner process
 start. The active snapshot, one candidate, and one previous snapshot may exist
-at the same time. A candidate never changes the active process.
+at the same time. A candidate never changes the active process. A captured
+candidate is not an application until Server has accepted its metadata.
 
 ### Environment application
 
@@ -106,6 +107,7 @@ and must not copy its own `PATH` into the snapshot.
 ## Application Protocol
 
 1. The local manager validates the candidate and publishes only its metadata.
+   If this publish fails, the candidate remains local and cannot be applied.
 2. Server creates one environment application and the matching update fence.
    A second application, a missing Runner, or a conflicting managed update is
    rejected without changing the active snapshot.
@@ -118,6 +120,11 @@ and must not copy its own `PATH` into the snapshot.
 5. Runner registers with a new process generation and reports the loaded
    version. Server marks the application active only when both values match the
    target. Only then may the manager remove the matching fence.
+
+The environment application fence is durable until cancellation, confirmed
+activation, or confirmed rollback. Losing the local CLI does not release it;
+the next CLI invocation or an authorized Web action must inspect and resolve the
+application.
 
 The existing release updater may use the same update fence API, but its
 transaction remains a release transaction and continues to reject an active
