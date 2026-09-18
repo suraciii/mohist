@@ -286,7 +286,10 @@ func ensureRunnerEnvironmentFile(unit []byte) ([]byte, bool, error) {
 			remaining := make([]string, 0, len(words))
 			for _, word := range words {
 				name, _, hasValue := strings.Cut(word.value, "=")
-				if !hasValue || name == "" {
+				if !hasValue {
+					name = word.value
+				}
+				if name == "" {
 					remaining = append(remaining, value[word.start:word.end])
 					continue
 				}

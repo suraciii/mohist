@@ -265,7 +265,7 @@ func TestEnsureRunnerEnvironmentFileRejectsNonCanonicalSnapshotPath(t *testing.T
 }
 
 func TestEnsureRunnerEnvironmentFileRemovesOnlyLegacyAllowlistedAssignments(t *testing.T) {
-	unit := []byte("[Service]\nEnvironment=PATH=/old DOTNET_ROOT=/dotnet RUNNER_ID=runner-pluto\nEnvironmentFile=-%h/.config/mohist/runner-environment.env\nExecStart=/runner\n")
+	unit := []byte("[Service]\nEnvironment=PATH=/old DOTNET_ROOT=/dotnet PATH RUNNER_ID=runner-pluto\nEnvironmentFile=-%h/.config/mohist/runner-environment.env\nExecStart=/runner\n")
 	updated, changed, err := ensureRunnerEnvironmentFile(unit)
 	if err != nil || !changed {
 		t.Fatalf("changed=%v err=%v", changed, err)
