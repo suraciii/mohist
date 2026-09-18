@@ -26,12 +26,12 @@ describe('workspace preparation across stages', () => {
     const workspacePath = await createTestTempDir('mohist-agent-job-workspace-')
     let materializeCalls = 0
     const recordingManager = {
-      async materializeForIssue() {
+      async provisionForIssue() {
         materializeCalls += 1
-        throw new Error('materializeForIssue must not be called for agent-job dispatches')
+        throw new Error('provisionForIssue must not be called for agent-job dispatches')
       },
-      async materialize() {
-        throw new Error('materialize must not be called for agent-job dispatches')
+      async provision() {
+        throw new Error('provision must not be called for agent-job dispatches')
       },
     } as unknown as NamedWorkspaceManager
 
@@ -59,12 +59,12 @@ describe('workspace preparation across stages', () => {
   it('fails an unresolved workflow workspace before materializing it', async () => {
     let materializeCalls = 0
     const workspaceManager = {
-      async materializeForIssue() {
+      async provisionForIssue() {
         materializeCalls += 1
-        throw new Error('workspace materialization must not start')
+        throw new Error('workspace Home provisioning must not start')
       },
-      async materialize() {
-        throw new Error('workspace materialization must not start')
+      async provision() {
+        throw new Error('workspace Home provisioning must not start')
       },
     } as unknown as NamedWorkspaceManager
     const executor = new WorkExecutor(
@@ -100,10 +100,10 @@ describe('workspace preparation across stages', () => {
       },
     )
     const failingManager = {
-      async materializeForIssue() {
+      async provisionForIssue() {
         throw timeout
       },
-      async materialize() {
+      async provision() {
         throw timeout
       },
     } as unknown as NamedWorkspaceManager

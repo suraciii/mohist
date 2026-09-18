@@ -44,6 +44,18 @@ import {
   type WorkspaceReclaimability,
   type WorkspaceReportTransport,
 } from './connection-workspaces.js'
+import {
+  downloadWorkspaceArtifact,
+  listWorkspaceArtifacts,
+  readWorkspaceArtifactDirectory,
+  type WorkspaceArtifactDirectory,
+  type WorkspaceArtifactInfo,
+} from './connection-workspace-artifacts.js'
+export {
+  type WorkspaceArtifactDirectory,
+  type WorkspaceArtifactDirectoryEntry,
+  type WorkspaceArtifactInfo,
+} from './connection-workspace-artifacts.js'
 export {
   parseWorkspaceReclaimability,
   type WorkspaceMaterializedReport,
@@ -657,6 +669,46 @@ export class ServerConnection {
     return await getWorkspaceReclaimabilityViaTransport(this.transport(), projectId, workspaceName, signal)
   }
 
+  async listWorkspaceArtifacts(
+    workflowRunId: string,
+    workId: string,
+    signal: AbortSignal,
+  ): Promise<WorkspaceArtifactInfo[]> {
+    return await listWorkspaceArtifacts(this.workspaceArtifactTransport(), workflowRunId, workId, signal)
+  }
+
+  async readWorkspaceArtifactDirectory(
+    workflowRunId: string,
+    workId: string,
+    artifactId: string,
+    signal: AbortSignal,
+  ): Promise<WorkspaceArtifactDirectory> {
+    return await readWorkspaceArtifactDirectory(
+      this.workspaceArtifactTransport(),
+      workflowRunId,
+      workId,
+      artifactId,
+      signal,
+    )
+  }
+
+  async downloadWorkspaceArtifact(
+    workflowRunId: string,
+    workId: string,
+    artifactId: string,
+    signal: AbortSignal,
+    file?: string,
+  ): Promise<Uint8Array> {
+    return await downloadWorkspaceArtifact(
+      this.workspaceArtifactTransport(),
+      workflowRunId,
+      workId,
+      artifactId,
+      signal,
+      file,
+    )
+  }
+
   async openAgentSession(
     projectId: string,
     sessionId: string,
@@ -815,6 +867,15 @@ export class ServerConnection {
       request: this.requestTransport.request.bind(this.requestTransport),
       readJson: this.requestTransport.readJson.bind(this.requestTransport),
       url: (path) => this.url(path),
+    }
+  }
+
+  private workspaceArtifactTransport() {
+    return {
+      request: this.requestTransport.request.bind(this.requestTransport),
+      readJson: this.requestTransport.readJson.bind(this.requestTransport),
+      readBytes: this.requestTransport.readBytes.bind(this.requestTransport),
+      url: (path: string) => this.url(path),
     }
   }
 

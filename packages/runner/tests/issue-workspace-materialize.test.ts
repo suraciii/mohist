@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { join } from 'node:path'
 import { describe, expect, it as vitestIt } from 'vitest'
 import {
-  materializeIssueWorkspace,
+  provisionIssueWorkspaceHome as materializeIssueWorkspace,
   namedWorkspaceMarkerPath,
   namedWorkspacePath,
   readNamedWorkspaceMarker,

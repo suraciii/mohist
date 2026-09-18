@@ -28,13 +28,14 @@ Plan has one execution path and one evidence path:
                       +-----------+     +-------------------+
 
 
-+----------------+    +------------+
-| Workspace loss +--->| Rerun Plan |
-+----------------+    +------------+
++----------------+    +--------------------------+
+| Home unavailable+--->| Provision from bound    |
++----------------+    | artifacts and Git branch |
+                      +--------------------------+
 ```
 
-`tasks.json` is the machine path. Other artifacts are the evidence path. Workspace loss returns
-execution to Plan rather than restoring an artifact into Build.
+`tasks.json` is the machine path. Other artifacts are the evidence path. If the Workspace Home is
+unavailable, provisioning makes the bound artifacts available before Build reads `tasks.json`.
 
 ### The Task List
 
@@ -93,13 +94,18 @@ does not consume it.
 
 ### Persistence and Recovery
 
-A WorkflowRun remains pinned to one Runner and its Workspace persists across Stages. On the
-happy path, Build reads `PLANS/tasks.json` from the Workspace filesystem. No artifact round-trip is used
-for execution.
+A WorkflowRun uses one Workspace identity across Stages. The Runner provisions a Workspace Home
+before each task and preserves a valid existing Home. If the Home is unavailable, provisioning
+uses the remote Workflow branch for Repository contents and the current WorkflowRun's bound
+artifacts for declared non-repository files. Build then reads `PLANS/tasks.json` from the local
+Home as usual.
 
-Artifact upload serves evidence and audit only. It is not an execution channel. If the Workspace
-directory is lost, unpushed Repository work and Workspace-local plan material are both lost.
-Recovery uses `mo run rerun --from-stage plan`, which regenerates both. No artifact fetch or restore channel exists.
+Artifact upload serves evidence and audit after a task report is accepted. Bound artifacts are
+also durable inputs for Workspace Home provisioning. Pending uploads are not durable and cannot
+be used for provisioning.
+
+Only declared non-repository paths are provisioned from artifacts. Unpushed Repository work,
+undeclared Workspace files, and `.scratch/` remain outside the persistence boundary.
 See [`../workspaces.md`](../workspaces.md).
 
 ### Review at an Approval Point
@@ -166,5 +172,6 @@ Workflow branch.
 ## Status
 
 The default Workflow uses `tasks.json` as its only machine-readable planning input. Named plan and
-review artifacts are uploaded for Approval Point evidence, while Workspace loss is recovered by
-rerunning from Plan. Auto-merge and prompt realignment follow the boundaries above.
+review artifacts are uploaded for Approval Point evidence and are available as durable inputs when
+a Workspace Home must be provisioned again. Auto-merge and prompt realignment follow the
+boundaries above.

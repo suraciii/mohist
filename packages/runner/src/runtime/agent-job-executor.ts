@@ -155,16 +155,16 @@ export class AgentJobExecutor {
       if (error instanceof WorkspaceHomeClaimedError) {
         return failureResult(
           'workspace-home-claimed',
-          'AgentJob yielded: the workspace is materialized on another runner; the job retries against the home runner',
+          'AgentJob yielded: the Workspace Home is owned by another runner; the job retries against the home runner',
         )
       }
       throw error
     }
     if (workspaceBinding.kind === 'failure') return workspaceBinding.result
-    if (workspaceBinding.kind === 'materialization-failed') {
+    if (workspaceBinding.kind === 'provisioning-failed') {
       return failureResult(
-        'workspace-materialization-failed',
-        `AgentJob failed to materialize the named workspace: ${workspaceBinding.message}`,
+        'workspace-provisioning-failed',
+        `AgentJob failed to provision the named Workspace Home: ${workspaceBinding.message}`,
       )
     }
     const workDir = workspaceBinding.workDir
@@ -441,14 +441,13 @@ type WorkspaceBindingResolution =
   | { kind: 'failure'; result: WorkItemResult }
   | { kind: 'path'; workDir: string }
   | { kind: 'named'; workDir: string; projectId: string; workspaceName: string; repositoryName?: string }
-  | { kind: 'materialization-failed'; message: string }
+  | { kind: 'provisioning-failed'; message: string }
 
 // Resolve the execution working directory from the dispatch's
 // `variables.workspace`:
-//   - `name` (Workspace entity binding): materialize the named
-//     workspace's persistent directory and report the home to the
-//     server (first writer wins — a claimed home fails the dispatch
-//     so the job retries against the home runner);
+//   - `name` (Workspace entity binding): provision the named Workspace Home
+//     and report it to the server (first writer wins — a claimed home fails
+//     the dispatch so the job retries against the home runner);
 //   - absent or malformed: reject the dispatch rather than choosing
 //     a directory owned by the runner process. `workspace.path` is
 //     not a Server-owned Workspace binding and never selects a
@@ -477,30 +476,27 @@ async function resolveWorkspaceBinding(
     if (!namedWorkspaceManager) return invalidWorkspaceBinding()
     try {
       const projectId = work.projectId ?? ''
-      const materialized = await namedWorkspaceManager.materialize(
-        projectId,
-        name,
-        readWorkspaceRepositories(ws),
-        signal,
-      )
+      const provisioned = await namedWorkspaceManager.provision(projectId, name, readWorkspaceRepositories(ws), signal)
       const repositoryName = stringAt(work.variables ?? {}, ['repository', 'name'])
       const gitUrl = stringAt(work.variables ?? {}, ['repository', 'gitUrl'])
       const baseBranch = stringAt(work.variables ?? {}, ['repository', 'baseBranch'])
       if (work.workflowRunId) {
         if (!repositoryName || !gitUrl || !baseBranch) {
           return {
-            kind: 'materialization-failed',
+            kind: 'provisioning-failed',
             message:
               'Workflow-bound named workspace requires repository.name, repository.gitUrl, and repository.baseBranch',
           }
         }
-        const issueWorkspace = await namedWorkspaceManager.materializeForIssue(
+        const issueWorkspace = await namedWorkspaceManager.provisionForIssue(
           projectId,
           name,
           repositoryName,
           gitUrl,
           baseBranch,
           signal,
+          work.workflowRunId,
+          work.actionAttemptId ?? work.workId,
         )
         return {
           kind: 'named',
@@ -512,14 +508,14 @@ async function resolveWorkspaceBinding(
       }
       return {
         kind: 'named',
-        workDir: materialized.path,
+        workDir: provisioned.path,
         projectId,
         workspaceName: name,
       }
     } catch (error) {
       if (error instanceof WorkspaceHomeClaimedError) throw error
       return {
-        kind: 'materialization-failed',
+        kind: 'provisioning-failed',
         message: error instanceof Error ? error.message : String(error),
       }
     }

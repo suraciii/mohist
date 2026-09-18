@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Workflow.Storage;
@@ -68,6 +69,7 @@ internal static class WorkflowArtifactDirectoryEnvelopeReader
             {
                 RelativePath = file.Path,
                 Size = file.Size ?? data.LongLength,
+                ContentHash = $"sha256:{Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant()}",
                 ContentType = file.ContentType,
                 OpenContent = () => new MemoryStream(data, writable: false),
             });
@@ -86,6 +88,7 @@ internal static class WorkflowArtifactDirectoryEnvelopeReader
     {
         public string? Path { get; set; }
         public long? Size { get; set; }
+        public string? ContentHash { get; set; }
         public string? ContentType { get; set; }
         public string? Data { get; set; }
     }

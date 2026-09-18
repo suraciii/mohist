@@ -102,6 +102,106 @@ public class WorkflowArtifactUploadRouteSpecs
     }
 
     [Fact]
+    public async Task RunnerWorkspaceArtifacts_ReadsBoundContentAndRejectsDifferentRunner()
+    {
+        var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
+        try
+        {
+            var payload = Encoding.UTF8.GetBytes("{\"tasks\":[]}");
+            using var form = BuildMultipart(
+                "PLANS/tasks.json",
+                payload,
+                "application/json",
+                "sha256:tasks",
+                payload.LongLength);
+            using var upload = await _fixture.Client.PostAsync(
+                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
+                form);
+            Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
+            var uploadData = (await upload.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            var uploadId = uploadData.GetProperty("uploadId").GetString()!;
+            var actionAttemptId = uploadData.GetProperty("actionAttemptId").GetString()!;
+
+            using var report = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/report", new
+            {
+                ownerKind = WorkDispatchOwnerKinds.Workflow,
+                workflowRunId,
+                workId,
+                actionAttemptId,
+                status = "completed",
+                artifacts = new[] { new { path = "PLANS/tasks.json" } },
+                artifactUploadIds = new[] { uploadId },
+                addTasks = new[]
+                {
+                    new
+                    {
+                        id = "next",
+                        title = "Next",
+                        uses = "spec/task",
+                        with = new { },
+                    },
+                },
+            });
+            Assert.Equal(HttpStatusCode.OK, report.StatusCode);
+
+            var nextWork = await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).PollAsync(_fixture.Services);
+            Assert.NotNull(nextWork);
+            var nextWorkId = nextWork.WorkId;
+            using var list = await _fixture.Client.GetAsync(
+                $"/api/runner/{runnerId}/workflow-runs/{workflowRunId}/work/{nextWorkId}/workspace-artifacts");
+            Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+            var listData = (await list.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            var artifacts = listData.GetProperty("artifacts");
+            Assert.Single(artifacts.EnumerateArray());
+            var artifactId = artifacts[0].GetProperty("artifactId").GetString()!;
+            Assert.Equal("PLANS/tasks.json", artifacts[0].GetProperty("path").GetString());
+            Assert.Equal("sha256:tasks", artifacts[0].GetProperty("contentHash").GetString());
+
+            using var content = await _fixture.Client.GetAsync(
+                $"/api/runner/{runnerId}/workflow-runs/{workflowRunId}/work/{nextWorkId}/workspace-artifacts/{artifactId}/content");
+            Assert.Equal(HttpStatusCode.OK, content.StatusCode);
+            Assert.Equal(payload, await content.Content.ReadAsByteArrayAsync());
+
+            using var otherRunner = await _fixture.Client.GetAsync(
+                $"/api/runner/other-runner/workflow-runs/{workflowRunId}/work/{nextWorkId}/workspace-artifacts");
+            Assert.Equal(HttpStatusCode.Forbidden, otherRunner.StatusCode);
+            var otherBody = await otherRunner.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("workflow_runner_not_assigned", otherBody.GetProperty("code").GetString());
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task RunnerWorkspaceArtifacts_DoesNotExposePendingUpload()
+    {
+        var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
+        try
+        {
+            var payload = Encoding.UTF8.GetBytes("pending");
+            using var form = BuildMultipart("PLANS/pending.md", payload, "text/markdown", "sha256:pending", payload.LongLength);
+            using var upload = await _fixture.Client.PostAsync(
+                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
+                form);
+            Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
+
+            using var list = await _fixture.Client.GetAsync(
+                $"/api/runner/{runnerId}/workflow-runs/{workflowRunId}/work/{workId}/workspace-artifacts");
+            Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+            var artifacts = (await list.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("data")
+                .GetProperty("artifacts");
+            Assert.Empty(artifacts.EnumerateArray());
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
     public async Task UploadEndpoint_UnknownWorkItemReturnsNotFound()
     {
         var form = BuildMultipart("review.md", new byte[] { 0x01, 0x02 }, "text/markdown", "sha256:zzz", 2);

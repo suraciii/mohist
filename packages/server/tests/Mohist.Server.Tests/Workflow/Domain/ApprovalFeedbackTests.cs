@@ -609,7 +609,11 @@ public partial class ApprovalFeedbackTests
 
         run.StartTask(publish.Id, "worker-1", "test-process-generation", DateTimeOffset.UnixEpoch);
         run.CompleteTask(DateTimeOffset.UnixEpoch);
-        var resolved = run.ResolveFeedback(feedbackId, publish.Id, JSON.DeserializeElement("\"published\""), DateTimeOffset.UnixEpoch);
+        var resolved = run.ResolveFeedback(
+            feedbackId,
+            publish.Id,
+            JSON.DeserializeElement("{\"kind\":\"push\",\"updated\":true,\"landedCommit\":\"commit-1\"}"),
+            DateTimeOffset.UnixEpoch);
 
         Assert.NotNull(resolved);
         Assert.Equal(ApprovalFeedbackStatus.Resolved, resolved!.Status);
@@ -652,7 +656,7 @@ public partial class ApprovalFeedbackTests
         var finalResolution = run.ResolveFeedback(
             feedbackId,
             publish.Id,
-            JSON.DeserializeElement("\"published\""),
+            JSON.DeserializeElement("{\"kind\":\"push\",\"updated\":true,\"landedCommit\":\"commit-1\"}"),
             DateTimeOffset.UnixEpoch.AddSeconds(5));
 
         Assert.NotNull(finalResolution);

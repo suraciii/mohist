@@ -695,7 +695,10 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         Assert.Empty((await dispatch.PollAsync(runnerId, repeatedPoll)).Dispatches);
         Assert.Equal(workflowEventsAfterClaim, (await EventStore.ListAsync(_workflowId!)).Count);
 
-        await ReportAsync(runnerId, push, "completed");
+        await ReportAsync(runnerId, push, new WorkResult(
+            "completed",
+            Output: System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+                "{\"kind\":\"push\",\"updated\":true,\"landedCommit\":\"commit-1\"}")));
         var resolved = await LoadRunAsync(_workflowId!);
         Assert.Equal(ApprovalFeedbackStatus.Resolved,
             resolved.Feedback.Single(item => item.Id == feedbackId).Status);

@@ -225,6 +225,25 @@ public class WorkflowArtifactUploadServiceSpecs
     }
 
     [Fact]
+    public async Task UploadAsync_RejectsEscapingAndReservedWorkspacePaths()
+    {
+        var service = BuildService();
+        foreach (var path in new[] { "../escape.md", "REPOS/main/secret", ".mohist/marker", ".scratch/tmp" })
+        {
+            var result = await service.UploadAsync(new WorkflowArtifactUploadRequest
+            {
+                WorkflowRunId = $"wr_{Guid.NewGuid():N}",
+                WorkId = "task-1.1",
+                Path = path,
+                Size = 0,
+                OpenContent = () => new MemoryStream(Array.Empty<byte>()),
+            });
+
+            Assert.Equal(WorkflowArtifactUploadResultKind.Invalid, result.Kind);
+        }
+    }
+
+    [Fact]
     public async Task UploadAsync_StoragePathIsGeneratedAndSourcePathNotUsedAsPathSegment()
     {
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
@@ -234,7 +253,7 @@ public class WorkflowArtifactUploadServiceSpecs
         resolver.Register(workflowRunId, workId, actionAttemptId);
 
         var service = BuildService(resolver);
-        var sourcePath = "../../../etc/passwd-like name";
+        var sourcePath = "PLANS/passwd-like name";
         var payload = Bytes("data");
         var result = await service.UploadAsync(new WorkflowArtifactUploadRequest
         {

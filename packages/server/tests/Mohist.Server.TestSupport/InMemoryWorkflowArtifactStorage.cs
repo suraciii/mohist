@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.TestSupport;
@@ -131,6 +132,7 @@ public sealed class InMemoryWorkflowArtifactStorage : IWorkflowArtifactStorage
             {
                 RelativePath = pair.Key,
                 Size = pair.Value.Content.LongLength,
+                ContentHash = $"sha256:{Convert.ToHexString(SHA256.HashData(pair.Value.Content)).ToLowerInvariant()}",
                 ContentType = null,
             })
             .ToArray();

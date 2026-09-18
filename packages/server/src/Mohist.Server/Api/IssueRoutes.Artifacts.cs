@@ -127,6 +127,7 @@ public static partial class IssueRoutes
                         {
                             relativePath = e.RelativePath,
                             size = e.Size,
+                            contentHash = e.ContentHash,
                             contentType = e.ContentType,
                         }).ToList(),
                         totalSize = listing.TotalSize,
@@ -154,6 +155,7 @@ public static partial class IssueRoutes
         path = info.Path,
         kind = info.Kind,
         contentType = info.ContentType,
+        contentHash = info.ContentHash,
         size = info.Size,
         recordedAt = info.RecordedAt.ToString("o"),
         displayName = info.DisplayName,

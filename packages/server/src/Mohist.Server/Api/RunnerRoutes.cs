@@ -153,6 +153,7 @@ public static partial class RunnerRoutes
         });
 
         MapReportRoute(group);
+        MapRunnerArtifactProvisioningRoutes(group);
 
         group.MapGet("/agent-sessions/reconcile", async (
             string runnerId,
