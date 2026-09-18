@@ -8,22 +8,23 @@ import (
 	"strings"
 )
 
-// readManagedReleaseIdentityFile reads and validates a canonical RuntimeIdentity
-// v1 manifest. A missing, malformed, or incomplete manifest is an error;
-// managed deployment preflight never falls back to a source-checkout identity.
-func readManagedReleaseIdentityFile(files managedFileSystem, path string, component string) (managedRuntimeIdentity, error) {
+// readManagedReleaseIdentityFile reads a RuntimeIdentity manifest. A missing or
+// malformed manifest is an error. The boolean reports that the payload had no
+// schemaVersion and is therefore legacy v0; callers that require the canonical
+// v1 contract (staged candidates and activated releases) must reject it.
+func readManagedReleaseIdentityFile(files managedFileSystem, path string, component string) (managedRuntimeIdentity, bool, error) {
 	value, _, err := files.ReadFile(path)
 	if err != nil {
-		return managedRuntimeIdentity{}, fmt.Errorf("managed %s release manifest is unavailable", component)
+		return managedRuntimeIdentity{}, false, fmt.Errorf("managed %s release manifest is unavailable", component)
 	}
 	identity, legacy, err := readManagedIdentityDocument(value)
 	if err != nil {
-		return managedRuntimeIdentity{}, fmt.Errorf("managed %s release manifest is invalid", component)
+		return managedRuntimeIdentity{}, false, fmt.Errorf("managed %s release manifest is invalid", component)
 	}
 	if !legacy && !validManagedRuntimeIdentity(identity) {
-		return managedRuntimeIdentity{}, fmt.Errorf("managed %s release manifest is not canonical", component)
+		return managedRuntimeIdentity{}, false, fmt.Errorf("managed %s release manifest is not canonical", component)
 	}
-	return identity, nil
+	return identity, legacy, nil
 }
 
 // validateManagedInstalledReleaseManifest checks the release manifest on disk
@@ -36,7 +37,7 @@ func validateManagedInstalledReleaseManifest(files managedFileSystem, target *ma
 	if err != nil {
 		return err
 	}
-	identity, err := readManagedReleaseIdentityFile(files, path, target.Component)
+	identity, _, err := readManagedReleaseIdentityFile(files, path, target.Component)
 	if err != nil {
 		return err
 	}
@@ -64,11 +65,14 @@ func validateManagedStagedCandidate(
 	if target == nil {
 		return errors.New("managed staged candidate is unavailable")
 	}
-	identity, err := readManagedReleaseIdentityFile(
+	identity, legacy, err := readManagedReleaseIdentityFile(
 		files, filepath.Join(candidateRoot, "runtime-identity.json"), target.Component,
 	)
 	if err != nil {
 		return err
+	}
+	if legacy {
+		return fmt.Errorf("managed %s staged candidate manifest is not canonical", target.Component)
 	}
 	if identity.Component != target.Component {
 		return fmt.Errorf("managed %s staged candidate reports component %q", target.Component, identity.Component)
@@ -92,10 +96,12 @@ func validateManagedStagedCandidate(
 }
 
 // validateManagedLiveIdentity checks the observed live runtime against the
-// active target identity before activation. A malformed observation or any
-// identity field disagreement rejects the update.
+// active target identity before activation. A canonical v1 target requires a
+// canonical v1 observation (the v1 contract is never relaxed); a bounded v0
+// legacy target only has to agree field for field. A malformed observation or
+// any identity field disagreement rejects the update.
 func validateManagedLiveIdentity(component string, observation managedRuntimeObservation, expected managedRuntimeIdentity) error {
-	if !validManagedRuntimeIdentity(observation.Identity) {
+	if validManagedRuntimeIdentity(expected) && !validManagedRuntimeIdentity(observation.Identity) {
 		return fmt.Errorf("managed %s live runtime identity is not canonical", component)
 	}
 	if differences := managedIdentityDifferences(observation.Identity, expected); len(differences) > 0 {

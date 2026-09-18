@@ -87,11 +87,11 @@ func verifyManagedActivatedTargets(
 		if err != nil {
 			return err
 		}
-		installed, err := readManagedReleaseIdentityFile(env.files, identityPath, component)
+		installed, _, err := readManagedReleaseIdentityFile(env.files, identityPath, component)
 		if err != nil {
 			return err
 		}
-		pointed, err := readManagedActivatedTarget(pointer, component)
+		pointed, _, err := readManagedTargetDocument(pointer[component])
 		if err != nil {
 			return fmt.Errorf("managed %s activated pointer target is unavailable: %w", component, err)
 		}
@@ -105,35 +105,6 @@ func verifyManagedActivatedTargets(
 		identities[component] = target.Identity
 	}
 	return verifyManagedCrossComponentIdentities(identities)
-}
-
-// readManagedActivatedTarget reads a pointer target during post-activation
-// verification. It accepts a canonical v1 identity or a bounded v0 legacy
-// identity so an old active release stays readable; the caller still compares
-// the result against the canonical activated candidate. The strict pointerTarget
-// remains the authority outside this verification boundary.
-func readManagedActivatedTarget(pointer managedPointer, component string) (*managedRuntimeTarget, error) {
-	value := pointer[component]
-	if len(value) == 0 || string(value) == "null" {
-		return nil, errors.New("activated target is missing")
-	}
-	var target managedRuntimeTarget
-	if err := json.Unmarshal(value, &target); err != nil {
-		return nil, errors.New("activated target identity is invalid")
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(value, &fields); err != nil {
-		return nil, errors.New("activated target identity is invalid")
-	}
-	identity, _, err := readManagedIdentityDocument(fields["identity"])
-	if err != nil {
-		return nil, errors.New("activated target identity is invalid")
-	}
-	target.Identity = identity
-	if target.Component == "" {
-		target.Component = identity.Component
-	}
-	return &target, nil
 }
 
 // verifyManagedActivatedComponent asserts field-level equality between the

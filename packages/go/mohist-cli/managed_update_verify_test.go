@@ -231,9 +231,12 @@ func TestReadManagedReleaseIdentityFileReadsLegacyV0(t *testing.T) {
   "releaseId": "mohist-server-legacy",
   "generation": 3
 }`))
-	identity, err := readManagedReleaseIdentityFile(files, path, "server")
+	identity, legacy, err := readManagedReleaseIdentityFile(files, path, "server")
 	if err != nil {
 		t.Fatalf("readManagedReleaseIdentityFile() error = %v", err)
+	}
+	if !legacy {
+		t.Fatal("readManagedReleaseIdentityFile() did not report the legacy v0 payload")
 	}
 	if identity.SchemaVersion != 0 || identity.SourceRevision != "legacy-source" || identity.BuildGitHash != "legacy-source" {
 		t.Fatalf("legacy identity = %#v", identity)

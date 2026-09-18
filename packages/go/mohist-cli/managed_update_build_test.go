@@ -353,6 +353,7 @@ func TestPointerTargetRejectsMalformedAndLegacyIdentity(t *testing.T) {
 		mutate func(*managedRuntimeTarget)
 	}{
 		{name: "bad schema version", mutate: func(target *managedRuntimeTarget) { target.Identity.SchemaVersion = 2 }},
+		{name: "zero schema version", mutate: func(target *managedRuntimeTarget) { target.Identity.SchemaVersion = 0 }},
 		{name: "missing build git hash", mutate: func(target *managedRuntimeTarget) { target.Identity.BuildGitHash = "" }},
 		{name: "missing artifact digest", mutate: func(target *managedRuntimeTarget) { target.Identity.ArtifactDigest = "" }},
 	}
@@ -368,14 +369,23 @@ func TestPointerTargetRejectsMalformedAndLegacyIdentity(t *testing.T) {
 	}
 
 	legacy := map[string]any{
-		"component": "server", "sourceRevision": managedBuildTestCommit,
-		"treeHash": managedBuildTestTree, "artifactDigest": strings.Repeat("e", 64),
-		"releaseId": "mohist-server-" + managedBuildTestCommit, "generation": 37,
-		"gitHash": managedBuildTestCommit, "isComplete": true,
+		"component": "server", "entrypoint": "/release/server/Mohist.Server",
+		"workingDirectory": "/release/server", "isAbsoluteTarget": true, "usesCanonicalEntrypoint": true,
+		"identity": map[string]any{
+			"component": "server", "sourceRevision": managedBuildTestCommit,
+			"treeHash": managedBuildTestTree, "artifactDigest": strings.Repeat("e", 64),
+			"releaseId": "mohist-server-" + managedBuildTestCommit, "generation": 37,
+			"gitHash": managedBuildTestCommit, "isComplete": true,
+		},
 	}
 	pointer := managedPointer{"server": managedBuildTestJSON(legacy)}
-	if _, err := pointerTarget(pointer, "server"); err == nil {
-		t.Fatal("pointerTarget() accepted a legacy gitHash/isComplete target")
+	target, err := pointerTarget(pointer, "server")
+	if err != nil {
+		t.Fatalf("pointerTarget() rejected a legacy v0 target: %v", err)
+	}
+	if target.Identity.SchemaVersion != 0 || target.Identity.SourceRevision != managedBuildTestCommit ||
+		target.Identity.BuildGitHash != managedBuildTestCommit {
+		t.Fatalf("legacy target identity = %#v", target.Identity)
 	}
 }
 

@@ -157,6 +157,48 @@ public sealed class RuntimeIdentityConformanceTests
         Assert.Equal("legacy-sha", identity.SourceRevision);
     }
 
+    [Fact]
+    public void ManagedIdentity_WhenLegacyServerManifestOmitsBuildGitHash_LeavesItNull()
+    {
+        // The previous Go writer emitted sourceRevision but neither buildGitHash
+        // nor gitHash for the server. The cross-language rule is
+        // buildGitHash = buildGitHash ?? gitHash, so C# must be null here just
+        // like the Go and TypeScript readers.
+        var identity = RuntimeBuildInfo.ParseManagedIdentity(
+            """
+            {
+              "component": "server",
+              "sourceRevision": "legacy-source",
+              "treeHash": "legacy-tree",
+              "generation": 4
+            }
+            """);
+
+        Assert.Null(identity.SchemaVersion);
+        Assert.Equal("legacy-source", identity.SourceRevision);
+        Assert.Null(identity.BuildGitHash);
+    }
+
+    [Fact]
+    public void ManagedIdentity_WhenLegacyManifestCarriesBuildGitHash_KeepsItDistinct()
+    {
+        var identity = RuntimeBuildInfo.ParseManagedIdentity(
+            """
+            {
+              "component": "runner",
+              "sourceRevision": "legacy-source",
+              "buildGitHash": "legacy-build",
+              "treeHash": "legacy-tree",
+              "generation": 4,
+              "runnerId": "runner-legacy"
+            }
+            """);
+
+        Assert.Null(identity.SchemaVersion);
+        Assert.Equal("legacy-source", identity.SourceRevision);
+        Assert.Equal("legacy-build", identity.BuildGitHash);
+    }
+
     private sealed class StubRuntimeSourceIdentity(string? gitHead = null) : IRuntimeSourceIdentity
     {
         public string? GitHead { get; } = gitHead;

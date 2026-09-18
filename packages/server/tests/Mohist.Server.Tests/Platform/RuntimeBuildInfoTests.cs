@@ -197,7 +197,7 @@ public class RuntimeBuildInfoTests
     }
 
     [Fact]
-    public void ManagedIdentity_WhenLegacyManifestWithoutSchemaVersion_MapsBuildGitHashFromSourceRevision()
+    public void ManagedIdentity_WhenLegacyManifestWithoutSchemaVersion_DoesNotMapBuildGitHashFromSourceRevision()
     {
         const string identityPath = "/managed/server/runtime-identity.json";
         var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
@@ -222,9 +222,39 @@ public class RuntimeBuildInfoTests
 
         Assert.Null(info.SchemaVersion);
         Assert.Equal("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", info.SourceRevision);
-        Assert.Equal(info.SourceRevision, info.BuildGitHash);
+        Assert.Null(info.BuildGitHash);
         Assert.Equal(info.SourceRevision, info.GitHash);
         Assert.Equal(4, info.Generation);
+    }
+
+    [Fact]
+    public void ManagedIdentity_WhenLegacyManifestHasBuildGitHash_KeepsItDistinctFromSourceRevision()
+    {
+        const string identityPath = "/managed/server/runtime-identity.json";
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        environment[RuntimeBuildInfo.RuntimeIdentityPathEnvironmentVariable] = identityPath;
+        var files = new FakeIdentityFileSystem();
+        files.WriteAllText(
+            identityPath,
+            """
+            {
+              "component": "server",
+              "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "buildGitHash": "dddddddddddddddddddddddddddddddddddddddd",
+              "treeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "generation": 4
+            }
+            """);
+
+        var info = new RuntimeBuildInfo(
+            environment,
+            new StubRuntimeSourceIdentity("source-checkout"),
+            new FakeTimeProvider(TestTime.UtcNow),
+            files);
+
+        Assert.Null(info.SchemaVersion);
+        Assert.Equal("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", info.SourceRevision);
+        Assert.Equal("dddddddddddddddddddddddddddddddddddddddd", info.BuildGitHash);
     }
 
     [Fact]

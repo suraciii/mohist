@@ -369,16 +369,43 @@ func pointerText(pointer managedPointer, key string) string {
 	return value
 }
 
+// pointerTarget reads a pointer target during the update and recovery flows. It
+// accepts the canonical RuntimeIdentity v1 contract or a bounded v0 legacy
+// payload without schemaVersion (the first update from a pre-v1 installation).
+// A payload with a present schemaVersion other than 1, or an incomplete legacy
+// identity, is rejected. The legacy read path is removed under the condition
+// recorded in design/cli.md#managed-runtime-updates.
 func pointerTarget(pointer managedPointer, component string) (*managedRuntimeTarget, error) {
-	value := pointer[component]
+	target, _, err := readManagedTargetDocument(pointer[component])
+	return target, err
+}
+
+// readManagedTargetDocument parses a serialized pointer target and classifies
+// its identity. The boolean reports that the identity had no schemaVersion and
+// is therefore legacy v0; callers that require the canonical v1 contract
+// (managed preflight and activation) must reject it. Malformed or incomplete
+// identities are always rejected.
+func readManagedTargetDocument(value json.RawMessage) (*managedRuntimeTarget, bool, error) {
 	if len(value) == 0 || string(value) == "null" {
-		return nil, errors.New("installed target is missing")
+		return nil, false, errors.New("installed target is missing")
 	}
 	var target managedRuntimeTarget
-	if err := json.Unmarshal(value, &target); err != nil || !validManagedRuntimeIdentity(target.Identity) {
-		return nil, errors.New("installed target identity is incomplete")
+	if err := json.Unmarshal(value, &target); err != nil {
+		return nil, false, errors.New("installed target identity is incomplete")
 	}
-	return &target, nil
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(value, &fields); err != nil {
+		return nil, false, errors.New("installed target identity is incomplete")
+	}
+	identity, legacy, err := readManagedIdentityDocument(fields["identity"])
+	if err != nil || (!legacy && !validManagedRuntimeIdentity(identity)) {
+		return nil, false, errors.New("installed target identity is incomplete")
+	}
+	target.Identity = identity
+	if target.Component == "" {
+		target.Component = identity.Component
+	}
+	return &target, legacy, nil
 }
 
 // validManagedRuntimeIdentity reports whether an identity satisfies the

@@ -103,8 +103,8 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
     /// than <c>1</c>, a wrong JSON type, or a canonical payload missing any
     /// required field is malformed and must not fall back to source identity.
     /// A payload without <c>schemaVersion</c> is legacy v0:
-    /// <c>buildGitHash = buildGitHash ?? gitHash ?? sourceRevision</c> and
-    /// <c>sourceRevision = sourceRevision ?? buildGitHash</c>.
+    /// <c>buildGitHash = buildGitHash ?? gitHash</c> and
+    /// <c>sourceRevision = sourceRevision ?? buildGitHash ?? gitHash</c>.
     /// </summary>
     internal static RuntimeIdentityMetadata ParseManagedIdentity(string json)
     {
@@ -176,8 +176,7 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
             var gitHash = ReadText(ReadString(root, "gitHash"));
             var legacySourceRevision = ReadText(ReadString(root, "sourceRevision"));
             var legacyBuildGitHash = ReadText(ReadString(root, "buildGitHash"))
-                ?? gitHash
-                ?? legacySourceRevision;
+                ?? gitHash;
             return new RuntimeIdentityMetadata(
                 null,
                 ReadText(ReadString(root, "component")),

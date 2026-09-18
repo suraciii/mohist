@@ -872,6 +872,117 @@ func TestManagedUpdateRejectsMissingStagedCandidateIdentityBeforeActivation(t *t
 	}
 }
 
+func TestManagedUpdateMigratesLegacyV0InstallToCanonicalIdentity(t *testing.T) {
+	t.Run("server", func(t *testing.T) {
+		fixture := newManagedUpdateFixture(t)
+		fixture.useLegacyV0Runtime(t)
+		assertLegacyV0Pointer(t, fixture, "server")
+
+		if err := fixture.updater.Update(context.Background(), ManagedUpdateRequest{
+			Components: []string{"server"}, RepoRoot: "/repo",
+		}); err != nil {
+			t.Fatalf("legacy v0 server update failed: %v", err)
+		}
+
+		target, err := pointerTarget(fixture.pointer("active.json"), "server")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !validManagedRuntimeIdentity(target.Identity) {
+			t.Fatalf("migrated server pointer target = %#v", target.Identity)
+		}
+		manifest, legacy, err := readManagedReleaseIdentityFile(
+			fixture.files, filepath.Join(target.WorkingDirectory, "runtime-identity.json"), "server",
+		)
+		if err != nil || legacy || !validManagedRuntimeIdentity(manifest) {
+			t.Fatalf("migrated server manifest = %#v, legacy = %v, err = %v", manifest, legacy, err)
+		}
+		if target.Identity.BuildGitHash != managedTestCommit {
+			t.Fatalf("migrated server buildGitHash = %q", target.Identity.BuildGitHash)
+		}
+	})
+
+	t.Run("runner", func(t *testing.T) {
+		fixture := newManagedRunnerUpdateFixture(t)
+		fixture.useLegacyV0Runtime(t)
+		assertLegacyV0Pointer(t, fixture, "runner")
+
+		if err := fixture.updater.Update(context.Background(), ManagedUpdateRequest{
+			Components: []string{"runner"}, RepoRoot: "/repo",
+		}); err != nil {
+			t.Fatalf("legacy v0 runner update failed: %v", err)
+		}
+
+		target, err := pointerTarget(fixture.pointer("verified.json"), "runner")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !validManagedRuntimeIdentity(target.Identity) || target.Identity.BuildGitHash != managedTestCommit {
+			t.Fatalf("migrated runner pointer target = %#v", target.Identity)
+		}
+	})
+}
+
+func TestManagedUpdateRejectsMalformedV0SchemaVersionBeforeBuild(t *testing.T) {
+	fixture := newManagedUpdateFixture(t)
+	fixture.useLegacyV0Runtime(t)
+	pointer := fixture.pointer("active.json")
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(pointer["server"], &fields); err != nil {
+		t.Fatal(err)
+	}
+	var identityFields map[string]json.RawMessage
+	if err := json.Unmarshal(fields["identity"], &identityFields); err != nil {
+		t.Fatal(err)
+	}
+	identityFields["schemaVersion"] = json.RawMessage("0")
+	fields["identity"], _ = json.Marshal(identityFields)
+	pointer["server"], _ = json.Marshal(fields)
+	pointerValue, _ := json.MarshalIndent(pointer, "", "  ")
+	fixture.files.put(filepath.Join(fixture.runtimeRoot, "active.json"), append(pointerValue, '\n'), 0o600)
+	fixture.files.put(filepath.Join(fixture.runtimeRoot, "verified.json"), append(pointerValue, '\n'), 0o600)
+
+	err := fixture.updater.Update(context.Background(), ManagedUpdateRequest{
+		Components: []string{"server"}, RepoRoot: "/repo",
+	})
+	if err == nil || (!strings.Contains(err.Error(), "identity is incomplete") && !strings.Contains(err.Error(), "active and verified targets do not agree")) {
+		t.Fatalf("error = %v", err)
+	}
+	for _, call := range fixture.commands.calls {
+		if call.Name == "dotnet" || call.Name == "npm" {
+			t.Fatalf("build ran for a present-but-zero v0 schemaVersion: %#v", call)
+		}
+	}
+	if fixture.commands.hasSystemctlMutation() {
+		t.Fatalf("systemd mutation for a malformed v0 pointer: %#v", fixture.commands.calls)
+	}
+}
+
+func TestManagedUpdateRejectsLegacyLiveIdentityMismatchBeforeBuild(t *testing.T) {
+	fixture := newManagedUpdateFixture(t)
+	fixture.useLegacyV0Runtime(t)
+	fixture.control.initialMismatch = true
+	originalUnit := fixture.files.text(fixture.unitPath)
+
+	err := fixture.updater.Update(context.Background(), ManagedUpdateRequest{
+		Components: []string{"server"}, RepoRoot: "/repo",
+	})
+	if err == nil || !strings.Contains(err.Error(), "live runtime does not match the active target") {
+		t.Fatalf("error = %v", err)
+	}
+	for _, call := range fixture.commands.calls {
+		if call.Name == "dotnet" || call.Name == "npm" {
+			t.Fatalf("build ran before a legacy live-runtime rejection: %#v", call)
+		}
+	}
+	if fixture.commands.hasSystemctlMutation() {
+		t.Fatalf("systemd mutation after a legacy live-runtime rejection: %#v", fixture.commands.calls)
+	}
+	if fixture.files.text(fixture.unitPath) != originalUnit {
+		t.Fatal("legacy live-runtime rejection changed the service")
+	}
+}
+
 type managedUpdateFixture struct {
 	t           testing.TB
 	runtimeRoot string
@@ -990,6 +1101,114 @@ func addManagedTestRunner(fixture *managedUpdateFixture, retainServer bool) {
 	}
 	fixture.control.runnerOld = &old.Identity
 	fixture.control.runnerUnitPath = fixture.unitPath
+}
+
+// legacyV0Identity maps a canonical identity to the v0 shape written by the
+// previous CLI: no schemaVersion. The old writer emitted buildGitHash only for
+// the runner, so a legacy server identity has an empty buildGitHash and the
+// legacy read rule maps it from gitHash (also absent). This is the bounded
+// migration input whose removal condition is recorded in PLANS/PLAN.md and
+// design/cli.md#managed-runtime-updates.
+func legacyV0Identity(identity managedRuntimeIdentity) managedRuntimeIdentity {
+	identity.SchemaVersion = 0
+	if identity.Component != "runner" {
+		identity.BuildGitHash = ""
+	}
+	return identity
+}
+
+func legacyV0IdentityMap(identity managedRuntimeIdentity) map[string]any {
+	mapped := legacyV0Identity(identity)
+	result := map[string]any{
+		"component": mapped.Component, "version": mapped.Version,
+		"sourceRevision": mapped.SourceRevision, "treeHash": mapped.TreeHash,
+		"artifactDigest": mapped.ArtifactDigest, "releaseId": mapped.ReleaseID,
+		"generation": mapped.Generation,
+	}
+	if mapped.BuildGitHash != "" {
+		result["buildGitHash"] = mapped.BuildGitHash
+	}
+	if mapped.RunnerID != "" {
+		result["runnerId"] = mapped.RunnerID
+	}
+	return result
+}
+
+func legacyV0TargetJSON(t testing.TB, target managedRuntimeTarget) []byte {
+	t.Helper()
+	value, err := json.Marshal(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(value, &fields); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := json.Marshal(legacyV0IdentityMap(target.Identity))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields["identity"] = identity
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
+}
+
+// useLegacyV0Runtime rewrites the fixture into a pre-v1 installation: active and
+// verified pointer targets and installed manifests without schemaVersion, plus
+// matching v0 live observations. The next update must migrate to canonical v1.
+func (fixture *managedUpdateFixture) useLegacyV0Runtime(t testing.TB) {
+	t.Helper()
+	for _, pointerName := range []string{"active.json", "verified.json"} {
+		pointer := fixture.pointer(pointerName)
+		for _, component := range []string{"server", "runner"} {
+			value := pointer[component]
+			if len(value) == 0 || string(value) == "null" {
+				continue
+			}
+			var target managedRuntimeTarget
+			if err := json.Unmarshal(value, &target); err != nil {
+				t.Fatal(err)
+			}
+			target.Identity = legacyV0Identity(target.Identity)
+			pointer[component] = legacyV0TargetJSON(t, target)
+			manifest, err := json.MarshalIndent(legacyV0IdentityMap(target.Identity), "", "  ")
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture.files.put(
+				filepath.Join(target.WorkingDirectory, "runtime-identity.json"), append(manifest, '\n'), 0o600,
+			)
+		}
+		pointerValue, err := json.MarshalIndent(pointer, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.files.put(filepath.Join(fixture.runtimeRoot, pointerName), append(pointerValue, '\n'), 0o600)
+	}
+	fixture.control.old = legacyV0Identity(fixture.control.old)
+	if fixture.control.runnerOld != nil {
+		mapped := legacyV0Identity(*fixture.control.runnerOld)
+		fixture.control.runnerOld = &mapped
+	}
+}
+
+func assertLegacyV0Pointer(t testing.TB, fixture *managedUpdateFixture, component string) {
+	t.Helper()
+	value := fixture.pointer("active.json")[component]
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(value, &fields); err != nil {
+		t.Fatal(err)
+	}
+	var identityFields map[string]json.RawMessage
+	if err := json.Unmarshal(fields["identity"], &identityFields); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := identityFields["schemaVersion"]; present {
+		t.Fatalf("legacy pointer target unexpectedly carries schemaVersion: %s", value)
+	}
 }
 
 func (fixture *managedUpdateFixture) pointer(name string) managedPointer {
