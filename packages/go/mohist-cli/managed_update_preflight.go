@@ -1,7 +1,6 @@
 package mohistcli
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -17,11 +16,11 @@ func readManagedReleaseIdentityFile(files managedFileSystem, path string, compon
 	if err != nil {
 		return managedRuntimeIdentity{}, fmt.Errorf("managed %s release manifest is unavailable", component)
 	}
-	var identity managedRuntimeIdentity
-	if err := json.Unmarshal(value, &identity); err != nil {
+	identity, legacy, err := readManagedIdentityDocument(value)
+	if err != nil {
 		return managedRuntimeIdentity{}, fmt.Errorf("managed %s release manifest is invalid", component)
 	}
-	if !validManagedRuntimeIdentity(identity) {
+	if !legacy && !validManagedRuntimeIdentity(identity) {
 		return managedRuntimeIdentity{}, fmt.Errorf("managed %s release manifest is not canonical", component)
 	}
 	return identity, nil

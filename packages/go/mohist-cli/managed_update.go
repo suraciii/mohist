@@ -250,6 +250,9 @@ func (updater *managedUpdater) Update(ctx context.Context, request ManagedUpdate
 	if err := writeManagedPointer(env.files, filepath.Join(runtimeRoot, "active.json"), candidate, activeMode); err != nil {
 		return updater.rollback(ctx, runtimeRoot, statePath, &transaction, activated, interrupt, activeBytes, activeMode, verifiedBytes, verifiedMode, previousObservations, err)
 	}
+	if err := verifyManagedActivatedTargets(ctx, env, runtimeRoot, components, targets); err != nil {
+		return updater.rollback(ctx, runtimeRoot, statePath, &transaction, activated, interrupt, activeBytes, activeMode, verifiedBytes, verifiedMode, previousObservations, err)
+	}
 	transaction.Status = "verified"
 	transaction.UpdatedAt = env.now()
 	if err := writeManagedTransaction(env.files, statePath, &transaction); err != nil {

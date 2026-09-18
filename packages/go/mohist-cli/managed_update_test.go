@@ -187,7 +187,7 @@ func TestManagedUpdateCommitsVerifiedRunnerRelease(t *testing.T) {
 			t.Fatalf("Runner unit lost %q: %s", preserved, unit)
 		}
 	}
-	if len(fixture.control.runnerObservations) != 2 {
+	if len(fixture.control.runnerObservations) != 3 {
 		t.Fatalf("Runner observations = %#v", fixture.control.runnerObservations)
 	}
 	oldObservation := fixture.control.runnerObservations[0]
@@ -917,7 +917,7 @@ func newManagedUpdateFixture(t testing.TB) *managedUpdateFixture {
 		files: files, oldTarget: &old, unitPath: unitPath,
 		unitPaths: map[string]string{"mohist.service": unitPath},
 	}
-	control := &managedUpdateFakeControl{files: files, old: old.Identity}
+	control := &managedUpdateFakeControl{files: files, old: old.Identity, serverUnitPath: unitPath}
 	now := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
 	env := managedUpdateEnvironment{
 		files: files, commands: commands, control: control,
@@ -1057,11 +1057,37 @@ type managedUpdateFakeFiles struct {
 	failStateWriteNumber    int
 	mutateCandidateIdentity func(*managedRuntimeIdentity)
 	removeCandidateIdentity bool
+	mutateIdentityRead      func(string, []byte) []byte
+	mutateActivePointer     bool
 }
 
 func isManagedCandidateIdentityPath(path string) bool {
 	slash := filepath.ToSlash(path)
 	return strings.Contains(slash, "/candidate/") && strings.HasSuffix(slash, "/runtime-identity.json")
+}
+
+func mutateManagedActivePointerTarget(value []byte) []byte {
+	var pointer managedPointer
+	if json.Unmarshal(value, &pointer) != nil {
+		return value
+	}
+	for _, component := range []string{"server", "runner"} {
+		raw := pointer[component]
+		if len(raw) == 0 {
+			continue
+		}
+		var target managedRuntimeTarget
+		if json.Unmarshal(raw, &target) != nil || target.Identity.TreeHash == "" {
+			continue
+		}
+		target.Identity.TreeHash = strings.Repeat("f", 40)
+		pointer[component], _ = json.Marshal(target)
+	}
+	encoded, err := json.MarshalIndent(pointer, "", "  ")
+	if err != nil {
+		return value
+	}
+	return append(encoded, '\n')
 }
 
 func (files *managedUpdateFakeFiles) put(path string, value []byte, mode os.FileMode) {
@@ -1075,11 +1101,16 @@ func (files *managedUpdateFakeFiles) Exists(path string) bool {
 	return ok
 }
 func (files *managedUpdateFakeFiles) ReadFile(path string) ([]byte, os.FileMode, error) {
-	value, ok := files.values[filepath.Clean(path)]
+	path = filepath.Clean(path)
+	value, ok := files.values[path]
 	if !ok {
 		return nil, 0, os.ErrNotExist
 	}
-	return append([]byte(nil), value.value...), value.mode, nil
+	content := append([]byte(nil), value.value...)
+	if files.mutateIdentityRead != nil {
+		content = files.mutateIdentityRead(path, content)
+	}
+	return content, value.mode, nil
 }
 func (files *managedUpdateFakeFiles) WriteFileAtomic(path string, value []byte, mode os.FileMode) error {
 	path = filepath.Clean(path)
@@ -1107,6 +1138,9 @@ func (files *managedUpdateFakeFiles) WriteFileAtomic(path string, value []byte, 
 	}
 	if files.removeCandidateIdentity && isManagedCandidateIdentityPath(path) {
 		return nil
+	}
+	if files.mutateActivePointer && filepath.Base(path) == "active.json" && strings.Contains(string(value), "11111111111111111111111111111111") {
+		value = mutateManagedActivePointerTarget(value)
 	}
 	files.put(path, value, mode)
 	return nil
@@ -1324,26 +1358,29 @@ func managedTestSystemdDirectiveValues(unit, property string) []string {
 }
 
 type managedUpdateFakeControl struct {
-	files                   *managedUpdateFakeFiles
-	old                     managedRuntimeIdentity
-	runnerOld               *managedRuntimeIdentity
-	runnerUnitPath          string
-	serverCalls             int
-	runnerCalls             int
-	candidateMismatch       bool
-	rollbackMismatch        bool
-	runnerCandidateMismatch bool
-	runnerSawCandidate      bool
-	runnerObservations      []managedRuntimeObservation
-	runnerObserveIDs        []string
-	beginError              error
-	cancelError             error
-	activeWorkCount         int
-	beginCalls              int
-	cancelCalls             int
-	cancelRunnerID          string
-	cancelInterruptID       string
-	initialMismatch         bool
+	files                      *managedUpdateFakeFiles
+	old                        managedRuntimeIdentity
+	runnerOld                  *managedRuntimeIdentity
+	serverUnitPath             string
+	runnerUnitPath             string
+	serverCalls                int
+	runnerCalls                int
+	candidateMismatch          bool
+	rollbackMismatch           bool
+	runnerCandidateMismatch    bool
+	serverVerificationMismatch bool
+	runnerVerificationMismatch bool
+	runnerSawCandidate         bool
+	runnerObservations         []managedRuntimeObservation
+	runnerObserveIDs           []string
+	beginError                 error
+	cancelError                error
+	activeWorkCount            int
+	beginCalls                 int
+	cancelCalls                int
+	cancelRunnerID             string
+	cancelInterruptID          string
+	initialMismatch            bool
 }
 
 func (control *managedUpdateFakeControl) ObserveServer(context.Context) (managedRuntimeObservation, error) {
@@ -1359,11 +1396,24 @@ func (control *managedUpdateFakeControl) ObserveServer(context.Context) (managed
 	if control.candidateMismatch && control.serverCalls == 2 {
 		return control.recordServerObservation("candidate-mismatch", managedRuntimeObservation{Identity: control.old, Status: "ok"}), nil
 	}
+	if control.serverVerificationMismatch {
+		if control.serverCalls == 3 {
+			mismatched := control.old
+			mismatched.TreeHash = strings.Repeat("f", 40)
+			return control.recordServerObservation("verification-mismatch", managedRuntimeObservation{Identity: mismatched, Status: "ok"}), nil
+		}
+		if control.serverCalls > 3 {
+			return control.recordServerObservation("rollback", managedRuntimeObservation{Identity: control.old, Status: "ok"}), nil
+		}
+	}
 	if control.rollbackMismatch && control.serverCalls >= 3 {
 		return control.recordServerObservation("rollback-mismatch", managedRuntimeObservation{Identity: managedRuntimeIdentity{Component: "server"}, Status: "ok"}), nil
 	}
 	if control.candidateMismatch {
 		return control.recordServerObservation("rollback", managedRuntimeObservation{Identity: control.old, Status: "ok"}), nil
+	}
+	if control.serverUnitPath != "" && !strings.Contains(control.files.text(control.serverUnitPath), managedTestCommit+"-g8/server") {
+		return control.recordServerObservation("old-unit", managedRuntimeObservation{Identity: control.old, Status: "ok"}), nil
 	}
 	for path, file := range control.files.values {
 		if strings.Contains(path, managedTestCommit+"-g8/server/runtime-identity.json") {
@@ -1405,6 +1455,9 @@ func (control *managedUpdateFakeControl) ObserveRunner(_ context.Context, runner
 		}
 		if control.runnerCandidateMismatch {
 			identity = *control.runnerOld
+		}
+		if control.runnerVerificationMismatch && control.runnerCalls == 3 {
+			identity.TreeHash = strings.Repeat("f", 40)
 		}
 	} else if control.runnerSawCandidate {
 		connectionGeneration = "rollback-connection"
