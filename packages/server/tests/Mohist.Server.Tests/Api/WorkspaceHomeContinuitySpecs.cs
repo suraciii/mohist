@@ -57,57 +57,15 @@ public sealed class WorkspaceHomeContinuitySpecs
     [Fact]
     public async Task OneWorkflowRun_KeepsOneWorkspaceIdentityBranchAndCommitLineageAcrossAllFiveStages()
     {
-        var projectId = $"continuity-{Guid.NewGuid():N}";
-        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
-            projectId,
-            new RepositoryInfo
-            {
-                Name = RepositoryName,
-                GitUrl = GitUrl,
-                BaseBranch = BaseBranch,
-                IsDefault = true,
-            },
-            "true");
-
-        var issueNumber = await _fixture.Grains
-            .GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId))
-            .NextAsync();
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
-        await issueGrain.CreateAsync(projectId, issueNumber, "continuity issue", null, null, null, isDraft: false);
-
-        await WorkflowApiTestSupport.SeedWorkflowProfileAsync(
-            _fixture.ConnectionString,
-            projectId,
-            ContinuityDefinition());
-
-        var runnerId = $"continuity-runner-{Guid.NewGuid():N}";
-        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(
-            new RunnerInfo(
-                runnerId,
-                ["spec/*", AgentExecutionSources.Version1Capability],
-                "test-host",
-                projectId,
-                ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration,
-                RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()),
-            TestRunnerGenerationExtensions.ProcessGeneration);
-
-        var runId = await issueGrain.StartWorkAsync();
-        await DispatchEventsAsync();
-
-        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(runId);
-        await workflow.AssignWorkerAsync(runnerId);
-
-        var workspaceName = $"issue-{issueNumber}";
-        var branch = $"mohist/ws-{workspaceName}";
-        var homePath = $"/mohist-tests/runner/{workspaceName}";
-        var workspaceGrain = _fixture.Grains.GetGrain<IWorkspaceGrain>(GrainKey.Workspace(projectId, workspaceName));
-        Assert.NotNull(await workspaceGrain.EnsureMaterializedOnAsync(
-            runnerId,
-            homePath,
-            _fixture.TimeProvider.GetUtcNow()));
-
-        _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(branch);
-        _fixture.RunnerWorkspace.Commits = Commits(branch, "commit-a");
+        var run = await StartContinuityRunAsync("continuity");
+        var projectId = run.ProjectId;
+        var issueNumber = run.IssueNumber;
+        var runnerId = run.RunnerId;
+        var runId = run.RunId;
+        var workflow = run.Workflow;
+        var workspaceGrain = run.Workspace;
+        var branch = run.Branch;
+        var homePath = run.HomePath;
 
         // --- Plan: the run's plan artifacts are uploaded and bound at report time. ---
         var plan = await PollAsync(runnerId);
@@ -249,6 +207,286 @@ public sealed class WorkspaceHomeContinuitySpecs
         Assert.Equal(["plan", "build", "check", "integrate"], completed.Stages.Select(stage => stage.Id));
         Assert.Equal(branch, _fixture.RunnerWorkspace.WorkspaceStatus.Branch);
         Assert.Equal(homePath, (await workspaceGrain.GetHomeAsync())!.Path);
+    }
+
+    [Fact]
+    public async Task HomeLoss_LaterWorkItemStillGetsSameIdentityAndBoundArtifacts()
+    {
+        var run = await StartContinuityRunAsync("continuity-home-loss");
+
+        var plan = await PollAsync(run.RunnerId);
+        Assert.Equal("plan", plan.Stage);
+        AssertIdentity(plan, run.RunId, run.IssueNumber);
+        await ReportPlanWithArtifactsAsync(run, plan);
+
+        // Home loss is the Runner peer reporting the local Home gone. The
+        // Server owns the logical Workspace and the durable bound artifacts.
+        _fixture.RunnerWorkspace.WorkspaceStatus = new WorkspaceStatus
+        {
+            Exists = false,
+            Reason = "workspace_removed",
+        };
+        await AssertWorkspaceStatusLostAsync(run);
+
+        // A later work item still carries the same Git inputs needed to
+        // re-clone the Home, and the provisioning route still serves exactly
+        // the bound non-Git artifacts from durable storage.
+        var build = await PollAsync(run.RunnerId);
+        Assert.Equal("build", build.Stage);
+        AssertIdentity(build, run.RunId, run.IssueNumber);
+        await AssertBoundPlanArtifactsAsync(run, build.WorkId);
+
+        await AssertRunStillActiveAsync(run, "build", build.WorkId);
+    }
+
+    [Fact]
+    public async Task PendingUpload_IsNotProvisionedAndDoesNotAdvanceTheRun()
+    {
+        var run = await StartContinuityRunAsync("continuity-pending");
+
+        var plan = await PollAsync(run.RunnerId);
+        await ReportPlanWithArtifactsAsync(run, plan);
+
+        var build = await PollAsync(run.RunnerId);
+        Assert.Equal("build", build.Stage);
+
+        const string pendingPath = "PLANS/pending.md";
+        using (var response = await PostArtifactAsync(run.RunId, build.WorkId, pendingPath, "# pending\n"))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            Assert.Equal(pendingPath, data.GetProperty("path").GetString());
+        }
+
+        // The pending upload never becomes a durable provisioning input.
+        var artifacts = (await GetProvisionedArtifactsAsync(run.RunnerId, run.RunId, build.WorkId))
+            .GetProperty("artifacts")
+            .EnumerateArray()
+            .ToList();
+        Assert.DoesNotContain(artifacts, artifact => artifact.GetProperty("path").GetString() == pendingPath);
+        await AssertBoundPlanArtifactsAsync(run, build.WorkId);
+
+        // Uploading is not reporting: the run stays on the same work item.
+        await AssertRunStillActiveAsync(run, "build", build.WorkId);
+    }
+
+    [Fact]
+    public async Task StaleWorkId_ReturnsNotFoundFromUploadAndProvisioningRoutes()
+    {
+        var run = await StartContinuityRunAsync("continuity-stale");
+
+        var plan = await PollAsync(run.RunnerId);
+        await ReportPlanWithArtifactsAsync(run, plan);
+
+        var build = await PollAsync(run.RunnerId);
+        Assert.Equal("build", build.Stage);
+
+        // The plan work item is stale now that its stage advanced.
+        using (var upload = await PostArtifactAsync(run.RunId, plan.WorkId, "PLANS/PLAN.md", "# stale\n"))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, upload.StatusCode);
+            var body = await upload.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("not_found", body.GetProperty("code").GetString());
+        }
+
+        using (var provision = await _client.GetAsync(
+            $"/api/runner/{run.RunnerId}/workflow-runs/{run.RunId}/work/{plan.WorkId}/workspace-artifacts"))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, provision.StatusCode);
+        }
+
+        await AssertRunStillActiveAsync(run, "build", build.WorkId);
+    }
+
+    [Fact]
+    public async Task WrongRunner_ReceivesForbiddenOnProvisioningRoute()
+    {
+        var run = await StartContinuityRunAsync("continuity-wrong-runner");
+
+        var plan = await PollAsync(run.RunnerId);
+        await ReportPlanWithArtifactsAsync(run, plan);
+
+        var build = await PollAsync(run.RunnerId);
+        Assert.Equal("build", build.Stage);
+
+        using (var response = await _client.GetAsync(
+            $"/api/runner/other-runner-{Guid.NewGuid():N}/workflow-runs/{run.RunId}/work/{build.WorkId}/workspace-artifacts"))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("workflow_runner_not_assigned", body.GetProperty("code").GetString());
+        }
+
+        await AssertRunStillActiveAsync(run, "build", build.WorkId);
+    }
+
+    [Fact]
+    public async Task HashConflictAtUpload_IsRejectedAndLeavesBoundArtifactUnchanged()
+    {
+        var run = await StartContinuityRunAsync("continuity-hash-conflict");
+
+        // Plan binds its three declared artifacts, including PLANS/PLAN.md.
+        var plan = await PollAsync(run.RunnerId);
+        Assert.Equal("plan", plan.Stage);
+        await ReportPlanWithArtifactsAsync(run, plan);
+
+        var build = await PollAsync(run.RunnerId);
+        Assert.Equal("build", build.Stage);
+
+        const string path = "PLANS/PLAN.md";
+        var boundHash = "sha256:" + Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes($"# {path}\n"))).ToLowerInvariant();
+
+        // The build work item uploads the same path twice with different
+        // contents; the second upload conflicts with the pending first one.
+        string pendingUploadId;
+        using (var first = await PostArtifactAsync(run.RunId, build.WorkId, path, "# build plan v1\n"))
+        {
+            Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+            pendingUploadId = (await first.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("data")
+                .GetProperty("uploadId")
+                .GetString()!;
+        }
+
+        using (var conflict = await PostArtifactAsync(run.RunId, build.WorkId, path, "# build plan v2\n"))
+        {
+            Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+            var body = await conflict.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("artifact_upload_conflict", body.GetProperty("code").GetString());
+            var details = body.GetProperty("details");
+            Assert.Equal(pendingUploadId, details.GetProperty("existingUploadId").GetString());
+            Assert.NotEqual(
+                details.GetProperty("existingContentHash").GetString(),
+                details.GetProperty("incomingContentHash").GetString());
+        }
+
+        // The previously bound Plan artifact still wins: the pending build
+        // uploads were never bound and cannot shadow it.
+        var artifacts = (await GetProvisionedArtifactsAsync(run.RunnerId, run.RunId, build.WorkId))
+            .GetProperty("artifacts")
+            .EnumerateArray()
+            .ToList();
+        var boundPlan = artifacts.Single(artifact => artifact.GetProperty("path").GetString() == path);
+        Assert.Equal(boundHash, boundPlan.GetProperty("contentHash").GetString());
+
+        await AssertRunStillActiveAsync(run, "build", build.WorkId);
+    }
+
+    private async Task<ContinuityRun> StartContinuityRunAsync(string prefix)
+    {
+        var projectId = $"{prefix}-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+            projectId,
+            new RepositoryInfo
+            {
+                Name = RepositoryName,
+                GitUrl = GitUrl,
+                BaseBranch = BaseBranch,
+                IsDefault = true,
+            },
+            "true");
+
+        var issueNumber = await _fixture.Grains
+            .GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId))
+            .NextAsync();
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+        await issueGrain.CreateAsync(projectId, issueNumber, "continuity issue", null, null, null, isDraft: false);
+
+        await WorkflowApiTestSupport.SeedWorkflowProfileAsync(
+            _fixture.ConnectionString,
+            projectId,
+            ContinuityDefinition());
+
+        var runnerId = $"{prefix}-runner-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(
+            new RunnerInfo(
+                runnerId,
+                ["spec/*", AgentExecutionSources.Version1Capability],
+                "test-host",
+                projectId,
+                ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration,
+                RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()),
+            TestRunnerGenerationExtensions.ProcessGeneration);
+
+        var runId = await issueGrain.StartWorkAsync();
+        await DispatchEventsAsync();
+
+        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(runId);
+        await workflow.AssignWorkerAsync(runnerId);
+
+        var workspaceName = $"issue-{issueNumber}";
+        var branch = $"mohist/ws-{workspaceName}";
+        var homePath = $"/mohist-tests/runner/{workspaceName}";
+        var workspace = _fixture.Grains.GetGrain<IWorkspaceGrain>(GrainKey.Workspace(projectId, workspaceName));
+        Assert.NotNull(await workspace.EnsureMaterializedOnAsync(
+            runnerId,
+            homePath,
+            _fixture.TimeProvider.GetUtcNow()));
+
+        _fixture.RunnerWorkspace.WorkspaceStatus = AvailableStatus(branch);
+        _fixture.RunnerWorkspace.Commits = Commits(branch, "commit-a");
+
+        return new ContinuityRun(
+            projectId,
+            issueNumber,
+            runnerId,
+            runId,
+            workflow,
+            workspace,
+            workspaceName,
+            branch,
+            homePath);
+    }
+
+    private async Task ReportPlanWithArtifactsAsync(ContinuityRun run, WorkDispatch plan)
+    {
+        var uploadIds = new List<string>();
+        foreach (var path in PlanArtifactPaths)
+            uploadIds.Add(await UploadArtifactAsync(run.RunId, plan.WorkId, path));
+        await ReportAsync(run.RunnerId, plan, "completed", artifactUploadIds: uploadIds.ToArray());
+    }
+
+    private async Task AssertBoundPlanArtifactsAsync(ContinuityRun run, string workId)
+    {
+        var artifacts = (await GetProvisionedArtifactsAsync(run.RunnerId, run.RunId, workId))
+            .GetProperty("artifacts")
+            .EnumerateArray()
+            .ToList();
+        Assert.Equal(
+            PlanArtifactPaths.OrderBy(path => path, StringComparer.Ordinal),
+            artifacts.Select(artifact => artifact.GetProperty("path").GetString()!).OrderBy(path => path, StringComparer.Ordinal));
+        Assert.All(artifacts, artifact =>
+        {
+            Assert.False(artifact.TryGetProperty("uploadId", out _));
+            Assert.StartsWith("sha256:", artifact.GetProperty("contentHash").GetString());
+            Assert.True(artifact.GetProperty("size").GetInt64() > 0);
+        });
+    }
+
+    private async Task AssertWorkspaceStatusLostAsync(ContinuityRun run)
+    {
+        var status = await _client.GetDataAsync<StatusDto>(
+            $"/api/projects/{run.ProjectId}/issues/{run.IssueNumber}/workspace-status");
+        Assert.False(status.Exists);
+        Assert.Equal("workspace_removed", status.Reason);
+    }
+
+    private async Task AssertRunStillActiveAsync(ContinuityRun run, string stage, string workId)
+    {
+        var current = await LoadRunAsync(run.RunId);
+        Assert.False(current.Status.IsTerminal());
+        Assert.Equal(stage, current.CurrentStageId);
+        var active = await run.Workflow.GetActiveWorkAsync(workId);
+        Assert.NotNull(active);
+    }
+
+    private async Task<HttpResponseMessage> PostArtifactAsync(string runId, string workId, string path, string body)
+    {
+        var content = Encoding.UTF8.GetBytes(body);
+        var contentHash = "sha256:" + Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
+        using var form = BuildMultipart(path, content, "text/markdown", contentHash, content.LongLength);
+        return await _client.PostAsync($"/api/workflow-runs/{runId}/work/{workId}/artifact-uploads", form);
     }
 
     private static WorkflowDefinition ContinuityDefinition() => new(
@@ -423,6 +661,17 @@ public sealed class WorkspaceHomeContinuitySpecs
 
     private Task DispatchEventsAsync() =>
         _fixture.Services.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventDispatcher>().DrainAsync();
+
+    private sealed record ContinuityRun(
+        string ProjectId,
+        int IssueNumber,
+        string RunnerId,
+        string RunId,
+        IWorkflowGrain Workflow,
+        IWorkspaceGrain Workspace,
+        string WorkspaceName,
+        string Branch,
+        string HomePath);
 
     private sealed record StatusDto(
         bool Exists,
