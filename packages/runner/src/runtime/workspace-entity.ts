@@ -544,7 +544,11 @@ export class NamedWorkspaceManager {
       now: this.now,
     })
     try {
-      if (workflowRunId && workId) {
+      // Bound artifacts are recovery inputs, not the source of truth for an
+      // active Home. Only a newly materialized Home needs restoration;
+      // comparing an existing Home with an older snapshot rejects valid edits
+      // made between workflow tasks.
+      if (workflowRunId && workId && result.created) {
         await provisionWorkspaceArtifacts(this.connection, workflowRunId, workId, result.path, signal)
       }
       await this.connection.reportWorkspaceProvisioned(projectId, workspaceName, result.path, signal)

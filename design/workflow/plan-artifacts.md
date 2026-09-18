@@ -95,10 +95,10 @@ does not consume it.
 ### Persistence and Recovery
 
 A WorkflowRun uses one Workspace identity across Stages. The Runner provisions a Workspace Home
-before each task and preserves a valid existing Home. If the Home is unavailable, provisioning
-uses the remote Workflow branch for Repository contents and the current WorkflowRun's bound
-artifacts for declared non-repository files. Build then reads `PLANS/tasks.json` from the local
-Home as usual.
+before each task and preserves a valid existing Home, including edits made between tasks. If the
+Home is unavailable, provisioning uses the remote Workflow branch for Repository contents and the
+current WorkflowRun's bound artifacts for declared non-repository files. Build then reads
+`PLANS/tasks.json` from the local Home as usual.
 
 Artifact upload serves evidence and audit after a task report is accepted. Bound artifacts are
 also durable inputs for Workspace Home provisioning. Pending uploads are not durable and cannot

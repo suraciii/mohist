@@ -59,6 +59,15 @@ describe('Workspace Home recovery', () => {
       await expect(fileSystem.readText(join(homePath, 'RESEARCH', 'notes.txt'))).resolves.toBe(DIRECTORY_ENTRY_CONTENT)
       expect(connection.reportCalls).toEqual([{ projectId: PROJECT_ID, workspaceName: WORKSPACE_NAME, path: homePath }])
 
+      // A valid Home is the source of truth. Later tasks keep local edits and
+      // do not re-read the older artifact snapshot.
+      await fileSystem.writeText(join(homePath, 'PLANS', 'tasks.json'), 'local edit')
+      const existing = await provisionNamedWorkspace(manager, STAGE_TWO_WORK_ID)
+      expect(existing).toMatchObject({ path: homePath, created: false })
+      await expect(fileSystem.readText(join(homePath, 'PLANS', 'tasks.json'))).resolves.toBe('local edit')
+      expect(connection.listRequests).toHaveLength(1)
+      expect(connection.downloadRequests).toHaveLength(2)
+
       // Home loss: both the directory and its registry entry are gone.
       await fileSystem.deleteDirectory(homePath)
       await registry.remove(namedWorkspaceRegistryKey(PROJECT_ID, WORKSPACE_NAME))

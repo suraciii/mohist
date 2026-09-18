@@ -159,6 +159,7 @@ describe('AgentJobExecutor resolves a named workspace binding', () => {
     const result = await executor.execute(work, new AbortController().signal)
 
     expect(result.status).toBe('completed')
+    expect(provision).not.toHaveBeenCalled()
     expect(provisionForIssue).toHaveBeenCalledWith(
       'proj-1',
       'pay',

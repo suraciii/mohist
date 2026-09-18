@@ -111,8 +111,10 @@ Only `REPOS/` participates in Git. Everything else is Workspace-local work
 material and never appears in a commit, branch, or Pull Request. The Workflow
 branch is the recovery point for Repository work. Plan and review material under
 `PLANS/` is uploaded as run artifacts for evidence and audit. It has no
-per-file recovery point. If the Workspace directory is lost, rerun from the
-Plan Stage to regenerate it.
+per-file recovery point. A valid Workspace Home remains the source of truth,
+including edits made between Workflow tasks. Bound artifacts are used to
+restore declared files only when the Home has been lost, cleaned, or recreated
+on another Runner.
 
 Each Workflow dispatch has two directory boundaries. Its execution directory is
 the Workspace root unless the Task selects another Workspace-relative path with
@@ -149,8 +151,9 @@ archive event, or a create event can trigger dependency installation. See
 
 The Runner that executes a Workspace hosts its directories. The Workspace still
 exists after Runner failure or disk cleanup, but its directory contents are not
-guaranteed to return. Mohist may reprovision a missing directory empty on the
-same home Runner, and unpushed work is lost.
+guaranteed to return. Mohist reprovisions a missing Home from the remote
+Workflow branch and bound non-repository artifacts; unpushed Git work and
+unuploaded Workspace files are lost.
 
 A Workflow preserves completed Repository work by pushing its Workflow branch to
 the remote. Important work in an interactive Workspace must be committed and
