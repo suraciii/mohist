@@ -82,7 +82,11 @@ describe('OpenCode model discovery', () => {
 
   it('publishes the host-owned snapshot in runner registration', () => {
     const registration = buildRegistrationState(
-      { projectId: 'project-a' } as never,
+      {
+        projectId: 'project-a',
+        environmentVersion: 'environment-a',
+        environmentLoadedAt: '2026-09-18T00:00:00.000Z',
+      } as never,
       null,
       { actions: [], tombstones: [] },
       () => 'connection-a',
@@ -96,5 +100,7 @@ describe('OpenCode model discovery', () => {
       variants: { 'openai/gpt-5.6-sol': ['high'] },
       supportsReasoningEffort: false,
     })
+    expect(registration.environmentVersion).toBe('environment-a')
+    expect(registration.environmentLoadedAt).toBe('2026-09-18T00:00:00.000Z')
   })
 })

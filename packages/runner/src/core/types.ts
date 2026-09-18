@@ -427,6 +427,10 @@ export interface RunnerOptions {
    */
   credential?: string
 
+  /** Environment facts captured by the process launcher at startup. */
+  environmentVersion?: string | null
+  environmentLoadedAt?: string | null
+
   /** Test seam: replaces the internally constructed NamedWorkspaceManager. */
   namedWorkspaceManager?: NamedWorkspaceManager
 
@@ -505,4 +509,6 @@ export interface RunnerRegistration {
   generation?: number | null
   runnerId?: string | null
   connectionId?: string | null
+  environmentVersion?: string | null
+  environmentLoadedAt?: string | null
 }

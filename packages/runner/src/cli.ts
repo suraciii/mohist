@@ -6,6 +6,7 @@ import { configureRunnerLogger } from './system/logger.js'
 import { requireRunnerCredential } from './system/runner-credential.js'
 import { parseEnabledAgentRuntimes } from './runtime/enabled-agent-runtimes.js'
 import { runnerTransportDiagnostics } from './server/connection-errors.js'
+import { observeRunnerEnvironment } from './runtime/environment-observation.js'
 
 const controller = new AbortController()
 process.on('SIGINT', () => controller.abort())
@@ -18,6 +19,8 @@ try {
   const runnerId = env('RUNNER_ID') ?? env('RunnerId') ?? `runner-${hostname()}`
   const runnerRoot = env('RUNNER_ROOT') ?? env('RunnerRoot') ?? defaultRunnerRoot()
   const hostnameValue = hostname()
+  const environmentLoadedAt = new Date().toISOString()
+  const environment = observeRunnerEnvironment(process.env, environmentLoadedAt)
   // Install registration: a fresh runner exchanges the one-time bootstrap
   // for its own machine credential; afterwards the persisted credential is
   // used. Missing authentication is fatal for managed service startup.
@@ -48,6 +51,8 @@ try {
     quarantineDrainTimeoutMs: positiveNumberEnv('QUARANTINE_DRAIN_TIMEOUT_MS') ?? 60_000,
     runtimeShutdownTimeoutMs: positiveNumberEnv('RUNTIME_SHUTDOWN_TIMEOUT_MS') ?? 30_000,
     credential: credential ?? undefined,
+    environmentVersion: environment.version,
+    environmentLoadedAt: environment.loadedAt,
   }).run(controller.signal)
 } finally {
   await logger.flush()

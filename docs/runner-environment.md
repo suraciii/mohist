@@ -162,8 +162,10 @@ project-specific version requirements. Managed release installation remains the
 responsibility of Issue #971; this feature only preserves and updates the
 Runner's host environment.
 
-## Implementation Gaps
+## Implementation Status
 
-The current Runner service loads a fixed systemd environment and does not yet
-capture, version, apply, or report this snapshot. The commands and the
-`environment` status projection are therefore target behavior for Issue #1009.
+The install path now captures the fixed host allowlist into the managed
+systemd environment file. Runner registration and heartbeat report the loaded
+environment version and load time, and poll observations retain current
+process-generation settlement counts. Refresh, application, tool checks, and
+the `environment` status projection remain target work for Issue #1009.

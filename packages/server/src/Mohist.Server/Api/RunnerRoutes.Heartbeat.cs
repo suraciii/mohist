@@ -38,7 +38,9 @@ public static partial class RunnerRoutes
                 TreeHash: NormalizeIdentity(req.TreeHash),
                 ArtifactDigest: NormalizeIdentity(req.ArtifactDigest),
                 ReleaseId: NormalizeIdentity(req.ReleaseId),
-                Generation: req.Generation > 0 ? req.Generation : null);
+                Generation: req.Generation > 0 ? req.Generation : null,
+                EnvironmentVersion: NormalizeIdentity(req.EnvironmentVersion),
+                EnvironmentLoadedAt: req.EnvironmentLoadedAt);
             if (connections.Matches(runnerId, req.ConnectionId))
                 await runner.HeartbeatRepairAsync(info);
             else

@@ -757,6 +757,9 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
             _pollAdmissionToken = null;
             _status = RunnerStatus.Offline;
+            // A poll report is only settlement evidence while the process is
+            // present. Do not let an expired lease look settled to recovery.
+            _dispatchObservation = null;
             state.LastPresenceAt ??= _lastPresenceAt;
             state.PresenceLeaseExpiresAt = null;
             BeginDurableCloseout();

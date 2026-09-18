@@ -69,7 +69,10 @@ public partial class RunnerGrain
                 normalizedConnectionGeneration,
                 observation.AdmissionReady,
                 [.. knownReasons],
-                [.. witnesses.Values]);
+                [.. witnesses.Values],
+                processGeneration.Trim(),
+                Math.Max(0, observation.InFlightCount),
+                Math.Max(0, observation.AwaitingAckCount));
             PublishStatusObservation();
 
             return CloneDispatchObservation(_dispatchObservation);
@@ -97,6 +100,9 @@ public partial class RunnerGrain
             [.. observation.AdmissionReasonCodes],
             observation.RuntimeReadiness
                 .Select(witness => witness with { })
-                .ToList());
+                .ToList(),
+            observation.ProcessGeneration,
+            observation.InFlightCount,
+            observation.AwaitingAckCount);
     }
 }
