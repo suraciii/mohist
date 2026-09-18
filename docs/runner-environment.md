@@ -167,5 +167,8 @@ Runner's host environment.
 The install path now captures the fixed host allowlist into the managed
 systemd environment file. Runner registration and heartbeat report the loaded
 environment version and load time, and poll observations retain current
-process-generation settlement counts. Refresh, application, tool checks, and
-the `environment` status projection remain target work for Issue #1009.
+process-generation settlement counts. Server now owns one durable environment
+application per Runner, keeps its fence across process replacement, and
+requires a current-generation target-version witness before releasing that
+fence. Local snapshot apply/rollback, tool checks, and the `environment` status
+projection remain target work for Issue #1009.

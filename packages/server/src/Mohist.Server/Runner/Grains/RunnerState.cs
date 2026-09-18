@@ -16,6 +16,12 @@ public sealed class RunnerState
     [Id(6)] public DateTimeOffset? PresenceLeaseExpiresAt { get; set; }
     /// <summary>Latest presence touch; retained after the lease is cleared.</summary>
     [Id(7)] public DateTimeOffset? LastPresenceAt { get; set; }
+    /// <summary>
+    /// The one host-environment application owned by this Runner. Raw
+    /// snapshot values remain on the host; this record is only control-plane
+    /// metadata and activation evidence.
+    /// </summary>
+    [Id(8)] public RunnerEnvironmentApplication? EnvironmentApplication { get; set; }
 }
 
 /// <summary>
@@ -28,6 +34,12 @@ public sealed class RunnerUpdateInterruptFence
 {
     [Id(0)] public string? PendingId { get; set; }
     [Id(1)] public string? LastCancelledId { get; set; }
+    /// <summary>
+    /// Null is the legacy release-updater fence. Environment applications use
+    /// a distinct kind so a replacement process cannot release their fence
+    /// before activation is confirmed.
+    /// </summary>
+    [Id(2)] public string? Kind { get; set; }
 }
 
 [GenerateSerializer]

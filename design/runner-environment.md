@@ -215,6 +215,8 @@ evidence without a new privileged channel.
 
 The install snapshot and Runner environment observation fields are implemented.
 The update fence now retains current-generation settlement counts even while a
-draining poll cannot claim new work. Environment application state, recovery,
-sanitized status projection, CLI refresh commands, and tool checks remain
-unimplemented slices of Issue #1009.
+draining poll cannot claim new work. Server now persists one environment
+application per Runner, preserves its fence across process replacement, and
+requires a current-generation target-version witness before confirmation.
+Local snapshot apply/rollback, sanitized status projection, CLI refresh
+commands, and tool checks remain unimplemented slices of Issue #1009.
