@@ -362,10 +362,31 @@ func pointerTarget(pointer managedPointer, component string) (*managedRuntimeTar
 		return nil, errors.New("installed target is missing")
 	}
 	var target managedRuntimeTarget
-	if err := json.Unmarshal(value, &target); err != nil || target.Identity.SourceRevision == "" || !target.Identity.IsComplete {
+	if err := json.Unmarshal(value, &target); err != nil || !validManagedRuntimeIdentity(target.Identity) {
 		return nil, errors.New("installed target identity is incomplete")
 	}
 	return &target, nil
+}
+
+// validManagedRuntimeIdentity reports whether an identity satisfies the
+// canonical RuntimeIdentity v1 contract. A managed identity is complete only
+// when schemaVersion is exactly 1 and every required field is present; the
+// legacy gitHash/isComplete aliases never satisfy it.
+func validManagedRuntimeIdentity(identity managedRuntimeIdentity) bool {
+	if identity.SchemaVersion != 1 {
+		return false
+	}
+	if identity.Component != "server" && identity.Component != "runner" {
+		return false
+	}
+	if identity.SourceRevision == "" || identity.BuildGitHash == "" || identity.TreeHash == "" ||
+		identity.ArtifactDigest == "" || identity.ReleaseID == "" || identity.Generation <= 0 {
+		return false
+	}
+	if identity.Component == "runner" {
+		return identity.RunnerID != ""
+	}
+	return identity.RunnerID == ""
 }
 
 func managedNextGeneration(pointer managedPointer) int64 {

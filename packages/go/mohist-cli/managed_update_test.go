@@ -167,7 +167,7 @@ func TestManagedUpdateCommitsVerifiedRunnerRelease(t *testing.T) {
 	if target.Identity.Component != "runner" || target.Identity.SourceRevision != managedTestCommit ||
 		target.Identity.TreeHash != managedTestTree || target.Identity.ReleaseID != "mohist-runner-"+managedTestCommit ||
 		target.Identity.Generation != 8 || target.Identity.RunnerID != "runner-1" ||
-		target.Identity.BuildGitHash != managedTestCommit || !target.Identity.IsComplete || len(target.Identity.ArtifactDigest) != 64 {
+		target.Identity.BuildGitHash != managedTestCommit || !validManagedRuntimeIdentity(target.Identity) || len(target.Identity.ArtifactDigest) != 64 {
 		t.Fatalf("candidate Runner identity = %#v", target.Identity)
 	}
 	if target.NodeExecutable == nil || *target.NodeExecutable != "/usr/bin/node" ||
@@ -726,9 +726,9 @@ func newManagedUpdateFixture(t testing.TB) *managedUpdateFixture {
 		Arguments: []string{}, RuntimeIdentifier: "linux-x64", LaunchMode: 0,
 		IsAbsoluteTarget: true, UsesCanonicalEntrypoint: true,
 		Identity: managedRuntimeIdentity{
-			Component: "server", Version: "0.0.0+" + managedOldCommit, SourceRevision: managedOldCommit,
-			TreeHash: strings.Repeat("d", 40), ArtifactDigest: strings.Repeat("e", 64),
-			ReleaseID: "mohist-server-" + managedOldCommit, Generation: 7, IsComplete: true,
+			SchemaVersion: 1, Component: "server", Version: "0.0.0+" + managedOldCommit, SourceRevision: managedOldCommit,
+			BuildGitHash: managedOldCommit, TreeHash: strings.Repeat("d", 40), ArtifactDigest: strings.Repeat("e", 64),
+			ReleaseID: "mohist-server-" + managedOldCommit, Generation: 7,
 		},
 	}
 	pointer := managedPointer{}
@@ -784,10 +784,9 @@ func addManagedTestRunner(fixture *managedUpdateFixture, retainServer bool) {
 		Arguments: []string{}, RuntimeIdentifier: managedRuntimeIdentifier(), NodeExecutable: &node,
 		DependencyRoot: &runnerRoot, LaunchMode: 1, IsAbsoluteTarget: true, UsesCanonicalEntrypoint: true,
 		Identity: managedRuntimeIdentity{
-			Component: "runner", Version: "0.0.0+" + managedOldCommit, SourceRevision: managedOldCommit,
-			TreeHash: strings.Repeat("d", 40), ArtifactDigest: strings.Repeat("e", 64),
+			SchemaVersion: 1, Component: "runner", Version: "0.0.0+" + managedOldCommit, SourceRevision: managedOldCommit,
+			BuildGitHash: managedOldCommit, TreeHash: strings.Repeat("d", 40), ArtifactDigest: strings.Repeat("e", 64),
 			ReleaseID: "mohist-runner-" + managedOldCommit, Generation: 7, RunnerID: "runner-1",
-			BuildGitHash: managedOldCommit, IsComplete: true,
 		},
 	}
 	for _, pointerName := range []string{"active.json", "verified.json"} {

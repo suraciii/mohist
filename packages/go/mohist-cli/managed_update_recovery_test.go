@@ -276,9 +276,9 @@ func seedManagedRecoveryCandidateAt(
 	candidate.WorkingDirectory = root
 	candidate.Entrypoint = filepath.Join(root, "Mohist.Server")
 	candidate.Identity = managedRuntimeIdentity{
-		Component: "server", Version: "0.0.0+" + managedTestCommit, SourceRevision: managedTestCommit,
-		TreeHash: managedTestTree, ArtifactDigest: strings.Repeat("f", 64),
-		ReleaseID: "mohist-server-" + managedTestCommit, Generation: 8, IsComplete: true,
+		SchemaVersion: 1, Component: "server", Version: "0.0.0+" + managedTestCommit, SourceRevision: managedTestCommit,
+		BuildGitHash: managedTestCommit, TreeHash: managedTestTree, ArtifactDigest: strings.Repeat("f", 64),
+		ReleaseID: "mohist-server-" + managedTestCommit, Generation: 8,
 	}
 	transaction.Targets["server"] = &candidate
 	writeManagedRecoveryTransaction(t, fixture, *transaction)
