@@ -864,6 +864,47 @@ func TestUpdateCLIUsesCanonicalGoAssets(t *testing.T) {
 	}
 }
 
+func TestUpdateCLIResolvesRelativeExecutableBeforeBuild(t *testing.T) {
+	root := t.TempDir()
+	writeTestSkill(t, canonicalGoSkillDataPath(root), "new-skill")
+	home := t.TempDir()
+	target := filepath.Join(root, "mo")
+	var outputPath string
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"update", "cli", "--repo-root", root}, Dependencies{
+		Stdout:           &stdout,
+		Stderr:           &stderr,
+		HomeDir:          func() (string, error) { return home, nil },
+		CurrentDirectory: func() string { return root },
+		Executable:       func() string { return "mo" },
+		Execute: func(_ context.Context, _ string, args []string) error {
+			for index := 0; index+1 < len(args); index++ {
+				if args[index] == "-o" {
+					outputPath = args[index+1]
+					if !filepath.IsAbs(outputPath) {
+						return errors.New("build output path was relative")
+					}
+					return os.WriteFile(outputPath, []byte("new"), 0o600)
+				}
+			}
+			return errors.New("missing build output")
+		},
+	})
+	if code != ExitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if outputPath != target+".tmp" {
+		t.Fatalf("build output = %q, want %q", outputPath, target+".tmp")
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "new" {
+		t.Fatalf("binary = %q", data)
+	}
+}
+
 func TestUpdateCLIMissingSkillTreePreservesInstallation(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(t.TempDir(), "mo")

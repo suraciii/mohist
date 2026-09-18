@@ -959,6 +959,19 @@ func updateCLI(ctx context.Context, deps Dependencies, repoRoot, explicit string
 		writeError(deps.Stderr, errors.New("could not resolve mo executable path"))
 		return ExitOperation
 	}
+	if !filepath.IsAbs(target) {
+		base := deps.CurrentDirectory()
+		if strings.TrimSpace(base) == "" {
+			writeError(deps.Stderr, errors.New("could not resolve mo executable directory"))
+			return ExitOperation
+		}
+		var err error
+		target, err = filepath.Abs(filepath.Join(base, target))
+		if err != nil {
+			writeError(deps.Stderr, errors.New("could not resolve mo executable path"))
+			return ExitOperation
+		}
+	}
 	temp := target + ".tmp"
 	if err := deps.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		writeError(deps.Stderr, err)
