@@ -80,6 +80,62 @@ describe('Workspace Home provisioning', () => {
     })
   })
 
+  it('rejects a directory entry whose downloaded bytes do not match the recorded hash', async () => {
+    await withTestRunnerResources(async (fileSystem) => {
+      const root = '/workspace'
+      await fileSystem.ensureDir(root)
+      const recorded = new TextEncoder().encode('research')
+      const tampered = new TextEncoder().encode('tampered')
+      const artifacts: WorkspaceArtifactInfo[] = [
+        {
+          artifactId: 'art_research',
+          path: 'RESEARCH',
+          kind: 'directory',
+          contentType: 'application/x-mohist-artifact-directory',
+          contentHash: null,
+          size: recorded.byteLength,
+        },
+      ]
+      const directory: WorkspaceArtifactDirectory = {
+        artifactId: 'art_research',
+        path: 'RESEARCH',
+        totalSize: tampered.byteLength,
+        entries: [
+          {
+            relativePath: 'notes.txt',
+            size: tampered.byteLength,
+            contentHash: hash('research'),
+            contentType: 'text/plain',
+          },
+        ],
+      }
+      const downloads: string[] = []
+      const client = {
+        async listWorkspaceArtifacts() {
+          return artifacts
+        },
+        async readWorkspaceArtifactDirectory() {
+          return directory
+        },
+        async downloadWorkspaceArtifact(
+          _workflowRunId: string,
+          _workId: string,
+          _artifactId: string,
+          _signal: AbortSignal,
+          filePath?: string,
+        ) {
+          downloads.push(filePath ?? '')
+          return tampered
+        },
+      }
+
+      await expect(
+        provisionWorkspaceArtifacts(client, 'run-1', 'work-1', root, new AbortController().signal),
+      ).rejects.toThrow(/content hash mismatch/)
+      expect(downloads).toEqual(['notes.txt'])
+    })
+  })
+
   it('rejects an existing file whose durable content does not match', async () => {
     await withTestRunnerResources(async (fileSystem) => {
       const root = '/workspace'
