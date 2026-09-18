@@ -264,7 +264,7 @@ export function createSessionCommandRouter(
         event: {
           type: event.type,
           payload: {
-            ...event.payload,
+            ...(handle.kind === 'codex' ? omitCodexVolatileTurnId(event.payload) : event.payload),
             source: 'session-command',
             command: request.command,
             operationId: request.operationId,
@@ -370,6 +370,11 @@ async function callPiFollowup(
   return signal === undefined
     ? await runtime.followup(piRequest, observer ?? undefined)
     : await runtime.followup(piRequest, observer ?? undefined, signal)
+}
+
+function omitCodexVolatileTurnId(payload: Record<string, unknown>): Record<string, unknown> {
+  const { turnId: _volatileTurnId, ...durablePayload } = payload
+  return durablePayload
 }
 
 function parseFollowupModel(value: string | null | undefined): { providerID: string; modelID: string } | null {

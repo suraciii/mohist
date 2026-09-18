@@ -21,6 +21,8 @@ function fakeHandle(
     beforeInitialize?: (method: string) => boolean
     onInitialize?: () => void
     onNotify?: (method: string) => void
+    enforceUniqueRequestIds?: boolean
+    emitCompletionOnTurnStart?: boolean
   } = {},
 ): CodexServerHandle {
   const catalog = options.catalog ?? { models: [{ id: 'gpt-5' }], complete: true }
@@ -49,6 +51,8 @@ function fakeHandle(
   ;(stdout as unknown as { setEncoding: (encoding: BufferEncoding) => void }).setEncoding = () => undefined
   const stderr = new EventEmitter()
   ;(stderr as unknown as { setEncoding: (encoding: BufferEncoding) => void }).setEncoding = () => undefined
+  const listeners = new Set<(message: unknown) => void>()
+  const seenRequestIds = new Set<number>()
 
   function buildInitializeResponse(id: number) {
     return {
@@ -68,6 +72,10 @@ function fakeHandle(
   return {
     codexHome: options.codexHome ?? MANAGED_CODEX_HOME,
     async send<P, R>(request: { readonly method: string; readonly params?: P; readonly id: number }): Promise<R> {
+      if (options.enforceUniqueRequestIds) {
+        if (seenRequestIds.has(request.id)) throw new Error(`duplicate response id ${request.id}`)
+        seenRequestIds.add(request.id)
+      }
       if (options.beforeInitialize?.(request.method)) {
         throw new Error('child exited before response')
       }
@@ -78,6 +86,32 @@ function fakeHandle(
       if (request.method === 'model/list') {
         return buildModelListResponse(request.id) as unknown as R
       }
+      if (request.method === 'thread/start') {
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: { thread: { id: 'thread-runtime', cwd: '/work' } },
+        } as unknown as R
+      }
+      if (request.method === 'turn/start') {
+        if (options.emitCompletionOnTurnStart) {
+          setTimeout(() => {
+            for (const listener of listeners) {
+              listener({
+                type: 'turn/completed',
+                threadId: 'thread-runtime',
+                turnId: 'turn-runtime',
+                status: 'completed',
+              })
+            }
+          }, 0)
+        }
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: { turn: { id: 'turn-runtime', status: 'in_progress' } },
+        } as unknown as R
+      }
       throw new Error(`Unexpected method ${request.method}`)
     },
     notify<P>(notification: { readonly method: string; readonly params?: P }): boolean {
@@ -87,6 +121,7 @@ function fakeHandle(
     },
     denyServerRequest: () => undefined,
     subscribe(listener: (message: unknown) => void) {
+      listeners.add(listener)
       stdout.on('data', (chunk: Buffer | string) => {
         const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
         for (const line of text.split('\n')) {
@@ -98,7 +133,7 @@ function fakeHandle(
           }
         }
       })
-      return () => undefined
+      return () => listeners.delete(listener)
     },
     async close() {
       /* no-op */
@@ -252,6 +287,26 @@ describe('CodexRuntime spawn + handshake happy path', () => {
     if (!result.ok) throw new Error('expected ready')
     expect(result.value.generation).toBe(1)
     expect(result.value.catalog?.models).toHaveLength(1)
+    await runtime.shutdown({ clearDiagnostic: true })
+  })
+
+  it('shares request ids across initialize, catalog, thread, and turn calls', async () => {
+    const runtime = new CodexRuntime({
+      codexHome: MANAGED_CODEX_HOME,
+      cwd: '/work',
+      serverFactory: async () => fakeHandle({ enforceUniqueRequestIds: true, emitCompletionOnTurnStart: true }),
+      readinessProbe: passingProbe(),
+    })
+
+    await expect(runtime.start()).resolves.toMatchObject({ ok: true })
+    await expect(
+      runtime.runTurn({
+        target: { runtime: 'codex', runtimeSessionId: null, workDir: '/work' },
+        prompt: 'hello',
+        clientUserMessageId: 'input-1',
+        options: { model: 'gpt-5' },
+      }),
+    ).resolves.toMatchObject({ ok: true, value: { facts: { runtimeSessionId: 'thread-runtime' } } })
     await runtime.shutdown({ clearDiagnostic: true })
   })
 })

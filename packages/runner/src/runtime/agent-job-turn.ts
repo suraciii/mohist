@@ -817,8 +817,16 @@ export function createAgentSessionEventSink(
                 agentTurnId,
                 runtimeEvents: [
                   {
-                    type: 'diagnostic',
-                    payload: agentTurnId ? { ...diagnostic, turnId: agentTurnId } : diagnostic,
+                    type: 'session.activity',
+                    payload: {
+                      activity: 'runtime-diagnostic',
+                      status: 'diagnostic',
+                      code: diagnostic.code,
+                      severity: diagnostic.severity,
+                      message: diagnostic.message,
+                      ...(diagnostic.details ? { details: diagnostic.details } : {}),
+                      ...(agentTurnId ? { turnId: agentTurnId } : {}),
+                    },
                   },
                 ],
               },

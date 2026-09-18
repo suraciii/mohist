@@ -106,7 +106,9 @@ public sealed class AgentReadinessService : IScopedService
             callerHint: null,
             definition: ExecutionConfigResolver.FromAgentConfig(config));
 
-        if (resolved.Model is not null && !resolved.Model.Contains('/', StringComparison.Ordinal))
+        if (resolved.Model is not null
+            && !string.Equals(resolved.Runtime, AgentConfigSchema.CodexRuntime, StringComparison.OrdinalIgnoreCase)
+            && !resolved.Model.Contains('/', StringComparison.Ordinal))
             gaps.Add(Gap(agent, "model-reference-malformed", "The model reference must use provider/model format.", "Set a valid model in Agent settings."));
         if (config is not null && AgentConfigSchema.ValidateRuntime(config.Value) is not null)
             gaps.Add(Gap(agent, "runtime-invalid", "The configured runtime is not supported.", "Choose opencode, pi, or codex in Agent settings."));

@@ -343,7 +343,7 @@ describe('Codex turn completion authority', () => {
       'message.delta',
       'reasoning.delta',
       'tool_call.completed',
-      'file_change.recorded',
+      'tool_call.completed',
       'usage.updated',
       'message.delta',
     ])
@@ -715,7 +715,10 @@ describe('Codex turn item projection', () => {
     expect(types).toContain('message.delta')
     expect(types).toContain('reasoning.delta')
     expect(types).toContain('tool_call.started')
-    expect(types).toContain('file_change.recorded')
+    expect(types.filter((type) => type === 'tool_call.completed')).toHaveLength(3)
+    expect(events.find((event) => event.payload.toolName === 'file_change')?.payload.changedFiles).toEqual([
+      { path: '/work/a.txt', operation: 'modified' },
+    ])
     expect(types).toContain('usage.updated')
     expect(types).toContain('compaction')
     // The volatile Turn ID is on every projected event.

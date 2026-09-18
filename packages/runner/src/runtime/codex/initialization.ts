@@ -44,6 +44,8 @@ export interface CodexInitializationTransport {
 export interface CodexInitializationOptions {
   readonly managedCodexHome: string
   readonly startupTimeoutMs: number
+  /** Request id allocated by the owning runtime generation. */
+  readonly requestId?: number
   readonly clock?: {
     readonly setTimeout: (callback: () => void, delayMs: number) => unknown
     readonly clearTimeout: (handle: unknown) => void
@@ -101,7 +103,7 @@ export async function performCodexInitialization(
   })
   try {
     response = await Promise.race([
-      transport.send({ id: 1, method: 'initialize', params: CODEX_INITIALIZE_PARAMS }),
+      transport.send({ id: options.requestId ?? 1, method: 'initialize', params: CODEX_INITIALIZE_PARAMS }),
       startupTimeout,
     ])
   } catch (cause) {

@@ -37,7 +37,7 @@ const INCOMPATIBLE_PATTERN =
   /incompatible|protocol[_\s-]?version|unsupported[_\s-]?method|unknown[_\s-]?method|schema[_\s-]?mismatch/i
 const INVALID_INPUT_PATTERN = /invalid[_\s-]?input|invalid[_\s-]?params|invalid[_\s-]?request|missing[_\s-]?field/i
 const UNAVAILABLE_PATTERN =
-  /unavailable|runtime[_\s-]?not[_\s-]?ready|not[_\s-]?ready|connection[_\s-]?lost|spawn[_\s-]?failed|startup[_\s-]?timeout/i
+  /unavailable|runtime[_\s-]?not[_\s-]?ready|not[_\s-]?ready|connection[_\s-]?lost|spawn[_\s-]?failed|startup[_\s-]?timeout|authentication|unauthori[sz]ed|invalid[_\s-]?api[_\s-]?key/i
 const DEADLINE_PATTERN = /deadline|timeout|timed[_\s-]?out/i
 const INTERRUPTED_PATTERN = /interrupted|interrupt[_\s-]?requested/i
 
@@ -48,6 +48,62 @@ const INTERRUPTED_PATTERN = /interrupted|interrupt[_\s-]?requested/i
  * treat them as actionable terminal failures without falling back to
  * another Runtime.
  */
+export function rawCodexErrorFromUnknown(cause: unknown, method?: string): RawCodexError | null {
+  if (!cause || typeof cause !== 'object' || cause instanceof Error) return null
+  const candidate = cause as { code?: unknown; message?: unknown; data?: unknown }
+  if (
+    typeof candidate.message !== 'string' &&
+    typeof candidate.code !== 'number' &&
+    typeof candidate.code !== 'string'
+  ) {
+    return null
+  }
+  return {
+    ...(typeof candidate.code === 'number' || typeof candidate.code === 'string' ? { code: candidate.code } : {}),
+    message: typeof candidate.message === 'string' ? candidate.message : 'Codex provider rejected the request',
+    ...(method ? { method } : {}),
+    ...(candidate.data !== undefined ? { data: candidate.data } : {}),
+  }
+}
+
+/** Normalize a definite JSON-RPC/provider rejection without confusing it with a lost response. */
+export function normalizeCodexProviderError(cause: unknown, method: string): CodexError | null {
+  const raw = rawCodexErrorFromUnknown(cause, method)
+  if (!raw) return null
+  const diagnostic: CodexDiagnostic = {
+    severity: 'error',
+    code: `codex-${String(raw.code ?? 'provider-error')}`,
+    message: redactCodexCredentialString(raw.message),
+    details: redactCodexCredentialValue({ code: raw.code, method: raw.method, data: raw.data }) as Record<
+      string,
+      unknown
+    >,
+  }
+  const diagnostics = [diagnostic]
+  switch (errorKindForCodex(raw)) {
+    case 'missing-session':
+      return normalizeMissingSessionCodex(diagnostics)
+    case 'permission-required':
+      return normalizePermissionRequiredCodex(diagnostics)
+    case 'incompatible-runtime':
+      return normalizeIncompatibleRuntimeCodex(diagnostics)
+    case 'invalid-input':
+      return normalizeInvalidInputCodex(redactCodexCredentialString(raw.message), diagnostics)
+    case 'unavailable-runtime':
+      return normalizeUnavailableRuntimeCodex(diagnostics)
+    case 'deadline-exceeded':
+      return {
+        kind: 'deadline-exceeded',
+        message: redactCodexCredentialString(raw.message),
+        diagnostics,
+      }
+    case 'interrupted':
+      return normalizeInterruptedCodex(diagnostics)
+    default:
+      return normalizeTurnFailedCodex(raw, diagnostics)
+  }
+}
+
 export function errorKindForCodex(raw: RawCodexError | string): CodexErrorKind {
   const message = typeof raw === 'string' ? raw : (raw.message ?? '')
   const code = typeof raw === 'string' ? undefined : raw.code

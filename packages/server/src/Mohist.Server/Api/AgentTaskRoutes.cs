@@ -582,6 +582,7 @@ public static class AgentTaskRoutes
             && string.IsNullOrWhiteSpace(body.Model))
             return ("model", "model must use the provider/model form.");
         if (HasNonNullProperty(body.Raw, "model")
+            && !string.Equals(body.Runtime, AgentConfigSchema.CodexRuntime, StringComparison.OrdinalIgnoreCase)
             && !AgentConfigSchema.HasProviderModelForm(body.Model))
             return ("model", "model must use the provider/model form.");
         if (HasNonNullProperty(body.Raw, "variant")
