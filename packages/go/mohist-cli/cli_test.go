@@ -324,6 +324,89 @@ func TestDoctorJSONProjectionKeepsWarnRows(t *testing.T) {
 	}
 }
 
+func TestDoctorStrictAppendsQueryFlag(t *testing.T) {
+	body := `{"success":true,"data":[{"name":"verification-command","status":"fail","detail":"Required Projects missing verification commands: alpha","nextAction":"Set a verification command for alpha"}]}`
+	var got *http.Request
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r
+		return response(200, body), nil
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"doctor", "--strict"}, deps); code != ExitOperation {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if got == nil || got.URL.Path != "/api/doctor/checks" || got.URL.RawQuery != "strict=true" {
+		t.Fatalf("request url = %v", got)
+	}
+}
+
+func TestDoctorStrictComposesWithJSONProjection(t *testing.T) {
+	var got *http.Request
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r
+		return response(200, `{"success":true,"data":[{"name":"migrations","status":"ok","detail":"current","nextAction":null}]}`), nil
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"doctor", "--strict", "--json", "name,status"}, deps); code != ExitOK || errOut.Len() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if got == nil || got.URL.Path != "/api/doctor/checks" || got.URL.RawQuery != "strict=true" {
+		t.Fatalf("request url = %v", got)
+	}
+	if out.String() != `[{"name":"migrations","status":"ok"}]`+"\n" {
+		t.Fatalf("projection=%q", out.String())
+	}
+}
+
+func TestDoctorWithoutFlagRequestsNoQuery(t *testing.T) {
+	var got *http.Request
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r
+		return response(200, `{"success":true,"data":[{"name":"migrations","status":"ok","detail":"current","nextAction":null}]}`), nil
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"doctor"}, deps); code != ExitOK || errOut.Len() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if got == nil || got.URL.Path != "/api/doctor/checks" || got.URL.RawQuery != "" {
+		t.Fatalf("request url = %v", got)
+	}
+}
+
+func TestDoctorStrictJSONDiscoveryPerformsNoRequest(t *testing.T) {
+	calls := 0
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("must not call")
+	}), map[string]string{"MOHIST_OPERATOR_TOKEN": "token"})
+	if code := Run(context.Background(), []string{"doctor", "--strict", "--json"}, deps); code != ExitOK || calls != 0 || errOut.Len() != 0 {
+		t.Fatalf("code=%d calls=%d stdout=%q stderr=%q", code, calls, out.String(), errOut.String())
+	}
+	if out.String() != "name\nstatus\ndetail\nnextAction\n" {
+		t.Fatalf("fields=%q", out.String())
+	}
+}
+
+func TestDoctorHelpDocumentsStrict(t *testing.T) {
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("must not call")
+	}), map[string]string{})
+	if code := Run(context.Background(), []string{"doctor", "--help"}, deps); code != ExitOK || errOut.Len() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	for _, expected := range []string{"--strict", "Project", "verification configuration"} {
+		if !strings.Contains(out.String(), expected) {
+			t.Errorf("help missing %q: %s", expected, out.String())
+		}
+	}
+}
+
+func TestDoctorRejectsUnknownOption(t *testing.T) {
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("must not call")
+	}), map[string]string{})
+	if code := Run(context.Background(), []string{"doctor", "--bogus"}, deps); code != ExitUsage || out.Len() != 0 || !strings.Contains(errOut.String(), "unknown option") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
 func TestDoctorRejectsMalformedChecksWithoutRendering(t *testing.T) {
 	for _, body := range []string{
 		`{"success":true,"data":{}}`,

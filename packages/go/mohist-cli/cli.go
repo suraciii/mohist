@@ -622,6 +622,7 @@ func parse(args []string) (command, error) {
 func parseLeaf(kind string, args []string, path string, catalog []string, usage string) (command, error) {
 	c := command{kind: kind, path: path, catalog: catalog}
 	positionals := []string{}
+	strict := false
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--help", "-h":
@@ -633,6 +634,11 @@ func parseLeaf(kind string, args []string, path string, catalog []string, usage 
 				c.fields = strings.Split(args[i+1], ",")
 				i++
 			}
+		case "--strict":
+			if kind != "doctor" {
+				return command{}, &usageError{message: "error: unknown option " + args[i] + "\nusage: " + usage}
+			}
+			strict = true
 		default:
 			if strings.HasPrefix(args[i], "-") {
 				return command{}, &usageError{message: "error: unknown option " + args[i] + "\nusage: " + usage}
@@ -651,6 +657,9 @@ func parseLeaf(kind string, args []string, path string, catalog []string, usage 
 		c.path = "/api/runs/" + url.PathEscape(positionals[0]) + "/diagnosis"
 	} else if len(positionals) != 0 {
 		return command{}, &usageError{message: "error: doctor does not accept positional arguments\nusage: " + usage}
+	}
+	if kind == "doctor" && strict {
+		c.path = path + "?strict=true"
 	}
 	if len(c.fields) > 0 {
 		for _, field := range c.fields {
@@ -794,7 +803,7 @@ func runGroupHelp() string {
 }
 
 func doctorHelp() string {
-	return "USAGE\n    mo doctor\n\nCheck Server readiness and show the next action for failed checks.\n\nJSON FIELDS\n" + strings.Join(doctorFields, "\n")
+	return "USAGE\n    mo doctor [--strict] [--json [fields]]\n\nCheck Server readiness and show the next action for failed checks.\n\nFLAGS\n    --strict  Fail on every Project with an invalid verification configuration, not only required Projects\n\nJSON FIELDS\n" + strings.Join(doctorFields, "\n")
 }
 
 type client struct {
