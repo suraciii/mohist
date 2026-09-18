@@ -679,7 +679,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _draining,
             _state.State?.UpdateInterruptFence?.PendingId,
             _info?.ConnectionGeneration,
-            CloneDispatchObservation(_dispatchObservation));
+            CloneDispatchObservation(_dispatchObservation),
+            _state.State?.CurrentProcessGeneration);
     }
 
     private void PublishStatusObservation()

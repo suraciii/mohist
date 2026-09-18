@@ -14,6 +14,7 @@ import (
 )
 
 var runnerFields = []string{"identity", "presence", "control", "admission", "capabilities", "runtimes", "capacity", "activeWorks", "drain", "nextActions"}
+var runnerEnvironmentFields = []string{"runnerId", "activeVersion", "candidateVersion", "candidateVariables", "addedVariables", "removedVariables", "changedVariables", "application", "processGeneration", "connectionGeneration", "status"}
 var auditFields = []string{"id", "subjectId", "eventType", "targetKind", "targetId", "occurredAt", "metadata"}
 var otelQueryFields = []string{"columns", "rows", "truncated", "truncate_reason"}
 var otelTraceFields = []string{"trace_id", "service_name", "start_time", "end_time", "span_count"}
@@ -117,6 +118,9 @@ func parseOperations(area string, args []string) (command, error) {
 	}
 	if area == "service" {
 		return parseService(args)
+	}
+	if area == "runner" && len(args) > 0 && args[0] == "environment" {
+		return parseRunnerEnvironment(args[1:])
 	}
 	if area == "notification" {
 		return parseNotification(args)
@@ -316,9 +320,69 @@ func fieldsFor(area string) []string {
 		return nil
 	}
 }
+
+func parseRunnerEnvironment(args []string) (command, error) {
+	usageText := "USAGE\n    mo runner environment <capture|status|apply|cancel> [flags]\n\nManage the local Runner environment transaction. Values remain on the host."
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+		return command{help: true, helpText: usageText}, nil
+	}
+	action := args[0]
+	if !contains([]string{"capture", "status", "apply", "cancel"}, action) {
+		return command{}, usage("unknown runner environment command")
+	}
+	leaf := "mo runner environment " + action
+	if action == "capture" {
+		leaf += " [--runner-id <runner-id>]"
+	} else if action == "status" {
+		leaf += " [--runner-id <runner-id>] [--json [fields]]"
+	} else if action == "apply" {
+		leaf += " --version <candidate-version> [--runner-id <runner-id>]"
+	} else {
+		leaf += " --update-id <update-id> [--runner-id <runner-id>]"
+	}
+	c := command{kind: "runner-environment-" + action, catalog: runnerEnvironmentFields}
+	seenFlags := map[string]bool{}
+	for i := 1; i < len(args); i++ {
+		arg := canonicalFlag(args[i])
+		switch arg {
+		case "--help", "-h":
+			return command{help: true, helpText: "USAGE\n    " + leaf + "\n\nValues and raw snapshot contents remain local.\n\nJSON FIELDS\n" + strings.Join(runnerEnvironmentFields, "\n")}, nil
+		case "--json":
+			var err error
+			i, err = jsonFlag(args, i, &c)
+			if err != nil {
+				return command{}, err
+			}
+		case "--runner-id", "--version", "--update-id":
+			name := strings.TrimPrefix(arg, "--")
+			if seenFlags[name] {
+				return command{}, usageWithLeaf(arg+" may be specified only once", "USAGE\n    "+leaf)
+			}
+			seenFlags[name] = true
+			if i+1 >= len(args) || isControlToken(args[i+1]) {
+				return command{}, usageWithLeaf(arg+" requires a value", "USAGE\n    "+leaf)
+			}
+			c.args = append(c.args, name, args[i+1])
+			i++
+		default:
+			return command{}, usageWithLeaf("unknown option "+args[i], "USAGE\n    "+leaf)
+		}
+	}
+	if action == "apply" && strings.TrimSpace(argValue(c.args, "version", "")) == "" {
+		return command{}, usageWithLeaf("apply requires --version", "USAGE\n    "+leaf)
+	}
+	if action == "cancel" && strings.TrimSpace(argValue(c.args, "update-id", "")) == "" {
+		return command{}, usageWithLeaf("cancel requires --update-id", "USAGE\n    "+leaf)
+	}
+	if len(c.fields) > 0 && action != "capture" && action != "status" {
+		return command{}, usageWithLeaf("--json is supported for capture and status only", "USAGE\n    "+leaf)
+	}
+	return c, validateFields(c.fields, runnerEnvironmentFields, leaf)
+}
+
 func operationsHelp(area string) string {
 	if area == "runner" {
-		return "USAGE\n    mo runner <list|status|view|revoke> [flags]\n\nRead and manage Server-global Runner resources. Local service-manager state is separate: use mo service status runner.\n\nActions: list, view, status, revoke"
+		return "USAGE\n    mo runner <list|status|view|revoke> [flags]\n    mo runner environment <capture|status|apply|cancel> [flags]\n\nRead and manage Server-global Runner resources. Environment capture and apply are local transactions coordinated with Server.\n\nActions: list, view, status, revoke, environment"
 	}
 	actions := map[string]string{"server": "status, health, info, logs", "audit": "list", "github": "connect, list, view, update, enable, disable", "slack": "setup, status, install-agent, list, view, claim-owner, edit, transfer-owner, enable, disable, remove-binding, permanent-delete, message, deliveries, resend-delivery, clear-gap, reconcile-create, reconcile-delete"}
 	return "USAGE\n    mo " + area + " <action> [flags]\n\nOperations and integrations.\n\nActions: " + actions[area]

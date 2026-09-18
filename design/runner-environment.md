@@ -104,11 +104,25 @@ The snapshot file is outside managed release directories, so release promotion
 cannot replace it. The managed update transaction must preserve that directive
 and must not copy its own `PATH` into the snapshot.
 
+The local manager uses these fixed paths below `~/.config/mohist/`:
+
+| Path | Owner | Meaning |
+| --- | --- | --- |
+| `runner-environment.env` | local manager/systemd | active snapshot |
+| `runner-environment.candidate.env` | local manager | inactive candidate |
+| `runner-environment.candidate.json` | local manager | candidate version, names, and capture time |
+| `runner-environment.previous.env` | local manager | rollback snapshot retained through confirmation |
+| `runner-environment-application.json` | local manager | update id and identity witness for recovery |
+
+All five paths are host-local mode `0600` files. The JSON records contain no
+environment values.
+
 ## Application Protocol
 
-1. The local manager validates the candidate and publishes only its metadata.
-   If this publish fails, the candidate remains local and cannot be applied.
-2. Server creates one environment application and the matching update fence.
+1. The local manager validates the candidate and records its metadata locally.
+   The candidate file remains inactive until the Server application is accepted.
+2. Server creates one environment application and the matching update fence;
+   the CLI sends only the candidate version and identity witness.
    A second application, a missing Runner, or a conflicting managed update is
    rejected without changing the active snapshot.
 3. The local manager waits for the settled predicate:
@@ -129,6 +143,14 @@ application.
 The existing release updater may use the same update fence API, but its
 transaction remains a release transaction and continues to reject an active
 Runner. Environment waiting must not silently change release update behavior.
+
+The CLI's apply loop is bounded and injectable: every retry uses the current
+identity response and a `Wait` seam. It never treats a stale, offline, or
+disconnected response as settled. After a restart it requires a new process
+generation and the target environment version before sending confirmation. On
+failure it restores `previous.env`, restarts once, and confirms the previous
+version; if that witness is unavailable it records `unconfirmed` and leaves the
+Server fence and local application record for recovery.
 
 ## Wire and Read Model
 
@@ -217,6 +239,7 @@ The install snapshot and Runner environment observation fields are implemented.
 The update fence now retains current-generation settlement counts even while a
 draining poll cannot claim new work. Server now persists one environment
 application per Runner, preserves its fence across process replacement, and
-requires a current-generation target-version witness before confirmation.
-Local snapshot apply/rollback, sanitized status projection, CLI refresh
-commands, and tool checks remain unimplemented slices of Issue #1009.
+requires a current-generation target-version witness before confirmation. The
+identity read model and local CLI candidate/apply/cancel transaction are now
+implemented. Sanitized status projection, Web presentation, and tool checks
+remain unimplemented slices of Issue #1009.
