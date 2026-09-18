@@ -311,7 +311,6 @@ draining poll cannot claim new work. Server now persists one environment
 application per Runner, preserves its fence across process replacement, and
 requires a current-generation target-version witness before confirmation. The
 identity read model, local CLI candidate/apply/cancel transaction, explicit
-observation report, bounded tool checks, and sanitized projection are now
-implemented. Legacy installation initialization is the next bounded
-implementation slice; end-to-end Go task verification and live-runtime
-validation remain separate gates.
+observation report, bounded tool checks, sanitized projection, and legacy
+installation initialization are now implemented. End-to-end Go task
+verification and live-runtime validation remain separate gates.
