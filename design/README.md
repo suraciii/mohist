@@ -67,6 +67,7 @@ changing a document in `design/`.
 - [issue-templates.md](issue-templates.md) — Body structure and design rationale of the three issue templates (Feature / Bug / Refactor).
 - [prompt-management.md](prompt-management.md) — Project-scoped Prompt, builtin fallback, Workflow key reference.
 - [runner.md](runner.md) — Runner and scheduling: each owner is its own dispatch ledger (no second copy, no reconcile), pull-only claim / poll / report, report verdicts, restart as ordinary failure with generation closeout, stop settles by identity.
+- [runner-environment.md](runner-environment.md) — Host-local environment snapshots, safe application, generation confirmation, and sanitized diagnostics.
 - [runner-transport.md](runner-transport.md) — SignalR-to-WebSocket Runner control migration: preserved HTTP dispatch, JSON-RPC 2.0 methods, and cutover order.
 - [task-log.md](task-log.md) — Task execution log collection pipeline, report channel, storage ownership, settlement-recorded terminal ownership.
 - [db-migrations.md](db-migrations.md) — EF Core migration authoring contract and the squash procedure: baseline, squash floor, history remap, equivalence verification.

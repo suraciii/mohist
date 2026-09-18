@@ -1,5 +1,10 @@
 # Runner and Dispatch
 
+Host environment snapshots and their update handoff are defined in
+[`runner-environment.md`](runner-environment.md). This document remains the
+authority for dispatch ownership, process generations, and Runner-lost
+closeout.
+
 Dispatch is memoryless: every decision is a stateless query over persisted
 state. A Runner's self-report is used only to discover work that needs
 redelivery. It is not authoritative; authority is always reconstructed from the

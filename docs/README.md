@@ -62,6 +62,7 @@ If you are new to Mohist, read the [repository README](../README.md) first.
 - [External Agent API](agent-api.md): Call the shipped private API to delegate
   Agent work, recover keyed writes, read public state, and resume Session events
 - [Runner Guide](runner.md): Run the execution plane and configure concurrency
+- [Runner Execution Environment](runner-environment.md): Capture, refresh, and verify the host environment used by Runner tasks
 - [Skills](skills.md): Give reusable capabilities to Mohist Agents and External
   Agents
 - [Slack](slack.md): Use the Mohist App to manage connections conversationally,
