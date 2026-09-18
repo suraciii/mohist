@@ -147,15 +147,24 @@ snapshot, the Runner root as the working directory, and no shell. The command
 surface is:
 
 ```text literal
-mo runner environment check <executable> [-- <argument> ...]
+mo runner environment check <executable> [--snapshot active|candidate] [--report] [-- <argument> ...]
 ```
 
 The executable and arguments are passed as an argument vector. The command has
 a bounded duration and no interactive input. The result reports the executable
 name, resolved path, exit status, duration, and check time. Output is local by
-default; only this sanitized observation may be sent to Server. A check is an
-observation, not permanent capability evidence, Runtime readiness, or a project
-test result.
+default; `--report` explicitly sends only the sanitized observation to Server.
+The default snapshot is `active`; `candidate` is an opt-in check of the local
+inactive candidate. A check is an observation, not permanent capability
+evidence, Runtime readiness, or a project test result.
+
+The check is bounded to 10 seconds, accepts at most 16 arguments with a total
+argument-vector size of 4096 bytes, and launches without a shell, stdin, or
+captured output. It uses the selected snapshot, the Runner root as its working
+directory, and the service user's identity. The local result has one of
+`passed`, `failed`, `not-found`, `timed-out`, or `error` outcomes. A non-zero
+tool exit is reported as `failed`; it does not make the CLI lose the diagnostic
+result.
 
 ## Web and Server Visibility
 
@@ -167,12 +176,23 @@ a bounded failure code. The summary is available for an offline Runner from
 durable state and does not activate the Runner grain. Active work and the
 existing drain projection remain the source for tasks that block an update.
 
-Candidate source/user metadata, changed variable names, and tool observations
-remain local until an explicit sanitized observation-report contract is added.
-Raw values, full paths from the snapshot, credentials, and command output are
-never returned. The Web detail page may show the active/application summary and
-blockers, but capture and apply remain local CLI operations; the page must not
-suggest that a remote browser can read a terminal environment.
+`POST /api/runner/{runnerId}/environment/observation` accepts an explicit,
+sanitized observation report and `GET` returns the latest report. A report may
+contain candidate metadata (`source`, operating-system `user`, capture time,
+version, variable names, and name-only diffs), the process-generation
+activation witness, and up to eight recent tool checks. Each tool check has
+only the executable name, resolved executable path, selected snapshot kind and
+version, bounded outcome, exit status, duration, and check time. Arguments,
+environment values, credentials, and command output are rejected or discarded
+at the boundary. Reports carrying a process generation are accepted only for
+the currently registered generation; candidate-only reports may be retained
+while the Runner is offline. The latest report is durable and survives a
+Server restart without activating the Runner merely to render status.
+
+The Web detail page may show this sanitized report alongside the active and
+application summary and blockers, but capture, apply, and check execution
+remain local CLI operations. The page must not suggest that a remote browser
+can read a terminal environment or execute a command.
 
 The Runner includes the active environment version and load time in registration
 and heartbeat identity. The pair `(processGeneration, environmentVersion)` is
@@ -197,6 +217,8 @@ current process generation. Server owns one durable environment application per
 Runner, keeps its fence across process replacement, and requires a
 current-generation target-version witness before releasing that fence. The
 local CLI now owns candidate capture, bounded apply/cancel, atomic
-active/previous rotation, restart confirmation, and rollback. Sanitized global
-projection, tool checks, and Web presentation remain later slices of Issue
-#1009.
+active/previous rotation, restart confirmation, rollback, and bounded local
+tool checks. Server stores the explicit sanitized observation report and the
+global projection/Web detail page render it without exposing raw values or
+command output. The end-to-end Go task verification and live-runtime proof
+remain separate acceptance work for Issue #1009.
