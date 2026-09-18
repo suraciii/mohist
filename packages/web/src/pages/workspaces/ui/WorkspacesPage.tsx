@@ -23,11 +23,7 @@ function OriginBadge({ origin }: { origin: Workspace['origin'] }) {
     manual: 'bg-amber-100 text-amber-700',
     unknown: 'bg-gray-100 text-gray-700',
   }
-  return (
-    <Badge className={colors[origin.kind] ?? 'bg-gray-100 text-gray-700'}>
-      {workspaceOriginLabel(origin)}
-    </Badge>
-  )
+  return <Badge className={colors[origin.kind] ?? 'bg-gray-100 text-gray-700'}>{workspaceOriginLabel(origin)}</Badge>
 }
 
 function WorkspaceCard({ workspace }: { workspace: Workspace }) {
@@ -62,15 +58,11 @@ function WorkspaceCard({ workspace }: { workspace: Workspace }) {
                 <span className="font-mono text-muted-foreground/70 truncate">{workspace.home.path}</span>
               </span>
             ) : (
-              <span>Not materialized</span>
+              <span>Not provisioned</span>
             )}
-            <span data-testid="workspace-created-at">
-              Created {formatDate(workspace.createdAt)}
-            </span>
+            <span data-testid="workspace-created-at">Created {formatDate(workspace.createdAt)}</span>
             {workspace.archivedAt && (
-              <span data-testid="workspace-archived-at">
-                Archived {formatDate(workspace.archivedAt)}
-              </span>
+              <span data-testid="workspace-archived-at">Archived {formatDate(workspace.archivedAt)}</span>
             )}
           </div>
         </div>
@@ -108,7 +100,7 @@ function WorkspaceSection({
           type="button"
           variant="ghost"
           size="sm"
-          onClick={() => setExpanded(prev => !prev)}
+          onClick={() => setExpanded((prev) => !prev)}
           aria-expanded={expanded}
           data-testid={`${testIdPrefix}-toggle`}
           className="text-muted-foreground hover:text-foreground"
@@ -118,7 +110,7 @@ function WorkspaceSection({
       </div>
       {expanded && (
         <div className="grid gap-4">
-          {workspaces.map(workspace => (
+          {workspaces.map((workspace) => (
             <WorkspaceCard key={workspace.name} workspace={workspace} />
           ))}
         </div>
@@ -130,15 +122,16 @@ function WorkspaceSection({
 export function WorkspacesPage() {
   const { data: workspaces, isLoading } = useWorkspaces()
 
-  const active = workspaces?.filter(w => w.status === 'active') ?? []
-  const archived = workspaces?.filter(w => w.status === 'archived') ?? []
+  const active = workspaces?.filter((w) => w.status === 'active') ?? []
+  const archived = workspaces?.filter((w) => w.status === 'archived') ?? []
 
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground">Workspaces</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Persistent execution environments in this project: who is bound to them, where they are materialized, and whether they can still be entered.
+          Persistent execution environments in this project: who is bound to them, where they are provisioned, and
+          whether they can still be entered.
         </p>
       </div>
 

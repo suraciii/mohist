@@ -72,8 +72,8 @@ An unfinished Issue prevents changes to its Repository execution attributes.
 See [`repositories.md`](repositories.md).
 
 Workspace is separate from Project Space configuration. Issue and interaction
-origins resolve to Workspace through Origin. Runner materializes it as a
-directory. Workflow uses Workspace routing facts and Runner capacity to choose
+origins resolve to Workspace through Origin. Runner provisions a Workspace
+Home for it. Workflow uses Workspace routing facts and Runner capacity to choose
 dispatch. See [`workspaces.md`](workspaces.md).
 
 See [`../CONTEXT.md`](../CONTEXT.md) for shared Agent terms and
@@ -255,7 +255,7 @@ entries 15 and 16. Participants do not call it synchronously.
 - Work properties, lifecycle, dependencies, and organization belong to Issue.
 - Repository binding, isolation, execution configuration, and prompts belong to
   Project Space.
-- Work location, Origin, materialization, and archive belong to Workspace.
+- Work location, Origin, provisioning, and archive belong to Workspace.
 - Agent configuration, execution jobs, Runner dispatch, retry, recovery, and
   report validation belong to Agent.
 - External Agent binding, provider identity, access policy, and Connection

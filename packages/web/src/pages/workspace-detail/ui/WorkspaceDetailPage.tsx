@@ -27,18 +27,13 @@ function OriginBadge({ origin }: { origin: Workspace['origin'] }) {
     manual: 'bg-amber-100 text-amber-700',
     unknown: 'bg-gray-100 text-gray-700',
   }
-  return (
-    <Badge className={colors[origin.kind] ?? 'bg-gray-100 text-gray-700'}>
-      {workspaceOriginLabel(origin)}
-    </Badge>
-  )
+  return <Badge className={colors[origin.kind] ?? 'bg-gray-100 text-gray-700'}>{workspaceOriginLabel(origin)}</Badge>
 }
 
 function CloseError({ error }: { error: Error }) {
   const details = error instanceof ApiError ? error.details : undefined
-  const hint = details && typeof details === 'object' && 'hint' in details
-    ? String((details as { hint: unknown }).hint)
-    : null
+  const hint =
+    details && typeof details === 'object' && 'hint' in details ? String((details as { hint: unknown }).hint) : null
 
   return (
     <div
@@ -46,7 +41,9 @@ function CloseError({ error }: { error: Error }) {
       data-testid="workspace-close-error"
       className="rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-sm text-danger"
     >
-      <div className="font-medium" data-testid="workspace-close-error-message">{error.message}</div>
+      <div className="font-medium" data-testid="workspace-close-error-message">
+        {error.message}
+      </div>
       {hint && (
         <div className="mt-1 text-danger-foreground/90" data-testid="workspace-close-error-hint">
           {hint}
@@ -68,7 +65,9 @@ function SessionRow({ session }: { session: NonNullable<Workspace['sessions']>[n
     >
       <span className="font-medium text-foreground truncate">{label}</span>
       <span className="text-muted-foreground shrink-0">
-        {session.activity}{session.origin ? ` · ${session.origin}` : ''}{session.model ? ` · ${session.model}` : ''}
+        {session.activity}
+        {session.origin ? ` · ${session.origin}` : ''}
+        {session.model ? ` · ${session.model}` : ''}
       </span>
     </Link>
   )
@@ -144,18 +143,18 @@ export function WorkspaceDetailPage() {
           </div>
         </div>
         {active && (
-          <Button
-            variant="destructive"
-            onClick={() => setConfirmOpen(true)}
-            data-testid="workspace-close-trigger"
-          >
+          <Button variant="destructive" onClick={() => setConfirmOpen(true)} data-testid="workspace-close-trigger">
             <ArchiveIcon className="h-4 w-4" aria-hidden="true" />
             Close workspace
           </Button>
         )}
       </div>
 
-      {closeError && <div className="mb-4"><CloseError error={closeError} /></div>}
+      {closeError && (
+        <div className="mb-4">
+          <CloseError error={closeError} />
+        </div>
+      )}
 
       <div className="space-y-6">
         <Card className="p-4">
@@ -168,7 +167,7 @@ export function WorkspaceDetailPage() {
             </div>
           ) : (
             <div className="text-sm text-muted-foreground" data-testid="workspace-detail-home-empty">
-              Not materialized on any runner
+              Not provisioned on any runner
             </div>
           )}
         </Card>
@@ -181,7 +180,7 @@ export function WorkspaceDetailPage() {
             <div className="text-sm text-muted-foreground">No repositories attached</div>
           ) : (
             <div className="flex flex-wrap gap-2">
-              {workspace.repositories.map(repo => (
+              {workspace.repositories.map((repo) => (
                 <Badge key={repo} variant="secondary" data-testid="workspace-repository">
                   {repo}
                 </Badge>
@@ -196,7 +195,7 @@ export function WorkspaceDetailPage() {
           </h2>
           {workspace.sessions && workspace.sessions.length > 0 ? (
             <div className="grid gap-2">
-              {workspace.sessions.map(session => (
+              {workspace.sessions.map((session) => (
                 <SessionRow key={session.id} session={session} />
               ))}
             </div>

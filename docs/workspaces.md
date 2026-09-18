@@ -149,7 +149,7 @@ archive event, or a create event can trigger dependency installation. See
 
 The Runner that executes a Workspace hosts its directories. The Workspace still
 exists after Runner failure or disk cleanup, but its directory contents are not
-guaranteed to return. Mohist may rematerialize a missing directory empty on the
+guaranteed to return. Mohist may reprovision a missing directory empty on the
 same home Runner, and unpushed work is lost.
 
 A Workflow preserves completed Repository work by pushing its Workflow branch to
@@ -159,7 +159,7 @@ pushed.
 ## Implementation Gaps
 
 Workspace identity, creation and archival, Issue and interactive source
-resolution, named Runner materialization, and cross-AgentSession reuse are
+resolution, named Runner provisioning, and cross-AgentSession reuse are
 implemented. AgentJobs can replace an offline home, but WorkflowRuns cannot yet
 move their assignment to another Runner. Slack channel archival does not yet
 archive its Workspace; close the interactive Workspace explicitly when a

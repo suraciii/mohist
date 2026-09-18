@@ -120,8 +120,8 @@ identity for the Session. Later input uses the same execution snapshot. Policy
 changes affect later launches only. The entry point resolves a named Workspace
 from its Origin and persists that identity before acceptance. Where an entry
 point permits a Workspace override, the caller supplies its name, never a raw
-path or Runner default. The Runner may materialize the work directory later.
-Workspace resolution and materialization are authoritative in
+path or Runner default. The Runner may provision the Workspace Home later.
+Workspace resolution and provisioning are authoritative in
 [`workspaces.md`](workspaces.md#binding-and-resolution).
 
 ### Launch convergence
@@ -580,7 +580,7 @@ Durable launch metadata may retain a filesystem `workspacePath` for internal
 dispatch, recovery, and storage lookup. It is not a public execution-context
 fact. Agent-scoped Session lists and summaries expose only Issue, Epic,
 Repository, and named Workspace. CLI and Web types consume those read models
-and cannot reconstruct or display the materialization path.
+and cannot reconstruct or display the Workspace Home path.
 
 ## Status
 
@@ -596,7 +596,7 @@ Current implementation gaps are:
 - Web and CLI do not yet rely exclusively on canonical Server state for recovery,
   force-reset risk confirmation, and original-operation query.
 - Some direct launch payloads still carry legacy `workspacePath`; named Workspace
-  is the target identity and caller-supplied materialization paths are outside
+  is the target identity and caller-supplied Workspace Home paths are outside
   the target contract.
 - Stop recovery still has divergent request and recovery paths, including a
   synchronous Session-to-AgentJob stop-unknown cycle and no deadline on recovery

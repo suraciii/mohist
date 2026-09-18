@@ -121,7 +121,7 @@ that owns it instead of masquerading as a property of the referenced resource.
   `workspace repo add/remove` manage repository membership. `agent launch
   --workspace` is the explicit Workspace override. Without it, the entry point
   resolves the Workspace from Origin; CLI launch uses the Project's `cli-current`
-  Workspace. Origin and Materialization rules live in
+  Workspace. Origin and Provisioning rules live in
   [`workspaces.md`](workspaces.md).
 - `slack install-agent`, `list`, `view`, `claim-owner`, `edit`,
   `transfer-owner`, `enable`, `disable`, and `remove-binding` manage one
