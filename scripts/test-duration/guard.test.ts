@@ -726,6 +726,41 @@ test('planTracks isolates the bounded Spec duration phase before remaining fan-o
   assert.equal(JSON.stringify(zeroMatchInput), zeroMatchSnapshot)
 })
 
+test('Server plan leaves Architecture outside duration measurement while preserving the L1 dependency barrier', () => {
+  const track = (id: string, resources: readonly string[], level?: 'L0' | 'L1'): TrackConfig => ({
+    id,
+    kind: 'dotnet-apphost',
+    trackType: id === 'server-arch' ? 'architecture' : 'behavior',
+    application: 'server',
+    specKinds: id === 'server-arch' ? ['Design'] : ['Product'],
+    ...(id === 'server-arch' ? { architectureScope: 'server' } : { level }),
+    resources,
+    apphost: `bin/${id}`,
+    report: `reports/${id}.trx`,
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: false,
+  })
+
+  const plans = planTracks(
+    [
+      track('server-l0', ['orleans', 'sqlite', 'server-runtime', 'duration-measurement'], 'L0'),
+      track('server-arch', []),
+      track('server-l1', ['orleans', 'sqlite', 'server-runtime'], 'L1'),
+    ],
+    '/evidence',
+    ['server-l1'],
+  )
+  const byId = new Map(plans.map((plan) => [plan.lane.id, plan.lane]))
+
+  assert.deepEqual(byId.get('server-l1')?.dependsOn, undefined)
+  assert.ok(byId.get('server-l1')?.resources?.includes('duration-measurement'))
+  assert.deepEqual(byId.get('server-l0')?.dependsOn, ['server-l1'])
+  assert.ok(byId.get('server-l0')?.resources?.includes('duration-measurement'))
+  assert.deepEqual(byId.get('server-arch')?.dependsOn, ['server-l1'])
+  assert.ok(!byId.get('server-arch')?.resources?.includes('duration-measurement'))
+})
+
 test('applyDurationMeasurementPhase preserves existing multi-lane coverage terminal semantics at its unit seam', () => {
   const measurement: TrackConfig = {
     id: 'measurement',
