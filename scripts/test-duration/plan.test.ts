@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { formatApplicationHelp, selectApplicationTracks, selectRepositoryTracks, validatePlan } from './plan.js'
+import {
+  formatApplicationHelp,
+  planIdentity,
+  selectApplicationTracks,
+  selectRepositoryTracks,
+  validatePlan,
+} from './plan.js'
 import type { SuiteConfig, TrackConfig } from './types.js'
 
 function track(overrides: Partial<TrackConfig> = {}): TrackConfig {
@@ -42,6 +48,23 @@ function planConfig(
 
 test('validatePlan accepts behavior and application Architecture tracks', () => {
   assert.deepEqual(validatePlan(planConfig()), [])
+})
+
+test('planIdentity includes effective scheduler inputs', () => {
+  const config = planConfig()
+  const changedTrack = {
+    ...config,
+    tracks: config.tracks.map((track) =>
+      track.id === 'server-l0' ? { ...track, resources: ['duration-measurement'] } : track,
+    ),
+  }
+  const changedCanonical = {
+    ...config,
+    canonical: { maxConcurrentLanes: 1, resourceLimits: { host: 1 } },
+  }
+
+  assert.notEqual(planIdentity(config), planIdentity(changedTrack))
+  assert.notEqual(planIdentity(config), planIdentity(changedCanonical))
 })
 
 test('selectApplicationTracks returns only the complete application behavior scope', () => {

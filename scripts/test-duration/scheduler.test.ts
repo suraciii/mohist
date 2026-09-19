@@ -249,6 +249,61 @@ test('scheduler completes the bounded Spec phase before throughput fan-out', asy
   )
 })
 
+test('scheduler overlaps Server L0 and Architecture after the measured Server L1 lane', async () => {
+  const starts = startSignals('server-l1', 'server-l0', 'server-arch')
+  const serverL1 = deferred<boolean>()
+  const serverL0 = deferred<boolean>()
+  const serverArch = deferred<boolean>()
+  const deferredById = new Map([
+    ['server-l1', serverL1],
+    ['server-l0', serverL0],
+    ['server-arch', serverArch],
+  ])
+
+  const pending = scheduleLanes(
+    [
+      {
+        id: 'server-l1',
+        resources: ['host', 'dotnet', 'server-runtime', 'server-l1', 'duration-measurement'],
+      },
+      {
+        id: 'server-l0',
+        dependsOn: ['server-l1'],
+        resources: ['host', 'dotnet', 'server-runtime', 'duration-measurement'],
+      },
+      { id: 'server-arch', dependsOn: ['server-l1'], resources: ['host', 'dotnet'] },
+    ],
+    (lane): RunningLane<boolean> => {
+      starts.record(lane.id)
+      return { result: deferredById.get(lane.id)!.promise, cancel: () => {} }
+    },
+    (result) => result,
+    {
+      resourceLimits: {
+        host: 4,
+        dotnet: 4,
+        'server-l1': 1,
+        'server-runtime': 1,
+        'duration-measurement': 1,
+      },
+    },
+  )
+
+  await starts.waitFor('server-l1')
+  assert.deepEqual(starts.started, ['server-l1'])
+  serverL1.resolve(true)
+  await Promise.all([starts.waitFor('server-l0'), starts.waitFor('server-arch')])
+  assert.deepEqual(starts.started, ['server-l1', 'server-l0', 'server-arch'])
+
+  serverL0.resolve(true)
+  serverArch.resolve(true)
+  const result = await pending
+  assert.deepEqual(
+    result.lanes.map((lane) => lane.state),
+    ['passed', 'passed', 'passed'],
+  )
+})
+
 test('scheduler admits no lane when the abort signal was already fulfilled', async () => {
   const abort = new AbortController()
   abort.abort()
