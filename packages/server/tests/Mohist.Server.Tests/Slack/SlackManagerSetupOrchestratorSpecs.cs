@@ -79,7 +79,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             new(new("xoxe-current", "xoxr-current")));
 
         Assert.Equal(SlackSetupPhase.AwaitingInstall, configuration.Phase);
-        Assert.Equal(SlackSetupNextAction.ApproveInstall, configuration.NextAction);
+        Assert.Equal(SlackSetupPrimaryAction.ApproveInstall, configuration.PrimaryAction);
         Assert.NotNull(configuration.ManagerAppId);
         Assert.StartsWith("https://api.slack.com/apps/", configuration.InstallUrl);
         Assert.Equal(1, _appManagement.CreateCalls);
@@ -92,7 +92,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             new("xoxb-runtime", "xapp-candidate"));
 
         Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, runtime.Phase);
-        Assert.Equal(SlackSetupNextAction.ReportSocketHello, runtime.NextAction);
+        Assert.Equal(SlackSetupPrimaryAction.AwaitSocketVerification, runtime.PrimaryAction);
         await AssertCandidateSecretsPersistedAsync(runtime.EnrollmentId!);
 
         var manager = new SlackLeaseTargetRef.Manager(runtime.EnrollmentId!, "T_SETUP");
@@ -105,7 +105,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         var ready = await _orchestrator.GetProgressAsync();
         Assert.Equal(SlackSetupPhase.Ready, ready!.Phase);
-        Assert.Equal(SlackSetupNextAction.Ready, ready.NextAction);
+        Assert.Equal(SlackSetupPrimaryAction.Ready, ready.PrimaryAction);
         await AssertEnrollmentReadinessAsync(runtime.EnrollmentId!, SlackManagerReadiness.Ready);
         // The verified hello promoted the candidate pair to the runtime
         // addresses; the candidate slot is no longer needed.
@@ -192,7 +192,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             new(new("xoxe-current", "xoxr-current")));
 
         Assert.Equal(SlackSetupPhase.CreateUnknown, progress.Phase);
-        Assert.Equal(SlackSetupNextAction.ReconcileCreate, progress.NextAction);
+        Assert.Equal(SlackSetupPrimaryAction.RerunSetup, progress.PrimaryAction);
         Assert.Equal(0, _appManagement.CreateCalls);
         await AssertEnrollmentAppLifecycleAsync("T_INTERRUPTED", SlackManagerAppLifecycle.CreateUnknown);
     }
@@ -213,7 +213,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             new(new("xoxe-current", "xoxr-current")));
 
         Assert.Equal(SlackSetupPhase.CreateUnknown, progress.Phase);
-        Assert.Equal(SlackSetupNextAction.ReconcileCreate, progress.NextAction);
+        Assert.Equal(SlackSetupPrimaryAction.RerunSetup, progress.PrimaryAction);
         Assert.Equal(0, _appManagement.CreateCalls);
         await AssertEnrollmentAppLifecycleAsync("T_ORPHAN", SlackManagerAppLifecycle.CreateUnknown);
     }
@@ -233,7 +233,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             new(new("xoxe-current", "xoxr-current")));
 
         Assert.Equal(SlackSetupPhase.AwaitingInstall, progress.Phase);
-        Assert.Equal(SlackSetupNextAction.ApproveInstall, progress.NextAction);
+        Assert.Equal(SlackSetupPrimaryAction.ApproveInstall, progress.PrimaryAction);
         Assert.Equal("A_NO_URL", progress.ManagerAppId);
         Assert.Equal("https://api.slack.com/apps/A_NO_URL/oauth", progress.InstallUrl);
         Assert.Equal(1, _appManagement.CreateCalls);
@@ -261,7 +261,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         var unknown = await _orchestrator.SupplyConfigurationAsync(
             new(new("xoxe-current", "xoxr-current")));
         Assert.Equal(SlackSetupPhase.CreateUnknown, unknown.Phase);
-        Assert.Equal(SlackSetupNextAction.ReconcileCreate, unknown.NextAction);
+        Assert.Equal(SlackSetupPrimaryAction.RerunSetup, unknown.PrimaryAction);
 
         _appManagement.SetResponse(enrollment.Id, new FakeSlackAppResponse(
             Inspect: new SlackAppManagementFact(
@@ -270,7 +270,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         var resumed = await _orchestrator.ResumeAsync();
 
         Assert.Equal(SlackSetupPhase.AwaitingInstall, resumed.Phase);
-        Assert.Equal(SlackSetupNextAction.ApproveInstall, resumed.NextAction);
+        Assert.Equal(SlackSetupPrimaryAction.ApproveInstall, resumed.PrimaryAction);
         Assert.Equal("https://api.slack.com/apps/A_RESUMED/oauth", resumed.InstallUrl);
         await AssertEnrollmentAppFactsAsync(
             "T_RESUME_UNKNOWN",
@@ -287,7 +287,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             new(new("xoxe-current", "xoxr-current")));
 
         Assert.Equal(SlackSetupPhase.Failed, progress.Phase);
-        Assert.Equal(SlackSetupNextAction.SupplyConfiguration, progress.NextAction);
+        Assert.Equal(SlackSetupPrimaryAction.SupplyConfiguration, progress.PrimaryAction);
         Assert.Equal("invalid_rotation_result", progress.ErrorClass);
         Assert.Equal(0, _appManagement.CreateCalls);
     }
@@ -327,7 +327,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             new("xoxb-rotated", "xapp-rotated"));
 
         Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, rotated.Phase);
-        Assert.Equal(SlackSetupNextAction.ReportSocketHello, rotated.NextAction);
+        Assert.Equal(SlackSetupPrimaryAction.AwaitSocketVerification, rotated.PrimaryAction);
         await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.AwaitingSocket);
         // The runtime addresses keep serving the old verified pair; the new
         // pair waits at the candidate addresses; the old pair is parked in
@@ -348,7 +348,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         var ready = await _orchestrator.GetProgressAsync();
         Assert.Equal(SlackSetupPhase.Ready, ready!.Phase);
-        Assert.Equal(SlackSetupNextAction.Ready, ready.NextAction);
+        Assert.Equal(SlackSetupPrimaryAction.Ready, ready.PrimaryAction);
         await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.Verified);
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-rotated");
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-rotated");
@@ -373,7 +373,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             new("xoxb-runtime", "xapp-candidate"));
 
         Assert.Equal(SlackSetupPhase.Ready, again.Phase);
-        Assert.Equal(SlackSetupNextAction.Ready, again.NextAction);
+        Assert.Equal(SlackSetupPrimaryAction.Ready, again.PrimaryAction);
         Assert.Equal(verifyCalls + 1, _botIdentity.Requests.Count);
         await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.Verified);
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-runtime");
@@ -568,20 +568,254 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             SecretStoreAddress.ForSlackWorkspaceEnrollment(progress.EnrollmentId!, SecretKind.SigningSecret)))!));
     }
 
-    private async Task<(string EnrollmentId, string ManagerAppId)> DriveToReadyAsync(string teamId)
+    [Fact]
+    public async Task Several_enrollments_without_a_selector_fail_closed_and_list_the_real_choices()
+    {
+        var first = await SeedEnrollmentAsync("T_AMBIG_A");
+        var second = await SeedEnrollmentAsync("T_AMBIG_B");
+
+        var progress = await Assert.ThrowsAsync<SlackManagerConflictException>(
+            () => _orchestrator.GetProgressAsync());
+        Assert.Equal("workspace_selection_required", progress.Code);
+        var choices = Assert.IsAssignableFrom<List<SlackSetupWorkspaceChoice>>(progress.Details);
+        Assert.Equal(2, choices.Count);
+        Assert.Contains(choices, choice => choice.TeamId == "T_AMBIG_A");
+        Assert.Contains(choices, choice => choice.TeamId == "T_AMBIG_B");
+        Assert.All(choices, choice => Assert.False(string.IsNullOrWhiteSpace(choice.Name)));
+
+        var resume = await Assert.ThrowsAsync<SlackManagerConflictException>(
+            () => _orchestrator.ResumeAsync());
+        Assert.Equal("workspace_selection_required", resume.Code);
+
+        var runtime = await Assert.ThrowsAsync<SlackManagerConflictException>(
+            () => _orchestrator.SupplyRuntimeCredentialsAsync(new("xoxb", "xapp")));
+        Assert.Equal("workspace_selection_required", runtime.Code);
+        // No target means no external verification and no write.
+        Assert.Empty(_botIdentity.Requests);
+        Assert.Equal(0, _appManagement.CreateCalls);
+
+        _configurationPort.Enqueue(ConfigurationRotation("T_AMBIG_B"));
+        var selected = await _orchestrator.SupplyConfigurationAsync(
+            new(new("xoxe-current", "xoxr-current")), "T_AMBIG_B");
+
+        Assert.Equal(second.Id, selected.EnrollmentId);
+        Assert.Equal("T_AMBIG_B", selected.WorkspaceTeamId);
+        await AssertEnrollmentAppLifecycleAsync("T_AMBIG_B", SlackManagerAppLifecycle.Created);
+        await AssertEnrollmentAppLifecycleAsync("T_AMBIG_A", SlackManagerAppLifecycle.NotCreated);
+        Assert.NotEqual(first.Id, selected.EnrollmentId);
+    }
+
+    [Fact]
+    public async Task A_selector_naming_an_unknown_workspace_fails_before_any_external_write()
+    {
+        _configurationPort.Enqueue(ConfigurationRotation("T_UNKNOWN_SELECTOR"));
+
+        var configuration = await Assert.ThrowsAsync<SlackManagerConflictException>(
+            () => _orchestrator.SupplyConfigurationAsync(new(new("xoxe-current", "xoxr-current")), "T_NOT_ENROLLED"));
+        Assert.Equal("workspace_not_enrolled", configuration.Code);
+
+        var resume = await Assert.ThrowsAsync<SlackManagerConflictException>(
+            () => _orchestrator.ResumeAsync("T_NOT_ENROLLED"));
+        Assert.Equal("workspace_not_enrolled", resume.Code);
+
+        Assert.Empty(_configurationPort.Requests);
+        Assert.Equal(0, _appManagement.CreateCalls);
+        Assert.Empty(_botIdentity.Requests);
+    }
+
+    [Fact]
+    public async Task Configuration_pair_without_a_selector_has_enrollment_intent_for_the_rotated_team()
+    {
+        await SeedEnrollmentAsync("T_INTENT_A");
+        await SeedEnrollmentAsync("T_INTENT_B");
+
+        _configurationPort.Enqueue(ConfigurationRotation("T_INTENT_B"));
+        var resumed = await _orchestrator.SupplyConfigurationAsync(
+            new(new("xoxe-current", "xoxr-current")));
+
+        Assert.Equal("T_INTENT_B", resumed.WorkspaceTeamId);
+        Assert.Equal(SlackSetupPhase.AwaitingInstall, resumed.Phase);
+        await AssertEnrollmentAppLifecycleAsync("T_INTENT_B", SlackManagerAppLifecycle.Created);
+        // Another configured Workspace is never treated as the repair target.
+        await AssertEnrollmentAppLifecycleAsync("T_INTENT_A", SlackManagerAppLifecycle.NotCreated);
+
+        _configurationPort.Enqueue(ConfigurationRotation("T_INTENT_NEW"));
+        var created = await _orchestrator.SupplyConfigurationAsync(
+            new(new("xoxe-current", "xoxr-current")));
+
+        Assert.Equal("T_INTENT_NEW", created.WorkspaceTeamId);
+        await AssertEnrollmentAppLifecycleAsync("T_INTENT_NEW", SlackManagerAppLifecycle.Created);
+    }
+
+    [Fact]
+    public async Task Configuration_pair_for_another_workspace_is_rejected_against_the_selected_enrollment()
+    {
+        var selected = await SeedEnrollmentAsync("T_CFG_SEL");
+        _configurationPort.Enqueue(ConfigurationRotation("T_CFG_OTHER"));
+
+        var rejected = await _orchestrator.SupplyConfigurationAsync(
+            new(new("xoxe-current", "xoxr-current")), "T_CFG_SEL");
+
+        Assert.Equal(SlackSetupPhase.Failed, rejected.Phase);
+        Assert.Equal(selected.Id, rejected.EnrollmentId);
+        Assert.Equal("configuration_workspace_mismatch", rejected.ErrorClass);
+        Assert.Equal(SlackSetupPrimaryAction.SupplyConfiguration, rejected.PrimaryAction);
+        Assert.Contains("T_CFG_SEL", rejected.Summary, StringComparison.Ordinal);
+        Assert.Equal(0, _appManagement.CreateCalls);
+        await AssertEnrollmentAppLifecycleAsync("T_CFG_SEL", SlackManagerAppLifecycle.NotCreated);
+        await AssertNoEnrollmentAsync("T_CFG_OTHER");
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(selected.Id, SecretKind.ConfigurationAccessToken)));
+    }
+
+    [Fact]
+    public async Task Runtime_credentials_bind_to_the_selected_enrollment_and_a_mismatch_leaves_every_target_unchanged()
+    {
+        var selected = await DriveToReadyAsync("T_BIND_A", "T_BIND_A");
+        var other = await DriveToReadyAsync("T_BIND_B", "T_BIND_B");
+
+        _botIdentity.Result = VerifiedBot("T_BIND_B", other.ManagerAppId);
+        var rejected = await _orchestrator.SupplyRuntimeCredentialsAsync(
+            new("xoxb-foreign", "xapp-foreign"), "T_BIND_A");
+
+        Assert.Equal(SlackSetupPhase.Failed, rejected.Phase);
+        Assert.Equal("runtime_credential_mismatch", rejected.ErrorClass);
+        Assert.Equal(selected.EnrollmentId, rejected.EnrollmentId);
+        await AssertEnrollmentRuntimeStateAsync(selected.EnrollmentId, SlackRuntimeCredentialValidationState.Verified);
+        await AssertEnrollmentRuntimeStateAsync(other.EnrollmentId, SlackRuntimeCredentialValidationState.Verified);
+        await AssertRuntimeSecretAsync(selected.EnrollmentId, SecretKind.BotToken, "xoxb-runtime");
+        await AssertRuntimeSecretAsync(other.EnrollmentId, SecretKind.BotToken, "xoxb-runtime");
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(selected.EnrollmentId, SecretKind.CandidateBotToken)));
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(other.EnrollmentId, SecretKind.CandidateBotToken)));
+
+        var ambiguous = await Assert.ThrowsAsync<SlackManagerConflictException>(
+            () => _orchestrator.SupplyRuntimeCredentialsAsync(new("xoxb-foreign", "xapp-foreign")));
+        Assert.Equal("workspace_selection_required", ambiguous.Code);
+    }
+
+    [Fact]
+    public async Task Ready_enrollment_rotates_an_explicit_pair_through_candidate_and_socket_hello_for_the_selected_workspace()
+    {
+        var selected = await DriveToReadyAsync("T_ROTATE_SEL", "T_ROTATE_SEL");
+        var other = await DriveToReadyAsync("T_ROTATE_OTHER", "T_ROTATE_OTHER");
+
+        _botIdentity.Result = VerifiedBot("T_ROTATE_SEL", selected.ManagerAppId);
+        var rotated = await _orchestrator.SupplyRuntimeCredentialsAsync(
+            new("xoxb-rotated", "xapp-rotated"), "T_ROTATE_SEL");
+
+        Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, rotated.Phase);
+        Assert.Equal(SlackSetupPrimaryAction.AwaitSocketVerification, rotated.PrimaryAction);
+        Assert.Contains("T_ROTATE_SEL", rotated.Summary, StringComparison.Ordinal);
+        await AssertEnrollmentRuntimeStateAsync(selected.EnrollmentId, SlackRuntimeCredentialValidationState.AwaitingSocket);
+        await AssertRuntimeSecretAsync(selected.EnrollmentId, SecretKind.CandidateBotToken, "xoxb-rotated");
+        await AssertRuntimeSecretAsync(selected.EnrollmentId, SecretKind.CandidateAppToken, "xapp-rotated");
+        await AssertRuntimeSecretAsync(selected.EnrollmentId, SecretKind.BotToken, "xoxb-runtime");
+        // The other Workspace keeps serving its own verified pair.
+        await AssertEnrollmentRuntimeStateAsync(other.EnrollmentId, SlackRuntimeCredentialValidationState.Verified);
+        await AssertRuntimeSecretAsync(other.EnrollmentId, SecretKind.BotToken, "xoxb-runtime");
+
+        var manager = new SlackLeaseTargetRef.Manager(selected.EnrollmentId, "T_ROTATE_SEL");
+        var validation = await _leases.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
+        Assert.NotNull(validation);
+        Assert.Equal("xapp-rotated", validation!.AppToken);
+        Assert.Equal(SlackHelloOutcome.Verified,
+            await _leases.ReportHelloAsync("operator-1", manager, validation.LeaseId, selected.ManagerAppId));
+
+        var ready = await _orchestrator.GetProgressAsync("T_ROTATE_SEL");
+        Assert.Equal(SlackSetupPhase.Ready, ready!.Phase);
+        Assert.Equal(SlackSetupPrimaryAction.Ready, ready.PrimaryAction);
+        await AssertEnrollmentRuntimeStateAsync(selected.EnrollmentId, SlackRuntimeCredentialValidationState.Verified);
+        await AssertRuntimeSecretAsync(selected.EnrollmentId, SecretKind.BotToken, "xoxb-rotated");
+        await AssertRuntimeSecretAsync(selected.EnrollmentId, SecretKind.AppToken, "xapp-rotated");
+    }
+
+    [Fact]
+    public async Task Every_projection_exposes_one_user_facing_primary_action_and_a_human_summary()
+    {
+        string[] userFacing =
+        [
+            SlackSetupPrimaryAction.SupplyConfiguration,
+            SlackSetupPrimaryAction.ApproveInstall,
+            SlackSetupPrimaryAction.SupplyRuntimeCredentials,
+            SlackSetupPrimaryAction.AwaitSocketVerification,
+            SlackSetupPrimaryAction.RerunSetup,
+            SlackSetupPrimaryAction.Ready,
+        ];
+        var projections = new List<SlackSetupProgress>();
+        Assert.Null(await _orchestrator.GetProgressAsync());
+
+        _configurationPort.Enqueue(ConfigurationRotation("T_PROJECTION"));
+        var configuration = await _orchestrator.SupplyConfigurationAsync(
+            new(new("xoxe-current", "xoxr-current")));
+        projections.Add(configuration);
+
+        _botIdentity.Result = VerifiedBot("T_PROJECTION", configuration.ManagerAppId!);
+        projections.Add(await _orchestrator.SupplyRuntimeCredentialsAsync(
+            new("xoxb-runtime", "xapp-candidate")));
+
+        var manager = new SlackLeaseTargetRef.Manager(configuration.EnrollmentId!, "T_PROJECTION");
+        var validation = await _leases.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
+        Assert.Equal(SlackHelloOutcome.Verified,
+            await _leases.ReportHelloAsync("operator-1", manager, validation!.LeaseId, configuration.ManagerAppId!));
+        projections.Add((await _orchestrator.GetProgressAsync())!);
+
+        // An unresolved App create projects a rerun of the guide, never the
+        // internal reconciliation step.
+        var unresolved = await SeedEnrollmentAsync("T_PROJECTION_UNKNOWN");
+        var begin = await _enrollments.BeginManagerAppCreateAsync(
+            unresolved.Id, unresolved.ManagerAppOperationFence, "manager_create_crashed");
+        Assert.True(begin.Accepted);
+        _configurationPort.Enqueue(ConfigurationRotation("T_PROJECTION_UNKNOWN"));
+        projections.Add(await _orchestrator.SupplyConfigurationAsync(
+            new(new("xoxe-current", "xoxr-current"))));
+
+        // A rejected pair returns the guide to the credential step.
+        _botIdentity.Result = VerifiedBot("T_OTHER", configuration.ManagerAppId!);
+        projections.Add(await _orchestrator.SupplyRuntimeCredentialsAsync(
+            new("xoxb-bad", "xapp-bad"), "T_PROJECTION"));
+
+        // A Workspace that never received Configuration credentials projects
+        // the protected Configuration step.
+        await SeedEnrollmentAsync("T_PROJECTION_FRESH");
+        projections.Add((await _orchestrator.GetProgressAsync("T_PROJECTION_FRESH"))!);
+
+        Assert.All(projections, projection =>
+        {
+            Assert.Contains(projection.PrimaryAction, userFacing);
+            Assert.False(string.IsNullOrWhiteSpace(projection.Summary));
+        });
+        Assert.Contains(projections, projection =>
+            projection.PrimaryAction == SlackSetupPrimaryAction.RerunSetup
+            && projection.Phase == SlackSetupPhase.CreateUnknown);
+        Assert.Contains(projections, projection =>
+            projection.PrimaryAction == SlackSetupPrimaryAction.SupplyConfiguration
+            && projection.Phase == SlackSetupPhase.ConfigurationRequired);
+    }
+
+    private async Task AssertNoEnrollmentAsync(string teamId)
+    {
+        await using var db = _factory.CreateDbContext();
+        Assert.False(await db.SlackWorkspaceEnrollments.AnyAsync(enrollment => enrollment.WorkspaceTeamId == teamId));
+    }
+
+    private async Task<(string EnrollmentId, string ManagerAppId)> DriveToReadyAsync(
+        string teamId,
+        string? workspaceTeamId = null)
     {
         _configurationPort.Enqueue(ConfigurationRotation(teamId));
         var configuration = await _orchestrator.SupplyConfigurationAsync(
             new(new("xoxe-current", "xoxr-current")));
         _botIdentity.Result = VerifiedBot(teamId, configuration.ManagerAppId!);
         var runtime = await _orchestrator.SupplyRuntimeCredentialsAsync(
-            new("xoxb-runtime", "xapp-candidate"));
+            new("xoxb-runtime", "xapp-candidate"), workspaceTeamId);
         var manager = new SlackLeaseTargetRef.Manager(runtime.EnrollmentId!, teamId);
         var validation = await _leases.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
         Assert.NotNull(validation);
         Assert.Equal(SlackHelloOutcome.Verified,
             await _leases.ReportHelloAsync("operator-1", manager, validation!.LeaseId, configuration.ManagerAppId!));
-        var ready = await _orchestrator.GetProgressAsync();
+        var ready = await _orchestrator.GetProgressAsync(workspaceTeamId);
         Assert.Equal(SlackSetupPhase.Ready, ready!.Phase);
         return (runtime.EnrollmentId!, configuration.ManagerAppId!);
     }

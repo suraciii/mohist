@@ -131,7 +131,8 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
         // resolved before any verification: the selected Enrollment or,
         // without a selector, the only eligible one. Verification never
         // redirects a write to another Enrollment.
-        var enrollment = selected ?? await RequireSingleEnrollmentAsync(ct);
+        var enrollment = selected ?? await RequireSingleEnrollmentAsync(
+            "Run Configuration setup for this workspace before providing runtime credentials.", ct);
 
         var verified = await _botIdentity.VerifyAsync(new(request.BotToken), ct);
         if (!verified.Verified
@@ -250,7 +251,8 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
         CancellationToken ct = default)
     {
         var selected = await SelectEnrollmentAsync(workspaceTeamId, ct)
-            ?? await RequireSingleEnrollmentAsync(ct);
+            ?? await RequireSingleEnrollmentAsync(
+                "Run Slack setup with Configuration credentials first.", ct);
         return await AdvanceManagerAppAsync(selected, reconcileUnknown: true, ct);
     }
 
@@ -272,13 +274,13 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
                 "workspace_not_enrolled");
     }
 
-    private async Task<SlackWorkspaceEnrollment> RequireSingleEnrollmentAsync(CancellationToken ct)
+    private async Task<SlackWorkspaceEnrollment> RequireSingleEnrollmentAsync(
+        string missingEnrollmentMessage,
+        CancellationToken ct)
     {
         var active = await _enrollments.ListActiveAsync(ct);
         if (active.Count == 0)
-            throw new SlackManagerConflictException(
-                "Run Slack setup with Configuration credentials first.",
-                "enrollment_required");
+            throw new SlackManagerConflictException(missingEnrollmentMessage, "enrollment_required");
         if (active.Count > 1)
             throw AmbiguousWorkspace(active);
         return active[0];
