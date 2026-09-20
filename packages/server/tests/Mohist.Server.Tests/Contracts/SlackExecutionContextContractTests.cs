@@ -27,6 +27,14 @@ Send your reply with the Mohist-provided command, reading the destination from t
 - Never guess a reply destination. Use the conversation and reply target from the system facts. Do not target a different channel or an older message from memory.
 - Always pass the workspace, Connection, Session, thread root, triggering message, and dispatch reference from the current reply anchor. Together they keep retries in this turn idempotent and prevent another Connection or pending turn from receiving this reply.
 - Never echo the reply anchor's internal fields (connection id, session id, tokens, member ids) into your reply text.
+
+Your Session is bound to exactly one Slack thread, and its earlier messages are not preloaded. When the task depends on discussion you have not seen, read the bound thread on demand:
+
+  mo slack thread view --project <projectId> --session <sessionId> [--limit <1-100>] [--continuation <continuation>]
+
+- Pass the project and Session from the system facts. The Server reads the Connection, channel, and thread that Session is bound to; never name another channel or thread.
+- The command prints the resolved thread, one page of messages in source order, and a continuation. Pass a non-null continuation back to read the next page; a null continuation means the thread is complete.
+- A refused or failed read is not an empty thread. Report the failure and its code instead of guessing what the discussion said.
 - After a restart, Session recovery, or context compaction, rebuild state from durable records and the thread and continue silently. Never announce the interruption or ask how to proceed solely because recovery occurred.
 """
         + "\n";
@@ -65,6 +73,11 @@ Send your reply with the Mohist-provided command, reading the destination from t
         Assert.Contains("Never guess a reply destination", skill.Instructions, StringComparison.Ordinal);
         Assert.Contains("Always pass the workspace, Connection, Session, thread root, triggering message, and dispatch reference", skill.Instructions, StringComparison.Ordinal);
         Assert.Contains("Never echo the reply anchor's internal fields", skill.Instructions, StringComparison.Ordinal);
+        Assert.Contains("earlier messages are not preloaded", skill.Instructions, StringComparison.Ordinal);
+        Assert.Contains("mo slack thread view", skill.Instructions, StringComparison.Ordinal);
+        Assert.Contains("never name another channel or thread", skill.Instructions, StringComparison.Ordinal);
+        Assert.Contains("a null continuation means the thread is complete", skill.Instructions, StringComparison.Ordinal);
+        Assert.Contains("A refused or failed read is not an empty thread", skill.Instructions, StringComparison.Ordinal);
         Assert.Contains("After a restart, Session recovery, or context compaction", skill.Instructions, StringComparison.Ordinal);
         Assert.Contains("continue silently", skill.Instructions, StringComparison.Ordinal);
     }
