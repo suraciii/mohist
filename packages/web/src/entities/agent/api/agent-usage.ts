@@ -9,16 +9,17 @@ export interface AgentUsageBucketDto {
   inputTokens: number
   outputTokens: number
   totalTokens: number
-  costAmount: number
+  /** Absent/null when no session in the bucket reported a cost. */
+  costAmount?: number | null
   costCurrency: string | null
 }
 
 export interface CumulativeCostPerShipPointDto {
   dayEnd: string
-  cumulativeCost: number | null
+  cumulativeCost?: number | null
   currency: string | null
   cumulativeShippedCount: number
-  costPerShip: number | null
+  costPerShip?: number | null
 }
 
 export interface AgentUsageTimeseriesDto {

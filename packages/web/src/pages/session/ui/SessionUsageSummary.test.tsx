@@ -140,9 +140,17 @@ describe('SessionUsageSummary', () => {
       expect(screen.queryByTestId('usage-summary-context')).toBeNull()
     })
 
-    it('omits cost when costAmount is null', () => {
+    it('shows a dash when cost was not reported', () => {
       render(<SessionUsageSummary usage={fullUsage({ costAmount: null })} />)
-      expect(screen.queryByTestId('usage-summary-cost')).toBeNull()
+      const cost = screen.getByTestId('usage-summary-cost')
+      expect(cost).toHaveTextContent('—')
+      expect(cost).toHaveAttribute('title', 'No cost reported')
+      expect(cost).toHaveAttribute('aria-label', 'No cost reported')
+    })
+
+    it('keeps an explicitly reported zero numeric', () => {
+      render(<SessionUsageSummary usage={fullUsage({ costAmount: 0, costCurrency: 'USD' })} />)
+      expect(screen.getByTestId('usage-summary-cost')).toHaveTextContent('$0.00')
     })
 
     it('omits health indicator when contextUsagePercent is null', () => {

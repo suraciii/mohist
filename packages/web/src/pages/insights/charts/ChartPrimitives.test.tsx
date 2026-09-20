@@ -120,6 +120,30 @@ describe('BarSeries', () => {
     const bar = screen.getByTestId('bar-0')
     expect(bar.getAttribute('class')).toContain('fill-chart-5')
   })
+
+  it('renders a gap for a null value without shifting the other bars', () => {
+    render(
+      <svg>
+        <BarSeries
+          data={[
+            { value: 10, label: 'A' },
+            { value: null, label: 'B' },
+            { value: 20, label: 'C' },
+          ]}
+          plotX={0}
+          plotY={0}
+          plotWidth={300}
+          plotHeight={200}
+        />
+      </svg>,
+    )
+
+    const barSeries = screen.getByTestId('bar-series')
+    expect(barSeries.children).toHaveLength(2)
+    expect(screen.getByTestId('bar-0')).toBeInTheDocument()
+    expect(screen.queryByTestId('bar-1')).not.toBeInTheDocument()
+    expect(screen.getByTestId('bar-2')).toBeInTheDocument()
+  })
 })
 
 // --- BarSeries motion ---

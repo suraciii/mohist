@@ -93,6 +93,76 @@ describe("OpenCode runtime event projection", () => {
     expect(second[0]?.payload.costAmount).toBeCloseTo(0.1)
   })
 
+  it("keeps cost unknown when an assistant message reports tokens only", () => {
+    const projector = createRuntimeTurnEventProjector("ses_1", "/work")
+
+    const projected = projector.project(event("message.updated", {
+      info: {
+        id: "msg_1",
+        role: "assistant",
+        tokens: { input: 10, output: 4 },
+      },
+    }))
+
+    expect(projected).toHaveLength(1)
+    expect(projected[0]?.type).toBe("usage.updated")
+    expect(projected[0]?.payload).toMatchObject({ inputTokens: 10, outputTokens: 4 })
+    expect(projected[0]?.payload).not.toHaveProperty("costAmount")
+    expect(projected[0]?.payload).not.toHaveProperty("costCurrency")
+  })
+
+  it("records a first explicit zero cost even without token growth", () => {
+    const projector = createRuntimeTurnEventProjector("ses_1", "/work")
+
+    const projected = projector.project(event("message.updated", {
+      info: {
+        id: "msg_1",
+        role: "assistant",
+        cost: 0,
+        tokens: { input: 0, output: 0, total: 0 },
+      },
+    }))
+
+    expect(projected).toHaveLength(1)
+    expect(projected[0]?.payload).toMatchObject({ costAmount: 0, costCurrency: "USD" })
+  })
+
+  it("charges only new cumulative cost and keeps the baseline across omitted and lower snapshots", () => {
+    const projector = createRuntimeTurnEventProjector("ses_1", "/work")
+    const snapshots: { input: number; cost?: number }[] = [
+      { input: 10, cost: 1.2 },
+      { input: 20 },
+      { input: 30, cost: 1.2 },
+      { input: 40, cost: 1.5 },
+      { input: 50, cost: 1.3 },
+      { input: 60, cost: 1.5 },
+    ]
+
+    const charges = snapshots.map((snapshot) => {
+      const projected = projector.project(event("message.updated", {
+        info: {
+          id: "msg_1",
+          role: "assistant",
+          tokens: { input: snapshot.input },
+          ...(snapshot.cost !== undefined ? { cost: snapshot.cost } : {}),
+        },
+      }))
+      const usage = projected.find((item) => item.type === "usage.updated")
+      expect(usage).toBeDefined()
+      const value = usage?.payload.costAmount
+      return typeof value === "number" ? value : undefined
+    })
+
+    expect(charges[0]).toBeCloseTo(1.2)
+    expect(charges[1]).toBeUndefined()
+    expect(charges[2]).toBeUndefined()
+    expect(charges[3]).toBeCloseTo(0.3)
+    expect(charges[4]).toBeUndefined()
+    expect(charges[5]).toBeUndefined()
+    const recorded = charges.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+    expect(recorded).toBeCloseTo(1.5)
+  })
+
   it("deduplicates live text deltas against the final prompt snapshot", () => {
     const projector = createRuntimeTurnEventProjector("ses_1", "/work")
 

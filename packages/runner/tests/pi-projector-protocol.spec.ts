@@ -49,4 +49,19 @@ describe("Pi runtime projector protocol", () => {
     expect(facts).toContainEqual(expect.objectContaining({ type: "message.delta", payload: { text: " world", partId: "assistant-1:message.delta:0", messageId: "assistant-1" } }))
     expect(facts).toContainEqual(expect.objectContaining({ type: "usage.updated", payload: { inputTokens: 1 } }))
   })
+
+  it("preserves unknown cost and reports an explicit zero cost", () => {
+    const unknown = createPiProjector("/virtual/session-1", "/workspace")
+    const unknownFacts = unknown.reconcile([{ role: "assistant", content: [], usage: { input: 1 } }])
+    expect(unknownFacts).toContainEqual(expect.objectContaining({ type: "usage.updated", payload: { inputTokens: 1 } }))
+    const unknownUsage = unknownFacts.find((fact) => fact.type === "usage.updated")
+    expect(unknownUsage?.payload).not.toHaveProperty("costAmount")
+
+    const zero = createPiProjector("/virtual/session-2", "/workspace")
+    const zeroFacts = zero.reconcile([{ role: "assistant", content: [], usage: { cost: { total: 0, currency: "USD" } } }])
+    expect(zeroFacts).toContainEqual(expect.objectContaining({
+      type: "usage.updated",
+      payload: { costAmount: 0, costCurrency: "USD" },
+    }))
+  })
 })

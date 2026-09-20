@@ -57,10 +57,19 @@ export function SessionUsageSummary({ usage }: SessionUsageSummaryProps) {
           )}
         </span>
 
-        {/* Cost */}
-        {usage.costAmount != null && usage.costCurrency != null && (
+        {/* Cost: an unreported amount is unknown, never a fabricated zero. */}
+        {usage.costAmount != null ? (
           <span className="text-muted-foreground" data-testid="usage-summary-cost">
             {formatCost(usage.costAmount, usage.costCurrency)}
+          </span>
+        ) : (
+          <span
+            className="text-muted-foreground/70"
+            data-testid="usage-summary-cost"
+            aria-label="No cost reported"
+            title="No cost reported"
+          >
+            —
           </span>
         )}
 

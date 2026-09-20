@@ -1,7 +1,8 @@
 import { useReducedMotion } from './useReducedMotion'
 
 export interface BarDatum {
-  value: number
+  /** A null value is an unknown observation and renders as a gap. */
+  value: number | null
   label: string
 }
 
@@ -27,7 +28,7 @@ export function BarSeries({
   animated = true,
 }: BarSeriesProps) {
   const reduced = useReducedMotion()
-  const max = Math.max(...data.map((d) => d.value), 0) || 1
+  const max = Math.max(...data.map((d) => d.value ?? 0), 0) || 1
   const barCount = data.length
   const totalGap = barGap * (barCount - 1)
   const barWidth = barCount > 0 ? (plotWidth - totalGap) / barCount : 0
@@ -36,6 +37,7 @@ export function BarSeries({
   return (
     <g data-testid="bar-series">
       {data.map((d, i) => {
+        if (d.value === null) return null
         const ratio = d.value / max
         const barX = plotX + i * (barWidth + barGap)
 

@@ -195,6 +195,35 @@ public class AgentSessionDomainTests
     }
 
     [Fact]
+    public void ApplyUsage_FirstExplicitZeroCost_RecordsKnownZero()
+    {
+        var session = CreateSession();
+
+        session.ApplyUsage(null, null, null, null, null, 0d, "USD", null, null, new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(0d, Usage(session).CostAmount);
+        Assert.Equal("USD", Usage(session).CostCurrency);
+    }
+
+    [Fact]
+    public void ApplyUsage_OmittedAndRepeatedCostDeltas_KeepTheKnownAmount()
+    {
+        var session = CreateSession();
+        var now = new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc);
+
+        session.ApplyUsage(null, null, null, null, null, 1.20, "USD", null, null, now);
+        // An omitted amount is unknown, not a zero delta.
+        session.ApplyUsage(10, 5, 15, null, null, null, null, null, null, now.AddSeconds(1));
+        // A repeated cumulative amount adds no charge.
+        session.ApplyUsage(null, null, null, null, null, 0d, "USD", null, null, now.AddSeconds(2));
+        // A lower repeated snapshot is not a refund.
+        session.ApplyUsage(null, null, null, null, null, -0.30, "USD", null, null, now.AddSeconds(3));
+
+        Assert.Equal(1.20, Usage(session).CostAmount);
+        Assert.Equal(15, Usage(session).TotalTokens);
+    }
+
+    [Fact]
     public void ApplyUsage_UpdatesContextWindowSnapshot()
     {
         var session = CreateSession();

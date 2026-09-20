@@ -46,7 +46,7 @@ function buildZeroSampleUsageData(): AgentUsageTimeseriesDto {
       inputTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
-      costAmount: 0,
+      costAmount: null,
       costCurrency: null,
     }
   })
@@ -130,7 +130,7 @@ describe('CostTrendChart', () => {
     await waitFor(() => {
       const empty = screen.getByTestId('chart-container-empty')
       expect(empty).toBeInTheDocument()
-      expect(empty.textContent).toContain('once an agent session reports usage')
+      expect(empty.textContent).toContain('once an agent session reports a cost')
     })
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
   })
@@ -143,7 +143,7 @@ describe('CostTrendChart', () => {
     await waitFor(() => {
       const empty = screen.getByTestId('chart-container-empty')
       expect(empty).toBeInTheDocument()
-      expect(empty.textContent).toContain('once an agent session reports usage')
+      expect(empty.textContent).toContain('once an agent session reports a cost')
     })
     expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
   })
@@ -192,6 +192,85 @@ describe('CostTrendChart', () => {
       const bar = screen.getByTestId('bar-2')
       expect(bar.style.transform).toContain('scaleY(0)')
     })
+  })
+
+  it('unknown-cost day renders as a gap, not a zero-height bar', async () => {
+    const data = buildUsageData()
+    data.buckets[2] = { ...data.buckets[2], costAmount: null }
+
+    mockUsageResponse(data)
+
+    renderChart()
+
+    await waitFor(() => {
+      const barSeries = screen.getByTestId('bar-series')
+      expect(barSeries.children).toHaveLength(6)
+      expect(screen.queryByTestId('bar-2')).not.toBeInTheDocument()
+      expect(screen.getByTestId('bar-3')).toBeInTheDocument()
+    })
+  })
+
+  it('treats an omitted costAmount key as unknown, not zero', async () => {
+    const data = buildUsageData()
+    const { costAmount: _omit, ...bucketWithoutCost } = data.buckets[2]
+    data.buckets[2] = bucketWithoutCost as AgentUsageTimeseriesDto['buckets'][number]
+
+    mockUsageResponse(data)
+
+    renderChart()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('bar-series').children).toHaveLength(6)
+      expect(screen.queryByTestId('bar-2')).not.toBeInTheDocument()
+    })
+  })
+
+  it('reports unknown recorded cost in the summary when no bucket reported an amount', async () => {
+    const data = buildUsageData()
+    data.buckets = data.buckets.map((bucket) => ({ ...bucket, costAmount: null, costCurrency: null }))
+    // A known pre-window cumulative amount still resolves the chart while
+    // every in-window bucket stays unknown.
+    data.cumulativeCostPerShip = data.cumulativeCostPerShip!.map((point) => ({
+      ...point,
+      cumulativeCost: 12,
+    }))
+
+    mockUsageResponse(data)
+
+    renderChart()
+
+    await waitFor(() => {
+      const summary = screen.getByTestId('chart-sr-summary')
+      expect(summary.textContent).toContain('Total window recorded cost: unknown')
+    })
+  })
+
+  it('renders the empty state for a token-only project without recorded cost', async () => {
+    const data = buildUsageData({
+      buckets: buildUsageData().buckets.map((bucket) => ({
+        ...bucket,
+        inputTokens: 100,
+        outputTokens: 50,
+        totalTokens: 150,
+        costAmount: null,
+        costCurrency: null,
+      })),
+      cumulativeCostPerShip: buildUsageData().cumulativeCostPerShip!.map((point) => ({
+        ...point,
+        cumulativeCost: null,
+        costPerShip: null,
+      })),
+    })
+
+    mockUsageResponse(data)
+
+    renderChart()
+
+    await waitFor(() => {
+      const empty = screen.getByTestId('chart-container-empty')
+      expect(empty).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('chart-accessibility')).not.toBeInTheDocument()
   })
 
   // --- Trend values ---
@@ -311,13 +390,13 @@ describe('CostTrendChart', () => {
     await waitFor(() => {
       const legend = screen.getByTestId('chart-legend')
       expect(legend).toBeInTheDocument()
-      expect(legend.textContent).toContain('Daily cost')
-      expect(legend.textContent).toContain('Cost per ship')
+      expect(legend.textContent).toContain('Recorded cost')
+      expect(legend.textContent).toContain('Recorded cost per completed Issue')
 
       const entries = legend.querySelectorAll('span')
-      const dailyCostEntry = [...entries].find((e) => e.textContent === 'Daily cost')
-      const cpsEntry = [...entries].find((e) => e.textContent === 'Cost per ship')
-      expect(dailyCostEntry).toBeTruthy()
+      const recordedCostEntry = [...entries].find((e) => e.textContent === 'Recorded cost')
+      const cpsEntry = [...entries].find((e) => e.textContent === 'Recorded cost per completed Issue')
+      expect(recordedCostEntry).toBeTruthy()
       expect(cpsEntry).toBeTruthy()
     })
   })
@@ -413,9 +492,9 @@ describe('CostTrendChart', () => {
     await waitFor(() => {
       const summary = screen.getByTestId('chart-sr-summary')
       expect(summary).toBeInTheDocument()
-      expect(summary.textContent).toContain('Daily cost bar chart')
+      expect(summary.textContent).toContain('Recorded cost bar chart')
       expect(summary.textContent).toContain('Jun 22')
-      expect(summary.textContent).toContain('Total window cost')
+      expect(summary.textContent).toContain('Total window recorded cost')
     })
   })
 
@@ -493,7 +572,7 @@ describe('CostTrendChart', () => {
 
     await waitFor(() => {
       const empty = screen.getByTestId('chart-container-empty')
-      expect(empty.textContent).toContain('once an agent session reports usage on this project')
+      expect(empty.textContent).toContain('once an agent session reports a cost on this project')
     })
   })
 

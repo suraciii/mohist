@@ -12,7 +12,14 @@ interface UsageSnapshot {
   totalTokens: number
   cachedReadTokens: number
   thoughtTokens: number
-  costAmount: number
+  costAmount: number | null
+}
+
+type TokenSnapshot = Omit<UsageSnapshot, "costAmount">
+
+interface CostObservation {
+  readonly baseline: number | null
+  readonly charge: number | null
 }
 
 type TextEventType = "message.delta" | "reasoning.delta"
@@ -117,12 +124,14 @@ export function createRuntimeTurnEventProjector(
 
     const current = readUsage(info)
     const previous = usageByMessage.get(messageId) ?? emptyUsage()
-    usageByMessage.set(messageId, current)
+    const cost = observeCost(previous.costAmount, current.costAmount)
+    usageByMessage.set(messageId, { ...current, costAmount: cost.baseline })
     const delta = subtractUsage(current, previous)
-    if (Object.values(delta).some((value) => value > 0)) {
+    const hasTokenDelta = Object.values(delta).some((value) => value > 0)
+    if (hasTokenDelta || cost.charge !== null) {
       projected.push(build("usage.updated", {
         ...delta,
-        costCurrency: "USD",
+        ...(cost.charge !== null ? { costAmount: cost.charge, costCurrency: "USD" } : {}),
         messageId,
       }))
     }
@@ -325,23 +334,32 @@ function readUsage(info: Record<string, unknown>): UsageSnapshot {
     totalTokens: numberValue(tokens?.["total"]) || inputTokens + outputTokens + thoughtTokens,
     cachedReadTokens: numberValue(cache?.["read"]),
     thoughtTokens,
-    costAmount: numberValue(info["cost"]),
+    costAmount: optionalNumberValue(info["cost"]),
   }
 }
 
 function emptyUsage(): UsageSnapshot {
-  return { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedReadTokens: 0, thoughtTokens: 0, costAmount: 0 }
+  return { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedReadTokens: 0, thoughtTokens: 0, costAmount: null }
 }
 
-function subtractUsage(current: UsageSnapshot, previous: UsageSnapshot): UsageSnapshot {
+function subtractUsage(current: UsageSnapshot, previous: UsageSnapshot): TokenSnapshot {
   return {
     inputTokens: Math.max(0, current.inputTokens - previous.inputTokens),
     outputTokens: Math.max(0, current.outputTokens - previous.outputTokens),
     totalTokens: Math.max(0, current.totalTokens - previous.totalTokens),
     cachedReadTokens: Math.max(0, current.cachedReadTokens - previous.cachedReadTokens),
     thoughtTokens: Math.max(0, current.thoughtTokens - previous.thoughtTokens),
-    costAmount: Math.max(0, current.costAmount - previous.costAmount),
   }
+}
+
+// A message reports its cumulative cost. Only a newly reported amount is a
+// charge; an omitted amount keeps the last known amount, and a lower repeat is
+// not a refund and must not reset the next comparison.
+function observeCost(previous: number | null, reported: number | null): CostObservation {
+  if (reported === null) return { baseline: previous, charge: null }
+  if (previous === null) return { baseline: reported, charge: reported }
+  if (reported > previous) return { baseline: reported, charge: reported - previous }
+  return { baseline: previous, charge: null }
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {
@@ -356,4 +374,8 @@ function stringValue(value: unknown): string | null {
 
 function numberValue(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0
+}
+
+function optionalNumberValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null
 }

@@ -55,22 +55,22 @@ function getCurrency(buckets: AgentUsageTimeseriesDto['buckets']): string | null
   return null
 }
 
+type UsageBucket = AgentUsageTimeseriesDto['buckets'][number]
+
+function hasRecordedCost(bucket: UsageBucket): bucket is UsageBucket & { costAmount: number } {
+  return bucket.costAmount != null
+}
+
 function hasUsageData(data: AgentUsageTimeseriesDto | undefined): data is AgentUsageTimeseriesDto {
   if (!data || data.buckets.length === 0) return false
 
-  const hasBucketUsage = data.buckets.some((bucket) =>
-    bucket.inputTokens > 0
-    || bucket.outputTokens > 0
-    || bucket.totalTokens > 0
-    || bucket.costAmount > 0
-    || bucket.costCurrency !== null,
-  )
+  const hasRecordedBucketCost = data.buckets.some(hasRecordedCost)
 
   const hasMeasuredCumulativeCost = (data.cumulativeCostPerShip ?? []).some((point) =>
-    point.cumulativeCost !== null,
+    point.cumulativeCost != null,
   )
 
-  return hasBucketUsage || hasMeasuredCumulativeCost
+  return hasRecordedBucketCost || hasMeasuredCumulativeCost
 }
 
 export type AgentUsageHook = (
@@ -110,8 +110,8 @@ export function CostTrendChart({
         status={status}
         emptyAction={
           <p className="text-sm text-muted-foreground text-center">
-            Cost and cost-per-ship appear once an agent session reports usage
-            on this project.
+            Recorded cost and recorded cost per completed Issue appear once an
+            agent session reports a cost on this project.
           </p>
         }
       >
@@ -128,7 +128,7 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
   const totalGap = barGap * (barCount - 1)
   const barWidth = barCount > 0 ? (plotWidth - totalGap) / barCount : 0
 
-  const maxCost = Math.max(...buckets.map((b) => b.costAmount), 0) || 1
+  const maxCost = Math.max(...buckets.map((b) => b.costAmount ?? 0), 0) || 1
 
   const trendValues = (cumulativeCostPerShip ?? [])
     .map((p) => p.costPerShip)
@@ -148,8 +148,11 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
   const leftTicks = computeTicks(maxCost, plotHeight)
   const rightTicks = hasTrend ? computeTicks(maxTrend, plotHeight) : []
 
-  const totalCost = buckets.reduce((s, b) => s + b.costAmount, 0)
-  const peakBucket = [...buckets].sort((a, b) => b.costAmount - a.costAmount)[0]
+  const recordedBuckets = buckets.filter(hasRecordedCost)
+  const totalCost = recordedBuckets.reduce((sum, bucket) => sum + bucket.costAmount, 0)
+  const peakBucket = recordedBuckets.length > 0
+    ? recordedBuckets.reduce((peak, bucket) => (bucket.costAmount > peak.costAmount ? bucket : peak))
+    : null
   const firstTrend = hasTrend
     ? cumulativeCostPerShip!.find((p) => p.costPerShip != null)
     : null
@@ -161,17 +164,17 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
   const lastBucket = buckets[buckets.length - 1]
 
   const summary =
-    `Daily cost bar chart from ${firstBucket ? formatLabel(firstBucket.bucketStart) : formatLabel(data.rangeFrom)} to ${lastBucket ? formatLabel(lastBucket.bucketStart) : formatLabel(data.rangeTo)}. ` +
-    `Total window cost: ${totalCost.toFixed(2)}. ` +
+    `Recorded cost bar chart from ${firstBucket ? formatLabel(firstBucket.bucketStart) : formatLabel(data.rangeFrom)} to ${lastBucket ? formatLabel(lastBucket.bucketStart) : formatLabel(data.rangeTo)}. ` +
+    `Total window recorded cost: ${recordedBuckets.length > 0 ? totalCost.toFixed(2) : 'unknown'}. ` +
     `Peak day: ${peakBucket ? `${formatLabel(peakBucket.bucketStart)} ${peakBucket.costAmount.toFixed(2)}` : 'N/A'}.` +
     (hasTrend && firstTrend && lastTrend
-      ? ` Cost per ship from ${firstTrend.costPerShip!.toFixed(2)} to ${lastTrend.costPerShip!.toFixed(2)}.`
+      ? ` Recorded cost per completed Issue from ${firstTrend.costPerShip!.toFixed(2)} to ${lastTrend.costPerShip!.toFixed(2)}.`
       : '')
 
   const legend = [
-    { label: 'Daily cost', shape: 'bar' as const, className: 'fill-chart-2' },
+    { label: 'Recorded cost', shape: 'bar' as const, className: 'fill-chart-2' },
     ...(hasTrend
-      ? [{ label: 'Cost per ship', shape: 'line' as const, className: 'stroke-chart-5' }]
+      ? [{ label: 'Recorded cost per completed Issue', shape: 'line' as const, className: 'stroke-chart-5' }]
       : []),
   ]
 
@@ -179,7 +182,7 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
 
   return (
     <ChartAccessibility
-      ariaLabel={`Cost trend for project: daily cost bar chart${hasTrend ? ' with cost-per-ship trend overlay' : ''}`}
+      ariaLabel={`Cost trend for project: recorded cost bar chart${hasTrend ? ' with recorded-cost-per-completed-Issue trend overlay' : ''}`}
       summary={summary}
       legend={legend}
       viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
@@ -191,7 +194,7 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
         textAnchor="middle"
         className="fill-chart-2 text-[9px] tabular-nums font-medium"
       >
-        Daily cost{currency ? ` (${currency})` : ''}
+        Recorded cost{currency ? ` (${currency})` : ''}
       </text>
 
       <text
@@ -200,7 +203,7 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
         textAnchor="middle"
         className="fill-chart-5 text-[9px] tabular-nums font-medium"
       >
-        Cost per ship{currency ? ` (${currency}/issue)` : ''}
+        Recorded cost per completed Issue{currency ? ` (${currency}/issue)` : ''}
       </text>
 
       {buckets.map((bucket, i) => {
@@ -244,7 +247,7 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
 
       <BarSeries
         data={buckets.map((b) => ({
-          value: b.costAmount,
+          value: b.costAmount ?? null,
           label: formatLabel(b.bucketStart),
         }))}
         plotX={plotX}

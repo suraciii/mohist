@@ -122,10 +122,10 @@ export function FactoryStatusHeadline(props: FactoryStatusHeadlineProps = {}) {
           testId="factory-status-today-cost"
           icon={CircleDollarSignIcon}
           iconClassName="text-muted-foreground/60"
-          label="Today cost"
+          label="Recorded cost today"
           value={todayCostDisplay}
           valueClassName={todayCostHasSample ? 'tabular-nums' : 'text-muted-foreground/70'}
-          valueAriaLabel={todayCostHasSample ? 'Today cost' : 'Today cost unavailable'}
+          valueAriaLabel={todayCostHasSample ? 'Recorded cost today' : 'No cost reported'}
         />
       </div>
       {runnerSummary.rows.length > 0 && (
