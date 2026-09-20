@@ -298,8 +298,10 @@ public sealed class AgentUsageReporterSpecs : IClassFixture<MohistDbFixture>
     [Fact]
     public async Task GetCostRollupAsync_TokenOnlySessionsAreNotCostSamples()
     {
+        // The Session is created today so the TodayCost assertions exercise
+        // the token-only rule rather than an empty today window.
         var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, Today.AddDays(-1).AddHours(8),
+        await InsertSessionAsync(project.Id, Today.AddHours(8),
             inputTokens: 100, outputTokens: 50, totalTokens: 150);
 
         var service = ResolveReporter();
@@ -310,6 +312,7 @@ public sealed class AgentUsageReporterSpecs : IClassFixture<MohistDbFixture>
         Assert.Null(result.TotalCost.Currency);
         Assert.Null(result.TodayCost.Amount);
         Assert.Equal(0, result.TodayCost.SampleCount);
+        Assert.Null(result.TodayCost.Currency);
     }
 
     [Fact]

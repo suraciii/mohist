@@ -122,6 +122,12 @@ describe('BarSeries', () => {
   })
 
   it('renders a gap for a null value without shifting the other bars', () => {
+    const plotX = 0
+    const plotWidth = 300
+    const barGap = 2
+    const barCount = 3
+    const barWidth = (plotWidth - barGap * (barCount - 1)) / barCount
+
     render(
       <svg>
         <BarSeries
@@ -130,9 +136,9 @@ describe('BarSeries', () => {
             { value: null, label: 'B' },
             { value: 20, label: 'C' },
           ]}
-          plotX={0}
+          plotX={plotX}
           plotY={0}
-          plotWidth={300}
+          plotWidth={plotWidth}
           plotHeight={200}
         />
       </svg>,
@@ -140,9 +146,14 @@ describe('BarSeries', () => {
 
     const barSeries = screen.getByTestId('bar-series')
     expect(barSeries.children).toHaveLength(2)
-    expect(screen.getByTestId('bar-0')).toBeInTheDocument()
     expect(screen.queryByTestId('bar-1')).not.toBeInTheDocument()
-    expect(screen.getByTestId('bar-2')).toBeInTheDocument()
+
+    // A gap keeps the index-based layout: bar 2 stays at slot 2 rather than
+    // compacting into slot 1.
+    const first = screen.getByTestId('bar-0')
+    const third = screen.getByTestId('bar-2')
+    expect(Number(first.getAttribute('x'))).toBeCloseTo(plotX)
+    expect(Number(third.getAttribute('x'))).toBeCloseTo(plotX + 2 * (barWidth + barGap))
   })
 })
 

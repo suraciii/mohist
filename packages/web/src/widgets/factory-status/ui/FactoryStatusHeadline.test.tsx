@@ -223,8 +223,10 @@ describe('FactoryStatusHeadline today-cost', () => {
     renderHeadline()
 
     const field = screen.getByTestId('factory-status-today-cost')
+    expect(field).toHaveTextContent('Recorded cost today')
     expect(field).toHaveTextContent('—')
     expect(field).not.toHaveTextContent('$')
+    expect(field.querySelector('[aria-label]')).toHaveAttribute('aria-label', 'No cost reported')
   })
 
   it('renders an em-dash placeholder when todayCost has zero samples (empty / no sessions with usage today)', () => {
@@ -234,9 +236,11 @@ describe('FactoryStatusHeadline today-cost', () => {
     renderHeadline()
 
     const field = screen.getByTestId('factory-status-today-cost')
+    expect(field).toHaveTextContent('Recorded cost today')
     expect(field).toHaveTextContent('—')
     expect(field).not.toHaveTextContent('$')
     expect(field).not.toHaveTextContent('0')
+    expect(field.querySelector('[aria-label]')).toHaveAttribute('aria-label', 'No cost reported')
   })
 
   it('renders the formatted numeric value when todayCost has a non-empty sample', async () => {
@@ -246,6 +250,9 @@ describe('FactoryStatusHeadline today-cost', () => {
     renderHeadline()
 
     expect(await screen.findByText('$1.25')).toBeInTheDocument()
+    const field = screen.getByTestId('factory-status-today-cost')
+    expect(field).toHaveTextContent('Recorded cost today')
+    expect(field.querySelector('[aria-label]')).toHaveAttribute('aria-label', 'Recorded cost today')
   })
 
   it('renders a real $0.00 when todayCost is a genuine zero (sampleCount > 0, amount === 0)', async () => {
@@ -255,6 +262,9 @@ describe('FactoryStatusHeadline today-cost', () => {
     renderHeadline()
 
     expect(await screen.findByText('$0.00')).toBeInTheDocument()
+    const field = screen.getByTestId('factory-status-today-cost')
+    expect(field).toHaveTextContent('Recorded cost today')
+    expect(field.querySelector('[aria-label]')).toHaveAttribute('aria-label', 'Recorded cost today')
   })
 
   it('prefers the injected todayCost prop over the rollup query', () => {
