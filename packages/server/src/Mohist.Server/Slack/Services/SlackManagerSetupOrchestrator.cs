@@ -11,11 +11,12 @@ namespace Mohist.Server.Slack.Services;
 /// <summary>
 /// Idempotent workspace Mohist App setup orchestration. Each entry reads the
 /// current enrollment facts, performs at most one external write per concern,
-/// and returns a single progress projection with one next action. Reruns
-/// restore or repair the same enrollment / Mohist App rather than creating a
-/// second one. Socket validation lease + <c>hello.app_id</c> are driven by
-/// the adapter through <see cref="SlackAdapterLeaseService"/>; this service
-/// only stages candidate runtime credentials and exposes the resulting state.
+/// and returns a single progress projection with one user-facing primary
+/// action. Reruns restore or repair the same enrollment / Mohist App rather
+/// than creating a second one. Socket validation lease + <c>hello.app_id</c>
+/// are driven by the adapter through <see cref="SlackAdapterLeaseService"/>;
+/// this service only stages candidate runtime credentials and exposes the
+/// resulting state.
 /// </summary>
 public sealed class SlackManagerSetupOrchestrator : IScopedService
 {
@@ -61,19 +62,41 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
 
     public async Task<SlackSetupProgress> SupplyConfigurationAsync(
         SlackSetupConfigurationRequest request,
+        string? workspaceTeamId = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Credentials);
         request.Credentials.Validate();
 
+        var selected = await SelectEnrollmentAsync(workspaceTeamId, ct);
         var rotation = await _configurationPort.RotateAsync(request.Credentials, ct);
         if (rotation.Outcome != SlackConfigurationCredentialRotationOutcome.Succeeded
             || rotation.Credentials is null
             || string.IsNullOrWhiteSpace(rotation.WorkspaceTeamId)
             || rotation.ExpiresAt is null)
         {
-            return Failed(rotation.WorkspaceTeamId, rotation.Outcome, rotation.ErrorClass);
+            return Failed(
+                rotation.WorkspaceTeamId ?? selected?.WorkspaceTeamId,
+                rotation.Outcome,
+                rotation.ErrorClass);
+        }
+
+        // A selector binds the submission before the write: the pair must
+        // verify against the selected Enrollment's team, so credentials for
+        // another Workspace can never land on it.
+        if (selected is not null
+            && !string.Equals(rotation.WorkspaceTeamId, selected.WorkspaceTeamId, StringComparison.Ordinal))
+        {
+            return new(
+                selected.Id,
+                selected.WorkspaceTeamId,
+                SlackSetupPhase.Failed,
+                AppIdOrNull(selected),
+                InstallUrl: null,
+                SlackSetupPrimaryAction.SupplyConfiguration,
+                Summarize(selected, SlackSetupPhase.Failed),
+                "configuration_workspace_mismatch");
         }
 
         var enrollment = await EnsureEnrollmentAsync(rotation.WorkspaceTeamId, ct);
@@ -96,11 +119,19 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
 
     public async Task<SlackSetupProgress> SupplyRuntimeCredentialsAsync(
         SlackSetupRuntimeRequest request,
+        string? workspaceTeamId = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.BotToken);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.AppLevelToken);
+
+        var selected = await SelectEnrollmentAsync(workspaceTeamId, ct);
+        // A runtime pair carries no team identity of its own, so the target is
+        // resolved before any verification: the selected Enrollment or,
+        // without a selector, the only eligible one. Verification never
+        // redirects a write to another Enrollment.
+        var enrollment = selected ?? await RequireSingleEnrollmentAsync(ct);
 
         var verified = await _botIdentity.VerifyAsync(new(request.BotToken), ct);
         if (!verified.Verified
@@ -108,34 +139,16 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
             || string.IsNullOrWhiteSpace(verified.BotUserId))
         {
             return new(
-                null,
-                string.Empty,
+                enrollment.Id,
+                enrollment.WorkspaceTeamId,
                 SlackSetupPhase.Failed,
+                AppIdOrNull(enrollment),
                 null,
-                null,
-                SlackSetupNextAction.SupplyRuntimeCredentials,
+                SlackSetupPrimaryAction.SupplyRuntimeCredentials,
+                Summarize(enrollment, SlackSetupPhase.Failed),
                 verified.ErrorClass ?? "runtime_credential_mismatch");
         }
 
-        var enrollment = await _enrollments.GetActiveByTeamAsync(verified.WorkspaceTeamId.Trim(), ct);
-        if (enrollment is null)
-        {
-            // The provider-confirmed team is authoritative. When there is a
-            // single configured workspace, keep the operation actionable by
-            // returning an identity mismatch against that enrollment; with no
-            // or multiple workspaces there is no safe target to mutate.
-            var active = await _enrollments.ListActiveAsync(ct);
-            enrollment = active.Count switch
-            {
-                0 => throw new SlackManagerConflictException(
-                    "Run Configuration setup for this workspace before providing runtime credentials.",
-                    "enrollment_required"),
-                1 => active[0],
-                _ => throw new SlackManagerConflictException(
-                    "More than one Slack workspace is configured; provide credentials for a configured workspace.",
-                    "workspace_selection_required"),
-            };
-        }
         if (string.IsNullOrWhiteSpace(enrollment.ManagerAppId))
             throw new SlackManagerConflictException(
                 "The Mohist App must be created before providing runtime credentials.",
@@ -172,9 +185,10 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
                 enrollment.Id,
                 enrollment.WorkspaceTeamId,
                 SlackSetupPhase.Failed,
-                ManagerAppId: enrollment.ManagerAppId,
+                AppIdOrNull(enrollment),
                 InstallUrl: null,
-                NextAction: SlackSetupNextAction.SupplyRuntimeCredentials,
+                SlackSetupPrimaryAction.SupplyRuntimeCredentials,
+                Summarize(enrollment, SlackSetupPhase.Failed),
                 ErrorClass: "runtime_credential_mismatch");
         }
 
@@ -215,30 +229,79 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
         return await ProjectAsync(enrollment.WorkspaceTeamId, ct);
     }
 
-    public async Task<SlackSetupProgress?> GetProgressAsync(CancellationToken ct = default)
+    public async Task<SlackSetupProgress?> GetProgressAsync(
+        string? workspaceTeamId = null,
+        CancellationToken ct = default)
     {
+        var selected = await SelectEnrollmentAsync(workspaceTeamId, ct);
+        if (selected is not null)
+            return await ProjectAsync(selected.WorkspaceTeamId, ct);
+
         var enrollments = await _enrollments.ListActiveAsync(ct);
         if (enrollments.Count == 0)
             return null;
         if (enrollments.Count > 1)
-            throw new SlackManagerConflictException(
-                "More than one Slack workspace is configured; select a workspace in the setup UI.",
-                "workspace_selection_required");
+            throw AmbiguousWorkspace(enrollments);
         return await ProjectAsync(enrollments[0].WorkspaceTeamId, ct);
     }
 
-    public async Task<SlackSetupProgress> ResumeAsync(CancellationToken ct = default)
+    public async Task<SlackSetupProgress> ResumeAsync(
+        string? workspaceTeamId = null,
+        CancellationToken ct = default)
     {
-        var enrollments = await _enrollments.ListActiveAsync(ct);
-        if (enrollments.Count == 0)
+        var selected = await SelectEnrollmentAsync(workspaceTeamId, ct)
+            ?? await RequireSingleEnrollmentAsync(ct);
+        return await AdvanceManagerAppAsync(selected, reconcileUnknown: true, ct);
+    }
+
+    /// <summary>
+    /// Resolves an explicit <c>--workspace-team</c> selector to its active
+    /// Enrollment before any external write. A selector naming an unknown or
+    /// ineligible Enrollment fails instead of falling back to another record.
+    /// </summary>
+    private async Task<SlackWorkspaceEnrollment?> SelectEnrollmentAsync(
+        string? workspaceTeamId,
+        CancellationToken ct)
+    {
+        var selector = workspaceTeamId?.Trim();
+        if (string.IsNullOrEmpty(selector))
+            return null;
+        return await _enrollments.GetActiveByTeamAsync(selector, ct)
+            ?? throw new SlackManagerConflictException(
+                $"No active Slack workspace enrollment matches team {selector}.",
+                "workspace_not_enrolled");
+    }
+
+    private async Task<SlackWorkspaceEnrollment> RequireSingleEnrollmentAsync(CancellationToken ct)
+    {
+        var active = await _enrollments.ListActiveAsync(ct);
+        if (active.Count == 0)
             throw new SlackManagerConflictException(
                 "Run Slack setup with Configuration credentials first.",
                 "enrollment_required");
-        if (enrollments.Count > 1)
-            throw new SlackManagerConflictException(
-                "More than one Slack workspace is configured; select a workspace in the setup UI.",
-                "workspace_selection_required");
-        return await AdvanceManagerAppAsync(enrollments[0], reconcileUnknown: true, ct);
+        if (active.Count > 1)
+            throw AmbiguousWorkspace(active);
+        return active[0];
+    }
+
+    /// <summary>
+    /// Several enrolled Workspaces and no selector leave no safe target, so the
+    /// operation fails closed and names the real choices. Nothing here picks
+    /// the first record a list returns.
+    /// </summary>
+    private SlackManagerConflictException AmbiguousWorkspace(
+        IReadOnlyList<SlackWorkspaceEnrollment> enrollments)
+    {
+        var choices = enrollments
+            .Select(enrollment => new SlackSetupWorkspaceChoice(
+                enrollment.WorkspaceTeamId,
+                $"Slack workspace {enrollment.WorkspaceTeamId}",
+                DerivePhase(enrollment, DesiredManifestHash(enrollment.WorkspaceTeamId)).Phase))
+            .ToList();
+        return new SlackManagerConflictException(
+            "More than one Slack workspace is enrolled; select one with --workspace-team <team-id>.",
+            "workspace_selection_required",
+            choices);
     }
 
     private async Task<SlackSetupProgress> AdvanceManagerAppAsync(
@@ -562,62 +625,99 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
     private static bool HasRequiredScopes(IReadOnlySet<string>? granted) =>
         granted is not null && ManagerBotScopes.All(scope => granted.Contains(scope));
 
+    private static string? AppIdOrNull(SlackWorkspaceEnrollment enrollment) =>
+        string.IsNullOrWhiteSpace(enrollment.ManagerAppId) ? null : enrollment.ManagerAppId;
+
+    private string DesiredManifestHash(string workspaceTeamId) => _manifests.Generate(new SlackManifestInput(
+        MohistAppName,
+        MohistAppDescription,
+        ProductCapabilityVersion,
+        new SlackManifestIdentitySnapshot(string.Empty, string.Empty, workspaceTeamId),
+        SlackManifestKind.MohistApp,
+        ManifestVersion)).Hash;
+
     private async Task<SlackSetupProgress> ProjectAsync(string workspaceTeamId, CancellationToken ct)
     {
         var enrollment = await _enrollments.GetByTeamAsync(workspaceTeamId, ct);
         if (enrollment is null)
-            return new(null, workspaceTeamId, SlackSetupPhase.NotStarted, null, null, SlackSetupNextAction.SupplyConfiguration, null);
-        var manifest = _manifests.Generate(new SlackManifestInput(
-            MohistAppName,
-            MohistAppDescription,
-            ProductCapabilityVersion,
-            new SlackManifestIdentitySnapshot(string.Empty, string.Empty, enrollment.WorkspaceTeamId),
-            SlackManifestKind.MohistApp,
-            ManifestVersion));
-        return Derive(enrollment, manifest.Hash);
+            return new(
+                null,
+                workspaceTeamId,
+                SlackSetupPhase.NotStarted,
+                null,
+                null,
+                SlackSetupPrimaryAction.SupplyConfiguration,
+                Summarize(null, SlackSetupPhase.NotStarted),
+                null);
+        return Derive(enrollment, DesiredManifestHash(enrollment.WorkspaceTeamId));
     }
 
     private static SlackSetupProgress Derive(
         SlackWorkspaceEnrollment enrollment,
         string desiredManifestHash)
     {
-        var (phase, nextAction, errorClass) = DerivePhase(enrollment, desiredManifestHash);
+        var (phase, primaryAction, errorClass) = DerivePhase(enrollment, desiredManifestHash);
         return new(
             enrollment.Id,
             enrollment.WorkspaceTeamId,
             phase,
-            string.IsNullOrWhiteSpace(enrollment.ManagerAppId) ? null : enrollment.ManagerAppId,
+            AppIdOrNull(enrollment),
             string.IsNullOrWhiteSpace(enrollment.ManagerAppInstallUrl) ? null : enrollment.ManagerAppInstallUrl,
-            nextAction,
+            primaryAction,
+            Summarize(enrollment, phase),
             errorClass);
     }
 
-    private static (string Phase, string NextAction, string? ErrorClass) DerivePhase(
+    private static (string Phase, string PrimaryAction, string? ErrorClass) DerivePhase(
         SlackWorkspaceEnrollment enrollment,
         string desiredManifestHash)
     {
         if (enrollment.Lifecycle == SlackEnrollmentLifecycle.Removed)
-            return (SlackSetupPhase.NotStarted, SlackSetupNextAction.SupplyConfiguration, null);
+            return (SlackSetupPhase.NotStarted, SlackSetupPrimaryAction.SupplyConfiguration, null);
         if (string.IsNullOrWhiteSpace(enrollment.ConfigurationCredentialRef))
-            return (SlackSetupPhase.ConfigurationRequired, SlackSetupNextAction.SupplyConfiguration, null);
+            return (SlackSetupPhase.ConfigurationRequired, SlackSetupPrimaryAction.SupplyConfiguration, null);
         if (enrollment.ManagerAppLifecycle is SlackManagerAppLifecycle.CreateUnknown
             or SlackManagerAppLifecycle.Creating
             || enrollment.ManagerAppLifecycle == SlackManagerAppLifecycle.Created
             && string.IsNullOrWhiteSpace(enrollment.ManagerAppId))
-            return (SlackSetupPhase.CreateUnknown, SlackSetupNextAction.ReconcileCreate, enrollment.ManagerAppOperationOutcome);
+            return (SlackSetupPhase.CreateUnknown, SlackSetupPrimaryAction.RerunSetup, enrollment.ManagerAppOperationOutcome);
         if (enrollment.ManagerAppLifecycle == SlackManagerAppLifecycle.NotCreated)
-            return (SlackSetupPhase.Failed, SlackSetupNextAction.CreateApp, enrollment.ManagerAppOperationOutcome);
+            return (SlackSetupPhase.Failed, SlackSetupPrimaryAction.RerunSetup, enrollment.ManagerAppOperationOutcome);
         if (string.IsNullOrWhiteSpace(enrollment.ManagerAppId))
-            return (SlackSetupPhase.CreateUnknown, SlackSetupNextAction.ReconcileCreate, enrollment.ManagerAppOperationOutcome);
+            return (SlackSetupPhase.CreateUnknown, SlackSetupPrimaryAction.RerunSetup, enrollment.ManagerAppOperationOutcome);
         if (!string.Equals(enrollment.ManagerAppManifestHash, desiredManifestHash, StringComparison.Ordinal))
-            return (SlackSetupPhase.ApplyingManifest, SlackSetupNextAction.ApplyManifest, null);
+            return (SlackSetupPhase.ApplyingManifest, SlackSetupPrimaryAction.RerunSetup, null);
         if (enrollment.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified)
-            return (SlackSetupPhase.Ready, SlackSetupNextAction.Ready, null);
+            return (SlackSetupPhase.Ready, SlackSetupPrimaryAction.Ready, null);
         if (enrollment.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Failed)
-            return (SlackSetupPhase.Failed, SlackSetupNextAction.SupplyRuntimeCredentials, null);
+            return (SlackSetupPhase.Failed, SlackSetupPrimaryAction.SupplyRuntimeCredentials, null);
         if (enrollment.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.NotProvided)
-            return (SlackSetupPhase.AwaitingInstall, SlackSetupNextAction.ApproveInstall, null);
-        return (SlackSetupPhase.AwaitingSocketValidation, SlackSetupNextAction.ReportSocketHello, null);
+            return (SlackSetupPhase.AwaitingInstall, SlackSetupPrimaryAction.ApproveInstall, null);
+        return (SlackSetupPhase.AwaitingSocketValidation, SlackSetupPrimaryAction.AwaitSocketVerification, null);
+    }
+
+    /// <summary>
+    /// One human sentence naming the target and what the current state means.
+    /// Internal App-level steps (create, manifest, Socket hello) stay out of
+    /// it: they are Server work, never a task the user is asked to perform.
+    /// </summary>
+    private static string Summarize(SlackWorkspaceEnrollment? enrollment, string phase)
+    {
+        var sentence = phase switch
+        {
+            SlackSetupPhase.NotStarted => "Slack setup has not started for this Workspace.",
+            SlackSetupPhase.ConfigurationRequired => "The Workspace Configuration credentials are required.",
+            SlackSetupPhase.ConfigurationUnknown => "The Configuration credential rotation result is unknown.",
+            SlackSetupPhase.CreateUnknown => "The Mohist App create result is unknown and must be reconciled.",
+            SlackSetupPhase.ApplyingManifest => "The Mohist App manifest is out of date.",
+            SlackSetupPhase.AwaitingInstall => "The Mohist App installation needs approval in Slack.",
+            SlackSetupPhase.AwaitingSocketValidation => "The Mohist App Socket identity is being verified.",
+            SlackSetupPhase.Ready => "The Mohist App is ready in this Workspace.",
+            _ => "The last setup step failed.",
+        };
+        return enrollment is null
+            ? sentence
+            : $"Workspace {enrollment.WorkspaceTeamId}: {sentence}";
     }
 
     private static SlackSetupProgress Failed(
@@ -628,7 +728,15 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
         var phase = outcome == SlackConfigurationCredentialRotationOutcome.Unknown
             ? SlackSetupPhase.ConfigurationUnknown
             : SlackSetupPhase.Failed;
-        return new(null, workspaceTeamId ?? string.Empty, phase, null, null, SlackSetupNextAction.SupplyConfiguration, errorClass);
+        return new(
+            null,
+            workspaceTeamId ?? string.Empty,
+            phase,
+            null,
+            null,
+            SlackSetupPrimaryAction.SupplyConfiguration,
+            Summarize(null, phase),
+            errorClass);
     }
 
     private sealed record ManagerAppCreateReconciliation(bool Absent, string? ErrorClass);
@@ -647,8 +755,19 @@ public sealed record SlackSetupProgress(
     string Phase,
     string? ManagerAppId,
     string? InstallUrl,
-    string NextAction,
-    string? ErrorClass);
+    string PrimaryAction,
+    string Summary,
+    string? ErrorClass = null);
+
+/// <summary>
+/// One enrolled Workspace offered as a setup choice. The team id is the
+/// selector value; the name and phase come from durable enrollment facts,
+/// because no Slack display name is persisted.
+/// </summary>
+public sealed record SlackSetupWorkspaceChoice(
+    string TeamId,
+    string Name,
+    string Phase);
 
 public static class SlackSetupPhase
 {
@@ -658,20 +777,23 @@ public static class SlackSetupPhase
     public const string CreateUnknown = "create_unknown";
     public const string AwaitingInstall = "awaiting_install";
     public const string ApplyingManifest = "applying_manifest";
-    public const string AwaitingRuntimeCredentials = "awaiting_runtime_credentials";
     public const string AwaitingSocketValidation = "awaiting_socket_validation";
     public const string Ready = "ready";
     public const string Failed = "failed";
 }
 
-public static class SlackSetupNextAction
+/// <summary>
+/// The user-facing primary actions of the setup projection. Every value is one
+/// step the caller can execute; Server-internal protocol work such as
+/// reporting a Socket hello or reconciling an App create is projected as a
+/// rerun of the guide instead of a human task.
+/// </summary>
+public static class SlackSetupPrimaryAction
 {
     public const string SupplyConfiguration = "supply_configuration";
-    public const string CreateApp = "create_app";
     public const string ApproveInstall = "approve_install";
-    public const string ApplyManifest = "apply_manifest";
     public const string SupplyRuntimeCredentials = "supply_runtime_credentials";
-    public const string ReportSocketHello = "report_socket_hello";
-    public const string ReconcileCreate = "reconcile_create";
+    public const string AwaitSocketVerification = "await_socket_verification";
+    public const string RerunSetup = "rerun_setup";
     public const string Ready = "ready";
 }

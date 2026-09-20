@@ -497,7 +497,13 @@ public sealed class SlackManagerValidationException(string message, string code)
     public string Code { get; } = code;
 }
 
-public sealed class SlackManagerConflictException(string message, string code) : Exception(message)
+public sealed class SlackManagerConflictException(string message, string code, object? details = null) : Exception(message)
 {
     public string Code { get; } = code;
+
+    /// <summary>
+    /// Machine-readable context the caller needs to act, such as the Workspace
+    /// choices an ambiguous selector must resolve to.
+    /// </summary>
+    public object? Details { get; } = details;
 }

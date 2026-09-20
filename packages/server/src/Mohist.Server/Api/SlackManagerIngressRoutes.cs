@@ -32,12 +32,14 @@ public static class SlackManagerIngressRoutes
                     "credential_address_not_supported");
             try
             {
-                return ApiResults.Ok(PublicSetupProgress(await orchestrator.SupplyConfigurationAsync(new(
-                    new(body.ConfigurationAccessToken, body.ConfigurationRefreshToken)), ct)));
+                return ApiResults.Ok(PublicSetupProgress(await orchestrator.SupplyConfigurationAsync(
+                    new(new(body.ConfigurationAccessToken, body.ConfigurationRefreshToken)),
+                    WorkspaceSelector(context),
+                    ct)));
             }
             catch (SlackManagerConflictException ex)
             {
-                return ApiResults.Conflict(ex.Message, ex.Code);
+                return ApiResults.Conflict(ex.Message, ex.Code, ex.Details);
             }
             catch (ArgumentException ex)
             {
@@ -64,12 +66,14 @@ public static class SlackManagerIngressRoutes
                     "credential_address_not_supported");
             try
             {
-                return ApiResults.Ok(PublicSetupProgress(await orchestrator.SupplyRuntimeCredentialsAsync(new(
-                    body.BotToken, body.AppLevelToken), ct)));
+                return ApiResults.Ok(PublicSetupProgress(await orchestrator.SupplyRuntimeCredentialsAsync(
+                    new(body.BotToken, body.AppLevelToken),
+                    WorkspaceSelector(context),
+                    ct)));
             }
             catch (SlackManagerConflictException ex)
             {
-                return ApiResults.Conflict(ex.Message, ex.Code);
+                return ApiResults.Conflict(ex.Message, ex.Code, ex.Details);
             }
             catch (ArgumentException ex)
             {
@@ -86,11 +90,12 @@ public static class SlackManagerIngressRoutes
             if (guard is not null) return guard;
             try
             {
-                return ApiResults.Ok(PublicSetupProgress(await orchestrator.ResumeAsync(ct)));
+                return ApiResults.Ok(PublicSetupProgress(await orchestrator.ResumeAsync(
+                    WorkspaceSelector(context), ct)));
             }
             catch (SlackManagerConflictException ex)
             {
-                return ApiResults.Conflict(ex.Message, ex.Code);
+                return ApiResults.Conflict(ex.Message, ex.Code, ex.Details);
             }
         });
 
@@ -102,11 +107,11 @@ public static class SlackManagerIngressRoutes
             SlackSetupProgress? progress;
             try
             {
-                progress = await orchestrator.GetProgressAsync(ct);
+                progress = await orchestrator.GetProgressAsync(WorkspaceSelector(context), ct);
             }
             catch (SlackManagerConflictException ex)
             {
-                return ApiResults.Conflict(ex.Message, ex.Code);
+                return ApiResults.Conflict(ex.Message, ex.Code, ex.Details);
             }
             return progress is null
                 ? ApiResults.NotFound("The workspace has not started setup.")
@@ -228,10 +233,21 @@ public static class SlackManagerIngressRoutes
     private static object PublicSetupProgress(SlackSetupProgress progress) => new
     {
         progress.Phase,
-        progress.NextAction,
+        progress.PrimaryAction,
         progress.InstallUrl,
+        progress.Summary,
         progress.ErrorClass,
     };
+
+    /// <summary>
+    /// The optional enrolled-Workspace selector travels as a query value: it
+    /// names a target and carries no credential, so it never enters a body
+    /// beside secrets.
+    /// </summary>
+    private static string? WorkspaceSelector(HttpContext context) =>
+        context.Request.Query.TryGetValue("workspaceTeamId", out var selector)
+            ? selector.ToString()
+            : null;
 
     private static IResult? RequireLoopback(HttpContext context)
     {

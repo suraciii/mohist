@@ -987,8 +987,12 @@ acknowledges Manager requests with a text message and executes management
 through that retired protocol.
 
 Workspace selection, target-bound credential verification, explicit replacement
-rotation, and the single primary action are specified above and not yet fully
-implemented. The current setup entry still reads a shared default credentials
-file when `--credentials-file` is absent and accepts no `--workspace-team`
-selector, so a terminal with several enrolled Workspaces cannot yet choose a
-target.
+rotation, and the single primary action are implemented in the Server. The
+loopback setup routes accept a `workspaceTeamId` selector, an ambiguous
+selection fails with the enrolled Workspaces as readable choices instead of
+mutating the first listed record, and the public projection carries one primary
+action, the install URL, and one human summary; App create, manifest, and
+Socket hello work never surface as user steps. The remaining gap sits at the
+entry points: the terminal guide still reads a shared default credentials file
+when `--credentials-file` is absent and passes no `--workspace-team` selector,
+so a terminal with several enrolled Workspaces cannot yet choose a target.
