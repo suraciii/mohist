@@ -10,6 +10,15 @@ Active development.
 - cli: static Go binary, command `mo` (`packages/go/mohist-cli/`)
 - `docs/` user docs · `design/` developer design · `eng/` repository engineering practices
 
+## Product Contract
+
+Before planning, implementing, or reviewing a non-trivial product or design change:
+
+1. Read the [Product Vision](docs/vision.md).
+2. Read the affected product specifications in `docs/` and design specifications in `design/`.
+3. Confirm that the change advances, or at least does not contradict, the product direction. State any intentional tension explicitly.
+4. Update `docs/vision.md` in the same change whenever the product direction changes.
+
 ## Engineering Principles
 
 - Follow KISS and YAGNI. Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.

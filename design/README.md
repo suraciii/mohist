@@ -40,6 +40,7 @@ changing a document in `design/`.
 
 ## Runtime integration
 
+- [runtime-switch-context.md](runtime-switch-context.md) — Replace an unavailable physical Runtime Session without changing the logical AgentSession or creating a synthetic user Turn.
 - [runtimes/](runtimes/README.md) — External execution backends: process, SDK, physical session, event and compatibility boundaries; OpenCode, Pi, and Codex.
 
 ## Workflow core domain
@@ -78,6 +79,7 @@ changing a document in `design/`.
 
 ## Decision records
 
+- [decisions/cli-go.md](decisions/cli-go.md) — The `mo` CLI is a static Go binary while preserving its command and output contracts.
 - [decisions/issue-owns-epic-membership.md](decisions/issue-owns-epic-membership.md) — Issue holds the current Epic membership; Project-scoped number identity and cross-aggregate recovery flow.
 - [decisions/epic-status-revival.md](decisions/epic-status-revival.md) — Epic `done` auto-revival and `closed` link rejection.
 - [decisions/composite-issues.md](decisions/composite-issues.md) — Composite Issues: explicit owner-chosen decomposition, independent of the Epic axis.
