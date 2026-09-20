@@ -26,8 +26,14 @@ Variant, Skills, or concurrency limit.
 - Slack never decides Agent configuration, execution state, or work results.
 - Installation is idempotent and resumable. It never creates a duplicate App,
   Bot, Connection, or installation record.
+- Setup collects credentials through hidden terminal input or a file named by
+  `--credentials-file`. Mohist reads no shared default credential file and
+  accepts no credential literal on the command line.
 - Agent Readiness, installation progress, connection health, and identity sync
   remain separate facts.
+- Ready is not Owner claim. A Workspace or Connection can be technically Ready
+  while an operator binding remains, and the binding is then the one next
+  action.
 - Mohist uses local Socket Mode. It needs no public callback service or Slack
   login session.
 - A Slack user who can invoke an Agent can use every capability granted to that
@@ -65,14 +71,16 @@ Mohist creates and maintains Apps through one Workspace-level **Configuration
 token pair** containing an access token and refresh token:
 
 - `mo slack setup` directs the user to Slack's App management page to generate
-  the pair and submits it through protected input without echo.
+  the pair and reads it through hidden terminal input. Automation supplies the
+  pair in a file named by `--credentials-file`; Mohist reads no shared default
+  credential file and accepts no credential literal on the command line.
 - Server rotates an expired access token with the refresh token and stores the
   new pair atomically. If the refresh token fails, App maintenance becomes
   Degraded with one next step: rerun `mo slack setup`. Installed Bots keep
   delivering messages.
 - After installation, the user provides each App's Bot token and App-level
-  token through protected CLI input. These credentials never pass through a
-  Mohist App conversation, command argument, log, or Session transcript.
+  token through the same protected input. These credentials never pass through
+  a Mohist App conversation, command argument, log, or Session transcript.
 
 There is no Slack CLI requirement and no HTTPS OAuth callback.
 
@@ -113,34 +121,43 @@ only the operator claimed during installation.
 The two guided commands are idempotent and resumable:
 
 ```text diagram
-        +-----------+
-        | Run setup |
-        +-----+-----+
-              |
-              v
-  +-----------------------+
-  | Confirm Slack install |
-  +-----------+-----------+
-              |
-              v
-     +----------------+
-     | Provide tokens |
-     +--------+-------+
-              |
-              v
- +-------------------------+
- | Verify App, Bot, Socket |
- +------------+------------+
-              |
-              v
-       +-------------+
-       | Claim Owner |
-       +------+------+
-              |
-              v
-          +-------+
-          | Ready |
-          +-------+
+                  +------------------+
+                  | Run the guide    |
+                  +--------+---------+
+                           |
+                           v
+                +---------------------+
+                | Check prerequisites |
+                +----------+----------+
+                           |
+                           v
+                +---------------------+
+                | Collect credentials |
+                | (hidden input)      |
+                +----------+----------+
+                           |
+                           v
+                +---------------------+
+                | Approve in Slack    |
+                +----------+----------+
+                           |
+                           v
+          +---------------------------+
+          | Verify App, Bot,          |
+          | permissions, and Socket   |
+          | identity                  |
+          +-------------+-------------+
+                        |
+          +-------------+-------------+
+          v                           v
+ +-------------------+   +-------------------+
+ | Workspace ready   |   | Claim the Owner   |
+ +-------------------+   +---------+---------+
+                                    |
+                                    v
+                         +-------------------+
+                         | Connection ready  |
+                         +-------------------+
 ```
 
 Each command advances automatable steps and stops only for a required user
@@ -148,26 +165,66 @@ action. A rerun reads durable progress and does not create another App. A
 Mohist App conversation starts the same Server-side flow and returns to the
 local CLI for secret-bearing steps.
 
+Every surface - terminal, Web, and Mohist App conversation - names the target,
+the current result, and exactly one executable next action. Opening a Slack
+page or answering a prompt is not approval; only verified provider facts
+advance the flow. Workspace Ready is not Owner claim: the Workspace can be
+Ready while its operator binding remains, and that binding is then the one
+next action.
+
 ### Set Up the Mohist App
 
-1. Create `~/.mohist/slack-credentials.json` with the
-   `configurationAccessToken` and `configurationRefreshToken` pair from
-   Slack's App management page, set its mode to `0600`, and run
-   `mo slack setup`. Mohist derives the workspace from Slack; no workspace ID
-   is entered.
-2. Mohist validates the Workspace, creates the Mohist App, and shows its
-   installation link. The user confirms it in the browser. Setup waits if
-   administrator approval is required.
-3. Add the installed App's `botToken` and `appLevelToken` to the same file and
-   rerun `mo slack setup`.
-4. Mohist validates the Workspace, App, Bot, and Socket, stores the credentials
-   securely, and starts the local `mohist-slack` service. It shows Ready only
-   after Socket identity is confirmed.
+1. Run `mo slack setup` on the Mohist host. The guide checks the local service
+   and operator prerequisites first and reports a missing one with its own
+   repair command before it creates any App.
+2. First enrollment: the guide names Slack's App management page for the
+   Configuration token pair and reads the access and refresh tokens through
+   hidden terminal input. Automation passes the same pair in a file named by
+   `--credentials-file`. Mohist verifies the pair, derives the Workspace from
+   Slack, and shows the verified Workspace. No team, enrollment, or App ID is
+   typed.
+3. Mohist creates or resumes the same Mohist App, applies its manifest, and
+   shows its installation link. The user confirms it in the browser. Setup
+   waits when administrator approval is required; an opened link is not
+   approval.
+4. The guide names the current App and the two Slack settings locations for its
+   Bot token and `connections:write` App-level token, and reads them through
+   hidden input. Mohist verifies Workspace, App, Bot, permissions, and Socket
+   identity before either credential becomes usable.
+5. The Workspace is Ready once identity, permission, and Socket verification
+   pass. Ready means the Mohist App can manage Apps in that Workspace; it does
+   not mean an operator has claimed the Mohist App, and a remaining operator
+   binding stays visible as the one next action.
+
+A rerun continues from the confirmed step and never creates a second App.
+Supplying a Configuration pair again is an explicit replacement: it must verify
+against the selected Workspace and Mohist App, and it is the only way
+credentials rotate on a Ready installation. A rerun with no new input rotates
+nothing and never resubmits an already consumed pair. `mo slack status` reads
+the same state and one next action and stays successful while the installation
+is truthfully incomplete.
+
+### Select the Workspace
+
+`--workspace-team <team-id>` optionally names an already enrolled Workspace for
+setup continuation, repair, or status. Without a selector, the guide selects a
+Workspace automatically only when exactly one is eligible; otherwise it lists
+readable choices and an explicit "Connect another Workspace" choice starts a
+new enrollment. A non-interactive setup call that supplies a Configuration
+pair without a selector has enrollment intent: Slack determines the team and
+that team's enrollment is created or resumed. It never assumes another
+configured Workspace is the repair target. A continuation keeps its selected
+Workspace, and a generated continuation command carries the stable selection.
+A missing or conflicting selector is reported instead of mutating the first
+enrolled Workspace.
 
 ### Install an Agent
 
 1. Select an active Agent that you may manage. Slack does not reveal Agents
-   outside your authority.
+   outside your authority. The target Workspace follows the selection rules
+   above: a conversation or continuation keeps its own, `--workspace-team`
+   names one, and a terminal with several eligible Workspaces lists readable
+   choices instead of resuming the first record in a list.
 2. Confirm the Bot name, avatar, description, requested permissions and their
    reasons, default access policy, and initial Connection Owner. The name is
    not an identity key; a collision receives a stable suffix.
@@ -179,10 +236,10 @@ local CLI for secret-bearing steps.
    pending approval resume the same App.
 5. Mohist verifies Workspace, App, and Bot identities. A mismatch stores no
    credentials and binds no Connection.
-6. Put this App's Bot token and App-level token in the same protected
-   credentials file and rerun `mo slack install-agent <agent>`. The
-   Connection is not Ready until both validate. Credentials never appear in
-   Instructions, messages, logs, or transcripts.
+6. Provide this App's Bot token and App-level token through protected input,
+   or supply them in a file named by `--credentials-file`. The Connection is
+   not Ready until both validate. Credentials never appear in Instructions,
+   messages, logs, or transcripts.
 7. Generate a short-lived, single-use claim code and send it in a DM to the
    Bot. The code is shown once; regenerating it invalidates the old code. Only
    a current full Workspace member can claim. External collaborators, Bots,
@@ -456,9 +513,10 @@ later input or another Connection gets a separate answer.
   Manager credential and `/api/slack-manager/reply`. The Server validates the
   credential's current-input origin; the Manager does not supply Slack
   credentials or choose a different destination.
-- `mo slack status` reads the configured workspace's public setup projection
-  through `/api/slack-manager/setup/progress`. The caller supplies no workspace
-  or internal setup identifier.
+- `mo slack status` reads a workspace's public setup projection through
+  `/api/slack-manager/setup/progress`. `--workspace-team` selects the enrolled
+  Workspace; without it the projection covers the only eligible Workspace or
+  reports the ambiguity. No internal setup identifier is supplied.
 
 - Status fields such as exit code, artifact count, or IDs are metadata, not the
   Agent's answer.
@@ -582,6 +640,11 @@ one signed chooser. A choice starts at most one execution from the original
 message under the selected Connection's Project. Pending choices expire after
 five minutes and recover after restart. The original sender remains the
 initiator of record.
+
+The setup guide does not yet match the journey above. It still reads
+`~/.mohist/slack-credentials.json` when `--credentials-file` is absent, offers
+no hidden terminal input, and accepts no `--workspace-team` selector, so a user
+with several enrolled Workspaces cannot yet choose one from the terminal.
 
 ## Non-goals
 
