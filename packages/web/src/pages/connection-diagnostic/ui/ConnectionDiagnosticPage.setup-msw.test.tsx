@@ -1,8 +1,9 @@
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
 import { server, useMswServer } from '../../../../tests/support/msw'
@@ -98,19 +99,25 @@ function makeQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } })
 }
 
-function renderPage() {
+function renderPageAt(entry: string) {
   const queryClient = makeQueryClient()
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider initialProjectId="proj-1" initialProjects={[PROJECT]}>
-        <MemoryRouter initialEntries={['/Test/connections/conn-1']}>
+        <MemoryRouter initialEntries={[entry]}>
+          <Link to="/Test">Leave the connection</Link>
           <Routes>
             <Route path="/:projectName/connections/:connectionId" element={<ConnectionDiagnosticPage />} />
+            <Route path="/:projectName" element={<Link to="/Test/connections/conn-1">Back to the connection</Link>} />
           </Routes>
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
   )
+}
+
+function renderPage() {
+  return renderPageAt('/Test/connections/conn-1')
 }
 
 afterEach(cleanup)
@@ -140,24 +147,105 @@ describe('ConnectionDiagnosticPage — setup step rendering (MSW)', () => {
     expect(await screen.findByTestId('connection-setup-managed-progress')).toBeInTheDocument()
     expect(screen.queryByTestId('connection-setup-identity-preview')).not.toBeInTheDocument()
     expect(screen.queryByTestId('connection-setup-credential-form')).not.toBeInTheDocument()
-    expect(await screen.findByTestId('managed-agent-app-status')).toHaveTextContent('reconcile create')
+    expect(await screen.findByTestId('connection-setup-primary-action')).toHaveAttribute('data-action', 'waiting')
+
+    const user = userEvent.setup()
+    await user.click(screen.getByText('App facts'))
+    expect(screen.getByTestId('managed-agent-app-status')).toHaveTextContent('reconcile create')
     expect(screen.getByTestId('managed-agent-app-status')).toHaveTextContent('timeout')
   })
 
-  it('keeps the install approval link and exact protected host command available after navigation', async () => {
+  it('names the Slack target instead of an internal connection id', async () => {
+    renderPage()
+
+    expect(await screen.findByTestId('connection-diagnostic-target')).toHaveTextContent('derived-bot')
+    expect(screen.getByTestId('connection-diagnostic-target')).not.toHaveTextContent('conn-1')
+
+    const user = userEvent.setup()
+    await user.click(screen.getByText('Supporting facts'))
+    expect(screen.getByTestId('connection-diagnostic-facts')).toHaveTextContent('conn-1')
+  })
+
+  it('prefers the verified Bot name over the configured one', async () => {
+    server.use(
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId/diagnostic', () =>
+        HttpResponse.json({
+          success: true,
+          data: makeDiagnostic({
+            facts: makeFacts({
+              identity: {
+                verificationStatus: 'verified',
+                verifiedBotName: 'Verified Bot',
+                botName: 'derived-bot',
+                agentName: 'Writer',
+                verifiedBotIconUrl: null,
+                avatarHash: null,
+                driftKinds: [],
+              },
+            }),
+          }),
+        }),
+      ),
+    )
+
+    renderPage()
+
+    expect(await screen.findByTestId('connection-diagnostic-target')).toHaveTextContent('Verified Bot')
+  })
+
+  it('keeps the install approval link as the single action and persists it across navigation', async () => {
     server.use(
       http.get('*/api/projects/:projectId/slack-connections/:connectionId', () =>
         HttpResponse.json({ success: true, data: makeDetail('approve_install') }),
       ),
     )
 
+    const user = userEvent.setup()
     renderPage()
 
-    const link = await screen.findByTestId('managed-agent-app-install-link')
-    expect(link).toHaveAttribute('href', 'https://api.slack.com/apps/A1/oauth')
-    expect(link).toHaveAttribute('target', '_blank')
-    expect(screen.getByTestId('managed-agent-app-local-step')).toHaveTextContent('mo slack install-agent agent-1')
-    expect(screen.getByTestId('managed-agent-app-local-step')).toHaveTextContent('--credentials-file')
+    const action = await screen.findByTestId('connection-setup-primary-action')
+    expect(action).toHaveAttribute('data-action', 'approve_install')
+    expect(action).toHaveAttribute('href', 'https://api.slack.com/apps/A1/oauth')
+    expect(action).toHaveAttribute('target', '_blank')
+    expect(screen.queryByTestId('connection-setup-host-command')).not.toBeInTheDocument()
+
+    await user.click(screen.getByText('Leave the connection'))
+    expect(await screen.findByText('Back to the connection')).toBeInTheDocument()
+
+    await user.click(screen.getByText('Back to the connection'))
+    const restored = await screen.findByTestId('connection-setup-primary-action')
+    expect(restored).toHaveAttribute('data-action', 'approve_install')
+    expect(restored).toHaveAttribute('href', 'https://api.slack.com/apps/A1/oauth')
+  })
+
+  it('shows the protected host command as the single action at the credential step', async () => {
+    server.use(
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId', () =>
+        HttpResponse.json({ success: true, data: makeDetail('provide_credentials') }),
+      ),
+    )
+
+    renderPage()
+
+    const action = await screen.findByTestId('connection-setup-primary-action')
+    expect(action).toHaveAttribute('data-action', 'host_command')
+    expect(screen.getByTestId('connection-setup-host-command')).toHaveTextContent('mo slack install-agent agent-1')
+    expect(action).toHaveTextContent('--credentials-file')
+    expect(action.querySelector('a')).toBeNull()
+  })
+
+  it('collects no credential and renders no token value on the setup page', async () => {
+    server.use(
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId', () =>
+        HttpResponse.json({ success: true, data: makeDetail('provide_credentials') }),
+      ),
+    )
+
+    renderPage()
+
+    expect(await screen.findByTestId('connection-setup-primary-action')).toBeInTheDocument()
+    expect(document.querySelectorAll('input, textarea, select')).toHaveLength(0)
+    expect(document.body.textContent ?? '').not.toMatch(/xoxb-|xapp-|xoxp-|botToken|appLevelToken/)
   })
 
   it('renders the waiting-for-service step while preserving setup progress', async () => {

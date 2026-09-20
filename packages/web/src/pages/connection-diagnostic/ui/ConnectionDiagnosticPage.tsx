@@ -1,13 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import {
-  AlertCircleIcon,
-  CheckCircle2Icon,
-  CircleOffIcon,
-  ExternalLinkIcon,
-  Settings2Icon,
-  TerminalIcon,
-} from 'lucide-react'
+import { AlertCircleIcon, CheckCircle2Icon, CircleOffIcon, Settings2Icon } from 'lucide-react'
 import {
   useAgentConnection,
   useAgentConnectionAccess,
@@ -24,11 +17,13 @@ import type {
   AgentConnectionDetailResponse,
   AccessPolicyState,
   ConnectionDiagnostic,
+  ConnectionIdentityFacts,
   SlackMemberSearchEntry,
 } from '../../../entities/agent-connection'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { SetupStepList } from './setup-step-list'
+import { SetupPrimaryAction } from './setup-primary-action'
 import { ClaimOwnerCodeStep } from './claim-owner-code-step'
 import { AccessPolicySection } from './access-policy-section'
 import { UncertainDeliveriesSection } from './uncertain-deliveries-section'
@@ -174,6 +169,11 @@ function label(value: string | null | undefined) {
   return value.replaceAll('_', ' ')
 }
 
+/** The target a user recognizes: the Slack Bot identity, never an internal id. */
+function readableTarget(identity: ConnectionIdentityFacts): string | null {
+  return identity.verifiedBotName || identity.botName || identity.agentName || null
+}
+
 function display(value: string | boolean | null | undefined) {
   if (typeof value === 'boolean') return value ? 'Online' : 'Offline'
   return value ?? 'Unknown'
@@ -203,53 +203,24 @@ function ManagedAppStatus({
   app: NonNullable<AgentConnectionDetailResponse['managedApp']>
   agentId: string
 }) {
-  const needsLocalCredentials = app.nextAction === 'approve_install' || app.nextAction === 'provide_credentials'
   return (
     <CardSection title="Managed Agent App" tone={app.nextAction === 'ready' ? 'green' : 'default'}>
       <div className="space-y-4">
-        <dl className="divide-y divide-border" data-testid="managed-agent-app-status">
-          <FactRow name="App lifecycle" value={label(app.appLifecycle)} />
-          <FactRow name="Authorization" value={label(app.authorization)} />
-          <FactRow name="Manifest" value={label(app.manifestState)} />
-          <FactRow name="Transport" value={`${label(app.transportKind)} / ${label(app.transportReadiness)}`} />
-          <FactRow name="Binding" value={label(app.bindingState)} />
-          <FactRow name="Next action" value={label(app.nextAction)} />
-          {app.unknownOutcome && <FactRow name="Unknown outcome" value={app.unknownOutcome} />}
-          {app.errorClass && <FactRow name="Error class" value={app.errorClass} />}
-        </dl>
+        <SetupPrimaryAction app={app} agentId={agentId} />
 
-        {app.nextAction === 'approve_install' && app.installUrl && (
-          <a
-            href={app.installUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            data-testid="managed-agent-app-install-link"
-          >
-            Approve in Slack
-            <ExternalLinkIcon className="size-4" />
-          </a>
-        )}
-
-        {needsLocalCredentials && (
-          <div
-            className="rounded-md border border-border bg-muted/40 p-3 text-sm"
-            data-testid="managed-agent-app-local-step"
-          >
-            <div className="flex items-start gap-2">
-              <TerminalIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              <div className="space-y-2">
-                <p className="text-foreground">
-                  After Slack approves the App, run this command on the Mohist host and enter the two tokens at its
-                  hidden prompt. Automation names a protected file with <code>--credentials-file</code>.
-                </p>
-                <code className="block overflow-x-auto rounded bg-background px-2 py-1.5 text-xs text-foreground">
-                  mo slack install-agent {agentId}
-                </code>
-              </div>
-            </div>
-          </div>
-        )}
+        <details className="border-t border-border pt-3" data-testid="managed-agent-app-facts">
+          <summary className="cursor-pointer text-sm font-medium text-foreground">App facts</summary>
+          <dl className="mt-3 divide-y divide-border" data-testid="managed-agent-app-status">
+            <FactRow name="App lifecycle" value={label(app.appLifecycle)} />
+            <FactRow name="Authorization" value={label(app.authorization)} />
+            <FactRow name="Manifest" value={label(app.manifestState)} />
+            <FactRow name="Transport" value={`${label(app.transportKind)} / ${label(app.transportReadiness)}`} />
+            <FactRow name="Binding" value={label(app.bindingState)} />
+            <FactRow name="Reported action" value={label(app.nextAction)} />
+            {app.unknownOutcome && <FactRow name="Unknown outcome" value={app.unknownOutcome} />}
+            {app.errorClass && <FactRow name="Error class" value={app.errorClass} />}
+          </dl>
+        </details>
       </div>
     </CardSection>
   )
@@ -311,6 +282,7 @@ export function ConnectionDiagnosticPage({
   const { facts } = data
   const setupProgress = facts.setupProgress
   const detail = connectionDetailQuery.data
+  const target = readableTarget(facts.identity)
 
   const isSetupComplete = setupProgress === 'complete'
 
@@ -319,7 +291,15 @@ export function ConnectionDiagnosticPage({
       <div className="mx-auto max-w-3xl space-y-5 px-4 py-6 sm:px-6">
         <header>
           <p className="text-sm text-muted-foreground">Slack Connection</p>
-          <h1 className="mt-1 break-all text-2xl font-semibold text-foreground">{connectionId}</h1>
+          <h1
+            className="mt-1 break-all text-2xl font-semibold text-foreground"
+            data-testid="connection-diagnostic-target"
+          >
+            {target ?? 'Slack Connection'}
+          </h1>
+          {target && facts.identity.agentName && (
+            <p className="mt-1 text-sm text-muted-foreground">Agent {facts.identity.agentName}</p>
+          )}
         </header>
 
         <CardSection
@@ -388,14 +368,14 @@ export function ConnectionDiagnosticPage({
         {setupProgress === 'create_app_credentials' && (
           <CardSection title="Managed Slack setup" tone="amber">
             <p className="text-sm text-muted-foreground" data-testid="connection-setup-managed-progress">
-              Mohist owns App creation and manifest setup. Use the install link and host command above; credentials are
-              never entered in this page.
+              Mohist owns App creation and manifest setup. This page shows progress and the one action you can take
+              here; tokens are entered only at the host command&rsquo;s hidden prompt.
             </p>
           </CardSection>
         )}
 
         {setupProgress === 'waiting_for_slack_service' && (
-          <CardSection title="Step 2 — Waiting for Slack service" tone="amber">
+          <CardSection title="Waiting for Slack service" tone="amber">
             <p className="text-sm text-muted-foreground" data-testid="connection-setup-waiting-for-service">
               Credentials are saved. Mohist is waiting for the Slack service (mohist-slack) to come online and verify
               the tokens. Progress is preserved; no action is needed here.
@@ -404,7 +384,7 @@ export function ConnectionDiagnosticPage({
         )}
 
         {setupProgress === 'fix_slack_setup' && (
-          <CardSection title="Step 3 — Fix Slack setup" tone="amber">
+          <CardSection title="Fix Slack setup" tone="amber">
             <p className="text-sm text-muted-foreground" data-testid="connection-setup-fix-step">
               The Slack service reported a problem with this Connection. Re-check the credentials and the workspace
               install, then wait for the service to re-verify.
@@ -413,7 +393,7 @@ export function ConnectionDiagnosticPage({
         )}
 
         {setupProgress === 'claim_owner' && (
-          <CardSection title="Step 4 — Claim owner">
+          <CardSection title="Claim owner">
             <ClaimOwnerCodeStep
               code={claimOwnerMutation.data?.code ?? null}
               expiresAt={claimOwnerMutation.data?.expiresAt ?? null}
@@ -459,6 +439,7 @@ export function ConnectionDiagnosticPage({
         <details className="border-y border-border py-3" data-testid="connection-diagnostic-facts">
           <summary className="cursor-pointer text-sm font-medium text-foreground">Supporting facts</summary>
           <dl className="mt-3 divide-y divide-border">
+            <FactRow name="Connection" value={connectionId} />
             <FactRow name="Setup" value={label(facts.setupProgress)} />
             <FactRow name="Desired state" value={label(facts.desiredState)} />
             <FactRow name="Connection health" value={label(facts.connectionHealth)} />
