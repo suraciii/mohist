@@ -56,6 +56,13 @@ Each entry states one decision; the body below carries the rules.
 - **Installation DSL: `mo slack setup` / `mo slack install-agent <agent>`.**
   `setup-agent` conflicts with Agent Readiness setup; `create` falsely claims
   creation when the user is installing an Agent into Slack.
+- **A selector chooses a target; it never proves identity or grants
+  authority.** `--workspace-team` names an enrolled Workspace; provider
+  verification against Slack decides identity, and the management-authority
+  model decides permission.
+- **One primary action, computed by Server.** Terminal, Web, and Mohist App
+  conversation render the same progress projection; supporting facts never
+  compete as a second task.
 - **Conversational creation asks at most for name and daily responsibility**,
   creates a real Agent with defaults, then guides Slack installation. A Mohist
   App DM is already an authorization boundary; no draft approval state.
@@ -342,7 +349,9 @@ copies Agent App runtime credentials:
 - Mohist App runtime credentials live at the Enrollment address as an opaque
   persisted reference. Bot token and App-level token are distinct secret kinds
   under one owner reference. `mo slack setup` is the only normal provision,
-  repair, and rotation entry point; repeated setup resumes one record.
+  repair, and rotation entry point; repeated setup resumes one record. Every
+  submission is verified against the resolved target before it is written, and
+  rotation requires an explicit replacement pair.
 - Agent App client/signing secret, App-level token (`xapp-`), and Bot token
   (`xoxb-`) live at the AgentApp address.
 - A Connection obtains data-plane credentials only through an active AgentApp
@@ -426,6 +435,79 @@ The `install-agent` idempotency key is `(enrollment_id, AgentId)`. The
 conversational operation performs only the non-secret steps and returns the
 same progress; at a secret step it provides the link and the local
 continuation command. Chat text is never a secret-input channel.
+
+### Workspace Selection
+
+Setup has three possible inputs: an explicit `--workspace-team <team-id>`
+selector, the authenticated conversation or continuation target, and a supplied
+Configuration pair. Resolution order is fixed: the conversation or continuation
+target first, then the explicit selector, then automatic selection only when
+exactly one Enrollment is eligible. Conflicting selectors fail. No fallback
+chooses the first Enrollment a list returns.
+
+First enrollment derives its identity from the provider. The successful
+Configuration rotation returns the provider-confirmed `team_id`, which becomes
+the Enrollment identity and the setup idempotency key. A non-interactive setup
+call that supplies a Configuration pair without a selector therefore carries
+enrollment intent: verify the pair, resolve its team, and create or resume that
+team's Enrollment. It must not first treat another configured Workspace as the
+repair target, because that would mutate a record the caller never selected.
+
+A continuation preserves its selected Workspace. The generated continuation
+command carries the stable selector, and only that Enrollment accepts the next
+write. A selector naming an unknown or ineligible Enrollment fails before any
+external write. A runtime credential pair carries no team identity of its own,
+so runtime-only input requires the selected Enrollment or exactly one eligible
+target before any write; it never selects a target by itself. Selecting an
+Enrollment grants no management permission.
+
+### Target-Bound Credential Verification
+
+Every credential write is bound to the resolved target before submission. A
+Configuration pair is accepted only when its verified `team_id` equals the
+selected Enrollment's team. A runtime pair is accepted only when it verifies as
+the selected Workspace's Mohist App Bot identity and App-level token. A mismatch
+rejects the submission and leaves the selected target, its stored credentials,
+and its binding unchanged; verification never redirects a write to another
+Enrollment, App, or Connection.
+
+The existing staged order still holds: Workspace and Bot verification succeed
+before any App-level token write, an App-level token is stored only as an
+unverified candidate, and a candidate for another team, App, or Bot is deleted
+and remains unusable. A candidate carries no business traffic before identity
+and Socket verification succeed, and a verification failure preserves or
+recovers the previously verified credentials instead of making the mismatched
+candidate usable.
+
+Replacement rotation is explicit and works on an installation already marked
+ready. Supplying a replacement pair is the only path that changes a verified
+pair; the replacement must resolve to the same team and Mohist App before stored
+credentials change. A rerun with no replacement input rotates nothing and never
+resubmits an already consumed Configuration pair. A replacement that fails
+verification leaves the previously verified credentials in place and returns the
+guide to the credential step.
+
+### Public Progress Projection
+
+Server owns progress. The projection is computed from the durable Enrollment,
+AgentApp, Connection, credential, and lease facts; terminal, Web, and Mohist App
+conversation render that same state and exactly one primary action. App-level
+progress such as create, manifest application, or unknown-outcome
+reconciliation is supporting evidence, and internal protocol actions such as
+reporting a Socket hello are never presented as human tasks.
+
+The one primary action must be executable by the caller: a Slack page link, a
+protected host command, an existing service action, or an explicit recovery
+operation. A Workspace choice is projected only together with actual readable
+choices. Reading status or refreshing a page performs no write: it rotates no
+credential, regenerates no claim code, and advances no state machine.
+
+Workspace `ready` is a technical fact - App, Bot, permissions, and Socket
+identity verified - not completion of the user journey. It is not Owner claim
+and not Agent execution availability. A remaining operator binding, an
+unavailable Runtime, or a Configuration-token outage is projected as the one
+next action with its own reason, while installed Bot traffic keeps its separate
+health fact.
 
 ### Canonical Manifests
 
@@ -903,3 +985,10 @@ messages. The interim model-output management protocol is deleted rather than
 preserved for compatibility. One gap remains: the running build still
 acknowledges Manager requests with a text message and executes management
 through that retired protocol.
+
+Workspace selection, target-bound credential verification, explicit replacement
+rotation, and the single primary action are specified above and not yet fully
+implemented. The current setup entry still reads a shared default credentials
+file when `--credentials-file` is absent and accepts no `--workspace-team`
+selector, so a terminal with several enrolled Workspaces cannot yet choose a
+target.
