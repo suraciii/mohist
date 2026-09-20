@@ -62,24 +62,6 @@ public sealed class SlackProviderOptions
     public string[] DevelopmentExternalWebUrlAllowlist { get; set; } = [];
 
     /// <summary>
-    /// Character budget for the rendered thread-history background on a
-    /// first-mention launch. When the bounded range exceeds the budget
-    /// the oldest whole messages are dropped first; a stable marker
-    /// surfaces in both the Slack acceptance reply and the agent input.
-    /// Approximately a few paragraphs of plaintext; the budget is
-    /// deterministic and avoids a tokenizer dependency for v1.
-    /// </summary>
-    public int StartupContextCharacterBudget { get; set; } = 8_000;
-
-    /// <summary>
-    /// Maximum number of <c>conversations.replies</c> pages fetched for
-    /// one first-mention launch. Bounds cost/latency on huge threads
-    /// independently of the character budget. Pages are 200 messages
-    /// each, so the default reads at most 2000 messages.
-    /// </summary>
-    public int StartupContextPaginationDepthCap { get; set; } = 10;
-
-    /// <summary>
     /// Conservative Slack event retention window. When the adapter
     /// reconnects after an outage of at least this duration, the
     /// Connection's <c>OfflineGapAt</c> is stamped so the diagnostic
@@ -112,8 +94,6 @@ public sealed class SlackProviderOptions
         DevelopmentExternalWebUrlAllowlist = section.GetSection(nameof(DevelopmentExternalWebUrlAllowlist)).Get<string[]>()
             ?? DevelopmentExternalWebUrlAllowlist;
         OutboxReminderPeriod = section.GetValue(nameof(OutboxReminderPeriod), OutboxReminderPeriod);
-        StartupContextCharacterBudget = section.GetValue(nameof(StartupContextCharacterBudget), StartupContextCharacterBudget);
-        StartupContextPaginationDepthCap = section.GetValue(nameof(StartupContextPaginationDepthCap), StartupContextPaginationDepthCap);
         SlackEventRetentionWindow = section.GetValue(nameof(SlackEventRetentionWindow), SlackEventRetentionWindow);
     }
 }

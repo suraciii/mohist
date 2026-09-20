@@ -218,7 +218,6 @@ internal sealed class SlackChannelLaunchService : IScopedService
                         request.Identity.MessageTs,
                         request.ThreadAnchor),
                     workspaceName: workspaceName,
-                    startupContext: request.StartupContext,
                     attachments: attachmentBinding.AcceptedDescriptors,
                     attachmentIds: attachmentBinding.AttachmentIds,
                     preMintedSessionId: request.PreMintedLaunchIds.SessionId,
@@ -399,7 +398,6 @@ internal sealed record SlackChannelLaunchRequest(
     string ThreadAnchor,
     string? ThreadTs,
     SlackChannelLaunchServiceLaunchIds PreMintedLaunchIds,
-    AgentStartupContext? StartupContext,
     SlackThreadSessionMappingStore ThreadMapping);
 
 internal sealed record SlackChannelLaunchServiceLaunchIds(

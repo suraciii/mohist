@@ -74,6 +74,15 @@ public sealed class SlackAdapterLeaseService(
     public static readonly TimeSpan ValidationLeaseTtl = TimeSpan.FromMinutes(2);
     public static readonly TimeSpan RuntimeLeaseTtl = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Operator identity for Server-initiated calls. The target provider uses
+    /// the operator id to attribute a lease, and a Server read holds none: it
+    /// declares the deployment's own identity instead of borrowing an
+    /// adapter's. The id is never a lease owner, so it can never validate a
+    /// runtime lease.
+    /// </summary>
+    private const string ServerOperatorId = "mohist-server";
+
     public async Task<IReadOnlyList<SlackLeaseTargetView>> DiscoverAsync(
         string operatorId, CancellationToken ct = default)
     {
@@ -112,6 +121,25 @@ public sealed class SlackAdapterLeaseService(
             Fingerprint(appToken), ct);
         return new SlackValidationLeaseResult(
             lease.LeaseId, lease.Generation, lease.ExpiresAt, target.ExpectedAppId, appToken);
+    }
+
+    /// <summary>
+    /// Server-initiated credential read: resolves the verified Bot token the
+    /// Connection's target pins, without requiring a runtime lease. HTTP read
+    /// availability is separate from Socket connection health, so a
+    /// Server-owned read must not borrow an adapter lease; it still fails
+    /// closed when the target is gone, inactive, unverified, or
+    /// Bot-token-less. Returns null on any failure; the token never leaves the
+    /// call chain.
+    /// </summary>
+    public async Task<string?> ResolveVerifiedBotTokenForServerAsync(
+        SlackLeaseTargetRef targetRef, CancellationToken ct = default)
+    {
+        RequireTarget(targetRef);
+        var target = await targetProvider.GetTargetAsync(ServerOperatorId, targetRef, ct);
+        if (target is null || !target.Active || !target.CredentialVerified || !target.BotTokenProvisioned)
+            return null;
+        return await secretResolver.LoadAsync(target.BotTokenAddress, ct);
     }
 
     public async Task<SlackHelloOutcome> ReportHelloAsync(
