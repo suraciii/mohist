@@ -94,8 +94,10 @@ mo run approve --issue <number>   # Enter Integrate.
 mo run request-changes --issue <number> --message "Describe the required changes"
 ```
 
-Request Changes runs the Feedback Tasks bound to the WorkflowRun. Read the review report and
-diff before a manual decision. See [Core Concepts: Approval Point](concepts.md#approval-point) for the complete sequence.
+Request Changes runs the Feedback Tasks bound to the WorkflowRun. The Agent Feedback Task reports one
+response per requested change in its original order, including what changed, the verification result, and
+any remaining or unverified work. Read the review report and diff before a manual decision. See
+[Core Concepts: Approval Point](concepts.md#approval-point) for the complete sequence.
 
 ## Integrate
 
