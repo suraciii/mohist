@@ -26,17 +26,19 @@ function recordTaskLogRequest(payload: unknown = { lines: [], nextCursor: null, 
 }
 
 describe('getIssueWorkflowTaskLog client', () => {
-  it('issues a GET to the issue-path logs endpoint', async () => {
+  it('issues a GET to the issue-path logs endpoint addressed by the originating run', async () => {
     const requests = recordTaskLogRequest({
       lines: [{ seq: 1, timestamp: '2026-07-03T08:00:00.000Z', source: 'action:rebase', text: 'CONFLICT' }],
       nextCursor: 1,
       truncated: false,
     })
 
-    const result = await getIssueWorkflowTaskLog(161, 'build.1', {}, 'proj-1')
+    const result = await getIssueWorkflowTaskLog(161, 'build.1', {}, 'proj-1', 'wr-1')
 
     expect(requests).toHaveLength(1)
-    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/issues/161/workflow/tasks/build.1/logs')
+    expect(requestPath(requests[0])).toBe(
+      '/api/projects/proj-1/issues/161/workflow/tasks/build.1/logs?workflowRunId=wr-1',
+    )
     expect(requests[0].method).toBe('GET')
     expect(requests[0].headers.get('content-type')).toBe('application/json')
     expect(result.lines).toHaveLength(1)
@@ -46,27 +48,33 @@ describe('getIssueWorkflowTaskLog client', () => {
     expect(result.truncated).toBe(false)
   })
 
-  it('serializes cursor and limit query params', async () => {
+  it('serializes the originating run with cursor and limit query params', async () => {
     const requests = recordTaskLogRequest()
 
-    await getIssueWorkflowTaskLog(161, 'build.1', { cursor: 5, limit: 50 }, 'proj-1')
+    await getIssueWorkflowTaskLog(161, 'build.1', { cursor: 5, limit: 50 }, 'proj-1', 'wr-1')
 
-    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/issues/161/workflow/tasks/build.1/logs?cursor=5&limit=50')
+    expect(requestPath(requests[0])).toBe(
+      '/api/projects/proj-1/issues/161/workflow/tasks/build.1/logs?workflowRunId=wr-1&cursor=5&limit=50',
+    )
   })
 
   it('encodes taskId in the path', async () => {
     const requests = recordTaskLogRequest()
 
-    await getIssueWorkflowTaskLog(161, 'integrate:publish.1', {}, 'proj-1')
+    await getIssueWorkflowTaskLog(161, 'integrate:publish.1', {}, 'proj-1', 'wr-1')
 
-    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/issues/161/workflow/tasks/integrate%3Apublish.1/logs')
+    expect(requestPath(requests[0])).toBe(
+      '/api/projects/proj-1/issues/161/workflow/tasks/integrate%3Apublish.1/logs?workflowRunId=wr-1',
+    )
   })
 
-  it('omits query string when no params are provided', async () => {
+  it('omits cursor and limit when no paging params are provided', async () => {
     const requests = recordTaskLogRequest()
 
-    await getIssueWorkflowTaskLog(161, 'build.1', {}, 'proj-1')
+    await getIssueWorkflowTaskLog(161, 'build.1', {}, 'proj-1', 'wr-1')
 
-    expect(requestPath(requests[0])).toBe('/api/projects/proj-1/issues/161/workflow/tasks/build.1/logs')
+    expect(requestPath(requests[0])).toBe(
+      '/api/projects/proj-1/issues/161/workflow/tasks/build.1/logs?workflowRunId=wr-1',
+    )
   })
 })

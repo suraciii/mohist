@@ -58,10 +58,11 @@ async function fetchIssueWorkflowTaskLogOrEmpty(
   taskId: string,
   params: IssueWorkflowTaskLogParams,
   projectId: string,
+  workflowRunId: string,
   signal?: AbortSignal,
 ): Promise<TaskLogPage> {
   try {
-    return await getIssueWorkflowTaskLog(issueNumber, taskId, params, projectId, signal)
+    return await getIssueWorkflowTaskLog(issueNumber, taskId, params, projectId, workflowRunId, signal)
   } catch (err) {
     if (err instanceof ApiError && err.status === 404 && isMissingTaskLogEndpoint(err)) {
       return EMPTY_TASK_LOG_PAGE
@@ -83,11 +84,19 @@ export function issueWorkflowTaskLogQueryOptions(
   workflowRunId?: string | null,
 ) {
   const safeTaskId = typeof taskId === 'string' && taskId.length > 0 ? taskId : null
+  const safeWorkflowRunId = typeof workflowRunId === 'string' && workflowRunId.length > 0 ? workflowRunId : null
   return {
     queryKey: issueWorkflowKeys.taskLog(projectId, issueNumber, safeTaskId, workflowRunId, params),
     queryFn: (context?: QueryFunctionContext) =>
-      fetchIssueWorkflowTaskLogOrEmpty(issueNumber, safeTaskId!, params, projectId!, context?.signal),
-    enabled: enabled && issueNumber > 0 && !!safeTaskId && !!projectId,
+      fetchIssueWorkflowTaskLogOrEmpty(
+        issueNumber,
+        safeTaskId!,
+        params,
+        projectId!,
+        safeWorkflowRunId!,
+        context?.signal,
+      ),
+    enabled: enabled && issueNumber > 0 && !!safeTaskId && !!projectId && !!safeWorkflowRunId,
   } as const
 }
 

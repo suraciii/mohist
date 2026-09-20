@@ -112,6 +112,21 @@ Each entry exposes only monotonic `seq`, timestamp, source, and redacted text.
 Reads use owner and work identity, with sequence as cursor and jump anchor.
 Storage layout and index names are not part of this contract.
 
+A read of an Action attempt is addressed by the originating WorkflowRun and that
+Run's exact attempt. The addressed Issue and Project must match the Run's own
+binding; a mismatch is an error, never a fallback to the Issue's current Run or
+a retry. Resolution uses the Run's persisted attempt-to-work mapping, so a
+later Run cannot change what an earlier result points at.
+
+A page reports `lines`, `nextCursor`, and `truncated`. `nextCursor` continues
+the read; `truncated` records that capture-time retention dropped head lines.
+An empty page means no retained lines are available for that attempt, not that
+the command produced no output. Reaching the end of a page means no further
+retained lines on that read, not that the original output was complete. A
+retained result prefix and its `stdoutTruncated` / `stderrTruncated` flags state
+completeness at the Action result boundary; those flags are separate from this
+log's retention facts.
+
 The related records have separate meanings:
 
 - Transcript records what the Agent said and did. It belongs to the Session.

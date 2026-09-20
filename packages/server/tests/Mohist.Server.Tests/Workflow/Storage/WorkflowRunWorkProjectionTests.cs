@@ -54,8 +54,8 @@ public sealed class WorkflowRunWorkProjectionTests
             var state = "{\"metadata\":{\"projectId\":\"proj_read\"}}";
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO "WorkflowRuns"
-                    ("WorkflowRunId", "State", "Status", "MetadataProjectId", "ActiveWorkId", "ActiveWorkerId", "ETag")
-                VALUES ('wr_projection_read', {state}, 'running', 'proj_read', 'work-1', 'runner-1', 1);
+                    ("WorkflowRunId", "State", "Status", "MetadataProjectId", "IssueNumber", "ActiveWorkId", "ActiveWorkerId", "ETag")
+                VALUES ('wr_projection_read', {state}, 'running', 'proj_read', 42, 'work-1', 'runner-1', 1);
                 INSERT INTO "WorkflowRuns"
                     ("WorkflowRunId", "State", "Status", "ActiveWorkId", "ActiveWorkerId", "ETag")
                 VALUES ('wr_projection_stale', {"{\"status\":\"completed\"}"}, 'completed', 'work-1', 'runner-1', 1);
@@ -71,7 +71,8 @@ public sealed class WorkflowRunWorkProjectionTests
         Assert.Equal("task-1", await projection.ResolveTaskIdAsync("wr_projection_read", "work-1"));
         Assert.True(await projection.IsActiveWorkAsync("wr_projection_read", "work-1", "runner-1"));
         Assert.False(await projection.IsActiveWorkAsync("wr_projection_read", "work-1", "runner-2"));
-        Assert.Equal("proj_read", await projection.GetProjectIdAsync("wr_projection_read"));
+        Assert.Equal(new WorkflowRunIssueScope("proj_read", 42), await projection.GetIssueScopeAsync("wr_projection_read"));
+        Assert.Null(await projection.GetIssueScopeAsync("wr_missing"));
         Assert.Null(await projection.ResolveWorkIdAsync("wr_missing", "task-1"));
         Assert.False(await projection.IsActiveWorkAsync("wr_missing", "work-1", "runner-1"));
         Assert.False(await projection.IsActiveWorkAsync("wr_projection_stale", "work-1", "runner-1"));

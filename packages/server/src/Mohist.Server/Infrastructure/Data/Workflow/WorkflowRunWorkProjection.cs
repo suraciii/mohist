@@ -7,6 +7,12 @@ namespace Mohist.Server.Infrastructure.Data.Workflow;
 
 public sealed record WorkflowRunTaskMapEntry(string TaskId, string WorkId);
 
+/// <summary>
+/// The Issue binding recorded on a WorkflowRun row. Null members mean the
+/// run state does not carry that binding.
+/// </summary>
+public sealed record WorkflowRunIssueScope(string? ProjectId, int? IssueNumber);
+
 public sealed record WorkflowRunWorkProjectionData(
     string WorkflowRunId,
     IReadOnlyList<WorkflowRunTaskMapEntry> TaskMap,
@@ -48,7 +54,7 @@ public interface IWorkflowRunWorkProjection
     Task<string?> ResolveTaskIdAsync(string workflowRunId, string workId, CancellationToken ct = default);
     Task<bool> IsActiveWorkAsync(string workflowRunId, string workId, string runnerId, CancellationToken ct = default);
     Task<bool> IsTerminalWorkAsync(string workflowRunId, string workId, string runnerId, CancellationToken ct = default);
-    Task<string?> GetProjectIdAsync(string workflowRunId, CancellationToken ct = default);
+    Task<WorkflowRunIssueScope?> GetIssueScopeAsync(string workflowRunId, CancellationToken ct = default);
 }
 
 public sealed class WorkflowRunWorkProjection : IWorkflowRunWorkProjection
@@ -141,16 +147,20 @@ public sealed class WorkflowRunWorkProjection : IWorkflowRunWorkProjection
                 && row.RunnerId == runnerId, ct);
     }
 
-    public async Task<string?> GetProjectIdAsync(string workflowRunId, CancellationToken ct = default)
+    public async Task<WorkflowRunIssueScope?> GetIssueScopeAsync(
+        string workflowRunId,
+        CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(workflowRunId))
             return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await db.WorkflowRuns
+        var row = await db.WorkflowRuns
             .AsNoTracking()
             .Where(row => row.WorkflowRunId == workflowRunId)
-            .Select(row => row.MetadataProjectId)
+            .Select(row => new { row.MetadataProjectId, row.IssueNumber })
             .SingleOrDefaultAsync(ct);
+
+        return row is null ? null : new WorkflowRunIssueScope(row.MetadataProjectId, row.IssueNumber);
     }
 }

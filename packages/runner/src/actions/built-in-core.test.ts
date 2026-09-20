@@ -122,6 +122,92 @@ describe('core/script timeout enforcement', () => {
   })
 })
 
+describe('core/script result stream truncation', () => {
+  async function runWithStreams(stdout: string, stderr: string) {
+    const result = await withTestRunnerResources(() => scriptAction({ run: 'emit output' }, makeHost()), {
+      commandRunner: { run: async () => ({ exitCode: 0, stdout, stderr }) },
+    })
+    expect(result.error).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+    expect(result.output).not.toBeNull()
+    return result.output!
+  }
+
+  it.each([0, 19_999, 20_000])('KeepsAStdoutStreamOf%sUnitsUnchangedAndFlagsItNotTruncated', async (length) => {
+    const stdout = 'o'.repeat(length)
+
+    const output = await runWithStreams(stdout, '')
+
+    expect(output.stdout).toBe(stdout)
+    expect(output.stdoutTruncated).toBe(false)
+    expect(output.stderrTruncated).toBe(false)
+  })
+
+  it.each([0, 19_999, 20_000])('KeepsAStderrStreamOf%sUnitsUnchangedAndFlagsItNotTruncated', async (length) => {
+    const stderr = 'e'.repeat(length)
+
+    const output = await runWithStreams('', stderr)
+
+    expect(output.stderr).toBe(stderr)
+    expect(output.stderrTruncated).toBe(false)
+    expect(output.stdoutTruncated).toBe(false)
+  })
+
+  it('KeepsTheFirst20000UnitsOfA20001UnitStdoutStreamAndFlagsOnlyStdoutTruncated', async () => {
+    const stdout = 'o'.repeat(20_001)
+
+    const output = await runWithStreams(stdout, '')
+
+    expect(output.stdout).toBe(stdout.slice(0, 20_000))
+    expect(output.stdout).toBe('o'.repeat(20_000))
+    expect(output.stdoutTruncated).toBe(true)
+    expect(output.stderrTruncated).toBe(false)
+  })
+
+  it('KeepsTheFirst20000UnitsOfA20001UnitStderrStreamAndFlagsOnlyStderrTruncated', async () => {
+    const stderr = 'e'.repeat(20_001)
+
+    const output = await runWithStreams('', stderr)
+
+    expect(output.stderr).toBe(stderr.slice(0, 20_000))
+    expect(output.stderr).toBe('e'.repeat(20_000))
+    expect(output.stderrTruncated).toBe(true)
+    expect(output.stdoutTruncated).toBe(false)
+  })
+
+  it('FlagsBothStreamsIndependentlyWhenBothExceedTheBoundary', async () => {
+    const stdout = 'o'.repeat(25_000)
+    const stderr = 'e'.repeat(20_001)
+
+    const output = await runWithStreams(stdout, stderr)
+
+    expect(output.stdout).toBe(stdout.slice(0, 20_000))
+    expect(output.stderr).toBe(stderr.slice(0, 20_000))
+    expect(output.stdoutTruncated).toBe(true)
+    expect(output.stderrTruncated).toBe(true)
+  })
+
+  it('SlicesByJavascriptStringUnitsWithoutNormalizingUnicodeBoundaries', async () => {
+    const stdout = '🙂'.repeat(10_001)
+
+    const output = await runWithStreams(stdout, '')
+
+    expect(output.stdout).toBe(stdout.slice(0, 20_000))
+    expect(output.stdoutTruncated).toBe(true)
+  })
+
+  it('DoesNotTrimOrAnnotateStreamContentBelowTheBoundary', async () => {
+    const stdout = '  \n padded output \n  '
+
+    const output = await runWithStreams(stdout, '\twarning\n')
+
+    expect(output.stdout).toBe(stdout)
+    expect(output.stderr).toBe('\twarning\n')
+    expect(output.stdoutTruncated).toBe(false)
+    expect(output.stderrTruncated).toBe(false)
+  })
+})
+
 describe('core/script failure diagnostics', () => {
   it('does not inject a hidden resource profile into command execution', async () => {
     let captured: unknown
