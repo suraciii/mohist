@@ -36,20 +36,14 @@ function buildAgentUsageQueryString(range?: InsightsRange): string {
 }
 
 export function fetchAgentUsage(projectId: string, range?: InsightsRange) {
-  return request<AgentUsageTimeseriesDto>(
-    projectApiPath(projectId, `/agent/usage${buildAgentUsageQueryString(range)}`),
-  )
+  return request<AgentUsageTimeseriesDto>(projectApiPath(projectId, `/agent/usage${buildAgentUsageQueryString(range)}`))
 }
 
 export const agentUsageQueryKey = (projectId?: string | null, range?: InsightsRange | null) => {
   if (range) {
-    return projectId
-      ? ['agent', 'usage', range, projectId] as const
-      : ['agent', 'usage', range] as const
+    return projectId ? (['agent', 'usage', range, projectId] as const) : (['agent', 'usage', range] as const)
   }
-  return projectId
-    ? ['agent', 'usage', projectId] as const
-    : ['agent', 'usage'] as const
+  return projectId ? (['agent', 'usage', projectId] as const) : (['agent', 'usage'] as const)
 }
 
 export function agentUsageQueryOptions(projectId: string | null | undefined, range?: InsightsRange) {

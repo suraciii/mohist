@@ -16,22 +16,120 @@ function buildUsageData(overrides?: Partial<AgentUsageTimeseriesDto>): AgentUsag
     rangeTo: '2026-06-28T23:59:59',
     bucketGranularity: 'day',
     buckets: [
-      { bucketStart: '2026-06-22T00:00:00', bucketEnd: '2026-06-22T23:59:59', inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 10, costCurrency: 'USD' },
-      { bucketStart: '2026-06-23T00:00:00', bucketEnd: '2026-06-23T23:59:59', inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 25, costCurrency: 'USD' },
-      { bucketStart: '2026-06-24T00:00:00', bucketEnd: '2026-06-24T23:59:59', inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 5, costCurrency: 'USD' },
-      { bucketStart: '2026-06-25T00:00:00', bucketEnd: '2026-06-25T23:59:59', inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 30, costCurrency: 'USD' },
-      { bucketStart: '2026-06-26T00:00:00', bucketEnd: '2026-06-26T23:59:59', inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 15, costCurrency: 'USD' },
-      { bucketStart: '2026-06-27T00:00:00', bucketEnd: '2026-06-27T23:59:59', inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 20, costCurrency: 'USD' },
-      { bucketStart: '2026-06-28T00:00:00', bucketEnd: '2026-06-28T23:59:59', inputTokens: 0, outputTokens: 0, totalTokens: 0, costAmount: 8, costCurrency: 'USD' },
+      {
+        bucketStart: '2026-06-22T00:00:00',
+        bucketEnd: '2026-06-22T23:59:59',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAmount: 10,
+        costCurrency: 'USD',
+      },
+      {
+        bucketStart: '2026-06-23T00:00:00',
+        bucketEnd: '2026-06-23T23:59:59',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAmount: 25,
+        costCurrency: 'USD',
+      },
+      {
+        bucketStart: '2026-06-24T00:00:00',
+        bucketEnd: '2026-06-24T23:59:59',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAmount: 5,
+        costCurrency: 'USD',
+      },
+      {
+        bucketStart: '2026-06-25T00:00:00',
+        bucketEnd: '2026-06-25T23:59:59',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAmount: 30,
+        costCurrency: 'USD',
+      },
+      {
+        bucketStart: '2026-06-26T00:00:00',
+        bucketEnd: '2026-06-26T23:59:59',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAmount: 15,
+        costCurrency: 'USD',
+      },
+      {
+        bucketStart: '2026-06-27T00:00:00',
+        bucketEnd: '2026-06-27T23:59:59',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAmount: 20,
+        costCurrency: 'USD',
+      },
+      {
+        bucketStart: '2026-06-28T00:00:00',
+        bucketEnd: '2026-06-28T23:59:59',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costAmount: 8,
+        costCurrency: 'USD',
+      },
     ],
     cumulativeCostPerShip: [
-      { dayEnd: '2026-06-22T23:59:59', cumulativeCost: 10, currency: 'USD', cumulativeShippedCount: 1, costPerShip: 10 },
-      { dayEnd: '2026-06-23T23:59:59', cumulativeCost: 35, currency: 'USD', cumulativeShippedCount: 2, costPerShip: 17.5 },
-      { dayEnd: '2026-06-24T23:59:59', cumulativeCost: 40, currency: 'USD', cumulativeShippedCount: 2, costPerShip: 20 },
-      { dayEnd: '2026-06-25T23:59:59', cumulativeCost: 70, currency: 'USD', cumulativeShippedCount: 3, costPerShip: 23.33 },
-      { dayEnd: '2026-06-26T23:59:59', cumulativeCost: 85, currency: 'USD', cumulativeShippedCount: 4, costPerShip: 21.25 },
-      { dayEnd: '2026-06-27T23:59:59', cumulativeCost: 105, currency: 'USD', cumulativeShippedCount: 5, costPerShip: 21 },
-      { dayEnd: '2026-06-28T23:59:59', cumulativeCost: 113, currency: 'USD', cumulativeShippedCount: 6, costPerShip: 18.83 },
+      {
+        dayEnd: '2026-06-22T23:59:59',
+        cumulativeCost: 10,
+        currency: 'USD',
+        cumulativeShippedCount: 1,
+        costPerShip: 10,
+      },
+      {
+        dayEnd: '2026-06-23T23:59:59',
+        cumulativeCost: 35,
+        currency: 'USD',
+        cumulativeShippedCount: 2,
+        costPerShip: 17.5,
+      },
+      {
+        dayEnd: '2026-06-24T23:59:59',
+        cumulativeCost: 40,
+        currency: 'USD',
+        cumulativeShippedCount: 2,
+        costPerShip: 20,
+      },
+      {
+        dayEnd: '2026-06-25T23:59:59',
+        cumulativeCost: 70,
+        currency: 'USD',
+        cumulativeShippedCount: 3,
+        costPerShip: 23.33,
+      },
+      {
+        dayEnd: '2026-06-26T23:59:59',
+        cumulativeCost: 85,
+        currency: 'USD',
+        cumulativeShippedCount: 4,
+        costPerShip: 21.25,
+      },
+      {
+        dayEnd: '2026-06-27T23:59:59',
+        cumulativeCost: 105,
+        currency: 'USD',
+        cumulativeShippedCount: 5,
+        costPerShip: 21,
+      },
+      {
+        dayEnd: '2026-06-28T23:59:59',
+        cumulativeCost: 113,
+        currency: 'USD',
+        cumulativeShippedCount: 6,
+        costPerShip: 18.83,
+      },
     ],
     ...overrides,
   }
@@ -292,8 +390,20 @@ describe('CostTrendChart', () => {
   it('skips null costPerShip points (undefined)', async () => {
     const data = buildUsageData()
     if (data.cumulativeCostPerShip) {
-      data.cumulativeCostPerShip[1] = { dayEnd: '2026-06-23T23:59:59', cumulativeCost: null, currency: null, cumulativeShippedCount: 0, costPerShip: null }
-      data.cumulativeCostPerShip[3] = { dayEnd: '2026-06-25T23:59:59', cumulativeCost: null, currency: null, cumulativeShippedCount: 0, costPerShip: null }
+      data.cumulativeCostPerShip[1] = {
+        dayEnd: '2026-06-23T23:59:59',
+        cumulativeCost: null,
+        currency: null,
+        cumulativeShippedCount: 0,
+        costPerShip: null,
+      }
+      data.cumulativeCostPerShip[3] = {
+        dayEnd: '2026-06-25T23:59:59',
+        cumulativeCost: null,
+        currency: null,
+        cumulativeShippedCount: 0,
+        costPerShip: null,
+      }
     }
 
     mockUsageResponse(data)
@@ -310,7 +420,13 @@ describe('CostTrendChart', () => {
   it('does not bridge null costPerShip gaps in the trend path', async () => {
     const data = buildUsageData()
     if (data.cumulativeCostPerShip) {
-      data.cumulativeCostPerShip[1] = { dayEnd: '2026-06-23T23:59:59', cumulativeCost: null, currency: null, cumulativeShippedCount: 0, costPerShip: null }
+      data.cumulativeCostPerShip[1] = {
+        dayEnd: '2026-06-23T23:59:59',
+        cumulativeCost: null,
+        currency: null,
+        cumulativeShippedCount: 0,
+        costPerShip: null,
+      }
     }
 
     mockUsageResponse(data)
@@ -326,7 +442,13 @@ describe('CostTrendChart', () => {
   it('genuine zero costPerShip plots at value 0 (not skipped)', async () => {
     const data = buildUsageData()
     if (data.cumulativeCostPerShip) {
-      data.cumulativeCostPerShip[0] = { dayEnd: '2026-06-22T23:59:59', cumulativeCost: 0, currency: 'USD', cumulativeShippedCount: 2, costPerShip: 0 }
+      data.cumulativeCostPerShip[0] = {
+        dayEnd: '2026-06-22T23:59:59',
+        cumulativeCost: 0,
+        currency: 'USD',
+        cumulativeShippedCount: 2,
+        costPerShip: 0,
+      }
     }
 
     mockUsageResponse(data)
@@ -616,10 +738,12 @@ describe('CostTrendChart', () => {
   // --- Window annotation ---
 
   it('renders a window badge derived from rangeFrom/rangeTo when usage data is present', async () => {
-    mockUsageResponse(buildUsageData({
-      rangeFrom: '2026-06-22T00:00:00',
-      rangeTo: '2026-06-28T23:59:59',
-    }))
+    mockUsageResponse(
+      buildUsageData({
+        rangeFrom: '2026-06-22T00:00:00',
+        rangeTo: '2026-06-28T23:59:59',
+      }),
+    )
 
     renderChart()
 

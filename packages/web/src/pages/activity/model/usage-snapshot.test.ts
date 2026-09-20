@@ -65,7 +65,9 @@ describe('computeUsageSnapshot', () => {
 
   it('counts an explicitly reported zero as a known amount', () => {
     const sessions: AgentActivitySession[] = [
-      makeSession({ usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0, costCurrency: 'USD' } }),
+      makeSession({
+        usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0, costCurrency: 'USD' },
+      }),
       makeSession({ usage: { inputTokens: 200, outputTokens: 80, totalTokens: 280 } }),
     ]
 

@@ -1,5 +1,5 @@
-import type { RuntimeGlobalEvent } from "./event-subscription.js"
-import type { RuntimeTurnEvent } from "./types.js"
+import type { RuntimeGlobalEvent } from './event-subscription.js'
+import type { RuntimeTurnEvent } from './types.js'
 
 interface RuntimeTurnEventProjector {
   project(event: RuntimeGlobalEvent): RuntimeTurnEvent[]
@@ -15,15 +15,15 @@ interface UsageSnapshot {
   costAmount: number | null
 }
 
-type TokenSnapshot = Omit<UsageSnapshot, "costAmount">
+type TokenSnapshot = Omit<UsageSnapshot, 'costAmount'>
 
 interface CostObservation {
   readonly baseline: number | null
   readonly charge: number | null
 }
 
-type TextEventType = "message.delta" | "reasoning.delta"
-type TextEventSource = "snapshot" | "delta"
+type TextEventType = 'message.delta' | 'reasoning.delta'
+type TextEventSource = 'snapshot' | 'delta'
 
 interface ToolCallProjection {
   readonly status: string
@@ -32,10 +32,7 @@ interface ToolCallProjection {
   readonly fingerprint: string
 }
 
-export function createRuntimeTurnEventProjector(
-  runtimeSessionId: string,
-  workDir: string,
-): RuntimeTurnEventProjector {
+export function createRuntimeTurnEventProjector(runtimeSessionId: string, workDir: string): RuntimeTurnEventProjector {
   const textByPart = new Map<string, string>()
   const textSourceByPart = new Map<string, TextEventSource>()
   const textTypeByPart = new Map<string, TextEventType>()
@@ -58,12 +55,14 @@ export function createRuntimeTurnEventProjector(
     delta: string,
   ): RuntimeTurnEvent[] => {
     if (!delta) return []
-    textByPart.set(partId, `${textByPart.get(partId) ?? ""}${delta}`)
-    return [build(type, {
-      text: delta,
-      partId,
-      ...(messageId ? { messageId } : {}),
-    })]
+    textByPart.set(partId, `${textByPart.get(partId) ?? ''}${delta}`)
+    return [
+      build(type, {
+        text: delta,
+        partId,
+        ...(messageId ? { messageId } : {}),
+      }),
+    ]
   }
 
   const projectTextDelta = (
@@ -72,8 +71,8 @@ export function createRuntimeTurnEventProjector(
     messageId: string | null,
     delta: string,
   ): RuntimeTurnEvent[] => {
-    if (textSourceByPart.get(partId) === "snapshot") return []
-    textSourceByPart.set(partId, "delta")
+    if (textSourceByPart.get(partId) === 'snapshot') return []
+    textSourceByPart.set(partId, 'delta')
     textTypeByPart.set(partId, type)
     return appendText(type, partId, messageId, delta)
   }
@@ -84,7 +83,7 @@ export function createRuntimeTurnEventProjector(
     messageId: string | null,
     text: string,
   ): RuntimeTurnEvent[] => {
-    const previous = textByPart.get(partId) ?? ""
+    const previous = textByPart.get(partId) ?? ''
     if (text === previous) return []
     if (previous && !text.startsWith(previous)) {
       textByPart.set(partId, text)
@@ -102,23 +101,23 @@ export function createRuntimeTurnEventProjector(
   ): RuntimeTurnEvent[] => {
     textTypeByPart.set(partId, type)
     if (!final && text.length > 0) {
-      if (textSourceByPart.get(partId) === "delta") return []
-      textSourceByPart.set(partId, "snapshot")
+      if (textSourceByPart.get(partId) === 'delta') return []
+      textSourceByPart.set(partId, 'snapshot')
     }
     return reconcileText(type, partId, messageId, text)
   }
 
   const projectMessage = (info: Record<string, unknown>): RuntimeTurnEvent[] => {
-    if (info["role"] !== "assistant") return []
-    const messageId = stringValue(info["id"]) ?? "assistant"
+    if (info['role'] !== 'assistant') return []
+    const messageId = stringValue(info['id']) ?? 'assistant'
     const projected: RuntimeTurnEvent[] = []
-    const providerId = stringValue(info["providerID"])
-    const modelId = stringValue(info["modelID"])
+    const providerId = stringValue(info['providerID'])
+    const modelId = stringValue(info['modelID'])
     if (providerId && modelId) {
       const resolvedModel = `${providerId}/${modelId}`
       if (modelByMessage.get(messageId) !== resolvedModel) {
         modelByMessage.set(messageId, resolvedModel)
-        projected.push(build("model.resolved", { resolvedModel, providerId, modelId, messageId }))
+        projected.push(build('model.resolved', { resolvedModel, providerId, modelId, messageId }))
       }
     }
 
@@ -129,11 +128,13 @@ export function createRuntimeTurnEventProjector(
     const delta = subtractUsage(current, previous)
     const hasTokenDelta = Object.values(delta).some((value) => value > 0)
     if (hasTokenDelta || cost.charge !== null) {
-      projected.push(build("usage.updated", {
-        ...delta,
-        ...(cost.charge !== null ? { costAmount: cost.charge, costCurrency: "USD" } : {}),
-        messageId,
-      }))
+      projected.push(
+        build('usage.updated', {
+          ...delta,
+          ...(cost.charge !== null ? { costAmount: cost.charge, costCurrency: 'USD' } : {}),
+          messageId,
+        }),
+      )
     }
     return projected
   }
@@ -153,49 +154,49 @@ export function createRuntimeTurnEventProjector(
   }
 
   const projectTool = (part: Record<string, unknown>): RuntimeTurnEvent[] => {
-    const state = recordValue(part["state"])
-    const callId = stringValue(part["callID"])
-    const toolName = stringValue(part["tool"])
-    const status = stringValue(state?.["status"])
+    const state = recordValue(part['state'])
+    const callId = stringValue(part['callID'])
+    const toolName = stringValue(part['tool'])
+    const status = stringValue(state?.['status'])
     if (!callId || !toolName || !status) return []
     const previous = toolByCall.get(callId)
 
-    const failed = status === "error"
-    const completed = status === "completed" || failed
+    const failed = status === 'error'
+    const completed = status === 'completed' || failed
     const eventType = completed
-      ? "tool_call.completed"
+      ? 'tool_call.completed'
       : previous === undefined
-        ? "tool_call.started"
-        : "tool_call.updated"
-    const rawOutput = failed ? state?.["error"] : state?.["output"]
-    const rawInput = state?.["input"] ?? previous?.rawInput ?? {}
+        ? 'tool_call.started'
+        : 'tool_call.updated'
+    const rawOutput = failed ? state?.['error'] : state?.['output']
+    const rawInput = state?.['input'] ?? previous?.rawInput ?? {}
     const payload = {
       toolCallId: callId,
       toolName,
-      status: failed ? "failed" : status,
-      state: failed ? "failed" : status,
+      status: failed ? 'failed' : status,
+      state: failed ? 'failed' : status,
       rawInput,
       ...(rawOutput !== undefined ? { rawOutput } : {}),
-      ...(stringValue(state?.["title"]) ? { title: stringValue(state?.["title"]) } : {}),
+      ...(stringValue(state?.['title']) ? { title: stringValue(state?.['title']) } : {}),
     }
     return emitTool(callId, eventType, status, toolName, rawInput, payload)
   }
 
   const projectPart = (part: Record<string, unknown>, final = false): RuntimeTurnEvent[] => {
-    const partId = stringValue(part["id"])
+    const partId = stringValue(part['id'])
     if (!partId) return []
-    const messageId = stringValue(part["messageID"])
-    switch (part["type"]) {
-      case "text":
-        return projectTextSnapshot("message.delta", partId, messageId, stringValue(part["text"]) ?? "", final)
-      case "reasoning":
-        return projectTextSnapshot("reasoning.delta", partId, messageId, stringValue(part["text"]) ?? "", final)
-      case "tool":
+    const messageId = stringValue(part['messageID'])
+    switch (part['type']) {
+      case 'text':
+        return projectTextSnapshot('message.delta', partId, messageId, stringValue(part['text']) ?? '', final)
+      case 'reasoning':
+        return projectTextSnapshot('reasoning.delta', partId, messageId, stringValue(part['text']) ?? '', final)
+      case 'tool':
         return projectTool(part)
-      case "compaction": {
+      case 'compaction': {
         if (compactionParts.has(partId)) return []
         compactionParts.add(partId)
-        return [build("compaction", { partId, messageId, ...part })]
+        return [build('compaction', { partId, messageId, ...part })]
       }
       default:
         return []
@@ -208,13 +209,13 @@ export function createRuntimeTurnEventProjector(
     status: string,
     type: string,
   ): RuntimeTurnEvent[] => {
-    const callId = stringValue(payload["callID"])
+    const callId = stringValue(payload['callID'])
     if (!callId) return []
     const previous = toolByCall.get(callId)
-    const toolName = stringValue(payload["tool"]) ?? previous?.toolName
+    const toolName = stringValue(payload['tool']) ?? previous?.toolName
     if (!toolName) return []
-    const rawInput = payload["input"] ?? previous?.rawInput ?? {}
-    const rawOutput = payload["result"] ?? payload["error"] ?? payload["structured"] ?? payload["content"]
+    const rawInput = payload['input'] ?? previous?.rawInput ?? {}
+    const rawOutput = payload['result'] ?? payload['error'] ?? payload['structured'] ?? payload['content']
     const projected = {
       toolCallId: callId,
       toolName,
@@ -228,88 +229,91 @@ export function createRuntimeTurnEventProjector(
 
   const projectRuntimeFailure = (event: RuntimeGlobalEvent): RuntimeTurnEvent[] => {
     const payload = event.payload ?? {}
-    const error = recordValue(payload["error"])
+    const error = recordValue(payload['error'])
     // OpenCode's session.error DTO stores provider failures under error.data.message.
     // Keep legacy top-level and string forms as tolerant fallbacks for older
     // server versions, but never discard the structured provider message.
-    const errorData = recordValue(error?.["data"])
-    const message = stringValue(errorData?.["message"])
-      ?? stringValue(error?.["message"])
-      ?? stringValue(payload["error"])
-      ?? stringValue(payload["message"])
-      ?? "OpenCode Session failed"
-    return [build("turn.failed", {
-      code: "turn-failed",
-      failureReason: message,
-      message,
-      source: event.type,
-    })]
+    const errorData = recordValue(error?.['data'])
+    const message =
+      stringValue(errorData?.['message']) ??
+      stringValue(error?.['message']) ??
+      stringValue(payload['error']) ??
+      stringValue(payload['message']) ??
+      'OpenCode Session failed'
+    return [
+      build('turn.failed', {
+        code: 'turn-failed',
+        failureReason: message,
+        message,
+        source: event.type,
+      }),
+    ]
   }
 
   const project = (event: RuntimeGlobalEvent): RuntimeTurnEvent[] => {
     const payload = event.payload ?? {}
     switch (event.type) {
-      case "session.next.step.failed":
-      case "session.error":
+      case 'session.next.step.failed':
+      case 'session.error':
         return projectRuntimeFailure(event)
-      case "message.updated": {
-        const info = recordValue(payload["info"])
+      case 'message.updated': {
+        const info = recordValue(payload['info'])
         return info ? projectMessage(info) : []
       }
-      case "message.part.updated": {
-        const part = recordValue(payload["part"])
+      case 'message.part.updated': {
+        const part = recordValue(payload['part'])
         return part ? projectPart(part) : []
       }
-      case "message.part.delta": {
-        const partId = stringValue(payload["partID"])
+      case 'message.part.delta': {
+        const partId = stringValue(payload['partID'])
         const type = partId ? textTypeByPart.get(partId) : undefined
-        if (!partId || !type || payload["field"] !== "text") return []
-        return projectTextDelta(type, partId, stringValue(payload["messageID"]), stringValue(payload["delta"]) ?? "")
+        if (!partId || !type || payload['field'] !== 'text') return []
+        return projectTextDelta(type, partId, stringValue(payload['messageID']), stringValue(payload['delta']) ?? '')
       }
-      case "session.next.text.delta":
+      case 'session.next.text.delta':
         return projectTextDelta(
-          "message.delta",
-          stringValue(payload["textID"]) ?? "text",
-          stringValue(payload["assistantMessageID"]),
-          stringValue(payload["delta"]) ?? "",
+          'message.delta',
+          stringValue(payload['textID']) ?? 'text',
+          stringValue(payload['assistantMessageID']),
+          stringValue(payload['delta']) ?? '',
         )
-      case "session.next.reasoning.delta":
+      case 'session.next.reasoning.delta':
         return projectTextDelta(
-          "reasoning.delta",
-          stringValue(payload["reasoningID"]) ?? "reasoning",
-          stringValue(payload["assistantMessageID"]),
-          stringValue(payload["delta"]) ?? "",
+          'reasoning.delta',
+          stringValue(payload['reasoningID']) ?? 'reasoning',
+          stringValue(payload['assistantMessageID']),
+          stringValue(payload['delta']) ?? '',
         )
-      case "session.next.tool.called":
-        return projectNextTool(payload, "running", "running", "tool_call.started")
-      case "session.next.tool.progress":
-        return projectNextTool(payload, "running", "running", "tool_call.updated")
-      case "session.next.tool.success":
-        return projectNextTool(payload, "completed", "completed", "tool_call.completed")
-      case "session.next.tool.failed":
-        return projectNextTool(payload, "error", "failed", "tool_call.completed")
-      case "session.next.model.switched": {
-        const model = recordValue(payload["model"])
-        const providerId = stringValue(model?.["providerID"])
-        const modelId = stringValue(model?.["modelID"])
+      case 'session.next.tool.called':
+        return projectNextTool(payload, 'running', 'running', 'tool_call.started')
+      case 'session.next.tool.progress':
+        return projectNextTool(payload, 'running', 'running', 'tool_call.updated')
+      case 'session.next.tool.success':
+        return projectNextTool(payload, 'completed', 'completed', 'tool_call.completed')
+      case 'session.next.tool.failed':
+        return projectNextTool(payload, 'error', 'failed', 'tool_call.completed')
+      case 'session.next.model.switched': {
+        const model = recordValue(payload['model'])
+        const providerId = stringValue(model?.['providerID'])
+        const modelId = stringValue(model?.['modelID'])
         if (!providerId || !modelId) return []
-        return [build("model.resolved", { resolvedModel: `${providerId}/${modelId}`, providerId, modelId })]
+        return [build('model.resolved', { resolvedModel: `${providerId}/${modelId}`, providerId, modelId })]
       }
-      case "session.next.compaction.ended":
-      case "session.compacted":
-        return [build("compaction", payload)]
+      case 'session.next.compaction.ended':
+      case 'session.compacted':
+        return [build('compaction', payload)]
       default:
         return []
     }
   }
 
   const reconcile = (response: unknown): RuntimeTurnEvent[] => {
-    const data = recordValue(recordValue(response)?.["data"])
+    const data = recordValue(recordValue(response)?.['data'])
     if (!data) return []
     const projected: RuntimeTurnEvent[] = []
-    const info = recordValue(data["info"])
+    const info = recordValue(data['info'])
     if (info) projected.push(...projectMessage(info))
-    const parts = data["parts"]
+    const parts = data['parts']
     if (Array.isArray(parts)) {
       for (const part of parts) {
         const value = recordValue(part)
@@ -323,18 +327,18 @@ export function createRuntimeTurnEventProjector(
 }
 
 function readUsage(info: Record<string, unknown>): UsageSnapshot {
-  const tokens = recordValue(info["tokens"])
-  const cache = recordValue(tokens?.["cache"])
-  const inputTokens = numberValue(tokens?.["input"])
-  const outputTokens = numberValue(tokens?.["output"])
-  const thoughtTokens = numberValue(tokens?.["reasoning"])
+  const tokens = recordValue(info['tokens'])
+  const cache = recordValue(tokens?.['cache'])
+  const inputTokens = numberValue(tokens?.['input'])
+  const outputTokens = numberValue(tokens?.['output'])
+  const thoughtTokens = numberValue(tokens?.['reasoning'])
   return {
     inputTokens,
     outputTokens,
-    totalTokens: numberValue(tokens?.["total"]) || inputTokens + outputTokens + thoughtTokens,
-    cachedReadTokens: numberValue(cache?.["read"]),
+    totalTokens: numberValue(tokens?.['total']) || inputTokens + outputTokens + thoughtTokens,
+    cachedReadTokens: numberValue(cache?.['read']),
     thoughtTokens,
-    costAmount: optionalNumberValue(info["cost"]),
+    costAmount: optionalNumberValue(info['cost']),
   }
 }
 
@@ -363,19 +367,19 @@ function observeCost(previous: number | null, reported: number | null): CostObse
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
     : null
 }
 
 function stringValue(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null
+  return typeof value === 'string' && value.length > 0 ? value : null
 }
 
 function numberValue(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
 function optionalNumberValue(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }

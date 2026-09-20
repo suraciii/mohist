@@ -25,13 +25,7 @@ describe('BarSeries', () => {
   it('renders one rect per data point', () => {
     render(
       <svg>
-        <BarSeries
-          data={barData}
-          plotX={0}
-          plotY={0}
-          plotWidth={400}
-          plotHeight={200}
-        />
+        <BarSeries data={barData} plotX={0} plotY={0} plotWidth={400} plotHeight={200} />
       </svg>,
     )
 
@@ -46,13 +40,7 @@ describe('BarSeries', () => {
   it('bars use transform scaleY for height encoding (not width/height CSS)', () => {
     render(
       <svg>
-        <BarSeries
-          data={barData}
-          plotX={0}
-          plotY={0}
-          plotWidth={400}
-          plotHeight={200}
-        />
+        <BarSeries data={barData} plotX={0} plotY={0} plotWidth={400} plotHeight={200} />
       </svg>,
     )
 
@@ -64,13 +52,7 @@ describe('BarSeries', () => {
   it('bars use fill-chart-* class for color (no hex/rgb literals)', () => {
     render(
       <svg>
-        <BarSeries
-          data={barData}
-          plotX={0}
-          plotY={0}
-          plotWidth={400}
-          plotHeight={200}
-        />
+        <BarSeries data={barData} plotX={0} plotY={0} plotWidth={400} plotHeight={200} />
       </svg>,
     )
 
@@ -88,13 +70,7 @@ describe('BarSeries', () => {
 
     render(
       <svg>
-        <BarSeries
-          data={zeroData}
-          plotX={0}
-          plotY={0}
-          plotWidth={200}
-          plotHeight={200}
-        />
+        <BarSeries data={zeroData} plotX={0} plotY={0} plotWidth={200} plotHeight={200} />
       </svg>,
     )
 
@@ -169,14 +145,7 @@ describe('BarSeries motion', () => {
   it('uses transform transition when animated (not width/height)', () => {
     render(
       <svg>
-        <BarSeries
-          data={barData}
-          plotX={0}
-          plotY={0}
-          plotWidth={100}
-          plotHeight={200}
-          animated={true}
-        />
+        <BarSeries data={barData} plotX={0} plotY={0} plotWidth={100} plotHeight={200} animated={true} />
       </svg>,
     )
 
@@ -191,14 +160,7 @@ describe('BarSeries motion', () => {
 
     render(
       <svg>
-        <BarSeries
-          data={barData}
-          plotX={0}
-          plotY={0}
-          plotWidth={100}
-          plotHeight={200}
-          animated={true}
-        />
+        <BarSeries data={barData} plotX={0} plotY={0} plotWidth={100} plotHeight={200} animated={true} />
       </svg>,
     )
 
@@ -213,13 +175,7 @@ describe('BarSeries motion', () => {
 
     render(
       <svg>
-        <BarSeries
-          data={barData}
-          plotX={0}
-          plotY={0}
-          plotWidth={100}
-          plotHeight={200}
-        />
+        <BarSeries data={barData} plotX={0} plotY={0} plotWidth={100} plotHeight={200} />
       </svg>,
     )
 
@@ -279,13 +235,7 @@ describe('LineSeries', () => {
   it('splits path segments at null points', () => {
     render(
       <svg>
-        <LineSeries
-          points={[
-            { x: 0, y: 100 },
-            null,
-            { x: 100, y: 80 },
-          ]}
-        />
+        <LineSeries points={[{ x: 0, y: 100 }, null, { x: 100, y: 80 }]} />
       </svg>,
     )
 
@@ -312,7 +262,10 @@ describe('LineSeries', () => {
     render(
       <svg>
         <LineSeries
-          points={[{ x: 0, y: 100 }, { x: 50, y: 50 }]}
+          points={[
+            { x: 0, y: 100 },
+            { x: 50, y: 50 },
+          ]}
         />
       </svg>,
     )
@@ -326,7 +279,10 @@ describe('LineSeries', () => {
     render(
       <svg>
         <LineSeries
-          points={[{ x: 0, y: 100 }, { x: 50, y: 50 }]}
+          points={[
+            { x: 0, y: 100 },
+            { x: 50, y: 50 },
+          ]}
           className="stroke-chart-2"
           markerClassName="fill-chart-2"
         />
@@ -344,7 +300,10 @@ describe('LineSeries', () => {
     render(
       <svg>
         <LineSeries
-          points={[{ x: 0, y: 100 }, { x: 50, y: 50 }]}
+          points={[
+            { x: 0, y: 100 },
+            { x: 50, y: 50 },
+          ]}
           animated={true}
         />
       </svg>,
@@ -372,14 +331,7 @@ describe('ChartAxes', () => {
   it('renders axis line and tick labels', () => {
     render(
       <svg>
-        <ChartAxes
-          side="left"
-          ticks={ticks}
-          plotX={40}
-          plotY={0}
-          plotWidth={360}
-          plotHeight={200}
-        />
+        <ChartAxes side="left" ticks={ticks} plotX={40} plotY={0} plotWidth={360} plotHeight={200} />
       </svg>,
     )
 
@@ -397,14 +349,7 @@ describe('ChartAxes', () => {
   it('renders right-side axis', () => {
     render(
       <svg>
-        <ChartAxes
-          side="right"
-          ticks={ticks}
-          plotX={40}
-          plotY={0}
-          plotWidth={360}
-          plotHeight={200}
-        />
+        <ChartAxes side="right" ticks={ticks} plotX={40} plotY={0} plotWidth={360} plotHeight={200} />
       </svg>,
     )
 
@@ -414,14 +359,7 @@ describe('ChartAxes', () => {
   it('axis labels use stroke-border class for chrome (no color literals)', () => {
     render(
       <svg>
-        <ChartAxes
-          side="left"
-          ticks={ticks}
-          plotX={40}
-          plotY={0}
-          plotWidth={360}
-          plotHeight={200}
-        />
+        <ChartAxes side="left" ticks={ticks} plotX={40} plotY={0} plotWidth={360} plotHeight={200} />
       </svg>,
     )
 
@@ -433,14 +371,7 @@ describe('ChartAxes', () => {
   it('label text uses fill-muted-foreground with tabular-nums', () => {
     render(
       <svg>
-        <ChartAxes
-          side="left"
-          ticks={ticks}
-          plotX={40}
-          plotY={0}
-          plotWidth={360}
-          plotHeight={200}
-        />
+        <ChartAxes side="left" ticks={ticks} plotX={40} plotY={0} plotWidth={360} plotHeight={200} />
       </svg>,
     )
 

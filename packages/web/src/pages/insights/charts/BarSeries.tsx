@@ -54,10 +54,7 @@ export function BarSeries({
             style={{
               transform: `scaleY(${ratio})`,
               transformOrigin: `${barX + barWidth / 2}px ${originY}px`,
-              transition:
-                animated && !reduced
-                  ? 'transform 0.5s ease-out'
-                  : 'none',
+              transition: animated && !reduced ? 'transform 0.5s ease-out' : 'none',
             }}
           />
         )

@@ -112,16 +112,20 @@ describe('SessionUsageSummary', () => {
 
   describe('missing fields degrade gracefully', () => {
     it('renders nothing when all usage fields are null', () => {
-      const { container } = render(<SessionUsageSummary usage={fullUsage({
-        inputTokens: null,
-        outputTokens: null,
-        totalTokens: null,
-        cachedReadTokens: null,
-        cachedWriteTokens: null,
-        thoughtTokens: null,
-        costAmount: null,
-        contextWindowUsed: null,
-      })} />)
+      const { container } = render(
+        <SessionUsageSummary
+          usage={fullUsage({
+            inputTokens: null,
+            outputTokens: null,
+            totalTokens: null,
+            cachedReadTokens: null,
+            cachedWriteTokens: null,
+            thoughtTokens: null,
+            costAmount: null,
+            contextWindowUsed: null,
+          })}
+        />,
+      )
       expect(container.firstChild).toBeNull()
     })
 

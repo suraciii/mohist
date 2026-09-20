@@ -20,11 +20,7 @@ export function UsageSnapshotLabel({ snapshot }: UsageSnapshotLabelProps) {
         </span>
       )}
       {!hasCost && hasTokens && (
-        <span
-          className="text-sm text-muted-foreground/70"
-          aria-label="No cost reported"
-          title="No cost reported"
-        >
+        <span className="text-sm text-muted-foreground/70" aria-label="No cost reported" title="No cost reported">
           —
         </span>
       )}

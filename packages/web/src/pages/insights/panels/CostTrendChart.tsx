@@ -1,13 +1,7 @@
 import { useAgentUsage } from '../../../entities/agent'
 import type { AgentUsageTimeseriesDto } from '../../../entities/agent'
 import type { InsightsRange } from '../model/insights-range'
-import {
-  ChartContainer,
-  ChartAccessibility,
-  BarSeries,
-  LineSeries,
-  ChartAxes,
-} from '../charts'
+import { ChartContainer, ChartAccessibility, BarSeries, LineSeries, ChartAxes } from '../charts'
 import type { AxisTick, LinePoint } from '../charts'
 
 const SVG_WIDTH = 500
@@ -66,9 +60,7 @@ function hasUsageData(data: AgentUsageTimeseriesDto | undefined): data is AgentU
 
   const hasRecordedBucketCost = data.buckets.some(hasRecordedCost)
 
-  const hasMeasuredCumulativeCost = (data.cumulativeCostPerShip ?? []).some((point) =>
-    point.cumulativeCost != null,
-  )
+  const hasMeasuredCumulativeCost = (data.cumulativeCostPerShip ?? []).some((point) => point.cumulativeCost != null)
 
   return hasRecordedBucketCost || hasMeasuredCumulativeCost
 }
@@ -86,17 +78,12 @@ export function CostTrendChart({
 }) {
   const { data, isLoading, isError } = agentUsageHook(range)
 
-  const status = isLoading ? 'loading'
-    : isError ? 'error'
-    : !hasUsageData(data) ? 'empty'
-    : 'resolved'
+  const status = isLoading ? 'loading' : isError ? 'error' : !hasUsageData(data) ? 'empty' : 'resolved'
 
   return (
     <section data-testid="cost-trend-chart" aria-label="Cost Trend">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Cost Trend
-        </h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cost Trend</h3>
         {hasUsageData(data) && (
           <span
             data-testid="cost-trend-chart-window"
@@ -110,8 +97,8 @@ export function CostTrendChart({
         status={status}
         emptyAction={
           <p className="text-sm text-muted-foreground text-center">
-            Recorded cost and recorded cost per completed Issue appear once an
-            agent session reports a cost on this project.
+            Recorded cost and recorded cost per completed Issue appear once an agent session reports a cost on this
+            project.
           </p>
         }
       >
@@ -130,9 +117,7 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
 
   const maxCost = Math.max(...buckets.map((b) => b.costAmount ?? 0), 0) || 1
 
-  const trendValues = (cumulativeCostPerShip ?? [])
-    .map((p) => p.costPerShip)
-    .filter((v): v is number => v != null)
+  const trendValues = (cumulativeCostPerShip ?? []).map((p) => p.costPerShip).filter((v): v is number => v != null)
   const hasTrend = trendValues.length > 0
   const maxTrend = hasTrend ? Math.max(...trendValues.map(Math.abs), 0) || 1 : 1
 
@@ -150,15 +135,12 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
 
   const recordedBuckets = buckets.filter(hasRecordedCost)
   const totalCost = recordedBuckets.reduce((sum, bucket) => sum + bucket.costAmount, 0)
-  const peakBucket = recordedBuckets.length > 0
-    ? recordedBuckets.reduce((peak, bucket) => (bucket.costAmount > peak.costAmount ? bucket : peak))
-    : null
-  const firstTrend = hasTrend
-    ? cumulativeCostPerShip!.find((p) => p.costPerShip != null)
-    : null
-  const lastTrend = hasTrend
-    ? [...cumulativeCostPerShip!].reverse().find((p) => p.costPerShip != null)
-    : null
+  const peakBucket =
+    recordedBuckets.length > 0
+      ? recordedBuckets.reduce((peak, bucket) => (bucket.costAmount > peak.costAmount ? bucket : peak))
+      : null
+  const firstTrend = hasTrend ? cumulativeCostPerShip!.find((p) => p.costPerShip != null) : null
+  const lastTrend = hasTrend ? [...cumulativeCostPerShip!].reverse().find((p) => p.costPerShip != null) : null
 
   const firstBucket = buckets[0]
   const lastBucket = buckets[buckets.length - 1]
@@ -258,13 +240,7 @@ function ChartInner({ data }: { data: AgentUsageTimeseriesDto }) {
         className="fill-chart-2"
       />
 
-      {hasTrend && (
-        <LineSeries
-          points={trendPoints}
-          className="stroke-chart-5"
-          markerClassName="fill-chart-5"
-        />
-      )}
+      {hasTrend && <LineSeries points={trendPoints} className="stroke-chart-5" markerClassName="fill-chart-5" />}
     </ChartAccessibility>
   )
 }
