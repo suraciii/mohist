@@ -52,7 +52,7 @@ visualization plane, not a workspace that users must adopt.
   what it tried, and what decision is needed. People supervise exceptions
   instead of watching every step.
 
-## Principles
+## Product Principles
 
 - **Agents work independently:** A Mohist Agent is configurable, startable,
   continuable, and able to read results before it has an external Connection.
