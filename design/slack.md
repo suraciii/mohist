@@ -666,6 +666,14 @@ caller-supplied background stays available to the other launch entry points.
   removed, the target has no verified Bot credential, or Slack refuses the
   token. No user token, broader scope, second credential path, or substitute
   transcript is introduced.
+- **Conversation kinds.** The read holds no scope of its own: it returns only
+  what the installed Bot's granted permissions allow. Group DMs are not a
+  separate kind — the adapter classifies only `channel_type: "im"` and
+  `D`-prefixed conversations as direct messages, so a group-DM mention takes
+  the channel-thread path and the read addresses that conversation like any
+  channel thread. Without `mpim:history` on the installed Bot, Slack itself
+  rejects the read and it surfaces as `provider_rejected`. The resolver adds no
+  conversation-kind heuristic and the read never widens the granted scopes.
 - **Narrow port.** `ISlackThreadQueryPort` returns one normalized page; the
   infrastructure adapter is the only component that knows
   `conversations.replies` and the wire payload. Normalization keeps message

@@ -613,7 +613,7 @@ Mohist App.
   at most 10 MB. The options are mutually exclusive. `--text -` reads the body
   from stdin and preserves line breaks. `--text` may be omitted when an image is
   attached. Manager-mode invocation uses the dedicated Manager reply contract.
-- `mo slack thread view --project <project> --session <session> [--limit <1-100>] [--continuation <token>] [--json thread,messages,continuation]`
+- `mo slack thread view --session <session> [--project <project>] [--limit <1-100>] [--continuation <token>] [--json thread,messages,continuation]`
   reads one page of the Slack channel thread already bound to that Session, so
   an Agent can read earlier discussion that was not in its own context. The
   result is one object with `thread` (the resolved Workspace team, Connection,
