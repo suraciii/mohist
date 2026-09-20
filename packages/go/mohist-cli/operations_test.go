@@ -242,16 +242,16 @@ func TestOperationsSlackAnchorValidationIsLocal(t *testing.T) {
 	}
 }
 
-func TestOperationsSlackStatusSendsWorkspaceQuery(t *testing.T) {
+func TestOperationsSlackStatusUsesCanonicalProgressRouteWithoutWorkspaceInput(t *testing.T) {
 	var request *http.Request
 	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		request = r
-		return response(http.StatusOK, `{"success":true,"data":{"workspaceTeamId":"T1"}}`), nil
+		return response(http.StatusOK, `{"success":true,"data":{"phase":"ready","nextAction":"ready"}}`), nil
 	}), map[string]string{"MOHIST_TOKEN": "management-token"})
-	if code := Run(context.Background(), []string{"slack", "status", "--workspace-team", "T1"}, deps); code != ExitOK {
+	if code := Run(context.Background(), []string{"slack", "status"}, deps); code != ExitOK {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
-	if request == nil || request.URL.Query().Get("workspaceTeamId") != "T1" || request.Header.Get("Authorization") != "Bearer management-token" {
+	if request == nil || request.URL.Path != "/api/slack-manager/setup/progress" || request.URL.RawQuery != "" || request.Header.Get("Authorization") != "Bearer management-token" {
 		t.Fatalf("request=%v", request)
 	}
 }
@@ -261,12 +261,12 @@ func TestOperationsSlackManagerStatusUsesBrokerWithoutLocalBearer(t *testing.T) 
 	deps, _, errOut := testDeps(nil, map[string]string{"MOHIST_MANAGER_MODE": "1"})
 	deps.ManagerCredentialBroker = func(_ context.Context, r *http.Request) (*http.Response, error) {
 		request = r
-		return response(http.StatusOK, `{"success":true,"data":{"workspaceTeamId":"T1"}}`), nil
+		return response(http.StatusOK, `{"success":true,"data":{"phase":"ready","nextAction":"ready"}}`), nil
 	}
-	if code := Run(context.Background(), []string{"slack", "status", "--workspace-team", "T1"}, deps); code != ExitOK {
+	if code := Run(context.Background(), []string{"slack", "status"}, deps); code != ExitOK {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
-	if request == nil || request.URL.Path != "/api/slack-manager/status" || request.URL.Query().Get("workspaceTeamId") != "T1" {
+	if request == nil || request.URL.Path != "/api/slack-manager/setup/progress" || request.URL.RawQuery != "" {
 		t.Fatalf("request=%v", request)
 	}
 	if request.Header.Get("X-Mohist-Manager-Mode") != "1" || request.Header.Get("Authorization") != "" {

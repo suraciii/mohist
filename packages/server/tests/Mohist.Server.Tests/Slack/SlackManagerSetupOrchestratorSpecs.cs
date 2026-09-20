@@ -54,6 +54,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             enrollmentStore,
             new SlackManifestGenerator(),
             _appManagement,
+            _appManagement,
             _botIdentity,
             _secrets,
             _time);
@@ -75,10 +76,10 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
     {
         _configurationPort.Enqueue(ConfigurationRotation("T_SETUP"));
         var configuration = await _orchestrator.SupplyConfigurationAsync(
-            new("T_SETUP", new("xoxe-current", "xoxr-current")));
+            new(new("xoxe-current", "xoxr-current")));
 
         Assert.Equal(SlackSetupPhase.AwaitingInstall, configuration.Phase);
-        Assert.Equal(SlackSetupNextAction.SupplyRuntimeCredentials, configuration.NextAction);
+        Assert.Equal(SlackSetupNextAction.ApproveInstall, configuration.NextAction);
         Assert.NotNull(configuration.ManagerAppId);
         Assert.StartsWith("https://api.slack.com/apps/", configuration.InstallUrl);
         Assert.Equal(1, _appManagement.CreateCalls);
@@ -88,7 +89,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         _botIdentity.Result = VerifiedBot("T_SETUP", configuration.ManagerAppId!);
         var runtime = await _orchestrator.SupplyRuntimeCredentialsAsync(
-            new("T_SETUP", "xoxb-runtime", "xapp-candidate"));
+            new("xoxb-runtime", "xapp-candidate"));
 
         Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, runtime.Phase);
         Assert.Equal(SlackSetupNextAction.ReportSocketHello, runtime.NextAction);
@@ -102,7 +103,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         Assert.Equal(SlackHelloOutcome.Verified,
             await _leases.ReportHelloAsync("operator-1", manager, validation.LeaseId, configuration.ManagerAppId!));
 
-        var ready = await _orchestrator.GetProgressAsync("T_SETUP");
+        var ready = await _orchestrator.GetProgressAsync();
         Assert.Equal(SlackSetupPhase.Ready, ready!.Phase);
         Assert.Equal(SlackSetupNextAction.Ready, ready.NextAction);
         await AssertEnrollmentReadinessAsync(runtime.EnrollmentId!, SlackManagerReadiness.Ready);
@@ -119,11 +120,11 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
     {
         _configurationPort.Enqueue(ConfigurationRotation("T_RERUN"));
         var first = await _orchestrator.SupplyConfigurationAsync(
-            new("T_RERUN", new("xoxe-a", "xoxr-a")));
+            new(new("xoxe-a", "xoxr-a")));
 
         _configurationPort.Enqueue(ConfigurationRotation("T_RERUN"));
         var second = await _orchestrator.SupplyConfigurationAsync(
-            new("T_RERUN", new("xoxe-b", "xoxr-b")));
+            new(new("xoxe-b", "xoxr-b")));
 
         Assert.Equal(first.EnrollmentId, second.EnrollmentId);
         Assert.Equal(first.ManagerAppId, second.ManagerAppId);
@@ -137,11 +138,11 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
     {
         _configurationPort.Enqueue(ConfigurationRotation("T_MISMATCH"));
         var configuration = await _orchestrator.SupplyConfigurationAsync(
-            new("T_MISMATCH", new("xoxe-current", "xoxr-current")));
+            new(new("xoxe-current", "xoxr-current")));
 
         _botIdentity.Result = VerifiedBot("T_OTHER", configuration.ManagerAppId!);
         var runtime = await _orchestrator.SupplyRuntimeCredentialsAsync(
-            new("T_MISMATCH", "xoxb-runtime", "xapp-candidate"));
+            new("xoxb-runtime", "xapp-candidate"));
 
         Assert.Equal(SlackSetupPhase.Failed, runtime.Phase);
         Assert.Equal("runtime_credential_mismatch", runtime.ErrorClass);
@@ -157,10 +158,10 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
     {
         _configurationPort.Enqueue(ConfigurationRotation("T_HELLO"));
         var configuration = await _orchestrator.SupplyConfigurationAsync(
-            new("T_HELLO", new("xoxe-current", "xoxr-current")));
+            new(new("xoxe-current", "xoxr-current")));
         _botIdentity.Result = VerifiedBot("T_HELLO", configuration.ManagerAppId!);
         var runtime = await _orchestrator.SupplyRuntimeCredentialsAsync(
-            new("T_HELLO", "xoxb-runtime", "xapp-candidate"));
+            new("xoxb-runtime", "xapp-candidate"));
 
         var manager = new SlackLeaseTargetRef.Manager(runtime.EnrollmentId!, "T_HELLO");
         var validation = await _leases.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
@@ -188,7 +189,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         _configurationPort.Enqueue(ConfigurationRotation("T_INTERRUPTED"));
         var progress = await _orchestrator.SupplyConfigurationAsync(
-            new("T_INTERRUPTED", new("xoxe-current", "xoxr-current")));
+            new(new("xoxe-current", "xoxr-current")));
 
         Assert.Equal(SlackSetupPhase.CreateUnknown, progress.Phase);
         Assert.Equal(SlackSetupNextAction.ReconcileCreate, progress.NextAction);
@@ -209,7 +210,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         _configurationPort.Enqueue(ConfigurationRotation("T_ORPHAN"));
         var progress = await _orchestrator.SupplyConfigurationAsync(
-            new("T_ORPHAN", new("xoxe-current", "xoxr-current")));
+            new(new("xoxe-current", "xoxr-current")));
 
         Assert.Equal(SlackSetupPhase.CreateUnknown, progress.Phase);
         Assert.Equal(SlackSetupNextAction.ReconcileCreate, progress.NextAction);
@@ -218,7 +219,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Create_succeeded_without_install_url_records_create_unknown_and_keeps_the_app_id()
+    public async Task Create_succeeded_without_install_url_derives_the_canonical_install_url()
     {
         var enrollment = await SeedEnrollmentAsync("T_NO_URL");
         _appManagement.SetResponse(enrollment.Id, new FakeSlackAppResponse(
@@ -229,14 +230,53 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         _configurationPort.Enqueue(ConfigurationRotation("T_NO_URL"));
         var progress = await _orchestrator.SupplyConfigurationAsync(
-            new("T_NO_URL", new("xoxe-current", "xoxr-current")));
+            new(new("xoxe-current", "xoxr-current")));
 
-        Assert.Equal(SlackSetupPhase.CreateUnknown, progress.Phase);
-        Assert.Equal(SlackSetupNextAction.ReconcileCreate, progress.NextAction);
+        Assert.Equal(SlackSetupPhase.AwaitingInstall, progress.Phase);
+        Assert.Equal(SlackSetupNextAction.ApproveInstall, progress.NextAction);
         Assert.Equal("A_NO_URL", progress.ManagerAppId);
-        Assert.Null(progress.InstallUrl);
+        Assert.Equal("https://api.slack.com/apps/A_NO_URL/oauth", progress.InstallUrl);
         Assert.Equal(1, _appManagement.CreateCalls);
-        await AssertEnrollmentAppFactsAsync("T_NO_URL", SlackManagerAppLifecycle.CreateUnknown, "A_NO_URL", "");
+        await AssertEnrollmentAppFactsAsync(
+            "T_NO_URL",
+            SlackManagerAppLifecycle.Created,
+            "A_NO_URL",
+            "https://api.slack.com/apps/A_NO_URL/oauth");
+    }
+
+    [Fact]
+    public async Task Resume_reconciles_a_known_unknown_app_then_applies_its_manifest()
+    {
+        var enrollment = await SeedEnrollmentAsync("T_RESUME_UNKNOWN");
+        _appManagement.SetResponse(enrollment.Id, new FakeSlackAppResponse(
+            Create: new SlackAppManagementResult(
+                SlackAppManagementOutcome.Unknown,
+                AppId: "A_RESUMED",
+                ErrorClass: "transport_error"),
+            Inspect: new SlackAppManagementFact(
+                SlackAppManagementFactOutcome.Unknown,
+                ErrorClass: "transport_error")));
+        _configurationPort.Enqueue(ConfigurationRotation("T_RESUME_UNKNOWN"));
+
+        var unknown = await _orchestrator.SupplyConfigurationAsync(
+            new(new("xoxe-current", "xoxr-current")));
+        Assert.Equal(SlackSetupPhase.CreateUnknown, unknown.Phase);
+        Assert.Equal(SlackSetupNextAction.ReconcileCreate, unknown.NextAction);
+
+        _appManagement.SetResponse(enrollment.Id, new FakeSlackAppResponse(
+            Inspect: new SlackAppManagementFact(
+                SlackAppManagementFactOutcome.Present,
+                "A_RESUMED")));
+        var resumed = await _orchestrator.ResumeAsync();
+
+        Assert.Equal(SlackSetupPhase.AwaitingInstall, resumed.Phase);
+        Assert.Equal(SlackSetupNextAction.ApproveInstall, resumed.NextAction);
+        Assert.Equal("https://api.slack.com/apps/A_RESUMED/oauth", resumed.InstallUrl);
+        await AssertEnrollmentAppFactsAsync(
+            "T_RESUME_UNKNOWN",
+            SlackManagerAppLifecycle.Created,
+            "A_RESUMED",
+            "https://api.slack.com/apps/A_RESUMED/oauth");
     }
 
     [Fact]
@@ -244,7 +284,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
     {
         _configurationPort.Enqueue(ConfigurationRotation("T_CONFLICT", expiresAt: T0.AddHours(-1)));
         var progress = await _orchestrator.SupplyConfigurationAsync(
-            new("T_CONFLICT", new("xoxe-current", "xoxr-current")));
+            new(new("xoxe-current", "xoxr-current")));
 
         Assert.Equal(SlackSetupPhase.Failed, progress.Phase);
         Assert.Equal(SlackSetupNextAction.SupplyConfiguration, progress.NextAction);
@@ -257,10 +297,10 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
     {
         _configurationPort.Enqueue(ConfigurationRotation("T_DISABLED"));
         var configuration = await _orchestrator.SupplyConfigurationAsync(
-            new("T_DISABLED", new("xoxe-current", "xoxr-current")));
+            new(new("xoxe-current", "xoxr-current")));
         _botIdentity.Result = VerifiedBot("T_DISABLED", configuration.ManagerAppId!);
         var runtime = await _orchestrator.SupplyRuntimeCredentialsAsync(
-            new("T_DISABLED", "xoxb-runtime", "xapp-candidate"));
+            new("xoxb-runtime", "xapp-candidate"));
         Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, runtime.Phase);
 
         var manager = new SlackLeaseTargetRef.Manager(runtime.EnrollmentId!, "T_DISABLED");
@@ -284,7 +324,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         _botIdentity.Result = VerifiedBot("T_ROTATE", managerAppId);
         var rotated = await _orchestrator.SupplyRuntimeCredentialsAsync(
-            new("T_ROTATE", "xoxb-rotated", "xapp-rotated"));
+            new("xoxb-rotated", "xapp-rotated"));
 
         Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, rotated.Phase);
         Assert.Equal(SlackSetupNextAction.ReportSocketHello, rotated.NextAction);
@@ -306,7 +346,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         Assert.Equal(SlackHelloOutcome.Verified,
             await _leases.ReportHelloAsync("operator-1", manager, validation.LeaseId, managerAppId));
 
-        var ready = await _orchestrator.GetProgressAsync("T_ROTATE");
+        var ready = await _orchestrator.GetProgressAsync();
         Assert.Equal(SlackSetupPhase.Ready, ready!.Phase);
         Assert.Equal(SlackSetupNextAction.Ready, ready.NextAction);
         await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.Verified);
@@ -330,11 +370,11 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         _botIdentity.Result = VerifiedBot("T_NOOP", managerAppId);
         var again = await _orchestrator.SupplyRuntimeCredentialsAsync(
-            new("T_NOOP", "xoxb-runtime", "xapp-candidate"));
+            new("xoxb-runtime", "xapp-candidate"));
 
         Assert.Equal(SlackSetupPhase.Ready, again.Phase);
         Assert.Equal(SlackSetupNextAction.Ready, again.NextAction);
-        Assert.Equal(verifyCalls, _botIdentity.Requests.Count);
+        Assert.Equal(verifyCalls + 1, _botIdentity.Requests.Count);
         await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.Verified);
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-runtime");
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-candidate");
@@ -347,7 +387,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         _botIdentity.Result = VerifiedBot("T_OTHER", managerAppId);
         var rejected = await _orchestrator.SupplyRuntimeCredentialsAsync(
-            new("T_BAD_ROTATE", "xoxb-bad", "xapp-bad"));
+            new("xoxb-bad", "xapp-bad"));
 
         Assert.Equal(SlackSetupPhase.Failed, rejected.Phase);
         Assert.Equal("runtime_credential_mismatch", rejected.ErrorClass);
@@ -364,12 +404,12 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         var (enrollmentId, managerAppId) = await DriveToReadyAsync("T_RESTORE");
         _botIdentity.Result = VerifiedBot("T_RESTORE", managerAppId);
         var rotated = await _orchestrator.SupplyRuntimeCredentialsAsync(
-            new("T_RESTORE", "xoxb-rotated", "xapp-rotated"));
+            new("xoxb-rotated", "xapp-rotated"));
         Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, rotated.Phase);
 
         _botIdentity.Result = VerifiedBot("T_OTHER", managerAppId);
         var rejected = await _orchestrator.SupplyRuntimeCredentialsAsync(
-            new("T_RESTORE", "xoxb-bad", "xapp-bad"));
+            new("xoxb-bad", "xapp-bad"));
 
         Assert.Equal(SlackSetupPhase.Failed, rejected.Phase);
         Assert.Equal("runtime_credential_mismatch", rejected.ErrorClass);
@@ -388,7 +428,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         var (enrollmentId, managerAppId) = await DriveToReadyAsync("T_HELLO_ROTATE");
         _botIdentity.Result = VerifiedBot("T_HELLO_ROTATE", managerAppId);
         var rotated = await _orchestrator.SupplyRuntimeCredentialsAsync(
-            new("T_HELLO_ROTATE", "xoxb-rotated", "xapp-rotated"));
+            new("xoxb-rotated", "xapp-rotated"));
         Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, rotated.Phase);
 
         var manager = new SlackLeaseTargetRef.Manager(enrollmentId, "T_HELLO_ROTATE");
@@ -428,13 +468,14 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             _enrollments,
             new SlackManifestGenerator(),
             _appManagement,
+            _appManagement,
             _botIdentity,
             new FaultingSecretStore(_secrets),
             _time);
         _botIdentity.Result = VerifiedBot("T_CRASH_STORE", managerAppId);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            faulting.SupplyRuntimeCredentialsAsync(new("T_CRASH_STORE", "xoxb-rotated", "xapp-rotated")));
+            faulting.SupplyRuntimeCredentialsAsync(new("xoxb-rotated", "xapp-rotated")));
 
         // Stage ran before the faulted Store, so the state has left Verified and
         // the runtime lease is closed; the runtime address still holds the old
@@ -451,7 +492,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         // Resume with the working store converges to the new pair after hello.
         _botIdentity.Result = VerifiedBot("T_CRASH_STORE", managerAppId);
         var resumed = await _orchestrator.SupplyRuntimeCredentialsAsync(
-            new("T_CRASH_STORE", "xoxb-rotated", "xapp-rotated"));
+            new("xoxb-rotated", "xapp-rotated"));
         Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, resumed.Phase);
 
         var validation = await _leases.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
@@ -469,7 +510,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
     {
         _configurationPort.Enqueue(ConfigurationRotation("T_APP_SECRETS"));
         var configuration = await _orchestrator.SupplyConfigurationAsync(
-            new("T_APP_SECRETS", new("xoxe-current", "xoxr-current")));
+            new(new("xoxe-current", "xoxr-current")));
 
         Assert.NotNull(configuration.ManagerAppId);
         await AssertRuntimeSecretAsync(configuration.EnrollmentId!, SecretKind.ClientSecret, $"xoxc-fake-{configuration.ManagerAppId}");
@@ -483,7 +524,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
     {
         _configurationPort.Enqueue(ConfigurationRotation("T_SECRET_RERUN"));
         var first = await _orchestrator.SupplyConfigurationAsync(
-            new("T_SECRET_RERUN", new("xoxe-a", "xoxr-a")));
+            new(new("xoxe-a", "xoxr-a")));
         var enrollmentId = first.EnrollmentId!;
         var appId = first.ManagerAppId!;
         var clientBefore = await _secrets.LoadAsync(
@@ -493,7 +534,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         _configurationPort.Enqueue(ConfigurationRotation("T_SECRET_RERUN"));
         var second = await _orchestrator.SupplyConfigurationAsync(
-            new("T_SECRET_RERUN", new("xoxe-b", "xoxr-b")));
+            new(new("xoxe-b", "xoxr-b")));
 
         Assert.Equal(enrollmentId, second.EnrollmentId);
         Assert.Equal(appId, second.ManagerAppId);
@@ -505,7 +546,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Create_without_install_url_records_create_unknown_and_does_not_store_app_secrets()
+    public async Task Create_without_install_url_uses_the_canonical_url_and_stores_returned_app_secrets()
     {
         var enrollment = await SeedEnrollmentAsync("T_NO_URL_SECRETS");
         _appManagement.SetResponse(enrollment.Id, new FakeSlackAppResponse(
@@ -518,29 +559,29 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         _configurationPort.Enqueue(ConfigurationRotation("T_NO_URL_SECRETS"));
         var progress = await _orchestrator.SupplyConfigurationAsync(
-            new("T_NO_URL_SECRETS", new("xoxe-current", "xoxr-current")));
+            new(new("xoxe-current", "xoxr-current")));
 
-        Assert.Equal(SlackSetupPhase.CreateUnknown, progress.Phase);
-        Assert.Null(await _secrets.LoadAsync(
-            SecretStoreAddress.ForSlackWorkspaceEnrollment(progress.EnrollmentId!, SecretKind.ClientSecret)));
-        Assert.Null(await _secrets.LoadAsync(
-            SecretStoreAddress.ForSlackWorkspaceEnrollment(progress.EnrollmentId!, SecretKind.SigningSecret)));
+        Assert.Equal(SlackSetupPhase.AwaitingInstall, progress.Phase);
+        Assert.Equal("xoxc-leak", Encoding.UTF8.GetString((await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(progress.EnrollmentId!, SecretKind.ClientSecret)))!));
+        Assert.Equal("sig-leak", Encoding.UTF8.GetString((await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(progress.EnrollmentId!, SecretKind.SigningSecret)))!));
     }
 
     private async Task<(string EnrollmentId, string ManagerAppId)> DriveToReadyAsync(string teamId)
     {
         _configurationPort.Enqueue(ConfigurationRotation(teamId));
         var configuration = await _orchestrator.SupplyConfigurationAsync(
-            new(teamId, new("xoxe-current", "xoxr-current")));
+            new(new("xoxe-current", "xoxr-current")));
         _botIdentity.Result = VerifiedBot(teamId, configuration.ManagerAppId!);
         var runtime = await _orchestrator.SupplyRuntimeCredentialsAsync(
-            new(teamId, "xoxb-runtime", "xapp-candidate"));
+            new("xoxb-runtime", "xapp-candidate"));
         var manager = new SlackLeaseTargetRef.Manager(runtime.EnrollmentId!, teamId);
         var validation = await _leases.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
         Assert.NotNull(validation);
         Assert.Equal(SlackHelloOutcome.Verified,
             await _leases.ReportHelloAsync("operator-1", manager, validation!.LeaseId, configuration.ManagerAppId!));
-        var ready = await _orchestrator.GetProgressAsync(teamId);
+        var ready = await _orchestrator.GetProgressAsync();
         Assert.Equal(SlackSetupPhase.Ready, ready!.Phase);
         return (runtime.EnrollmentId!, configuration.ManagerAppId!);
     }

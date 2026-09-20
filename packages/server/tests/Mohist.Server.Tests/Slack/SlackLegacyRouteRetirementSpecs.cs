@@ -14,6 +14,10 @@ public sealed class SlackLegacyRouteRetirementSpecs : IClassFixture<DefaultMohis
     private static readonly string[] RetiredRoutes =
     [
         "/api/slack-manager/credentials",
+        "/api/slack-manager/status",
+        "/api/slack-manager/setup",
+        "/api/projects/{projectRef}/slack-manager/apps",
+        "/api/projects/{projectRef}/slack-connections/{connectionId}/configure",
         "/api/projects/{projectRef}/slack-manager/connections/{connectionId}/begin-authorization",
         "/api/projects/{projectRef}/slack-manager/connections/{connectionId}/authorization-progress",
         "/api/projects/{projectRef}/slack-manager/connections/{connectionId}/authorize",
@@ -24,9 +28,9 @@ public sealed class SlackLegacyRouteRetirementSpecs : IClassFixture<DefaultMohis
 
     private static readonly string[] KeptControlPlaneRoutes =
     [
-        "/api/slack-manager/setup",
         "/api/slack-manager/setup/configuration",
         "/api/slack-manager/setup/runtime-credentials",
+        "/api/slack-manager/setup/resume",
         "/api/slack-manager/setup/progress",
         "/api/projects/{projectRef}/slack-manager/install-agent",
         "/api/projects/{projectRef}/slack-manager/install-agent/credentials",
@@ -69,6 +73,11 @@ public sealed class SlackLegacyRouteRetirementSpecs : IClassFixture<DefaultMohis
 
     [Theory]
     [InlineData("POST", "/api/slack-manager/credentials")]
+    [InlineData("GET", "/api/slack-manager/status")]
+    [InlineData("POST", "/api/slack-manager/setup")]
+    [InlineData("POST", "/api/projects/proj-retired/slack-manager/apps")]
+    [InlineData("POST", "/api/projects/proj-retired/slack-connections/")]
+    [InlineData("POST", "/api/projects/proj-retired/slack-connections/conn-retired/configure")]
     [InlineData("POST", "/api/projects/proj-retired/slack-manager/connections/conn-retired/begin-authorization")]
     [InlineData("POST", "/api/projects/proj-retired/slack-manager/connections/conn-retired/authorization-progress")]
     [InlineData("POST", "/api/projects/proj-retired/slack-manager/connections/conn-retired/authorize")]

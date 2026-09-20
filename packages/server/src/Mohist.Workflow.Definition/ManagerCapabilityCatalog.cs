@@ -86,7 +86,6 @@ public static class ManagerCapabilityCatalog
                 // projection; keep its operator behavior identical in Manager mode.
                 "view" => ConnectionDiagnostics,
                 "diagnostics" => ConnectionDiagnostics,
-                "create" => AgentCreateOrMount,
                 "enable" => ConnectionEnable,
                 "disable" => ConnectionDisable,
                 "claim-owner" => OwnerClaim,
@@ -124,12 +123,6 @@ public static class ManagerCapabilityCatalog
         if (segments.Length == 3
             && Equals(segments, 0, "api")
             && Equals(segments, 1, "slack-manager")
-            && Equals(segments, 2, "status")
-            && string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
-            return WorkspaceStatus;
-        if (segments.Length == 3
-            && Equals(segments, 0, "api")
-            && Equals(segments, 1, "slack-manager")
             && Equals(segments, 2, "reply")
             && string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase))
             return ManagerReply;
@@ -139,6 +132,13 @@ public static class ManagerCapabilityCatalog
             && Equals(segments, 2, "management")
             && string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase))
             return ManagerManagementRoute;
+        if (segments.Length == 4
+            && Equals(segments, 0, "api")
+            && Equals(segments, 1, "slack-manager")
+            && Equals(segments, 2, "setup")
+            && Equals(segments, 3, "progress")
+            && string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
+            return WorkspaceStatus;
 
         if (segments.Length < 4
             || !Equals(segments, 0, "api")
@@ -164,9 +164,6 @@ public static class ManagerCapabilityCatalog
             if (segments.Length == 5 && Equals(segments, 4, "agents")
                 && string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
                 return AgentList;
-            if (segments.Length == 5 && Equals(segments, 4, "apps")
-                && string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase))
-                return AgentCreateOrMount;
             if (segments.Length == 6 && Equals(segments, 4, "connections")
                 && string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
                 return ConnectionView;

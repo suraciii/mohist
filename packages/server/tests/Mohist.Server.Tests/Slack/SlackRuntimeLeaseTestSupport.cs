@@ -88,6 +88,61 @@ public static class SlackRuntimeLeaseTestSupport
         }
     }
 
+    /// <summary>
+    /// Seeds the durable facts that the managed setup flow would have
+    /// produced after the provider install and Socket hello. Ingress specs
+    /// exercise admission and lease behavior, so they should not depend on a
+    /// retired manual setup HTTP route.
+    /// </summary>
+    public static async Task<(string EnrollmentId, string? ClaimCode)> EnsureVerifiedManagerAsync(
+        MohistIntegrationFixture fixture,
+        string teamId,
+        string managerAppId,
+        string managerBotUserId,
+        string appToken,
+        string botToken,
+        bool issueClaim = false)
+    {
+        var enrollmentId = await EnsureEnrollmentAsync(fixture, teamId);
+        var now = fixture.TimeProvider.GetUtcNow();
+        await using (var scope = fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var row = await db.SlackWorkspaceEnrollments.SingleAsync(item => item.Id == enrollmentId);
+            row.ManagerActorId = string.IsNullOrWhiteSpace(row.ManagerActorId)
+                ? $"manager_actor_{enrollmentId}"
+                : row.ManagerActorId;
+            row.ConfigurationCredentialRef = enrollmentId;
+            row.ManagerAppId = managerAppId;
+            row.ManagerBotUserId = managerBotUserId;
+            row.ManagerCredentialRef = enrollmentId;
+            row.ManagerAppLifecycle = SlackManagerAppLifecycle.Created;
+            row.ManagerAppManifestHash = "test-manifest";
+            row.ManagerAppInstallUrl = $"https://api.slack.com/apps/{managerAppId}";
+            row.ManagerReadiness = SlackManagerReadiness.Ready;
+            row.RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Verified;
+            row.UpdatedAt = now;
+            await db.SaveChangesAsync();
+
+            var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
+            await secrets.StoreAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.AppToken),
+                Encoding.UTF8.GetBytes(appToken));
+            await secrets.StoreAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken),
+                Encoding.UTF8.GetBytes(botToken));
+        }
+
+        string? claimCode = null;
+        if (issueClaim)
+        {
+            await using var scope = fixture.Services.CreateAsyncScope();
+            var claims = scope.ServiceProvider.GetRequiredService<ManagerClaimService>();
+            claimCode = (await claims.IssueAsync(enrollmentId)).Code;
+        }
+        return (enrollmentId, claimCode);
+    }
+
     public static async Task<string> AcquireConnectionLeaseAsync(
         MohistIntegrationFixture fixture, string projectId, string connectionId)
     {

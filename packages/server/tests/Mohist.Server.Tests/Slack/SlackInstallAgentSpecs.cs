@@ -71,7 +71,9 @@ public sealed class SlackInstallAgentSpecs
         var appId = first.AgentApp.AppId;
         Assert.False(string.IsNullOrWhiteSpace(appId));
         Assert.Equal(SlackRuntimeCredentialValidationState.NotProvided, first.AgentApp.RuntimeCredentialValidationState);
-        Assert.Equal(SlackAgentAppNextAction.ProvideCredentials, first.NextAction);
+        Assert.Equal(SlackManifestState.Applied, first.AgentApp.ManifestState);
+        Assert.Equal(SlackAuthorizationState.AwaitingUser, first.AgentApp.Authorization);
+        Assert.Equal(SlackAgentAppNextAction.AuthorizeAgentApp, first.NextAction);
 
         Assert.True(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(first.AgentApp.Id, SecretKind.ClientSecret)));
         Assert.True(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(first.AgentApp.Id, SecretKind.SigningSecret)));
@@ -82,7 +84,7 @@ public sealed class SlackInstallAgentSpecs
         Assert.Equal(first.AgentApp.Id, rerun.AgentApp.Id);
         Assert.Equal(first.InstallUrl, rerun.InstallUrl);
         Assert.Equal(1, _apps.CreateCalls);
-        Assert.Equal(SlackAgentAppNextAction.ProvideCredentials, rerun.NextAction);
+        Assert.Equal(SlackAgentAppNextAction.AuthorizeAgentApp, rerun.NextAction);
     }
 
     [Fact]
@@ -135,7 +137,7 @@ public sealed class SlackInstallAgentSpecs
     }
 
     [Fact]
-    public async Task Unknown_create_never_replays_create_on_rerun()
+    public async Task Rerun_reconciles_an_unknown_create_without_replaying_create()
     {
         await SeedAgentAsync(AgentStatus.Active);
         await SeedEnrollmentAsync("enrollment-1");
@@ -150,8 +152,9 @@ public sealed class SlackInstallAgentSpecs
 
         var rerun = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
 
-        Assert.Equal(SlackAppLifecycle.CreateUnknown, rerun.AgentApp.AppLifecycle);
-        Assert.Equal(SlackAgentAppNextAction.ReconcileCreate, rerun.NextAction);
+        Assert.Equal(SlackAppLifecycle.Created, rerun.AgentApp.AppLifecycle);
+        Assert.Equal(SlackAgentAppNextAction.AuthorizeAgentApp, rerun.NextAction);
+        Assert.Equal(installed.InstallUrl, rerun.InstallUrl);
         Assert.Equal(1, _apps.CreateCalls);
         Assert.Equal(installed.AgentApp.Id, rerun.AgentApp.Id);
     }

@@ -10,8 +10,8 @@ import type { AgentConnectionDto } from '../../../entities/agent-connection'
 const mocks = {
   connections: [] as AgentConnectionDto[],
   connectionsLoading: false,
-  createMutateCalls: [] as Array<{ data: unknown; options?: unknown }>,
-  createPending: false,
+  installMutateCalls: [] as Array<{ agentId: string; options?: unknown }>,
+  installPending: false,
 }
 
 function makeConnection(overrides: Partial<AgentConnectionDto> = {}): AgentConnectionDto {
@@ -70,13 +70,13 @@ const operationsHook: ConnectionOperationsHook = () => ({
     data: mocks.connections,
     isLoading: mocks.connectionsLoading,
   },
-  createMutation: {
-    mutate: (data, options) => {
-      mocks.createMutateCalls.push({ data, options })
+  installMutation: {
+    mutate: (agentId, options) => {
+      mocks.installMutateCalls.push({ agentId, options })
       const onSuccess = options?.onSuccess as ((created: { connection: AgentConnectionDto }) => void) | undefined
-      onSuccess?.({ connection: makeConnection({ id: 'conn_new', agentId: (data as { agentId: string }).agentId }) })
+      onSuccess?.({ connection: makeConnection({ id: 'conn_new', agentId }) })
     },
-    isPending: mocks.createPending,
+    isPending: mocks.installPending,
   },
 })
 
@@ -139,8 +139,8 @@ describe('ConnectionsSection', () => {
   beforeEach(() => {
     mocks.connections = []
     mocks.connectionsLoading = false
-    mocks.createMutateCalls.length = 0
-    mocks.createPending = false
+    mocks.installMutateCalls.length = 0
+    mocks.installPending = false
   })
 
   afterEach(() => {
@@ -149,10 +149,11 @@ describe('ConnectionsSection', () => {
   })
 
   describe('rendering', () => {
-    it('renders the section heading and Add Slack button', () => {
+    it('renders the section heading and Connect Slack button', () => {
       renderSection()
       expect(screen.getByText('Connections')).toBeInTheDocument()
       expect(screen.getByTestId('agent-connections-add-slack')).toBeInTheDocument()
+      expect(screen.getByText('Connect Slack')).toBeInTheDocument()
     })
 
     it('shows the empty state when there are no connections', () => {
@@ -234,12 +235,12 @@ describe('ConnectionsSection', () => {
     })
   })
 
-  describe('Add Slack', () => {
-    it('calls the create mutation with the agent id', () => {
+  describe('Connect Slack', () => {
+    it('starts managed setup with the agent id', () => {
       renderSection(makeAgent({ id: 'agent-42' }))
       fireEvent.click(screen.getByTestId('agent-connections-add-slack'))
-      expect(mocks.createMutateCalls).toHaveLength(1)
-      expect(mocks.createMutateCalls[0].data).toEqual({ agentId: 'agent-42' })
+      expect(mocks.installMutateCalls).toHaveLength(1)
+      expect(mocks.installMutateCalls[0].agentId).toBe('agent-42')
     })
 
     it('navigates to the new connection page on success', async () => {

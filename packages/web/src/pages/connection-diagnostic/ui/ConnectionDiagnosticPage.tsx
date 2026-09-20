@@ -1,12 +1,18 @@
 import { useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import { AlertCircleIcon, CheckCircle2Icon, CircleOffIcon, Settings2Icon } from 'lucide-react'
+import {
+  AlertCircleIcon,
+  CheckCircle2Icon,
+  CircleOffIcon,
+  ExternalLinkIcon,
+  Settings2Icon,
+  TerminalIcon,
+} from 'lucide-react'
 import {
   useAgentConnection,
   useAgentConnectionAccess,
   useClaimAgentConnectionOwner,
   useClearOfflineGap,
-  useConfigureAgentConnection,
   useConnectionDiagnostic,
   useManageAgentConnectionAccess,
   useResendSlackOutboxDelivery,
@@ -23,8 +29,6 @@ import type {
 import { CardSection } from '@/shared/ui/components/card-section'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { SetupStepList } from './setup-step-list'
-import { IdentityPreviewStep } from './identity-preview-step'
-import { CredentialFormStep } from './credential-form-step'
 import { ClaimOwnerCodeStep } from './claim-owner-code-step'
 import { AccessPolicySection } from './access-policy-section'
 import { UncertainDeliveriesSection } from './uncertain-deliveries-section'
@@ -46,12 +50,6 @@ export interface ConnectionDiagnosticPageOperations {
   connectionDetailQuery: {
     data: AgentConnectionDetailResponse | undefined
     isLoading: boolean
-  }
-  configureMutation: {
-    mutate: (input: { appToken: string; botToken: string }) => void
-    isPending: boolean
-    error: Error | null
-    reset: () => void
   }
   claimOwnerMutation: {
     mutate: () => void
@@ -94,7 +92,6 @@ export type ConnectionDiagnosticPageOperationsHook = (
 
 const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connectionId, setupComplete) => {
   const detailQuery = useAgentConnection(connectionId)
-  const configure = useConfigureAgentConnection(connectionId)
   const claim = useClaimAgentConnectionOwner(connectionId)
   const accessStateQuery = useAgentConnectionAccess(connectionId, setupComplete ?? false)
   const manageAccess = useManageAgentConnectionAccess(connectionId)
@@ -106,12 +103,6 @@ const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connection
     connectionDetailQuery: {
       data: detailQuery.data,
       isLoading: detailQuery.isLoading,
-    },
-    configureMutation: {
-      mutate: configure.mutate,
-      isPending: configure.isPending,
-      error: configure.error instanceof Error ? configure.error : null,
-      reset: configure.reset,
     },
     claimOwnerMutation: {
       mutate: claim.mutate,
@@ -148,12 +139,6 @@ const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connection
 
 export const readOnlyOperations: ConnectionDiagnosticPageOperations = {
   connectionDetailQuery: { data: undefined, isLoading: false },
-  configureMutation: {
-    mutate: () => undefined,
-    isPending: false,
-    error: null,
-    reset: () => undefined,
-  },
   claimOwnerMutation: {
     mutate: () => undefined,
     isPending: false,
@@ -197,7 +182,8 @@ function display(value: string | boolean | null | undefined) {
 function SummaryIcon({ state }: { state: string }) {
   if (state === 'healthy') return <CheckCircle2Icon className="size-5 text-success" />
   if (state === 'disabled') return <CircleOffIcon className="size-5 text-muted-foreground" />
-  if (state === 'agent_needs_setup' || state === 'setup_incomplete') return <Settings2Icon className="size-5 text-warning" />
+  if (state === 'agent_needs_setup' || state === 'setup_incomplete')
+    return <Settings2Icon className="size-5 text-warning" />
   return <AlertCircleIcon className="size-5 text-danger" />
 }
 
@@ -210,19 +196,61 @@ function FactRow({ name, value }: { name: string; value: string | boolean | null
   )
 }
 
-function ManagedAppStatus({ app }: { app: NonNullable<AgentConnectionDetailResponse['managedApp']> }) {
+function ManagedAppStatus({
+  app,
+  agentId,
+}: {
+  app: NonNullable<AgentConnectionDetailResponse['managedApp']>
+  agentId: string
+}) {
+  const needsLocalCredentials = app.nextAction === 'approve_install' || app.nextAction === 'provide_credentials'
   return (
     <CardSection title="Managed Agent App" tone={app.nextAction === 'ready' ? 'green' : 'default'}>
-      <dl className="divide-y divide-border" data-testid="managed-agent-app-status">
-        <FactRow name="App lifecycle" value={label(app.appLifecycle)} />
-        <FactRow name="Authorization" value={label(app.authorization)} />
-        <FactRow name="Manifest" value={label(app.manifestState)} />
-        <FactRow name="Transport" value={`${label(app.transportKind)} / ${label(app.transportReadiness)}`} />
-        <FactRow name="Binding" value={label(app.bindingState)} />
-        <FactRow name="Next action" value={label(app.nextAction)} />
-        {app.unknownOutcome && <FactRow name="Unknown outcome" value={app.unknownOutcome} />}
-        {app.errorClass && <FactRow name="Error class" value={app.errorClass} />}
-      </dl>
+      <div className="space-y-4">
+        <dl className="divide-y divide-border" data-testid="managed-agent-app-status">
+          <FactRow name="App lifecycle" value={label(app.appLifecycle)} />
+          <FactRow name="Authorization" value={label(app.authorization)} />
+          <FactRow name="Manifest" value={label(app.manifestState)} />
+          <FactRow name="Transport" value={`${label(app.transportKind)} / ${label(app.transportReadiness)}`} />
+          <FactRow name="Binding" value={label(app.bindingState)} />
+          <FactRow name="Next action" value={label(app.nextAction)} />
+          {app.unknownOutcome && <FactRow name="Unknown outcome" value={app.unknownOutcome} />}
+          {app.errorClass && <FactRow name="Error class" value={app.errorClass} />}
+        </dl>
+
+        {app.nextAction === 'approve_install' && app.installUrl && (
+          <a
+            href={app.installUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            data-testid="managed-agent-app-install-link"
+          >
+            Approve in Slack
+            <ExternalLinkIcon className="size-4" />
+          </a>
+        )}
+
+        {needsLocalCredentials && (
+          <div
+            className="rounded-md border border-border bg-muted/40 p-3 text-sm"
+            data-testid="managed-agent-app-local-step"
+          >
+            <div className="flex items-start gap-2">
+              <TerminalIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <div className="space-y-2">
+                <p className="text-foreground">
+                  After Slack approves the App, add its <code>botToken</code> and <code>appLevelToken</code> to{' '}
+                  <code>~/.mohist/slack-credentials.json</code> on the Mohist host.
+                </p>
+                <code className="block overflow-x-auto rounded bg-background px-2 py-1.5 text-xs text-foreground">
+                  mo slack install-agent {agentId}
+                </code>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </CardSection>
   )
 }
@@ -237,11 +265,17 @@ export function ConnectionDiagnosticPage({
   const { connectionId } = useParams<{ connectionId: string }>()
   const { data, isLoading, error } = dataHook(connectionId)
   const ops = operationsHook(connectionId, data?.facts.setupProgress === 'complete')
-  const { connectionDetailQuery, configureMutation, claimOwnerMutation, accessStateQuery, manageAccessMutation, deliveriesQuery, resendDeliveryMutation, clearOfflineGapMutation } = ops
+  const {
+    connectionDetailQuery,
+    claimOwnerMutation,
+    accessStateQuery,
+    manageAccessMutation,
+    deliveriesQuery,
+    resendDeliveryMutation,
+    clearOfflineGapMutation,
+  } = ops
   useDocumentTitle(data ? `Connection ${connectionId ?? ''} - Mohist` : 'Connection - Mohist')
 
-  const configureResetRef = useRef<() => void>(() => undefined)
-  configureResetRef.current = configureMutation.reset
   const claimResetRef = useRef<() => void>(() => undefined)
   claimResetRef.current = claimOwnerMutation.reset
   const accessResetRef = useRef<() => void>(() => undefined)
@@ -252,19 +286,23 @@ export function ConnectionDiagnosticPage({
   useEffect(() => {
     return () => {
       claimResetRef.current()
-      configureResetRef.current()
       accessResetRef.current()
       resendDeliveryResetRef.current()
     }
   }, [])
 
   if (isLoading) {
-    return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading connection...</div>
+    return (
+      <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading connection...</div>
+    )
   }
 
   if (error || !data) {
     return (
-      <div className="flex flex-1 items-center justify-center text-sm text-danger" data-testid="connection-diagnostic-error">
+      <div
+        className="flex flex-1 items-center justify-center text-sm text-danger"
+        data-testid="connection-diagnostic-error"
+      >
         {error?.message ?? 'Connection was not found.'}
       </div>
     )
@@ -273,9 +311,6 @@ export function ConnectionDiagnosticPage({
   const { facts } = data
   const setupProgress = facts.setupProgress
   const detail = connectionDetailQuery.data
-  const previewBotName = detail?.botName ?? facts.identity.botName
-  const previewAppDescription = detail?.appDescription ?? ''
-  const previewSlackAppCreationReference = detail?.slackAppCreationReference ?? ''
 
   const isSetupComplete = setupProgress === 'complete'
 
@@ -287,28 +322,41 @@ export function ConnectionDiagnosticPage({
           <h1 className="mt-1 break-all text-2xl font-semibold text-foreground">{connectionId}</h1>
         </header>
 
-        <CardSection title="Current status" icon={<SummaryIcon state={data.primaryState} />} tone={data.primaryState === 'healthy' ? 'green' : 'default'}>
+        <CardSection
+          title="Current status"
+          icon={<SummaryIcon state={data.primaryState} />}
+          tone={data.primaryState === 'healthy' ? 'green' : 'default'}
+        >
           <div className="space-y-3">
-            <div className="text-lg font-medium capitalize text-foreground" data-testid="connection-diagnostic-primary-state">{label(data.primaryState)}</div>
-            <p className="text-sm text-muted-foreground" data-testid="connection-diagnostic-reason">{data.reason}</p>
-            <div className="border-l-2 border-info pl-3 text-sm font-medium text-foreground" data-testid="connection-diagnostic-next-action">
+            <div
+              className="text-lg font-medium capitalize text-foreground"
+              data-testid="connection-diagnostic-primary-state"
+            >
+              {label(data.primaryState)}
+            </div>
+            <p className="text-sm text-muted-foreground" data-testid="connection-diagnostic-reason">
+              {data.reason}
+            </p>
+            <div
+              className="border-l-2 border-info pl-3 text-sm font-medium text-foreground"
+              data-testid="connection-diagnostic-next-action"
+            >
               {data.nextAction}
             </div>
           </div>
         </CardSection>
 
-        {detail?.managedApp && <ManagedAppStatus app={detail.managedApp} />}
+        {detail?.managedApp && <ManagedAppStatus app={detail.managedApp} agentId={detail.connection.agentId} />}
 
         {facts.offlineGapAt && (
           <CardSection title="Possible messages missed" tone="amber">
             <div className="space-y-2" data-testid="offline-gap-notice">
               <p className="text-sm text-foreground">
-                The Slack adapter was offline long enough that Slack may have discarded events
-                from the outage window. Some messages may have been missed.
+                The Slack adapter was offline long enough that Slack may have discarded events from the outage window.
+                Some messages may have been missed.
               </p>
               <p className="text-sm text-muted-foreground">
-                Resend any critical delegations — Mohist cannot guarantee all events from the
-                outage were received.
+                Resend any critical delegations — Mohist cannot guarantee all events from the outage were received.
               </p>
               <div className="flex flex-wrap items-center gap-2 pt-1">
                 <button
@@ -329,8 +377,8 @@ export function ConnectionDiagnosticPage({
           <CardSection title="Setup progress" tone="amber">
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">
-                Setup is owned by the server. Closing, refreshing, or returning on another device resumes at
-                the current step.
+                Setup is owned by the server. Closing, refreshing, or returning on another device resumes at the current
+                step.
               </p>
               <SetupStepList setupProgress={setupProgress} />
             </div>
@@ -338,54 +386,28 @@ export function ConnectionDiagnosticPage({
         )}
 
         {setupProgress === 'create_app_credentials' && (
-          <CardSection title="Step 1 — Create app & add credentials">
-            <div className="space-y-4">
-              {connectionDetailQuery.isLoading ? (
-                <p className="text-xs text-muted-foreground" data-testid="connection-setup-identity-loading">
-                  Loading identity preview...
-                </p>
-              ) : (
-                <IdentityPreviewStep
-                  botName={previewBotName}
-                  appDescription={previewAppDescription}
-                  slackAppCreationReference={previewSlackAppCreationReference}
-                />
-              )}
-              <div className="border-t border-border pt-4">
-                <p className="mb-2 text-sm font-medium text-foreground">Add credentials</p>
-                <CredentialFormStep
-                  onSubmit={(input) => {
-                    configureMutation.reset()
-                    configureMutation.mutate(input)
-                  }}
-                  isSubmitting={configureMutation.isPending}
-                  errorMessage={configureMutation.error?.message ?? null}
-                />
-              </div>
-            </div>
+          <CardSection title="Managed Slack setup" tone="amber">
+            <p className="text-sm text-muted-foreground" data-testid="connection-setup-managed-progress">
+              Mohist owns App creation and manifest setup. Use the install link and host command above; credentials are
+              never entered in this page.
+            </p>
           </CardSection>
         )}
 
         {setupProgress === 'waiting_for_slack_service' && (
           <CardSection title="Step 2 — Waiting for Slack service" tone="amber">
-            <p
-              className="text-sm text-muted-foreground"
-              data-testid="connection-setup-waiting-for-service"
-            >
-              Credentials are saved. Mohist is waiting for the Slack service (mohist-slack) to come online and
-              verify the tokens. Progress is preserved; no action is needed here.
+            <p className="text-sm text-muted-foreground" data-testid="connection-setup-waiting-for-service">
+              Credentials are saved. Mohist is waiting for the Slack service (mohist-slack) to come online and verify
+              the tokens. Progress is preserved; no action is needed here.
             </p>
           </CardSection>
         )}
 
         {setupProgress === 'fix_slack_setup' && (
           <CardSection title="Step 3 — Fix Slack setup" tone="amber">
-            <p
-              className="text-sm text-muted-foreground"
-              data-testid="connection-setup-fix-step"
-            >
-              The Slack service reported a problem with this Connection. Re-check the credentials and the
-              workspace install, then wait for the service to re-verify.
+            <p className="text-sm text-muted-foreground" data-testid="connection-setup-fix-step">
+              The Slack service reported a problem with this Connection. Re-check the credentials and the workspace
+              install, then wait for the service to re-verify.
             </p>
           </CardSection>
         )}

@@ -47,6 +47,67 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
     public Task<ManagedSlackAgentAppOperationResult> ReconcileCreateAsync(string agentAppId, CancellationToken ct = default) =>
         ReconcileAsync(agentAppId, SlackAgentAppOperation.Create, ct);
 
+    public async Task<ManagedSlackAgentAppOperationResult> ApplyManifestAsync(
+        string agentAppId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentAppId);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var agentApp = await db.ManagedSlackAgentApps.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == agentAppId, ct);
+        if (agentApp is null)
+            return ManagedSlackAgentAppOperationResult.NotFound;
+        if (agentApp.AppLifecycle != SlackAppLifecycle.Created
+            || string.IsNullOrWhiteSpace(agentApp.AppId))
+            return ManagedSlackAgentAppOperationResult.NotAllowed(agentApp.AppLifecycle, "agent_app_not_created");
+        if (agentApp.AppliedManifestVersion == agentApp.DesiredManifestVersion
+            && string.Equals(agentApp.AppliedManifestHash, agentApp.DesiredManifestHash, StringComparison.Ordinal))
+            return ManagedSlackAgentAppOperationResult.Completed(
+                SlackAppManagementOutcome.Succeeded, agentApp.AppId, null);
+
+        // Build the canonical payload before fencing the durable operation. A
+        // missing Connection/Agent is a local defect and must not strand the
+        // row in an in-flight manifest operation that can never be resumed.
+        var manifest = await BuildManifestAsync(db, agentApp, ct).ConfigureAwait(false);
+
+        var operationId = $"apply_manifest_{Guid.NewGuid():N}";
+        var nextFence = agentApp.OperationFence + 1;
+        var now = _timeProvider.GetUtcNow();
+        var changed = await db.ManagedSlackAgentApps
+            .Where(item => item.Id == agentAppId
+                && item.OperationFence == agentApp.OperationFence
+                && item.AppLifecycle == SlackAppLifecycle.Created
+                && item.AppId == agentApp.AppId
+                && item.OperationId == agentApp.OperationId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.OperationFence, nextFence)
+                .SetProperty(item => item.OperationId, operationId)
+                .SetProperty(item => item.OperationKind, "apply_manifest")
+                .SetProperty(item => item.OperationStartedAt, now)
+                .SetProperty(item => item.UnknownOutcome, (string?)null)
+                .SetProperty(item => item.ErrorClass, (string?)null)
+                .SetProperty(item => item.UpdatedAt, now), ct);
+        if (changed == 0)
+            return ManagedSlackAgentAppOperationResult.Concurrent;
+
+        var external = await _appManagement.UpdateManifestAsync(
+            new SlackAppManifestRequest(
+                new SlackAppManagementRequest(
+                    agentApp.EnrollmentId,
+                    agentApp.Id,
+                    agentApp.WorkspaceTeamId,
+                    agentApp.AppId),
+                manifest), ct).ConfigureAwait(false);
+        return await ApplyManifestResultAsync(
+            agentAppId,
+            nextFence,
+            operationId,
+            agentApp.AppId,
+            manifest,
+            external,
+            ct).ConfigureAwait(false);
+    }
+
     public async Task<ManagedSlackAgentAppOperationResult> DeleteAsync(
         string agentAppId,
         string confirmation,
@@ -114,7 +175,15 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
         var external = operation == SlackAgentAppOperation.Create
             ? await _appManagement.CreateAsync(request, ct)
             : await _appManagement.DeleteAsync(request, ct);
-        return await ApplyResultAsync(agentAppId, nextFence, operationId, operation, external, ct);
+        return await ApplyResultAsync(
+            agentAppId,
+            nextFence,
+            operationId,
+            operation,
+            agentApp.DesiredManifestVersion,
+            agentApp.DesiredManifestHash,
+            external,
+            ct);
     }
 
     private async Task<ManagedSlackAgentAppOperationResult> ReconcileAsync(
@@ -153,6 +222,14 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
 
         var request = new SlackAppManagementRequest(agentApp.EnrollmentId, agentApp.Id, agentApp.WorkspaceTeamId, agentApp.AppId);
         var fact = await _appManagementFacts.InspectAsync(request, ct);
+        if (fact.Outcome == SlackAppManagementFactOutcome.Present
+            && !string.IsNullOrWhiteSpace(agentApp.AppId)
+            && !string.Equals(agentApp.AppId, fact.AppId, StringComparison.Ordinal))
+        {
+            fact = new SlackAppManagementFact(
+                SlackAppManagementFactOutcome.Unknown,
+                ErrorClass: "app_identity_mismatch");
+        }
         return await ApplyFactAsync(agentAppId, nextFence, operationId, operation, fact, ct);
     }
 
@@ -161,6 +238,8 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
         int fence,
         string operationId,
         SlackAgentAppOperation operation,
+        int desiredManifestVersion,
+        string desiredManifestHash,
         SlackAppManagementResult result,
         CancellationToken ct)
     {
@@ -185,17 +264,32 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
         int changed;
         if (result.Outcome == SlackAppManagementOutcome.Succeeded)
         {
-            changed = await query.ExecuteUpdateAsync(setters => setters
-                .SetProperty(item => item.AppLifecycle, lifecycle)
-                .SetProperty(item => item.AppId, operation == SlackAgentAppOperation.Create ? result.AppId ?? string.Empty : string.Empty)
-                .SetProperty(item => item.BotUserId, string.Empty)
-                .SetProperty(item => item.InstallUrl, operation == SlackAgentAppOperation.Create ? result.InstallUrl ?? string.Empty : string.Empty)
-                .SetProperty(item => item.ClientSecretRef, operation == SlackAgentAppOperation.Create && !string.IsNullOrEmpty(result.ClientSecret) ? agentAppId : string.Empty)
-                .SetProperty(item => item.SigningSecretRef, operation == SlackAgentAppOperation.Create && !string.IsNullOrEmpty(result.SigningSecret) ? agentAppId : string.Empty)
-                .SetProperty(item => item.DeletedAt, operation == SlackAgentAppOperation.Delete ? now : (DateTimeOffset?)null)
-                .SetProperty(item => item.UnknownOutcome, (string?)null)
-                .SetProperty(item => item.ErrorClass, (string?)null)
-                .SetProperty(item => item.UpdatedAt, now), ct);
+            changed = operation == SlackAgentAppOperation.Create
+                ? await query.ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.AppLifecycle, lifecycle)
+                    .SetProperty(item => item.AppId, result.AppId ?? string.Empty)
+                    .SetProperty(item => item.BotUserId, string.Empty)
+                    .SetProperty(item => item.InstallUrl, result.InstallUrl ?? string.Empty)
+                    .SetProperty(item => item.ClientSecretRef, string.IsNullOrEmpty(result.ClientSecret) ? string.Empty : agentAppId)
+                    .SetProperty(item => item.SigningSecretRef, string.IsNullOrEmpty(result.SigningSecret) ? string.Empty : agentAppId)
+                    .SetProperty(item => item.Authorization, SlackAuthorizationState.AwaitingUser)
+                    .SetProperty(item => item.AppliedManifestVersion, desiredManifestVersion)
+                    .SetProperty(item => item.AppliedManifestHash, desiredManifestHash)
+                    .SetProperty(item => item.DeletedAt, (DateTimeOffset?)null)
+                    .SetProperty(item => item.UnknownOutcome, (string?)null)
+                    .SetProperty(item => item.ErrorClass, (string?)null)
+                    .SetProperty(item => item.UpdatedAt, now), ct)
+                : await query.ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.AppLifecycle, lifecycle)
+                    .SetProperty(item => item.AppId, string.Empty)
+                    .SetProperty(item => item.BotUserId, string.Empty)
+                    .SetProperty(item => item.InstallUrl, string.Empty)
+                    .SetProperty(item => item.ClientSecretRef, string.Empty)
+                    .SetProperty(item => item.SigningSecretRef, string.Empty)
+                    .SetProperty(item => item.DeletedAt, now)
+                    .SetProperty(item => item.UnknownOutcome, (string?)null)
+                    .SetProperty(item => item.ErrorClass, (string?)null)
+                    .SetProperty(item => item.UpdatedAt, now), ct);
         }
         else if (result.Outcome == SlackAppManagementOutcome.Unknown)
         {
@@ -263,10 +357,14 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
             .Where(item => item.Id == agentAppId && item.OperationFence == fence && item.OperationId == operationId);
         var outcome = fact.Outcome switch
         {
-            SlackAppManagementFactOutcome.Present when operation == SlackAgentAppOperation.Create =>
+            SlackAppManagementFactOutcome.Present when operation == SlackAgentAppOperation.Create
+                && !string.IsNullOrWhiteSpace(fact.AppId) =>
                 await query.ExecuteUpdateAsync(setters => setters
-                    .SetProperty(item => item.AppLifecycle, SlackAppLifecycle.Created)
-                    .SetProperty(item => item.AppId, fact.AppId ?? string.Empty)
+                .SetProperty(item => item.AppLifecycle, SlackAppLifecycle.Created)
+                .SetProperty(item => item.AppId, fact.AppId!)
+                .SetProperty(item => item.InstallUrl,
+                    $"https://api.slack.com/apps/{Uri.EscapeDataString(fact.AppId!)}/oauth")
+                .SetProperty(item => item.Authorization, SlackAuthorizationState.AwaitingUser)
                     .SetProperty(item => item.UnknownOutcome, (string?)null)
                     .SetProperty(item => item.ErrorClass, (string?)null)
                     .SetProperty(item => item.UpdatedAt, now), ct),
@@ -294,7 +392,8 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
 
         var status = fact.Outcome switch
         {
-            SlackAppManagementFactOutcome.Present when operation == SlackAgentAppOperation.Create => ManagedSlackAgentAppOperationStatus.Reconciled,
+            SlackAppManagementFactOutcome.Present when operation == SlackAgentAppOperation.Create
+                && !string.IsNullOrWhiteSpace(fact.AppId) => ManagedSlackAgentAppOperationStatus.Reconciled,
             SlackAppManagementFactOutcome.Absent when operation is SlackAgentAppOperation.Create or SlackAgentAppOperation.Delete => ManagedSlackAgentAppOperationStatus.Reconciled,
             _ => ManagedSlackAgentAppOperationStatus.ManualAdjudicationRequired,
         };
@@ -303,7 +402,46 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
             : ManagedSlackAgentAppOperationResult.Stale;
     }
 
-    private async Task<string> BuildManifestJsonAsync(
+    private async Task<ManagedSlackAgentAppOperationResult> ApplyManifestResultAsync(
+        string agentAppId,
+        int fence,
+        string operationId,
+        string appId,
+        SlackManifest manifest,
+        SlackAppManagementResult result,
+        CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var now = _timeProvider.GetUtcNow();
+        var query = db.ManagedSlackAgentApps
+            .Where(item => item.Id == agentAppId
+                && item.OperationFence == fence
+                && item.OperationId == operationId
+                && item.AppLifecycle == SlackAppLifecycle.Created
+                && item.AppId == appId);
+        var changed = result.Outcome switch
+        {
+            SlackAppManagementOutcome.Succeeded => await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.AppliedManifestVersion, manifest.Version)
+                .SetProperty(item => item.AppliedManifestHash, manifest.Hash)
+                .SetProperty(item => item.UnknownOutcome, (string?)null)
+                .SetProperty(item => item.ErrorClass, (string?)null)
+                .SetProperty(item => item.UpdatedAt, now), ct),
+            SlackAppManagementOutcome.Unknown => await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.UnknownOutcome, SlackSecretRedactor.Redact(result.ErrorMessage ?? result.ErrorClass ?? "unknown"))
+                .SetProperty(item => item.ErrorClass, result.ErrorClass ?? "manifest_update_unknown")
+                .SetProperty(item => item.UpdatedAt, now), ct),
+            _ => await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.UnknownOutcome, (string?)null)
+                .SetProperty(item => item.ErrorClass, result.ErrorClass ?? "manifest_update_failed")
+                .SetProperty(item => item.UpdatedAt, now), ct),
+        };
+        return changed == 1
+            ? ManagedSlackAgentAppOperationResult.Completed(result.Outcome, appId, result.ErrorClass)
+            : ManagedSlackAgentAppOperationResult.Stale;
+    }
+
+    private async Task<SlackManifest> BuildManifestAsync(
         MohistDbContext db,
         ManagedSlackAgentAppRow agentApp,
         CancellationToken ct)
@@ -328,8 +466,14 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
             new SlackManifestIdentitySnapshot(connection.Id, connection.AgentId, connection.WorkspaceTeamId),
             SlackManifestKind.AgentApp,
             ManifestVersion));
-        return manifest.CanonicalJson;
+        return manifest;
     }
+
+    private async Task<string> BuildManifestJsonAsync(
+        MohistDbContext db,
+        ManagedSlackAgentAppRow agentApp,
+        CancellationToken ct) =>
+        (await BuildManifestAsync(db, agentApp, ct).ConfigureAwait(false)).CanonicalJson;
 
     private static bool CanStart(ManagedSlackAgentAppRow agentApp, SlackAgentAppOperation operation) =>
         operation switch

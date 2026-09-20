@@ -275,15 +275,9 @@ public sealed class SlackManagedBotConnectionIngressSpecs : IClassFixture<Defaul
         string managerAppId,
         string managerBotUserId)
     {
-        using var setup = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/setup", new
-        {
-            workspaceTeamId = team,
-            managerAppId,
-            managerBotUserId,
-        });
-        setup.EnsureSuccessStatusCode();
-        return await SlackRuntimeLeaseTestSupport.ProvisionVerifiedManagerAsync(
-            _fixture, team, $"xapp-{team}", $"xoxb-{team}");
+        var (enrollmentId, _) = await SlackRuntimeLeaseTestSupport.EnsureVerifiedManagerAsync(
+            _fixture, team, managerAppId, managerBotUserId, $"xapp-{team}", $"xoxb-{team}");
+        return enrollmentId;
     }
 
     private async Task<SeededConnection> SeedConnectionAsync(

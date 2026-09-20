@@ -6,11 +6,10 @@ import { useProject } from '../../project/@x/project-context'
 import {
   claimAgentConnectionOwner,
   clearOfflineGap,
-  configureAgentConnection,
-  createAgentConnection,
   getAgentConnection,
   getConnectionDiagnostic,
   getAgentConnectionAccess,
+  installManagedSlackAgent,
   listAgentConnections,
   listSlackOutboxDeliveries,
   manageAgentConnectionAccess,
@@ -19,9 +18,6 @@ import {
 } from './client'
 import type {
   AgentConnectionClaimOwnerResponse,
-  AgentConnectionConfigureRequest,
-  AgentConnectionCreateRequest,
-  AgentConnectionCreateResponse,
   AgentConnectionDetailResponse,
   AgentConnectionDto,
   AccessPolicyManageRequest,
@@ -71,9 +67,7 @@ export function agentConnectionDetailQueryOptions(
 
 export function useAgentConnection(connectionId: string | null | undefined) {
   const { projectId } = useProject()
-  return useQuery<AgentConnectionDetailResponse>(
-    agentConnectionDetailQueryOptions(projectId, connectionId),
-  )
+  return useQuery<AgentConnectionDetailResponse>(agentConnectionDetailQueryOptions(projectId, connectionId))
 }
 
 export const agentConnectionsQueryKey = (projectId: string | null | undefined) =>
@@ -109,52 +103,26 @@ function invalidateAgentConnectionQueries(
   })
 }
 
-export function createAgentConnectionMutationOptions(
+export function installManagedSlackAgentMutationOptions(
   projectId: string | null | undefined,
   queryClient: InvalidationClient,
 ) {
   return {
-    mutationFn: (data: AgentConnectionCreateRequest) => createAgentConnection(projectId, data),
-    onSuccess: (_created: AgentConnectionCreateResponse) => {
-      invalidateAgentConnectionQueries(queryClient, projectId)
-      toast.success('Slack Connection created')
+    mutationFn: (agentId: string) => installManagedSlackAgent(projectId, agentId),
+    onSuccess: (progress: { connection: { id: string } }) => {
+      invalidateAgentConnectionQueries(queryClient, projectId, progress.connection.id)
+      toast.success('Slack setup resumed')
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to create Slack Connection')
+      toast.error(err.message || 'Failed to start Slack setup')
     },
   }
 }
 
-export function useCreateAgentConnection() {
+export function useInstallManagedSlackAgent() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation(createAgentConnectionMutationOptions(projectId, queryClient))
-}
-
-export function configureAgentConnectionMutationOptions(
-  projectId: string | null | undefined,
-  connectionId: string,
-  queryClient: InvalidationClient,
-) {
-  return {
-    mutationFn: (data: AgentConnectionConfigureRequest) =>
-      configureAgentConnection(projectId, connectionId, data),
-    onSuccess: (_updated: AgentConnectionDto) => {
-      invalidateAgentConnectionQueries(queryClient, projectId, connectionId)
-      toast.success('Credentials saved')
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Failed to save credentials')
-    },
-  }
-}
-
-export function useConfigureAgentConnection(connectionId: string | null | undefined) {
-  const queryClient = useQueryClient()
-  const { projectId } = useProject()
-  return useMutation(
-    configureAgentConnectionMutationOptions(projectId, connectionId ?? '', queryClient),
-  )
+  return useMutation(installManagedSlackAgentMutationOptions(projectId, queryClient))
 }
 
 export function claimAgentConnectionOwnerMutationOptions(
@@ -176,9 +144,7 @@ export function claimAgentConnectionOwnerMutationOptions(
 export function useClaimAgentConnectionOwner(connectionId: string | null | undefined) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation(
-    claimAgentConnectionOwnerMutationOptions(projectId, connectionId ?? '', queryClient),
-  )
+  return useMutation(claimAgentConnectionOwnerMutationOptions(projectId, connectionId ?? '', queryClient))
 }
 
 export const agentConnectionAccessQueryKey = (
@@ -198,10 +164,7 @@ export function agentConnectionAccessQueryOptions(
   }
 }
 
-export function useAgentConnectionAccess(
-  connectionId: string | null | undefined,
-  enabled = true,
-) {
+export function useAgentConnectionAccess(connectionId: string | null | undefined, enabled = true) {
   const { projectId } = useProject()
   return useQuery<AccessPolicyState>(agentConnectionAccessQueryOptions(projectId, connectionId, enabled))
 }
@@ -212,8 +175,7 @@ export function manageAgentConnectionAccessMutationOptions(
   queryClient: InvalidationClient,
 ) {
   return {
-    mutationFn: (data: AccessPolicyManageRequest) =>
-      manageAgentConnectionAccess(projectId, connectionId, data),
+    mutationFn: (data: AccessPolicyManageRequest) => manageAgentConnectionAccess(projectId, connectionId, data),
     onSuccess: (_updated: AccessPolicyManageResponse) => {
       invalidateAgentConnectionQueries(queryClient, projectId, connectionId)
       queryClient.invalidateQueries({
@@ -230,16 +192,10 @@ export function manageAgentConnectionAccessMutationOptions(
 export function useManageAgentConnectionAccess(connectionId: string | null | undefined) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation(
-    manageAgentConnectionAccessMutationOptions(projectId, connectionId ?? '', queryClient),
-  )
+  return useMutation(manageAgentConnectionAccessMutationOptions(projectId, connectionId ?? '', queryClient))
 }
 
-export function useSearchSlackMembers(
-  connectionId: string | null | undefined,
-  query: string,
-  enabled: boolean,
-) {
+export function useSearchSlackMembers(connectionId: string | null | undefined, query: string, enabled: boolean) {
   const { projectId } = useProject()
   return useQuery<SlackMemberSearchResponse>({
     queryKey: ['slack-member-search', projectId, connectionId, query],
@@ -279,14 +235,9 @@ export function slackOutboxDeliveriesQueryOptions(
   }
 }
 
-export function useSlackOutboxDeliveries(
-  connectionId: string | null | undefined,
-  enabled = true,
-) {
+export function useSlackOutboxDeliveries(connectionId: string | null | undefined, enabled = true) {
   const { projectId } = useProject()
-  return useQuery<SlackOutboxListResponse>(
-    slackOutboxDeliveriesQueryOptions(projectId, connectionId, enabled),
-  )
+  return useQuery<SlackOutboxListResponse>(slackOutboxDeliveriesQueryOptions(projectId, connectionId, enabled))
 }
 
 export function resendSlackOutboxDeliveryMutationOptions(
@@ -311,9 +262,7 @@ export function resendSlackOutboxDeliveryMutationOptions(
 export function useResendSlackOutboxDelivery(connectionId: string | null | undefined) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation(
-    resendSlackOutboxDeliveryMutationOptions(projectId, connectionId ?? '', queryClient),
-  )
+  return useMutation(resendSlackOutboxDeliveryMutationOptions(projectId, connectionId ?? '', queryClient))
 }
 
 export function clearOfflineGapMutationOptions(
@@ -335,7 +284,5 @@ export function clearOfflineGapMutationOptions(
 export function useClearOfflineGap(connectionId: string | null | undefined) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation(
-    clearOfflineGapMutationOptions(projectId, connectionId ?? '', queryClient),
-  )
+  return useMutation(clearOfflineGapMutationOptions(projectId, connectionId ?? '', queryClient))
 }

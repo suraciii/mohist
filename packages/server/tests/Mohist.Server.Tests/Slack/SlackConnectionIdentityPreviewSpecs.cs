@@ -17,13 +17,12 @@ namespace Mohist.Server.Tests.Slack;
 [Trait("level", "L1")]
 public sealed class SlackConnectionIdentityPreviewSpecs : IClassFixture<DefaultMohistIntegrationFixture>
 {
-    private const string SlackAppCreationReference = "https://api.slack.com/apps?new_app=1";
     private readonly MohistIntegrationFixture _fixture;
 
     public SlackConnectionIdentityPreviewSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
-    public async Task Create_without_BotName_persists_and_returns_the_Agent_identity_preview()
+    public async Task Legacy_empty_connection_create_route_is_removed()
     {
         var seeded = await SeedAgentAsync("release_helper", "Reviews release changes.");
 
@@ -35,35 +34,7 @@ public sealed class SlackConnectionIdentityPreviewSpecs : IClassFixture<DefaultM
             botUserId = "U_FORGED",
         });
 
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var data = await ReadDataAsync(response);
-        var connection = data.GetProperty("connection");
-        var connectionId = connection.GetProperty("id").GetString()!;
-        Assert.Equal("release_helper", data.GetProperty("botName").GetString());
-        Assert.Equal("Reviews release changes.", data.GetProperty("appDescription").GetString());
-        Assert.Equal(SlackAppCreationReference, data.GetProperty("slackAppCreationReference").GetString());
-        Assert.Equal("release_helper", connection.GetProperty("botName").GetString());
-        Assert.Equal(string.Empty, connection.GetProperty("workspaceTeamId").GetString());
-        Assert.Equal(string.Empty, connection.GetProperty("appId").GetString());
-        Assert.Equal(string.Empty, connection.GetProperty("botUserId").GetString());
-
-        await using (var scope = _fixture.Services.CreateAsyncScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            var persisted = await db.AgentConnections.SingleAsync(item => item.Id == connectionId);
-            Assert.Equal("release_helper", persisted.BotName);
-            Assert.Equal(string.Empty, persisted.WorkspaceTeamId);
-            Assert.Equal(string.Empty, persisted.AppId);
-            Assert.Equal(string.Empty, persisted.BotUserId);
-        }
-
-        using var detailResponse = await _fixture.Client.GetAsync(Path(seeded.ProjectId, connectionId));
-        detailResponse.EnsureSuccessStatusCode();
-        var detail = await ReadDataAsync(detailResponse);
-        Assert.Equal(connectionId, detail.GetProperty("connection").GetProperty("id").GetString());
-        Assert.Equal("release_helper", detail.GetProperty("botName").GetString());
-        Assert.Equal("Reviews release changes.", detail.GetProperty("appDescription").GetString());
-        Assert.Equal(SlackAppCreationReference, detail.GetProperty("slackAppCreationReference").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     private async Task<SeededAgent> SeedAgentAsync(string name, string description)

@@ -33,35 +33,51 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
 
         var createsBefore = _fixture.Apps.CreateCalls;
         var first = await ReadDataAsync(await client.PostAsJsonAsync(
-            InstallPath(projectId), new { enrollmentId, agentId }));
+            InstallPath(projectId), new { agentId }));
 
-        Assert.Equal("provide_credentials", first.GetProperty("nextAction").GetString());
-        Assert.Equal(team, first.GetProperty("connection").GetProperty("workspaceTeamId").GetString());
-        Assert.Equal(string.Empty, first.GetProperty("connection").GetProperty("appId").GetString());
-        Assert.False(string.IsNullOrWhiteSpace(first.GetProperty("agentApp").GetProperty("appId").GetString()));
+        Assert.Equal("approve_install", first.GetProperty("nextAction").GetString());
+        Assert.False(first.GetProperty("connection").TryGetProperty("workspaceTeamId", out _));
+        Assert.False(first.GetProperty("agentApp").TryGetProperty("id", out _));
+        Assert.False(first.GetProperty("agentApp").TryGetProperty("appId", out _));
+        Assert.False(string.IsNullOrWhiteSpace(first.GetProperty("agentApp").GetProperty("installUrl").GetString()));
         Assert.Equal(createsBefore + 1, _fixture.Apps.CreateCalls);
+
+        var internalFacts = await ReadManagedAppFactsAsync(projectId, agentId);
+        var detail = await ReadDataAsync(await client.GetAsync(
+            $"/api/projects/{projectId}/slack-connections/{internalFacts.ConnectionId}"));
+        var publicManagedApp = detail.GetProperty("managedApp");
+        Assert.Equal("approve_install", publicManagedApp.GetProperty("nextAction").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(publicManagedApp.GetProperty("installUrl").GetString()));
+        Assert.False(publicManagedApp.TryGetProperty("id", out _));
+        Assert.False(publicManagedApp.TryGetProperty("enrollmentId", out _));
+        Assert.False(publicManagedApp.TryGetProperty("workspaceTeamId", out _));
+        Assert.False(publicManagedApp.TryGetProperty("appId", out _));
 
         var createsBeforeRerun = _fixture.Apps.CreateCalls;
         var rerun = await ReadDataAsync(await client.PostAsJsonAsync(
-            InstallPath(projectId), new { enrollmentId, agentId }));
+            InstallPath(projectId), new { agentId }));
 
-        Assert.Equal(first.GetProperty("connection").GetProperty("id").GetString(), rerun.GetProperty("connection").GetProperty("id").GetString());
-        Assert.Equal(first.GetProperty("agentApp").GetProperty("id").GetString(), rerun.GetProperty("agentApp").GetProperty("id").GetString());
+        Assert.Equal(internalFacts.ConnectionId, rerun.GetProperty("connection").GetProperty("id").GetString());
         Assert.Equal(createsBeforeRerun, _fixture.Apps.CreateCalls);
     }
 
     [Fact]
-    public async Task Install_rejects_when_the_workspace_has_no_active_enrollment()
+    public async Task Install_rejects_when_multiple_active_workspaces_require_a_selection()
     {
-        var (projectId, agentId, team, _) = UniqueIds();
+        var (projectId, agentId, _, _) = UniqueIds();
         await SeedAgentAsync(projectId, agentId, AgentStatus.Active);
+        // Auto-selection resolves only a single eligible workspace; two active
+        // enrollments must surface an explicit selection instead of mutating
+        // the first record a list happens to return.
+        await SeedActiveEnrollmentAsync($"enrollment_{Guid.NewGuid():N}", $"T_{Guid.NewGuid():N}");
+        await SeedActiveEnrollmentAsync($"enrollment_{Guid.NewGuid():N}", $"T_{Guid.NewGuid():N}");
         using var client = _fixture.CreateOperatorClient();
 
         using var response = await client.PostAsJsonAsync(
-            InstallPath(projectId), new { enrollmentId = "enrollment_missing", agentId });
+            InstallPath(projectId), new { agentId });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        Assert.Equal("enrollment_required", await CodeAsync(response));
+        Assert.Equal("workspace_selection_required", await CodeAsync(response));
     }
 
     [Fact]
@@ -72,7 +88,7 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
         using var client = _fixture.CreateOperatorClient();
 
         using var response = await client.PostAsJsonAsync(
-            InstallPath(projectId), new { enrollmentId, agentId });
+            InstallPath(projectId), new { agentId });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         Assert.Equal("agent_archived", await CodeAsync(response));
@@ -124,9 +140,10 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
         using var client = _fixture.CreateOperatorClient();
 
         var installed = await ReadDataAsync(await client.PostAsJsonAsync(
-            InstallPath(projectId), new { enrollmentId, agentId }));
-        var agentAppId = installed.GetProperty("agentApp").GetProperty("id").GetString()!;
-        var appId = installed.GetProperty("agentApp").GetProperty("appId").GetString()!;
+            InstallPath(projectId), new { agentId }));
+        var internalFacts = await ReadManagedAppFactsAsync(projectId, agentId);
+        var agentAppId = internalFacts.AgentAppId;
+        var appId = internalFacts.AppId;
         var connectionId = installed.GetProperty("connection").GetProperty("id").GetString()!;
 
         _fixture.BotIdentity.Result = new SlackBotIdentityVerificationResult(
@@ -137,7 +154,7 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
             GrantedScopes: new HashSet<string>(SlackManifestDefinition.For(SlackManifestKind.AgentApp).BotScopes));
 
         using var provisioned = await client.PostAsJsonAsync(
-            CredentialsPath(projectId), new { agentAppId, botToken = "xoxb-live", appLevelToken = "xapp-live" });
+            CredentialsPath(projectId), new { agentId, botToken = "xoxb-live", appLevelToken = "xapp-live" });
         provisioned.EnsureSuccessStatusCode();
         Assert.DoesNotContain("xoxb-live", await provisioned.Content.ReadAsStringAsync(), StringComparison.Ordinal);
 
@@ -155,10 +172,10 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
         }
 
         var ready = await ReadDataAsync(await client.PostAsJsonAsync(
-            InstallPath(projectId), new { enrollmentId, agentId }));
+            InstallPath(projectId), new { agentId }));
         Assert.Equal("ready", ready.GetProperty("nextAction").GetString());
-        Assert.Equal(appId, ready.GetProperty("connection").GetProperty("appId").GetString());
-        Assert.Equal("U_INSTALL_BOT", ready.GetProperty("connection").GetProperty("botUserId").GetString());
+        Assert.False(ready.GetProperty("connection").TryGetProperty("appId", out _));
+        Assert.False(ready.GetProperty("connection").TryGetProperty("botUserId", out _));
     }
 
     [Fact]
@@ -170,7 +187,7 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
 
         using var response = await client.PostAsJsonAsync(
             CredentialsPath(projectId),
-            new { agentAppId = "agent_app_addr", botToken = "xoxb", appLevelToken = "xapp", secretKind = "botToken" });
+            new { agentId = "agent_addr", agentAppId = "agent_app_addr", botToken = "xoxb", appLevelToken = "xapp", secretKind = "botToken" });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("credential_address_not_supported", await CodeAsync(response));
@@ -203,6 +220,21 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
             PlanCode = "pro",
             ManagedAppLimit = 10,
             AuditJson = "[]",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        db.AgentConnections.Add(new AgentConnectionRow
+        {
+            Id = $"connection_{agentId}",
+            ProjectId = projectId,
+            AgentId = agentId,
+            ProviderKind = ConnectionProviderKind.Slack,
+            WorkspaceTeamId = team,
+            SetupProgress = SetupProgressKind.CreateAppCredentials,
+            DesiredState = DesiredStateKind.Enabled,
+            ConnectionHealth = ConnectionHealthKind.Unhealthy,
+            HealthReason = "managed_app_not_ready",
+            AgentReadiness = AgentReadinessKind.Ready,
             CreatedAt = now,
             UpdatedAt = now,
         });
@@ -243,6 +275,26 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
         await db.SaveChangesAsync();
     }
 
+    private async Task SeedActiveEnrollmentAsync(string enrollmentId, string team)
+    {
+        var now = _fixture.TimeProvider.GetUtcNow();
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        db.SlackWorkspaceEnrollments.Add(new SlackWorkspaceEnrollmentRow
+        {
+            Id = enrollmentId,
+            WorkspaceTeamId = team,
+            Lifecycle = SlackEnrollmentLifecycle.Active,
+            ManagerCapability = SlackManagerCapability.Available,
+            PlanCode = "pro",
+            ManagedAppLimit = 10,
+            AuditJson = "[]",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+    }
+
     private static async Task<JsonElement> ReadDataAsync(HttpResponseMessage response)
     {
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -253,5 +305,17 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
     {
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return document.RootElement.GetProperty("code").GetString()!;
+    }
+
+    private async Task<(string ConnectionId, string AgentAppId, string AppId)> ReadManagedAppFactsAsync(
+        string projectId,
+        string agentId)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var connection = await db.AgentConnections.SingleAsync(row =>
+            row.ProjectId == projectId && row.AgentId == agentId && row.DeletedAt == null);
+        var app = await db.ManagedSlackAgentApps.SingleAsync(row => row.AgentConnectionId == connection.Id);
+        return (connection.Id, app.Id, app.AppId);
     }
 }

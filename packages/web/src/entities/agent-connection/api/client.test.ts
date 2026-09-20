@@ -3,10 +3,9 @@ import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
 import {
   claimAgentConnectionOwner,
-  configureAgentConnection,
-  createAgentConnection,
   getAgentConnection,
   getConnectionDiagnostic,
+  installManagedSlackAgent,
   listAgentConnections,
 } from './client'
 
@@ -89,42 +88,58 @@ describe('listAgentConnections', () => {
   })
 })
 
-describe('createAgentConnection', () => {
-  it('POSTs the agent id and returns the create response with derived preview', async () => {
+describe('installManagedSlackAgent', () => {
+  it('POSTs only the Agent selection to the managed setup route', async () => {
     const calls: Array<{ method: string; pathname: string; body: unknown }> = []
     server.use(
-      http.post('*/api/projects/:projectId/slack-connections', async ({ request }) => {
+      http.post('*/api/projects/:projectId/slack-manager/install-agent', async ({ request }) => {
         const text = await request.text()
         let parsed: unknown = text
-        try { parsed = JSON.parse(text) } catch { /* keep raw */ }
+        try {
+          parsed = JSON.parse(text)
+        } catch {
+          /* keep raw */
+        }
         calls.push({ method: request.method, pathname: new URL(request.url).pathname, body: parsed })
-        return HttpResponse.json({
-          success: true,
-          data: {
-            connection: { ...CONNECTION_FIXTURE, id: 'conn_new', botName: 'derived-bot' },
-            botName: 'derived-bot',
-            appDescription: 'A description derived from the agent',
-            slackAppCreationReference: 'https://api.slack.com/apps?new_app=1',
+        return HttpResponse.json(
+          {
+            success: true,
+            data: {
+              connection: { ...CONNECTION_FIXTURE, id: 'conn_new', botName: 'derived-bot' },
+              agentApp: {
+                appLifecycle: 'created',
+                authorization: 'pending',
+                runtimeCredentialValidationState: 'not_provided',
+                bindingState: 'unbound',
+                manifestState: 'applied',
+                transportReadiness: 'not_ready',
+                nextAction: 'approve_install',
+                installUrl: null,
+                unknownOutcome: null,
+                errorClass: null,
+              },
+              nextAction: 'approve_install',
+              errorClass: null,
+            },
           },
-        }, { status: 201 })
+          { status: 201 },
+        )
       }),
     )
 
-    const response = await createAgentConnection('proj-1', { agentId: 'agent-1' })
+    const response = await installManagedSlackAgent('proj-1', 'agent-1')
 
     expect(calls).toHaveLength(1)
     expect(calls[0].method).toBe('POST')
-    expect(calls[0].pathname).toBe('/api/projects/proj-1/slack-connections')
+    expect(calls[0].pathname).toBe('/api/projects/proj-1/slack-manager/install-agent')
     expect(calls[0].body).toEqual({ agentId: 'agent-1' })
     expect(response.connection.id).toBe('conn_new')
-    expect(response.botName).toBe('derived-bot')
-    expect(response.appDescription).toBe('A description derived from the agent')
-    expect(response.slackAppCreationReference).toBe('https://api.slack.com/apps?new_app=1')
+    expect(response.nextAction).toBe('approve_install')
   })
 })
 
 describe('getAgentConnection', () => {
-  it('fetches the connection detail with the derived identity preview', async () => {
+  it('fetches the connection detail used by diagnostics', async () => {
     const paths: string[] = []
     server.use(
       http.get('*/api/projects/:projectId/slack-connections/:connectionId', ({ request }) => {
@@ -133,9 +148,6 @@ describe('getAgentConnection', () => {
           success: true,
           data: {
             connection: CONNECTION_FIXTURE,
-            botName: 'derived-bot',
-            appDescription: 'Derived from Agent description',
-            slackAppCreationReference: 'https://api.slack.com/apps?new_app=1',
           },
         })
       }),
@@ -144,48 +156,7 @@ describe('getAgentConnection', () => {
     const detail = await getAgentConnection('proj-1', 'conn-1')
 
     expect(paths).toEqual(['/api/projects/proj-1/slack-connections/conn-1'])
-    expect(detail.botName).toBe('derived-bot')
-    expect(detail.appDescription).toBe('Derived from Agent description')
-    expect(detail.slackAppCreationReference).toBe('https://api.slack.com/apps?new_app=1')
-  })
-})
-
-describe('configureAgentConnection', () => {
-  it('POSTs the credentials in the body to /configure and never puts tokens in the URL', async () => {
-    const calls: Array<{ method: string; pathname: string; body: unknown; url: string }> = []
-    server.use(
-      http.post('*/api/projects/:projectId/slack-connections/:connectionId/configure', async ({ request }) => {
-        const text = await request.text()
-        let parsed: unknown = text
-        try { parsed = JSON.parse(text) } catch { /* keep raw */ }
-        const url = new URL(request.url)
-        calls.push({
-          method: request.method,
-          pathname: url.pathname,
-          body: parsed,
-          url: url.toString(),
-        })
-        return HttpResponse.json({
-          success: true,
-          data: { ...CONNECTION_FIXTURE, setupProgress: 'waiting_for_slack_service' },
-        })
-      }),
-    )
-
-    await configureAgentConnection('proj-1', 'conn-1', {
-      appToken: 'xapp-1-A-SECRET',
-      botToken: 'xoxb-1-B-SECRET',
-    })
-
-    expect(calls).toHaveLength(1)
-    expect(calls[0].method).toBe('POST')
-    expect(calls[0].pathname).toBe('/api/projects/proj-1/slack-connections/conn-1/configure')
-    expect(calls[0].body).toEqual({
-      appToken: 'xapp-1-A-SECRET',
-      botToken: 'xoxb-1-B-SECRET',
-    })
-    expect(calls[0].url).not.toContain('xapp-')
-    expect(calls[0].url).not.toContain('xoxb-')
+    expect(detail.connection.id).toBe('conn-1')
   })
 })
 

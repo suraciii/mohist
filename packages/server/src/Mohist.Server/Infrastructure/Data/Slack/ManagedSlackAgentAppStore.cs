@@ -44,6 +44,47 @@ public sealed class ManagedSlackAgentAppStore : IScopedService
         return row is null ? null : ToDomain(row);
     }
 
+    public async Task<ManagedSlackAgentApp?> GetByProjectAndAgentAsync(
+        string projectId,
+        string agentId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentId);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.ManagedSlackAgentApps.AsNoTracking()
+            .Where(app => app.DeletedAt == null
+                && db.AgentConnections.Any(connection =>
+                    connection.Id == app.AgentConnectionId
+                    && connection.ProjectId == projectId
+                    && connection.AgentId == agentId))
+            .ToListAsync(ct);
+        var row = rows.OrderByDescending(app => app.UpdatedAt).FirstOrDefault();
+        return row is null ? null : ToDomain(row);
+    }
+
+    public async Task<ManagedSlackAgentApp?> GetByProjectAgentAndWorkspaceAsync(
+        string projectId,
+        string agentId,
+        string workspaceTeamId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.ManagedSlackAgentApps.AsNoTracking()
+            .Where(app => app.DeletedAt == null
+                && app.WorkspaceTeamId == workspaceTeamId
+                && db.AgentConnections.Any(connection =>
+                    connection.Id == app.AgentConnectionId
+                    && connection.ProjectId == projectId
+                    && connection.AgentId == agentId))
+            .ToListAsync(ct);
+        var row = rows.OrderByDescending(app => app.UpdatedAt).FirstOrDefault();
+        return row is null ? null : ToDomain(row);
+    }
+
     public async Task<bool> HasUndeletedForAgentAndWorkspaceAsync(
         string projectId,
         string agentId,
@@ -130,6 +171,16 @@ public sealed class ManagedSlackAgentAppStore : IScopedService
             ArgumentException.ThrowIfNullOrWhiteSpace(manifestHash);
             agentApp.DesiredManifestVersion = manifestVersion;
             agentApp.DesiredManifestHash = manifestHash;
+        }, ct);
+
+    public Task<ManagedSlackAgentApp?> ApplyManifestAsync(
+        string id,
+        int manifestVersion,
+        string manifestHash,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, agentApp =>
+        {
+            agentApp.ApplyManifest(manifestVersion, manifestHash);
         }, ct);
 
     public Task<ManagedSlackAgentApp?> StageRuntimeCredentialsAsync(
@@ -247,6 +298,10 @@ public sealed class ManagedSlackAgentAppStore : IScopedService
         row.Authorization = agentApp.Authorization;
         row.BindingState = agentApp.BindingState;
         row.BotUserId = agentApp.BotUserId;
+        row.DesiredManifestVersion = agentApp.DesiredManifestVersion;
+        row.DesiredManifestHash = agentApp.DesiredManifestHash;
+        row.AppliedManifestVersion = agentApp.AppliedManifestVersion;
+        row.AppliedManifestHash = agentApp.AppliedManifestHash;
         row.VerifiedScopesJson = agentApp.VerifiedScopesJson;
         row.InstallUrl = agentApp.InstallUrl;
         row.RuntimeCredentialValidationState = agentApp.RuntimeCredentialValidationState;

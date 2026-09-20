@@ -7,10 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
 import { server, useMswServer } from '../../../../tests/support/msw'
 import { ConnectionDiagnosticPage } from './ConnectionDiagnosticPage'
-import type {
-  ConnectionDiagnostic,
-  ConnectionDiagnosticFacts,
-} from '../../../entities/agent-connection'
+import type { ConnectionDiagnostic, ConnectionDiagnosticFacts } from '../../../entities/agent-connection'
 
 useMswServer()
 
@@ -56,7 +53,7 @@ function makeDiagnostic(overrides: Partial<ConnectionDiagnostic> = {}): Connecti
   }
 }
 
-function makeDetail() {
+function makeDetail(nextAction = 'reconcile_create') {
   return {
     connection: {
       id: 'conn-1',
@@ -81,23 +78,15 @@ function makeDetail() {
       updatedAt: '2026-06-01T00:00:00.000Z',
       deletedAt: null,
     },
-    botName: 'derived-bot',
-    appDescription: 'Derived description for the Agent',
-    slackAppCreationReference: 'https://api.slack.com/apps?new_app=1',
     managedApp: {
-      id: 'child-1',
-      enrollmentId: 'enrollment-1',
-      agentConnectionId: 'conn-1',
-      workspaceTeamId: 'T123',
-      appId: '',
-      botUserId: '',
       appLifecycle: 'create_unknown',
       authorization: 'pending_admin',
       manifestState: 'desired',
       transportKind: 'socket',
       transportReadiness: 'not_ready',
-      nextAction: 'reconcile_create',
+      nextAction,
       bindingState: 'pending',
+      installUrl: nextAction === 'approve_install' ? 'https://api.slack.com/apps/A1/oauth' : null,
       unknownOutcome: 'timeout',
       errorClass: 'timeout',
       deletedAt: null,
@@ -116,10 +105,7 @@ function renderPage() {
       <ProjectProvider initialProjectId="proj-1" initialProjects={[PROJECT]}>
         <MemoryRouter initialEntries={['/Test/connections/conn-1']}>
           <Routes>
-            <Route
-              path="/:projectName/connections/:connectionId"
-              element={<ConnectionDiagnosticPage />}
-            />
+            <Route path="/:projectName/connections/:connectionId" element={<ConnectionDiagnosticPage />} />
           </Routes>
         </MemoryRouter>
       </ProjectProvider>
@@ -147,20 +133,31 @@ describe('ConnectionDiagnosticPage — setup step rendering (MSW)', () => {
     )
   })
 
-  it('renders the first setup step — identity preview and Create in Slack — when setupProgress is create_app_credentials', async () => {
+  it('renders the managed setup progress without a manual app or credential form', async () => {
     renderPage()
 
     expect(await screen.findByTestId('connection-setup-step-list')).toBeInTheDocument()
-    expect(await screen.findByTestId('connection-setup-identity-preview')).toBeInTheDocument()
-    expect(screen.getByTestId('connection-setup-identity-bot-name')).toHaveTextContent('derived-bot')
-    expect(screen.getByTestId('connection-setup-identity-app-description')).toHaveTextContent(
-      'Derived description for the Agent',
-    )
-    const link = screen.getByTestId('connection-setup-create-in-slack')
-    expect(link).toHaveAttribute('href', 'https://api.slack.com/apps?new_app=1')
-    expect(link).toHaveAttribute('target', '_blank')
+    expect(await screen.findByTestId('connection-setup-managed-progress')).toBeInTheDocument()
+    expect(screen.queryByTestId('connection-setup-identity-preview')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('connection-setup-credential-form')).not.toBeInTheDocument()
     expect(await screen.findByTestId('managed-agent-app-status')).toHaveTextContent('reconcile create')
     expect(screen.getByTestId('managed-agent-app-status')).toHaveTextContent('timeout')
+  })
+
+  it('keeps the install approval link and exact protected host command available after navigation', async () => {
+    server.use(
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId', () =>
+        HttpResponse.json({ success: true, data: makeDetail('approve_install') }),
+      ),
+    )
+
+    renderPage()
+
+    const link = await screen.findByTestId('managed-agent-app-install-link')
+    expect(link).toHaveAttribute('href', 'https://api.slack.com/apps/A1/oauth')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(screen.getByTestId('managed-agent-app-local-step')).toHaveTextContent('mo slack install-agent agent-1')
+    expect(screen.getByTestId('managed-agent-app-local-step')).toHaveTextContent('~/.mohist/slack-credentials.json')
   })
 
   it('renders the waiting-for-service step while preserving setup progress', async () => {
@@ -181,7 +178,10 @@ describe('ConnectionDiagnosticPage — setup step rendering (MSW)', () => {
     renderPage()
 
     expect(await screen.findByTestId('connection-setup-waiting-for-service')).toBeInTheDocument()
-    expect(screen.getByTestId('connection-setup-step-waiting_for_slack_service')).toHaveAttribute('data-state', 'current')
+    expect(screen.getByTestId('connection-setup-step-waiting_for_slack_service')).toHaveAttribute(
+      'data-state',
+      'current',
+    )
     expect(screen.getByTestId('connection-setup-step-create_app_credentials')).toHaveAttribute('data-state', 'done')
   })
 
@@ -204,10 +204,7 @@ describe('ConnectionDiagnosticPage — setup step rendering (MSW)', () => {
         <ProjectProvider initialProjectId="proj-1" initialProjects={[PROJECT]}>
           <MemoryRouter initialEntries={['/Test/connections/conn-1']}>
             <Routes>
-              <Route
-                path="/:projectName/connections/:connectionId"
-                element={<ConnectionDiagnosticPage />}
-              />
+              <Route path="/:projectName/connections/:connectionId" element={<ConnectionDiagnosticPage />} />
             </Routes>
           </MemoryRouter>
         </ProjectProvider>
@@ -224,67 +221,12 @@ describe('ConnectionDiagnosticPage — setup step rendering (MSW)', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByTestId('connection-setup-step-waiting_for_slack_service')).toHaveAttribute('data-state', 'current')
+      expect(screen.getByTestId('connection-setup-step-waiting_for_slack_service')).toHaveAttribute(
+        'data-state',
+        'current',
+      )
     })
     expect(screen.getByTestId('connection-setup-step-create_app_credentials')).toHaveAttribute('data-state', 'done')
-  })
-
-  it('closes the credential form when setupProgress advances away from create_app_credentials', async () => {
-    let progress = 'create_app_credentials'
-    server.use(
-      http.get('*/api/projects/:projectId/slack-connections/:connectionId/diagnostic', () =>
-        HttpResponse.json({
-          success: true,
-          data: makeDiagnostic({
-            facts: makeFacts({ setupProgress: progress }),
-          }),
-        }),
-      ),
-    )
-
-    const queryClient = makeQueryClient()
-    const { rerender } = render(
-      <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj-1" initialProjects={[PROJECT]}>
-          <MemoryRouter initialEntries={['/Test/connections/conn-1']}>
-            <Routes>
-              <Route
-                path="/:projectName/connections/:connectionId"
-                element={<ConnectionDiagnosticPage />}
-              />
-            </Routes>
-          </MemoryRouter>
-        </ProjectProvider>
-      </QueryClientProvider>,
-    )
-
-    expect(await screen.findByTestId('connection-setup-credential-form')).toBeInTheDocument()
-
-    progress = 'waiting_for_slack_service'
-
-    rerender(
-      <QueryClientProvider client={queryClient}>
-        <ProjectProvider initialProjectId="proj-1" initialProjects={[PROJECT]}>
-          <MemoryRouter initialEntries={['/Test/connections/conn-1']}>
-            <Routes>
-              <Route
-                path="/:projectName/connections/:connectionId"
-                element={<ConnectionDiagnosticPage />}
-              />
-            </Routes>
-          </MemoryRouter>
-        </ProjectProvider>
-      </QueryClientProvider>,
-    )
-
-    await act(async () => {
-      await queryClient.invalidateQueries({ queryKey: ['agent-connection-diagnostic', 'proj-1', 'conn-1'] })
-    })
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('connection-setup-credential-form')).not.toBeInTheDocument()
-    })
-    expect(screen.getByTestId('connection-setup-step-waiting_for_slack_service')).toHaveAttribute('data-state', 'current')
   })
 
   it('agent not Ready keeps Connection setup progress and reports it via the summary', async () => {

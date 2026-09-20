@@ -217,18 +217,8 @@ public sealed class SlackManagedBotAdmissionSpecs : IClassFixture<DefaultMohistI
         string managerAppId,
         string managerBotUserId)
     {
-        using var setup = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/setup", new
-        {
-            workspaceTeamId = team,
-            managerAppId,
-            managerBotUserId,
-        });
-        setup.EnsureSuccessStatusCode();
-        var enrollmentId = await SlackRuntimeLeaseTestSupport.ProvisionVerifiedManagerAsync(
-            _fixture,
-            team,
-            $"xapp-{team}",
-            $"xoxb-{team}");
+        var (enrollmentId, _) = await SlackRuntimeLeaseTestSupport.EnsureVerifiedManagerAsync(
+            _fixture, team, managerAppId, managerBotUserId, $"xapp-{team}", $"xoxb-{team}");
         var leaseId = await SlackRuntimeLeaseTestSupport.AcquireManagerLeaseAsync(
             _fixture,
             enrollmentId,

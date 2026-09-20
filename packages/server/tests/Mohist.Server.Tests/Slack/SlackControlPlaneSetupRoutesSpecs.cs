@@ -29,7 +29,6 @@ public sealed class SlackControlPlaneSetupRoutesSpecs
         using var client = _fixture.CreateOperatorClient();
         using var response = await client.PostAsJsonAsync("/api/slack-manager/setup/configuration", new
         {
-            workspaceTeamId = team,
             configurationAccessToken = "xoxe-supplied",
             configurationRefreshToken = "xoxr-supplied",
         });
@@ -38,9 +37,11 @@ public sealed class SlackControlPlaneSetupRoutesSpecs
         var body = await response.Content.ReadAsStringAsync();
         var data = await ReadDataAsync(response);
         Assert.Equal("awaiting_install", data.GetProperty("phase").GetString());
-        Assert.Equal("supply_runtime_credentials", data.GetProperty("nextAction").GetString());
-        Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("managerAppId").GetString()));
+        Assert.Equal("approve_install", data.GetProperty("nextAction").GetString());
         Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("installUrl").GetString()));
+        Assert.False(data.TryGetProperty("managerAppId", out _));
+        Assert.False(data.TryGetProperty("enrollmentId", out _));
+        Assert.False(data.TryGetProperty("workspaceTeamId", out _));
         Assert.Equal(createsBefore + 1, _fixture.Apps.CreateCalls);
 
         Assert.DoesNotContain("xoxe-supplied", body, StringComparison.Ordinal);
@@ -71,43 +72,42 @@ public sealed class SlackControlPlaneSetupRoutesSpecs
     }
 
     [Fact]
-    public async Task Legacy_setup_route_derives_the_credential_ref_from_owner_and_rejects_a_caller_supplied_one()
+    public async Task Legacy_setup_route_is_removed()
     {
-        const string team = "T_LEGACY_SETUP";
         using var client = _fixture.CreateOperatorClient();
 
-        using var rejected = await client.PostAsJsonAsync("/api/slack-manager/setup", new
-        {
-            workspaceTeamId = team,
-            managerAppId = "A_LEGACY",
-            managerBotUserId = "U_LEGACY",
-            managerCredentialRef = "caller-supplied-ref",
-        });
-        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
-        Assert.Equal("credential_address_not_supported", await CodeAsync(rejected));
+        using var response = await client.PostAsJsonAsync("/api/slack-manager/setup", new { });
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
 
-        using var setup = await client.PostAsJsonAsync("/api/slack-manager/setup", new
-        {
-            workspaceTeamId = team,
-            managerAppId = "A_LEGACY",
-            managerBotUserId = "U_LEGACY",
-        });
-        setup.EnsureSuccessStatusCode();
-        var data = await ReadDataAsync(setup);
-        Assert.True(data.GetProperty("enrollment").GetProperty("managerCredentialConfigured").GetBoolean());
+    [Fact]
+    public async Task Resume_requires_an_operator_token_and_loopback()
+    {
+        using var anonymous = _fixture.CreateUnauthenticatedClient();
+        using var anonymousResponse = await anonymous.PostAsync(
+            "/api/slack-manager/setup/resume",
+            content: null);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
+
+        using var loopback = _fixture.CreateOperatorClient();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/api/slack-manager/setup/resume");
+        request.Headers.Add("X-Test-Remote-Address", "203.0.113.10");
+        using var nonLoopback = await loopback.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Forbidden, nonLoopback.StatusCode);
+        Assert.Equal("loopback_required", await CodeAsync(nonLoopback));
     }
 
     private static object SecretBody(string path, string team) => path switch
     {
         "/api/slack-manager/setup/configuration" => new
         {
-            workspaceTeamId = team,
             configurationAccessToken = "xoxe",
             configurationRefreshToken = "xoxr",
         },
         "/api/slack-manager/setup/runtime-credentials" => new
         {
-            workspaceTeamId = team,
             botToken = "xoxb",
             appLevelToken = "xapp",
         },

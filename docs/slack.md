@@ -150,13 +150,16 @@ local CLI for secret-bearing steps.
 
 ### Set Up the Mohist App
 
-1. Run `mo slack setup` on the Mohist host. Without Configuration credentials,
-   it directs the user to generate the pair in Slack's App management page.
+1. Create `~/.mohist/slack-credentials.json` with the
+   `configurationAccessToken` and `configurationRefreshToken` pair from
+   Slack's App management page, set its mode to `0600`, and run
+   `mo slack setup`. Mohist derives the workspace from Slack; no workspace ID
+   is entered.
 2. Mohist validates the Workspace, creates the Mohist App, and shows its
    installation link. The user confirms it in the browser. Setup waits if
    administrator approval is required.
-3. Provide the Bot token and a `connections:write` App-level token through
-   protected input.
+3. Add the installed App's `botToken` and `appLevelToken` to the same file and
+   rerun `mo slack setup`.
 4. Mohist validates the Workspace, App, Bot, and Socket, stores the credentials
    securely, and starts the local `mohist-slack` service. It shows Ready only
    after Socket identity is confirmed.
@@ -176,7 +179,8 @@ local CLI for secret-bearing steps.
    pending approval resume the same App.
 5. Mohist verifies Workspace, App, and Bot identities. A mismatch stores no
    credentials and binds no Connection.
-6. Provide the Bot token and App-level token through protected input. The
+6. Put this App's Bot token and App-level token in the same protected
+   credentials file and rerun `mo slack install-agent <agent>`. The
    Connection is not Ready until both validate. Credentials never appear in
    Instructions, messages, logs, or transcripts.
 7. Generate a short-lived, single-use claim code and send it in a DM to the
@@ -452,10 +456,9 @@ later input or another Connection gets a separate answer.
   Manager credential and `/api/slack-manager/reply`. The Server validates the
   credential's current-input origin; the Manager does not supply Slack
   credentials or choose a different destination.
-- `mo slack status` reads workspace status through `/api/slack-manager/status`
-  with `workspaceTeamId` in the query and the management credential. Manager
-  status and management requests use the same broker and never a Connection
-  credential.
+- `mo slack status` reads the configured workspace's public setup projection
+  through `/api/slack-manager/setup/progress`. The caller supplies no workspace
+  or internal setup identifier.
 
 - Status fields such as exit code, artifact count, or IDs are metadata, not the
   Agent's answer.

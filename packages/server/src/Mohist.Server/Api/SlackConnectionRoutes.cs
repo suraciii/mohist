@@ -27,7 +27,23 @@ public static partial class SlackConnectionRoutes
         connection.ConnectionHealth == ConnectionHealthKind.Degraded
         && SlackConnectionBackpressureReasons.IsBackpressureReason(connection.HealthReason);
 
-    private const string SlackAppCreationReference = "https://api.slack.com/apps?new_app=1";
+    private static object PublicManagedApp(SlackManagerAppProjection app) => new
+    {
+        app.AppLifecycle,
+        app.Authorization,
+        app.ManifestState,
+        app.TransportKind,
+        app.TransportReadiness,
+        NextAction = app.NextAction == SlackAgentAppNextAction.AuthorizeAgentApp
+            ? "approve_install"
+            : app.NextAction,
+        app.BindingState,
+        app.InstallUrl,
+        app.UnknownOutcome,
+        app.ErrorClass,
+        app.DeletedAt,
+    };
+
     private static readonly Regex SlackMentionToken = new(
         @"<@(?<id>[A-Za-z0-9_-]+)(?:\|[^>]*)?>",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -36,56 +52,6 @@ public static partial class SlackConnectionRoutes
     {
         var management = app.MapGroup("/api/projects/{projectRef}/slack-connections")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
-
-        management.MapPost("/", async (
-            HttpContext context,
-            SlackConnectionCreateBody body,
-            AgentConnectionStore connections,
-            AgentQuerier agents,
-            CancellationToken ct) =>
-        {
-            var projectId = context.GetResolvedProject().Id;
-            if (body is null || string.IsNullOrWhiteSpace(body.AgentId))
-                return ApiResults.BadRequest("agentId is required.");
-
-            var agentId = body.AgentId.Trim();
-            var agent = await agents.GetByIdAsync(projectId, agentId);
-            if (agent is null)
-                return ApiResults.BadRequest($"Agent '{agentId}' was not found in project '{projectId}'.", "agent_not_found");
-            var preview = SlackBotIdentityDeriver.Derive(agent);
-            var botName = body.BotName?.Trim() ?? preview.BotName;
-            var connection = new AgentConnection
-            {
-                Id = $"connection_{Guid.NewGuid():N}",
-                ProjectId = projectId,
-                AgentId = agentId,
-                ProviderKind = ConnectionProviderKind.Slack,
-                WorkspaceTeamId = string.Empty,
-                AppId = string.Empty,
-                BotUserId = string.Empty,
-                BotName = botName,
-                AvatarHash = body.AvatarHash,
-            };
-            try
-            {
-                var created = await connections.CreateAsync(connection, ct);
-                return Results.Json(new ApiResponse<object>(true, new
-                {
-                    connection = created,
-                    botName = created.BotName,
-                    appDescription = preview.AppDescription,
-                    slackAppCreationReference = SlackAppCreationReference,
-                }), statusCode: 201);
-            }
-            catch (AgentConnectionDuplicateException ex)
-            {
-                return ApiResults.Conflict(ex.Message, "connection_duplicate");
-            }
-            catch (AgentConnectionValidationException ex)
-            {
-                return ApiResults.BadRequest(ex.Message, ex.Code);
-            }
-        });
 
         management.MapGet("/", async (
             HttpContext context,
@@ -120,13 +86,13 @@ public static partial class SlackConnectionRoutes
             var preview = agent is null
                 ? SlackBotIdentityDeriver.Derive(connection.AgentId, connection.BotName, string.Empty)
                 : SlackBotIdentityDeriver.Derive(agent);
+            var managedApp = await manager.GetAsync(projectId, connectionId, ct);
             return ApiResults.Ok(new
             {
                 connection,
                 botName = string.IsNullOrWhiteSpace(connection.BotName) ? preview.BotName : connection.BotName,
                 appDescription = preview.AppDescription,
-                slackAppCreationReference = SlackAppCreationReference,
-                managedApp = await manager.GetAsync(projectId, connectionId, ct),
+                managedApp = managedApp is null ? null : PublicManagedApp(managedApp),
             });
         });
 
@@ -213,24 +179,6 @@ public static partial class SlackConnectionRoutes
             return updated is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(updated);
         });
 
-        management.MapPost("/{connectionId}/configure", async (HttpContext context, string connectionId, SlackCredentialsBody body, AgentConnectionStore connections, ISecretStore secrets, CancellationToken ct) =>
-        {
-            if (body is null || string.IsNullOrWhiteSpace(body.AppToken) || string.IsNullOrWhiteSpace(body.BotToken))
-                return ApiResults.BadRequest("appToken and botToken are required.");
-            var projectId = context.GetResolvedProject().Id;
-            var connection = await connections.GetAsync(projectId, connectionId, ct);
-            if (connection is null) return ApiResults.NotFound("Slack Connection was not found.");
-            if (AgentConnectionStore.HasBoundIdentity(connection))
-                return ApiResults.Conflict(
-                    "Connection identity is already bound. Re-run `mo slack install-agent` and re-supply credentials to rotate them.",
-                    "identity_already_bound");
-            await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.AppToken), Encoding.UTF8.GetBytes(body.AppToken), ct);
-            await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.BotToken), Encoding.UTF8.GetBytes(body.BotToken), ct);
-            var updated = await connections.UpdateAsync(projectId, connectionId,
-                new HashSet<string>(StringComparer.Ordinal) { "setupProgress" },
-                setupProgress: SetupProgressKind.WaitingForSlackService, ct: ct);
-            return ApiResults.Ok(updated);
-        });
 
         management.MapPost("/{connectionId}/claim-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, AgentConnectionStore connections, CancellationToken ct) =>
         {
@@ -1533,16 +1481,6 @@ internal sealed record HandleChannelIngressRequest(
             leaseContext, services);
 }
 
-public sealed class SlackConnectionCreateBody
-{
-    public string AgentId { get; init; } = string.Empty;
-    public string WorkspaceTeamId { get; init; } = string.Empty;
-    public string AppId { get; init; } = string.Empty;
-    public string BotUserId { get; init; } = string.Empty;
-    public string? BotName { get; init; }
-    public string? AvatarHash { get; init; }
-}
-
 public sealed class SlackConnectionEditBody
 {
     public string? BotName { get; init; }
@@ -1553,12 +1491,6 @@ public sealed class SlackConnectionManageAccessBody
 {
     public string? AccessPolicy { get; init; }
     public IReadOnlyList<string>? AllowMembers { get; init; }
-}
-
-public sealed class SlackCredentialsBody
-{
-    public string AppToken { get; init; } = string.Empty;
-    public string BotToken { get; init; } = string.Empty;
 }
 
 public sealed partial class SlackReplyBody
