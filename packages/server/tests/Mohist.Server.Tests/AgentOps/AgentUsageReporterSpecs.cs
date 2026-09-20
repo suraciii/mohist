@@ -275,6 +275,68 @@ public sealed class AgentUsageReporterSpecs : IClassFixture<MohistDbFixture>
     }
 
     [Fact]
+    public async Task GetCostWindowedAsync_TokenOnlySessionWithCompletedIssue_YieldsUnknownNumerator()
+    {
+        // A completed Issue is a positive denominator, but the only session
+        // reported tokens, not an amount. The derived per-issue cost has no
+        // numerator and must stay unknown rather than divide a fabricated 0.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(8),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150);
+        await InsertDoneIssueAsync(project.Id, number: 1, title: "d1",
+            completedAt: Today.AddDays(-2).AddHours(9));
+
+        var service = ResolveReporter();
+        var result = await service.GetCostWindowedAsync(project.Id);
+
+        Assert.Null(result.CurrentWindow.Spend.Amount);
+        Assert.Equal(0, result.CurrentWindow.Spend.SampleCount);
+        Assert.Null(result.CurrentWindow.PerIssueCost.Amount);
+        Assert.Equal(0, result.CurrentWindow.PerIssueCost.SampleCount);
+    }
+
+    [Fact]
+    public async Task GetCostRollupAsync_TokenOnlySessionsAreNotCostSamples()
+    {
+        // The Session is created today so the TodayCost assertions exercise
+        // the token-only rule rather than an empty today window.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddHours(8),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150);
+
+        var service = ResolveReporter();
+        var result = await service.GetCostRollupAsync(project.Id);
+
+        Assert.Null(result.TotalCost.Amount);
+        Assert.Equal(0, result.TotalCost.SampleCount);
+        Assert.Null(result.TotalCost.Currency);
+        Assert.Null(result.TodayCost.Amount);
+        Assert.Equal(0, result.TodayCost.SampleCount);
+        Assert.Null(result.TodayCost.Currency);
+    }
+
+    [Fact]
+    public async Task GetCostRollupAsync_SumsKnownAmountsAndCountsTheirSessions()
+    {
+        // A token-only Session neither adds an amount nor a cost sample; the
+        // explicit zero is a known observation and does count.
+        var project = await CreateProjectAsync();
+        await InsertSessionAsync(project.Id, Today.AddDays(-1).AddHours(8),
+            costAmount: 0.0, costCurrency: "USD");
+        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(8),
+            costAmount: 1.20, costCurrency: "USD");
+        await InsertSessionAsync(project.Id, Today.AddDays(-3).AddHours(8),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150);
+
+        var service = ResolveReporter();
+        var result = await service.GetCostRollupAsync(project.Id);
+
+        Assert.Equal(1.20, result.TotalCost.Amount);
+        Assert.Equal(2, result.TotalCost.SampleCount);
+        Assert.Equal("USD", result.TotalCost.Currency);
+    }
+
+    [Fact]
     public async Task GetCostRollupAsync_NoSessions_YieldsEmptyMetrics()
     {
         var project = await CreateProjectAsync();
@@ -348,7 +410,7 @@ public sealed class AgentUsageReporterSpecs : IClassFixture<MohistDbFixture>
             Assert.Equal(0, bucket.InputTokens);
             Assert.Equal(0, bucket.OutputTokens);
             Assert.Equal(0, bucket.TotalTokens);
-            Assert.Equal(0.0, bucket.CostAmount);
+            Assert.Null(bucket.CostAmount);
             Assert.Null(bucket.CostCurrency);
         }
         Assert.NotNull(result.CumulativeCostPerShip);
@@ -519,7 +581,56 @@ public sealed class AgentUsageReporterSpecs : IClassFixture<MohistDbFixture>
 
         var usagelessDay = result.Buckets.Single(b => b.BucketStart.Date == Today.AddDays(-3));
         Assert.Equal(0, usagelessDay.InputTokens);
-        Assert.Equal(0.0, usagelessDay.CostAmount);
+        Assert.Null(usagelessDay.CostAmount);
+    }
+
+    [Fact]
+    public async Task GetUsageTimeseriesAsync_TokenOnlySessionsKeepBucketCostUnknown()
+    {
+        var project = await CreateProjectAsync();
+        var bucketDay = Today.AddDays(-2);
+        await InsertSessionAsync(project.Id, bucketDay.AddHours(10),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150);
+
+        var service = ResolveReporter();
+        var result = await service.GetUsageTimeseriesAsync(project.Id);
+
+        var bucket = result.Buckets.Single(b => b.BucketStart.Date == bucketDay.Date);
+        Assert.Equal(150, bucket.TotalTokens);
+        Assert.Null(bucket.CostAmount);
+        Assert.Null(bucket.CostCurrency);
+        Assert.All(result.CumulativeCostPerShip!, point =>
+        {
+            Assert.Null(point.CumulativeCost);
+            Assert.Null(point.Currency);
+            Assert.Null(point.CostPerShip);
+        });
+    }
+
+    [Fact]
+    public async Task GetUsageTimeseriesAsync_KnownPreWindowCostSurvivesLaterUnknownBucket()
+    {
+        var project = await CreateProjectAsync();
+        // Pre-window amount: the cumulative recorded cost is known from the
+        // first in-window bucket on, even though no in-window session reported
+        // an amount.
+        await InsertSessionAsync(project.Id, Today.AddDays(-10).AddHours(8),
+            costAmount: 1.20, costCurrency: "USD");
+        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(8),
+            inputTokens: 100, outputTokens: 50, totalTokens: 150);
+
+        var service = ResolveReporter();
+        var result = await service.GetUsageTimeseriesAsync(project.Id);
+
+        var tokenBucket = result.Buckets.Single(b => b.BucketStart.Date == Today.AddDays(-2).Date);
+        Assert.Equal(150, tokenBucket.TotalTokens);
+        Assert.Null(tokenBucket.CostAmount);
+
+        var points = result.CumulativeCostPerShip!;
+        Assert.All(points, point => Assert.Equal(1.20, point.CumulativeCost));
+        Assert.All(points, point => Assert.Equal("USD", point.Currency));
+        // Nothing shipped in the window: the derived figure stays empty.
+        Assert.All(points, point => Assert.Null(point.CostPerShip));
     }
 
     [Fact]
@@ -537,7 +648,7 @@ public sealed class AgentUsageReporterSpecs : IClassFixture<MohistDbFixture>
         var result = await service.GetUsageTimeseriesAsync(project.Id);
 
         Assert.Equal(0, result.Buckets.Sum(b => b.InputTokens));
-        Assert.Equal(0.0, result.Buckets.Sum(b => b.CostAmount));
+        Assert.All(result.Buckets, bucket => Assert.Null(bucket.CostAmount));
     }
 
     [Fact]
@@ -612,7 +723,7 @@ public sealed class AgentUsageReporterSpecs : IClassFixture<MohistDbFixture>
     }
 
     [Fact]
-    public async Task GetUsageTimeseriesAsync_CumulativeZeroCost_DefinedWhenShippedOrSampled()
+    public async Task GetUsageTimeseriesAsync_ShippedIssuesDoNotManufactureCost_ExplicitZeroDoes()
     {
         var project = await CreateProjectAsync();
         // Shipped (bucket index 2) before any usage sample exists.
@@ -632,21 +743,23 @@ public sealed class AgentUsageReporterSpecs : IClassFixture<MohistDbFixture>
             Assert.Null(points[i].CostPerShip);
         }
 
-        // Shipped > 0 with no samples yet: cumulative cost is the defined
-        // genuine zero without currency, cost-per-ship a genuine 0.0.
+        // A completed Issue is a denominator, not a numerator: with no
+        // reported amount the cumulative recorded cost stays unknown.
         for (var i = 2; i <= 4; i++)
         {
-            Assert.Equal(0.0, points[i].CumulativeCost);
+            Assert.Null(points[i].CumulativeCost);
             Assert.Null(points[i].Currency);
             Assert.Equal(1, points[i].CumulativeShippedCount);
-            Assert.Equal(0.0, points[i].CostPerShip);
+            Assert.Null(points[i].CostPerShip);
         }
 
-        // After the zero-cost sample the currency resolves; values stay 0.0.
+        // The explicit zero is a known amount: currency resolves and the
+        // derived figure is a genuine 0.0.
         for (var i = 5; i <= 6; i++)
         {
             Assert.Equal(0.0, points[i].CumulativeCost);
             Assert.Equal("USD", points[i].Currency);
+            Assert.Equal(1, points[i].CumulativeShippedCount);
             Assert.Equal(0.0, points[i].CostPerShip);
         }
     }
@@ -672,7 +785,7 @@ public sealed class AgentUsageReporterSpecs : IClassFixture<MohistDbFixture>
         long inputTokens = 0,
         long outputTokens = 0,
         long totalTokens = 0,
-        double costAmount = 0,
+        double? costAmount = null,
         string? costCurrency = null,
         string? agentSessionId = null)
     {

@@ -322,6 +322,32 @@ fact atomically. Compact records a boundary without changing Binding or
 `session.followup_failed` are not target event types. Consumers must not infer
 current Activity from historical completion, failure, or stop facts.
 
+### Usage and cost
+
+Tokens and money are independent observations. A Runtime that reports Tokens
+without a cost does not report a monetary zero; the amount stays unknown.
+
+- A cost is known only when the Runtime reported an amount. An explicitly
+  reported zero is a known amount and one cost observation.
+- A provider message reports its cumulative cost for that message. The Runner
+  emits the non-negative difference from the message's last known amount. An
+  omitted amount neither clears that baseline nor emits an observation. A
+  repeated amount adds no charge, and a lower repeat is not a refund: it does
+  not lower the baseline or make a later repeat count again.
+- Server adds reported differences to the Session usage. It never invents an
+  amount for a Session that reported none.
+- Reporting sums known amounts as recorded cost and counts Sessions with a
+  known amount as cost samples, including explicit zeros. A total, current-day,
+  windowed, time-series, or derived figure with no known amount stays unknown;
+  an unknown time bucket is a gap, not a zero-height observation.
+- A derived per-Issue figure needs a known numerator and a positive denominator.
+  It keeps the existing completed-Issue cohort, time attribution, currency
+  policy, and zero-denominator handling.
+- Recorded cost describes what Sessions reported. It is not complete
+  consumption, a provider invoice, or a price estimate.
+- An amount stored before this contract is not reclassified: an earlier absence
+  cannot be reconstructed from an ambiguous numeric record.
+
 ## Follow-up and Stop
 
 Follow-up has two paths chosen by current state:

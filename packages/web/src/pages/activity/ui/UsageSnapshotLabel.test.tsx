@@ -10,7 +10,7 @@ describe('UsageSnapshotLabel', () => {
       inputTokens: 100,
       outputTokens: 50,
       totalTokens: 150,
-      costAmount: 0,
+      costAmount: null,
       costCurrency: null,
     }
 
@@ -23,7 +23,7 @@ describe('UsageSnapshotLabel', () => {
       inputTokens: 1000,
       outputTokens: 500,
       totalTokens: 1500,
-      costAmount: 0,
+      costAmount: null,
       costCurrency: null,
     }
 
@@ -49,7 +49,7 @@ describe('UsageSnapshotLabel', () => {
       inputTokens: 100,
       outputTokens: 50,
       totalTokens: 150,
-      costAmount: 0,
+      costAmount: null,
       costCurrency: null,
     }
 
@@ -62,7 +62,7 @@ describe('UsageSnapshotLabel', () => {
       inputTokens: 100,
       outputTokens: 50,
       totalTokens: 150,
-      costAmount: 0,
+      costAmount: null,
       costCurrency: null,
     }
 
@@ -75,7 +75,7 @@ describe('UsageSnapshotLabel', () => {
       inputTokens: 100,
       outputTokens: 50,
       totalTokens: 150,
-      costAmount: 0,
+      costAmount: null,
       costCurrency: null,
     }
 
@@ -88,11 +88,40 @@ describe('UsageSnapshotLabel', () => {
       inputTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
-      costAmount: 0,
+      costAmount: null,
       costCurrency: null,
     }
 
     render(<UsageSnapshotLabel snapshot={snapshot} />)
     expect(screen.getByText('No usage data')).toBeInTheDocument()
+  })
+
+  it('shows unknown cost as a dash that reports no cost', () => {
+    const snapshot: UsageSnapshot = {
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+      costAmount: null,
+      costCurrency: null,
+    }
+
+    render(<UsageSnapshotLabel snapshot={snapshot} />)
+    const dash = screen.getByText('—')
+    expect(dash).toHaveAttribute('title', 'No cost reported')
+    expect(dash).toHaveAttribute('aria-label', 'No cost reported')
+  })
+
+  it('shows an explicitly reported zero as a numeric zero', () => {
+    const snapshot: UsageSnapshot = {
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+      costAmount: 0,
+      costCurrency: 'USD',
+    }
+
+    render(<UsageSnapshotLabel snapshot={snapshot} />)
+    expect(screen.getByText('$0.00')).toBeInTheDocument()
+    expect(screen.queryByText('—')).toBeNull()
   })
 })

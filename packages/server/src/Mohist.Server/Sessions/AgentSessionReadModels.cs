@@ -560,7 +560,12 @@ public sealed record UsageBucketDto(
     long InputTokens,
     long OutputTokens,
     long TotalTokens,
-    double CostAmount,
+    /// <summary>
+    /// Recorded cost for the bucket: the sum of the amounts sessions in the
+    /// bucket actually reported. <c>null</c> means no session reported an
+    /// amount — an unknown bucket is a gap, not an observed zero.
+    /// </summary>
+    double? CostAmount,
     string? CostCurrency);
 
 public sealed record AgentCostMetricDto(

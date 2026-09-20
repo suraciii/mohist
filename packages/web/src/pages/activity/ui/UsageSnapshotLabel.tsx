@@ -7,7 +7,7 @@ interface UsageSnapshotLabelProps {
 
 export function UsageSnapshotLabel({ snapshot }: UsageSnapshotLabelProps) {
   const hasTokens = snapshot.inputTokens > 0 || snapshot.outputTokens > 0 || snapshot.totalTokens > 0
-  const hasCost = snapshot.costAmount > 0 && snapshot.costCurrency != null
+  const hasCost = snapshot.costAmount != null
 
   return (
     <div data-testid="usage-snapshot-label" className="flex items-center gap-2">
@@ -17,6 +17,11 @@ export function UsageSnapshotLabel({ snapshot }: UsageSnapshotLabelProps) {
       {hasCost && (
         <span className="text-sm font-medium text-foreground">
           {formatCost(snapshot.costAmount, snapshot.costCurrency)}
+        </span>
+      )}
+      {!hasCost && hasTokens && (
+        <span className="text-sm text-muted-foreground/70" aria-label="No cost reported" title="No cost reported">
+          —
         </span>
       )}
       {!hasTokens && !hasCost && <span className="text-sm text-muted-foreground/70">No usage data</span>}

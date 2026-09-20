@@ -50,7 +50,9 @@ authorization confirmation page (`/device`) are outside this prefix.
   Epic lists and details.
 - **Inbox:** `/<projectName>/inbox` shows notification history.
 - **Insights:** `/<projectName>/insights` shows delivery trends such as
-  throughput, completion, stage duration, and cost.
+  throughput, completion, stage duration, and recorded cost. Spend figures
+  describe recorded cost only: an amount no agent session reported stays
+  unknown rather than becoming zero.
 - **Activity:** `/<projectName>/activity` shows the live Activity feed.
 - **Runners:** `/runners` and `/runners/<runnerId>` show the Server-global
   Runner inventory and each Runner's current state. These routes work without a

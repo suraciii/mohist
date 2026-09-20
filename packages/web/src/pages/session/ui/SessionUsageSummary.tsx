@@ -27,9 +27,7 @@ export function SessionUsageSummary({ usage }: SessionUsageSummaryProps) {
   if (!usage || !hasAnyUsage(usage)) return null
 
   const contextWindowPct =
-    usage.contextUsagePercent != null
-      ? Math.round(Math.max(0, Math.min(100, usage.contextUsagePercent)))
-      : null
+    usage.contextUsagePercent != null ? Math.round(Math.max(0, Math.min(100, usage.contextUsagePercent))) : null
 
   return (
     <div className="border-b border-border bg-muted px-4 py-1 md:py-2" data-testid="session-usage-summary">
@@ -38,29 +36,50 @@ export function SessionUsageSummary({ usage }: SessionUsageSummaryProps) {
         <span className="text-muted-foreground font-medium" data-testid="usage-summary-tokens">
           Tokens:
           {usage.inputTokens != null && (
-            <span className="hidden md:inline ml-1 text-foreground" data-testid="usage-summary-input">{formatCompact(usage.inputTokens)} in</span>
+            <span className="hidden md:inline ml-1 text-foreground" data-testid="usage-summary-input">
+              {formatCompact(usage.inputTokens)} in
+            </span>
           )}
           {usage.outputTokens != null && (
-            <span className="hidden md:inline ml-1 text-foreground" data-testid="usage-summary-output">· {formatCompact(usage.outputTokens)} out</span>
+            <span className="hidden md:inline ml-1 text-foreground" data-testid="usage-summary-output">
+              · {formatCompact(usage.outputTokens)} out
+            </span>
           )}
           {usage.totalTokens != null && (
-            <span className="ml-1 text-foreground font-semibold" data-testid="usage-summary-total">· {formatCompact(usage.totalTokens)} total</span>
+            <span className="ml-1 text-foreground font-semibold" data-testid="usage-summary-total">
+              · {formatCompact(usage.totalTokens)} total
+            </span>
           )}
           {shouldShowToken(usage.cachedReadTokens) && (
-            <span className="hidden md:inline ml-1 text-muted-foreground" data-testid="usage-summary-cached">· {formatCompact(usage.cachedReadTokens)} cached</span>
+            <span className="hidden md:inline ml-1 text-muted-foreground" data-testid="usage-summary-cached">
+              · {formatCompact(usage.cachedReadTokens)} cached
+            </span>
           )}
           {shouldShowToken(usage.cachedWriteTokens) && (
-            <span className="hidden md:inline ml-1 text-muted-foreground" data-testid="usage-summary-cache-write">· {formatCompact(usage.cachedWriteTokens)} cache write</span>
+            <span className="hidden md:inline ml-1 text-muted-foreground" data-testid="usage-summary-cache-write">
+              · {formatCompact(usage.cachedWriteTokens)} cache write
+            </span>
           )}
           {shouldShowToken(usage.thoughtTokens) && (
-            <span className="hidden md:inline ml-1 text-muted-foreground" data-testid="usage-summary-thought">· {formatCompact(usage.thoughtTokens)} thought</span>
+            <span className="hidden md:inline ml-1 text-muted-foreground" data-testid="usage-summary-thought">
+              · {formatCompact(usage.thoughtTokens)} thought
+            </span>
           )}
         </span>
 
-        {/* Cost */}
-        {usage.costAmount != null && usage.costCurrency != null && (
+        {/* Cost: an unreported amount is unknown, never a fabricated zero. */}
+        {usage.costAmount != null ? (
           <span className="text-muted-foreground" data-testid="usage-summary-cost">
             {formatCost(usage.costAmount, usage.costCurrency)}
+          </span>
+        ) : (
+          <span
+            className="text-muted-foreground/70"
+            data-testid="usage-summary-cost"
+            aria-label="No cost reported"
+            title="No cost reported"
+          >
+            —
           </span>
         )}
 
@@ -73,9 +92,7 @@ export function SessionUsageSummary({ usage }: SessionUsageSummaryProps) {
                 ? `${formatCompact(usage.contextWindowUsed)} / ${formatCompact(usage.contextWindowSize)}`
                 : `${formatCompact(usage.contextWindowUsed)} used`}
             </span>
-            {contextWindowPct != null && (
-              <span className="ml-1 text-muted-foreground/70">({contextWindowPct}%)</span>
-            )}
+            {contextWindowPct != null && <span className="ml-1 text-muted-foreground/70">({contextWindowPct}%)</span>}
           </span>
         )}
 

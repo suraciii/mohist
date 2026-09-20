@@ -42,13 +42,38 @@ describe('computeUsageSnapshot', () => {
     expect(result.costCurrency).toBe('USD')
   })
 
-  it('returns zeroes for an empty sessions array', () => {
+  it('returns zero token totals and unknown cost for an empty sessions array', () => {
     const result = computeUsageSnapshot([])
     expect(result.inputTokens).toBe(0)
     expect(result.outputTokens).toBe(0)
     expect(result.totalTokens).toBe(0)
-    expect(result.costAmount).toBe(0)
+    expect(result.costAmount).toBeNull()
     expect(result.costCurrency).toBeNull()
+  })
+
+  it('keeps cost unknown when no session reported an amount', () => {
+    const sessions: AgentActivitySession[] = [
+      makeSession({ usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 } }),
+      makeSession({ usage: { inputTokens: 200, outputTokens: 80, totalTokens: 280, costAmount: null } }),
+    ]
+
+    const result = computeUsageSnapshot(sessions)
+    expect(result.totalTokens).toBe(430)
+    expect(result.costAmount).toBeNull()
+    expect(result.costCurrency).toBeNull()
+  })
+
+  it('counts an explicitly reported zero as a known amount', () => {
+    const sessions: AgentActivitySession[] = [
+      makeSession({
+        usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150, costAmount: 0, costCurrency: 'USD' },
+      }),
+      makeSession({ usage: { inputTokens: 200, outputTokens: 80, totalTokens: 280 } }),
+    ]
+
+    const result = computeUsageSnapshot(sessions)
+    expect(result.costAmount).toBe(0)
+    expect(result.costCurrency).toBe('USD')
   })
 
   it('treats missing usage object as zero contribution', () => {
