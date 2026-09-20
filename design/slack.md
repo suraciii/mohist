@@ -133,8 +133,8 @@ Each entry states one decision; the body below carries the rules.
   App creation or installation.
 - **Server Connection boundary (data plane)** owns provider identity and
   access decisions, durable ingress, conversation mapping, pending delivery,
-  and Agent API calls. Not: Slack wire payloads, Agent execution, result
-  arbitration.
+  Agent API calls, and one normalized channel-thread read port. Not: Slack wire
+  payloads, Agent execution, result arbitration.
 - **Server Slack control plane** owns Workspace enrollment, external App
   lifecycle and authorization, manifests, credential references, and audit.
   Not: Agent execution, thread ownership, the wire protocol.
@@ -641,6 +641,55 @@ card's provider message identity and never replaces its navigation surface.
 - **Scope.** No broadcast across channels and no distinct message types.
   `mo slack message` is a command group; only `send` is implemented.
 
+### Channel-Thread Reads
+
+An Agent reads the discussion bound to its Session instead of receiving an
+imported transcript at launch. The channel-thread launch passes the task plus
+the existing conversation references and injects no thread background;
+caller-supplied background stays available to the other launch entry points.
+
+- **Route.** `GET /api/projects/{projectRef}/slack-connections/thread` with
+  `sessionId`, `limit` (default 15, accepted 1-100) and `continuation`. It is a
+  control-plane route like the other Connection routes: a Session id selects a
+  resource and is not an authorization credential. It adds no external
+  delegation route and exposes no arbitrary Slack API call.
+- **Binding.** Server resolves the recorded Slack provenance and thread mapping
+  of the selected Session to one `(Connection, Workspace, channel, root
+  message)` tuple and revalidates that tuple on every request. A missing,
+  conflicting, non-Slack, DM, or Manager association fails explicitly, and the
+  provider is never contacted first. A Session selected through a foreign
+  Project fails before any provider read.
+- **Credential.** The read uses the Connection's verified Agent App Bot identity
+  resolved through the lease target's protected address. HTTP read availability
+  is independent of Socket connection health: the read needs no active runtime
+  lease and no Agent Runtime, but it fails when the Connection is disabled or
+  removed, the target has no verified Bot credential, or Slack refuses the
+  token. No user token, broader scope, second credential path, or substitute
+  transcript is introduced.
+- **Narrow port.** `ISlackThreadQueryPort` returns one normalized page; the
+  infrastructure adapter is the only component that knows
+  `conversations.replies` and the wire payload. Normalization keeps message
+  timestamps as strings, source order, author identity, and source-provided
+  edit, deletion, and unread-content facts, and drops tokens, internal URLs,
+  and raw JSON. It never filters a message out of the returned page.
+- **Pagination.** The adapter validates the provider's pagination metadata and
+  fails explicitly on contradictory facts (`has_more` without a cursor, a
+  cursor with `has_more` false). A short or empty page while the provider still
+  returns a continuation is not completion.
+- **Continuation.** The caller-visible token is opaque and bound to the resolved
+  Project, Session, Connection, Workspace, channel, and root message; Server
+  revalidates both the binding and the token before the provider call, so a
+  malformed, tampered, or differently scoped token fails as an invalid
+  continuation. Continuations are stateless: a fresh read starts a new
+  traversal.
+- **Rate limits.** The transport classifies a rate-limited response and carries
+  Slack's `Retry-After`. The route surfaces the delay as `retryAfterSeconds`
+  with HTTP 429; nothing sleeps through the limit, polls, starts a durable
+  query job, or replays the Agent task.
+- **No side effects.** A read creates no Job, Input, or Turn and sends no Slack
+  message. Provider failures are never empty histories. Thread text returned to
+  the Agent is background; it is never promoted to Instructions.
+
 ### Signed Action Buttons
 
 Slack interactivity reaches Server as `block_actions` provider interactions.
@@ -832,6 +881,12 @@ path has no OAuth callback or plaintext-token control path.
 App-management calls reactively rotate an expired Configuration credential
 without changing the installed Bot data plane. The Agent-authored reply action
 owns reply content, and terminal handling owns only delivery liveness.
+
+On-demand channel-thread reads replace the earlier automatic first-mention
+history import: the channel-thread launch passes the task and conversation
+references, `mo slack thread view` reads one provider page through the narrow
+read port, and failures stay explicit. The retired empty thread reader and its
+startup-context budget are deleted rather than kept as compatibility.
 
 Manager sessions use these same boundaries: the operator-bound capability
 credential and the ordinary command surface replace server-side parsing of

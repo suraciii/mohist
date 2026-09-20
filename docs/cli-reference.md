@@ -613,6 +613,21 @@ Mohist App.
   at most 10 MB. The options are mutually exclusive. `--text -` reads the body
   from stdin and preserves line breaks. `--text` may be omitted when an image is
   attached. Manager-mode invocation uses the dedicated Manager reply contract.
+- `mo slack thread view --project <project> --session <session> [--limit <1-100>] [--continuation <token>] [--json thread,messages,continuation]`
+  reads one page of the Slack channel thread already bound to that Session, so
+  an Agent can read earlier discussion that was not in its own context. The
+  result is one object with `thread` (the resolved Workspace team, Connection,
+  channel, and root message), `messages` in source order with author identity,
+  the exact message timestamp, text, and source-provided edit, deletion, and
+  unread-content facts, and a nullable `continuation`. `--limit` defaults to 15
+  and accepts 1 to 100; Slack may return fewer messages and Mohist never
+  fetches another page to fill a short one. A non-null `continuation` means the
+  discussion continues: pass it to the next call to read forward. It is opaque
+  and bound to the resolved Project, Session, Connection, channel, and thread,
+  so a token from another Session is rejected before Slack is contacted. The
+  command reads at most one Slack thread; it never lists channels or reads a DM.
+  A missing `--session` or a `--limit` outside 1 to 100 is a LOCAL ERROR
+  (exit 2) and no request is sent.
 - `mo slack claim-owner <id>` generates and displays a setup claim, expiration,
   and Slack direct-message step only after identity verification. A second call
   invalidates the old claim immediately.
