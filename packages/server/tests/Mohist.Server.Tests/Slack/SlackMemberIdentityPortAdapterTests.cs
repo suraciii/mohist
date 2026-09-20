@@ -156,12 +156,23 @@ public sealed class SlackMemberIdentityPortAdapterTests
     [Fact]
     public async Task LookupMember_http_error_status_is_unconfirmed()
     {
+        var adapter = NewAdapter(_ => new HttpResponseMessage(HttpStatusCode.Forbidden));
+
+        var result = await adapter.LookupMemberAsync(new SlackMemberIdentityRequest("xoxb-bot", "U123"));
+
+        Assert.False(result.Confirmed);
+        Assert.Equal("http_403", result.ErrorClass);
+    }
+
+    [Fact]
+    public async Task LookupMember_rate_limited_is_unconfirmed_with_the_rate_limit_class()
+    {
         var adapter = NewAdapter(_ => new HttpResponseMessage(HttpStatusCode.TooManyRequests));
 
         var result = await adapter.LookupMemberAsync(new SlackMemberIdentityRequest("xoxb-bot", "U123"));
 
         Assert.False(result.Confirmed);
-        Assert.Equal("http_429", result.ErrorClass);
+        Assert.Equal("ratelimited", result.ErrorClass);
     }
 
     [Fact]

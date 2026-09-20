@@ -40,6 +40,7 @@ public sealed class SlackBotIdentityVerificationPortAdapter(
             case SlackApiCallOutcome.Ok:
                 return await ParseVerifiedAsync(response.Body, response.GrantedScopesHeader, request.BotToken, ct).ConfigureAwait(false);
             case SlackApiCallOutcome.Rejected:
+            case SlackApiCallOutcome.RateLimited:
                 return new(false, ErrorClass: response.Error ?? "auth_rejected");
             case SlackApiCallOutcome.Unparseable:
                 return new(false, ErrorClass: "unparseable_response");

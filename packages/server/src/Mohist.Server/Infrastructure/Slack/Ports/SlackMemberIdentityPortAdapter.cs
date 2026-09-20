@@ -33,7 +33,7 @@ public sealed class SlackMemberIdentityPortAdapter(SlackApiTransport transport) 
         return response.Outcome switch
         {
             SlackApiCallOutcome.Ok => ParseMember(response.Body),
-            SlackApiCallOutcome.Rejected => new(false, ErrorClass: response.Error ?? "users_info_rejected"),
+            SlackApiCallOutcome.Rejected or SlackApiCallOutcome.RateLimited => new(false, ErrorClass: response.Error ?? "users_info_rejected"),
             SlackApiCallOutcome.Unparseable => new(false, ErrorClass: "unparseable_response"),
             _ => new(false, ErrorClass: "transport_error"),
         };
@@ -56,7 +56,7 @@ public sealed class SlackMemberIdentityPortAdapter(SlackApiTransport transport) 
         return response.Outcome switch
         {
             SlackApiCallOutcome.Ok => ParseConversation(response.Body, request.ConversationId),
-            SlackApiCallOutcome.Rejected => new(false, ErrorClass: response.Error ?? "conversations_info_rejected"),
+            SlackApiCallOutcome.Rejected or SlackApiCallOutcome.RateLimited => new(false, ErrorClass: response.Error ?? "conversations_info_rejected"),
             SlackApiCallOutcome.Unparseable => new(false, ErrorClass: "unparseable_response"),
             _ => new(false, ErrorClass: "transport_error"),
         };

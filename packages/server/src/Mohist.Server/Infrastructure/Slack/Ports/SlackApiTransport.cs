@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -10,6 +11,9 @@ namespace Mohist.Server.Infrastructure.Slack.Ports;
 /// are classified so adapters can map Slack semantics onto their port
 /// outcomes without touching HTTP shapes. Caller cancellation propagates;
 /// timeouts and transport failures surface as <see cref="SlackApiCallOutcome.TransportError"/>.
+/// A rate-limited response is classified as
+/// <see cref="SlackApiCallOutcome.RateLimited"/> and carries the provider's
+/// requested delay when Slack supplied one.
 /// </summary>
 public sealed class SlackApiTransport(HttpClient http)
 {
@@ -43,7 +47,10 @@ public sealed class SlackApiTransport(HttpClient http)
         using (response)
         {
             var grantedScopesHeader = ReadGrantedScopesHeader(response);
+            var retryAfter = ReadRetryAfterHeader(response);
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                return SlackApiResponse.RateLimited(ExtractError(body) ?? "ratelimited", retryAfter);
             if (response.StatusCode != HttpStatusCode.OK)
                 return SlackApiResponse.Rejected(ExtractError(body) ?? $"http_{(int)response.StatusCode}");
 
@@ -71,6 +78,9 @@ public sealed class SlackApiTransport(HttpClient http)
                     ? errorElement.GetString()
                     : null;
                 document.Dispose();
+                // Slack reports some limits inside an HTTP 200 envelope.
+                if (string.Equals(error, "ratelimited", StringComparison.Ordinal))
+                    return SlackApiResponse.RateLimited("ratelimited", retryAfter);
                 return SlackApiResponse.Rejected(error ?? "unknown_error");
             }
 
@@ -84,6 +94,24 @@ public sealed class SlackApiTransport(HttpClient http)
             return null;
         var joined = string.Join(",", values.Where(value => !string.IsNullOrWhiteSpace(value)));
         return string.IsNullOrWhiteSpace(joined) ? null : joined;
+    }
+
+    /// <summary>
+    /// Slack sends the whole-second retry delay in <c>Retry-After</c>; an
+    /// absent or unparseable value leaves the delay unknown without hiding
+    /// the rate limit itself.
+    /// </summary>
+    private static TimeSpan? ReadRetryAfterHeader(HttpResponseMessage response)
+    {
+        if (!response.Headers.TryGetValues("Retry-After", out var values))
+            return null;
+        var raw = values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        if (raw is null)
+            return null;
+        return int.TryParse(raw.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var seconds)
+            && seconds >= 0
+            ? TimeSpan.FromSeconds(seconds)
+            : null;
     }
 
     private static string? ExtractError(string body)
@@ -109,18 +137,24 @@ public enum SlackApiCallOutcome
     Rejected,
     Unparseable,
     TransportError,
+    /// <summary>Slack refused the call for rate limiting; see the response's retry delay.</summary>
+    RateLimited,
 }
 
 public sealed record SlackApiResponse(
     SlackApiCallOutcome Outcome,
     JsonDocument? Body = null,
     string? Error = null,
-    string? GrantedScopesHeader = null)
+    string? GrantedScopesHeader = null,
+    TimeSpan? RetryAfter = null)
 {
     public static SlackApiResponse Ok(JsonDocument body, string? grantedScopesHeader = null) =>
         new(SlackApiCallOutcome.Ok, body, GrantedScopesHeader: grantedScopesHeader);
 
     public static SlackApiResponse Rejected(string error) => new(SlackApiCallOutcome.Rejected, Error: error);
+
+    public static SlackApiResponse RateLimited(string error, TimeSpan? retryAfter) =>
+        new(SlackApiCallOutcome.RateLimited, Error: error, RetryAfter: retryAfter);
 
     public static SlackApiResponse Unparseable { get; } = new(SlackApiCallOutcome.Unparseable);
 
