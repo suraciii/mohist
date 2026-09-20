@@ -62,13 +62,17 @@ export async function scriptAction(inputs: JsonObject, host: ActionHost): Promis
         exitCode: result.exitCode,
       })
     }
+    const stdout = retainedStream(result.stdout)
+    const stderr = retainedStream(result.stderr)
     const output: JsonObject = {
       kind: 'script',
       run,
       shell,
       exitCode: result.exitCode,
-      stdout: trim(result.stdout),
-      stderr: trim(result.stderr),
+      stdout: stdout.content,
+      stderr: stderr.content,
+      stdoutTruncated: stdout.truncated,
+      stderrTruncated: stderr.truncated,
     }
     return succeed(output, { exitCode: result.exitCode })
   } finally {
@@ -115,6 +119,7 @@ function firstLine(value: string) {
 }
 
 const MAX_FAILURE_STREAM_CHARS = 10_000
+const MAX_RESULT_STREAM_CHARS = 20_000
 
 export function scriptFailureMessage(run: string, exitCode: number, stdout: string, stderr: string) {
   const streams = [failureStream('stdout', stdout), failureStream('stderr', stderr)].filter(
@@ -134,8 +139,15 @@ function tail(value: string, limit: number) {
   return marker + value.slice(-(limit - marker.length))
 }
 
-function trim(value: string) {
-  return value.length <= 20_000 ? value : value.slice(0, 20_000)
+// The result boundary keeps a stream's first units and reports whether it
+// shortened the stream, so a caller never has to infer completeness from the
+// returned length. Slicing counts JavaScript string units and does not trim
+// whitespace: stream content is program data, so the boundary may shorten it
+// but never rewrite it.
+function retainedStream(value: string) {
+  return value.length <= MAX_RESULT_STREAM_CHARS
+    ? { content: value, truncated: false }
+    : { content: value.slice(0, MAX_RESULT_STREAM_CHARS), truncated: true }
 }
 
 function commandOptions(host: ActionHost, source: string): CommandLineOptions | undefined {
