@@ -995,5 +995,6 @@ carries one primary action, the install URL, and one human summary; App create,
 manifest, and Socket hello work never surface as user steps. The terminal guide
 collects the pair the current step needs through hidden input, reads credentials
 only from one explicit protected file or that prompt, and carries the selected
-Workspace through every continuation command. Selecting the target Workspace for
-Agent installation stays with the dependent Issue.
+Workspace through every continuation command. The Agent installation write takes
+the same selector and resolves the target Workspace from it, so a selection never
+resumes the Agent's first existing Connection or the first enrolled record.
