@@ -28,7 +28,10 @@ namespace Mohist.Server.Tests.Api;
 /// (<c>GET /api/.../logs</c>) endpoints: request binding/validation
 /// (400 malformed json / duplicate seq / invalid metadata / oversized
 /// text), owner resolution (404 unknown owner), the dependency boundary
-/// (upload must not invoke a grain), and one empty-page read shape. The
+/// (upload must not invoke a grain), read addressing (the originating
+/// run id is required, its project/issue scope and exact attempt are
+/// enforced, and an addressable attempt without lines is an empty page),
+/// and original-run/attempt resolution across a later run or retry. The
 /// store's write/read calculation matrix (append + dedup, owner-kind
 /// isolation, cursor pagination in seq order, empty page for unknown
 /// owner) lives in <c>TaskLogStoreSpecs</c>.
@@ -74,11 +77,23 @@ public class TaskLogRouteSpecs : IClassFixture<DefaultMohistIntegrationFixture>
             isDraft: false);
     }
 
-    private async Task SeedActiveWorkflowRunAsync(
+    private Task SeedActiveWorkflowRunAsync(
         string workflowRunId,
         string taskId,
         string workId,
-        string? projectId = null)
+        string? projectId = null,
+        int? issueNumber = null) =>
+        SeedActiveWorkflowRunAttemptsAsync(
+            workflowRunId,
+            [(taskId, workId, WorkflowActionAttemptStatus.Running)],
+            projectId,
+            issueNumber);
+
+    private async Task SeedActiveWorkflowRunAttemptsAsync(
+        string workflowRunId,
+        (string TaskId, string WorkId, WorkflowActionAttemptStatus Status)[] attempts,
+        string? projectId = null,
+        int? issueNumber = null)
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var runStore = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
@@ -88,7 +103,8 @@ public class TaskLogRouteSpecs : IClassFixture<DefaultMohistIntegrationFixture>
             Metadata = new WorkflowRunMetadata(
                 Name: null,
                 CreatedAt: _fixture.TimeProvider.GetUtcNow(),
-                ProjectId: projectId),
+                ProjectId: projectId,
+                IssueNumber: issueNumber),
             CurrentStageId = "build",
             Status = WorkflowRunStatus.Running,
             Assignment = new WorkflowAssignment(RunnerId, _fixture.TimeProvider.GetUtcNow()),
@@ -100,21 +116,20 @@ public class TaskLogRouteSpecs : IClassFixture<DefaultMohistIntegrationFixture>
                     Attempt = 1,
                     RequiresApproval = false,
                     Status = StageRunStatus.Running,
-                    Tasks =
-                    [
-                        new WorkflowActionAttempt
+                    Tasks = attempts
+                        .Select(attempt => new WorkflowActionAttempt
                         {
-                            Id = taskId,
-                            DefinitionId = taskId,
+                            Id = attempt.TaskId,
+                            DefinitionId = attempt.TaskId,
                             Attempt = 1,
                             Title = "Build it",
                             Uses = "core/script",
-                            WorkId = workId,
+                            WorkId = attempt.WorkId,
                             WorkerId = RunnerId,
-                            Status = WorkflowActionAttemptStatus.Running,
+                            Status = attempt.Status,
                             Classification = TaskClassification.Orchestration,
-                        }
-                    ],
+                        })
+                        .ToList(),
                 },
             ],
         });
@@ -267,17 +282,29 @@ public class TaskLogRouteSpecs : IClassFixture<DefaultMohistIntegrationFixture>
     }
 
     [Fact]
+    public async Task GetEndpoint_RequiresTheOriginatingWorkflowRunId()
+    {
+        var projectId = await CreateProjectAsync("tasklog-required-run");
+        var issueNumber = await CreateIssueAsync(projectId, "run id required");
+
+        using var response = await _fixture.Client.GetAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/build.1/logs");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task GetEndpoint_TaskWithoutCapturedLines_ReturnsEmptyPageShape()
     {
         var projectId = await CreateProjectAsync("tasklog-empty");
         var issueNumber = await CreateIssueAsync(projectId, "no logs");
         var workflowRunId = $"wr_tasklog_spec_{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
-        await SeedActiveWorkflowRunAsync(workflowRunId, "build.1", workId, projectId);
+        await SeedActiveWorkflowRunAsync(workflowRunId, "build.1", workId, projectId, issueNumber);
         await BindIssueToWorkflowRunAsync(projectId, issueNumber, workflowRunId);
 
         using var response = await _fixture.Client.GetAsync(
-            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/build.1/logs");
+            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/build.1/logs?workflowRunId={workflowRunId}");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -286,5 +313,127 @@ public class TaskLogRouteSpecs : IClassFixture<DefaultMohistIntegrationFixture>
         Assert.Empty(data.GetProperty("lines").EnumerateArray());
         Assert.Equal(JsonValueKind.Null, data.GetProperty("nextCursor").ValueKind);
         Assert.False(data.GetProperty("truncated").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GetEndpoint_ReadsTheOriginatingRunAfterTheIssueStartsAnotherRun()
+    {
+        var projectId = await CreateProjectAsync("tasklog-origin-run");
+        var issueNumber = await CreateIssueAsync(projectId, "original run evidence");
+
+        var originalRunId = $"wr_tasklog_original_{Guid.NewGuid():N}";
+        var originalWorkId = $"work-original-{Guid.NewGuid():N}";
+        await SeedActiveWorkflowRunAsync(originalRunId, "build.1", originalWorkId, projectId, issueNumber);
+        await BindIssueToWorkflowRunAsync(projectId, issueNumber, originalRunId);
+        using (var upload = await PostTaskLogAsync(
+            $"/api/workflow-runs/{originalRunId}/work/{originalWorkId}/task-log",
+            OneLineBody("original run line")))
+            Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
+
+        var laterRunId = $"wr_tasklog_later_{Guid.NewGuid():N}";
+        var laterWorkId = $"work-later-{Guid.NewGuid():N}";
+        await SeedActiveWorkflowRunAsync(laterRunId, "build.1", laterWorkId, projectId, issueNumber);
+        await BindIssueToWorkflowRunAsync(projectId, issueNumber, laterRunId);
+        using (var upload = await PostTaskLogAsync(
+            $"/api/workflow-runs/{laterRunId}/work/{laterWorkId}/task-log",
+            OneLineBody("later run line")))
+            Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
+
+        // The issue now binds the later run; the original run's read must
+        // still resolve the original run's attempt and lines.
+        using var original = await _fixture.Client.GetAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/build.1/logs?workflowRunId={originalRunId}");
+        Assert.Equal(HttpStatusCode.OK, original.StatusCode);
+        var originalData = (await original.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        var originalLine = Assert.Single(originalData.GetProperty("lines").EnumerateArray());
+        Assert.Equal("original run line", originalLine.GetProperty("text").GetString());
+
+        using var later = await _fixture.Client.GetAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/build.1/logs?workflowRunId={laterRunId}");
+        Assert.Equal(HttpStatusCode.OK, later.StatusCode);
+        var laterData = (await later.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        var laterLine = Assert.Single(laterData.GetProperty("lines").EnumerateArray());
+        Assert.Equal("later run line", laterLine.GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task GetEndpoint_ReadsTheOriginalAttemptAfterTheSameRunRetriesTheTask()
+    {
+        var projectId = await CreateProjectAsync("tasklog-retry");
+        var issueNumber = await CreateIssueAsync(projectId, "retried attempt");
+        var workflowRunId = $"wr_tasklog_retry_{Guid.NewGuid():N}";
+        var originalWorkId = $"work-original-{Guid.NewGuid():N}";
+        await SeedActiveWorkflowRunAsync(workflowRunId, "build.1", originalWorkId, projectId, issueNumber);
+        using (var upload = await PostTaskLogAsync(
+            $"/api/workflow-runs/{workflowRunId}/work/{originalWorkId}/task-log",
+            OneLineBody("first attempt line")))
+            Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
+
+        // A retry keeps the failed attempt for history and adds the next
+        // attempt, so the run now owns both attempts.
+        var retryWorkId = $"work-retry-{Guid.NewGuid():N}";
+        await SeedActiveWorkflowRunAttemptsAsync(
+            workflowRunId,
+            [
+                ("build.1", originalWorkId, WorkflowActionAttemptStatus.Failed),
+                ("build.2", retryWorkId, WorkflowActionAttemptStatus.Running),
+            ],
+            projectId,
+            issueNumber);
+
+        using var original = await _fixture.Client.GetAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/build.1/logs?workflowRunId={workflowRunId}");
+        Assert.Equal(HttpStatusCode.OK, original.StatusCode);
+        var originalData = (await original.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        var originalLine = Assert.Single(originalData.GetProperty("lines").EnumerateArray());
+        Assert.Equal("first attempt line", originalLine.GetProperty("text").GetString());
+
+        // The newer attempt is addressable but has no retained lines yet; that
+        // is an empty page, not a redirect to the older attempt's lines.
+        using var retry = await _fixture.Client.GetAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/build.2/logs?workflowRunId={workflowRunId}");
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        var retryData = (await retry.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Empty(retryData.GetProperty("lines").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task GetEndpoint_RejectsRunOutsideTheAddressedIssueOrProject()
+    {
+        var projectId = await CreateProjectAsync("tasklog-scope");
+        var issueNumber = await CreateIssueAsync(projectId, "scope check");
+
+        var otherProjectRunId = $"wr_tasklog_other_project_{Guid.NewGuid():N}";
+        await SeedActiveWorkflowRunAsync(
+            otherProjectRunId, "build.1", $"work-{Guid.NewGuid():N}", "project-other", issueNumber);
+
+        var otherIssueRunId = $"wr_tasklog_other_issue_{Guid.NewGuid():N}";
+        await SeedActiveWorkflowRunAsync(
+            otherIssueRunId, "build.1", $"work-{Guid.NewGuid():N}", projectId, issueNumber + 1);
+
+        var unknownRunId = $"wr_tasklog_unknown_{Guid.NewGuid():N}";
+
+        foreach (var runId in new[] { otherProjectRunId, otherIssueRunId, unknownRunId })
+        {
+            using var response = await _fixture.Client.GetAsync(
+                $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/build.1/logs?workflowRunId={runId}");
+
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task GetEndpoint_RejectsAttemptMissingFromTheAddressedRun()
+    {
+        var projectId = await CreateProjectAsync("tasklog-attempt");
+        var issueNumber = await CreateIssueAsync(projectId, "attempt check");
+        var workflowRunId = $"wr_tasklog_attempt_{Guid.NewGuid():N}";
+        await SeedActiveWorkflowRunAsync(
+            workflowRunId, "build.1", $"work-{Guid.NewGuid():N}", projectId, issueNumber);
+
+        using var response = await _fixture.Client.GetAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/build.99/logs?workflowRunId={workflowRunId}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 }
