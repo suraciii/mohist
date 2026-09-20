@@ -5,9 +5,7 @@ import { issueWorkflowTaskLogQueryOptions } from './queries'
 
 const EMPTY_PAGE = { lines: [], nextCursor: null, truncated: false }
 
-function recordTaskLogRequests(
-  respond: () => Response = () => HttpResponse.json({ success: true, data: EMPTY_PAGE }),
-) {
+function recordTaskLogRequests(respond: () => Response = () => HttpResponse.json({ success: true, data: EMPTY_PAGE })) {
   const urls: string[] = []
   server.use(
     http.get('*/api/projects/:projectId/issues/:issueNumber/workflow/tasks/:taskId/logs', ({ request }) => {
@@ -40,37 +38,44 @@ describe('issueWorkflowTaskLogQueryOptions query key', () => {
   })
 
   it('disables the query when taskId is null', () => {
-    expect(issueWorkflowTaskLogQueryOptions('proj-1', 161, null).enabled).toBe(false)
+    expect(issueWorkflowTaskLogQueryOptions('proj-1', 161, null, {}, true, 'wr-1').enabled).toBe(false)
   })
 
   it('disables the query when taskId is undefined', () => {
-    expect(issueWorkflowTaskLogQueryOptions('proj-1', 161, undefined).enabled).toBe(false)
+    expect(issueWorkflowTaskLogQueryOptions('proj-1', 161, undefined, {}, true, 'wr-1').enabled).toBe(false)
   })
 
   it('disables the query when issueNumber is zero', () => {
-    expect(issueWorkflowTaskLogQueryOptions('proj-1', 0, 'build.1').enabled).toBe(false)
+    expect(issueWorkflowTaskLogQueryOptions('proj-1', 0, 'build.1', {}, true, 'wr-1').enabled).toBe(false)
   })
 
   it('disables the query when projectId is missing', () => {
-    expect(issueWorkflowTaskLogQueryOptions(null, 161, 'build.1').enabled).toBe(false)
+    expect(issueWorkflowTaskLogQueryOptions(null, 161, 'build.1', {}, true, 'wr-1').enabled).toBe(false)
   })
 
-  it('is enabled when issueNumber > 0, taskId is non-empty, and projectId is set', () => {
-    expect(issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1').enabled).toBe(true)
+  it('disables the query when the originating workflow run is missing', () => {
+    expect(issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1').enabled).toBe(false)
+    expect(issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1', {}, true, '').enabled).toBe(false)
+  })
+
+  it('is enabled when issueNumber > 0, taskId is non-empty, projectId is set, and the run is known', () => {
+    expect(issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1', {}, true, 'wr-1').enabled).toBe(true)
   })
 
   it('respects an explicit enabled=false override', () => {
-    expect(issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1', {}, false).enabled).toBe(false)
+    expect(issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1', {}, false, 'wr-1').enabled).toBe(false)
   })
 })
 
 describe('issueWorkflowTaskLogQueryOptions query function', () => {
-  it('fetches the task log endpoint with issueNumber, taskId, params, and projectId', async () => {
+  it('fetches the task log endpoint with issueNumber, taskId, params, projectId, and the originating run', async () => {
     const urls = recordTaskLogRequests()
 
-    await issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1', { cursor: 5, limit: 50 }).queryFn()
+    await issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1', { cursor: 5, limit: 50 }, true, 'wr-1').queryFn()
 
-    expect(urls).toEqual(['/api/projects/proj-1/issues/161/workflow/tasks/build.1/logs?cursor=5&limit=50'])
+    expect(urls).toEqual([
+      '/api/projects/proj-1/issues/161/workflow/tasks/build.1/logs?workflowRunId=wr-1&cursor=5&limit=50',
+    ])
   })
 
   it('returns the fetched page on success', async () => {
@@ -81,7 +86,7 @@ describe('issueWorkflowTaskLogQueryOptions query function', () => {
     }
     recordTaskLogRequests(() => HttpResponse.json({ success: true, data: page }))
 
-    const result = await issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1').queryFn()
+    const result = await issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1', {}, true, 'wr-1').queryFn()
 
     expect(result).toEqual(page)
   })
@@ -89,7 +94,7 @@ describe('issueWorkflowTaskLogQueryOptions query function', () => {
   it('returns an empty page when an older server is missing the endpoint route', async () => {
     recordTaskLogRequests(() => new HttpResponse('', { status: 404 }))
 
-    const result = await issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1').queryFn()
+    const result = await issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1', {}, true, 'wr-1').queryFn()
 
     expect(result).toEqual({ lines: [], nextCursor: null, truncated: false })
   })
@@ -99,12 +104,16 @@ describe('issueWorkflowTaskLogQueryOptions query function', () => {
       HttpResponse.json({ success: false, error: 'Issue #161 not found', code: 'not_found' }, { status: 404 }),
     )
 
-    await expect(issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1').queryFn()).rejects.toThrow('Issue #161 not found')
+    await expect(
+      issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1', {}, true, 'wr-1').queryFn(),
+    ).rejects.toThrow('Issue #161 not found')
   })
 
   it('rethrows non-404 errors so callers can surface them', async () => {
     recordTaskLogRequests(() => HttpResponse.json({ success: false, error: 'boom' }, { status: 500 }))
 
-    await expect(issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1').queryFn()).rejects.toThrow('boom')
+    await expect(
+      issueWorkflowTaskLogQueryOptions('proj-1', 161, 'build.1', {}, true, 'wr-1').queryFn(),
+    ).rejects.toThrow('boom')
   })
 })
