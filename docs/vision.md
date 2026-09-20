@@ -13,21 +13,96 @@ ability to understand, evaluate, and redirect the work.
 
 ## Philosophy
 
+### An idea gives production its purpose
+
+A person supplies the idea that starts the factory: an intention to make
+something exist or to change what already exists. Mohist helps turn that idea
+into a usable result while the person retains authority over its purpose.
+The work remains answerable to that purpose throughout delivery.
+
+An idea may begin before its author knows how to implement it. Agents can
+help clarify the intention, explore alternatives, and expose constraints.
+Their interpretations and proposals must remain distinguishable from the
+person's decisions. A more detailed plan does not by itself establish that
+its assumptions express the user's intent.
+
+### Purpose, will, and attention
+
+In *Capital*, Volume I, Marx examines the labor process before considering
+its particular social form. He distinguishes purposeful human labor from
+instinctive activity through the example of an architect and a bee. The
+following passage is from the historical English translation of
+[Chapter 7, Section 1](https://www.marxists.org/archive/marx/works/1867-c1/ch07.htm#S1):
+
+> A spider conducts operations that resemble those of a weaver, and a bee
+> puts to shame many an architect in the construction of her cells. But what
+> distinguishes the worst architect from the best of bees is this, that the
+> architect raises his structure in imagination before he erects it in
+> reality. At the end of every labour-process, we get a result that already
+> existed in the imagination of the labourer at its commencement. He not only
+> effects a change of form in the material on which he works, but he also
+> realises a purpose of his own that gives the law to his modus operandi, and
+> to which he must subordinate his will. And this subordination is no mere
+> momentary act. Besides the exertion of the bodily organs, the process
+> demands that, during the whole operation, the workman’s will be steadily in
+> consonance with his purpose. This means close attention. The less he is
+> attracted by the nature of the work, and the mode in which it is carried
+> on, and the less, therefore, he enjoys it as something which gives play to
+> his bodily and mental powers, the more close his attention is forced to be.
+
+The corresponding [Chinese translation](https://www.marxists.org/chinese/marx/capital/05.htm)
+places this passage in Chapter 5. Chapter numbering differs between these
+editions; the quotation retains the English translation's spelling.
+
+The argument connects an anticipated result, a purpose that governs the
+activity, and the sustained attention needed to keep activity aligned with
+that purpose. It does not depend on the architect being more skillful than
+the bee. Later in the same section, Marx examines capitalist control of labor
+and ownership of its product. Purposeful labor therefore does not, by itself,
+establish that the worker controls the purpose, process, or result.
+
+Mohist draws a product commitment from this distinction: people must retain
+meaningful control over the purposes they delegate. This is Mohist's position,
+not a claim that Marx's account settles the capabilities or consciousness of
+AI.
+
+### Review and correction continue the intention
+
+The idea, review of the result, and correction of the work are parts of one
+purposeful activity. Review asks whether the result realizes the person's
+intention. Correction may repair a defect, remove unnecessary work, or
+reconsider a product choice. A technically correct result may still fail to
+serve the intended purpose.
+
+Seeing a concrete result can also change a person's understanding of the
+idea. The person can refine or revise that purpose. Agents must surface the
+difference between correcting an implementation and proposing a change to
+the goal; a goal change remains a human decision.
+
 Software projects need sustained human judgment to remain useful and
-maintainable. People set direction, judge value, and decide which complexity
-is worth keeping. AI can perform and review work, but agreement among Agents
-and passing checks cannot establish that the project is moving in the right
-direction.
+maintainable. Agreement among Agents and passing checks cannot establish that
+a project is moving in the right direction. Evidence must make it possible to
+question the assumptions behind the work as well as the work itself.
 
-Mohist amplifies human judgment and attention. It takes on routine execution,
-coordination, and evidence gathering so people can spend their attention on
-goals, trade-offs, and actual results. Human involvement remains part of the
-operating model as automation improves.
+### Automation extends the means of acting
 
-Effective supervision requires more than an approval button. People must be
-able to understand what changed, inspect the evidence, question the
-assumptions, and redirect the work. Mohist succeeds when one person can guide
-more work while retaining that understanding and control.
+Marx describes an instrument of labor as something through which a worker
+conducts activity toward its subject. Mohist applies that perspective to its
+own role: it organizes the means by which people turn ideas into software.
+Its value depends on whether those means help realize the intended purpose.
+The volume of code, tasks, or tests cannot establish that value on its own.
+
+Mohist takes on routine execution, coordination, and evidence gathering so
+people can spend their attention on goals, trade-offs, and actual results.
+Delegation does not require continuous human observation of every operation.
+It requires that people can understand the results, inspect evidence, and
+redirect the work. Human involvement remains part of the operating model as
+automation improves.
+
+Meaningful control also requires truthful feedback. Agents must expose
+failures, constraints, and uncertainty so people can make informed choices.
+Mohist succeeds when one person can guide more work while retaining that
+understanding and control.
 
 ## How People Use Mohist
 
