@@ -4,7 +4,11 @@ import { Link2Icon, Loader2Icon, PlusIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import { useProjectPath } from '../../../entities/project'
 import type { AgentInfo } from '../../../entities/agent'
-import { useAgentConnections, useInstallManagedSlackAgent } from '../../../entities/agent-connection'
+import {
+  setupProgressLabel,
+  useAgentConnections,
+  useInstallManagedSlackAgent,
+} from '../../../entities/agent-connection'
 import type { AgentConnectionDto } from '../../../entities/agent-connection'
 
 interface Props {
@@ -23,11 +27,6 @@ const useDefaultOperations: ConnectionOperationsHook = () => ({
   connectionsQuery: useAgentConnections(),
   installMutation: useInstallManagedSlackAgent(),
 })
-
-function label(value: string | null | undefined): string {
-  if (!value) return 'Unknown'
-  return value.replaceAll('_', ' ')
-}
 
 function describeConnectionState(connection: AgentConnectionDto): {
   label: string
@@ -154,7 +153,7 @@ export function ConnectionsSection({ agent, operationsHook = useDefaultOperation
                   className="mt-1 text-xs text-muted-foreground italic"
                   data-testid={`agent-connection-row-${connection.id}-setup`}
                 >
-                  Setup: {label(connection.setupProgress)}
+                  Setup: {setupProgressLabel(connection.setupProgress)}
                 </div>
               </li>
             )

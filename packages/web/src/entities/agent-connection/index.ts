@@ -40,6 +40,7 @@ export {
   useSlackOutboxDeliveries,
 } from './api/queries'
 export { ACCESS_POLICY_VALUES } from './model/types'
+export { setupProgressLabel } from './model/setup-progress'
 export type {
   AccessPolicyKind,
   AccessPolicyManageRequest,

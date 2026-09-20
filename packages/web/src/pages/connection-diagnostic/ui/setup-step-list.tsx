@@ -1,4 +1,5 @@
 import { CheckIcon, CircleDotIcon, Loader2Icon } from 'lucide-react'
+import { setupProgressLabel } from '../../../entities/agent-connection'
 import { cn } from '@/shared/lib/utils'
 
 export type SetupStepKey =
@@ -14,11 +15,11 @@ export interface SetupStepDefinition {
 }
 
 export const SETUP_STEPS: readonly SetupStepDefinition[] = [
-  { key: 'create_app_credentials', label: 'Create app & add credentials' },
-  { key: 'waiting_for_slack_service', label: 'Waiting for Slack service' },
-  { key: 'fix_slack_setup', label: 'Fix Slack setup' },
-  { key: 'claim_owner', label: 'Claim owner' },
-  { key: 'complete', label: 'Complete' },
+  { key: 'create_app_credentials', label: setupProgressLabel('create_app_credentials') },
+  { key: 'waiting_for_slack_service', label: setupProgressLabel('waiting_for_slack_service') },
+  { key: 'fix_slack_setup', label: setupProgressLabel('fix_slack_setup') },
+  { key: 'claim_owner', label: setupProgressLabel('claim_owner') },
+  { key: 'complete', label: setupProgressLabel('complete') },
 ] as const
 
 interface SetupStepListProps {

@@ -182,7 +182,10 @@ describe('ConnectionsSection', () => {
       renderSection()
       const row = screen.getByTestId('agent-connection-row-conn_a')
       expect(row).toHaveAttribute('data-connection-state', 'amber')
-      expect(screen.getByTestId('agent-connection-row-conn_a-setup')).toHaveTextContent(/setup/i)
+      const setup = screen.getByTestId('agent-connection-row-conn_a-setup')
+      expect(setup).toHaveTextContent(/setup/i)
+      expect(setup).toHaveTextContent('Approve install in Slack')
+      expect(setup).not.toHaveTextContent(/create app credentials/i)
     })
 
     it('renders unhealthy state when connectionHealth is unhealthy', () => {
