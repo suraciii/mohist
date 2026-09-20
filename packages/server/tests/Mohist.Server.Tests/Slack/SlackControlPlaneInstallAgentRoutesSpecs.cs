@@ -81,6 +81,24 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
     }
 
     [Fact]
+    public async Task Install_targets_the_selected_workspace_instead_of_the_first_enrollment()
+    {
+        var (projectId, agentId, _, _) = UniqueIds();
+        await SeedAgentAsync(projectId, agentId, AgentStatus.Active);
+        var selectedTeam = $"T_{Guid.NewGuid():N}";
+        await SeedActiveEnrollmentAsync($"enrollment_{Guid.NewGuid():N}", selectedTeam);
+        await SeedActiveEnrollmentAsync($"enrollment_{Guid.NewGuid():N}", $"T_{Guid.NewGuid():N}");
+        using var client = _fixture.CreateOperatorClient();
+
+        var installed = await ReadDataAsync(await client.PostAsJsonAsync(
+            $"{InstallPath(projectId)}?workspaceTeamId={selectedTeam}", new { agentId }));
+
+        Assert.Equal("approve_install", installed.GetProperty("nextAction").GetString());
+        Assert.Equal(selectedTeam, await ReadConnectionTeamAsync(
+            installed.GetProperty("connection").GetProperty("id").GetString()!));
+    }
+
+    [Fact]
     public async Task Install_rejects_an_archived_agent()
     {
         var (projectId, agentId, team, enrollmentId) = UniqueIds();
@@ -305,6 +323,14 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
     {
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return document.RootElement.GetProperty("code").GetString()!;
+    }
+
+    private async Task<string> ReadConnectionTeamAsync(string connectionId)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var connection = await db.AgentConnections.SingleAsync(row => row.Id == connectionId);
+        return connection.WorkspaceTeamId;
     }
 
     private async Task<(string ConnectionId, string AgentAppId, string AppId)> ReadManagedAppFactsAsync(

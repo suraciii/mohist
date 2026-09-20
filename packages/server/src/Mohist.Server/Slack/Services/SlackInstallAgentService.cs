@@ -65,6 +65,7 @@ public sealed class SlackInstallAgentService : IScopedService
     public async Task<SlackInstallAgentProgress> InstallAsync(
         string projectId,
         string agentId,
+        string? workspaceTeamId = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
@@ -75,29 +76,57 @@ public sealed class SlackInstallAgentService : IScopedService
         if (selectedAgent.Status != AgentStatus.Active)
             throw new SlackManagerConflictException("Only active Agents can be installed to Slack.", "agent_archived");
 
-        var existing = (await _connections.ListAsync(projectId, ct: ct))
-            .FirstOrDefault(item => item.AgentId == agentId && !string.IsNullOrWhiteSpace(item.WorkspaceTeamId));
-        var enrollment = existing is not null
-            ? await _enrollments.GetActiveByTeamAsync(existing.WorkspaceTeamId, ct)
-            : null;
-        if (enrollment is null)
-        {
-            var active = await _enrollments.ListActiveAsync(ct);
-            if (active.Count == 0)
-                throw new SlackManagerConflictException(
-                    "Connect Slack before installing an Agent.",
-                    "enrollment_required");
-            if (active.Count > 1)
-                throw new SlackManagerConflictException(
-                    "More than one Slack workspace is configured; select a workspace before installing the Agent.",
-                    "workspace_selection_required");
-            enrollment = active[0];
-        }
-
-        return await InstallAsync(projectId, agentId, enrollment.Id, ct);
+        var enrollment = await ResolveInstallEnrollmentAsync(projectId, agentId, workspaceTeamId, ct);
+        return await InstallToEnrollmentAsync(projectId, agentId, enrollment.Id, ct);
     }
 
-    public async Task<SlackInstallAgentProgress> InstallAsync(
+    /// <summary>
+    /// An explicit selector is the only authority for the install target: it wins
+    /// over the Agent's existing Connection, so a selected Workspace can never
+    /// resume a different Workspace's record. Without one, the Agent's existing
+    /// Connection decides and a single active Enrollment is the only other safe
+    /// target; several leave the caller the choice instead of the first record.
+    /// </summary>
+    private async Task<SlackWorkspaceEnrollment> ResolveInstallEnrollmentAsync(
+        string projectId,
+        string agentId,
+        string? workspaceTeamId,
+        CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(workspaceTeamId))
+            return await _enrollments.GetActiveByTeamAsync(workspaceTeamId, ct)
+                ?? throw new SlackManagerConflictException(
+                    $"No active Slack workspace enrollment matches team {workspaceTeamId}.",
+                    "workspace_not_enrolled");
+
+        var existing = (await _connections.ListAsync(projectId, ct: ct))
+            .FirstOrDefault(item => item.AgentId == agentId && !string.IsNullOrWhiteSpace(item.WorkspaceTeamId));
+        if (existing is not null)
+        {
+            var connectionEnrollment = await _enrollments.GetActiveByTeamAsync(existing.WorkspaceTeamId, ct);
+            if (connectionEnrollment is not null) return connectionEnrollment;
+        }
+
+        var active = await _enrollments.ListActiveAsync(ct);
+        if (active.Count == 0)
+            throw new SlackManagerConflictException(
+                "Connect Slack before installing an Agent.",
+                "enrollment_required");
+        if (active.Count > 1)
+            throw new SlackManagerConflictException(
+                "More than one Slack workspace is configured; select a workspace before installing the Agent.",
+                "workspace_selection_required",
+                // The enrollment's own readiness is the only durable fact that
+                // says whether the Workspace can already host an Agent App, so
+                // the terminal lists it beside the selector it accepts.
+                active.Select(enrollment => new SlackSetupWorkspaceChoice(
+                    enrollment.WorkspaceTeamId,
+                    $"Slack workspace {enrollment.WorkspaceTeamId}",
+                    enrollment.ManagerReadiness)).ToList());
+        return active[0];
+    }
+
+    public async Task<SlackInstallAgentProgress> InstallToEnrollmentAsync(
         string projectId,
         string agentId,
         string enrollmentId,
@@ -143,6 +172,7 @@ public sealed class SlackInstallAgentService : IScopedService
         string agentId,
         string botToken,
         string appLevelToken,
+        string? workspaceTeamId = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
@@ -157,8 +187,14 @@ public sealed class SlackInstallAgentService : IScopedService
                 SlackRuntimeCredentialValidationState.NotProvided,
                 verification.ErrorClass ?? "bot_identity_verification_failed");
 
+        // A selected Workspace decides the target, so a pair verified in another
+        // Workspace fails the identity check against that target instead of
+        // rotating a different Workspace's credentials.
+        var targetTeamId = string.IsNullOrWhiteSpace(workspaceTeamId)
+            ? verification.WorkspaceTeamId
+            : workspaceTeamId;
         var agentApp = await _agentApps.GetByProjectAgentAndWorkspaceAsync(
-            projectId, agentId, verification.WorkspaceTeamId, ct)
+            projectId, agentId, targetTeamId, ct)
             ?? throw new SlackManagerConflictException(
                 "Install the Agent before providing its Slack credentials.",
                 "agent_install_required");

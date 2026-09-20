@@ -25,6 +25,7 @@ public static class SlackManagerRoutes
 
         manager.MapPost("/install-agent", async (
             HttpContext context,
+            string? workspaceTeamId,
             SlackControlInstallAgentBody body,
             SlackInstallAgentService service,
             CancellationToken ct) =>
@@ -40,17 +41,18 @@ public static class SlackManagerRoutes
             try
             {
                 var projectId = context.GetResolvedProject().Id;
-                var progress = await service.InstallAsync(projectId, body.AgentId, ct);
+                var progress = await service.InstallAsync(projectId, body.AgentId, workspaceTeamId, ct);
                 return ApiResults.Ok(PublicInstallProgress(progress));
             }
             catch (SlackManagerConflictException ex)
             {
-                return ApiResults.Conflict(ex.Message, ex.Code);
+                return ApiResults.Conflict(ex.Message, ex.Code, ex.Details);
             }
         });
 
         manager.MapPost("/install-agent/credentials", async (
             HttpContext context,
+            string? workspaceTeamId,
             SlackControlInstallAgentCredentialsBody body,
             SlackInstallAgentService service,
             CancellationToken ct) =>
@@ -73,6 +75,7 @@ public static class SlackManagerRoutes
                     body.AgentId,
                     body.BotToken,
                     body.AppLevelToken,
+                    workspaceTeamId,
                     ct));
             }
             catch (SlackManagerConflictException ex)

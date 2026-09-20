@@ -346,6 +346,40 @@ func TestSlackSetupSuppliesTheRuntimePairTheCurrentStepNeeds(t *testing.T) {
 	}
 }
 
+func TestSlackSetupPromptsHiddenInputForTheMissingRuntimePair(t *testing.T) {
+	requests := []capturedSlackRequest{}
+	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requests = append(requests, captureSlackRequest(t, request))
+		if len(requests) == 1 {
+			return response(http.StatusOK, `{"success":true,"data":{"phase":"failed","primaryAction":"supply_runtime_credentials","summary":"Workspace T123: The last setup step failed.","errorClass":"runtime_credential_mismatch"}}`), nil
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"phase":"awaiting_socket_validation","primaryAction":"await_socket_verification","summary":"Workspace T123: The Mohist App Socket identity is being verified."}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "operator"})
+	file := &slackFileStub{mode: 0o600}
+	deps.ReadFile, deps.StatFile = file.read, file.stat
+	interactive, readSecret, prompts := slackPrompts("xoxb-typed", "xapp-typed")
+	deps.TerminalInteractive = interactive
+	deps.ReadSecretLine = readSecret
+
+	code := Run(context.Background(), []string{"slack", "setup"}, deps)
+
+	if code != ExitOK || errOut.Len() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if len(*prompts) != 2 || !strings.Contains((*prompts)[0], "Mohist App Bot token") || !strings.Contains((*prompts)[1], "App-level token") {
+		t.Fatalf("prompts=%v", *prompts)
+	}
+	if len(requests) != 2 || requests[1].path != "/api/slack-manager/setup/runtime-credentials" {
+		t.Fatalf("requests=%+v", requests)
+	}
+	if requests[1].body["botToken"] != "xoxb-typed" || requests[1].body["appLevelToken"] != "xapp-typed" || len(requests[1].body) != 2 {
+		t.Fatalf("runtime body=%v", requests[1].body)
+	}
+	if strings.Contains(out.String(), "xoxb-typed") || strings.Contains(errOut.String(), "xapp-typed") {
+		t.Fatalf("secret leaked: stdout=%q stderr=%q", out.String(), errOut.String())
+	}
+}
+
 func TestSlackSetupRotatesAnExplicitReplacementPairOnAReadyInstallation(t *testing.T) {
 	requests := []capturedSlackRequest{}
 	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -579,6 +613,11 @@ func TestSlackInstallAgentResolvesTheSelectedWorkspaceBeforeAnyWrite(t *testing.
 	}
 	if len(requests) != 2 || requests[0].path != "/api/slack-manager/setup/progress" || requests[0].query != "workspaceTeamId=T123" {
 		t.Fatalf("requests=%+v", requests)
+	}
+	// The write carries the same selector, so the Server installs into the
+	// selected Workspace instead of the Agent's first existing Connection.
+	if requests[1].path != "/api/projects/proj/slack-manager/install-agent" || requests[1].query != "workspaceTeamId=T123" {
+		t.Fatalf("install write=%+v", requests[1])
 	}
 	if !strings.Contains(out.String(), "continue: mo slack install-agent reviewer --project proj --workspace-team T123") {
 		t.Fatalf("continuation=%q", out.String())

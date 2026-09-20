@@ -194,7 +194,9 @@ func runSlackInstallAgent(
 			return slackSetupFailure(deps, ctx, err)
 		}
 	}
-	path := "/api/projects/" + url.PathEscape(project) + "/slack-manager/install-agent"
+	base := "/api/projects/" + url.PathEscape(project) + "/slack-manager/install-agent"
+	path := withSlackWorkspaceSelector(base, selector)
+	credentialsPath := withSlackWorkspaceSelector(base+"/credentials", selector)
 	progress, err := client.request(ctx, http.MethodPost, path, map[string]any{"agentId": agentID})
 	if err != nil {
 		return slackSetupFailure(deps, ctx, err)
@@ -222,7 +224,7 @@ func runSlackInstallAgent(
 		credentials = prompted
 	}
 
-	_, err = client.request(ctx, http.MethodPost, path+"/credentials", map[string]any{
+	_, err = client.request(ctx, http.MethodPost, credentialsPath, map[string]any{
 		"agentId":       agentID,
 		"botToken":      credentials.BotToken,
 		"appLevelToken": credentials.AppLevelToken,
@@ -625,11 +627,16 @@ func slackInstallContinuation(agentID, project, selector string, credentialsFile
 }
 
 func slackSetupPath(action, selector string) string {
-	path := "/api/slack-manager/setup/" + action
-	if selector != "" {
-		path += "?workspaceTeamId=" + url.QueryEscape(selector)
+	return withSlackWorkspaceSelector("/api/slack-manager/setup/"+action, selector)
+}
+
+// Every install-agent write carries the selector, so the Server targets the
+// selected Workspace instead of the Agent's first existing Connection.
+func withSlackWorkspaceSelector(path, selector string) string {
+	if selector == "" {
+		return path
 	}
-	return path
+	return path + "?workspaceTeamId=" + url.QueryEscape(selector)
 }
 
 func slackWorkspaceSelector(cmd command) string {
