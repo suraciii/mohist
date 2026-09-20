@@ -2,13 +2,32 @@
 
 Mohist is an Agent-oriented software factory. It turns the path from idea to
 delivery into a production line that people can define, run, and supervise.
-An Issue enters and a deliverable leaves. People intervene when judgment or
-exception handling is required.
+An Issue enters and a deliverable leaves. People retain direction and judgment
+throughout delivery, while Agents perform delegated work.
 
 ## Goal
 
 When the production line is clear enough and Agent execution is reliable
-enough, one person can deliver as much as a small team.
+enough, one person can deliver as much as a small team while retaining the
+ability to understand, evaluate, and redirect the work.
+
+## Philosophy
+
+Software projects need sustained human judgment to remain useful and
+maintainable. People set direction, judge value, and decide which complexity
+is worth keeping. AI can perform and review work, but agreement among Agents
+and passing checks cannot establish that the project is moving in the right
+direction.
+
+Mohist amplifies human judgment and attention. It takes on routine execution,
+coordination, and evidence gathering so people can spend their attention on
+goals, trade-offs, and actual results. Human involvement remains part of the
+operating model as automation improves.
+
+Effective supervision requires more than an approval button. People must be
+able to understand what changed, inspect the evidence, question the
+assumptions, and redirect the work. Mohist succeeds when one person can guide
+more work while retaining that understanding and control.
 
 ## How People Use Mohist
 
@@ -62,9 +81,11 @@ visualization plane, not a workspace that users must adopt.
 - **Agent-friendly interfaces first:** A Mohist Agent has a stable invocation
   interface. An External Agent can discover and operate Mohist with a Skill and
   `mo`. Critical capabilities must not exist only in the Web UI.
-- **Issues carry complete objectives:** An Issue contains everything an Agent
-  needs to finish the work: requirements, acceptance criteria, and boundaries.
-  The Agent must not have to ask for decisions after the work starts.
+- **Issues carry complete objectives:** An Issue contains the requirements,
+  acceptance criteria, and boundaries needed to start work. When new evidence
+  requires a decision outside those boundaries, the Agent must bring that
+  decision to the user. An Agent proposal does not become a user decision
+  without the user's approval.
 - **Feedback density over volume:** Each result is local to a change or a
   stage, quick to get, and objectively verifiable. An Agent uses the cheapest
   check that can answer its current question. Feedback that is slow or does
@@ -92,10 +113,12 @@ visualization plane, not a workspace that users must adopt.
 
 ## Direction
 
-Mohist is moving toward a factory where people leave routine execution in the
-loop only when they choose to supervise it. Supervision Agents can handle
-proxy Approval and failure routing, while mentions and event routing make that
-help configurable and revocable. See [Agent Supervision](agent-supervision.md)
+Mohist is moving toward a factory that reduces routine execution and
+coordination work so people can focus on direction, trade-offs, and results.
+People can inspect and redirect work even when no failure has been reported.
+Supervision Agents can handle proxy Approval and failure routing within their
+delegated authority, while mentions and event routing make that help
+configurable and revocable. See [Agent Supervision](agent-supervision.md)
 and [Agent Event Routing](event-routing.md).
 
 The same Agent should remain useful wherever the work starts. Agents should
