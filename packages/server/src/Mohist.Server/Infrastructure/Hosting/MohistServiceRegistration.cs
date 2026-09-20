@@ -220,6 +220,7 @@ public static class MohistServiceRegistration
         services.AddScoped<ISlackConfigurationCredentialStore>(sp => sp.GetRequiredService<ProtectedSlackConfigurationCredentialStore>());
         services.AddScoped<ISlackBotIdentityVerificationPort, SlackBotIdentityVerificationPortAdapter>();
         services.AddScoped<ISlackMemberIdentityPort, SlackMemberIdentityPortAdapter>();
+        services.AddScoped<ISlackThreadQueryPort, SlackThreadQueryPortAdapter>();
         services.AddScoped<ISlackAgentAppBindingPort>(sp => sp.GetRequiredService<AgentConnectionStore>());
         var slackApiOptions = configuration.GetSection(SlackProviderOptions.SectionName).Get<SlackProviderOptions>()
             ?? new SlackProviderOptions();

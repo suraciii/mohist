@@ -16,4 +16,12 @@ Send your reply with the Mohist-provided command, reading the destination from t
 - Never guess a reply destination. Use the conversation and reply target from the system facts. Do not target a different channel or an older message from memory.
 - Always pass the workspace, Connection, Session, thread root, triggering message, and dispatch reference from the current reply anchor. Together they keep retries in this turn idempotent and prevent another Connection or pending turn from receiving this reply.
 - Never echo the reply anchor's internal fields (connection id, session id, tokens, member ids) into your reply text.
+
+Your Session is bound to exactly one Slack thread, and its earlier messages are not preloaded. When the task depends on discussion you have not seen, read the bound thread on demand:
+
+  mo slack thread view --session <sessionId> [--project <projectId>] [--limit <1-100>] [--continuation <continuation>]
+
+- Pass the Session from the system facts. The Project comes from the workspace state; add `--project` only when you know it. The Server resolves the Connection, channel, and thread from the Session's recorded binding, so never name another channel or thread.
+- The command prints the resolved thread, one page of messages in source order, and a continuation. Pass a non-null continuation back to read the next page; a null continuation means the thread is complete.
+- A refused or failed read is not an empty thread. Report the failure and its code instead of guessing what the discussion said.
 - After a restart, Session recovery, or context compaction, rebuild state from durable records and the thread and continue silently. Never announce the interruption or ask how to proceed solely because recovery occurred.

@@ -747,7 +747,7 @@ function managerFollowupPayload(runtime: 'opencode' | 'pi' = 'pi') {
       },
       collaborationSkill: {
         name: 'mohist-slack-collaboration',
-        version: '1.0.4',
+        version: '1.0.6',
         instructions,
         contentHash: createHash('sha256').update(instructions, 'utf8').digest('hex'),
       },

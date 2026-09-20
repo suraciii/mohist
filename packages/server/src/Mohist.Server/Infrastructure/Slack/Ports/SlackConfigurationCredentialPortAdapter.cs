@@ -35,6 +35,7 @@ public sealed class SlackConfigurationCredentialPortAdapter(
             case SlackApiCallOutcome.Ok:
                 return ParseRotation(response.Body);
             case SlackApiCallOutcome.Rejected:
+            case SlackApiCallOutcome.RateLimited:
                 return new(SlackConfigurationCredentialRotationOutcome.DefiniteFailure,
                     ErrorClass: response.Error ?? "rotation_rejected");
             case SlackApiCallOutcome.Unparseable:

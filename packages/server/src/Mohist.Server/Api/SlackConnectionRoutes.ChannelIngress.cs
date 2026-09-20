@@ -141,7 +141,7 @@ public static partial class SlackConnectionRoutes
                     await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
                     return ApiResults.Ok(new { kind = "rejected", reason });
                 }
-                return await LaunchChannelRootAsync(req, prompt, rootTs, null, ct);
+                return await LaunchChannelRootAsync(req, prompt, rootTs, ct);
             }
 
             if (otherBotsInThread)
@@ -152,7 +152,7 @@ public static partial class SlackConnectionRoutes
                     await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
                     return ApiResults.Ok(new { kind = "rejected", reason });
                 }
-                return await LaunchChannelRootAsync(req, prompt, rootTs, null, ct);
+                return await LaunchChannelRootAsync(req, prompt, rootTs, ct);
             }
 
             var reconciled = await ReconcileSessionIdAsync(
@@ -167,19 +167,7 @@ public static partial class SlackConnectionRoutes
                 return ApiResults.Ok(new { kind = "rejected", reason });
             }
 
-            var historyOutcome = await ReadThreadHistoryIfAnyAsync(req, rootTs, ct);
-
-            if (historyOutcome.Outcome == SlackThreadHistoryReadOutcome.Refused)
-            {
-                const string reason = "I couldn't read the full thread discussion; please re-mention me in a moment and I'll try again.";
-                await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
-                return ApiResults.Ok(new { kind = "rejected", reason });
-            }
-
-            var startupContext = historyOutcome.Outcome == SlackThreadHistoryReadOutcome.Imported
-                ? BuildStartupContext(req, historyOutcome.Messages)
-                : null;
-            return await LaunchChannelRootAsync(req, prompt, rootTs, startupContext, ct);
+            return await LaunchChannelRootAsync(req, prompt, rootTs, ct);
         }
 
         if (threadBindings.Count >= 2)
@@ -527,7 +515,6 @@ public static partial class SlackConnectionRoutes
         HandleChannelIngressRequest req,
         string prompt,
         string rootTs,
-        AgentStartupContext? startupContext,
         CancellationToken ct)
     {
         var body = req.Body;
@@ -542,7 +529,6 @@ public static partial class SlackConnectionRoutes
                 rootTs,
                 body.ThreadTs,
                 ToServiceLaunchIds(SlackChannelLaunchService.PreMintSlackLaunchIds(req.ProjectId, req.Identity)),
-                startupContext,
                 req.ThreadMapping),
             ct);
 

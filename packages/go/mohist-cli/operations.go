@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -24,6 +25,11 @@ var slackFields = []string{"id", "projectId", "agentId", "workspaceTeamId", "sta
 // slackEditFields mirrors the manage-access response envelope, not the flat
 // Connection projection used by `slack list`/`slack view`.
 var slackEditFields = []string{"connection", "accessPolicy", "allowMembers", "anyoneDisclosure"}
+
+// slackThreadFields mirrors the on-demand channel-thread read envelope:
+// the resolved thread identity, the page of messages, and the opaque
+// continuation the next read needs (null when the traversal completed).
+var slackThreadFields = []string{"thread", "messages", "continuation"}
 
 const maxSlackReplyFileBytes = 10 * 1024 * 1024
 
@@ -83,6 +89,12 @@ var operationsFlags = map[string]map[string]map[string]flagShape{
 		"clear-gap":        {"project": flagValue},
 		"reconcile-create": {"project": flagValue},
 		"reconcile-delete": {"project": flagValue},
+		"thread-view": {
+			"session":      flagValue,
+			"limit":        flagValue,
+			"continuation": flagValue,
+			"project":      flagValue,
+		},
 		"message-send": {
 			"workspace":          flagValue,
 			"conversation":       flagValue,
@@ -137,12 +149,15 @@ func parseOperations(area string, args []string) (command, error) {
 		"server": {"status", "health", "info", "logs"},
 		"audit":  {"list"},
 		"github": {"connect", "list", "view", "update", "enable", "disable"},
-		"slack":  {"setup", "status", "install-agent", "create", "list", "view", "diagnostics", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete", "message"},
+		"slack":  {"setup", "status", "install-agent", "create", "list", "view", "diagnostics", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete", "message", "thread"},
 	}
 	if !contains(allowed[area], action) {
 		return command{}, usage("unknown " + area + " command")
 	}
 	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+		if area == "slack" && action == "thread" {
+			return command{help: true, helpText: opsLeafHelp("ops-slack-thread-view", slackThreadFields)}, nil
+		}
 		return command{help: true, helpText: opsLeafHelp("ops-"+area+"-"+action, catalogFor(area, action))}, nil
 	}
 	if action == "message" {
@@ -150,6 +165,11 @@ func parseOperations(area string, args []string) (command, error) {
 			return command{}, usage("message action must be send")
 		}
 		action = "message-send"
+	} else if action == "thread" {
+		if len(args) < 2 || args[1] != "view" {
+			return command{}, usage("thread action must be view")
+		}
+		action = "thread-view"
 	} else if len(args) > 1 && (args[1] == "--help" || args[1] == "-h") {
 		return command{help: true, helpText: opsLeafHelp("ops-"+area+"-"+action, catalogFor(area, action))}, nil
 	}
@@ -161,7 +181,7 @@ func parseOperations(area string, args []string) (command, error) {
 		c.args = append(c.args, "collection", "false")
 	}
 	start := 1
-	if action == "message-send" {
+	if action == "message-send" || action == "thread-view" {
 		start = 2
 	}
 	if area == "runner" && (action == "view" || action == "revoke") || area == "github" && contains([]string{"view", "update", "enable", "disable"}, action) || area == "slack" && contains([]string{"view", "diagnostics", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete"}, action) {
@@ -294,12 +314,26 @@ func parseOperations(area string, args []string) (command, error) {
 	if area == "slack" && action == "status" && strings.TrimSpace(argValue(c.args, "workspace-team", "")) == "" {
 		return command{}, usage("slack status requires non-blank --workspace-team")
 	}
+	if area == "slack" && action == "thread-view" {
+		if strings.TrimSpace(argValue(c.args, "session", "")) == "" {
+			return command{}, usageWithLeaf("slack thread view requires --session", leafUsage)
+		}
+		if raw := strings.TrimSpace(argValue(c.args, "limit", "")); raw != "" {
+			limit, err := strconv.Atoi(raw)
+			if err != nil || limit < 1 || limit > 100 {
+				return command{}, usageWithLeaf("--limit must be a whole number between 1 and 100", leafUsage)
+			}
+		}
+	}
 	return c, validateFields(c.fields, c.catalog, "mo "+area+" "+strings.ReplaceAll(action, "-", " "))
 }
 
 func catalogFor(area, action string) []string {
 	if area == "slack" && action == "edit" {
 		return slackEditFields
+	}
+	if area == "slack" && action == "thread-view" {
+		return slackThreadFields
 	}
 	return fieldsFor(area)
 }
@@ -491,7 +525,7 @@ func operationsHelp(area string) string {
 	if area == "runner" {
 		return "USAGE\n    mo runner <list|status|view|revoke> [flags]\n    mo runner environment <capture|initialize|status|apply|cancel|check> [flags]\n\nRead and manage Server-global Runner resources. Environment capture, initialization, and apply are local transactions; apply is coordinated with Server.\n\nActions: list, view, status, revoke, environment"
 	}
-	actions := map[string]string{"server": "status, health, info, logs", "audit": "list", "github": "connect, list, view, update, enable, disable", "slack": "setup, status, install-agent, list, view, claim-owner, edit, transfer-owner, enable, disable, remove-binding, permanent-delete, message, deliveries, resend-delivery, clear-gap, reconcile-create, reconcile-delete"}
+	actions := map[string]string{"server": "status, health, info, logs", "audit": "list", "github": "connect, list, view, update, enable, disable", "slack": "setup, status, install-agent, list, view, claim-owner, edit, transfer-owner, enable, disable, remove-binding, permanent-delete, message, thread, deliveries, resend-delivery, clear-gap, reconcile-create, reconcile-delete"}
 	return "USAGE\n    mo " + area + " <action> [flags]\n\nOperations and integrations.\n\nActions: " + actions[area]
 }
 func opsLeafHelp(kind string, fields []string) string {
@@ -509,6 +543,8 @@ func opsLeafHelp(kind string, fields []string) string {
 	path := strings.TrimPrefix(kind, "ops-")
 	if strings.HasPrefix(path, "event-dead-letter-") {
 		path = "event dead-letter " + strings.TrimPrefix(path, "event-dead-letter-")
+	} else if strings.HasPrefix(path, "slack-thread-") {
+		path = "slack thread " + strings.TrimPrefix(path, "slack-thread-")
 	} else {
 		path = strings.Replace(path, "-", " ", 1)
 	}
@@ -972,6 +1008,16 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 			if isManagerMode(deps.Lookup) {
 				path = "/api/slack-manager/reply"
 			}
+		} else if action == "thread-view" {
+			path += "/thread"
+			q := url.Values{}
+			q.Set("sessionId", argValue(cmd.args, "session", ""))
+			for _, name := range []string{"limit", "continuation"} {
+				if value := argValue(cmd.args, name, ""); value != "" {
+					q.Set(name, value)
+				}
+			}
+			path += "?" + q.Encode()
 		} else if action == "edit" {
 			path += "/" + url.PathEscape(argValue(cmd.args, "id", "")) + "/manage-access"
 			method = http.MethodPost

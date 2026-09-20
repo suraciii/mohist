@@ -75,14 +75,71 @@ public sealed class SlackApiTransportTests
     [Fact]
     public async Task PostForm_non_ok_status_is_rejected_with_http_status_class()
     {
-        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.TooManyRequests));
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized));
         using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
         var transport = new SlackApiTransport(http);
 
         var response = await transport.PostFormAsync("auth.test", null, null, CancellationToken.None);
 
         Assert.Equal(SlackApiCallOutcome.Rejected, response.Outcome);
-        Assert.Equal("http_429", response.Error);
+        Assert.Equal("http_401", response.Error);
+        Assert.Null(response.RetryAfter);
+    }
+
+    [Fact]
+    public async Task PostForm_http_429_is_rate_limited_with_the_retry_after_delay()
+    {
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            response.Headers.Add("Retry-After", "33");
+            return response;
+        });
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
+        var transport = new SlackApiTransport(http);
+
+        var response = await transport.PostFormAsync("auth.test", null, null, CancellationToken.None);
+
+        Assert.Equal(SlackApiCallOutcome.RateLimited, response.Outcome);
+        Assert.Equal("ratelimited", response.Error);
+        Assert.Equal(TimeSpan.FromSeconds(33), response.RetryAfter);
+    }
+
+    [Fact]
+    public async Task PostForm_http_429_without_a_parseable_retry_after_still_reports_the_rate_limit()
+    {
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            response.Headers.Add("Retry-After", "Wed, 21 Oct 2026 07:28:00 GMT");
+            return response;
+        });
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
+        var transport = new SlackApiTransport(http);
+
+        var response = await transport.PostFormAsync("auth.test", null, null, CancellationToken.None);
+
+        Assert.Equal(SlackApiCallOutcome.RateLimited, response.Outcome);
+        Assert.Null(response.RetryAfter);
+    }
+
+    [Fact]
+    public async Task PostForm_ok_false_ratelimited_is_rate_limited_with_the_retry_after_delay()
+    {
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            var response = JsonResponse("""{"ok":false,"error":"ratelimited"}""");
+            response.Headers.Add("Retry-After", "5");
+            return response;
+        });
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
+        var transport = new SlackApiTransport(http);
+
+        var response = await transport.PostFormAsync("auth.test", null, null, CancellationToken.None);
+
+        Assert.Equal(SlackApiCallOutcome.RateLimited, response.Outcome);
+        Assert.Equal("ratelimited", response.Error);
+        Assert.Equal(TimeSpan.FromSeconds(5), response.RetryAfter);
     }
 
     [Fact]

@@ -101,6 +101,8 @@ public static partial class SlackConnectionRoutes
 
         MapSlackManagerAdapterRoutes(app);
 
+        MapThreadViewRoute(management);
+
         management.MapGet("/{connectionId}", async (
             HttpContext context,
             string connectionId,
@@ -402,8 +404,6 @@ public static partial class SlackConnectionRoutes
             IGrainFactory grains,
             AgentSessionFollowupDispatcher followupDispatcher,
             AgentSessionQuerier sessions,
-            SlackThreadHistoryReader threadHistory,
-            IOptions<SlackProviderOptions> slackProviderOptions,
             SlackAdapterLeaseService leases,
             SlackManagedBotAdmissionService managedBotAdmission,
             ISlackAdapterOperatorAuthenticator auth,
@@ -522,7 +522,6 @@ public static partial class SlackConnectionRoutes
                             operatorId, body.LeaseId, body.AdapterId,
                             (targetRef, leaseCt) => leases.ResolveRuntimeLeaseBotTokenAsync(
                                 operatorId, targetRef, body.LeaseId, body.AdapterId, leaseCt)),
-                        threadHistory, slackProviderOptions,
                         http.RequestServices),
                     ct);
 
@@ -807,38 +806,6 @@ public static partial class SlackConnectionRoutes
             threadTs,
             SlackStatusProjection.DispatchRef(source, "progress"),
             blocks, launch.SessionId, ct);
-    }
-
-    private static async Task<SlackThreadHistoryReadResult> ReadThreadHistoryIfAnyAsync(
-        HandleChannelIngressRequest req,
-        string rootTs,
-        CancellationToken ct)
-    {
-        var body = req.Body;
-        return await req.ThreadHistory.ReadAsync(
-            req.ProjectId,
-            req.Connection.Id,
-            body.ConversationId,
-            rootTs,
-            body.MessageTs,
-            ct);
-    }
-
-    private static AgentStartupContext BuildStartupContext(
-        HandleChannelIngressRequest req,
-        IReadOnlyList<SlackConversationMessage> messages)
-    {
-        var budget = Math.Max(1, req.SlackProviderOptions.Value.StartupContextCharacterBudget);
-        var (text, marker, omitted) = SlackThreadHistoryReader.ApplyBudget(
-            messages,
-            budget);
-        return new AgentStartupContext(
-            Text: text,
-            Provenance: new AgentStartupContextProvenance(
-                Source: "slack-thread-history",
-                Truncated: marker is not null,
-                TruncationMarker: marker,
-                OmittedOldestMessageCount: omitted));
     }
 
     private static async Task EnqueueReplyAsync(
@@ -1535,8 +1502,6 @@ internal sealed record HandleChannelIngressRequest(
     IGrainFactory Grains,
     AgentSessionFollowupDispatcher FollowupDispatcher,
     SlackLeaseContext LeaseContext,
-    SlackThreadHistoryReader ThreadHistory,
-    IOptions<SlackProviderOptions> SlackProviderOptions,
     IServiceProvider Services)
 {
     public static HandleChannelIngressRequest From(
@@ -1560,14 +1525,12 @@ internal sealed record HandleChannelIngressRequest(
         IGrainFactory grains,
         AgentSessionFollowupDispatcher followupDispatcher,
         SlackLeaseContext leaseContext,
-        SlackThreadHistoryReader threadHistory,
-        IOptions<SlackProviderOptions> slackProviderOptions,
         IServiceProvider services) =>
         new(projectId, connection, identity, senderSlackUserId, body,
             connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
             sessions, agents, claims, accessDecider, inbox, outbox,
             launcher, attachmentBinder, grains, followupDispatcher,
-            leaseContext, threadHistory, slackProviderOptions, services);
+            leaseContext, services);
 }
 
 public sealed class SlackConnectionCreateBody

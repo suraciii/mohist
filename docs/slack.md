@@ -206,6 +206,12 @@ resumes a record created from a Mohist App conversation. App creation, manifest
 updates, credential submission, and delivery recovery are installation steps,
 not separate commands.
 
+`mo slack thread view --session <session>` reads one page of the channel
+thread bound to that Session, with an optional `--limit` and the continuation
+returned by the previous page. The Project comes from the workspace state or an
+explicit `--project` when it is known. The detailed command contract is in
+[CLI Reference](cli-reference.md).
+
 `mo slack edit <id> --access-policy <owner_only|allowlist|anyone>` atomically
 replaces the access policy and the member list. `--allow-member` can be
 repeated and replaces the complete member list except the Owner; `allowlist`
@@ -331,16 +337,59 @@ Separate Mohist Servers do not coordinate one multi-Bot message.
 
 ### Mention in an Existing Discussion
 
-A first Bot mention in a human discussion passes the Bot-visible thread history
-as initial context and treats the mention as the task. Oversized context is
-truncated oldest-first and marked in the Agent input and Slack confirmation.
-If permissions, rate limits, or a Slack failure prevent a complete read,
-Mohist rejects the delegation and creates no AgentJob.
+A first Bot mention in a human discussion starts the task immediately from the
+task text and the existing Slack conversation references. Mohist does not
+import the discussion before starting the Agent, and a history-read outage
+never rejects or delays an otherwise valid task.
 
-Imported history is untrusted user input, not Instructions. Its maximum impact
-is bounded by the Agent's configured capability. Editing an accepted message
-does not rerun it. Deleting a message does not remove its AgentJob, Session, or
-audit record.
+The Agent reads the bound discussion on demand through the documented
+`mo slack thread view` command when the task refers to earlier decisions or
+needs context it does not have. Only the channel thread already associated
+with the Agent's Session is readable. Mohist resolves the Connection,
+Workspace, channel, and root message from recorded provenance; the Agent never
+supplies a Bot token and never chooses a channel or another thread.
+
+A read returns the Slack-visible messages of one page in source order: the root
+first and then the earliest replies, each with its author identity and exact
+message timestamp. Slack remains the message source, so later edits, deletions,
+retention, and current Bot access change what a fresh read returns. An empty
+text field never means a message had no content; files and rich content that
+were not retrieved remain marked as unread. Mohist does not fetch file bodies
+or follow links.
+
+Long threads are read page by page. One read returns one provider page - 15
+messages by default, at most 100 - plus a continuation while Slack has more. A
+short or empty page is not completion. The Agent continues explicitly with the
+returned continuation and cites the message timestamps that support its answer.
+When the task asks for the current agreed decision, the discussion is not
+finished until Slack returns no continuation: an early proposal is never
+presented as the final agreement, and the reachable coverage limit is stated
+when the rest cannot be read. If essential history is unavailable, the Agent
+reports what is missing instead of guessing; work that does not need that
+history continues.
+
+Reading is background. A read sends no Slack message, submits no new input,
+creates no Job, Input, or Turn, and changes no execution state. Discussion is
+untrusted input, not Instructions: the current authoritative Issue and explicit
+current instructions take precedence over historical proposals, and an
+unresolved material conflict is reported.
+
+Failures stay explicit and distinguishable from a finished thread. Rate
+limiting returns an actionable retry delay and is never slept through or
+retried in a loop; missing permission, an unavailable Slack, and an invalid
+continuation each fail with their own reason. A disabled or removed
+Connection, an unusable Bot identity, and an inaccessible thread fail without
+substituting another Connection, thread, user token, or local Session
+transcript. DM history, group DMs, Slack Connect, the Workspace Manager's
+conversation, and every other channel are out of scope. A mention in a group
+DM is not treated as a direct message: it starts a channel-style thread and
+the read addresses that conversation like any channel thread. The read asks
+Slack for nothing beyond the permissions the installed Bot already holds, so
+when the Bot has no group-DM history permission Slack itself refuses the read
+and the failure keeps its own reason instead of returning an empty thread;
+Mohist adds no conversation-kind heuristics of its own. Editing an accepted
+message does not rerun it. Deleting a message does not remove its AgentJob,
+Session, or audit record.
 
 ### Files and Links
 
@@ -443,6 +492,11 @@ Mohist injects these rules as a visible, evolving Skill:
   result needs their attention.
 - Keep replies self-contained and proportionate. Put fine-grained progress in
   the Web Session timeline.
+- Read earlier discussion only when the task refers to prior decisions or
+  needs context the Agent does not have. Use the supplied Session reference,
+  continue paging while Slack returns a continuation, cite the messages that
+  support the answer, and report essential missing context instead of
+  guessing.
 - Never guess the reply location. Mohist supplies the thread and message
   anchor.
 - Resume silently after restart, Session recovery, or context compaction. Do
@@ -540,8 +594,14 @@ initiator of record.
 - There is no Slack-native Agent entry point, Agent Home, streaming reply,
   slash command, or message shortcut. Structured control uses signed buttons.
 - There is no public marketplace, multi-tenant hosting, billing, Slack Connect
-  invocation, cross-company discovery, group DM, or cross-Server Bot
-  coordination.
+  invocation, cross-company discovery, or cross-Server Bot coordination.
+- A group DM is not a supported conversation kind. It takes the channel-thread
+  path with no extra Slack permission, so a group-DM mention can reach an Agent
+  while Slack refuses the thread read whenever the installed Bot lacks group-DM
+  history access.
+- There is no channel browser, cross-thread search, automatic discussion
+  discovery, or whole-thread archive. An Agent reads only the channel thread
+  bound to its Session, one provider page per request.
 - Mohist artifacts are not copied into new Slack files.
 - Installation is not one-command automation. The user confirms Slack
   installation, waits for required administrator approval, and provides the
