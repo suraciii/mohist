@@ -73,6 +73,15 @@ type Dependencies struct {
 	ManagedUpdate           ManagedUpdateRuntime
 	OpenManagedLock         func(string) (io.Closer, error)
 	ManagedPathExists       func(string) bool
+	// TerminalInteractive reports whether a person is present at a terminal, so
+	// a guide can prompt instead of failing closed. It is injected in tests.
+	TerminalInteractive func() bool
+	// ReadSecretLine reads one hidden line for a secret prompt. It is injected
+	// in tests so no test depends on a terminal.
+	ReadSecretLine func(prompt string) (string, error)
+	// StatFile exposes file metadata, which the protected credentials-file
+	// check reads before any content is read.
+	StatFile func(string) (os.FileInfo, error)
 }
 
 type Config struct {
@@ -151,6 +160,10 @@ func defaultDependencies() Dependencies {
 		},
 		Executable:       currentExecutablePath,
 		CurrentDirectory: func() string { value, _ := os.Getwd(); return value },
+
+		TerminalInteractive: defaultTerminalInteractive,
+		ReadSecretLine:      defaultReadSecretLine,
+		StatFile:            os.Stat,
 	}
 }
 
@@ -400,6 +413,15 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	}
 	if deps.CurrentDirectory == nil {
 		deps.CurrentDirectory = defaults.CurrentDirectory
+	}
+	if deps.TerminalInteractive == nil {
+		deps.TerminalInteractive = defaults.TerminalInteractive
+	}
+	if deps.ReadSecretLine == nil {
+		deps.ReadSecretLine = defaults.ReadSecretLine
+	}
+	if deps.StatFile == nil {
+		deps.StatFile = defaults.StatFile
 	}
 	if deps.HealthProbe == nil {
 		deps.HealthProbe = func(ctx context.Context, address string) error {
