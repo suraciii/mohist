@@ -157,7 +157,7 @@ describe('ConnectionDiagnosticPage — setup step rendering (MSW)', () => {
     expect(link).toHaveAttribute('href', 'https://api.slack.com/apps/A1/oauth')
     expect(link).toHaveAttribute('target', '_blank')
     expect(screen.getByTestId('managed-agent-app-local-step')).toHaveTextContent('mo slack install-agent agent-1')
-    expect(screen.getByTestId('managed-agent-app-local-step')).toHaveTextContent('~/.mohist/slack-credentials.json')
+    expect(screen.getByTestId('managed-agent-app-local-step')).toHaveTextContent('--credentials-file')
   })
 
   it('renders the waiting-for-service step while preserving setup progress', async () => {

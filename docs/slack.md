@@ -641,11 +641,6 @@ message under the selected Connection's Project. Pending choices expire after
 five minutes and recover after restart. The original sender remains the
 initiator of record.
 
-The setup guide does not yet match the journey above. It still reads
-`~/.mohist/slack-credentials.json` when `--credentials-file` is absent, offers
-no hidden terminal input, and accepts no `--workspace-team` selector, so a user
-with several enrolled Workspaces cannot yet choose one from the terminal.
-
 ## Non-goals
 
 - A Slack Bot runs no Agent Runtime and owns no Agent configuration or hidden

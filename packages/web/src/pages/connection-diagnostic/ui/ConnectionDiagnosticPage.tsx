@@ -240,8 +240,8 @@ function ManagedAppStatus({
               <TerminalIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
               <div className="space-y-2">
                 <p className="text-foreground">
-                  After Slack approves the App, add its <code>botToken</code> and <code>appLevelToken</code> to{' '}
-                  <code>~/.mohist/slack-credentials.json</code> on the Mohist host.
+                  After Slack approves the App, run this command on the Mohist host and enter the two tokens at its
+                  hidden prompt. Automation names a protected file with <code>--credentials-file</code>.
                 </p>
                 <code className="block overflow-x-auto rounded bg-background px-2 py-1.5 text-xs text-foreground">
                   mo slack install-agent {agentId}
