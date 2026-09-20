@@ -180,6 +180,31 @@ public sealed class SlackThreadReadServiceSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Read_refuses_a_soft_deleted_connection()
+    {
+        var sessionId = await SeedBoundSessionAsync(deletedAt: ClockNow);
+
+        var result = await Service().ReadAsync(new SlackThreadReadRequest(_projectId, sessionId, 15, null));
+
+        Assert.Equal("connection_unavailable", result.Error!.Code);
+        Assert.Contains("no longer exists", result.Error.Message, StringComparison.Ordinal);
+        Assert.Empty(_threads.Queries);
+    }
+
+    [Fact]
+    public async Task Read_refuses_a_direct_message_session_with_its_own_code()
+    {
+        var sessionId = await SeedSessionAsync(ChannelProvenance(conversationId: "D-dm", threadRootMessageId: "1709.0001"));
+        await _dmMappings.SetCurrentSessionIdAsync(
+            _projectId, _connectionId, "T123", "U_SENDER", "D-dm", sessionId);
+
+        var result = await Service().ReadAsync(new SlackThreadReadRequest(_projectId, sessionId, 15, null));
+
+        Assert.Equal("dm_not_supported", result.Error!.Code);
+        Assert.Empty(_threads.Queries);
+    }
+
+    [Fact]
     public async Task Read_refuses_a_session_that_is_not_bound_to_a_channel_thread()
     {
         var sessionId = await SeedSessionAsync();
@@ -304,12 +329,13 @@ public sealed class SlackThreadReadServiceSpecs : IAsyncLifetime
 
     private async Task<string> SeedBoundSessionAsync(
         bool withCredential = true,
-        string desiredState = DesiredStateKind.Enabled)
+        string desiredState = DesiredStateKind.Enabled,
+        DateTimeOffset? deletedAt = null)
     {
         var sessionId = await SeedSessionAsync(ChannelProvenance());
         await _threadMappings.UpsertAsync(
             _projectId, "T123", _connectionId, ChannelId, RootMessageId, "U_SENDER", sessionId, RootMessageId);
-        await SeedConnectionAsync(desiredState);
+        await SeedConnectionAsync(desiredState, deletedAt);
         var address = SecretStoreAddress.ForManagedSlackAgentApp(_agentAppId, SecretKind.BotToken);
         if (withCredential)
             await _secrets.StoreAsync(address, Encoding.UTF8.GetBytes(BotToken));
@@ -326,7 +352,7 @@ public sealed class SlackThreadReadServiceSpecs : IAsyncLifetime
         return sessionId;
     }
 
-    private async Task SeedConnectionAsync(string desiredState)
+    private async Task SeedConnectionAsync(string desiredState, DateTimeOffset? deletedAt = null)
     {
         await using var db = new MohistDbContext(_database.Options);
         db.AgentConnections.Add(new AgentConnectionRow
@@ -344,6 +370,7 @@ public sealed class SlackThreadReadServiceSpecs : IAsyncLifetime
             ConnectionHealth = ConnectionHealthKind.Healthy,
             CreatedAt = ClockNow,
             UpdatedAt = ClockNow,
+            DeletedAt = deletedAt,
         });
         await db.SaveChangesAsync();
     }
@@ -351,16 +378,18 @@ public sealed class SlackThreadReadServiceSpecs : IAsyncLifetime
     private SlackThreadReadTarget ChannelTarget() =>
         new(_projectId, _connectionId, "T123", ChannelId, RootMessageId);
 
-    private AgentSessionInputProvenance ChannelProvenance() =>
+    private AgentSessionInputProvenance ChannelProvenance(
+        string conversationId = ChannelId,
+        string threadRootMessageId = RootMessageId) =>
         new(
             ProviderKind: "slack",
             WorkspaceId: "T123",
-            ConversationId: ChannelId,
-            ThreadId: RootMessageId,
+            ConversationId: conversationId,
+            ThreadId: threadRootMessageId,
             MemberId: "U_SENDER",
             MessageId: "1710.0002",
             ConnectionId: _connectionId,
-            BoundThreadRootMessageId: RootMessageId);
+            BoundThreadRootMessageId: threadRootMessageId);
 
     private async Task<string> SeedSessionAsync(params AgentSessionInputProvenance[] provenance)
     {

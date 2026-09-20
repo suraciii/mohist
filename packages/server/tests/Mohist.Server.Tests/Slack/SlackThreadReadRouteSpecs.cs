@@ -211,6 +211,41 @@ public sealed class SlackThreadReadRouteSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Read_reports_when_slack_is_unreachable()
+    {
+        var (connection, sessionId) = await LaunchChannelRootAsync("C-thread-10", "1712001000.000100");
+        SlackApi.Requests.Clear();
+        SlackApi.Responder = _ => throw new HttpRequestException("connection reset");
+
+        using var response = await _fixture.Client.GetAsync($"{ThreadPath(connection)}?sessionId={sessionId}");
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        Assert.Equal("provider_unavailable", await ErrorCodeAsync(response));
+        Assert.Single(SlackApi.Requests);
+    }
+
+    [Fact]
+    public async Task Read_reports_a_cursor_slack_no_longer_accepts()
+    {
+        var (connection, sessionId) = await LaunchChannelRootAsync("C-thread-11", "1712001100.000100");
+        SlackApi.Responder = _ => SlackApiTestScript.JsonResponse(
+            """{"ok":true,"messages":[{"type":"message","ts":"1712001100.000100","user":"U_HUMAN","text":"one"}],"has_more":true,"response_metadata":{"next_cursor":"cursor-2"}}""");
+        using var first = await _fixture.Client.GetAsync($"{ThreadPath(connection)}?sessionId={sessionId}");
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        using var firstDoc = JsonDocument.Parse(await first.Content.ReadAsStringAsync());
+        var continuation = firstDoc.RootElement.GetProperty("data").GetProperty("continuation").GetString();
+        SlackApi.Responder = _ => SlackApiTestScript.JsonResponse("""{"ok":false,"error":"invalid_cursor"}""");
+        SlackApi.Requests.Clear();
+
+        using var response = await _fixture.Client.GetAsync(
+            $"{ThreadPath(connection)}?sessionId={sessionId}&continuation={Uri.EscapeDataString(continuation!)}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("cursor_rejected", await ErrorCodeAsync(response));
+        Assert.Single(SlackApi.Requests);
+    }
+
+    [Fact]
     public async Task Read_refuses_a_limit_above_the_supported_maximum()
     {
         var (connection, sessionId) = await LaunchChannelRootAsync("C-thread-9", "1712000900.000100");

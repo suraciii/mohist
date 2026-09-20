@@ -78,7 +78,7 @@ public sealed class SlackThreadReadService(
         var thread = target.Target;
 
         var connection = await connections.GetAsync(request.ProjectId, thread.ConnectionId, ct);
-        if (connection is null)
+        if (connection is null || connection.DeletedAt is not null)
         {
             return SlackThreadReadResult.Fail(
                 "connection_unavailable",
