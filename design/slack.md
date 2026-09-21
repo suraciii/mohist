@@ -1036,10 +1036,13 @@ Workspace through every continuation command. The Agent installation write takes
 the same selector and resolves the target Workspace from it, so a selection never
 resumes the Agent's first existing Connection or the first enrolled record.
 
-Agent installation is not yet the complete replacement journey. The Server
+Agent installation is the complete replacement journey across every surface. The Server
 projects the outstanding fact instead of App readiness, the Mohist App
 conversation and the terminal guide both end at Owner claim as the one next
-action, and the CLI separates a truthfully incomplete installation from a
-definite failure in its exit code. The Web view still renders App readiness as
-the end of setup instead of projecting Owner claim once verification passes, so
-that surface is the remaining gap.
+action, the CLI separates a truthfully incomplete installation from a definite
+failure in its exit code, and the Web installation view projects the same fact:
+at the claim it offers the protected `mo slack claim-owner <connection-id>`
+command and the Bot DM destination and renders no code, and a claimed Connection
+whose Agent cannot execute states that limitation separately with the existing
+Agent repair action. No surface issues, invalidates, or displays a claim code by
+reading status or refreshing a view.

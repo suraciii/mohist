@@ -260,11 +260,11 @@ Agent, and Workspace, and hand credential input to the local host.
    identity before either credential becomes usable. A mismatched pair stores
    nothing and changes neither installation; explicit replacement on an already
    ready installation reuses the same validation boundary.
-5. Owner claim is the next primary action. Generating a code is explicit: it is
-   shown once with its expiry and the exact Bot DM destination. Only a current
-   full Workspace member can claim; external collaborators, Bots, and
-   deactivated members cannot. A successful claim also proves the App can
-   receive and reply to DMs.
+5. Owner claim is the next primary action. Generating a code is explicit: the
+   command that issues it shows the code once with its expiry and the exact Bot
+   DM destination. Only a current full Workspace member can claim; external
+   collaborators, Bots, and deactivated members cannot. A successful claim also
+   proves the App can receive and reply to DMs.
 6. The Connection becomes Ready after claim and a healthy connection. Owner
    only is the initial access policy; changing it is a separate management
    operation, so setup never widens access.
@@ -274,6 +274,13 @@ a short explanation, and one primary action derived by the Server. App create,
 manifest application, credential staging, Socket verification, and binding stay
 available as supporting facts and never compete as a second task. A successful
 HTTP request is not installation completion.
+
+A secret-bearing step is never executed where the secret cannot be shown. At the
+Owner claim the one action is the protected host command
+`mo slack claim-owner <connection-id>`, whose response is the only place a code
+appears; the Web shows that command and the Bot DM destination and renders no
+code, and reading or refreshing the view issues and invalidates nothing. Every
+copied host command carries the Project, Agent, and Workspace it resumes.
 
 ### Agent Setup Completion
 
@@ -689,12 +696,6 @@ one signed chooser. A choice starts at most one execution from the original
 message under the selected Connection's Project. Pending choices expire after
 five minutes and recover after restart. The original sender remains the
 initiator of record.
-
-Agent installation does not yet complete the replacement journey. Once
-verification passes, the installation view reports the Agent App as ready and
-leaves Owner claim to a separate command instead of offering it as the one next
-action, and the manual Agent App creation route still exists beside the managed
-`install-agent` path.
 
 ## Non-goals
 
