@@ -4,7 +4,6 @@ import { AlertCircleIcon, CheckCircle2Icon, CircleOffIcon, Settings2Icon } from 
 import {
   useAgentConnection,
   useAgentConnectionAccess,
-  useClaimAgentConnectionOwner,
   useClearOfflineGap,
   useConnectionDiagnostic,
   useManageAgentConnectionAccess,
@@ -13,7 +12,6 @@ import {
   useSlackOutboxDeliveries,
 } from '../../../entities/agent-connection'
 import type {
-  AgentConnectionClaimOwnerResponse,
   AgentConnectionDetailResponse,
   AccessPolicyState,
   ConnectionDiagnostic,
@@ -22,9 +20,11 @@ import type {
 } from '../../../entities/agent-connection'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import { useProject, useProjectPath } from '../../../entities/project'
 import { SetupStepList } from './setup-step-list'
 import { SetupPrimaryAction } from './setup-primary-action'
-import { ClaimOwnerCodeStep } from './claim-owner-code-step'
+import type { SetupHostCommandTarget } from './setup-primary-action'
+import { AgentExecutabilitySection, isAgentExecutionBlocked } from './agent-executability-section'
 import { AccessPolicySection } from './access-policy-section'
 import { UncertainDeliveriesSection } from './uncertain-deliveries-section'
 
@@ -45,13 +45,6 @@ export interface ConnectionDiagnosticPageOperations {
   connectionDetailQuery: {
     data: AgentConnectionDetailResponse | undefined
     isLoading: boolean
-  }
-  claimOwnerMutation: {
-    mutate: () => void
-    isPending: boolean
-    error: Error | null
-    data: AgentConnectionClaimOwnerResponse | undefined
-    reset: () => void
   }
   accessStateQuery: {
     data: AccessPolicyState | undefined
@@ -87,7 +80,6 @@ export type ConnectionDiagnosticPageOperationsHook = (
 
 const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connectionId, setupComplete) => {
   const detailQuery = useAgentConnection(connectionId)
-  const claim = useClaimAgentConnectionOwner(connectionId)
   const accessStateQuery = useAgentConnectionAccess(connectionId, setupComplete ?? false)
   const manageAccess = useManageAgentConnectionAccess(connectionId)
   const searchMembers = useSlackMemberSearchFn(connectionId)
@@ -98,13 +90,6 @@ const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connection
     connectionDetailQuery: {
       data: detailQuery.data,
       isLoading: detailQuery.isLoading,
-    },
-    claimOwnerMutation: {
-      mutate: claim.mutate,
-      isPending: claim.isPending,
-      error: claim.error instanceof Error ? claim.error : null,
-      data: claim.data,
-      reset: claim.reset,
     },
     accessStateQuery: { data: accessStateQuery.data },
     manageAccessMutation: {
@@ -134,13 +119,6 @@ const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connection
 
 export const readOnlyOperations: ConnectionDiagnosticPageOperations = {
   connectionDetailQuery: { data: undefined, isLoading: false },
-  claimOwnerMutation: {
-    mutate: () => undefined,
-    isPending: false,
-    error: null,
-    data: undefined,
-    reset: () => undefined,
-  },
   accessStateQuery: { data: undefined },
   manageAccessMutation: {
     mutate: () => undefined,
@@ -196,17 +174,18 @@ function FactRow({ name, value }: { name: string; value: string | boolean | null
   )
 }
 
-function ManagedAppStatus({
-  app,
-  agentId,
-}: {
+interface ManagedAppStatusProps {
   app: NonNullable<AgentConnectionDetailResponse['managedApp']>
-  agentId: string
-}) {
+  target: SetupHostCommandTarget
+  botName: string | null
+  agentRepair: { label: string; href: string } | null
+}
+
+function ManagedAppStatus({ app, target, botName, agentRepair }: ManagedAppStatusProps) {
   return (
     <CardSection title="Managed Agent App" tone={app.nextAction === 'ready' ? 'green' : 'default'}>
       <div className="space-y-4">
-        <SetupPrimaryAction app={app} agentId={agentId} />
+        <SetupPrimaryAction app={app} target={target} botName={botName} agentRepair={agentRepair} />
 
         <details className="border-t border-border pt-3" data-testid="managed-agent-app-facts">
           <summary className="cursor-pointer text-sm font-medium text-foreground">App facts</summary>
@@ -238,17 +217,16 @@ export function ConnectionDiagnosticPage({
   const ops = operationsHook(connectionId, data?.facts.setupProgress === 'complete')
   const {
     connectionDetailQuery,
-    claimOwnerMutation,
     accessStateQuery,
     manageAccessMutation,
     deliveriesQuery,
     resendDeliveryMutation,
     clearOfflineGapMutation,
   } = ops
+  const toProjectPath = useProjectPath()
+  const { currentProject } = useProject()
   useDocumentTitle(data ? `Connection ${connectionId ?? ''} - Mohist` : 'Connection - Mohist')
 
-  const claimResetRef = useRef<() => void>(() => undefined)
-  claimResetRef.current = claimOwnerMutation.reset
   const accessResetRef = useRef<() => void>(() => undefined)
   accessResetRef.current = manageAccessMutation.reset
   const resendDeliveryResetRef = useRef<() => void>(() => undefined)
@@ -256,7 +234,6 @@ export function ConnectionDiagnosticPage({
 
   useEffect(() => {
     return () => {
-      claimResetRef.current()
       accessResetRef.current()
       resendDeliveryResetRef.current()
     }
@@ -285,6 +262,8 @@ export function ConnectionDiagnosticPage({
   const target = readableTarget(facts.identity)
 
   const isSetupComplete = setupProgress === 'complete'
+  const agentExecutability = facts.agentExecutability ?? null
+  const agentRepairGap = agentExecutability?.gaps[0] ?? null
 
   return (
     <main className="flex-1 min-w-0 overflow-y-auto" data-testid="connection-diagnostic-page">
@@ -326,7 +305,27 @@ export function ConnectionDiagnosticPage({
           </div>
         </CardSection>
 
-        {detail?.managedApp && <ManagedAppStatus app={detail.managedApp} agentId={detail.connection.agentId} />}
+        {detail?.managedApp && (
+          <ManagedAppStatus
+            app={detail.managedApp}
+            target={{
+              agentId: detail.connection.agentId,
+              connectionId: detail.connection.id,
+              projectRef: currentProject?.name ?? null,
+              workspaceTeamId: detail.connection.workspaceTeamId || null,
+            }}
+            botName={facts.identity.verifiedBotName ?? facts.identity.botName}
+            agentRepair={
+              agentRepairGap
+                ? { label: agentRepairGap.fixEntryPoint.label, href: toProjectPath(agentRepairGap.fixEntryPoint.path) }
+                : null
+            }
+          />
+        )}
+
+        {isSetupComplete && agentExecutability && isAgentExecutionBlocked(agentExecutability.state) && (
+          <AgentExecutabilitySection executability={agentExecutability} />
+        )}
 
         {facts.offlineGapAt && (
           <CardSection title="Possible messages missed" tone="amber">
@@ -389,21 +388,6 @@ export function ConnectionDiagnosticPage({
               The Slack service reported a problem with this Connection. Re-check the credentials and the workspace
               install, then wait for the service to re-verify.
             </p>
-          </CardSection>
-        )}
-
-        {setupProgress === 'claim_owner' && (
-          <CardSection title="Claim owner">
-            <ClaimOwnerCodeStep
-              code={claimOwnerMutation.data?.code ?? null}
-              expiresAt={claimOwnerMutation.data?.expiresAt ?? null}
-              onGenerate={() => {
-                claimOwnerMutation.reset()
-                claimOwnerMutation.mutate()
-              }}
-              isGenerating={claimOwnerMutation.isPending}
-              errorMessage={claimOwnerMutation.error?.message ?? null}
-            />
           </CardSection>
         )}
 

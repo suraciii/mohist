@@ -207,7 +207,7 @@ enter the language.
 - `slack`: `setup`, `status`, `install-agent`; `list`, `view`, `claim-owner`,
   `edit`, `transfer-owner`, `enable`, `disable`, `remove-binding`,
   `permanent-delete`; `message send`; `deliveries`, `resend-delivery`,
-  `clear-gap`, `reconcile-create`, `reconcile-delete`.
+  `clear-gap`.
 - `otel`: `status`, `query <sql>`, `traces`; `query` runs through the Server
   and supports `--json <fields>` field selection.
 - `skill`: `list`, `view`, `install`, `path`, `sync`.
@@ -570,19 +570,26 @@ Mohist App.
   On first enrollment Slack's verified Configuration credentials determine the
   Workspace; the command never asks for a workspace, enrollment, or App ID.
 - `mo slack install-agent <agent> [--project <project>] [--credentials-file <path>] [--workspace-team <team-id>]`
-  creates or resumes the selected Agent's dedicated Slack App. When exactly
-  one active Workspace is eligible, Agent selection is the only product input.
-  A previously started installation resumes the same Connection and App.
+  creates or resumes the selected Agent's dedicated Slack App. The Agent is
+  resolved by its ordinary Project-scoped name or ID, and its configured
+  identity and execution definition are reused. When exactly one active
+  Workspace is eligible, Agent selection is the only product input;
+  `--workspace-team` names an enrolled Workspace, and several eligible
+  Workspaces fail with the readable choices instead of resuming the Agent's
+  first existing Connection. A previously started installation resumes the same
+  Connection and App. Once identity, permission, and Socket verification pass,
+  the next primary action is `mo slack claim-owner <id>`.
 - `setup` and `install-agent` are idempotent, resumable guides. When a step must
   be completed in Slack, the command returns the installation link, exact page,
-  and same continuation command. A rerun continues from confirmed steps and
-  validates saved credentials again. Invalid credentials return the guide to
-  the credential step. Supplying credentials again for a ready record is an
-  explicit replacement and rotates them; a rerun with no new input rotates
-  nothing. New credentials must still belong to the original workspace, App, and
-  Bot. Non-interactive mode never waits for input. If a required file for the
-  current step is missing, it exits nonzero and returns the continuation
-  command.
+  and same continuation command. That continuation carries the selected
+  `--workspace-team` and the resolved `--project`, so a rerun keeps the original
+  target. A rerun continues from confirmed steps and validates saved
+  credentials again. Invalid credentials return the guide to the credential
+  step. Supplying credentials again for a ready record is an explicit
+  replacement and rotates them; a rerun with no new input rotates nothing. New
+  credentials must still belong to the original workspace, App, and Bot.
+  Non-interactive mode never waits for input. If a required file for the current
+  step is missing, it exits nonzero and returns the continuation command.
 - In a TTY the guides collect credentials through hidden input. Automation
   names one protected, user-owned file with `--credentials-file`; the CLI
   reads no shared default credential file and accepts no credential literal on
@@ -607,7 +614,9 @@ Mohist App.
   installation, the current result, and its one next action. Without a
   selector it reports the only eligible Workspace; with several enrolled it
   names the ambiguity and the selector instead of choosing the first record.
-  It exits 0 while it truthfully reports an incomplete installation.
+  It exits 0 while it truthfully reports an incomplete installation, and it
+  exits 1 when the projection reports a definite failure, such as a Mohist App
+  Bot or App-level token that does not verify against the selected Workspace.
 - `mo slack message send --workspace <workspace-id> --conversation <conversation-id> --reply-to <thread-root-ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <reply-anchor-ref> [--text <body>] [--image <url> | --file <path>]`
   lets an Agent speak in Slack through an anchored reply. The seven reply-anchor
   options are required for Connection Agent replies; the CLI refuses an
@@ -633,9 +642,13 @@ Mohist App.
   command reads at most one Slack thread; it never lists channels or reads a DM.
   A missing `--session` or a `--limit` outside 1 to 100 is a LOCAL ERROR
   (exit 2) and no request is sent.
-- `mo slack claim-owner <id>` generates and displays a setup claim, expiration,
-  and Slack direct-message step only after identity verification. A second call
-  invalidates the old claim immediately.
+- `mo slack claim-owner <id>` generates the Owner claim code once installation
+  identity is verified, and displays it once with its expiry and the exact Bot
+  DM destination. Generating is the only action that issues a code, and a
+  second call explicitly regenerates and immediately invalidates the
+  outstanding code. The code is a single-use secret that appears only in this
+  authorized claim response: `status`, `view`, `list`, and `diagnostics` neither
+  issue nor invalidate a code and never display one.
 - `mo slack view <id>` always returns setup progress, status, and one next
   action. The command process may exit; installation and claim do not depend on
   it remaining alive.
@@ -653,11 +666,11 @@ Mohist App.
   facts. `permanent-delete --yes` permanently deletes the Agent App when no
   active binding exists. The last two operations do not delete the Agent,
   AgentJob, or AgentSession.
-- When the result of an external App write is unknown, `reconcile-create` or
-  `reconcile-delete` checks the original operation without replaying it blindly.
-  Delivery diagnostics use `deliveries`, `resend-delivery`, and `clear-gap`.
-  These recovery commands do not replace `install-agent` as the normal
-  installation path.
+- When the result of an external App write is unknown, rerunning the guide
+  (`install-agent` or `setup`) recovers it: a recorded App identity is
+  reconciled against the provider, and one without an identity is retried with a
+  fresh create. Delivery diagnostics use `deliveries`, `resend-delivery`, and
+  `clear-gap`.
 
 The integration owns only the external identity, permissions, and connection
 state. `agent edit` still changes Agent configuration. The normal path for

@@ -100,22 +100,6 @@ public static class SlackManagerRoutes
                 : ApiResults.Ok(PublicManagedApp(result));
         });
 
-        manager.MapPost("/connections/{connectionId}/create", async (
-            HttpContext context,
-            string connectionId,
-            SlackManagerApplicationService service,
-            CancellationToken ct) =>
-            OperationResult(await service.CreateAgentAppAsync(
-                context.GetResolvedProject().Id, connectionId, ct)));
-
-        manager.MapPost("/connections/{connectionId}/reconcile-create", async (
-            HttpContext context,
-            string connectionId,
-            SlackManagerApplicationService service,
-            CancellationToken ct) =>
-            OperationResult(await service.ReconcileCreateAsync(
-                context.GetResolvedProject().Id, connectionId, ct)));
-
         manager.MapPost("/connections/{connectionId}/disable", async (
             HttpContext context,
             string connectionId,
@@ -206,38 +190,17 @@ public static class SlackManagerRoutes
             ? ApiResults.NotFound("The managed Agent App was not found.")
             : ApiResults.Ok(result);
 
-    private static object PublicInstallProgress(SlackInstallAgentProgress progress) => new
-    {
-        connection = new
-        {
-            progress.Connection.Id,
-            progress.Connection.ProjectId,
-            progress.Connection.AgentId,
-            progress.Connection.SetupProgress,
-            progress.Connection.ConnectionHealth,
-            progress.Connection.HealthReason,
-        },
-        agentApp = new
-        {
-            progress.AgentApp.AppLifecycle,
-            progress.AgentApp.Authorization,
-            progress.AgentApp.RuntimeCredentialValidationState,
-            progress.AgentApp.BindingState,
-            progress.AgentApp.ManifestState,
-            progress.AgentApp.TransportReadiness,
-            NextAction = PublicInstallNextAction(progress.AgentApp.NextAction),
-            InstallUrl = progress.InstallUrl,
-            progress.AgentApp.UnknownOutcome,
-            progress.AgentApp.ErrorClass,
-        },
-        NextAction = PublicInstallNextAction(progress.NextAction),
-        progress.ErrorClass,
-    };
+    private static object PublicInstallProgress(SlackInstallAgentProgress progress) =>
+        SlackInstallAgentProjections.Public(progress);
 
+    /// <summary>
+    /// One user-facing primary action. Server-internal App steps project as a
+    /// rerun of the guide, and the two remaining facts that end the journey -
+    /// the Owner claim and an Agent that cannot execute - keep their own
+    /// executable action instead of hiding behind a technical `ready`.
+    /// </summary>
     private static string PublicInstallNextAction(string nextAction) =>
-        nextAction == SlackAgentAppNextAction.AuthorizeAgentApp
-            ? "approve_install"
-            : nextAction;
+        SlackInstallAgentActions.UserFacing(nextAction);
 
     private static object PublicManagedApp(SlackManagerAppProjection app) => new
     {

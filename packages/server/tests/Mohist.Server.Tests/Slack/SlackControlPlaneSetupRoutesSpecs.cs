@@ -161,6 +161,17 @@ public sealed class SlackControlPlaneSetupRoutesSpecs
         Assert.DoesNotContain("xoxb-foreign", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task The_setup_adjudicate_create_route_is_retired()
+    {
+        const string team = "T_CTRL_ADJUDICATE_RETIRED";
+        using var client = _fixture.CreateOperatorClient();
+        using var response = await client.PostAsync(
+            $"/api/slack-manager/setup/adjudicate-create?workspaceTeamId={team}", content: null);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
     [Theory]
     [InlineData("/api/slack-manager/setup/configuration")]
     [InlineData("/api/slack-manager/setup/runtime-credentials")]

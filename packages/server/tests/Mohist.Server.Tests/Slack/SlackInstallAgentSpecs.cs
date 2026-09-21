@@ -89,6 +89,35 @@ public sealed class SlackInstallAgentSpecs
     }
 
     [Fact]
+    public async Task Install_stages_an_owner_only_connection_and_a_rerun_never_widens_it()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+
+        await using (var db = _factory.CreateDbContext())
+        {
+            var connection = await db.AgentConnections.SingleAsync(row => row.Id == installed.Connection.Id);
+            // Setup starts Owner-only and claims no Owner: the claim is a
+            // separate act the installation never performs.
+            Assert.Equal(AccessPolicyKind.OwnerOnly, connection.AccessPolicy);
+            Assert.Null(connection.OwnerSlackUserId);
+            // A later management operation may widen access.
+            connection.AccessPolicy = AccessPolicyKind.Allowlist;
+            await db.SaveChangesAsync();
+        }
+
+        await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+
+        await using (var db = _factory.CreateDbContext())
+        {
+            var connection = await db.AgentConnections.SingleAsync(row => row.Id == installed.Connection.Id);
+            Assert.Equal(AccessPolicyKind.Allowlist, connection.AccessPolicy);
+            Assert.Null(connection.OwnerSlackUserId);
+        }
+    }
+
+    [Fact]
     public async Task A_selected_workspace_decides_the_install_target_over_the_agents_first_connection()
     {
         await SeedAgentAsync(AgentStatus.Active);
@@ -261,6 +290,58 @@ public sealed class SlackInstallAgentSpecs
         Assert.Equal(installed.InstallUrl, rerun.InstallUrl);
         Assert.Equal(1, _apps.CreateCalls);
         Assert.Equal(installed.AgentApp.Id, rerun.AgentApp.Id);
+    }
+
+    [Fact]
+    public async Task An_identity_less_unknown_create_is_retried_by_a_rerun_on_the_same_app()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+        // Simulate a crashed create whose outcome is unknown and recorded no App
+        // identity: the provider cannot be asked about an operation it cannot
+        // name, so the rerun is the only recovery.
+        await using (var db = _factory.CreateDbContext())
+        {
+            var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == installed.AgentApp.Id);
+            row.AppLifecycle = SlackAppLifecycle.CreateUnknown;
+            row.AppId = string.Empty;
+            row.UnknownOutcome = "timeout";
+            await db.SaveChangesAsync();
+        }
+
+        // The rerun clears the unknown fence and performs a fresh create on the
+        // same AgentApp, reaching the ordinary next step.
+        var retried = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+
+        Assert.Equal(SlackAppLifecycle.Created, retried.AgentApp.AppLifecycle);
+        Assert.Equal(installed.AgentApp.Id, retried.AgentApp.Id);
+        Assert.Equal(SlackAgentAppNextAction.AuthorizeAgentApp, retried.NextAction);
+        Assert.Equal(2, _apps.CreateCalls);
+    }
+
+    [Fact]
+    public async Task A_recorded_identity_keeps_the_rerun_reconciling_instead_of_recreating()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+        await using (var db = _factory.CreateDbContext())
+        {
+            var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == installed.AgentApp.Id);
+            row.AppLifecycle = SlackAppLifecycle.CreateUnknown;
+            row.UnknownOutcome = "timeout";
+            await db.SaveChangesAsync();
+        }
+        _apps.SetResponse(installed.AgentApp.Id, new FakeSlackAppResponse(
+            Inspect: new SlackAppManagementFact(
+                SlackAppManagementFactOutcome.Unknown,
+                ErrorClass: "transport_error")));
+        var unknown = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+        // A recorded identity keeps the rerun reconciling against the provider;
+        // it never recreates the App.
+        Assert.Equal(SlackAgentAppNextAction.ReconcileCreate, unknown.NextAction);
+        Assert.Equal(1, _apps.CreateCalls);
     }
 
     [Fact]
@@ -574,6 +655,56 @@ public sealed class SlackInstallAgentSpecs
         Assert.True(staged.Accepted);
         Assert.Equal(SlackRuntimeCredentialValidationState.Candidate, staged.RuntimeCredentialValidationState);
         Assert.Equal("xoxb-full", ReadSecretAsync(agentAppId, SecretKind.CandidateBotToken));
+    }
+
+    [Fact]
+    public async Task A_verified_app_projects_the_owner_claim_and_a_complete_connection_projects_the_agent_repair()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1");
+        await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+        _botIdentity.Result = VerifiedAgentBot("A_APP");
+        await _service.ProvisionCredentialsAsync(ProjectId, AgentId, "xoxb-live", "xapp-live");
+        await using (var db = _factory.CreateDbContext())
+        {
+            var app = await db.ManagedSlackAgentApps.SingleAsync();
+            app.AppId = "A_APP";
+            app.RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Verified;
+            app.BindingState = SlackAgentAppBindingState.Bound;
+            app.Authorization = SlackAuthorizationState.Authorized;
+            app.AppliedManifestVersion = app.DesiredManifestVersion;
+            app.AppliedManifestHash = app.DesiredManifestHash;
+            var connection = await db.AgentConnections.SingleAsync();
+            connection.SetupProgress = SetupProgressKind.CreateAppCredentials;
+            connection.ConnectionHealth = ConnectionHealthKind.Unhealthy;
+            connection.HealthReason = "managed_app_not_ready";
+            await db.SaveChangesAsync();
+        }
+
+        var verified = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+
+        // App, permissions, Socket identity, and binding are verified; the
+        // Connection is complete only after the Owner claim.
+        Assert.Equal(SlackAppLifecycle.Created, verified.AgentApp.AppLifecycle);
+        Assert.Equal(SetupProgressKind.ClaimOwner, verified.Connection.SetupProgress);
+        Assert.Equal(SlackAgentAppNextAction.ClaimOwner, verified.NextAction);
+
+        await using (var db = _factory.CreateDbContext())
+        {
+            var connection = await db.AgentConnections.SingleAsync();
+            connection.OwnerSlackUserId = "U_OWNER";
+            connection.SetupProgress = SetupProgressKind.Complete;
+            connection.AgentReadiness = AgentReadinessKind.NeedsSetup;
+            await db.SaveChangesAsync();
+        }
+
+        var complete = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+
+        // Slack setup completion is a separate fact from the Agent's ability to
+        // accept work, so the projection points at the Agent repair surface.
+        Assert.Equal(SetupProgressKind.Complete, complete.Connection.SetupProgress);
+        Assert.Equal(AgentReadinessKind.NeedsSetup, complete.Connection.AgentReadiness);
+        Assert.Equal(SlackAgentAppNextAction.RepairAgent, complete.NextAction);
     }
 
     private async Task<(string AgentAppId, string ConnectionId, string AppId)> DriveToVerifiedAsync(string botToken, string appToken)

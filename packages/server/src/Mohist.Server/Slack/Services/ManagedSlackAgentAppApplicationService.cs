@@ -478,7 +478,11 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
     private static bool CanStart(ManagedSlackAgentAppRow agentApp, SlackAgentAppOperation operation) =>
         operation switch
         {
-            SlackAgentAppOperation.Create => agentApp.AppLifecycle == SlackAppLifecycle.NotCreated,
+            // A rerun retries a create whose outcome is unknown and recorded no
+            // App identity by clearing the fence and creating fresh; a recorded
+            // identity is reconciled instead (see ReconcileAsync).
+            SlackAgentAppOperation.Create => agentApp.AppLifecycle == SlackAppLifecycle.NotCreated
+                || agentApp.AppLifecycle == SlackAppLifecycle.CreateUnknown && string.IsNullOrWhiteSpace(agentApp.AppId),
             SlackAgentAppOperation.Delete => agentApp.AppLifecycle == SlackAppLifecycle.Created,
             _ => false,
         };

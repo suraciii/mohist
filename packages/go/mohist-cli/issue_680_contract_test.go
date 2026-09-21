@@ -50,8 +50,6 @@ func issue680OpsLeaves() []issue680OpsLeaf {
 		{area: "slack", action: "deliveries", base: []string{"slack", "deliveries", "s1"}},
 		{area: "slack", action: "resend-delivery", base: []string{"slack", "resend-delivery", "s1"}},
 		{area: "slack", action: "clear-gap", base: []string{"slack", "clear-gap", "s1"}},
-		{area: "slack", action: "reconcile-create", base: []string{"slack", "reconcile-create", "s1"}},
-		{area: "slack", action: "reconcile-delete", base: []string{"slack", "reconcile-delete", "s1"}},
 		{area: "slack", action: "message-send", base: []string{"slack", "message", "send"}},
 		{area: "slack", action: "thread-view", base: []string{"slack", "thread", "view"}},
 	}
@@ -88,8 +86,6 @@ func issue680ValidArgs(leaf issue680OpsLeaf) []string {
 		"slack.deliveries":       {"--project", "proj"},
 		"slack.resend-delivery":  {"--project", "proj"},
 		"slack.clear-gap":        {"--project", "proj"},
-		"slack.reconcile-create": {"--project", "proj"},
-		"slack.reconcile-delete": {"--project", "proj"},
 		"slack.thread-view": {
 			"--project", "proj", "--session", "S1", "--limit", "20", "--continuation", "opaque",
 		},

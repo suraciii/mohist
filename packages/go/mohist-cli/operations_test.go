@@ -244,9 +244,9 @@ func TestOperationsSlackAnchorValidationIsLocal(t *testing.T) {
 
 func TestOperationsSlackStatusUsesCanonicalProgressRouteWithoutWorkspaceInput(t *testing.T) {
 	var request *http.Request
-	deps, _, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	deps, out, errOut := testDeps(roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		request = r
-		return response(http.StatusOK, `{"success":true,"data":{"phase":"ready","nextAction":"ready"}}`), nil
+		return response(http.StatusOK, `{"success":true,"data":{"phase":"ready","primaryAction":"ready","summary":"Workspace T123: The Mohist App is ready in this Workspace."}}`), nil
 	}), map[string]string{"MOHIST_TOKEN": "management-token"})
 	if code := Run(context.Background(), []string{"slack", "status"}, deps); code != ExitOK {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
@@ -254,14 +254,17 @@ func TestOperationsSlackStatusUsesCanonicalProgressRouteWithoutWorkspaceInput(t 
 	if request == nil || request.URL.Path != "/api/slack-manager/setup/progress" || request.URL.RawQuery != "" || request.Header.Get("Authorization") != "Bearer management-token" {
 		t.Fatalf("request=%v", request)
 	}
+	if !strings.Contains(out.String(), "next: the Workspace is ready") {
+		t.Fatalf("next action line=%q", out.String())
+	}
 }
 
 func TestOperationsSlackManagerStatusUsesBrokerWithoutLocalBearer(t *testing.T) {
 	var request *http.Request
-	deps, _, errOut := testDeps(nil, map[string]string{"MOHIST_MANAGER_MODE": "1"})
+	deps, out, errOut := testDeps(nil, map[string]string{"MOHIST_MANAGER_MODE": "1"})
 	deps.ManagerCredentialBroker = func(_ context.Context, r *http.Request) (*http.Response, error) {
 		request = r
-		return response(http.StatusOK, `{"success":true,"data":{"phase":"ready","nextAction":"ready"}}`), nil
+		return response(http.StatusOK, `{"success":true,"data":{"phase":"ready","primaryAction":"ready","summary":"Workspace T123: The Mohist App is ready in this Workspace."}}`), nil
 	}
 	if code := Run(context.Background(), []string{"slack", "status"}, deps); code != ExitOK {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
@@ -271,6 +274,9 @@ func TestOperationsSlackManagerStatusUsesBrokerWithoutLocalBearer(t *testing.T) 
 	}
 	if request.Header.Get("X-Mohist-Manager-Mode") != "1" || request.Header.Get("Authorization") != "" {
 		t.Fatalf("headers=%v", request.Header)
+	}
+	if !strings.Contains(out.String(), "next: the Workspace is ready") {
+		t.Fatalf("next action line=%q", out.String())
 	}
 }
 

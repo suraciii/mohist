@@ -102,9 +102,9 @@ public static class SlackStateTransitions
             return;
         if (current == SlackManagerAppLifecycle.NotCreated && next == SlackManagerAppLifecycle.Creating
             || current == SlackManagerAppLifecycle.Creating
-            && IsOneOf(next, SlackManagerAppLifecycle.Created, SlackManagerAppLifecycle.CreateUnknown)
+            && IsOneOf(next, SlackManagerAppLifecycle.Created, SlackManagerAppLifecycle.CreateUnknown, SlackManagerAppLifecycle.NotCreated)
             || current == SlackManagerAppLifecycle.CreateUnknown
-            && IsOneOf(next, SlackManagerAppLifecycle.Creating, SlackManagerAppLifecycle.Created)
+            && IsOneOf(next, SlackManagerAppLifecycle.Creating, SlackManagerAppLifecycle.Created, SlackManagerAppLifecycle.NotCreated)
             || current == SlackManagerAppLifecycle.Created && next == SlackManagerAppLifecycle.CreateUnknown)
             return;
         throw InvalidTransition("Manager App lifecycle", current, next);

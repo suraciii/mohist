@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Slack;
@@ -161,7 +162,21 @@ public sealed class SlackInstallAgentService : IScopedService
 
         var agentApp = await _agentApps.GetByConnectionAsync(connection.Id, ct);
         if (agentApp is null)
-            agentApp = await CreateAgentAppAsync(connection, agent, enrollment, ct);
+        {
+            try
+            {
+                agentApp = await CreateAgentAppAsync(connection, agent, enrollment, ct);
+            }
+            catch (DbUpdateException)
+            {
+                // A concurrent rerun already staged this Agent App. The unique
+                // Connection binding is the arbiter, so the second guide resumes
+                // that record instead of failing with a constraint violation.
+                agentApp = await _agentApps.GetByConnectionAsync(connection.Id, ct)
+                    ?? throw new InvalidOperationException(
+                        "The Agent App was not found after a concurrent install.");
+            }
+        }
 
         agentApp = await EnsureDesiredManifestAsync(agentApp, connection, agent, ct);
         return await AdvanceAsync(connection, agentApp, agent, ct);
@@ -297,7 +312,8 @@ public sealed class SlackInstallAgentService : IScopedService
         AgentInfo agent,
         CancellationToken ct)
     {
-        if (agentApp.AppLifecycle == SlackAppLifecycle.NotCreated)
+        if (agentApp.AppLifecycle == SlackAppLifecycle.NotCreated
+            || agentApp.AppLifecycle == SlackAppLifecycle.CreateUnknown && string.IsNullOrWhiteSpace(agentApp.AppId))
         {
             var manifest = RegenerateManifest(connection, agent);
             var validation = await _appManagement.ValidateManifestAsync(new SlackAppManifestRequest(
@@ -351,6 +367,13 @@ public sealed class SlackInstallAgentService : IScopedService
             result.ErrorClass ?? current.ErrorClass ?? "manual_adjudication_required");
     }
 
+    /// <summary>
+    /// A verified App is one fact and Connection setup is another: the App can
+    /// be ready, bound, and healthy while the Owner claim is still outstanding,
+    /// and a claimed Connection is complete while its Agent still cannot
+    /// execute. The projected next action follows the outstanding fact instead
+    /// of reporting the technical App state as the end of the journey.
+    /// </summary>
     private async Task<SlackInstallAgentProgress> MarkReadyAsync(
         AgentConnection connection,
         ManagedSlackAgentApp agentApp,
@@ -359,7 +382,7 @@ public sealed class SlackInstallAgentService : IScopedService
         if (agentApp.ManifestState != SlackManifestState.Applied)
             return Progress(connection, agentApp, SlackAgentAppNextAction.ApplyManifest);
         if (connection.SetupProgress != SetupProgressKind.CreateAppCredentials)
-            return Progress(connection, agentApp, SlackAgentAppNextAction.Ready);
+            return Progress(connection, agentApp, OutstandingSetupAction(connection));
         var setupProgress = connection.OwnerSlackUserId is null
             ? SetupProgressKind.ClaimOwner
             : SetupProgressKind.Complete;
@@ -374,8 +397,24 @@ public sealed class SlackInstallAgentService : IScopedService
         connection.SetupProgress = setupProgress;
         connection.ConnectionHealth = ConnectionHealthKind.Healthy;
         connection.HealthReason = null;
-        return Progress(connection, agentApp, SlackAgentAppNextAction.Ready);
+        return Progress(connection, agentApp, OutstandingSetupAction(connection));
     }
+
+    /// <summary>
+    /// The Agent App's own technical action, except that a technically ready App
+    /// never projects as the end of setup while the Owner claim is outstanding.
+    /// </summary>
+    private static string ProjectedAction(AgentConnection connection, ManagedSlackAgentApp agentApp) =>
+        agentApp.NextAction == SlackAgentAppNextAction.Ready
+            ? OutstandingSetupAction(connection)
+            : agentApp.NextAction;
+
+    private static string OutstandingSetupAction(AgentConnection connection) =>
+        connection.OwnerSlackUserId is null
+            ? SlackAgentAppNextAction.ClaimOwner
+            : connection.AgentReadiness == AgentReadinessKind.Ready
+                ? SlackAgentAppNextAction.Ready
+                : SlackAgentAppNextAction.RepairAgent;
 
     private async Task<SlackInstallAgentProgress> BindAsync(
         AgentConnection connection,
@@ -385,7 +424,7 @@ public sealed class SlackInstallAgentService : IScopedService
         var binding = await _binding.ReconcileAsync(agentApp.Id, ct);
         var current = await ReloadAsync(agentApp.Id, ct);
         return Progress(connection, current, binding.Status == SlackAgentAppBindingStatus.Bound
-            ? SlackAgentAppNextAction.Ready
+            ? OutstandingSetupAction(connection)
             : SlackAgentAppNextAction.BindConnection);
     }
 
@@ -399,7 +438,7 @@ public sealed class SlackInstallAgentService : IScopedService
         if (result.Status == ManagedSlackAgentAppOperationStatus.Completed
             && result.Outcome == SlackAppManagementOutcome.Succeeded
             && current.ManifestState == SlackManifestState.Applied)
-            return Progress(connection, current, current.NextAction);
+            return Progress(connection, current, ProjectedAction(connection, current));
         return Progress(
             connection,
             current,
@@ -646,7 +685,8 @@ public sealed class SlackInstallAgentService : IScopedService
             connection.DesiredState,
             connection.ConnectionHealth,
             connection.HealthReason,
-            connection.SetupProgress),
+            connection.SetupProgress,
+            connection.AgentReadiness),
         new SlackInstallAgentAppState(
             agentApp.Id,
             agentApp.AppId,
@@ -675,6 +715,33 @@ public sealed record SlackInstallAgentProgress(
     string? ErrorClass = null)
 {
     public string? InstallUrl => string.IsNullOrWhiteSpace(AgentApp.InstallUrl) ? null : AgentApp.InstallUrl;
+
+    /// <summary>
+    /// The one action every surface renders. The CLI, the Web view, and a Mohist
+    /// App conversation read this value, so they name the same step.
+    /// </summary>
+    public string PrimaryAction => SlackInstallAgentActions.UserFacing(NextAction);
+}
+
+/// <summary>
+/// The user-facing spelling of an installation action. App create, manifest
+/// application, binding, reconciliation, and the Socket hello are the guide's
+/// own work, so the caller's action is to rerun it; the two facts that end the
+/// journey - the Owner claim and an Agent that cannot execute - keep their own
+/// executable action instead of hiding behind a technical <c>ready</c>.
+/// </summary>
+public static class SlackInstallAgentActions
+{
+    public static string UserFacing(string nextAction) => nextAction switch
+    {
+        SlackAgentAppNextAction.AuthorizeAgentApp => "approve_install",
+        SlackAgentAppNextAction.ConfigureSocketCredentials => "provide_credentials",
+        SlackAgentAppNextAction.ProvideCredentials => "provide_credentials",
+        SlackAgentAppNextAction.ClaimOwner => SlackAgentAppNextAction.ClaimOwner,
+        SlackAgentAppNextAction.RepairAgent => SlackAgentAppNextAction.RepairAgent,
+        SlackAgentAppNextAction.Ready => "ready",
+        _ => "rerun_install",
+    };
 }
 
 public sealed record SlackInstallAgentConnectionState(
@@ -687,7 +754,8 @@ public sealed record SlackInstallAgentConnectionState(
     string DesiredState,
     string ConnectionHealth,
     string? HealthReason,
-    string SetupProgress);
+    string SetupProgress,
+    string AgentReadiness);
 
 public sealed record SlackInstallAgentAppState(
     string Id,
@@ -709,3 +777,56 @@ public sealed record SlackInstallAgentCredentialResult(
     bool Accepted,
     string RuntimeCredentialValidationState,
     string? ErrorClass = null);
+
+/// <summary>
+/// The one public installation projection every surface renders — the HTTP
+/// install route, the connection detail, and a Mohist App conversation. App
+/// create, manifest application, binding, reconciliation, and the Socket hello
+/// are the guide's own work, so their internal next actions project as a rerun;
+/// only the Owner claim and an Agent that cannot execute keep their own
+/// executable action. No raw internal action reaches a caller.
+/// </summary>
+public static class SlackInstallAgentProjections
+{
+    public static object Public(SlackInstallAgentProgress progress) => new
+    {
+        connection = new
+        {
+            progress.Connection.Id,
+            progress.Connection.ProjectId,
+            progress.Connection.AgentId,
+            progress.Connection.SetupProgress,
+            progress.Connection.ConnectionHealth,
+            progress.Connection.HealthReason,
+            progress.Connection.AgentReadiness,
+        },
+        agentApp = new
+        {
+            progress.AgentApp.AppLifecycle,
+            progress.AgentApp.Authorization,
+            progress.AgentApp.RuntimeCredentialValidationState,
+            progress.AgentApp.BindingState,
+            progress.AgentApp.ManifestState,
+            progress.AgentApp.TransportReadiness,
+            NextAction = SlackInstallAgentActions.UserFacing(progress.AgentApp.NextAction),
+            InstallUrl = progress.InstallUrl,
+            progress.AgentApp.UnknownOutcome,
+            progress.AgentApp.ErrorClass,
+        },
+        facts = new
+        {
+            appReady = progress.AgentApp.AppLifecycle == SlackAppLifecycle.Created
+                && progress.AgentApp.Authorization == SlackAuthorizationState.Authorized
+                && progress.AgentApp.BindingState == SlackAgentAppBindingState.Bound
+                && progress.AgentApp.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified,
+            connectionSetupComplete = string.Equals(
+                progress.Connection.SetupProgress, SetupProgressKind.Complete, StringComparison.Ordinal),
+            transportReady = string.Equals(
+                progress.AgentApp.TransportReadiness, SlackTransportReadiness.Ready, StringComparison.Ordinal),
+            agentExecutable = string.Equals(
+                progress.Connection.AgentReadiness, AgentReadinessKind.Ready, StringComparison.Ordinal),
+        },
+        NextAction = SlackInstallAgentActions.UserFacing(progress.NextAction),
+        progress.ErrorClass,
+    };
+}

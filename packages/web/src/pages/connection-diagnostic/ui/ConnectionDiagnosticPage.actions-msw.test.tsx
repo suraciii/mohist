@@ -8,11 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../../../entities/project'
 import { server, useMswServer } from '../../../../tests/support/msw'
 import { ConnectionDiagnosticPage } from './ConnectionDiagnosticPage'
-import type {
-  AgentConnectionClaimOwnerResponse,
-  ConnectionDiagnostic,
-  ConnectionDiagnosticFacts,
-} from '../../../entities/agent-connection'
+import type { ConnectionDiagnostic, ConnectionDiagnosticFacts } from '../../../entities/agent-connection'
 
 useMswServer()
 
@@ -58,7 +54,7 @@ function makeDiagnostic(overrides: Partial<ConnectionDiagnostic> = {}): Connecti
   }
 }
 
-function makeDetail() {
+function makeDetail(nextAction = 'rerun_install') {
   return {
     connection: {
       id: 'conn-1',
@@ -81,6 +77,19 @@ function makeDetail() {
       lastHeartbeatAt: null,
       createdAt: '2026-06-01T00:00:00.000Z',
       updatedAt: '2026-06-01T00:00:00.000Z',
+      deletedAt: null,
+    },
+    managedApp: {
+      appLifecycle: 'create_unknown',
+      authorization: 'pending_admin',
+      manifestState: 'desired',
+      transportKind: 'socket',
+      transportReadiness: 'not_ready',
+      nextAction,
+      bindingState: 'pending',
+      installUrl: null,
+      unknownOutcome: 'timeout',
+      errorClass: 'timeout',
       deletedAt: null,
     },
   } as const
@@ -107,7 +116,7 @@ function renderPage() {
 
 afterEach(cleanup)
 
-describe('ConnectionDiagnosticPage — configure & claim-owner actions (MSW)', () => {
+describe('ConnectionDiagnosticPage — configure & owner-claim handoff actions (MSW)', () => {
   beforeEach(() => {
     server.use(
       http.get('*/api/projects/:projectId/slack-connections/:connectionId/diagnostic', () =>
@@ -119,7 +128,8 @@ describe('ConnectionDiagnosticPage — configure & claim-owner actions (MSW)', (
     )
   })
 
-  it('shows the claim-owner code once and regenerating POSTs again (server-side supersedes)', async () => {
+  it('issues no claim code from the page at the claim step', async () => {
+    const claimCalls: Array<{ method: string; pathname: string }> = []
     server.use(
       http.get('*/api/projects/:projectId/slack-connections/:connectionId/diagnostic', () =>
         HttpResponse.json({
@@ -127,71 +137,30 @@ describe('ConnectionDiagnosticPage — configure & claim-owner actions (MSW)', (
           data: makeDiagnostic({
             primaryState: 'setup_incomplete',
             reason: "Slack setup is incomplete at 'claim_owner'.",
-            nextAction: 'Advance the current setup step.',
+            nextAction: 'Claim the Owner from the Mohist host.',
             facts: makeFacts({ setupProgress: 'claim_owner' }),
           }),
         }),
       ),
-    )
-    const claimCalls: Array<{ pathname: string }> = []
-    let lastCode: AgentConnectionClaimOwnerResponse = {
-      code: 'CLAIM-CODE-1',
-      expiresAt: '2026-08-01T01:00:00.000Z',
-    }
-    server.use(
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId', () =>
+        HttpResponse.json({ success: true, data: makeDetail('claim_owner') }),
+      ),
       http.post('*/api/projects/:projectId/slack-connections/:connectionId/claim-owner', ({ request }) => {
-        claimCalls.push({ pathname: new URL(request.url).pathname })
-        const response: AgentConnectionClaimOwnerResponse = lastCode
-        lastCode = { code: 'CLAIM-CODE-2', expiresAt: '2026-08-01T02:00:00.000Z' }
-        return HttpResponse.json({ success: true, data: response })
+        claimCalls.push({ method: request.method, pathname: new URL(request.url).pathname })
+        return HttpResponse.json({
+          success: true,
+          data: { code: 'NEVER-ISSUED', expiresAt: '2026-08-01T01:00:00.000Z' },
+        })
       }),
     )
 
-    const user = userEvent.setup()
     renderPage()
 
-    await user.click(await screen.findByTestId('connection-setup-claim-owner-generate'))
-
-    expect(await screen.findByTestId('connection-setup-claim-owner-code')).toHaveTextContent('CLAIM-CODE-1')
-    expect(claimCalls).toHaveLength(1)
-
-    await user.click(screen.getByTestId('connection-setup-claim-owner-generate'))
-
-    await waitFor(() => {
-      expect(claimCalls).toHaveLength(2)
-    })
-    expect(claimCalls[0].pathname).toBe('/api/projects/proj-1/slack-connections/conn-1/claim-owner')
-  })
-
-  it('discards the displayed code on unmount', async () => {
-    server.use(
-      http.get('*/api/projects/:projectId/slack-connections/:connectionId/diagnostic', () =>
-        HttpResponse.json({
-          success: true,
-          data: makeDiagnostic({
-            primaryState: 'setup_incomplete',
-            reason: "Slack setup is incomplete at 'claim_owner'.",
-            nextAction: 'Advance the current setup step.',
-            facts: makeFacts({ setupProgress: 'claim_owner' }),
-          }),
-        }),
-      ),
-      http.post('*/api/projects/:projectId/slack-connections/:connectionId/claim-owner', () =>
-        HttpResponse.json({
-          success: true,
-          data: { code: 'SHOULD-BE-DISCARDED', expiresAt: '2026-08-01T01:00:00.000Z' },
-        }),
-      ),
-    )
-
-    const user = userEvent.setup()
-    const { unmount } = renderPage()
-
-    await user.click(await screen.findByTestId('connection-setup-claim-owner-generate'))
-    expect(await screen.findByTestId('connection-setup-claim-owner-code')).toHaveTextContent('SHOULD-BE-DISCARDED')
-
-    unmount()
-    expect(document.body.textContent ?? '').not.toContain('SHOULD-BE-DISCARDED')
+    const action = await screen.findByTestId('connection-setup-primary-action')
+    expect(action).toHaveAttribute('data-action', 'claim_owner')
+    expect(screen.getByTestId('connection-setup-host-command')).toHaveTextContent('mo slack claim-owner conn-1')
+    expect(claimCalls).toEqual([])
+    expect(document.body.textContent ?? '').not.toContain('NEVER-ISSUED')
   })
 
   it('service offline retains setup progress and surfaces the single next step', async () => {

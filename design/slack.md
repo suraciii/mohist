@@ -63,6 +63,9 @@ Each entry states one decision; the body below carries the rules.
 - **One primary action, computed by Server.** Terminal, Web, and Mohist App
   conversation render the same progress projection; supporting facts never
   compete as a second task.
+- **Owner claim is separate completion.** A ready App is a technical fact; the
+  Connection is complete only after a claimed Owner. The claim code is issued
+  explicitly, shown once, and never in status, logs, or diagnostics.
 - **Conversational creation asks at most for name and daily responsibility**,
   creates a real Agent with defaults, then guides Slack installation. A Mohist
   App DM is already an authorization boundary; no draft approval state.
@@ -278,6 +281,32 @@ while its Agent is `needs-setup`, or the Agent `ready` while Slack is offline.
 Views may expose all four, but a summary highlights one current state and
 exactly one next action.
 
+### Owner Claim
+
+Binding the Owner is a separate act from every other installation step: the
+Connection has no Owner until a member claims it, and the claim code is what
+proves a Slack member controls the Bot's DM destination.
+
+- One code per Connection and claim kind is outstanding at a time. It is
+  short-lived, single-use, and stored only as a hash.
+- Issuing a code is an explicit operation and supersedes the outstanding code.
+  A superseded code can never be redeemed, so regeneration kills the earlier
+  code instead of leaving two live destinations.
+- Only an explicit issue touches a code. A status read, a page refresh, or
+  advancing an unrelated installation step neither issues nor invalidates one,
+  so an outstanding code stays claimable while other work proceeds.
+- The authorized claim response shows the plaintext code once, with its expiry
+  and the exact Bot DM destination. Status, logs, diagnostics, audit, and the
+  Mohist App conversation never carry it.
+- Only a current full Workspace member can claim. A successful claim also
+  proves the App receives and replies to DMs and completes Connection setup. It
+  grants no Mohist management permission and no execution capability.
+- Connection setup completion is a separate fact from App readiness, transport
+  health, and Agent execution availability. A ready App with an unclaimed Owner
+  projects Owner claim as the one next action and never presents setup as
+  complete; a claimed Connection whose Agent has no available Runtime projects
+  the Agent repair action instead.
+
 ## Slack Control Plane
 
 Two aggregates in Server's Slack integration context own durable product facts
@@ -335,11 +364,20 @@ Socket ready:   both credentials persisted, both identities verified,
                 adapter lease alive; missing either credential forbids ready
 ```
 
-An unknown state is left only through reconciliation or explicit human
-arbitration; a process restart never repeats create/delete automatically. A
+An unknown state is left only through a rerun: a recorded App identity is
+reconciled against the provider, and one without an identity is retried with a
+fresh create. A process restart never repeats create/delete automatically. A
 definite failure starts a new attempt on the same AgentApp, never a new
 Connection or Bot target. Cancelled installation, expired authorization, and
 pending approval all resume the same AgentApp.
+
+An unknown create result is recovered on the same AgentApp by a rerun: a
+recorded identity is reconciled by asking the provider about that operation,
+and one without an identity is retried with a fresh create. The operation fence
+is the only writer of the external create, so a restart and a concurrent rerun
+both read the fence and perform no second external write. If the interrupted
+create actually made an App, the fresh create leaves that half-configured App
+behind and the user removes it in Slack's app settings.
 
 ### Credential Ownership
 
@@ -499,8 +537,8 @@ reporting a Socket hello are never presented as human tasks.
 The one primary action must be executable by the caller: a Slack page link, a
 protected host command, an existing service action, or an explicit recovery
 operation. A Workspace choice is projected only together with actual readable
-choices. Reading status or refreshing a page performs no write: it rotates no
-credential, regenerates no claim code, and advances no state machine.
+choices. Reading status or refreshing a page performs no write and advances no
+state machine.
 
 Workspace `ready` is a technical fact - App, Bot, permissions, and Socket
 identity verified - not completion of the user journey. It is not Owner claim
@@ -609,8 +647,9 @@ claim end-to-end exactly-once.
   a gap may exist.
 
 Control-plane create/delete is likewise at-least-once: a repeated attempt does
-not repeat App creation/deletion, and an unknown result converges only through
-reconciliation or human arbitration under Four-Axis State.
+not repeat App creation/deletion, and an unknown result converges only through a
+rerun — reconciliation for a recorded identity, a fresh create otherwise — under
+Four-Axis State.
 
 ### State Projection and Message Identity
 
@@ -998,3 +1037,14 @@ only from one explicit protected file or that prompt, and carries the selected
 Workspace through every continuation command. The Agent installation write takes
 the same selector and resolves the target Workspace from it, so a selection never
 resumes the Agent's first existing Connection or the first enrolled record.
+
+Agent installation is the complete replacement journey across every surface. The Server
+projects the outstanding fact instead of App readiness, the Mohist App
+conversation and the terminal guide both end at Owner claim as the one next
+action, the CLI separates a truthfully incomplete installation from a definite
+failure in its exit code, and the Web installation view projects the same fact:
+at the claim it offers the protected `mo slack claim-owner <connection-id>`
+command and the Bot DM destination and renders no code, and a claimed Connection
+whose Agent cannot execute states that limitation separately with the existing
+Agent repair action. No surface issues, invalidates, or displays a claim code by
+reading status or refreshing a view.

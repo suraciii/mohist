@@ -17,13 +17,16 @@ public sealed class ManagerManagementBridge : IScopedService
 {
     private readonly ManagerActorAccessDecider _access;
     private readonly SlackManagerApplicationService _manager;
+    private readonly SlackInstallAgentService _install;
 
     public ManagerManagementBridge(
         ManagerActorAccessDecider access,
-        SlackManagerApplicationService manager)
+        SlackManagerApplicationService manager,
+        SlackInstallAgentService install)
     {
         _access = access;
         _manager = manager;
+        _install = install;
     }
 
     public async Task<ManagerCommandResult> ExecuteAsync(
@@ -134,6 +137,13 @@ public sealed class ManagerManagementBridge : IScopedService
             : Confirmed(connection, null, "connection_view");
     }
 
+    /// <summary>
+    /// A Mohist App conversation request to install an Agent enters the same
+    /// managed operation as the Web Connect Slack action and
+    /// <c>mo slack install-agent</c>: the Agent is resolved or created first,
+    /// then the shared guide owns target selection, App lifecycle, and every
+    /// credential step. No second installation protocol runs through chat.
+    /// </summary>
     private async Task<ManagerCommandResult> CreateAsync(
         ManagerActorContext actor,
         JsonElement args,
@@ -143,7 +153,6 @@ public sealed class ManagerManagementBridge : IScopedService
         var agentId = OptionalString(args, "agentId");
         var agentName = OptionalString(args, "agentName");
         var responsibility = OptionalString(args, "responsibility");
-        var accessPolicy = OptionalString(args, "accessPolicy");
         if ((agentId is null) == (agentName is null))
             throw new BridgeValidationException("agent_reference_required", "Exactly one of agentId or agentName is required.");
 
@@ -168,18 +177,21 @@ public sealed class ManagerManagementBridge : IScopedService
                 "responsibility_required",
                 "responsibility is required when agentName does not resolve to an existing Agent.");
 
-        var result = await _manager.CreateOrMountAsync(
+        var resolved = await _manager.CreateAgentAsync(
             projectId,
             agentId,
             agentName,
             responsibility,
-            actor.WorkspaceTeamId,
-            actor.SlackUserId,
-            accessPolicy,
             ct);
-        return result.Created
-            ? Confirmed(result, result.ManagedApp.NextAction, "create_confirmed")
-            : Idempotent(result, result.ManagedApp.NextAction, "already_mounted");
+        var progress = await _install.InstallAsync(projectId, resolved.Agent.Id, actor.WorkspaceTeamId, ct);
+        // The outcome derives from installation progress, not Agent-creation
+        // novelty: the shared guide creates or resumes the managed App, and the
+        // one actionable instruction is the public primary action. The public
+        // projection carries no raw internal next action.
+        return Confirmed(
+            SlackInstallAgentProjections.Public(progress),
+            progress.PrimaryAction,
+            "install_confirmed");
     }
 
     private async Task<ManagerCommandResult> EditAsync(
@@ -235,7 +247,7 @@ public sealed class ManagerManagementBridge : IScopedService
         var workflow = await _manager.IssueOwnerWorkflowAsync(projectId, connectionId, kind, ct);
         return workflow is null
             ? NotFound("manager_resource_not_found", "The requested Connection was not found.")
-            : Confirmed(workflow, workflow.NextAction, "owner_workflow_issued");
+            : Confirmed(workflow, null, "owner_workflow_issued");
     }
 
     private async Task<ManagerAccessDecision> AuthorizeConnectionAsync(
@@ -268,7 +280,7 @@ public sealed class ManagerManagementBridge : IScopedService
         {
             ManagerManagementOperations.List or ManagerManagementOperations.Diagnostics => Array.Empty<string>(),
             ManagerManagementOperations.View => new[] { "projectId", "targetKind", "targetId" },
-            ManagerManagementOperations.Create => new[] { "projectId", "agentId", "agentName", "accessPolicy", "responsibility" },
+            ManagerManagementOperations.Create => new[] { "projectId", "agentId", "agentName", "responsibility" },
             ManagerManagementOperations.Edit => new[] { "projectId", "connectionId", "accessPolicy" },
             ManagerManagementOperations.Enable or ManagerManagementOperations.Disable
                 or ManagerManagementOperations.ClaimOwner or ManagerManagementOperations.TransferOwner =>

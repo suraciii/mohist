@@ -191,7 +191,14 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
 
         var ready = await ReadDataAsync(await client.PostAsJsonAsync(
             InstallPath(projectId), new { agentId }));
-        Assert.Equal("ready", ready.GetProperty("nextAction").GetString());
+        // A verified App is not the end of the journey: the Owner claim is the
+        // one next action, and the four installation facts stay separate.
+        Assert.Equal("claim_owner", ready.GetProperty("nextAction").GetString());
+        var facts = ready.GetProperty("facts");
+        Assert.True(facts.GetProperty("appReady").GetBoolean());
+        Assert.True(facts.GetProperty("transportReady").GetBoolean());
+        Assert.True(facts.GetProperty("agentExecutable").GetBoolean());
+        Assert.False(facts.GetProperty("connectionSetupComplete").GetBoolean());
         Assert.False(ready.GetProperty("connection").TryGetProperty("appId", out _));
         Assert.False(ready.GetProperty("connection").TryGetProperty("botUserId", out _));
     }
@@ -211,8 +218,21 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
         Assert.Equal("credential_address_not_supported", await CodeAsync(response));
     }
 
+    [Fact]
+    public async Task The_install_agent_adjudicate_create_route_is_retired()
+    {
+        using var client = _fixture.CreateOperatorClient();
+        using var response = await client.PostAsJsonAsync(
+            AdjudicatePath("project-retired"), new { agentId = "agent-retired" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
     private static string InstallPath(string projectId) =>
         $"/api/projects/{projectId}/slack-manager/install-agent";
+
+    private static string AdjudicatePath(string projectId) =>
+        $"/api/projects/{projectId}/slack-manager/install-agent/adjudicate-create";
 
     private static string CredentialsPath(string projectId) =>
         $"/api/projects/{projectId}/slack-manager/install-agent/credentials";

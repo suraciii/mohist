@@ -8,6 +8,26 @@ export interface ConnectionIdentityFacts {
   driftKinds: string[]
 }
 
+/** State the Server reports for one Agent's ability to accept work. */
+export interface AgentExecutabilityFixEntryPoint {
+  label: string
+  path: string
+  command: string
+}
+
+export interface AgentExecutabilityGap {
+  code: string
+  message: string
+  nextAction: string
+  fixEntryPoint: AgentExecutabilityFixEntryPoint
+}
+
+export interface AgentExecutabilityFacts {
+  state: string
+  gaps: AgentExecutabilityGap[]
+  pendingLaunchNote: string | null
+}
+
 export interface ConnectionDiagnosticFacts {
   setupProgress: string
   desiredState: string
@@ -19,16 +39,7 @@ export interface ConnectionDiagnosticFacts {
   agentReadiness: string
   identity: ConnectionIdentityFacts
   offlineGapAt: string | null
-  agentExecutability?: {
-    state: string
-    gaps: Array<{
-      code: string
-      message: string
-      nextAction: string
-      fixEntryPoint: { label: string; path: string; command: string }
-    }>
-    pendingLaunchNote: string | null
-  } | null
+  agentExecutability?: AgentExecutabilityFacts | null
 }
 
 export interface ConnectionDiagnostic {
@@ -102,11 +113,6 @@ export interface ManagedSlackAppProjection {
   unknownOutcome: string | null
   errorClass: string | null
   deletedAt: string | null
-}
-
-export interface AgentConnectionClaimOwnerResponse {
-  code: string
-  expiresAt: string
 }
 
 export const ACCESS_POLICY_VALUES = ['owner_only', 'allowlist', 'anyone'] as const

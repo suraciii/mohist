@@ -156,6 +156,35 @@ public sealed class SlackConnectionAccessDecider : IScopedService
         };
     }
 
+    /// <summary>
+    /// Whether a Slack user is a current full Workspace member right now, proven
+    /// live with the Connection's verified Agent App Bot token. The Owner-claim
+    /// boundary uses this so only a real member can claim or receive a transfer:
+    /// external collaborators, guests, Bots, and deactivated members are
+    /// rejected, and an identity that cannot be proven (no lease, no verified
+    /// token, or an unconfirmed lookup) fails closed.
+    /// </summary>
+    public async Task<AccessDecision> EvaluateMemberAsync(
+        string projectId,
+        string connectionId,
+        string senderSlackUserId,
+        string workspaceTeamId,
+        SlackLeaseContext? leaseContext,
+        CancellationToken ct = default)
+    {
+        if (leaseContext is null)
+            return AccessDecision.Deny(VerificationFailedReason);
+        var botToken = await leaseContext.ResolveVerifiedBotToken(
+            new SlackLeaseTargetRef.Connection(projectId, connectionId), ct);
+        if (string.IsNullOrWhiteSpace(botToken))
+            return AccessDecision.Deny(VerificationFailedReason);
+        var member = await _memberIdentity.LookupMemberAsync(
+            new SlackMemberIdentityRequest(botToken, senderSlackUserId), ct);
+        return IsEligibleRegularMember(member, senderSlackUserId, workspaceTeamId)
+            ? AccessDecision.Allow("workspace_member")
+            : DenyForMember(member);
+    }
+
     private async Task<AccessDecision> EvaluateAllowlistAsync(
         AgentConnection connection,
         string senderSlackUserId,

@@ -453,8 +453,6 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
     {
         if (enrollment.ManagerAppLifecycle != SlackManagerAppLifecycle.CreateUnknown)
             return new(false, null);
-        if (string.IsNullOrWhiteSpace(enrollment.ManagerAppId))
-            return new(false, enrollment.ManagerAppOperationOutcome ?? "manual_adjudication_required");
 
         var begin = await _enrollments.BeginManagerAppCreateAsync(
             enrollment.Id,
@@ -465,6 +463,18 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
             return new(false, "setup_changed_concurrently");
 
         var fence = begin.Enrollment!.ManagerAppOperationFence;
+
+        if (string.IsNullOrWhiteSpace(enrollment.ManagerAppId))
+        {
+            // No App identity was recorded, so the provider cannot be asked
+            // about the operation. The rerun clears the unknown fence and
+            // performs a fresh create; if the interrupted create actually made
+            // an App, the user removes it in Slack's app settings.
+            await _enrollments.ApplyManagerAppCreateResultAsync(
+                enrollment.Id, fence, SlackManagerAppLifecycle.NotCreated, "rerun_fresh_create", ct);
+            return new(true, null);
+        }
+
         var fact = await _appManagementFacts.InspectAsync(new SlackAppManagementRequest(
             enrollment.Id,
             enrollment.Id,
@@ -710,7 +720,7 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
             SlackSetupPhase.NotStarted => "Slack setup has not started for this Workspace.",
             SlackSetupPhase.ConfigurationRequired => "The Workspace Configuration credentials are required.",
             SlackSetupPhase.ConfigurationUnknown => "The Configuration credential rotation result is unknown.",
-            SlackSetupPhase.CreateUnknown => "The Mohist App create result is unknown and must be reconciled.",
+            SlackSetupPhase.CreateUnknown => "The Mohist App create result is unknown; rerun to retry the create.",
             SlackSetupPhase.ApplyingManifest => "The Mohist App manifest is out of date.",
             SlackSetupPhase.AwaitingInstall => "The Mohist App installation needs approval in Slack.",
             SlackSetupPhase.AwaitingSocketValidation => "The Mohist App Socket identity is being verified.",

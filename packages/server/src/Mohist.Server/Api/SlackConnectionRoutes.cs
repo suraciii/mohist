@@ -27,6 +27,9 @@ public static partial class SlackConnectionRoutes
         connection.ConnectionHealth == ConnectionHealthKind.Degraded
         && SlackConnectionBackpressureReasons.IsBackpressureReason(connection.HealthReason);
 
+    private static SlackLeaseContext ConnectionLease(string operatorId, SlackIngressBody body, SlackAdapterLeaseService leases) =>
+        new(operatorId, body.LeaseId, body.AdapterId, (targetRef, leaseCt) => leases.ResolveRuntimeLeaseBotTokenAsync(operatorId, targetRef, body.LeaseId, body.AdapterId, leaseCt));
+
     private static object PublicManagedApp(SlackManagerAppProjection app) => new
     {
         app.AppLifecycle,
@@ -34,9 +37,7 @@ public static partial class SlackConnectionRoutes
         app.ManifestState,
         app.TransportKind,
         app.TransportReadiness,
-        NextAction = app.NextAction == SlackAgentAppNextAction.AuthorizeAgentApp
-            ? "approve_install"
-            : app.NextAction,
+        NextAction = SlackInstallAgentActions.UserFacing(app.NextAction),
         app.BindingState,
         app.InstallUrl,
         app.UnknownOutcome,
@@ -180,16 +181,18 @@ public static partial class SlackConnectionRoutes
         });
 
 
-        management.MapPost("/{connectionId}/claim-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, AgentConnectionStore connections, CancellationToken ct) =>
+        management.MapPost("/{connectionId}/claim-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, CancellationToken ct) =>
         {
             try
             {
-                var projectId = context.GetResolvedProject().Id;
-                var connection = await connections.GetAsync(projectId, connectionId, ct);
-                if (connection is null)
-                    return ApiResults.NotFound("Slack Connection was not found.");
-                var code = await claims.GenerateAsync(projectId, connectionId, ct: ct);
-                return ApiResults.Ok(new { code = code.Value, expiresAt = code.ExpiresAt, botName = ClaimCodeBotName(connection) });
+                var grant = await claims.IssueAsync(
+                    context.GetResolvedProject().Id,
+                    connectionId,
+                    SlackOwnerClaimCodeKinds.Initial,
+                    ct: ct);
+                return grant is null
+                    ? ApiResults.NotFound("Slack Connection was not found.")
+                    : ApiResults.Ok(grant);
             }
             catch (InvalidOperationException ex)
             {
@@ -197,20 +200,18 @@ public static partial class SlackConnectionRoutes
             }
         });
 
-        management.MapPost("/{connectionId}/transfer-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, AgentConnectionStore connections, CancellationToken ct) =>
+        management.MapPost("/{connectionId}/transfer-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, CancellationToken ct) =>
         {
             try
             {
-                var projectId = context.GetResolvedProject().Id;
-                var connection = await connections.GetAsync(projectId, connectionId, ct);
-                if (connection is null)
-                    return ApiResults.NotFound("Slack Connection was not found.");
-                var code = await claims.GenerateAsync(
-                    projectId,
+                var grant = await claims.IssueAsync(
+                    context.GetResolvedProject().Id,
                     connectionId,
-                    Mohist.Server.Infrastructure.Data.Slack.SlackOwnerClaimCodeKinds.Transfer,
+                    SlackOwnerClaimCodeKinds.Transfer,
                     ct: ct);
-                return ApiResults.Ok(new { code = code.Value, expiresAt = code.ExpiresAt, botName = ClaimCodeBotName(connection) });
+                return grant is null
+                    ? ApiResults.NotFound("Slack Connection was not found.")
+                    : ApiResults.Ok(grant);
             }
             catch (InvalidOperationException ex)
             {
@@ -466,10 +467,7 @@ public static partial class SlackConnectionRoutes
                         connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
                         sessions, agents, claims, accessDecider, inbox, outbox,
                         launcher, attachmentBinder, grains, followupDispatcher,
-                        new SlackLeaseContext(
-                            operatorId, body.LeaseId, body.AdapterId,
-                            (targetRef, leaseCt) => leases.ResolveRuntimeLeaseBotTokenAsync(
-                                operatorId, targetRef, body.LeaseId, body.AdapterId, leaseCt)),
+                        ConnectionLease(operatorId, body, leases),
                         http.RequestServices),
                     ct);
 
@@ -478,6 +476,7 @@ public static partial class SlackConnectionRoutes
                     projectId, connection, identity, senderSlackUserId, body,
                     connections, mapping, agents, claims, inbox, outbox,
                     launcher, attachmentBinder, grains, followupDispatcher,
+                    ConnectionLease(operatorId, body, leases),
                     http.RequestServices),
                 ct);
         });
@@ -988,6 +987,7 @@ public static partial class SlackConnectionRoutes
             projectId,
             connection.Id,
             new SlackInboundDm(req.SenderSlackUserId, body.Text ?? string.Empty),
+            req.Lease,
             ct);
         if (decision.Kind == SlackInboundDecisionKind.Claimed)
         {
@@ -1261,9 +1261,6 @@ public static partial class SlackConnectionRoutes
         return "Task accepted and queued for execution. " + detail;
     }
 
-    private static string? ClaimCodeBotName(AgentConnection connection) =>
-        string.IsNullOrWhiteSpace(connection.BotName) ? connection.VerifiedBotName : connection.BotName;
-
     private static async Task<IResult> DispatchChannelFollowupAsync(
         HandleChannelIngressRequest req,
         string sessionId,
@@ -1397,8 +1394,10 @@ internal sealed record HandleDmIngressRequest(
     SlackAttachmentInputBinder AttachmentBinder,
     IGrainFactory Grains,
     AgentSessionFollowupDispatcher FollowupDispatcher,
+    SlackLeaseContext Lease,
     IServiceProvider Services)
 {
+
     public static HandleDmIngressRequest From(
         string projectId,
         Agent.Domain.AgentConnection connection,
@@ -1415,10 +1414,11 @@ internal sealed record HandleDmIngressRequest(
         SlackAttachmentInputBinder attachmentBinder,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher followupDispatcher,
+        SlackLeaseContext lease,
         IServiceProvider services) =>
         new(projectId, connection, identity, senderSlackUserId, body,
             connections, dmMapping, agents, claims, inbox, outbox,
-            launcher, attachmentBinder, grains, followupDispatcher, services);
+            launcher, attachmentBinder, grains, followupDispatcher, lease, services);
 
 }
 

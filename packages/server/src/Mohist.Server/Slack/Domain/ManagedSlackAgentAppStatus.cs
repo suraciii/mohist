@@ -128,6 +128,8 @@ public static class SlackAgentAppNextAction
     public const string ConfigureSocketCredentials = "configure_socket_credentials";
     public const string ProvideCredentials = "provide_credentials";
     public const string BindConnection = "bind_connection";
+    public const string ClaimOwner = "claim_owner";
+    public const string RepairAgent = "repair_agent";
     public const string Ready = "ready";
     public const string Deleted = "deleted";
 }

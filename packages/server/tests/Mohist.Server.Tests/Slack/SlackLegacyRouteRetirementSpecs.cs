@@ -18,12 +18,16 @@ public sealed class SlackLegacyRouteRetirementSpecs : IClassFixture<DefaultMohis
         "/api/slack-manager/setup",
         "/api/projects/{projectRef}/slack-manager/apps",
         "/api/projects/{projectRef}/slack-connections/{connectionId}/configure",
+        "/api/projects/{projectRef}/slack-manager/connections/{connectionId}/create",
+        "/api/projects/{projectRef}/slack-manager/connections/{connectionId}/reconcile-create",
         "/api/projects/{projectRef}/slack-manager/connections/{connectionId}/begin-authorization",
         "/api/projects/{projectRef}/slack-manager/connections/{connectionId}/authorization-progress",
         "/api/projects/{projectRef}/slack-manager/connections/{connectionId}/authorize",
         "/api/projects/{projectRef}/slack-connections/{connectionId}/rotate-credentials",
         "/api/projects/{projectRef}/slack-connections/{connectionId}/adapter-session",
         "/api/slack-connections/adapter",
+        "/api/slack-manager/setup/adjudicate-create",
+        "/api/projects/{projectRef}/slack-manager/install-agent/adjudicate-create",
     ];
 
     private static readonly string[] KeptControlPlaneRoutes =
@@ -78,12 +82,16 @@ public sealed class SlackLegacyRouteRetirementSpecs : IClassFixture<DefaultMohis
     [InlineData("POST", "/api/projects/proj-retired/slack-manager/apps")]
     [InlineData("POST", "/api/projects/proj-retired/slack-connections/")]
     [InlineData("POST", "/api/projects/proj-retired/slack-connections/conn-retired/configure")]
+    [InlineData("POST", "/api/projects/proj-retired/slack-manager/connections/conn-retired/create")]
+    [InlineData("POST", "/api/projects/proj-retired/slack-manager/connections/conn-retired/reconcile-create")]
     [InlineData("POST", "/api/projects/proj-retired/slack-manager/connections/conn-retired/begin-authorization")]
     [InlineData("POST", "/api/projects/proj-retired/slack-manager/connections/conn-retired/authorization-progress")]
     [InlineData("POST", "/api/projects/proj-retired/slack-manager/connections/conn-retired/authorize")]
     [InlineData("POST", "/api/projects/proj-retired/slack-connections/conn-retired/rotate-credentials")]
     [InlineData("POST", "/api/projects/proj-retired/slack-connections/conn-retired/adapter-session")]
     [InlineData("GET", "/api/slack-connections/adapter")]
+    [InlineData("POST", "/api/slack-manager/setup/adjudicate-create")]
+    [InlineData("POST", "/api/projects/proj-retired/slack-manager/install-agent/adjudicate-create")]
     public async Task Retired_routes_answer_404_not_found(string method, string path)
     {
         using var request = new HttpRequestMessage(new HttpMethod(method), path)
