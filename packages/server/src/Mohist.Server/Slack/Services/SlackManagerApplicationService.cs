@@ -12,16 +12,10 @@ namespace Mohist.Server.Slack.Services;
 
 public sealed partial class SlackManagerApplicationService : IScopedService
 {
-    private const string ProductCapabilityVersion = "p0-agent-app";
-    private const int ManifestVersion = 2;
-    private static readonly string[] BotScopes = ["app_mentions:read", "chat:write"];
-    private static readonly string[] BotEvents = ["app_mention"];
-
     private readonly AgentQuerier _agents;
     private readonly AgentConnectionStore _connections;
     private readonly SlackWorkspaceEnrollmentStore _enrollments;
     private readonly ManagedSlackAgentAppStore _agentApps;
-    private readonly SlackManifestGenerator _manifests;
     private readonly ManagedSlackAgentAppApplicationService _childOperations;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ISecretStore _secrets;
@@ -36,7 +30,6 @@ public sealed partial class SlackManagerApplicationService : IScopedService
         AgentConnectionStore connections,
         SlackWorkspaceEnrollmentStore enrollments,
         ManagedSlackAgentAppStore agentApps,
-        SlackManifestGenerator manifests,
         ManagedSlackAgentAppApplicationService childOperations,
         IDbContextFactory<MohistDbContext> dbFactory,
         ISecretStore secrets,
@@ -50,7 +43,6 @@ public sealed partial class SlackManagerApplicationService : IScopedService
         _connections = connections;
         _enrollments = enrollments;
         _agentApps = agentApps;
-        _manifests = manifests;
         _childOperations = childOperations;
         _dbFactory = dbFactory;
         _secrets = secrets;
@@ -307,11 +299,6 @@ public sealed partial class SlackManagerApplicationService : IScopedService
             agentApp.DeletedAt);
     }
 
-    private static void ValidateAccessPolicy(string value)
-    {
-        if (value is not (AccessPolicyKind.OwnerOnly or AccessPolicyKind.Allowlist or AccessPolicyKind.Anyone))
-            throw new SlackManagerValidationException("Unknown access policy.", "invalid_access_policy");
-    }
 }
 
 public sealed record SlackManagerClaimIssued(
