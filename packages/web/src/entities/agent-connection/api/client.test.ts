@@ -1,13 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
-import {
-  claimAgentConnectionOwner,
-  getAgentConnection,
-  getConnectionDiagnostic,
-  installManagedSlackAgent,
-  listAgentConnections,
-} from './client'
+import { getAgentConnection, getConnectionDiagnostic, installManagedSlackAgent, listAgentConnections } from './client'
 
 useMswServer()
 
@@ -157,26 +151,5 @@ describe('getAgentConnection', () => {
 
     expect(paths).toEqual(['/api/projects/proj-1/slack-connections/conn-1'])
     expect(detail.connection.id).toBe('conn-1')
-  })
-})
-
-describe('claimAgentConnectionOwner', () => {
-  it('POSTs to /claim-owner and returns the one-time code', async () => {
-    const paths: string[] = []
-    server.use(
-      http.post('*/api/projects/:projectId/slack-connections/:connectionId/claim-owner', ({ request }) => {
-        paths.push(new URL(request.url).pathname)
-        return HttpResponse.json({
-          success: true,
-          data: { code: 'CLAIM-CODE-12345', expiresAt: '2026-08-01T01:00:00.000Z' },
-        })
-      }),
-    )
-
-    const response = await claimAgentConnectionOwner('proj-1', 'conn-1')
-
-    expect(paths).toEqual(['/api/projects/proj-1/slack-connections/conn-1/claim-owner'])
-    expect(response.code).toBe('CLAIM-CODE-12345')
-    expect(response.expiresAt).toBe('2026-08-01T01:00:00.000Z')
   })
 })

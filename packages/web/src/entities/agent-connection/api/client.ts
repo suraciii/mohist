@@ -1,6 +1,5 @@
 import { projectApiPath, request } from '@/shared/api/client'
 import type {
-  AgentConnectionClaimOwnerResponse,
   AgentConnectionDetailResponse,
   AgentConnectionDto,
   ManagedSlackSetupProgress,
@@ -33,13 +32,6 @@ export function installManagedSlackAgent(projectId: string | null | undefined, a
 export function getAgentConnection(projectId: string | null | undefined, connectionId: string) {
   return request<AgentConnectionDetailResponse>(
     projectApiPath(projectId, `/slack-connections/${encodeURIComponent(connectionId)}`),
-  )
-}
-
-export function claimAgentConnectionOwner(projectId: string | null | undefined, connectionId: string) {
-  return request<AgentConnectionClaimOwnerResponse>(
-    projectApiPath(projectId, `/slack-connections/${encodeURIComponent(connectionId)}/claim-owner`),
-    { method: 'POST' },
   )
 }
 

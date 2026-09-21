@@ -229,9 +229,171 @@ describe('ConnectionDiagnosticPage — setup step rendering (MSW)', () => {
 
     const action = await screen.findByTestId('connection-setup-primary-action')
     expect(action).toHaveAttribute('data-action', 'host_command')
-    expect(screen.getByTestId('connection-setup-host-command')).toHaveTextContent('mo slack install-agent agent-1')
+    expect(screen.getByTestId('connection-setup-host-command')).toHaveTextContent(
+      'mo slack install-agent agent-1 --project Test',
+    )
     expect(action).toHaveTextContent('--credentials-file')
     expect(action.querySelector('a')).toBeNull()
+  })
+
+  it('projects Owner claim as the one next action instead of App readiness', async () => {
+    const claimCalls: Array<{ method: string; pathname: string }> = []
+    server.use(
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId/diagnostic', () =>
+        HttpResponse.json({
+          success: true,
+          data: makeDiagnostic({
+            primaryState: 'setup_incomplete',
+            reason: "Slack setup is incomplete at 'claim_owner'.",
+            nextAction: 'Claim the Owner from the Mohist host.',
+            facts: makeFacts({
+              setupProgress: 'claim_owner',
+              identity: {
+                verificationStatus: 'verified',
+                verifiedBotName: 'Writer',
+                botName: 'derived-bot',
+                agentName: 'Writer',
+                verifiedBotIconUrl: null,
+                avatarHash: null,
+                driftKinds: [],
+              },
+            }),
+          }),
+        }),
+      ),
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId', () =>
+        HttpResponse.json({ success: true, data: makeDetail('claim_owner') }),
+      ),
+      http.post('*/api/projects/:projectId/slack-connections/:connectionId/claim-owner', ({ request }) => {
+        claimCalls.push({ method: request.method, pathname: new URL(request.url).pathname })
+        return HttpResponse.json({
+          success: true,
+          data: { code: 'CLAIM-CODE-1', expiresAt: '2026-08-01T01:00:00.000Z' },
+        })
+      }),
+    )
+
+    renderPage()
+
+    const action = await screen.findByTestId('connection-setup-primary-action')
+    expect(action).toHaveAttribute('data-action', 'claim_owner')
+    expect(screen.getByTestId('connection-setup-host-command')).toHaveTextContent(
+      'mo slack claim-owner conn-1 --project Test',
+    )
+    expect(screen.getByTestId('connection-setup-claim-destination')).toHaveTextContent(
+      'direct message with the writer bot',
+    )
+    // A pending claim is never presented as completed setup.
+    expect(screen.getByTestId('connection-setup-step-claim_owner')).toHaveAttribute('data-state', 'current')
+    expect(screen.getByTestId('connection-setup-step-complete')).toHaveAttribute('data-state', 'pending')
+    expect(screen.queryByTestId('connection-setup-step-list')).toBeInTheDocument()
+
+    // The code itself never reaches the page: no request issues one and no element renders one.
+    expect(claimCalls).toEqual([])
+    expect(document.body.textContent ?? '').not.toContain('CLAIM-CODE-1')
+    expect(document.querySelectorAll('button')).toHaveLength(0)
+  })
+
+  it('keeps a pending claim free of regeneration on refetch', async () => {
+    const claimCalls: Array<{ method: string; pathname: string }> = []
+    server.use(
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId/diagnostic', () =>
+        HttpResponse.json({
+          success: true,
+          data: makeDiagnostic({
+            facts: makeFacts({ setupProgress: 'claim_owner' }),
+          }),
+        }),
+      ),
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId', () =>
+        HttpResponse.json({ success: true, data: makeDetail('claim_owner') }),
+      ),
+      http.post('*/api/projects/:projectId/slack-connections/:connectionId/claim-owner', ({ request }) => {
+        claimCalls.push({ method: request.method, pathname: new URL(request.url).pathname })
+        return HttpResponse.json({
+          success: true,
+          data: { code: 'CLAIM-CODE-1', expiresAt: '2026-08-01T01:00:00.000Z' },
+        })
+      }),
+    )
+
+    const queryClient = makeQueryClient()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId="proj-1" initialProjects={[PROJECT]}>
+          <MemoryRouter initialEntries={['/Test/connections/conn-1']}>
+            <Routes>
+              <Route path="/:projectName/connections/:connectionId" element={<ConnectionDiagnosticPage />} />
+            </Routes>
+          </MemoryRouter>
+        </ProjectProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByTestId('connection-setup-primary-action')).toHaveAttribute('data-action', 'claim_owner')
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['agent-connection-diagnostic', 'proj-1', 'conn-1'] })
+      await queryClient.invalidateQueries({ queryKey: ['agent-connection', 'proj-1', 'conn-1'] })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('connection-setup-primary-action')).toHaveAttribute('data-action', 'claim_owner')
+    })
+    expect(claimCalls).toEqual([])
+  })
+
+  it('separates a claimed Connection from an Agent that cannot execute', async () => {
+    server.use(
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId/diagnostic', () =>
+        HttpResponse.json({
+          success: true,
+          data: makeDiagnostic({
+            primaryState: 'agent_needs_setup',
+            reason: 'The bound Agent is not ready to accept new work.',
+            nextAction: 'Review the Agent execution settings.',
+            facts: makeFacts({
+              setupProgress: 'complete',
+              agentReadiness: 'needs_setup',
+              credentialStatus: 'valid',
+              agentExecutability: {
+                state: 'not-configured',
+                gaps: [
+                  {
+                    code: 'runtime_missing',
+                    message: 'No Runtime is configured for this Agent.',
+                    nextAction: 'Choose a Runtime in Agent settings.',
+                    fixEntryPoint: {
+                      label: 'Agent settings',
+                      path: '/agents/agent-1',
+                      command: 'mo agent edit agent-1',
+                    },
+                  },
+                ],
+                pendingLaunchNote: null,
+              },
+            }),
+          }),
+        }),
+      ),
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId', () =>
+        HttpResponse.json({ success: true, data: makeDetail('repair_agent') }),
+      ),
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId/deliveries', () =>
+        HttpResponse.json({ success: true, data: { entries: [] } }),
+      ),
+    )
+
+    renderPage()
+
+    const action = await screen.findByTestId('connection-setup-primary-action')
+    expect(action).toHaveAttribute('data-action', 'repair_agent')
+    expect(screen.getByTestId('connection-setup-agent-repair-link')).toHaveAttribute('href', '/Test/agents/agent-1')
+    const limitation = screen.getByTestId('connection-agent-executability')
+    expect(limitation).toHaveTextContent('No Runtime is configured for this Agent.')
+    expect(limitation).toHaveTextContent('mo agent edit agent-1')
+    // The limitation is separate from the completed Connection setup.
+    expect(screen.getByTestId('connection-diagnostic-facts')).toHaveTextContent(/complete/i)
   })
 
   it('collects no credential and renders no token value on the setup page', async () => {

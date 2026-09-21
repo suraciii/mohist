@@ -4,7 +4,6 @@ import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
 import {
-  claimAgentConnectionOwner,
   clearOfflineGap,
   getAgentConnection,
   getConnectionDiagnostic,
@@ -17,7 +16,6 @@ import {
   searchSlackConnectionMembers,
 } from './client'
 import type {
-  AgentConnectionClaimOwnerResponse,
   AgentConnectionDetailResponse,
   AgentConnectionDto,
   AccessPolicyManageRequest,
@@ -123,28 +121,6 @@ export function useInstallManagedSlackAgent() {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   return useMutation(installManagedSlackAgentMutationOptions(projectId, queryClient))
-}
-
-export function claimAgentConnectionOwnerMutationOptions(
-  projectId: string | null | undefined,
-  connectionId: string,
-  queryClient: InvalidationClient,
-) {
-  return {
-    mutationFn: () => claimAgentConnectionOwner(projectId, connectionId),
-    onSuccess: (_response: AgentConnectionClaimOwnerResponse) => {
-      invalidateAgentConnectionQueries(queryClient, projectId, connectionId)
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Failed to generate owner claim code')
-    },
-  }
-}
-
-export function useClaimAgentConnectionOwner(connectionId: string | null | undefined) {
-  const queryClient = useQueryClient()
-  const { projectId } = useProject()
-  return useMutation(claimAgentConnectionOwnerMutationOptions(projectId, connectionId ?? '', queryClient))
 }
 
 export const agentConnectionAccessQueryKey = (
