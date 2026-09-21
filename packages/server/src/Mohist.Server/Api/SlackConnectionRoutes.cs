@@ -189,7 +189,7 @@ public static partial class SlackConnectionRoutes
                 if (connection is null)
                     return ApiResults.NotFound("Slack Connection was not found.");
                 var code = await claims.GenerateAsync(projectId, connectionId, ct: ct);
-                return ApiResults.Ok(new { code = code.Value, expiresAt = code.ExpiresAt, botName = ClaimCodeBotName(connection) });
+                return ApiResults.Ok(AuthorizedClaimResponse(code, connection));
             }
             catch (InvalidOperationException ex)
             {
@@ -210,7 +210,7 @@ public static partial class SlackConnectionRoutes
                     connectionId,
                     Mohist.Server.Infrastructure.Data.Slack.SlackOwnerClaimCodeKinds.Transfer,
                     ct: ct);
-                return ApiResults.Ok(new { code = code.Value, expiresAt = code.ExpiresAt, botName = ClaimCodeBotName(connection) });
+                return ApiResults.Ok(AuthorizedClaimResponse(code, connection));
             }
             catch (InvalidOperationException ex)
             {
@@ -1263,6 +1263,28 @@ public static partial class SlackConnectionRoutes
 
     private static string? ClaimCodeBotName(AgentConnection connection) =>
         string.IsNullOrWhiteSpace(connection.BotName) ? connection.VerifiedBotName : connection.BotName;
+
+    /// <summary>
+    /// The one authorized claim response. It carries the plaintext code once,
+    /// its expiry, and the exact Bot DM destination the code must be sent to;
+    /// no status, diagnostic, or projection route builds this shape.
+    /// </summary>
+    private static object AuthorizedClaimResponse(SlackOwnerClaimCode code, AgentConnection connection) => new
+    {
+        code = code.Value,
+        expiresAt = code.ExpiresAt,
+        botName = ClaimCodeBotName(connection),
+        botUserId = string.IsNullOrWhiteSpace(connection.BotUserId) ? null : connection.BotUserId,
+        dmDestination = OwnerClaimDmDestination(connection),
+    };
+
+    private static string OwnerClaimDmDestination(AgentConnection connection)
+    {
+        var botName = ClaimCodeBotName(connection);
+        return string.IsNullOrWhiteSpace(botName)
+            ? "Direct message with the Slack Bot of this Connection"
+            : $"Direct message with the {botName} Bot";
+    }
 
     private static async Task<IResult> DispatchChannelFollowupAsync(
         HandleChannelIngressRequest req,

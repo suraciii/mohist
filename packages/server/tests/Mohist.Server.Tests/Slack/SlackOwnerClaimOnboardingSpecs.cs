@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
@@ -68,6 +69,52 @@ public sealed class SlackOwnerClaimOnboardingSpecs
         var text = await ReadReplyTextAsync(connection, "D-DM-TRANSFER");
         Assert.Equal("Owner transferred successfully.", text);
         Assert.DoesNotContain("get started", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_authorized_claim_response_names_the_bot_dm_destination_and_no_other_surface_carries_the_code()
+    {
+        var connection = await SeedConnectionAsync(SetupProgressKind.ClaimOwner, ownerSlackUserId: null);
+        var code = await GenerateCodeAsync(connection, "claim-owner");
+
+        using var claim = await _fixture.Client.GetAsync(
+            $"/api/projects/{connection.ProjectId}/slack-connections/{connection.Id}");
+        claim.EnsureSuccessStatusCode();
+        var detail = await claim.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(code, detail, StringComparison.Ordinal);
+
+        using var diagnostic = await _fixture.Client.GetAsync(
+            $"/api/projects/{connection.ProjectId}/slack-connections/{connection.Id}/diagnostic");
+        diagnostic.EnsureSuccessStatusCode();
+        var diagnostics = await diagnostic.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(code, diagnostics, StringComparison.Ordinal);
+
+        // The pending claim is not completed setup on any read surface.
+        using var detailDocument = JsonDocument.Parse(detail);
+        Assert.Equal(
+            SetupProgressKind.ClaimOwner,
+            detailDocument.RootElement.GetProperty("data").GetProperty("connection").GetProperty("setupProgress").GetString());
+        using var diagnosticDocument = JsonDocument.Parse(diagnostics);
+        Assert.Equal(
+            ConnectionDiagnosticState.SetupIncomplete,
+            diagnosticDocument.RootElement.GetProperty("data").GetProperty("primaryState").GetString());
+    }
+
+    [Fact]
+    public async Task The_authorized_claim_response_returns_the_bot_dm_destination_once()
+    {
+        var connection = await SeedConnectionAsync(SetupProgressKind.ClaimOwner, ownerSlackUserId: null);
+
+        using var response = await _fixture.Client.PostAsync(
+            $"/api/projects/{connection.ProjectId}/slack-connections/{connection.Id}/claim-owner", null);
+        response.EnsureSuccessStatusCode();
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        var code = data.GetProperty("code").GetString()!;
+        Assert.False(string.IsNullOrWhiteSpace(code));
+        Assert.Equal("Mohist", data.GetProperty("botName").GetString());
+        Assert.Equal("U123", data.GetProperty("botUserId").GetString());
+        Assert.Equal("Direct message with the Mohist Bot", data.GetProperty("dmDestination").GetString());
     }
 
     private async Task<string> GenerateCodeAsync(AgentConnection connection, string action)

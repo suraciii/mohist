@@ -151,19 +151,12 @@ public sealed partial class SlackManagerApplicationService
             await _accessPolicies.ListMembersAsync(projectId, connectionId, ct));
     }
 
+    /// <summary>
+    /// Issues one Owner claim code. The plaintext code stays inside the claim
+    /// service: this management projection carries only the destination and
+    /// the next action, so a Mohist App conversation never receives a code.
+    /// </summary>
     public async Task<SlackManagerOwnerWorkflowResult?> IssueOwnerWorkflowAsync(
-        string projectId,
-        string connectionId,
-        string kind,
-        CancellationToken ct = default)
-    {
-        var result = await IssueOwnerWorkflowServiceAsync(projectId, connectionId, kind, ct);
-        return result is null
-            ? null
-            : new(result.ConnectionId, result.BotName, result.ExpiresAt, result.NextAction);
-    }
-
-    public async Task<SlackManagerOwnerWorkflowServiceResult?> IssueOwnerWorkflowServiceAsync(
         string projectId,
         string connectionId,
         string kind,
@@ -175,7 +168,6 @@ public sealed partial class SlackManagerApplicationService
         return new(
             connection.Id,
             connection.BotName,
-            claim.Value,
             claim.ExpiresAt,
             kind == SlackOwnerClaimCodeKinds.Transfer ? "transfer-owner" : "claim-owner");
     }
@@ -193,12 +185,5 @@ public sealed record SlackManagerAccessPolicyResult(
 public sealed record SlackManagerOwnerWorkflowResult(
     string ConnectionId,
     string BotName,
-    DateTimeOffset ExpiresAt,
-    string NextAction);
-
-public sealed record SlackManagerOwnerWorkflowServiceResult(
-    string ConnectionId,
-    string BotName,
-    string Code,
     DateTimeOffset ExpiresAt,
     string NextAction);
