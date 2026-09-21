@@ -42,18 +42,11 @@ describe('resolveSetupPrimaryAction', () => {
     expect(resolveSetupPrimaryAction(makeApp({ nextAction: 'repair_agent' }))).toBe('repair_agent')
   })
 
-  it('never turns Server work into a human step', () => {
-    for (const nextAction of [
-      'reconcile_create',
-      'reconcile_delete',
-      'create_agent_app',
-      'wait_for_operation',
-      'apply_manifest',
-      'bind_connection',
-      'deleted',
-    ]) {
-      expect(resolveSetupPrimaryAction(makeApp({ nextAction }))).toBe('waiting')
-    }
+  it('hands a required rerun the target-bound install command', () => {
+    // The Server projects internal App work (create, manifest, binding,
+    // reconciliation) as a rerun of the guide, so the Web renders the
+    // executable install command rather than a passive waiting state.
+    expect(resolveSetupPrimaryAction(makeApp({ nextAction: 'rerun_install' }))).toBe('host_command')
   })
 
   it('reports a ready App without an action', () => {
@@ -102,14 +95,15 @@ describe('SetupPrimaryAction', () => {
     )
   })
 
-  it('renders a waiting state for Server-owned work', () => {
-    render(<SetupPrimaryAction app={makeApp({ nextAction: 'reconcile_create' })} target={target} />)
+  it('renders the ordinary rerun as the target-bound install command', () => {
+    render(<SetupPrimaryAction app={makeApp({ nextAction: 'rerun_install' })} target={target} />)
 
     const action = screen.getByTestId('connection-setup-primary-action')
-    expect(action).toHaveAttribute('data-action', 'waiting')
-    expect(action.textContent ?? '').not.toMatch(/reconcile/i)
-    expect(action.querySelector('a')).toBeNull()
-    expect(screen.queryByTestId('connection-setup-host-command')).not.toBeInTheDocument()
+    expect(action).toHaveAttribute('data-action', 'host_command')
+    expect(screen.getByTestId('connection-setup-host-command')).toHaveTextContent(
+      'mo slack install-agent agent-1 --project Test',
+    )
+    expect(action.textContent ?? '').not.toMatch(/reconcile|apply_manifest|bind_connection/i)
   })
 
   it('hands the Owner claim to the host command and names the Bot DM destination', () => {

@@ -101,8 +101,18 @@ public sealed class SlackManagerManagementBridgeSpecs : IClassFixture<DefaultMoh
         });
         Assert.Equal(HttpStatusCode.OK, claim.StatusCode);
         var claimData = await DataAsync(claim);
+        // The conversation hands off the explicit host command and the Bot DM
+        // destination; it never generates or carries a claim code.
         Assert.False(claimData.GetProperty("state").TryGetProperty("code", out _));
-        Assert.True(claimData.GetProperty("state").TryGetProperty("expiresAt", out _));
+        Assert.True(claimData.GetProperty("state").TryGetProperty("hostCommand", out _));
+        Assert.True(claimData.GetProperty("state").TryGetProperty("dmDestination", out _));
+        // The conversation claim never generates a code, so it cannot supersede
+        // an outstanding one: no claim-code row exists for the connection.
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            Assert.False(await db.SlackOwnerClaimCodes.AnyAsync(row => row.ConnectionId == seeded.ClaimConnectionId));
+        }
 
         var transfer = await SendAsync(grant, new
         {

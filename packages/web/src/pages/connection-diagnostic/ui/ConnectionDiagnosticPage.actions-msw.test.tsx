@@ -54,7 +54,7 @@ function makeDiagnostic(overrides: Partial<ConnectionDiagnostic> = {}): Connecti
   }
 }
 
-function makeDetail(nextAction = 'reconcile_create') {
+function makeDetail(nextAction = 'rerun_install') {
   return {
     connection: {
       id: 'conn-1',

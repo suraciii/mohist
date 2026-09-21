@@ -34,9 +34,7 @@ public static partial class SlackConnectionRoutes
         app.ManifestState,
         app.TransportKind,
         app.TransportReadiness,
-        NextAction = app.NextAction == SlackAgentAppNextAction.AuthorizeAgentApp
-            ? "approve_install"
-            : app.NextAction,
+        NextAction = SlackInstallAgentActions.UserFacing(app.NextAction),
         app.BindingState,
         app.InstallUrl,
         app.UnknownOutcome,

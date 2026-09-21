@@ -777,3 +777,56 @@ public sealed record SlackInstallAgentCredentialResult(
     bool Accepted,
     string RuntimeCredentialValidationState,
     string? ErrorClass = null);
+
+/// <summary>
+/// The one public installation projection every surface renders — the HTTP
+/// install route, the connection detail, and a Mohist App conversation. App
+/// create, manifest application, binding, reconciliation, and the Socket hello
+/// are the guide's own work, so their internal next actions project as a rerun;
+/// only the Owner claim and an Agent that cannot execute keep their own
+/// executable action. No raw internal action reaches a caller.
+/// </summary>
+public static class SlackInstallAgentProjections
+{
+    public static object Public(SlackInstallAgentProgress progress) => new
+    {
+        connection = new
+        {
+            progress.Connection.Id,
+            progress.Connection.ProjectId,
+            progress.Connection.AgentId,
+            progress.Connection.SetupProgress,
+            progress.Connection.ConnectionHealth,
+            progress.Connection.HealthReason,
+            progress.Connection.AgentReadiness,
+        },
+        agentApp = new
+        {
+            progress.AgentApp.AppLifecycle,
+            progress.AgentApp.Authorization,
+            progress.AgentApp.RuntimeCredentialValidationState,
+            progress.AgentApp.BindingState,
+            progress.AgentApp.ManifestState,
+            progress.AgentApp.TransportReadiness,
+            NextAction = SlackInstallAgentActions.UserFacing(progress.AgentApp.NextAction),
+            InstallUrl = progress.InstallUrl,
+            progress.AgentApp.UnknownOutcome,
+            progress.AgentApp.ErrorClass,
+        },
+        facts = new
+        {
+            appReady = progress.AgentApp.AppLifecycle == SlackAppLifecycle.Created
+                && progress.AgentApp.Authorization == SlackAuthorizationState.Authorized
+                && progress.AgentApp.BindingState == SlackAgentAppBindingState.Bound
+                && progress.AgentApp.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified,
+            connectionSetupComplete = string.Equals(
+                progress.Connection.SetupProgress, SetupProgressKind.Complete, StringComparison.Ordinal),
+            transportReady = string.Equals(
+                progress.AgentApp.TransportReadiness, SlackTransportReadiness.Ready, StringComparison.Ordinal),
+            agentExecutable = string.Equals(
+                progress.Connection.AgentReadiness, AgentReadinessKind.Ready, StringComparison.Ordinal),
+        },
+        NextAction = SlackInstallAgentActions.UserFacing(progress.NextAction),
+        progress.ErrorClass,
+    };
+}

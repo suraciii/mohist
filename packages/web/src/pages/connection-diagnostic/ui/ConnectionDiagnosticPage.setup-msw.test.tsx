@@ -54,7 +54,7 @@ function makeDiagnostic(overrides: Partial<ConnectionDiagnostic> = {}): Connecti
   }
 }
 
-function makeDetail(nextAction = 'reconcile_create') {
+function makeDetail(nextAction = 'rerun_install') {
   return {
     connection: {
       id: 'conn-1',
@@ -147,11 +147,11 @@ describe('ConnectionDiagnosticPage — setup step rendering (MSW)', () => {
     expect(await screen.findByTestId('connection-setup-managed-progress')).toBeInTheDocument()
     expect(screen.queryByTestId('connection-setup-identity-preview')).not.toBeInTheDocument()
     expect(screen.queryByTestId('connection-setup-credential-form')).not.toBeInTheDocument()
-    expect(await screen.findByTestId('connection-setup-primary-action')).toHaveAttribute('data-action', 'waiting')
+    expect(await screen.findByTestId('connection-setup-primary-action')).toHaveAttribute('data-action', 'host_command')
 
     const user = userEvent.setup()
     await user.click(screen.getByText('App facts'))
-    expect(screen.getByTestId('managed-agent-app-status')).toHaveTextContent('reconcile create')
+    expect(screen.getByTestId('managed-agent-app-status')).toHaveTextContent('rerun install')
     expect(screen.getByTestId('managed-agent-app-status')).toHaveTextContent('timeout')
   })
 

@@ -149,9 +149,11 @@ public sealed partial class SlackManagerApplicationService
     }
 
     /// <summary>
-    /// Issues one Owner claim code. The plaintext code stays inside the claim
-    /// service: this management projection carries only the destination and
-    /// the next action, so a Mohist App conversation never receives a code.
+    /// Hands the caller the explicit host command that issues the Owner claim
+    /// code and the exact Bot DM destination. No code is generated here: the
+    /// host command's own response is the single authorized place a code
+    /// appears, so a conversation read never issues, invalidates, or displays
+    /// one, and an outstanding code stays claimable.
     /// </summary>
     public async Task<SlackManagerOwnerWorkflowResult?> IssueOwnerWorkflowAsync(
         string projectId,
@@ -161,12 +163,18 @@ public sealed partial class SlackManagerApplicationService
     {
         var connection = await _connections.GetAsync(projectId, connectionId, ct);
         if (connection is null) return null;
-        var claim = await _ownerClaims.GenerateAsync(projectId, connectionId, kind, ct: ct);
+        var command = string.Equals(kind, SlackOwnerClaimCodeKinds.Transfer, StringComparison.Ordinal)
+            ? "transfer-owner"
+            : "claim-owner";
+        var botName = string.IsNullOrWhiteSpace(connection.BotName)
+            ? connection.VerifiedBotName
+            : connection.BotName;
         return new(
             connection.Id,
-            connection.BotName,
-            claim.ExpiresAt,
-            kind == SlackOwnerClaimCodeKinds.Transfer ? "transfer-owner" : "claim-owner");
+            $"mo slack {command} {connection.Id} --project {projectId}",
+            string.IsNullOrWhiteSpace(botName)
+                ? "Direct message with this Connection's Slack Bot"
+                : $"Direct message with the {botName} Bot");
     }
 }
 
@@ -189,6 +197,5 @@ public sealed record SlackManagerAccessPolicyResult(
 
 public sealed record SlackManagerOwnerWorkflowResult(
     string ConnectionId,
-    string BotName,
-    DateTimeOffset ExpiresAt,
-    string NextAction);
+    string HostCommand,
+    string DmDestination);

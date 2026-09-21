@@ -184,9 +184,14 @@ public sealed class ManagerManagementBridge : IScopedService
             responsibility,
             ct);
         var progress = await _install.InstallAsync(projectId, resolved.Agent.Id, actor.WorkspaceTeamId, ct);
-        return resolved.Created
-            ? Confirmed(progress, progress.PrimaryAction, "create_confirmed")
-            : Idempotent(progress, progress.PrimaryAction, "already_installed");
+        // The outcome derives from installation progress, not Agent-creation
+        // novelty: the shared guide creates or resumes the managed App, and the
+        // one actionable instruction is the public primary action. The public
+        // projection carries no raw internal next action.
+        return Confirmed(
+            SlackInstallAgentProjections.Public(progress),
+            progress.PrimaryAction,
+            "install_confirmed");
     }
 
     private async Task<ManagerCommandResult> EditAsync(
@@ -242,7 +247,7 @@ public sealed class ManagerManagementBridge : IScopedService
         var workflow = await _manager.IssueOwnerWorkflowAsync(projectId, connectionId, kind, ct);
         return workflow is null
             ? NotFound("manager_resource_not_found", "The requested Connection was not found.")
-            : Confirmed(workflow, workflow.NextAction, "owner_workflow_issued");
+            : Confirmed(workflow, null, "owner_workflow_issued");
     }
 
     private async Task<ManagerAccessDecision> AuthorizeConnectionAsync(

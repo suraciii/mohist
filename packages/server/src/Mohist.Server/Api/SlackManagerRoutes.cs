@@ -190,57 +190,8 @@ public static class SlackManagerRoutes
             ? ApiResults.NotFound("The managed Agent App was not found.")
             : ApiResults.Ok(result);
 
-    private static object PublicInstallProgress(SlackInstallAgentProgress progress) => new
-    {
-        connection = new
-        {
-            progress.Connection.Id,
-            progress.Connection.ProjectId,
-            progress.Connection.AgentId,
-            progress.Connection.SetupProgress,
-            progress.Connection.ConnectionHealth,
-            progress.Connection.HealthReason,
-            progress.Connection.AgentReadiness,
-        },
-        agentApp = new
-        {
-            progress.AgentApp.AppLifecycle,
-            progress.AgentApp.Authorization,
-            progress.AgentApp.RuntimeCredentialValidationState,
-            progress.AgentApp.BindingState,
-            progress.AgentApp.ManifestState,
-            progress.AgentApp.TransportReadiness,
-            NextAction = PublicInstallNextAction(progress.AgentApp.NextAction),
-            InstallUrl = progress.InstallUrl,
-            progress.AgentApp.UnknownOutcome,
-            progress.AgentApp.ErrorClass,
-        },
-        // Four separate facts: a ready App, the Connection's setup progress,
-        // transport health, and whether the Agent can accept work. No single
-        // status stands in for another, and a pending Owner claim is never
-        // reported as completed setup.
-        facts = new
-        {
-            appReady = progress.AgentApp.AppLifecycle == SlackAppLifecycle.Created
-                && progress.AgentApp.Authorization == SlackAuthorizationState.Authorized
-                && progress.AgentApp.BindingState == SlackAgentAppBindingState.Bound
-                && progress.AgentApp.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified,
-            connectionSetupComplete = string.Equals(
-                progress.Connection.SetupProgress,
-                SetupProgressKind.Complete,
-                StringComparison.Ordinal),
-            transportReady = string.Equals(
-                progress.AgentApp.TransportReadiness,
-                SlackTransportReadiness.Ready,
-                StringComparison.Ordinal),
-            agentExecutable = string.Equals(
-                progress.Connection.AgentReadiness,
-                AgentReadinessKind.Ready,
-                StringComparison.Ordinal),
-        },
-        NextAction = PublicInstallNextAction(progress.NextAction),
-        progress.ErrorClass,
-    };
+    private static object PublicInstallProgress(SlackInstallAgentProgress progress) =>
+        SlackInstallAgentProjections.Public(progress);
 
     /// <summary>
     /// One user-facing primary action. Server-internal App steps project as a

@@ -22,6 +22,10 @@ export function resolveSetupPrimaryAction(
 ): SetupPrimaryActionKind {
   if (app.nextAction === 'approve_install' && app.installUrl) return 'approve_install'
   if (CREDENTIAL_STEP_ACTIONS.has(app.nextAction)) return 'host_command'
+  // A required rerun is executable: the Server projects internal App work as a
+  // rerun of the guide, so the Web hands back the target-bound install command
+  // instead of a passive waiting state.
+  if (app.nextAction === 'rerun_install') return 'host_command'
   if (app.nextAction === 'claim_owner') return 'claim_owner'
   if (app.nextAction === 'repair_agent') return 'repair_agent'
   if (app.nextAction === 'ready') return 'ready'

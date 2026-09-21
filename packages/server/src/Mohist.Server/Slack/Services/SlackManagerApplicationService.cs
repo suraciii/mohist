@@ -20,7 +20,6 @@ public sealed partial class SlackManagerApplicationService : IScopedService
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ISecretStore _secrets;
     private readonly SlackConnectionAccessManager _accessPolicies;
-    private readonly SlackOwnerClaimService _ownerClaims;
     private readonly SlackOutboxStore _outbox;
     private readonly IGrainFactory _grains;
     private readonly ManagerAgentDefaultProfileResolver _defaults;
@@ -34,7 +33,6 @@ public sealed partial class SlackManagerApplicationService : IScopedService
         IDbContextFactory<MohistDbContext> dbFactory,
         ISecretStore secrets,
         SlackConnectionAccessManager accessPolicies,
-        SlackOwnerClaimService ownerClaims,
         SlackOutboxStore outbox,
         IGrainFactory grains,
         ManagerAgentDefaultProfileResolver defaults)
@@ -47,7 +45,6 @@ public sealed partial class SlackManagerApplicationService : IScopedService
         _dbFactory = dbFactory;
         _secrets = secrets;
         _accessPolicies = accessPolicies;
-        _ownerClaims = ownerClaims;
         _outbox = outbox;
         _grains = grains;
         _defaults = defaults;
