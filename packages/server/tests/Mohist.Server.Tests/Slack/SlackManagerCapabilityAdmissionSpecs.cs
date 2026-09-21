@@ -48,6 +48,25 @@ public sealed class SlackManagerCapabilityAdmissionSpecs : IClassFixture<Default
     }
 
     [Fact]
+    public async Task Manager_marked_workspace_status_reaches_the_canonical_setup_progress_route()
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            "/api/slack-manager/setup/progress");
+        request.Headers.TryAddWithoutValidation(ManagerCapabilityCatalog.ManagerModeHeader, "1");
+
+        using var response = await _fixture.Client.SendAsync(request);
+
+        // The manager capability gate must admit this allowlisted route. The
+        // canonical handler answers from the shared-fixture enrollment state
+        // (NotFound, Ok, or a workspace-selection Conflict); the gate's own
+        // rejection is Forbidden, so any non-Forbidden status proves admission.
+        Assert.Contains(
+            response.StatusCode,
+            new[] { HttpStatusCode.NotFound, HttpStatusCode.OK, HttpStatusCode.Conflict });
+    }
+
+    [Fact]
     public async Task Unmarked_operator_request_keeps_existing_route_behavior()
     {
         using var request = new HttpRequestMessage(

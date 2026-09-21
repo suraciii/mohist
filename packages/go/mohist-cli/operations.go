@@ -21,6 +21,8 @@ var otelQueryFields = []string{"columns", "rows", "truncated", "truncate_reason"
 var otelTraceFields = []string{"trace_id", "service_name", "start_time", "end_time", "span_count"}
 var githubFields = []string{"id", "projectId", "owner", "repo", "repositoryName", "approvers", "status", "installationId", "repositoryNodeId", "reconnectRequired", "needsAttention", "needsReprojection", "lastError", "webhookSecret", "ingressUrl", "createdAt", "updatedAt"}
 var slackFields = []string{"id", "projectId", "agentId", "workspaceTeamId", "status", "connectionState", "botName", "owner", "accessPolicy", "nextAction", "createdAt", "updatedAt"}
+var slackSetupFields = []string{"phase", "primaryAction", "installUrl", "summary", "errorClass"}
+var slackInstallFields = []string{"connection", "agentApp", "nextAction", "errorClass"}
 
 // slackEditFields mirrors the manage-access response envelope, not the flat
 // Connection projection used by `slack list`/`slack view`.
@@ -70,10 +72,9 @@ var operationsFlags = map[string]map[string]map[string]flagShape{
 		"disable": {"project": flagValue},
 	},
 	"slack": {
-		"setup":            {},
+		"setup":            {"credentials-file": flagValue, "workspace-team": flagValue},
 		"status":           {"workspace-team": flagValue},
-		"install-agent":    {"agent": flagValue, "project": flagValue},
-		"create":           {"agent": flagValue, "project": flagValue},
+		"install-agent":    {"agent": flagValue, "project": flagValue, "credentials-file": flagValue, "workspace-team": flagValue},
 		"list":             {"project": flagValue},
 		"view":             {"project": flagValue},
 		"diagnostics":      {"project": flagValue},
@@ -149,7 +150,7 @@ func parseOperations(area string, args []string) (command, error) {
 		"server": {"status", "health", "info", "logs"},
 		"audit":  {"list"},
 		"github": {"connect", "list", "view", "update", "enable", "disable"},
-		"slack":  {"setup", "status", "install-agent", "create", "list", "view", "diagnostics", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete", "message", "thread"},
+		"slack":  {"setup", "status", "install-agent", "list", "view", "diagnostics", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete", "message", "thread"},
 	}
 	if !contains(allowed[area], action) {
 		return command{}, usage("unknown " + area + " command")
@@ -204,7 +205,7 @@ func parseOperations(area string, args []string) (command, error) {
 		c.args = append(c.args, "repository", args[1])
 		start = 2
 	}
-	if area == "slack" && contains([]string{"list", "install-agent", "create"}, action) && len(args) > 1 && !isControlToken(args[1]) {
+	if area == "slack" && contains([]string{"list", "install-agent"}, action) && len(args) > 1 && !isControlToken(args[1]) {
 		c.args = append(c.args, "agent", args[1])
 		start = 2
 	}
@@ -294,6 +295,10 @@ func parseOperations(area string, args []string) (command, error) {
 	if area == "slack" && action == "permanent-delete" && !hasArg(c.args, "yes") {
 		return command{}, usage("--yes is required for permanent deletion")
 	}
+	if area == "slack" && action == "install-agent" &&
+		strings.TrimSpace(argValue(c.args, "agent", "")) == "" {
+		return command{}, usageWithLeaf("Agent is required", leafUsage)
+	}
 	if area == "slack" && action == "message-send" {
 		missing := []string{}
 		for _, required := range []string{"workspace", "conversation", "reply-to", "connection", "session", "triggering-message", "dispatch-ref"} {
@@ -311,8 +316,15 @@ func parseOperations(area string, args []string) (command, error) {
 			return command{}, usage("--image and --file are mutually exclusive")
 		}
 	}
-	if area == "slack" && action == "status" && strings.TrimSpace(argValue(c.args, "workspace-team", "")) == "" {
-		return command{}, usage("slack status requires non-blank --workspace-team")
+	if area == "slack" && contains([]string{"setup", "install-agent"}, action) &&
+		hasArg(c.args, "credentials-file") &&
+		strings.TrimSpace(argValue(c.args, "credentials-file", "")) == "" {
+		return command{}, usageWithLeaf("--credentials-file must be non-blank", leafUsage)
+	}
+	if area == "slack" && contains([]string{"setup", "status", "install-agent"}, action) &&
+		hasArg(c.args, "workspace-team") &&
+		strings.TrimSpace(argValue(c.args, "workspace-team", "")) == "" {
+		return command{}, usageWithLeaf("--workspace-team must be non-blank", leafUsage)
 	}
 	if area == "slack" && action == "thread-view" {
 		if strings.TrimSpace(argValue(c.args, "session", "")) == "" {
@@ -334,6 +346,12 @@ func catalogFor(area, action string) []string {
 	}
 	if area == "slack" && action == "thread-view" {
 		return slackThreadFields
+	}
+	if area == "slack" && contains([]string{"setup", "status"}, action) {
+		return slackSetupFields
+	}
+	if area == "slack" && action == "install-agent" {
+		return slackInstallFields
 	}
 	return fieldsFor(area)
 }
@@ -529,6 +547,15 @@ func operationsHelp(area string) string {
 	return "USAGE\n    mo " + area + " <action> [flags]\n\nOperations and integrations.\n\nActions: " + actions[area]
 }
 func opsLeafHelp(kind string, fields []string) string {
+	if kind == "ops-slack-setup" {
+		return "USAGE\n    mo slack setup [--credentials-file <path>] [--workspace-team <team-id>] [--json [fields]]\n\nCreate or resume the workspace Mohist App. Secrets come from hidden terminal input or one local credentials file with mode 0600.\n\nJSON FIELDS\n" + strings.Join(fields, "\n")
+	}
+	if kind == "ops-slack-status" {
+		return "USAGE\n    mo slack status [--workspace-team <team-id>] [--json [fields]]\n\nShow the configured workspace setup and its single next action.\n\nJSON FIELDS\n" + strings.Join(fields, "\n")
+	}
+	if kind == "ops-slack-install-agent" {
+		return "USAGE\n    mo slack install-agent <agent> [--project <project>] [--credentials-file <path>] [--workspace-team <team-id>] [--json [fields]]\n\nCreate or resume the selected Agent App. Secrets come from hidden terminal input or one local credentials file with mode 0600.\n\nJSON FIELDS\n" + strings.Join(fields, "\n")
+	}
 	if strings.HasPrefix(kind, "ops-runner-") {
 		action := strings.TrimPrefix(kind, "ops-runner-")
 		if action == "revoke" {
@@ -978,22 +1005,12 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 	} else if area == "slack" {
 		path = "/api/projects/" + url.PathEscape(project) + "/slack-connections"
 		collection = action == "list"
-		if action == "setup" || action == "status" {
-			path = "/api/slack-manager/" + action
-			if action == "status" {
-				q := url.Values{}
-				workspace := strings.TrimSpace(argValue(cmd.args, "workspace-team", ""))
-				if workspace == "" {
-					writeError(deps.Stderr, errors.New("--workspace-team is required for slack status"))
-					return ExitUsage
-				}
-				q.Set("workspaceTeamId", workspace)
-				path += "?" + q.Encode()
-			}
-		} else if action == "install-agent" || action == "create" {
-			path = "/api/projects/" + url.PathEscape(project) + "/slack-manager/install-agent"
-			method = http.MethodPost
-			body = map[string]any{"agent": argValue(cmd.args, "agent", "")}
+		if action == "setup" {
+			return runSlackSetup(ctx, deps, c, cmd)
+		} else if action == "status" {
+			return runSlackStatus(ctx, deps, c, cmd)
+		} else if action == "install-agent" {
+			return runSlackInstallAgent(ctx, deps, c, cmd, project)
 		} else if action == "message-send" {
 			path = "/api/projects/" + url.PathEscape(project) + "/slack-connections/reply"
 			method = http.MethodPost

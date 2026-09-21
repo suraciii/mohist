@@ -30,7 +30,7 @@ public sealed class OperatorCredentialMigrationSpecs(DefaultMohistIntegrationFix
     {
         using var response = await SendLegacyOnlyAsync(
             HttpMethod.Get,
-            "/api/slack-manager/status?workspaceTeamId=T_MIGRATE");
+            "/api/slack-manager/setup/progress");
 
         AssertUnauthorized(response);
     }

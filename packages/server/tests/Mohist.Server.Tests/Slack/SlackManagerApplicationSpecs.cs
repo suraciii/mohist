@@ -26,87 +26,21 @@ public sealed class SlackManagerApplicationSpecs : IClassFixture<DefaultMohistIn
     public SlackManagerApplicationSpecs(DefaultMohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
-    public async Task Create_selects_active_agent_persists_manager_records_and_is_idempotent()
+    public async Task Legacy_manual_manager_app_route_is_removed()
     {
         var seeded = await SeedAgentAsync(AgentStatus.Active);
-        await SetupManagerAsync("T_MANAGER_CREATE");
-        var request = new
-        {
-            agentId = seeded.Agent.Id,
-            workspaceTeamId = "T_MANAGER_CREATE",
-            accessPolicy = AccessPolicyKind.Allowlist,
-            ownerSlackUserId = "U_OWNER",
-            transportKind = "socket",
-        };
-
-        using var firstResponse = await _fixture.Client.PostAsJsonAsync(ManagerPath(seeded.ProjectId, "/apps"), request);
-        Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
-        var first = await ReadDataAsync(firstResponse);
-        var connectionId = first.GetProperty("connection").GetProperty("id").GetString()!;
-        var childId = first.GetProperty("managedApp").GetProperty("id").GetString()!;
-        Assert.Equal("release_helper", first.GetProperty("preview").GetProperty("botName").GetString());
-        Assert.Equal("not_created", first.GetProperty("managedApp").GetProperty("appLifecycle").GetString());
-        Assert.Equal("create_agent_app", first.GetProperty("managedApp").GetProperty("nextAction").GetString());
-
-        using var secondResponse = await _fixture.Client.PostAsJsonAsync(ManagerPath(seeded.ProjectId, "/apps"), request);
-        Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
-        var second = await ReadDataAsync(secondResponse);
-        Assert.False(second.GetProperty("created").GetBoolean());
-        Assert.Equal(connectionId, second.GetProperty("connection").GetProperty("id").GetString());
-        Assert.Equal(childId, second.GetProperty("managedApp").GetProperty("id").GetString());
-
-        using var listResponse = await _fixture.Client.GetAsync(
-            $"{ManagerPath(seeded.ProjectId, "/agents")}?workspaceTeamId=T_MANAGER_CREATE");
-        listResponse.EnsureSuccessStatusCode();
-        var list = await ReadDataAsync(listResponse);
-        var option = Assert.Single(list.EnumerateArray());
-        Assert.Equal(seeded.Agent.Id, option.GetProperty("agentId").GetString());
-        Assert.Equal(childId, option.GetProperty("managedApp").GetProperty("id").GetString());
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Single(await db.SlackWorkspaceEnrollments.Where(row => row.WorkspaceTeamId == "T_MANAGER_CREATE").ToListAsync());
-        var connection = await db.AgentConnections.SingleAsync(row => row.Id == connectionId);
-        Assert.Equal(AccessPolicyKind.Allowlist, connection.AccessPolicy);
-        Assert.Equal("T_MANAGER_CREATE", connection.WorkspaceTeamId);
-        var child = await db.ManagedSlackAgentApps.SingleAsync(row => row.Id == childId);
-        Assert.Equal(connectionId, child.AgentConnectionId);
-        Assert.NotEmpty(child.DesiredManifestHash);
-        Assert.Equal(seeded.Agent.Id, (await db.Agents.SingleAsync(row => row.Id == seeded.Agent.Id)).Id);
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            ManagerPath(seeded.ProjectId, "/apps"), new { agentId = seeded.Agent.Id });
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
-    public async Task Remove_binding_keeps_child_facts_and_permanent_delete_requires_explicit_confirmation()
+    public async Task Legacy_manual_manager_app_route_cannot_create_a_binding()
     {
         var seeded = await SeedAgentAsync(AgentStatus.Active);
-        await SetupManagerAsync("T_MANAGER_REMOVE");
-        using var createResponse = await _fixture.Client.PostAsJsonAsync(ManagerPath(seeded.ProjectId, "/apps"), new
-        {
-            agentId = seeded.Agent.Id,
-            workspaceTeamId = "T_MANAGER_REMOVE",
-        });
-        var created = await ReadDataAsync(createResponse);
-        var connectionId = created.GetProperty("connection").GetProperty("id").GetString()!;
-        var childId = created.GetProperty("managedApp").GetProperty("id").GetString()!;
-
-        using var removeResponse = await _fixture.Client.PostAsJsonAsync(
-            ManagerPath(seeded.ProjectId, $"/connections/{connectionId}/remove-binding"), new { });
-        Assert.Equal(HttpStatusCode.OK, removeResponse.StatusCode);
-        var removed = await ReadDataAsync(removeResponse);
-        Assert.True(removed.GetProperty("removedBinding").GetBoolean());
-        Assert.Equal(childId, removed.GetProperty("managedApp").GetProperty("id").GetString());
-
-        using var unconfirmedResponse = await _fixture.Client.PostAsJsonAsync(
-            ManagerPath(seeded.ProjectId, $"/connections/{connectionId}/permanent-delete"), new { });
-        Assert.Equal(HttpStatusCode.Conflict, unconfirmedResponse.StatusCode);
-        using (var error = JsonDocument.Parse(await unconfirmedResponse.Content.ReadAsStringAsync()))
-            Assert.Equal("confirmation_required", error.RootElement.GetProperty("code").GetString());
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.NotNull(await db.AgentConnections.SingleAsync(row => row.Id == connectionId && row.DeletedAt != null));
-        Assert.NotNull(await db.ManagedSlackAgentApps.SingleAsync(row => row.Id == childId && row.DeletedAt == null));
-        Assert.NotNull(await db.Agents.SingleAsync(row => row.Id == seeded.Agent.Id));
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            ManagerPath(seeded.ProjectId, "/apps"), new { agentId = seeded.Agent.Id });
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     private async Task<SeededAgent> SeedAgentAsync(string status)
@@ -144,19 +78,6 @@ public sealed class SlackManagerApplicationSpecs : IClassFixture<DefaultMohistIn
 
     private static string ManagerPath(string projectId, string suffix = "") =>
         $"/api/projects/{projectId}/slack-manager{suffix}";
-
-    private async Task SetupManagerAsync(string workspaceTeamId)
-    {
-        using var response = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/setup", new
-        {
-            workspaceTeamId,
-            managerAppId = $"A_MANAGER_{workspaceTeamId}",
-            managerBotUserId = $"U_MANAGER_{workspaceTeamId}",
-            transportKind = SlackManagerTransportKind.Socket,
-            readiness = SlackManagerReadiness.Ready,
-        });
-        response.EnsureSuccessStatusCode();
-    }
 
     private static async Task<JsonElement> ReadDataAsync(HttpResponseMessage response)
     {

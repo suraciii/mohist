@@ -63,37 +63,34 @@ export interface AgentConnectionDto {
   deletedAt: string | null
 }
 
-export interface AgentConnectionCreateRequest {
-  agentId: string
-  workspaceTeamId?: string
-  appId?: string
-  botUserId?: string
-  botName?: string | null
-  avatarHash?: string | null
-}
-
-export interface AgentConnectionCreateResponse {
-  connection: AgentConnectionDto
-  botName: string
-  appDescription: string
-  slackAppCreationReference: string
-}
-
 export interface AgentConnectionDetailResponse {
   connection: AgentConnectionDto
-  botName: string
-  appDescription: string
-  slackAppCreationReference: string
   managedApp?: ManagedSlackAppProjection | null
 }
 
+/** State the Web setup surface can act on; internal setup identifiers are not part of this contract. */
+export interface ManagedSlackSetupProgress {
+  connection: Pick<
+    AgentConnectionDto,
+    'id' | 'projectId' | 'agentId' | 'setupProgress' | 'connectionHealth' | 'healthReason'
+  >
+  agentApp: {
+    appLifecycle: string
+    authorization: string
+    runtimeCredentialValidationState: string
+    bindingState: string
+    manifestState: string
+    transportReadiness: string
+    nextAction: string
+    installUrl: string | null
+    unknownOutcome: string | null
+    errorClass: string | null
+  }
+  nextAction: string
+  errorClass: string | null
+}
+
 export interface ManagedSlackAppProjection {
-  id: string
-  enrollmentId: string
-  agentConnectionId: string
-  workspaceTeamId: string
-  appId: string
-  botUserId: string
   appLifecycle: string
   authorization: string
   manifestState: string
@@ -101,14 +98,10 @@ export interface ManagedSlackAppProjection {
   transportReadiness: string
   nextAction: string
   bindingState: string
+  installUrl: string | null
   unknownOutcome: string | null
   errorClass: string | null
   deletedAt: string | null
-}
-
-export interface AgentConnectionConfigureRequest {
-  appToken: string
-  botToken: string
 }
 
 export interface AgentConnectionClaimOwnerResponse {

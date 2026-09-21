@@ -25,6 +25,7 @@ public sealed class SlackInstallAgentSpecs
     private const string ProjectId = "project-install";
     private const string AgentId = "agent-review-bot";
     private const string TeamId = "T_INSTALL_AGENT";
+    private const string OtherTeamId = "T_OTHER_INSTALL";
 
     private readonly FakeTimeProvider _time = new(FixedNow);
     private readonly TestSqliteDatabase _database = TestSqliteDatabase.CreateMigrated();
@@ -60,7 +61,7 @@ public sealed class SlackInstallAgentSpecs
         await SeedAgentAsync(AgentStatus.Active);
         await SeedEnrollmentAsync("enrollment-1");
 
-        var first = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        var first = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
 
         Assert.Equal(SlackAppLifecycle.Created, first.AgentApp.AppLifecycle);
         Assert.Equal(1, _apps.CreateCalls);
@@ -71,18 +72,123 @@ public sealed class SlackInstallAgentSpecs
         var appId = first.AgentApp.AppId;
         Assert.False(string.IsNullOrWhiteSpace(appId));
         Assert.Equal(SlackRuntimeCredentialValidationState.NotProvided, first.AgentApp.RuntimeCredentialValidationState);
-        Assert.Equal(SlackAgentAppNextAction.ProvideCredentials, first.NextAction);
+        Assert.Equal(SlackManifestState.Applied, first.AgentApp.ManifestState);
+        Assert.Equal(SlackAuthorizationState.AwaitingUser, first.AgentApp.Authorization);
+        Assert.Equal(SlackAgentAppNextAction.AuthorizeAgentApp, first.NextAction);
 
         Assert.True(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(first.AgentApp.Id, SecretKind.ClientSecret)));
         Assert.True(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(first.AgentApp.Id, SecretKind.SigningSecret)));
 
-        var rerun = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        var rerun = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
 
         Assert.Equal(first.Connection.Id, rerun.Connection.Id);
         Assert.Equal(first.AgentApp.Id, rerun.AgentApp.Id);
         Assert.Equal(first.InstallUrl, rerun.InstallUrl);
         Assert.Equal(1, _apps.CreateCalls);
-        Assert.Equal(SlackAgentAppNextAction.ProvideCredentials, rerun.NextAction);
+        Assert.Equal(SlackAgentAppNextAction.AuthorizeAgentApp, rerun.NextAction);
+    }
+
+    [Fact]
+    public async Task A_selected_workspace_decides_the_install_target_over_the_agents_first_connection()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1", TeamId);
+        await SeedEnrollmentAsync("enrollment-2", OtherTeamId);
+
+        var installed = await _service.InstallAsync(ProjectId, AgentId, OtherTeamId);
+
+        Assert.Equal(OtherTeamId, installed.Connection.WorkspaceTeamId);
+        await using (var db = _factory.CreateDbContext())
+        {
+            Assert.Equal(1, await db.AgentConnections.CountAsync(item => item.AgentId == AgentId));
+        }
+    }
+
+    [Fact]
+    public async Task A_selector_naming_no_active_enrollment_installs_nothing()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1");
+
+        var conflict = await Assert.ThrowsAsync<SlackManagerConflictException>(
+            () => _service.InstallAsync(ProjectId, AgentId, "T_MISSING"));
+
+        Assert.Equal("workspace_not_enrolled", conflict.Code);
+        await using (var db = _factory.CreateDbContext())
+        {
+            Assert.Equal(0, await db.AgentConnections.CountAsync(item => item.AgentId == AgentId));
+        }
+    }
+
+    [Fact]
+    public async Task Several_enrollments_and_no_selector_report_the_choices_instead_of_the_first_record()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1", TeamId);
+        await SeedEnrollmentAsync("enrollment-2", OtherTeamId);
+
+        var conflict = await Assert.ThrowsAsync<SlackManagerConflictException>(
+            () => _service.InstallAsync(ProjectId, AgentId));
+
+        Assert.Equal("workspace_selection_required", conflict.Code);
+        var choices = Assert.IsAssignableFrom<List<SlackSetupWorkspaceChoice>>(conflict.Details);
+        Assert.Equal(new[] { TeamId, OtherTeamId }, choices.Select(choice => choice.TeamId));
+        await using (var db = _factory.CreateDbContext())
+        {
+            Assert.Equal(0, await db.AgentConnections.CountAsync(item => item.AgentId == AgentId));
+        }
+    }
+
+    [Fact]
+    public async Task A_selected_workspace_rejects_a_pair_verified_in_another_workspace()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1", TeamId);
+        await SeedEnrollmentAsync("enrollment-2", OtherTeamId);
+        var selected = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+        var other = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-2");
+        _botIdentity.Result = new SlackBotIdentityVerificationResult(
+            true,
+            WorkspaceTeamId: OtherTeamId,
+            BotUserId: "U_OTHER_BOT",
+            AppId: other.AgentApp.AppId,
+            GrantedScopes: new HashSet<string>(AgentAppBotScopes));
+
+        var rejected = await _service.ProvisionCredentialsAsync(
+            ProjectId, AgentId, "xoxb-other", "xapp-other", TeamId);
+
+        Assert.False(rejected.Accepted);
+        Assert.Equal("identity_mismatch", rejected.ErrorClass);
+        Assert.Equal(
+            SlackRuntimeCredentialValidationState.NotProvided, await ReadAgentAppStateAsync(selected.AgentApp.Id));
+        Assert.Equal(
+            SlackRuntimeCredentialValidationState.NotProvided, await ReadAgentAppStateAsync(other.AgentApp.Id));
+        Assert.False(HasCandidateSecretsAsync(selected.AgentApp.Id));
+        Assert.False(HasCandidateSecretsAsync(other.AgentApp.Id));
+    }
+
+    [Fact]
+    public async Task A_selected_workspace_stages_a_pair_verified_in_that_workspace()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1", TeamId);
+        await SeedEnrollmentAsync("enrollment-2", OtherTeamId);
+        await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+        var other = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-2");
+        _botIdentity.Result = new SlackBotIdentityVerificationResult(
+            true,
+            WorkspaceTeamId: OtherTeamId,
+            BotUserId: "U_OTHER_BOT",
+            AppId: other.AgentApp.AppId,
+            GrantedScopes: new HashSet<string>(AgentAppBotScopes));
+
+        var staged = await _service.ProvisionCredentialsAsync(
+            ProjectId, AgentId, "xoxb-other", "xapp-other", OtherTeamId);
+
+        Assert.True(staged.Accepted);
+        Assert.Equal(
+            SlackRuntimeCredentialValidationState.Candidate, await ReadAgentAppStateAsync(other.AgentApp.Id));
+        Assert.Equal("xoxb-other", ReadSecretAsync(other.AgentApp.Id, SecretKind.CandidateBotToken));
     }
 
     [Fact]
@@ -91,7 +197,7 @@ public sealed class SlackInstallAgentSpecs
         await SeedAgentAsync(AgentStatus.Active, name: "reviewbot");
         await SeedEnrollmentAsync("enrollment-1");
 
-        var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
 
         Assert.NotNull(_apps.LastCreateManifestJson);
         using var document = JsonDocument.Parse(_apps.LastCreateManifestJson!);
@@ -108,7 +214,7 @@ public sealed class SlackInstallAgentSpecs
             hashBefore = (await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == installed.AgentApp.Id)).DesiredManifestHash;
         }
 
-        await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
 
         await using (var db = _factory.CreateDbContext())
         {
@@ -124,7 +230,7 @@ public sealed class SlackInstallAgentSpecs
         await SeedAgentAsync(AgentStatus.Active, "Reviews release pull requests.", "reviewbot");
         await SeedEnrollmentAsync("enrollment-1");
 
-        await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
 
         Assert.NotNull(_apps.LastCreateManifestJson);
         using var document = JsonDocument.Parse(_apps.LastCreateManifestJson!);
@@ -135,11 +241,11 @@ public sealed class SlackInstallAgentSpecs
     }
 
     [Fact]
-    public async Task Unknown_create_never_replays_create_on_rerun()
+    public async Task Rerun_reconciles_an_unknown_create_without_replaying_create()
     {
         await SeedAgentAsync(AgentStatus.Active);
         await SeedEnrollmentAsync("enrollment-1");
-        var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
         await using (var db = _factory.CreateDbContext())
         {
             var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == installed.AgentApp.Id);
@@ -148,10 +254,11 @@ public sealed class SlackInstallAgentSpecs
             await db.SaveChangesAsync();
         }
 
-        var rerun = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        var rerun = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
 
-        Assert.Equal(SlackAppLifecycle.CreateUnknown, rerun.AgentApp.AppLifecycle);
-        Assert.Equal(SlackAgentAppNextAction.ReconcileCreate, rerun.NextAction);
+        Assert.Equal(SlackAppLifecycle.Created, rerun.AgentApp.AppLifecycle);
+        Assert.Equal(SlackAgentAppNextAction.AuthorizeAgentApp, rerun.NextAction);
+        Assert.Equal(installed.InstallUrl, rerun.InstallUrl);
         Assert.Equal(1, _apps.CreateCalls);
         Assert.Equal(installed.AgentApp.Id, rerun.AgentApp.Id);
     }
@@ -161,7 +268,7 @@ public sealed class SlackInstallAgentSpecs
     {
         await SeedAgentAsync(AgentStatus.Active);
         await SeedEnrollmentAsync("enrollment-1");
-        var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
         var agentAppId = installed.AgentApp.Id;
 
         _botIdentity.Result = new SlackBotIdentityVerificationResult(false, ErrorClass: "invalid_auth");
@@ -182,7 +289,7 @@ public sealed class SlackInstallAgentSpecs
     {
         await SeedAgentAsync(AgentStatus.Active);
         await SeedEnrollmentAsync("enrollment-1");
-        var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
         var agentAppId = installed.AgentApp.Id;
         _botIdentity.Result = VerifiedAgentBot(installed.AgentApp.AppId);
 
@@ -387,7 +494,7 @@ public sealed class SlackInstallAgentSpecs
     {
         await SeedAgentAsync(AgentStatus.Active);
         await SeedEnrollmentAsync("enrollment-1");
-        var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
         var agentAppId = installed.AgentApp.Id;
         var incomplete = AgentAppBotScopes.Where(scope => scope != "chat:write").ToHashSet();
 
@@ -417,7 +524,7 @@ public sealed class SlackInstallAgentSpecs
     {
         await SeedAgentAsync(AgentStatus.Active);
         await SeedEnrollmentAsync("enrollment-1");
-        var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
         var agentAppId = installed.AgentApp.Id;
         var superset = new HashSet<string>(AgentAppBotScopes) { "files:read" };
 
@@ -441,7 +548,7 @@ public sealed class SlackInstallAgentSpecs
     {
         await SeedAgentAsync(AgentStatus.Active);
         await SeedEnrollmentAsync("enrollment-1");
-        var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
         var agentAppId = installed.AgentApp.Id;
         var incomplete = AgentAppBotScopes.Where(scope => scope != "im:history").ToHashSet();
 
@@ -473,7 +580,7 @@ public sealed class SlackInstallAgentSpecs
     {
         await SeedAgentAsync(AgentStatus.Active);
         await SeedEnrollmentAsync("enrollment-1");
-        var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
         _botIdentity.Result = VerifiedAgentBot(installed.AgentApp.AppId);
         var staged = await _service.ProvisionCredentialsAsync(installed.AgentApp.Id, botToken, appToken);
         Assert.True(staged.Accepted);
@@ -539,13 +646,13 @@ public sealed class SlackInstallAgentSpecs
         await db.SaveChangesAsync();
     }
 
-    private async Task SeedEnrollmentAsync(string enrollmentId)
+    private async Task SeedEnrollmentAsync(string enrollmentId, string? teamId = null)
     {
         await using var db = _factory.CreateDbContext();
         db.SlackWorkspaceEnrollments.Add(new SlackWorkspaceEnrollmentRow
         {
             Id = enrollmentId,
-            WorkspaceTeamId = TeamId,
+            WorkspaceTeamId = teamId ?? TeamId,
             Lifecycle = SlackEnrollmentLifecycle.Active,
             ManagerCapability = SlackManagerCapability.Available,
             PlanCode = "pro",

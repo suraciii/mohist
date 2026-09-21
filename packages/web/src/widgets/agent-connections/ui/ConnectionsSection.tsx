@@ -5,8 +5,9 @@ import { Button } from '@/shared/ui/components/button'
 import { useProjectPath } from '../../../entities/project'
 import type { AgentInfo } from '../../../entities/agent'
 import {
+  setupProgressLabel,
   useAgentConnections,
-  useCreateAgentConnection,
+  useInstallManagedSlackAgent,
 } from '../../../entities/agent-connection'
 import type { AgentConnectionDto } from '../../../entities/agent-connection'
 
@@ -17,22 +18,20 @@ interface Props {
 
 export interface ConnectionOperations {
   connectionsQuery: Pick<ReturnType<typeof useAgentConnections>, 'data' | 'isLoading'>
-  createMutation: Pick<ReturnType<typeof useCreateAgentConnection>, 'mutate' | 'isPending'>
+  installMutation: Pick<ReturnType<typeof useInstallManagedSlackAgent>, 'mutate' | 'isPending'>
 }
 
 export type ConnectionOperationsHook = (agentRef: string) => ConnectionOperations
 
 const useDefaultOperations: ConnectionOperationsHook = () => ({
   connectionsQuery: useAgentConnections(),
-  createMutation: useCreateAgentConnection(),
+  installMutation: useInstallManagedSlackAgent(),
 })
 
-function label(value: string | null | undefined): string {
-  if (!value) return 'Unknown'
-  return value.replaceAll('_', ' ')
-}
-
-function describeConnectionState(connection: AgentConnectionDto): { label: string; tone: 'muted' | 'amber' | 'emerald' } {
+function describeConnectionState(connection: AgentConnectionDto): {
+  label: string
+  tone: 'muted' | 'amber' | 'emerald'
+} {
   if (connection.setupProgress !== 'complete') {
     return { label: 'setup incomplete', tone: 'amber' }
   }
@@ -53,10 +52,7 @@ function StateBadge({ tone, label: text }: { tone: 'muted' | 'amber' | 'emerald'
         ? 'text-[10px] px-1.5 py-0 h-4 text-amber-700 border-amber-300'
         : 'text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30'
   return (
-    <span
-      data-state={tone}
-      className={`inline-flex items-center rounded border bg-background ${className}`}
-    >
+    <span data-state={tone} className={`inline-flex items-center rounded border bg-background ${className}`}>
       {text}
     </span>
   )
@@ -64,7 +60,7 @@ function StateBadge({ tone, label: text }: { tone: 'muted' | 'amber' | 'emerald'
 
 export function ConnectionsSection({ agent, operationsHook = useDefaultOperations }: Props) {
   const isArchived = agent.status === 'archived'
-  const { connectionsQuery, createMutation } = operationsHook(agent.id)
+  const { connectionsQuery, installMutation } = operationsHook(agent.id)
   const { data: allConnections = [], isLoading } = connectionsQuery
   const toProjectPath = useProjectPath()
   const navigate = useNavigate()
@@ -74,16 +70,13 @@ export function ConnectionsSection({ agent, operationsHook = useDefaultOperation
     [allConnections, agent.id],
   )
 
-  function handleAdd() {
+  function handleConnect() {
     if (isArchived) return
-    createMutation.mutate(
-      { agentId: agent.id },
-      {
-        onSuccess: (created) => {
-          navigate(toProjectPath(`/connections/${encodeURIComponent(created.connection.id)}`))
-        },
+    installMutation.mutate(agent.id, {
+      onSuccess: (progress) => {
+        navigate(toProjectPath(`/connections/${encodeURIComponent(progress.connection.id)}`))
       },
-    )
+    })
   }
 
   return (
@@ -93,13 +86,13 @@ export function ConnectionsSection({ agent, operationsHook = useDefaultOperation
         <Button
           size="sm"
           variant="outline"
-          onClick={handleAdd}
+          onClick={handleConnect}
           data-testid="agent-connections-add-slack"
-          disabled={isArchived || createMutation.isPending}
+          disabled={isArchived || installMutation.isPending}
           aria-label="Add Slack connection"
         >
-          {createMutation.isPending ? <Loader2Icon className="size-4 animate-spin" /> : <PlusIcon />}
-          Add Slack
+          {installMutation.isPending ? <Loader2Icon className="size-4 animate-spin" /> : <PlusIcon />}
+          Connect Slack
         </Button>
       </div>
 
@@ -108,8 +101,7 @@ export function ConnectionsSection({ agent, operationsHook = useDefaultOperation
           data-testid="agent-connections-archived-notice"
           className="rounded-md bg-muted/60 border border-border px-3 py-2 text-xs text-muted-foreground mb-3"
         >
-          Archived agents cannot receive new Slack Connections. Their existing Connections are
-          also inactive.
+          Archived agents cannot receive new Slack Connections. Their existing Connections are also inactive.
         </div>
       )}
 
@@ -118,11 +110,12 @@ export function ConnectionsSection({ agent, operationsHook = useDefaultOperation
           Loading connections...
         </div>
       ) : connections.length === 0 ? (
-        <div
-          data-testid="agent-connections-empty"
-          className="text-xs text-muted-foreground py-4 text-center"
-        >
-          No Connections yet. Add Slack to start setup.
+        <div data-testid="agent-connections-empty" className="space-y-2 py-4 text-center text-xs text-muted-foreground">
+          <p>No Connections yet. Connect Slack to create this Agent&apos;s managed App.</p>
+          <p>
+            First workspace? Run <code className="rounded bg-muted px-1 py-0.5">mo slack setup</code> once on the Mohist
+            host.
+          </p>
         </div>
       ) : (
         <ul className="space-y-2" data-testid="agent-connections-list">
@@ -160,7 +153,7 @@ export function ConnectionsSection({ agent, operationsHook = useDefaultOperation
                   className="mt-1 text-xs text-muted-foreground italic"
                   data-testid={`agent-connection-row-${connection.id}-setup`}
                 >
-                  Setup: {label(connection.setupProgress)}
+                  Setup: {setupProgressLabel(connection.setupProgress)}
                 </div>
               </li>
             )

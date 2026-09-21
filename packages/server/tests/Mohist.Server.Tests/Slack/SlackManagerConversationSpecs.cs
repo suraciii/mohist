@@ -259,16 +259,14 @@ public sealed class SlackManagerConversationSpecs : IClassFixture<DefaultMohistI
 
     private async Task<string> SetupAndClaimAsync(string team, string appId, string owner)
     {
-        using var setupResponse = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/setup", new
-        {
-            workspaceTeamId = team,
-            managerAppId = appId,
-            managerBotUserId = $"U_MANAGER_BOT_{team}",
-        });
-        setupResponse.EnsureSuccessStatusCode();
-        var claimCode = (await ReadDataAsync(setupResponse)).GetProperty("claimCode").GetString()!;
-        var enrollmentId = await SlackRuntimeLeaseTestSupport.ProvisionVerifiedManagerAsync(
-            _fixture, team, $"xapp-manager-{team}", $"xoxb-manager-{team}");
+        var (enrollmentId, claimCode) = await SlackRuntimeLeaseTestSupport.EnsureVerifiedManagerAsync(
+            _fixture,
+            team,
+            appId,
+            $"U_MANAGER_BOT_{team}",
+            $"xapp-manager-{team}",
+            $"xoxb-manager-{team}",
+            issueClaim: true);
         _managerLeases[team] = await SlackRuntimeLeaseTestSupport.AcquireManagerLeaseAsync(
             _fixture, enrollmentId, team);
         var claimed = await SendManagerMessageAsync(appId, team, owner, "1710000000.000001", $"claim {claimCode}");
