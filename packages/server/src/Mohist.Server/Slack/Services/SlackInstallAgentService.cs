@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Slack;
@@ -161,7 +162,21 @@ public sealed class SlackInstallAgentService : IScopedService
 
         var agentApp = await _agentApps.GetByConnectionAsync(connection.Id, ct);
         if (agentApp is null)
-            agentApp = await CreateAgentAppAsync(connection, agent, enrollment, ct);
+        {
+            try
+            {
+                agentApp = await CreateAgentAppAsync(connection, agent, enrollment, ct);
+            }
+            catch (DbUpdateException)
+            {
+                // A concurrent rerun already staged this Agent App. The unique
+                // Connection binding is the arbiter, so the second guide resumes
+                // that record instead of failing with a constraint violation.
+                agentApp = await _agentApps.GetByConnectionAsync(connection.Id, ct)
+                    ?? throw new InvalidOperationException(
+                        "The Agent App was not found after a concurrent install.");
+            }
+        }
 
         agentApp = await EnsureDesiredManifestAsync(agentApp, connection, agent, ct);
         return await AdvanceAsync(connection, agentApp, agent, ct);
