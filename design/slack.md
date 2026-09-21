@@ -626,6 +626,17 @@ concurrent redelivery from overwriting a newer Session, and the follow-up's
 stable Slack idempotency key prevents duplicate SessionInput records after the
 migration. Different Mohist Servers never share thread routing.
 
+Accepting a DM follow-up requires a Runtime Session binding, with one bounded
+exemption: while a launch turn is still in flight — the launch dispatched but
+its Runner binding has not appeared yet — a follow-up may be accepted and
+ordered behind it. That exemption keys on the turn's current non-terminal state,
+never on history: once the initial launch turn reaches a terminal state
+(Completed, Failed, Cancelled), a missing binding fails at accept time with
+`RuntimeSessionMissing`, and the message takes the existing DM rejection path
+(one readable rejection reply, inbox row audited and dispatched). This keeps a
+Session whose runtime was reset or lost from parking its follow-ups in an
+invisible queue with no user feedback, no reply, and no dispatch.
+
 ## Reliability Contract
 
 Slack-to-adapter transport is externally at-least-once; the system cannot

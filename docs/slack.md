@@ -440,6 +440,12 @@ on the same Runner and logical AgentSession. Mohist never automatically replays
 input while execution is active or its effects are unknown. Those states need
 explicit reconciliation. `new task` is an intentional command, never recovery.
 
+When the bound Session's runtime is unusable — the Session was reset, or its
+physical Runtime Session is lost and cannot be recovered on the same Runner —
+the Bot never drops the message silently. It replies that this Session cannot
+continue automatically: reconcile or reset the Session in Mohist and send the
+message again, or begin the DM with `new task` to start a fresh Session.
+
 One thread can host several Agents:
 
 - One bound Agent: an unmentioned reply continues its Session.
