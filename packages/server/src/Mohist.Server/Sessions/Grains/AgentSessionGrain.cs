@@ -611,7 +611,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         }
 
         var session = await GetRequiredAsync();
-        if (!command.AllowPendingInitialLaunch || !HasInitialLaunch(session))
+        if (!command.AllowPendingInitialLaunch || !HasPendingInitialLaunch(session))
             EnsureRuntimeSessionPresent(session);
         if (session.Status.PendingReset is { } recovery)
         {
