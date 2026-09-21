@@ -1,67 +1,32 @@
 # Philosophy of Software Development
 
-Software development changes something in the world: what people can do,
-which work they need to perform, and the conditions under which they do it.
-AI changes the means available for that activity. Understanding its role
-requires examining the activity, the purposes it serves, and the relations
-through which people carry it out.
+Software development turns human purposes into executable systems. It
+changes what people can do and the conditions under which they work.
+Its results also become the materials and constraints of later development.
 
-This philosophy informs the [Product Vision](vision.md). It begins with
-software development as a practical activity, then examines purpose, tools,
-cooperation, evidence, and the conditions left for future work. Mohist's
-software factory is a product response to these questions. It is not a
-premise from which all software development must be understood.
-
-## Development begins in practical conditions
-
-People develop software within existing conditions: needs, available
-knowledge, prior software, technical limits, and the circumstances of its
-use. An idea expresses a possible change to those conditions. It cannot
-establish by itself that the change is feasible or useful.
-
-In *Theses on Feuerbach*, Marx criticizes an understanding of reality that
-treats it only as an object of contemplation, rather than also as human
-activity. His second thesis connects the truth of thought to practice:
-
-> The question whether objective truth can be attributed to human thinking is not a question of theory but is a practical question.[^theses]
-
-A description, design, or explanation must remain open to what building and
-using it reveals. Internal agreement about a design does not establish its
-practical value.
-
-The organization of an argument also needs a basis in its subject. Marx
-distinguishes inquiry from presentation:
-
-> Of course the method of presentation must differ in form from that of inquiry. The latter has to appropriate the material in detail, to analyse its different forms of development, to trace out their inner connexion. Only after this work is done, can the actual movement be adequately described.[^afterword]
-
-In *Capital*, the analysis moves through forms and relations such as the
-commodity, exchange, money, capital, production, cooperation, machinery, and
-accumulation. The *Theses* develop a position through connected criticisms
-of contemplation, isolated thought, and the abstract individual. Neither
-work supplies a ready-made classification for AI development. Their value
-here lies in how they direct attention to activity and its relations.
-
-For software development, this means studying what people and Agents
-actually do, what changes as a result, and where expectations fail. A neat
-conceptual structure remains answerable to those observations.
+Development connects intentions, means, and results. AI changes the means
+available and the distribution of work. Understanding that change requires
+examining how purposes guide activity, how tools and cooperation reshape it,
+and how its results are judged and carried forward.
 
 ## Purpose guides activity and develops through it
 
 A person's idea expresses an intention to create something or change what
 already exists. Development gives that intention a concrete form. The
-ability to anticipate a result and direct activity toward it is central to
-Marx's account of the labor process.
+purpose must continue to guide the work as people and AI agents make decisions
+about requirements, design, and implementation.
 
 > A spider conducts operations that resemble those of a weaver, and a bee puts to shame many an architect in the construction of her cells. But what distinguishes the worst architect from the best of bees is this, that the architect raises his structure in imagination before he erects it in reality. At the end of every labour-process, we get a result that already existed in the imagination of the labourer at its commencement. He not only effects a change of form in the material on which he works, but he also realises a purpose of his own that gives the law to his modus operandi, and to which he must subordinate his will. And this subordination is no mere momentary act. Besides the exertion of the bodily organs, the process demands that, during the whole operation, the workman’s will be steadily in consonance with his purpose. This means close attention. The less he is attracted by the nature of the work, and the mode in which it is carried on, and the less, therefore, he enjoys it as something which gives play to his bodily and mental powers, the more close his attention is forced to be.[^labor]
 
-The comparison concerns purposeful labor;
-it does not depend on the architect being more skillful than the bee. The
-passage connects an anticipated result, a purpose that governs activity,
-and the will and attention needed to sustain that relation.
+Writing down a goal does not ensure that later decisions still serve it.
+Each handoff can preserve the assigned task while losing the reason for it.
+A feature can satisfy its local specification yet add behavior that the
+person never wanted. Keeping the connection to the goal is work that must
+continue throughout delivery.
 
-An intention, its expression, an Agent's interpretation, and a finished
+An intention, its expression, an agent's interpretation, and a finished
 result can differ. A brief instruction may leave important matters
-unexpressed. An Agent may turn an assumption into a detailed plan without
+unexpressed. An agent may turn an assumption into a detailed plan without
 establishing that the assumption matches the person's intention.
 
 Review and correction continue the same purposeful activity. A person
@@ -80,15 +45,16 @@ This keeps human judgment within the activity it judges:
 > The materialist doctrine that men are products of circumstances and upbringing, and that, therefore, changed men are products of changed circumstances and changed upbringing, forgets that it is men who change circumstances and that the educator must himself be educated.[^theses]
 
 A person can retain authority over a goal without being infallible about it.
-The product commitment drawn here is that people can direct and revise the
-purposes of delegated work. It is not a claim that human judgment is exempt
-from evidence or that Marx's account settles AI capabilities or consciousness.
+An early result can reveal a missing need or an unnecessary feature. The
+person needs to be able to revise the goal and distinguish that decision
+from asking an agent to correct its implementation.
 
 ## Tools extend capacity and change the activity
 
-A purpose requires means of realization. Marx identifies purposeful
-activity, its subject, and its instruments as the elementary factors of the
-labor process:
+In software development, existing code, behavior, and data are objects of
+work. Editors, compilers, tests, and AI agents are means through which people
+change them. Improving those means changes which activities people perform
+and which constraints limit the whole effort.
 
 > An instrument of labour is a thing, or a complex of things, which the labourer interposes between himself and the subject of his labour, and which serves as the conductor of his activity.[^labor]
 
@@ -97,7 +63,7 @@ results. Delegating these activities changes which work a person performs
 and which knowledge they need. It can reduce the cost of implementation
 while increasing the volume of material that needs interpretation or review.
 
-Tools also affect the choices people can see. An Agent's proposal may help
+Tools also affect the choices people can see. An agent's proposal may help
 a person form an idea, rather than merely carry out a complete instruction.
 That contribution should remain visible as a proposal. Greater capability
 does not by itself determine who should decide which purposes to pursue.
@@ -114,23 +80,25 @@ correct the result. These questions remain relevant as models improve.
 
 ## Cooperation must preserve the relation to the whole
 
-Tools participate in organized work. Dividing work among people and Agents
+Tools participate in organized work. Dividing work among people and AI agents
 introduces relationships between local assignments, shared knowledge,
 decisions, and the overall purpose. A collection of successful local tasks
 can still produce an unsuccessful whole.
 
-The *Theses* challenge the idea of an isolated individual:
+The person requesting a change, the person implementing it, and the person
+using it can encounter different parts of the problem:
 
 > But the essence of man is no abstraction inherent in each single individual. In reality, it is the ensemble of the social relations.[^theses]
 
-For software development, this invites attention to the actual relations
-among the person requesting work, those performing it, and those using the
-result. Their knowledge, needs, and responsibilities need not coincide.
-This application does not equate Agents with human social subjects.
+A requester may know the need without knowing the implementation cost. An
+implementer may satisfy a written requirement without seeing its use. An
+agent can only work from the context and evidence available to it.
+Cooperation has to connect these views; assigning more work does not itself
+create shared understanding.
 
 A software factory is one way to organize development. It makes assignments,
 execution, evidence, and handoffs repeatable. Its organization must still be
-judged by how those activities serve the intended whole. More Agents, more
+judged by how those activities serve the intended whole. More agents, more
 completed tasks, or more layers of review do not by themselves establish
 that the organization works.
 
@@ -139,17 +107,15 @@ reviewer who accepts it. Nor should the existence of a process become a
 reason to manufacture work for that process. The organization needs to make
 its assumptions and results available for challenge.
 
-Human and Agent interaction belongs within this account of cooperation.
-An Agent can surface a contradiction, propose an alternative, or report that
+Human interaction with AI agents belongs within this account of cooperation.
+An agent can surface a contradiction, propose an alternative, or report that
 it does not know. Such responses help the person form a judgment. Apparent
 agreement obtained by hiding constraints weakens the basis of that judgment.
 
-Marx's labor-process analysis also distinguishes purposeful activity from
-control over it. After examining the process in general, he returns to
-capitalist supervision and ownership of the product. Purposeful labor alone
-does not establish that its performer controls the purpose or result.
-Similarly, meaningful control in a software system must be examined in its
-actual relationships; an approval button alone does not demonstrate it.
+Control depends on what the person can inspect and change. If approval
+presents only an agent's conclusion, the person must either trust it or
+repeat the investigation. Useful supervision makes the result, its evidence,
+and the decisions still open to correction understandable.
 
 ## Claims and results return to practice
 
@@ -165,7 +131,7 @@ rather than another implementation patch.
 
 Review asks what evidence supports a conclusion and whether it concerns the
 actual result being delivered. It also asks whether the assumptions behind
-the work remain justified. Agreement among Agents and human approval can
+the work remain justified. Agreement among agents and human approval can
 both be mistaken; neither replaces contact with the result and its use.
 
 Practical feedback includes failures, constraints, and uncertainty. Reporting
@@ -181,7 +147,7 @@ completion into an internal label detached from the product.
 
 Development leaves more than a delivered feature. It leaves code,
 architecture, tools, documentation, knowledge, and habits that influence the
-next activity. Marx describes this relation in the labor process:
+next activity:
 
 > Products are therefore not only results, but also essential conditions of labour.[^labor]
 
@@ -190,42 +156,21 @@ can preserve a useful lesson or preserve an assumption that is no longer
 true. Accumulating artifacts does not guarantee accumulating understanding.
 
 Maintenance therefore includes selection, revision, and removal. People
-and Agents can simplify code, retire obsolete behavior, and revise context
+and agents can simplify code, retire obsolete behavior, and revise context
 when evidence shows that it no longer serves the product. Keeping every
 past decision active can burden future work with incompatible purposes.
 
-The image of entropy expresses a concern about growing complexity and loss
-of direction. It is not proof that every autonomous AI project must decline,
-or that AI cannot simplify a system. The practical question is which forms
-of accumulation strengthen future development and which obstruct it.
+A future agent inherits the code and context left by earlier work. If those
+materials preserve obsolete assumptions, the next task starts from them and
+can reinforce them. Useful learning changes the maintained context and
+removes what no longer applies; storing more reports is not enough.
 
 Human involvement remains important because purposes, conditions, and
 judgments can change. It does not guarantee a healthy project on its own.
 Its value depends on the quality of attention and the willingness to revise
 both the product and the assumptions governing its development.
 
-## Implications for Mohist
-
-Mohist organizes software development so people can turn ideas into usable
-results while retaining meaningful direction over the work. It reduces
-routine execution, coordination, and evidence-gathering effort so attention
-can be spent on purposes, choices, and actual outcomes.
-
-Its factory model is a product choice that must demonstrate its usefulness
-in practice. The philosophical argument does not prescribe a particular
-Workflow, interface, approval frequency, or division of tasks. Those choices
-belong to product and technical design and must be assessed against the
-purposes they serve.
-
-The [four context levels](../eng/context-management.md#levels-of-context)
-organize how decisions acquire reasons and become concrete: philosophy,
-product design, technical design, and implementation. They are not a claim
-that reality follows a one-way path from thought to code. Experience can
-require revisiting any level, including the purposes and assumptions with
-which the work began.
-
 ## References
 
-[^theses]: Karl Marx, [*Theses on Feuerbach*](https://www.marxists.org/archive/marx/works/1845/theses/index.htm), theses 2, 3, and 6. Translation by Cyril Smith, 2002, based on work with Don Cuckson.
-[^afterword]: Karl Marx, [*Capital*, Volume I, Afterword to the Second German Edition](https://www.marxists.org/archive/marx/works/1867-c1/p3.htm).
+[^theses]: Karl Marx, [*Theses on Feuerbach*](https://www.marxists.org/archive/marx/works/1845/theses/index.htm), theses 3 and 6. Translation by Cyril Smith, 2002, based on work with Don Cuckson.
 [^labor]: Karl Marx, [*Capital*, Volume I, Chapter 7, Section 1: The Labour-Process](https://www.marxists.org/archive/marx/works/1867-c1/ch07.htm#S1).

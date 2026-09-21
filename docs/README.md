@@ -10,8 +10,8 @@ If you are new to Mohist, read the [repository README](../README.md) first.
 
 - [Product Vision](vision.md): Where Mohist is going and how independent Agents
   work with external interaction locations
-- [Philosophy of Software Development](philosophy.md): Purpose, practice,
-  cooperation, and the reasoning behind Mohist's product choices
+- [Philosophy of Software Development](philosophy.md): Purpose, tools,
+  cooperation, and evidence in software development
 - [Getting Started](getting-started.md): Start from zero and move one Issue
   through the complete Workflow with a Mohist Agent, External Agent, or `mo`
 - [Core Concepts](concepts.md): Understand the Mohist production-line model
