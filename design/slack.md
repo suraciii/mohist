@@ -1036,11 +1036,10 @@ Workspace through every continuation command. The Agent installation write takes
 the same selector and resolves the target Workspace from it, so a selection never
 resumes the Agent's first existing Connection or the first enrolled record.
 
-Agent installation is not yet the complete replacement journey. The install
-projection can report the Agent App next action as `ready` while the Connection
-still needs Owner claim, so App readiness still reaches the user as setup
-completion. The claim code exists, but no surface projects Owner claim as the
-next primary action once verification passes. The manual Agent App creation
-route remains beside the managed `install-agent` path, and the CLI exit contract
-that separates a truthfully incomplete installation from a definite failure is
-not implemented.
+Agent installation is not yet the complete replacement journey. The Server
+projects the outstanding fact instead of App readiness, the Mohist App
+conversation and the terminal guide both end at Owner claim as the one next
+action, and the CLI separates a truthfully incomplete installation from a
+definite failure in its exit code. The Web view still renders App readiness as
+the end of setup instead of projecting Owner claim once verification passes, so
+that surface is the remaining gap.
