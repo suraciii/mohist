@@ -51,15 +51,14 @@ format.
 
 Context connects four levels of reasoning:
 
-1. **Philosophy** states the purpose and values that guide product choices.
-   Its home is [Product Vision](../docs/vision.md#philosophy).
+1. **Philosophy** examines the activity, purposes, and values that guide
+   product choices.
 2. **Product design** defines the capabilities, behavior, and experience that
-   serve that purpose. Its contracts live in `docs/`.
+   serve those purposes.
 3. **Technical design** chooses the architecture, modules, and boundaries that
-   make the product behavior possible. Its contracts live in `design/`.
+   make the product behavior possible.
 4. **Implementation** makes those choices concrete in code and observable
-   behavior. Code and tests live in `packages/`; tests provide evidence about
-   the behavior they exercise.
+   behavior. Tests provide evidence about the behavior they exercise.
 
 Each level answers a problem posed by the preceding level and supplies
 problems and constraints to the next. A purpose can admit several product
@@ -78,9 +77,11 @@ require different corrections. A lower-level change must not silently alter
 an upstream requirement. Propose that change at its owning level and resolve
 it through the existing decision process.
 
-These levels organize knowledge, not Workflow stages. `AGENTS.md` directs
-readers to the relevant context. `eng/` governs how contributors maintain and
-verify it. Neither creates another product abstraction level.
+These levels organize the reasons for decisions and their expression in a
+product. They do not describe a one-way development process: practical
+experience can challenge any level, including its purposes and assumptions.
+They are not Workflow stages. `AGENTS.md` directs readers to the relevant
+context, and `eng/` governs how contributors maintain and verify it.
 
 ## Where context lives
 
@@ -89,11 +90,13 @@ the fact.
 
 The subject of a document fixes its layer:
 
-- **`docs/`** — product foundations and product design: why the product exists
-  and what it must satisfy. `vision.md` owns its philosophy and direction;
-  other product documents define user-facing behavior.
+- **`docs/`** — product foundations and product design.
+  [Philosophy](../docs/philosophy.md) owns the argument about development and
+  human agency. [Product Vision](../docs/vision.md) states Mohist's direction.
+  Other product documents define user-facing behavior.
 - **`design/`** — technical design: why the system has its boundaries and
   which contracts implementations must preserve. Written for developers.
+- **`packages/`** — product implementation and its tests.
 - **`eng/`** — repository engineering practices: how this repository itself
   is built, tested, and documented. Written for contributors and agents.
   These documents govern the repository, not the product.

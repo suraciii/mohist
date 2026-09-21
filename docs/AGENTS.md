@@ -1,7 +1,11 @@
 # Agents: Writing Product Docs
 
-`docs/` is the product specification layer. It defines what the product must
-satisfy. Write for users and Agents who do not read the source code.
+`docs/` holds product foundations and product specifications. Write for users
+and Agents who do not read the source code. `philosophy.md` develops the
+foundational argument; `vision.md` states product direction. Their reasoning
+and attributed source material follow the shared writing rules. The behavior
+specification rules and template below apply to product behavior, not to
+philosophical argument.
 
 Shared writing rules (language, diagrams, fences, tables, examples) live in
 [`../eng/context-management.md`](../eng/context-management.md#writing-rules).
