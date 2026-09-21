@@ -98,7 +98,7 @@ Users manage the integration in the Mohist App's DMs:
   `mo slack install-agent review-bot`, keeps its selected Project, Agent, and
   Workspace, and returns the authorization link. Secret steps continue on the
   Mohist host. Once installation verification passes, Owner claim becomes the
-  next action and names the Bot DM destination.
+  next action.
 - **View and diagnose:** ask which Agents are connected or ask for an Agent's
   status. The answer uses the same facts as the Web UI and CLI: one current
   state and one next action.

@@ -1261,9 +1261,6 @@ public static partial class SlackConnectionRoutes
         return "Task accepted and queued for execution. " + detail;
     }
 
-    private static string? ClaimCodeBotName(AgentConnection connection) =>
-        string.IsNullOrWhiteSpace(connection.BotName) ? connection.VerifiedBotName : connection.BotName;
-
     private static async Task<IResult> DispatchChannelFollowupAsync(
         HandleChannelIngressRequest req,
         string sessionId,

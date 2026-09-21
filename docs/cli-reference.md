@@ -615,8 +615,8 @@ Mohist App.
   selector it reports the only eligible Workspace; with several enrolled it
   names the ambiguity and the selector instead of choosing the first record.
   It exits 0 while it truthfully reports an incomplete installation, and it
-  exits 1 when the projection reports a definite failure, such as a credential
-  that does not verify against the selected Workspace, App, or Bot.
+  exits 1 when the projection reports a definite failure, such as a Mohist App
+  Bot or App-level token that does not verify against the selected Workspace.
 - `mo slack message send --workspace <workspace-id> --conversation <conversation-id> --reply-to <thread-root-ts> --connection <connection-id> --session <session-id> --triggering-message <message-id> --dispatch-ref <reply-anchor-ref> [--text <body>] [--image <url> | --file <path>]`
   lets an Agent speak in Slack through an anchored reply. The seven reply-anchor
   options are required for Connection Agent replies; the CLI refuses an

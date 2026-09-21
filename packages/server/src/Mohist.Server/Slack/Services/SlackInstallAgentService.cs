@@ -445,11 +445,6 @@ public sealed class SlackInstallAgentService : IScopedService
     }
 
     /// <summary>
-    /// Owner claim is the one next action until it is done; once the Connection
-    /// is complete, an Agent that cannot execute keeps that limitation separate
-    /// and points at the existing Agent repair surface.
-    /// </summary>
-    /// <summary>
     /// The Agent App's own technical action, except that a technically ready App
     /// never projects as the end of setup while the Owner claim is outstanding.
     /// </summary>

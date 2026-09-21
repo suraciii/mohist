@@ -77,7 +77,7 @@ public static class ManagedSlackAgentAppStatusDeriver
         string manifestState,
         string transportReadiness,
         string bindingState,
-        string? appId = null)
+        string? appId)
     {
         if (appLifecycle == SlackAppLifecycle.CreateUnknown)
             // Reconciliation needs the recorded App identity to ask the
