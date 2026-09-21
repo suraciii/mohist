@@ -627,15 +627,20 @@ stable Slack idempotency key prevents duplicate SessionInput records after the
 migration. Different Mohist Servers never share thread routing.
 
 Accepting a DM follow-up requires a Runtime Session binding, with one bounded
-exemption: while a launch turn is still in flight — the launch dispatched but
-its Runner binding has not appeared yet — a follow-up may be accepted and
-ordered behind it. That exemption keys on the turn's current non-terminal state,
-never on history: once the initial launch turn reaches a terminal state
-(Completed, Failed, Cancelled), a missing binding fails at accept time with
-`RuntimeSessionMissing`, and the message takes the existing DM rejection path
-(one readable rejection reply, inbox row audited and dispatched). This keeps a
-Session whose runtime was reset or lost from parking its follow-ups in an
-invisible queue with no user feedback, no reply, and no dispatch.
+exemption: while a launched turn is still in flight — a turn that carries a
+launch job id and stands in `Queued`, `Executing`, or `Unknown` — a follow-up
+may be accepted and ordered behind it, because the Runner binding can
+legitimately appear only after the turn starts. Once no launched turn remains
+in flight (`Completed`, `Failed`, `Cancelled`), a missing binding fails at
+accept time with `RuntimeSessionMissing`, and the message takes the existing DM
+rejection path (one readable rejection reply, inbox row audited and
+dispatched). The reachable causes are a launch that failed before its Runner
+attached (the terminal turn never bound a runtime) or a lost binding. This
+closes the acceptance-time black hole where a follow-up parked in an invisible
+queue with no user feedback, no reply, and no dispatch. The boundary is
+explicit: a follow-up accepted during the in-flight exemption whose launch then
+fails without ever binding stays queued; settling those parked follow-ups is
+deferred.
 
 ## Reliability Contract
 

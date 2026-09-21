@@ -13,6 +13,13 @@ public sealed partial class AgentSessionGrain
         throw new RuntimeSessionMissingException(session.Id, session.Status.AgentRuntimeSessionId, session.Runtime.Runtime);
     }
 
+    /// <summary>
+    /// True while a launched turn is still in flight. Only launch turns carry a
+    /// JobId — follow-up turns are constructed with <c>JobId: null</c> — so a
+    /// follow-up can never keep this exemption alive. <see cref="AgentTurnStatus.Unknown"/>
+    /// stays in flight: only the Runner can prove a runtime session died, and a
+    /// concurrent verdict settles the turn without inventing a binding.
+    /// </summary>
     private static bool HasPendingInitialLaunch(AgentSession session) =>
         (session.Status.Turns ?? [])
             .Any(turn => !string.IsNullOrWhiteSpace(turn.JobId)

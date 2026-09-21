@@ -145,6 +145,32 @@ public sealed class AgentSessionRuntimeGrainSpecs
     }
 
     [Fact]
+    public async Task AcceptFollowup_UnknownLaunchWithoutBindingStillAccepts()
+    {
+        var grain = NewGrain();
+        await grain.OpenAsync(OpenCommand());
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job"));
+
+        var sessionId = grain.GetPrimaryKeyString();
+        var launched = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(launched);
+        var unresolved = launched!;
+        unresolved.Status = unresolved.Status with
+        {
+            AgentRuntimeSessionId = null,
+            Turns = [.. unresolved.Status.Turns!.Select(turn => turn with { Status = AgentTurnStatus.Unknown })]
+        };
+        await _fixture.StateStore.SaveAsync(sessionId, unresolved);
+        await TestLifecycle.Deactivate(grain);
+
+        var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "continue", "agent-session-followup", "unknown-launch-key", AllowPendingInitialLaunch: true));
+
+        Assert.False(accepted.AlreadyAccepted);
+    }
+
+    [Fact]
     public async Task AcceptFollowup_TerminalLaunchWithBindingAccepts()
     {
         var grain = NewGrain();
