@@ -207,7 +207,7 @@ enter the language.
 - `slack`: `setup`, `status`, `install-agent`; `list`, `view`, `claim-owner`,
   `edit`, `transfer-owner`, `enable`, `disable`, `remove-binding`,
   `permanent-delete`; `message send`; `deliveries`, `resend-delivery`,
-  `clear-gap`, `reconcile-create`, `reconcile-delete`.
+  `clear-gap`.
 - `otel`: `status`, `query <sql>`, `traces`; `query` runs through the Server
   and supports `--json <fields>` field selection.
 - `skill`: `list`, `view`, `install`, `path`, `sync`.
@@ -666,11 +666,11 @@ Mohist App.
   facts. `permanent-delete --yes` permanently deletes the Agent App when no
   active binding exists. The last two operations do not delete the Agent,
   AgentJob, or AgentSession.
-- When the result of an external App write is unknown, `reconcile-create` or
-  `reconcile-delete` checks the original operation without replaying it blindly.
-  Delivery diagnostics use `deliveries`, `resend-delivery`, and `clear-gap`.
-  These recovery commands do not replace `install-agent` as the normal
-  installation path.
+- When the result of an external App write is unknown, rerunning the guide
+  (`install-agent` or `setup`) recovers it: a recorded App identity is
+  reconciled against the provider, and one without an identity is retried with a
+  fresh create. Delivery diagnostics use `deliveries`, `resend-delivery`, and
+  `clear-gap`.
 
 The integration owns only the external identity, permissions, and connection
 state. `agent edit` still changes Agent configuration. The normal path for

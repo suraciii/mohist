@@ -88,8 +88,6 @@ var operationsFlags = map[string]map[string]map[string]flagShape{
 		"deliveries":       {"project": flagValue},
 		"resend-delivery":  {"project": flagValue},
 		"clear-gap":        {"project": flagValue},
-		"reconcile-create": {"project": flagValue},
-		"reconcile-delete": {"project": flagValue},
 		"thread-view": {
 			"session":      flagValue,
 			"limit":        flagValue,
@@ -150,7 +148,7 @@ func parseOperations(area string, args []string) (command, error) {
 		"server": {"status", "health", "info", "logs"},
 		"audit":  {"list"},
 		"github": {"connect", "list", "view", "update", "enable", "disable"},
-		"slack":  {"setup", "status", "install-agent", "list", "view", "diagnostics", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete", "message", "thread"},
+		"slack":  {"setup", "status", "install-agent", "list", "view", "diagnostics", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "message", "thread"},
 	}
 	if !contains(allowed[area], action) {
 		return command{}, usage("unknown " + area + " command")
@@ -185,7 +183,7 @@ func parseOperations(area string, args []string) (command, error) {
 	if action == "message-send" || action == "thread-view" {
 		start = 2
 	}
-	if area == "runner" && (action == "view" || action == "revoke") || area == "github" && contains([]string{"view", "update", "enable", "disable"}, action) || area == "slack" && contains([]string{"view", "diagnostics", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete"}, action) {
+	if area == "runner" && (action == "view" || action == "revoke") || area == "github" && contains([]string{"view", "update", "enable", "disable"}, action) || area == "slack" && contains([]string{"view", "diagnostics", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap"}, action) {
 		if len(args) <= 1 {
 			return command{}, usage("resource id is required")
 		}
@@ -543,7 +541,7 @@ func operationsHelp(area string) string {
 	if area == "runner" {
 		return "USAGE\n    mo runner <list|status|view|revoke> [flags]\n    mo runner environment <capture|initialize|status|apply|cancel|check> [flags]\n\nRead and manage Server-global Runner resources. Environment capture, initialization, and apply are local transactions; apply is coordinated with Server.\n\nActions: list, view, status, revoke, environment"
 	}
-	actions := map[string]string{"server": "status, health, info, logs", "audit": "list", "github": "connect, list, view, update, enable, disable", "slack": "setup, status, install-agent, list, view, claim-owner, edit, transfer-owner, enable, disable, remove-binding, permanent-delete, message, thread, deliveries, resend-delivery, clear-gap, reconcile-create, reconcile-delete"}
+	actions := map[string]string{"server": "status, health, info, logs", "audit": "list", "github": "connect, list, view, update, enable, disable", "slack": "setup, status, install-agent, list, view, claim-owner, edit, transfer-owner, enable, disable, remove-binding, permanent-delete, message, thread, deliveries, resend-delivery, clear-gap"}
 	return "USAGE\n    mo " + area + " <action> [flags]\n\nOperations and integrations.\n\nActions: " + actions[area]
 }
 func opsLeafHelp(kind string, fields []string) string {
@@ -1042,7 +1040,7 @@ func runRemoteOperations(ctx context.Context, deps Dependencies, c *client, cmd 
 		} else if action != "list" {
 			path += "/" + url.PathEscape(argValue(cmd.args, "id", ""))
 		}
-		if contains([]string{"enable", "disable", "claim-owner", "transfer-owner", "remove-binding", "permanent-delete", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete"}, action) {
+		if contains([]string{"enable", "disable", "claim-owner", "transfer-owner", "remove-binding", "permanent-delete", "resend-delivery", "clear-gap"}, action) {
 			path += "/" + action
 			method = http.MethodPost
 		}
