@@ -357,7 +357,9 @@ public sealed class GitHubIssueCloseSpecs
         await PumpAsync();
 
         Assert.Equal(IssueStatus.InProgress, (await LoadIssueAsync(projectId, issueNumber))!.Status);
-        Assert.Empty(_fixture.Comments.Closes);
+        // The echo guard leaves the Mohist issue running; an echo at/after
+        // integrate is not applied, so this connection produces no close.
+        Assert.DoesNotContain(_fixture.Comments.Closes, close => close.ConnectionId == connectionId);
     }
 
     [Fact]
