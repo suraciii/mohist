@@ -321,7 +321,9 @@ A durable write-back operation failure re-raises into the Event Bus delivery
 channel, so write-back rides the same at-least-once contract as every other
 subscription in [`eventbus.md`](eventbus.md): the stream parks with exponential
 backoff and redelivers until `MaxAttempts`, then the event settles as a dead
-letter. A handler never swallows its own failure.
+letter. A handler never swallows its own failure. A failed operation
+aborts the remaining operations of that attempt; they ride the redelivery, and
+already-posted operations are skipped there by the reservation ledger.
 
 The reservation bookkeeping decides what a retry may do. A failure with a known
 remote outcome releases the reservation, so the retry re-reserves and re-executes
