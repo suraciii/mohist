@@ -14,6 +14,19 @@ namespace Mohist.Server.Slack;
 
 public sealed record SlackOwnerClaimCode(string Value, DateTimeOffset ExpiresAt);
 
+/// <summary>
+/// The one authorized claim response: the plaintext code, its expiry, and the
+/// exact Bot DM destination the code must be sent to. It is produced by the
+/// claim service alone, so no status, projection, log, or conversation builds a
+/// second shape that could carry a code.
+/// </summary>
+public sealed record SlackOwnerClaimGrant(
+    string Code,
+    DateTimeOffset ExpiresAt,
+    string? BotName,
+    string? BotUserId,
+    string DmDestination);
+
 public sealed record SlackInboundDm(string SenderSlackUserId, string Text);
 
 public sealed record SlackInboundDecision(string Kind, string? Reason)
@@ -108,6 +121,36 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
         });
         await db.SaveChangesAsync(ct);
         return new(value, expiresAt);
+    }
+
+    /// <summary>
+    /// Issues one claim code and returns the single authorized response. A
+    /// missing Connection is the only null result; the code never exists outside
+    /// this response.
+    /// </summary>
+    public async Task<SlackOwnerClaimGrant?> IssueAsync(
+        string projectId,
+        string connectionId,
+        string kind,
+        TimeSpan? lifetime = null,
+        CancellationToken ct = default)
+    {
+        var code = await GenerateAsync(projectId, connectionId, kind, lifetime, ct);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var connection = await db.AgentConnections.AsNoTracking().FirstOrDefaultAsync(
+            row => row.ProjectId == projectId && row.Id == connectionId && row.DeletedAt == null, ct);
+        if (connection is null) return null;
+        var botName = string.IsNullOrWhiteSpace(connection.BotName)
+            ? connection.VerifiedBotName
+            : connection.BotName;
+        return new(
+            code.Value,
+            code.ExpiresAt,
+            botName,
+            string.IsNullOrWhiteSpace(connection.BotUserId) ? null : connection.BotUserId,
+            string.IsNullOrWhiteSpace(botName)
+                ? "Direct message with the Slack Bot of this Connection"
+                : $"Direct message with the {botName} Bot");
     }
 
     public async Task<SlackInboundDecision> HandleInboundDmAsync(

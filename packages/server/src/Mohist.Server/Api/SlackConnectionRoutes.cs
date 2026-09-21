@@ -180,16 +180,18 @@ public static partial class SlackConnectionRoutes
         });
 
 
-        management.MapPost("/{connectionId}/claim-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, AgentConnectionStore connections, CancellationToken ct) =>
+        management.MapPost("/{connectionId}/claim-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, CancellationToken ct) =>
         {
             try
             {
-                var projectId = context.GetResolvedProject().Id;
-                var connection = await connections.GetAsync(projectId, connectionId, ct);
-                if (connection is null)
-                    return ApiResults.NotFound("Slack Connection was not found.");
-                var code = await claims.GenerateAsync(projectId, connectionId, ct: ct);
-                return ApiResults.Ok(AuthorizedClaimResponse(code, connection));
+                var grant = await claims.IssueAsync(
+                    context.GetResolvedProject().Id,
+                    connectionId,
+                    SlackOwnerClaimCodeKinds.Initial,
+                    ct: ct);
+                return grant is null
+                    ? ApiResults.NotFound("Slack Connection was not found.")
+                    : ApiResults.Ok(grant);
             }
             catch (InvalidOperationException ex)
             {
@@ -197,20 +199,18 @@ public static partial class SlackConnectionRoutes
             }
         });
 
-        management.MapPost("/{connectionId}/transfer-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, AgentConnectionStore connections, CancellationToken ct) =>
+        management.MapPost("/{connectionId}/transfer-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, CancellationToken ct) =>
         {
             try
             {
-                var projectId = context.GetResolvedProject().Id;
-                var connection = await connections.GetAsync(projectId, connectionId, ct);
-                if (connection is null)
-                    return ApiResults.NotFound("Slack Connection was not found.");
-                var code = await claims.GenerateAsync(
-                    projectId,
+                var grant = await claims.IssueAsync(
+                    context.GetResolvedProject().Id,
                     connectionId,
-                    Mohist.Server.Infrastructure.Data.Slack.SlackOwnerClaimCodeKinds.Transfer,
+                    SlackOwnerClaimCodeKinds.Transfer,
                     ct: ct);
-                return ApiResults.Ok(AuthorizedClaimResponse(code, connection));
+                return grant is null
+                    ? ApiResults.NotFound("Slack Connection was not found.")
+                    : ApiResults.Ok(grant);
             }
             catch (InvalidOperationException ex)
             {
@@ -1263,28 +1263,6 @@ public static partial class SlackConnectionRoutes
 
     private static string? ClaimCodeBotName(AgentConnection connection) =>
         string.IsNullOrWhiteSpace(connection.BotName) ? connection.VerifiedBotName : connection.BotName;
-
-    /// <summary>
-    /// The one authorized claim response. It carries the plaintext code once,
-    /// its expiry, and the exact Bot DM destination the code must be sent to;
-    /// no status, diagnostic, or projection route builds this shape.
-    /// </summary>
-    private static object AuthorizedClaimResponse(SlackOwnerClaimCode code, AgentConnection connection) => new
-    {
-        code = code.Value,
-        expiresAt = code.ExpiresAt,
-        botName = ClaimCodeBotName(connection),
-        botUserId = string.IsNullOrWhiteSpace(connection.BotUserId) ? null : connection.BotUserId,
-        dmDestination = OwnerClaimDmDestination(connection),
-    };
-
-    private static string OwnerClaimDmDestination(AgentConnection connection)
-    {
-        var botName = ClaimCodeBotName(connection);
-        return string.IsNullOrWhiteSpace(botName)
-            ? "Direct message with the Slack Bot of this Connection"
-            : $"Direct message with the {botName} Bot";
-    }
 
     private static async Task<IResult> DispatchChannelFollowupAsync(
         HandleChannelIngressRequest req,
