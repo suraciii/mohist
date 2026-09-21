@@ -27,6 +27,9 @@ public static partial class SlackConnectionRoutes
         connection.ConnectionHealth == ConnectionHealthKind.Degraded
         && SlackConnectionBackpressureReasons.IsBackpressureReason(connection.HealthReason);
 
+    private static SlackLeaseContext ConnectionLease(string operatorId, SlackIngressBody body, SlackAdapterLeaseService leases) =>
+        new(operatorId, body.LeaseId, body.AdapterId, (targetRef, leaseCt) => leases.ResolveRuntimeLeaseBotTokenAsync(operatorId, targetRef, body.LeaseId, body.AdapterId, leaseCt));
+
     private static object PublicManagedApp(SlackManagerAppProjection app) => new
     {
         app.AppLifecycle,
@@ -464,10 +467,7 @@ public static partial class SlackConnectionRoutes
                         connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
                         sessions, agents, claims, accessDecider, inbox, outbox,
                         launcher, attachmentBinder, grains, followupDispatcher,
-                        new SlackLeaseContext(
-                            operatorId, body.LeaseId, body.AdapterId,
-                            (targetRef, leaseCt) => leases.ResolveRuntimeLeaseBotTokenAsync(
-                                operatorId, targetRef, body.LeaseId, body.AdapterId, leaseCt)),
+                        ConnectionLease(operatorId, body, leases),
                         http.RequestServices),
                     ct);
 
@@ -476,10 +476,7 @@ public static partial class SlackConnectionRoutes
                     projectId, connection, identity, senderSlackUserId, body,
                     connections, mapping, agents, claims, inbox, outbox,
                     launcher, attachmentBinder, grains, followupDispatcher,
-                    new SlackLeaseContext(
-                        operatorId, body.LeaseId, body.AdapterId,
-                        (targetRef, leaseCt) => leases.ResolveRuntimeLeaseBotTokenAsync(
-                            operatorId, targetRef, body.LeaseId, body.AdapterId, leaseCt)),
+                    ConnectionLease(operatorId, body, leases),
                     http.RequestServices),
                 ct);
         });
