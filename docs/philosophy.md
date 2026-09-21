@@ -23,23 +23,16 @@ In *Theses on Feuerbach*, Marx criticizes an understanding of reality that
 treats it only as an object of contemplation, rather than also as human
 activity. His second thesis connects the truth of thought to practice:
 
-> The question whether objective truth can be attributed to human thinking
-> is not a question of theory but is a practical question.
+> The question whether objective truth can be attributed to human thinking is not a question of theory but is a practical question.[^theses]
 
-This is from the [2002 English translation of the 1845 text](https://www.marxists.org/archive/marx/works/1845/theses/index.htm),
-Thesis 2. The implication we draw for software is that a description, design,
-or explanation must remain open to what building and using it reveals.
-Internal agreement about a design does not establish its practical value.
+A description, design, or explanation must remain open to what building and
+using it reveals. Internal agreement about a design does not establish its
+practical value.
 
-The organization of an argument also needs a basis in its subject. In the
-[afterword to the second German edition of *Capital*, Volume I](https://www.marxists.org/archive/marx/works/1867-c1/p3.htm),
-Marx distinguishes inquiry from presentation:
+The organization of an argument also needs a basis in its subject. Marx
+distinguishes inquiry from presentation:
 
-> Of course the method of presentation must differ in form from that of
-> inquiry. The latter has to appropriate the material in detail, to analyse
-> its different forms of development, to trace out their inner connexion.
-> Only after this work is done, can the actual movement be adequately
-> described.
+> Of course the method of presentation must differ in form from that of inquiry. The latter has to appropriate the material in detail, to analyse its different forms of development, to trace out their inner connexion. Only after this work is done, can the actual movement be adequately described.[^afterword]
 
 In *Capital*, the analysis moves through forms and relations such as the
 commodity, exchange, money, capital, production, cooperation, machinery, and
@@ -59,24 +52,7 @@ already exists. Development gives that intention a concrete form. The
 ability to anticipate a result and direct activity toward it is central to
 Marx's account of the labor process.
 
-The following passage is from the historical English translation of
-[*Capital*, Volume I, Chapter 7, Section 1](https://www.marxists.org/archive/marx/works/1867-c1/ch07.htm#S1):
-
-> A spider conducts operations that resemble those of a weaver, and a bee
-> puts to shame many an architect in the construction of her cells. But what
-> distinguishes the worst architect from the best of bees is this, that the
-> architect raises his structure in imagination before he erects it in
-> reality. At the end of every labour-process, we get a result that already
-> existed in the imagination of the labourer at its commencement. He not only
-> effects a change of form in the material on which he works, but he also
-> realises a purpose of his own that gives the law to his modus operandi, and
-> to which he must subordinate his will. And this subordination is no mere
-> momentary act. Besides the exertion of the bodily organs, the process
-> demands that, during the whole operation, the workman’s will be steadily in
-> consonance with his purpose. This means close attention. The less he is
-> attracted by the nature of the work, and the mode in which it is carried
-> on, and the less, therefore, he enjoys it as something which gives play to
-> his bodily and mental powers, the more close his attention is forced to be.
+> A spider conducts operations that resemble those of a weaver, and a bee puts to shame many an architect in the construction of her cells. But what distinguishes the worst architect from the best of bees is this, that the architect raises his structure in imagination before he erects it in reality. At the end of every labour-process, we get a result that already existed in the imagination of the labourer at its commencement. He not only effects a change of form in the material on which he works, but he also realises a purpose of his own that gives the law to his modus operandi, and to which he must subordinate his will. And this subordination is no mere momentary act. Besides the exertion of the bodily organs, the process demands that, during the whole operation, the workman’s will be steadily in consonance with his purpose. This means close attention. The less he is attracted by the nature of the work, and the mode in which it is carried on, and the less, therefore, he enjoys it as something which gives play to his bodily and mental powers, the more close his attention is forced to be.[^labor]
 
 The comparison concerns purposeful labor;
 it does not depend on the architect being more skillful than the bee. The
@@ -99,11 +75,9 @@ that the original idea was incomplete or that a different goal would be more
 useful. The purpose guides development, while development gives the person
 new grounds for understanding and changing that purpose.
 
-This keeps human judgment within the activity it judges. Thesis 3 states
-that the doctrine it criticizes forgets:
+This keeps human judgment within the activity it judges:
 
-> that it is men who change circumstances and that the educator must himself
-> be educated.
+> The materialist doctrine that men are products of circumstances and upbringing, and that, therefore, changed men are products of changed circumstances and changed upbringing, forgets that it is men who change circumstances and that the educator must himself be educated.[^theses]
 
 A person can retain authority over a goal without being infallible about it.
 The product commitment drawn here is that people can direct and revise the
@@ -114,11 +88,9 @@ from evidence or that Marx's account settles AI capabilities or consciousness.
 
 A purpose requires means of realization. Marx identifies purposeful
 activity, its subject, and its instruments as the elementary factors of the
-labor process. In the same section of *Capital*, he writes:
+labor process:
 
-> An instrument of labour is a thing, or a complex of things, which the
-> labourer interposes between himself and the subject of his labour, and
-> which serves as the conductor of his activity.
+> An instrument of labour is a thing, or a complex of things, which the labourer interposes between himself and the subject of his labour, and which serves as the conductor of his activity.[^labor]
 
 AI can help people explore possibilities, develop solutions, and evaluate
 results. Delegating these activities changes which work a person performs
@@ -147,10 +119,9 @@ introduces relationships between local assignments, shared knowledge,
 decisions, and the overall purpose. A collection of successful local tasks
 can still produce an unsuccessful whole.
 
-The *Theses* challenge the idea of an isolated individual. Thesis 6 states:
+The *Theses* challenge the idea of an isolated individual:
 
-> But the essence of man is no abstraction inherent in each single individual.
-> In reality, it is the ensemble of the social relations.
+> But the essence of man is no abstraction inherent in each single individual. In reality, it is the ensemble of the social relations.[^theses]
 
 For software development, this invites attention to the actual relations
 among the person requesting work, those performing it, and those using the
@@ -212,8 +183,7 @@ Development leaves more than a delivered feature. It leaves code,
 architecture, tools, documentation, knowledge, and habits that influence the
 next activity. Marx describes this relation in the labor process:
 
-> Products are therefore not only results, but also essential conditions of
-> labour.
+> Products are therefore not only results, but also essential conditions of labour.[^labor]
 
 What made one change easy may make the next change difficult. A new rule
 can preserve a useful lesson or preserve an assumption that is no longer
@@ -254,9 +224,8 @@ that reality follows a one-way path from thought to code. Experience can
 require revisiting any level, including the purposes and assumptions with
 which the work began.
 
-## Sources and interpretation
+## References
 
-Quotations preserve the linked English translations. The *Theses* quotations
-use Cyril Smith's 2002 translation of the 1845 text, based on work with Don
-Cuckson. The applications to software development and Mohist are our
-interpretation, not claims made by Marx about AI.
+[^theses]: Karl Marx, [*Theses on Feuerbach*](https://www.marxists.org/archive/marx/works/1845/theses/index.htm), theses 2, 3, and 6. Translation by Cyril Smith, 2002, based on work with Don Cuckson.
+[^afterword]: Karl Marx, [*Capital*, Volume I, Afterword to the Second German Edition](https://www.marxists.org/archive/marx/works/1867-c1/p3.htm).
+[^labor]: Karl Marx, [*Capital*, Volume I, Chapter 7, Section 1: The Labour-Process](https://www.marxists.org/archive/marx/works/1867-c1/ch07.htm#S1).
