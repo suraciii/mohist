@@ -7,6 +7,9 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.GitHub;
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
@@ -86,7 +89,7 @@ public sealed class GitHubWriteBackSpecs
     {
         var (projectId, connectionId) = await ConnectNewAsync();
         _fixture.Comments.DeliveryPrUrl = "https://github.com/octocat/hello-world/pull/123";
-        await SeedIssueAsync(projectId, issue =>
+        var issueNumber = await SeedIssueAsync(projectId, issue =>
         {
             issue.StartWorkflow("wr_done");
             issue.Complete("wr_done");
@@ -101,8 +104,38 @@ public sealed class GitHubWriteBackSpecs
         Assert.Contains(
             GitHubStateLabels.Done,
             _fixture.Comments.StateLabels.Where(s => s.ConnectionId == connectionId).Select(s => s.StateLabel));
-        var close = Assert.Single(_fixture.Comments.Closes, c => c.ConnectionId == connectionId);
+        var closes = _fixture.Comments.Closes.Where(c => c.ConnectionId == connectionId).ToList();
+        if (closes.Count != 1)
+            throw new Xunit.Sdk.XunitException(
+                $"Expected exactly one close for connection {connectionId}, found {closes.Count}. " +
+                $"{await DescribeWriteBackStateAsync(projectId, connectionId, issueNumber)}");
+        var close = closes[0];
         Assert.Equal("completed", close.StateReason);
     }
 
+    /// <summary>
+    /// Renders the durable write-back state for this connection so an empty
+    /// Closes assertion names its cause: the handler swallows transient
+    /// operation failures into the audit stores (no auto-retry), and the
+    /// reservation rows show whether an operation was skipped or stranded.
+    /// </summary>
+    private async Task<string> DescribeWriteBackStateAsync(string projectId, string connectionId, int issueNumber)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var sp = scope.ServiceProvider;
+        var failures = (await sp.GetRequiredService<GitHubWriteBackFailureStore>()
+                .ListRecentAsync(projectId, limit: 20))
+            .Where(f => f.ConnectionId == connectionId)
+            .ToList();
+        await using var db = await sp.GetRequiredService<IDbContextFactory<MohistDbContext>>()
+            .CreateDbContextAsync();
+        var link = await db.GitHubIssueLinks.AsNoTracking()
+            .SingleOrDefaultAsync(row => row.ProjectId == projectId && row.IssueNumber == issueNumber);
+        var ops = link is null
+            ? "link=<none>"
+            : string.Join("; ", db.GitHubIssueCommentOperations.AsNoTracking()
+                .Where(row => row.LinkId == link.Id)
+                .Select(row => $"{row.CommentKey}:{row.Kind}:err={row.LastError ?? "-"}"));
+        return $"failures=[{string.Join("|", failures.Select(f => $"{f.Operation}:{f.ErrorCode}:{f.ErrorDetail}"))}] ops=[{ops}]";
+    }
 }
