@@ -304,9 +304,9 @@ public sealed class GitHubWriteBackSpecs
     }
 
     /// <summary>
-    /// Closes assertion names its cause: the handler swallows transient
-    /// operation failures into the audit stores (no auto-retry), and the
-    /// reservation rows show whether an operation was skipped or stranded.
+    /// Closes assertion names its cause: a failing operation parks the
+    /// event on the dispatcher retry channel and leaves an audit row, and
+    /// the reservation rows show whether an operation was skipped or held.
     /// </summary>
     private async Task<string> DescribeWriteBackStateAsync(string projectId, string connectionId, int issueNumber)
     {

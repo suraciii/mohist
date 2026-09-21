@@ -357,12 +357,9 @@ public sealed class GitHubIssueCloseSpecs
         await PumpAsync();
 
         Assert.Equal(IssueStatus.InProgress, (await LoadIssueAsync(projectId, issueNumber))!.Status);
-        // The echo guard leaves the Mohist issue running, but the workflow
-        // completion write-back still converges: a failed operation rides the
-        // dispatcher retry channel instead of being dropped, so the GitHub
-        // issue ends closed exactly once.
-        var close = Assert.Single(_fixture.Comments.Closes);
-        Assert.Equal("completed", close.StateReason);
+        // The echo guard leaves the Mohist issue running; an echo at/after
+        // integrate is not applied, so this connection produces no close.
+        Assert.DoesNotContain(_fixture.Comments.Closes, close => close.ConnectionId == connectionId);
     }
 
     [Fact]
