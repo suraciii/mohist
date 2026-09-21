@@ -99,25 +99,6 @@ public static class SlackManagerIngressRoutes
             }
         });
 
-        manager.MapPost("/setup/adjudicate-create", async (
-            HttpContext context,
-            SlackManagerSetupOrchestrator orchestrator,
-            CancellationToken ct) =>
-        {
-            var guard = RequireLoopback(context);
-            if (guard is not null) return guard;
-            try
-            {
-                return ApiResults.Ok(PublicSetupProgress(await orchestrator.AdjudicateCreateUnknownAsync(
-                    WorkspaceSelector(context),
-                    ct)));
-            }
-            catch (SlackManagerConflictException ex)
-            {
-                return ApiResults.Conflict(ex.Message, ex.Code, ex.Details);
-            }
-        });
-
         manager.MapGet("/setup/progress", async (
             HttpContext context,
             SlackManagerSetupOrchestrator orchestrator,

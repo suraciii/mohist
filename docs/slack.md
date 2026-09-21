@@ -252,8 +252,8 @@ Agent, and Workspace, and hand credential input to the local host.
    required manifest, and returns the installation link. The user confirms it in
    the browser. The Bot name comes from the Agent name; it is not an identity
    key, and a collision receives a stable suffix. An unknown create result
-   becomes **Result unknown** and stays attached to that operation until it is
-   reconciled or explicitly arbitrated; no second create attempt runs.
+   becomes **Result unknown** and stays attached to that operation until a rerun
+   reconciles or retries it; no automatic or concurrent second write runs.
 4. Provide this App's Bot token and App-level token through protected local
    input, or supply them in a file named by `--credentials-file`. Mohist
    verifies the selected Workspace, App, Bot, installed permissions, and Socket
@@ -307,9 +307,12 @@ preserves the original target and confirmed progress:
   holds the required scopes.
 - An adapter or Socket outage preserves the Connection and its confirmed
   progress. Delivery recovery is not a reinstallation.
-- An unknown create result is reconciled against the original operation or
-  settled by explicit arbitration. A restart never repeats the create
-  automatically, and a concurrent rerun performs no second external write.
+- An unknown create result is recovered on a rerun: a recorded App identity is
+  reconciled against the provider, and one without an identity is retried with a
+  fresh create. A restart never repeats the create automatically, and a
+  concurrent rerun performs no second external write. If the interrupted create
+  actually made an App in Slack, the fresh create leaves that half-configured
+  App behind; remove it in Slack's app settings.
 - Installation changes neither the Agent definition nor already running work,
   and unauthorized management and invocation stay rejected.
 
@@ -660,7 +663,7 @@ Workspace member claims through a Bot DM.
   does not uninstall the Slack App.
 - **Permanent delete** deletes only a Mohist-created Slack App. It requires
   separate permission, explicit confirmation, complete audit, and no active
-  binding. An unknown delete result is reconciled or arbitrated, never claimed
+  binding. An unknown delete result is reconciled on a rerun, never claimed
   as success.
 - Agent edits never change running work. New AgentJobs use the new snapshot.
   Existing Sessions keep theirs. A description edit updates the expected Slack

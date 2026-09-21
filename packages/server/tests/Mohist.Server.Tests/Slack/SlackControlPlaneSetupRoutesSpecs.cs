@@ -162,31 +162,14 @@ public sealed class SlackControlPlaneSetupRoutesSpecs
     }
 
     [Fact]
-    public async Task Adjudicate_create_requires_an_operator_token_and_loopback_and_refuses_a_ready_workspace()
+    public async Task The_setup_adjudicate_create_route_is_retired()
     {
-        const string team = "T_CTRL_ADJUDICATE";
+        const string team = "T_CTRL_ADJUDICATE_RETIRED";
         using var client = _fixture.CreateOperatorClient();
-        await EnrollAsync(client, team);
-
-        using var anonymous = _fixture.CreateUnauthenticatedClient();
-        using var anonymousResponse = await anonymous.PostAsync(
+        using var response = await client.PostAsync(
             $"/api/slack-manager/setup/adjudicate-create?workspaceTeamId={team}", content: null);
-        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
 
-        using var loopback = _fixture.CreateOperatorClient();
-        using var request = new HttpRequestMessage(
-            HttpMethod.Post,
-            $"/api/slack-manager/setup/adjudicate-create?workspaceTeamId={team}");
-        request.Headers.Add("X-Test-Remote-Address", "203.0.113.10");
-        using var nonLoopback = await loopback.SendAsync(request);
-        Assert.Equal(HttpStatusCode.Forbidden, nonLoopback.StatusCode);
-        Assert.Equal("loopback_required", await CodeAsync(nonLoopback));
-
-        // A Workspace whose create is not unknown has nothing to arbitrate.
-        using var refused = await client.PostAsync(
-            $"/api/slack-manager/setup/adjudicate-create?workspaceTeamId={team}", content: null);
-        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
-        Assert.Equal("create_adjudication_not_required", await CodeAsync(refused));
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Theory]

@@ -293,15 +293,14 @@ public sealed class SlackInstallAgentSpecs
     }
 
     [Fact]
-    public async Task An_identity_less_unknown_create_is_adjudicated_then_created_once_on_the_same_app()
+    public async Task An_identity_less_unknown_create_is_retried_by_a_rerun_on_the_same_app()
     {
         await SeedAgentAsync(AgentStatus.Active);
         await SeedEnrollmentAsync("enrollment-1");
         var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
-        _apps.SetResponse(installed.AgentApp.Id, new FakeSlackAppResponse(
-            Create: new SlackAppManagementResult(
-                SlackAppManagementOutcome.Unknown,
-                ErrorClass: "transport_error")));
+        // Simulate a crashed create whose outcome is unknown and recorded no App
+        // identity: the provider cannot be asked about an operation it cannot
+        // name, so the rerun is the only recovery.
         await using (var db = _factory.CreateDbContext())
         {
             var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == installed.AgentApp.Id);
@@ -311,32 +310,18 @@ public sealed class SlackInstallAgentSpecs
             await db.SaveChangesAsync();
         }
 
-        var unknown = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+        // The rerun clears the unknown fence and performs a fresh create on the
+        // same AgentApp, reaching the ordinary next step.
+        var retried = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
 
-        // No App identity was recorded, so reconciliation cannot ask the
-        // provider about the operation: arbitration is the executable action.
-        Assert.Equal(SlackAppLifecycle.CreateUnknown, unknown.AgentApp.AppLifecycle);
-        Assert.Equal(SlackAgentAppNextAction.AdjudicateCreate, unknown.NextAction);
-        Assert.Equal(1, _apps.CreateCalls);
-
-        // The operator confirmed in Slack that no App was created, so the
-        // guide's own create step now succeeds on the same AgentApp.
-        _apps.SetResponse(installed.AgentApp.Id, new FakeSlackAppResponse());
-        var adjudicated = await _service.AdjudicateCreateAsync(ProjectId, AgentId);
-
-        Assert.Equal(SlackAppLifecycle.Created, adjudicated.AgentApp.AppLifecycle);
-        Assert.Equal(installed.AgentApp.Id, adjudicated.AgentApp.Id);
-        Assert.Equal(SlackAgentAppNextAction.AuthorizeAgentApp, adjudicated.NextAction);
+        Assert.Equal(SlackAppLifecycle.Created, retried.AgentApp.AppLifecycle);
+        Assert.Equal(installed.AgentApp.Id, retried.AgentApp.Id);
+        Assert.Equal(SlackAgentAppNextAction.AuthorizeAgentApp, retried.NextAction);
         Assert.Equal(2, _apps.CreateCalls);
-        await using (var db = _factory.CreateDbContext())
-        {
-            var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == installed.AgentApp.Id);
-            Assert.Contains("create_adjudication", row.AuditJson, StringComparison.Ordinal);
-        }
     }
 
     [Fact]
-    public async Task Adjudicating_a_create_that_recorded_an_app_identity_is_refused()
+    public async Task A_recorded_identity_keeps_the_rerun_reconciling_instead_of_recreating()
     {
         await SeedAgentAsync(AgentStatus.Active);
         await SeedEnrollmentAsync("enrollment-1");
@@ -353,27 +338,9 @@ public sealed class SlackInstallAgentSpecs
                 SlackAppManagementFactOutcome.Unknown,
                 ErrorClass: "transport_error")));
         var unknown = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+        // A recorded identity keeps the rerun reconciling against the provider;
+        // it never recreates the App.
         Assert.Equal(SlackAgentAppNextAction.ReconcileCreate, unknown.NextAction);
-
-        var conflict = await Assert.ThrowsAsync<SlackManagerConflictException>(
-            () => _service.AdjudicateCreateAsync(ProjectId, AgentId));
-
-        Assert.Equal("create_reconciliation_required", conflict.Code);
-        Assert.Equal(1, _apps.CreateCalls);
-    }
-
-    [Fact]
-    public async Task Adjudicating_a_create_that_is_not_unknown_is_refused()
-    {
-        await SeedAgentAsync(AgentStatus.Active);
-        await SeedEnrollmentAsync("enrollment-1");
-        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
-
-        var conflict = await Assert.ThrowsAsync<SlackManagerConflictException>(
-            () => _service.AdjudicateCreateAsync(ProjectId, AgentId));
-
-        Assert.Equal("create_adjudication_not_required", conflict.Code);
-        Assert.Equal(SlackAppLifecycle.Created, installed.AgentApp.AppLifecycle);
         Assert.Equal(1, _apps.CreateCalls);
     }
 

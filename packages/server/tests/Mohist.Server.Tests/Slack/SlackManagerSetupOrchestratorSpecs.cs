@@ -191,12 +191,12 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         var progress = await _orchestrator.SupplyConfigurationAsync(
             new(new("xoxe-current", "xoxr-current")));
 
-        Assert.Equal(SlackSetupPhase.CreateUnknown, progress.Phase);
-        // No App identity was recorded, so the executable action is the
-        // explicit arbitration: a rerun could never change this state.
-        Assert.Equal(SlackSetupPrimaryAction.AdjudicateCreate, progress.PrimaryAction);
-        Assert.Equal(0, _appManagement.CreateCalls);
-        await AssertEnrollmentAppLifecycleAsync("T_INTERRUPTED", SlackManagerAppLifecycle.CreateUnknown);
+        Assert.Equal(SlackSetupPhase.AwaitingInstall, progress.Phase);
+        // The interrupted create is recovered and the same rerun creates fresh,
+        // so the guide never stalls on an unknown outcome.
+        Assert.Equal(SlackSetupPrimaryAction.ApproveInstall, progress.PrimaryAction);
+        Assert.Equal(1, _appManagement.CreateCalls);
+        await AssertEnrollmentAppLifecycleAsync("T_INTERRUPTED", SlackManagerAppLifecycle.Created);
     }
 
     [Fact]
@@ -214,10 +214,12 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         var progress = await _orchestrator.SupplyConfigurationAsync(
             new(new("xoxe-current", "xoxr-current")));
 
-        Assert.Equal(SlackSetupPhase.CreateUnknown, progress.Phase);
-        Assert.Equal(SlackSetupPrimaryAction.AdjudicateCreate, progress.PrimaryAction);
-        Assert.Equal(0, _appManagement.CreateCalls);
-        await AssertEnrollmentAppLifecycleAsync("T_ORPHAN", SlackManagerAppLifecycle.CreateUnknown);
+        Assert.Equal(SlackSetupPhase.AwaitingInstall, progress.Phase);
+        // A create that succeeded but recorded no identity is recovered and
+        // created fresh on the same enrollment instead of stalling.
+        Assert.Equal(SlackSetupPrimaryAction.ApproveInstall, progress.PrimaryAction);
+        Assert.Equal(1, _appManagement.CreateCalls);
+        await AssertEnrollmentAppLifecycleAsync("T_ORPHAN", SlackManagerAppLifecycle.Created);
     }
 
     [Fact]
@@ -743,7 +745,6 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             SlackSetupPrimaryAction.SupplyRuntimeCredentials,
             SlackSetupPrimaryAction.AwaitSocketVerification,
             SlackSetupPrimaryAction.RerunSetup,
-            SlackSetupPrimaryAction.AdjudicateCreate,
             SlackSetupPrimaryAction.Ready,
         ];
         var projections = new List<SlackSetupProgress>();
@@ -764,12 +765,21 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             await _leases.ReportHelloAsync("operator-1", manager, validation!.LeaseId, configuration.ManagerAppId!));
         projections.Add((await _orchestrator.GetProgressAsync())!);
 
-        // An unresolved App create that recorded no identity projects the
-        // explicit arbitration: a rerun could never change that state.
+        // An unresolved App create that recorded an identity projects the
+        // ordinary rerun while the provider cannot answer.
         var unresolved = await SeedEnrollmentAsync("T_PROJECTION_UNKNOWN");
-        var begin = await _enrollments.BeginManagerAppCreateAsync(
+        var beginUnknown = await _enrollments.BeginManagerAppCreateAsync(
             unresolved.Id, unresolved.ManagerAppOperationFence, "manager_create_crashed");
-        Assert.True(begin.Accepted);
+        Assert.True(beginUnknown.Accepted);
+        var applyUnknown = await _enrollments.ApplyManagerAppCreateResultAsync(
+            unresolved.Id, beginUnknown.Enrollment!.ManagerAppOperationFence,
+            SlackManagerAppLifecycle.CreateUnknown, "transport_error");
+        Assert.True(applyUnknown.Accepted);
+        await _enrollments.RecordManagerAppIdentityAsync(unresolved.Id, "A_PROJECTION_UNKNOWN");
+        _appManagement.SetResponse(unresolved.Id, new FakeSlackAppResponse(
+            Inspect: new SlackAppManagementFact(
+                SlackAppManagementFactOutcome.Unknown,
+                ErrorClass: "transport_error")));
         _configurationPort.Enqueue(ConfigurationRotation("T_PROJECTION_UNKNOWN"));
         projections.Add(await _orchestrator.SupplyConfigurationAsync(
             new(new("xoxe-current", "xoxr-current"))));
@@ -790,7 +800,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             Assert.False(string.IsNullOrWhiteSpace(projection.Summary));
         });
         Assert.Contains(projections, projection =>
-            projection.PrimaryAction == SlackSetupPrimaryAction.AdjudicateCreate
+            projection.PrimaryAction == SlackSetupPrimaryAction.RerunSetup
             && projection.Phase == SlackSetupPhase.CreateUnknown);
         Assert.Contains(projections, projection =>
             projection.PrimaryAction == SlackSetupPrimaryAction.SupplyConfiguration

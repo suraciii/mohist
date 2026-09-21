@@ -211,31 +211,6 @@ public sealed class SlackWorkspaceEnrollment
         UpdatedAt = now;
     }
 
-    /// <summary>
-    /// Records the human decision that an unknown create produced no App.
-    /// Reconciliation is the only recovery when the operation recorded an App
-    /// identity; without one no rerun could change the state, so the
-    /// operator's decision is what moves it. Nothing external is written and
-    /// no replacement App exists: the guide's own create step runs afterwards
-    /// on this same enrollment.
-    /// </summary>
-    public void AdjudicateManagerAppCreate(string redactedOutcome, int expectedFence, DateTimeOffset now)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(redactedOutcome);
-        if (ManagerAppOperationFence != expectedFence)
-            throw new InvalidOperationException("The Manager App create operation fence does not match the enrollment.");
-        if (ManagerAppLifecycle != SlackManagerAppLifecycle.CreateUnknown)
-            throw new InvalidOperationException("Only an unknown Manager App create can be adjudicated.");
-        if (!string.IsNullOrWhiteSpace(ManagerAppId))
-            throw new InvalidOperationException("An unknown create with a recorded App identity is reconciled, not adjudicated.");
-        SlackStateTransitions.RequireManagerAppLifecycleTransition(
-            ManagerAppLifecycle,
-            SlackManagerAppLifecycle.NotCreated);
-        ManagerAppLifecycle = SlackManagerAppLifecycle.NotCreated;
-        ManagerAppOperationOutcome = redactedOutcome.Trim();
-        UpdatedAt = now;
-    }
-
     public void StageManagerRuntimeCredentials(string botUserId, DateTimeOffset now)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(botUserId);

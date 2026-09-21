@@ -61,28 +61,40 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Unknown_create_can_only_leave_via_fact_reconcile_and_never_replays_create()
+    public async Task An_unknown_create_without_identity_is_retried_by_a_rerun_while_a_recorded_identity_reconciles()
     {
         var child = await SeedChildAsync(lifecycle: SlackAppLifecycle.NotCreated);
         _apps.SetResponse(child.Id, new FakeSlackAppResponse(
             Create: new SlackAppManagementResult(SlackAppManagementOutcome.Unknown, ErrorClass: "timeout")));
 
         var create = await _appService.CreateAsync(child.Id);
-        var retry = await _appService.CreateAsync(child.Id);
-
         Assert.Equal(ManagedSlackAgentAppOperationStatus.Completed, create.Status);
         Assert.Equal(SlackAppManagementOutcome.Unknown, create.Outcome);
-        Assert.Equal(ManagedSlackAgentAppOperationStatus.NotAllowed, retry.Status);
         Assert.Equal(1, _apps.CreateCalls);
         Assert.Equal(SlackAppLifecycle.CreateUnknown, await LifecycleAsync(child.Id));
 
-        _apps.SetResponse(child.Id, new FakeSlackAppResponse(
-            Inspect: new SlackAppManagementFact(SlackAppManagementFactOutcome.Present, "A_FACT")));
-        var reconciled = await _appService.ReconcileCreateAsync(child.Id);
+        // No App identity was recorded, so a rerun retries the create: this is
+        // the recovery for a create the provider could not confirm.
+        var retry = await _appService.CreateAsync(child.Id);
+        Assert.Equal(ManagedSlackAgentAppOperationStatus.Completed, retry.Status);
+        Assert.Equal(2, _apps.CreateCalls);
+        Assert.Equal(SlackAppLifecycle.CreateUnknown, await LifecycleAsync(child.Id));
 
+        // Once an App identity is recorded, a rerun reconciles against the
+        // provider and never replays the create.
+        await using (var db = _factory.CreateDbContext())
+        {
+            var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == child.Id);
+            row.AppId = "A_RECORDED";
+            await db.SaveChangesAsync();
+        }
+        _apps.SetResponse(child.Id, new FakeSlackAppResponse(
+            Inspect: new SlackAppManagementFact(SlackAppManagementFactOutcome.Present, "A_RECORDED")));
+        var before = _apps.CreateCalls;
+        var reconciled = await _appService.ReconcileCreateAsync(child.Id);
         Assert.Equal(ManagedSlackAgentAppOperationStatus.Reconciled, reconciled.Status);
         Assert.Equal(SlackAppManagementFactOutcome.Present, reconciled.FactOutcome);
-        Assert.Equal(1, _apps.CreateCalls);
+        Assert.Equal(before, _apps.CreateCalls);
         Assert.Equal(SlackAppLifecycle.Created, await LifecycleAsync(child.Id));
     }
 
@@ -155,8 +167,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         Assert.Equal(SlackAgentAppNextAction.CreateAgentApp, child.NextAction);
 
         child.AppLifecycle = SlackAppLifecycle.CreateUnknown;
-        Assert.Equal(SlackAgentAppNextAction.AdjudicateCreate, child.NextAction);
-        child.AppId = "A_KNOWN";
+        // A rerun is the recovery whether or not an App identity was recorded.
         Assert.Equal(SlackAgentAppNextAction.ReconcileCreate, child.NextAction);
 
         child.AppLifecycle = SlackAppLifecycle.Created;

@@ -184,41 +184,6 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
             : ManagerAppCreateApplyResult.Stale(await CurrentOrNullAsync(db, id, ct));
     }
 
-    public async Task<ManagerAppCreateApplyResult> AdjudicateManagerAppCreateAsync(
-        string id,
-        int expectedFence,
-        string redactedOutcome,
-        CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(id);
-        ArgumentException.ThrowIfNullOrWhiteSpace(redactedOutcome);
-
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await db.SlackWorkspaceEnrollments.AsNoTracking()
-            .SingleOrDefaultAsync(item => item.Id == id, ct);
-        if (row is null)
-            return ManagerAppCreateApplyResult.NotFound;
-        var enrollment = ToDomain(row);
-        if (enrollment.ManagerAppOperationFence != expectedFence
-            || enrollment.ManagerAppLifecycle != SlackManagerAppLifecycle.CreateUnknown
-            || !string.IsNullOrWhiteSpace(enrollment.ManagerAppId))
-            return ManagerAppCreateApplyResult.Stale(enrollment);
-        enrollment.AdjudicateManagerAppCreate(redactedOutcome, expectedFence, _timeProvider.GetUtcNow());
-
-        var updated = await db.SlackWorkspaceEnrollments
-            .Where(item => item.Id == id
-                && item.ManagerAppOperationFence == expectedFence
-                && item.ManagerAppLifecycle == SlackManagerAppLifecycle.CreateUnknown
-                && item.ManagerAppId == "")
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(item => item.ManagerAppLifecycle, enrollment.ManagerAppLifecycle)
-                .SetProperty(item => item.ManagerAppOperationOutcome, enrollment.ManagerAppOperationOutcome)
-                .SetProperty(item => item.UpdatedAt, enrollment.UpdatedAt), ct);
-        return updated == 1
-            ? new(enrollment, true)
-            : ManagerAppCreateApplyResult.Stale(await CurrentOrNullAsync(db, id, ct));
-    }
-
     public Task<SlackWorkspaceEnrollment?> StageRuntimeCredentialsAsync(string id, CancellationToken ct = default) =>
         UpdateAsync(id, enrollment => enrollment.StageRuntimeCredentials(_timeProvider.GetUtcNow()), ct);
 

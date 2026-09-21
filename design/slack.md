@@ -364,19 +364,20 @@ Socket ready:   both credentials persisted, both identities verified,
                 adapter lease alive; missing either credential forbids ready
 ```
 
-An unknown state is left only through reconciliation or explicit human
-arbitration; a process restart never repeats create/delete automatically. A
+An unknown state is left only through a rerun: a recorded App identity is
+reconciled against the provider, and one without an identity is retried with a
+fresh create. A process restart never repeats create/delete automatically. A
 definite failure starts a new attempt on the same AgentApp, never a new
 Connection or Bot target. Cancelled installation, expired authorization, and
 pending approval all resume the same AgentApp.
 
-An unknown create result is adjudicated on the same AgentApp: reconciliation
-asks the provider about the recorded operation by its own identity, and
-explicit arbitration records a human decision. Neither path creates a
-replacement App. The operation fence is the only writer of the external create,
-so a restart and a concurrent rerun both read the fence and perform no second
-external write; until the outcome is known, the projection shows a waiting
-state with its reason instead of a create task.
+An unknown create result is recovered on the same AgentApp by a rerun: a
+recorded identity is reconciled by asking the provider about that operation,
+and one without an identity is retried with a fresh create. The operation fence
+is the only writer of the external create, so a restart and a concurrent rerun
+both read the fence and perform no second external write. If the interrupted
+create actually made an App, the fresh create leaves that half-configured App
+behind and the user removes it in Slack's app settings.
 
 ### Credential Ownership
 
@@ -646,8 +647,9 @@ claim end-to-end exactly-once.
   a gap may exist.
 
 Control-plane create/delete is likewise at-least-once: a repeated attempt does
-not repeat App creation/deletion, and an unknown result converges only through
-reconciliation or human arbitration under Four-Axis State.
+not repeat App creation/deletion, and an unknown result converges only through a
+rerun — reconciliation for a recorded identity, a fresh create otherwise — under
+Four-Axis State.
 
 ### State Projection and Message Identity
 

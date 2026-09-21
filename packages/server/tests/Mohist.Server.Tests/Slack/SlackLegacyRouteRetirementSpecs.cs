@@ -26,6 +26,8 @@ public sealed class SlackLegacyRouteRetirementSpecs : IClassFixture<DefaultMohis
         "/api/projects/{projectRef}/slack-connections/{connectionId}/rotate-credentials",
         "/api/projects/{projectRef}/slack-connections/{connectionId}/adapter-session",
         "/api/slack-connections/adapter",
+        "/api/slack-manager/setup/adjudicate-create",
+        "/api/projects/{projectRef}/slack-manager/install-agent/adjudicate-create",
     ];
 
     private static readonly string[] KeptControlPlaneRoutes =
@@ -33,10 +35,8 @@ public sealed class SlackLegacyRouteRetirementSpecs : IClassFixture<DefaultMohis
         "/api/slack-manager/setup/configuration",
         "/api/slack-manager/setup/runtime-credentials",
         "/api/slack-manager/setup/resume",
-        "/api/slack-manager/setup/adjudicate-create",
         "/api/slack-manager/setup/progress",
         "/api/projects/{projectRef}/slack-manager/install-agent",
-        "/api/projects/{projectRef}/slack-manager/install-agent/adjudicate-create",
         "/api/projects/{projectRef}/slack-manager/install-agent/credentials",
         "/api/slack-manager/adapter",
         "/api/slack-manager/adapter/{enrollmentId}/deliveries/claim",
@@ -90,6 +90,8 @@ public sealed class SlackLegacyRouteRetirementSpecs : IClassFixture<DefaultMohis
     [InlineData("POST", "/api/projects/proj-retired/slack-connections/conn-retired/rotate-credentials")]
     [InlineData("POST", "/api/projects/proj-retired/slack-connections/conn-retired/adapter-session")]
     [InlineData("GET", "/api/slack-connections/adapter")]
+    [InlineData("POST", "/api/slack-manager/setup/adjudicate-create")]
+    [InlineData("POST", "/api/projects/proj-retired/slack-manager/install-agent/adjudicate-create")]
     public async Task Retired_routes_answer_404_not_found(string method, string path)
     {
         using var request = new HttpRequestMessage(new HttpMethod(method), path)

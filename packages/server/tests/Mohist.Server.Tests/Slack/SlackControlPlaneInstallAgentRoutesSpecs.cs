@@ -219,25 +219,13 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
     }
 
     [Fact]
-    public async Task Adjudicate_create_requires_an_operator_token_and_refuses_a_created_app()
+    public async Task The_install_agent_adjudicate_create_route_is_retired()
     {
-        var (projectId, agentId, team, enrollmentId) = UniqueIds();
-        await SeedAsync(projectId, agentId, AgentStatus.Active, team, enrollmentId);
-
-        using var anonymous = _fixture.CreateUnauthenticatedClient();
-        using var anonymousResponse = await anonymous.PostAsJsonAsync(
-            AdjudicatePath(projectId), new { agentId });
-        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
-
         using var client = _fixture.CreateOperatorClient();
-        await ReadDataAsync(await client.PostAsJsonAsync(InstallPath(projectId), new { agentId }));
-        var createsBefore = _fixture.Apps.CreateCalls;
+        using var response = await client.PostAsJsonAsync(
+            AdjudicatePath("project-retired"), new { agentId = "agent-retired" });
 
-        // A created App has no unknown create to arbitrate.
-        using var refused = await client.PostAsJsonAsync(AdjudicatePath(projectId), new { agentId });
-        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
-        Assert.Equal("create_adjudication_not_required", await CodeAsync(refused));
-        Assert.Equal(createsBefore, _fixture.Apps.CreateCalls);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     private static string InstallPath(string projectId) =>
