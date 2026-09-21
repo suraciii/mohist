@@ -1,18 +1,8 @@
 import '@testing-library/jest-dom'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
-import { ProjectProvider } from '../../../entities/project'
 import type { AgentExecutabilityFacts } from '../../../entities/agent-connection'
 import { AgentExecutabilitySection, isAgentExecutionBlocked } from './agent-executability-section'
-
-const PROJECT = {
-  id: 'proj-1',
-  name: 'Test',
-  createdAt: '2026-01-01T00:00:00.000Z',
-  updatedAt: '2026-01-01T00:00:00.000Z',
-  repositories: [],
-}
 
 function makeExecutability(overrides: Partial<AgentExecutabilityFacts> = {}): AgentExecutabilityFacts {
   return {
@@ -31,13 +21,7 @@ function makeExecutability(overrides: Partial<AgentExecutabilityFacts> = {}): Ag
 }
 
 function renderSection(executability: AgentExecutabilityFacts) {
-  return render(
-    <MemoryRouter initialEntries={['/Test/connections/conn-1']}>
-      <ProjectProvider initialProjectId="proj-1" initialProjects={[PROJECT]}>
-        <AgentExecutabilitySection executability={executability} />
-      </ProjectProvider>
-    </MemoryRouter>,
-  )
+  return render(<AgentExecutabilitySection executability={executability} />)
 }
 
 afterEach(cleanup)
@@ -53,17 +37,19 @@ describe('isAgentExecutionBlocked', () => {
 })
 
 describe('AgentExecutabilitySection', () => {
-  it('states the limitation separately from Connection setup and links the repair surface', () => {
+  it('states the limitation separately from Connection setup', () => {
     renderSection(makeExecutability())
 
     const section = screen.getByTestId('connection-agent-executability')
     expect(section).toHaveTextContent('Slack setup for this Connection is complete.')
     expect(section).toHaveTextContent('No Runtime is configured for this Agent.')
     expect(section).toHaveTextContent('Choose a Runtime in Agent settings.')
+  })
 
-    const link = screen.getByRole('link', { name: 'Agent settings' })
-    expect(link).toHaveAttribute('href', '/Test/agents/agent-1')
-    expect(section).toHaveTextContent('mo agent edit agent-1')
+  it('repeats no repair link, because the projected action already carries it', () => {
+    renderSection(makeExecutability())
+
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
   })
 
   it('renders every reported gap', () => {

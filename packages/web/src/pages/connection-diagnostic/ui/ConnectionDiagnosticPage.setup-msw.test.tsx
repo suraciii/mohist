@@ -391,8 +391,10 @@ describe('ConnectionDiagnosticPage — setup step rendering (MSW)', () => {
     expect(screen.getByTestId('connection-setup-agent-repair-link')).toHaveAttribute('href', '/Test/agents/agent-1')
     const limitation = screen.getByTestId('connection-agent-executability')
     expect(limitation).toHaveTextContent('No Runtime is configured for this Agent.')
-    expect(limitation).toHaveTextContent('mo agent edit agent-1')
-    // The limitation is separate from the completed Connection setup.
+    expect(limitation).toHaveTextContent('Choose a Runtime in Agent settings.')
+    // The limitation is separate from the completed Connection setup, and the
+    // projected repair action stays the one executable action on the page.
+    expect(limitation.querySelector('a')).toBeNull()
     expect(screen.getByTestId('connection-diagnostic-facts')).toHaveTextContent(/complete/i)
   })
 

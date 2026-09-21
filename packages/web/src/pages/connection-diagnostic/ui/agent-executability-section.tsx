@@ -1,7 +1,6 @@
 import { AlertTriangleIcon } from 'lucide-react'
 import type { AgentExecutabilityFacts } from '../../../entities/agent-connection'
 import { CardSection } from '@/shared/ui/components/card-section'
-import { useProjectPath } from '../../../entities/project'
 
 /** States that stop the Agent from accepting work while Slack setup is complete. */
 const BLOCKED_EXECUTION_STATES = new Set(['not-configured', 'not-executable'])
@@ -13,13 +12,11 @@ export function isAgentExecutionBlocked(state: string | null | undefined): boole
 /**
  * Slack setup completion and the Agent's ability to accept work are separate
  * facts. A claimed Connection whose Agent cannot execute states that limitation
- * on its own instead of folding it into the Connection's health, and it points
- * at the existing Agent repair surface.
+ * on its own instead of folding it into the Connection's health. The repair
+ * action itself stays the one primary action the Server projected, so this
+ * section reports the gaps and repeats no second link.
  */
 export function AgentExecutabilitySection({ executability }: { executability: AgentExecutabilityFacts }) {
-  const toProjectPath = useProjectPath()
-  const gaps = executability.gaps
-
   return (
     <CardSection title="Agent cannot accept work yet" tone="amber">
       <div className="space-y-3" data-testid="connection-agent-executability">
@@ -30,9 +27,9 @@ export function AgentExecutabilitySection({ executability }: { executability: Ag
             delegations are safely rejected until the Agent is repaired.
           </p>
         </div>
-        {gaps.length > 0 && (
+        {executability.gaps.length > 0 && (
           <ul className="space-y-2" data-testid="connection-agent-executability-gaps">
-            {gaps.map((gap) => (
+            {executability.gaps.map((gap) => (
               <li
                 key={gap.code}
                 data-testid={`connection-agent-executability-gap-${gap.code}`}
@@ -40,13 +37,6 @@ export function AgentExecutabilitySection({ executability }: { executability: Ag
               >
                 <p className="font-medium text-foreground">{gap.message}</p>
                 <p className="mt-0.5 text-muted-foreground">{gap.nextAction}</p>
-                <p className="mt-1 text-muted-foreground">
-                  Fix in{' '}
-                  <a className="font-medium underline" href={toProjectPath(gap.fixEntryPoint.path)}>
-                    {gap.fixEntryPoint.label}
-                  </a>{' '}
-                  ({gap.fixEntryPoint.command}).
-                </p>
               </li>
             ))}
           </ul>
