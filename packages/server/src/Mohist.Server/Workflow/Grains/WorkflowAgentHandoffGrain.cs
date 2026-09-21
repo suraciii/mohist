@@ -225,6 +225,20 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
             }
             await ClearActivationReminderAsync();
         }
+        catch (RuntimeSessionMissingException ex)
+        {
+            // Only the Runner can attach a Runtime Session binding, so a
+            // terminal launch that never bound one never self-heals: retrying
+            // activation cannot converge. The handoff settles as Failed and
+            // the Workflow's own task retry re-renders a fresh handoff.
+            _state.State.Plan = plan with
+            {
+                Disposition = WorkflowAgentHandoffDisposition.Failed,
+                ActivationError = ex.Message,
+            };
+            await _state.WriteStateAsync();
+            await ClearActivationReminderAsync();
+        }
         catch (Exception ex)
         {
             _state.State.Plan = plan with { ActivationError = ex.Message };
