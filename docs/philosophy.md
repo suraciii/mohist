@@ -41,47 +41,74 @@ assumptions, and correct direction. AI can supply evidence and challenge a
 proposal. People can delegate work without continuously observing every
 operation, while retaining meaningful judgment over what the work serves.
 
-## Chapter 2: Human-Computer Interaction
+## Chapter 2: Humans, Agents, and Programs
 
-Human-computer interaction connects human purposes with actions a machine can
-perform. Its central problem is how people give their intentions an effective
-form and understand the consequences of acting through that form.
+Humans use software to act on things they want to understand or change. An
+Agent can undertake work on their behalf and use programs to carry out their
+intentions. This activity develops through cooperation among humans, Agents,
+and programs.
 
-### 1. Purpose must take an executable form
+### 1. Humans can delegate the use of programs
 
-A purpose concerns what an action is for. A program specifies operations.
-Moving from one to the other requires interpreting the purpose and choosing
-means that can realize it.
+A person can use a program through an Agent without specifying every
+operation. Delegation can include interpreting the task, choosing tools,
+connecting operations, and deciding how to continue. The Agent takes up the
+person's intention as the purpose of its activity.
 
-An interface gives this interpretation a form. Its commands and categories
-shape what people can express directly and what they must work out for
-themselves. The form of interaction therefore affects how people formulate
-their work and which possibilities they can readily explore.
+Its ability to sustain this activity depends on its intelligence, the means
+available, and the conditions in which it acts. Planning, tool use, and
+adaptation to feedback are themselves capabilities that training can
+develop.[^agent-practice]
 
-### 2. Language makes interpretation part of interaction
+Agents are themselves implemented as programs. Using and being used describe
+positions within an activity. An Agent can use programs to act, while programs
+can invoke Agents and organize their execution. The same Agent can occupy
+both positions.
 
-Natural language lets people express purposes before specifying all the
-means. Meaning depends on context, assumptions, and what the speaker is
-trying to accomplish. Understanding develops through explanation, questions,
-and responses.
+### 2. Cooperation develops through action and feedback
 
-An Agent can participate in this interpretation. Dialogue makes assumptions
-available for examination and connects an emerging intention with possible
-actions. People can revise the purpose itself as they discover what their
-request entails. Expression and understanding develop together.
-
-### 3. Mediation changes the work of judgment
-
-An Agent's interpretation makes action possible, but it can also introduce
-assumptions that the person did not intend. Fluent expression can conceal
-misunderstanding, and successful operations can leave the purpose unfulfilled.
-
-For the activity to remain directed by the person, the interpretation and its
-consequences need to remain open to examination. People can delegate the
-choice of operations while judging what was understood, what happened, and
-whether to continue. Communication sustains this relation throughout the
+An activity can cross the boundaries of several applications. Their
+operations become connected through the work being done and the object being
+examined or changed. In investigating an unusual expense, queries,
+calculations, and comparisons of records become parts of the same inquiry.
+Each program can contribute without understanding the purpose of the whole
 activity.
+
+Action changes the conditions for further action. Results can challenge an
+assumption, reveal a missing step, or suggest another approach. Agents
+interpret this feedback; humans can refine their intentions as the
+consequences become clear. Understanding the intention and acting on it
+develop together.
+
+The Agent's interpretation also shapes which possibilities become available.
+It can discover useful means or overlook them. The work therefore tests both
+the chosen means and the interpretation that guided their use.
+
+Cooperation can include sustained dialogue, extended autonomous work, and
+direct manipulation of results. Humans can move between these forms within
+the same activity. The appropriate form depends on what they seek from the
+activity, including the value of taking part in it.
+
+### 3. Use can transform its own means
+
+When an Agent creates or modifies a program, a means of action becomes an
+object of work. When the resulting program is used, it becomes a means again.
+Using software can thus include producing the tools needed to proceed.
+
+An activity can leave behind programs, methods, and records that become
+conditions for later work.[^labor] Existing programs carry forward knowledge
+and experience from earlier development. More capable Agents can make better
+use of these means, while better means expand what Agents can accomplish.
+
+Each use takes place under particular conditions, while reusable programs
+preserve relatively stable rules. Existing tools may need adjustment;
+creating every tool anew would discard useful accumulated work. Choosing
+when to reuse, combine, modify, or create programs is part of carrying out
+the intention. Through this activity, humans and Agents can change the means
+available for future use.
 
 ## References
 
 [^labor]: Karl Marx, [*Capital*, Volume I, Chapter 7, Section 1: The Labour-Process](https://www.marxists.org/archive/marx/works/1867-c1/ch07.htm#S1).
+
+[^agent-practice]: Moonshot AI, [*Kimi K3: Open Frontier Intelligence*](https://arxiv.org/html/2607.24653v1), sections 4.1 and 4.2; MiniMax, [*MiniMax M3: Frontier Coding, 1M Context, Native Multimodality — All in One Model*](https://www.minimax.io/blog/minimax-m3).
