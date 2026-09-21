@@ -63,6 +63,13 @@ func slackPrompts(answers ...string) (func() bool, func(string) (string, error),
 		}, prompts
 }
 
+// slackAgentRead answers the Agent resolution the guide performs before any
+// write: the caller's Project-scoped name or ID resolves to the stored Agent
+// the Server installs, so no Connection, App, or Enrollment ID is ever typed.
+func slackAgentRead(id string) *http.Response {
+	return response(http.StatusOK, `{"success":true,"data":{"id":"`+id+`","name":"reviewer","status":"active"}}`)
+}
+
 func TestSlackSetupStartsFromOneExplicitCredentialsFileWithoutExposingSecrets(t *testing.T) {
 	requests := []capturedSlackRequest{}
 	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -498,6 +505,39 @@ func TestSlackStatusReportsANotStartedSetupAndExitsZero(t *testing.T) {
 	}
 }
 
+func TestSlackStatusExitsNonzeroOnADefiniteFailure(t *testing.T) {
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"success":true,"data":{"phase":"failed","primaryAction":"supply_runtime_credentials","summary":"Workspace T123: The last setup step failed.","errorClass":"runtime_credential_mismatch"}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "management-token"})
+
+	code := Run(context.Background(), []string{"slack", "status"}, deps)
+
+	if code != ExitOperation || errOut.Len() != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "Workspace T123") || !strings.Contains(out.String(), "supply the Mohist App Bot token and App-level token") {
+		t.Fatalf("the truthful report stays on stdout: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "reason: runtime_credential_mismatch") {
+		t.Fatalf("reason missing: %q", out.String())
+	}
+}
+
+func TestSlackStatusExitsZeroWhileAnOutcomeIsUnknown(t *testing.T) {
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"success":true,"data":{"phase":"create_unknown","primaryAction":"rerun_setup","summary":"Workspace T123: The Mohist App create result is unknown and must be reconciled.","errorClass":"transport_error"}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "management-token"})
+
+	code := Run(context.Background(), []string{"slack", "status"}, deps)
+
+	if code != ExitOK || errOut.Len() != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "unknown") || !strings.Contains(out.String(), "continue: mo slack setup") {
+		t.Fatalf("stdout=%q", out.String())
+	}
+}
+
 func TestSlackSetupSubmitsAnExplicitConfigurationPairOncePerRun(t *testing.T) {
 	requests := []capturedSlackRequest{}
 	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -561,11 +601,13 @@ func TestSlackInstallAgentUsesAgentIdentityAndReturnsRefreshedPublicProgress(t *
 		requests = append(requests, captureSlackRequest(t, request))
 		switch len(requests) {
 		case 1:
-			return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"reviewer"},"agentApp":{"installUrl":"https://api.slack.com/install"},"nextAction":"provide_credentials"}}`), nil
+			return slackAgentRead("agent_reviewer"), nil
 		case 2:
+			return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"agent_reviewer"},"agentApp":{"installUrl":"https://api.slack.com/install"},"nextAction":"provide_credentials"}}`), nil
+		case 3:
 			return response(http.StatusOK, `{"success":true,"data":{"accepted":true,"runtimeCredentialValidationState":"candidate"}}`), nil
 		default:
-			return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"reviewer"},"agentApp":{"runtimeCredentialValidationState":"candidate"},"nextAction":"provide_credentials"}}`), nil
+			return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"agent_reviewer"},"agentApp":{"runtimeCredentialValidationState":"candidate"},"nextAction":"provide_credentials"}}`), nil
 		}
 	}), map[string]string{"MOHIST_TOKEN": "operator"})
 	file := &slackFileStub{contents: `{"botToken":"xoxb-agent","appLevelToken":"xapp-agent"}`, mode: 0o600}
@@ -576,16 +618,16 @@ func TestSlackInstallAgentUsesAgentIdentityAndReturnsRefreshedPublicProgress(t *
 	if code != ExitOK || errOut.Len() != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
-	if len(requests) != 3 || requests[0].path != "/api/projects/proj/slack-manager/install-agent" || requests[1].path != "/api/projects/proj/slack-manager/install-agent/credentials" || requests[2].path != requests[0].path {
+	if len(requests) != 4 || requests[0].path != "/api/projects/proj/agents/by-name/reviewer" || requests[1].path != "/api/projects/proj/slack-manager/install-agent" || requests[2].path != "/api/projects/proj/slack-manager/install-agent/credentials" || requests[3].path != requests[1].path {
 		t.Fatalf("requests=%+v", requests)
 	}
-	for _, index := range []int{0, 1, 2} {
-		if requests[index].body["agentId"] != "reviewer" {
+	for _, index := range []int{1, 2, 3} {
+		if requests[index].body["agentId"] != "agent_reviewer" {
 			t.Fatalf("request %d body=%v", index, requests[index].body)
 		}
 	}
-	if requests[1].body["botToken"] != "xoxb-agent" || requests[1].body["appLevelToken"] != "xapp-agent" {
-		t.Fatalf("credentials body=%v", requests[1].body)
+	if requests[2].body["botToken"] != "xoxb-agent" || requests[2].body["appLevelToken"] != "xapp-agent" {
+		t.Fatalf("credentials body=%v", requests[2].body)
 	}
 	if !strings.Contains(out.String(), "supply the Agent App Bot token and App-level token") {
 		t.Fatalf("human summary=%q", out.String())
@@ -602,7 +644,10 @@ func TestSlackInstallAgentResolvesTheSelectedWorkspaceBeforeAnyWrite(t *testing.
 		if requests[len(requests)-1].path == "/api/slack-manager/setup/progress" {
 			return response(http.StatusOK, `{"success":true,"data":{"phase":"ready","primaryAction":"ready","summary":"Workspace T123: The Mohist App is ready in this Workspace."}}`), nil
 		}
-		return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"reviewer"},"agentApp":{"installUrl":"https://api.slack.com/install"},"nextAction":"approve_install"}}`), nil
+		if requests[len(requests)-1].path == "/api/projects/proj/agents/by-name/reviewer" {
+			return slackAgentRead("agent_reviewer"), nil
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"agent_reviewer","setupProgress":"create_app_credentials"},"agentApp":{"installUrl":"https://api.slack.com/install"},"nextAction":"approve_install"}}`), nil
 	}), map[string]string{"MOHIST_TOKEN": "operator"})
 	deps.ReadFile = func(string) (string, error) { return "", os.ErrNotExist }
 
@@ -611,16 +656,86 @@ func TestSlackInstallAgentResolvesTheSelectedWorkspaceBeforeAnyWrite(t *testing.
 	if code != ExitOK || errOut.Len() != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
-	if len(requests) != 2 || requests[0].path != "/api/slack-manager/setup/progress" || requests[0].query != "workspaceTeamId=T123" {
+	if len(requests) != 3 || requests[0].path != "/api/projects/proj/agents/by-name/reviewer" || requests[1].path != "/api/slack-manager/setup/progress" || requests[1].query != "workspaceTeamId=T123" {
 		t.Fatalf("requests=%+v", requests)
 	}
 	// The write carries the same selector, so the Server installs into the
 	// selected Workspace instead of the Agent's first existing Connection.
-	if requests[1].path != "/api/projects/proj/slack-manager/install-agent" || requests[1].query != "workspaceTeamId=T123" {
-		t.Fatalf("install write=%+v", requests[1])
+	if requests[2].path != "/api/projects/proj/slack-manager/install-agent" || requests[2].query != "workspaceTeamId=T123" {
+		t.Fatalf("install write=%+v", requests[2])
 	}
 	if !strings.Contains(out.String(), "continue: mo slack install-agent reviewer --project proj --workspace-team T123") {
 		t.Fatalf("continuation=%q", out.String())
+	}
+}
+
+func TestSlackInstallAgentEndsAtOwnerClaimWithTheExplicitClaimCommand(t *testing.T) {
+	requests := []capturedSlackRequest{}
+	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requests = append(requests, captureSlackRequest(t, request))
+		if requests[len(requests)-1].path == "/api/projects/proj/agents/by-name/reviewer" {
+			return slackAgentRead("agent_reviewer"), nil
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"agent_reviewer","setupProgress":"claim_owner"},"agentApp":{"installUrl":"https://api.slack.com/install"},"nextAction":"claim_owner"}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "operator"})
+	deps.ReadFile = func(string) (string, error) { return "", os.ErrNotExist }
+
+	code := Run(context.Background(), []string{"slack", "install-agent", "reviewer", "--project", "proj", "--workspace-team", "T123"}, deps)
+
+	if code != ExitOK || errOut.Len() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if len(requests) != 3 || requests[2].query != "workspaceTeamId=T123" {
+		t.Fatalf("requests=%+v", requests)
+	}
+	// Owner claim is the one next primary action, and the only way to obtain a
+	// code is the explicit claim command, whose response carries the exact Bot
+	// DM destination. The guide prints neither a code nor a destination itself.
+	if !strings.Contains(out.String(), "next: claim Owner for the Agent App") {
+		t.Fatalf("next action=%q", out.String())
+	}
+	if !strings.Contains(out.String(), "claim: mo slack claim-owner connection-1 --project proj") {
+		t.Fatalf("claim command=%q", out.String())
+	}
+	if !strings.Contains(out.String(), "continue: mo slack install-agent reviewer --project proj --workspace-team T123") {
+		t.Fatalf("continuation=%q", out.String())
+	}
+	if strings.Contains(out.String(), "code") {
+		t.Fatalf("the guide must not print a claim code: %q", out.String())
+	}
+}
+
+func TestSlackInstallAgentRejectedCredentialsExitNonzeroWithTheServersReason(t *testing.T) {
+	requests := []capturedSlackRequest{}
+	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requests = append(requests, captureSlackRequest(t, request))
+		if requests[len(requests)-1].path == "/api/projects/proj/agents/by-name/reviewer" {
+			return slackAgentRead("agent_reviewer"), nil
+		}
+		if requests[len(requests)-1].path == "/api/projects/proj/slack-manager/install-agent/credentials" {
+			return response(http.StatusOK, `{"success":true,"data":{"accepted":false,"runtimeCredentialValidationState":"not_provided","errorClass":"identity_mismatch"}}`), nil
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"agent_reviewer","setupProgress":"create_app_credentials"},"agentApp":{"installUrl":"https://api.slack.com/install"},"nextAction":"provide_credentials"}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "operator"})
+	file := &slackFileStub{contents: `{"botToken":"xoxb-wrong-team","appLevelToken":"xapp-wrong-team"}`, mode: 0o600}
+	deps.ReadFile, deps.StatFile = file.read, file.stat
+
+	code := Run(context.Background(), []string{"slack", "install-agent", "reviewer", "--project", "proj", "--credentials-file", "/secure/agent.json"}, deps)
+
+	if code != ExitOperation {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if len(requests) != 3 {
+		t.Fatalf("a rejected pair is not followed by another install write: requests=%+v", requests)
+	}
+	if !strings.Contains(errOut.String(), "identity_mismatch") {
+		t.Fatalf("reason missing: stderr=%q", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "continue: mo slack install-agent reviewer --project proj --credentials-file <path>") {
+		t.Fatalf("continuation missing: stderr=%q", errOut.String())
+	}
+	if strings.Contains(out.String(), "xoxb-wrong-team") || strings.Contains(errOut.String(), "xoxb-wrong-team") {
+		t.Fatalf("secret leaked: stdout=%q stderr=%q", out.String(), errOut.String())
 	}
 }
 
@@ -628,13 +743,22 @@ func TestSlackInstallAgentRefusesASelectorThatNamesNoEnrolledWorkspace(t *testin
 	requests := []capturedSlackRequest{}
 	deps, _, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		requests = append(requests, captureSlackRequest(t, request))
+		if requests[len(requests)-1].path == "/api/projects/proj/agents/by-name/reviewer" {
+			return slackAgentRead("agent_reviewer"), nil
+		}
 		return response(http.StatusConflict, `{"success":false,"error":"No active Slack workspace enrollment matches team T999.","code":"workspace_not_enrolled"}`), nil
 	}), map[string]string{"MOHIST_TOKEN": "operator"})
 
 	code := Run(context.Background(), []string{"slack", "install-agent", "reviewer", "--project", "proj", "--workspace-team", "T999"}, deps)
 
-	if code != ExitOperation || len(requests) != 1 || !strings.Contains(errOut.String(), "workspace_not_enrolled") {
-		t.Fatalf("code=%d requests=%+v stderr=%q", code, requests, errOut.String())
+	if code != ExitOperation || len(requests) != 2 {
+		t.Fatalf("code=%d requests=%+v", code, requests)
+	}
+	if requests[1].path != "/api/slack-manager/setup/progress" || requests[1].query != "workspaceTeamId=T999" {
+		t.Fatalf("selector read=%+v", requests[1])
+	}
+	if !strings.Contains(errOut.String(), "workspace_not_enrolled") {
+		t.Fatalf("stderr=%q", errOut.String())
 	}
 }
 
@@ -642,7 +766,10 @@ func TestSlackInstallAgentNonInteractiveReportsTheCredentialStepAndContinuation(
 	requests := []capturedSlackRequest{}
 	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		requests = append(requests, captureSlackRequest(t, request))
-		return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"reviewer"},"agentApp":{"installUrl":"https://api.slack.com/install"},"nextAction":"provide_credentials"}}`), nil
+		if requests[len(requests)-1].path == "/api/projects/proj/agents/by-name/reviewer" {
+			return slackAgentRead("agent_reviewer"), nil
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"agent_reviewer","setupProgress":"create_app_credentials"},"agentApp":{"installUrl":"https://api.slack.com/install"},"nextAction":"provide_credentials"}}`), nil
 	}), map[string]string{"MOHIST_TOKEN": "operator"})
 	deps.ReadFile = func(string) (string, error) { return "", os.ErrNotExist }
 	interactive, readSecret, prompts := slackPrompts("must-not-be-read")
@@ -652,7 +779,7 @@ func TestSlackInstallAgentNonInteractiveReportsTheCredentialStepAndContinuation(
 
 	code := Run(context.Background(), []string{"slack", "install-agent", "reviewer", "--project", "proj"}, deps)
 
-	if code != ExitOperation || len(*prompts) != 0 || len(requests) != 1 {
+	if code != ExitOperation || len(*prompts) != 0 || len(requests) != 2 {
 		t.Fatalf("code=%d prompts=%v requests=%+v", code, *prompts, requests)
 	}
 	if out.Len() != 0 || !strings.Contains(errOut.String(), "credentials_required") {
@@ -667,17 +794,112 @@ func TestSlackInstallWithoutCredentialsFileStillReturnsInstallStep(t *testing.T)
 	requests := 0
 	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		requests++
-		return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"reviewer"},"agentApp":{"installUrl":"https://api.slack.com/install"},"nextAction":"approve_install"}}`), nil
+		if request.URL.Path == "/api/projects/proj/agents/by-name/reviewer" {
+			return slackAgentRead("agent_reviewer"), nil
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"agent_reviewer","setupProgress":"create_app_credentials"},"agentApp":{"installUrl":"https://api.slack.com/install"},"nextAction":"approve_install"}}`), nil
 	}), map[string]string{"MOHIST_TOKEN": "operator"})
 	deps.ReadFile = func(string) (string, error) { return "", os.ErrNotExist }
 
 	code := Run(context.Background(), []string{"slack", "install-agent", "reviewer", "--project", "proj"}, deps)
 
-	if code != ExitOK || requests != 1 || errOut.Len() != 0 {
+	if code != ExitOK || requests != 2 || errOut.Len() != 0 {
 		t.Fatalf("code=%d requests=%d stderr=%q", code, requests, errOut.String())
 	}
 	if !strings.Contains(out.String(), "approve the Agent App installation in Slack") || !strings.Contains(out.String(), "https://api.slack.com/install") {
 		t.Fatalf("stdout=%q", out.String())
+	}
+}
+
+func TestSlackInstallAgentPromptsHiddenInputForTheMissingAgentPair(t *testing.T) {
+	requests := []capturedSlackRequest{}
+	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requests = append(requests, captureSlackRequest(t, request))
+		if requests[len(requests)-1].path == "/api/projects/proj/agents/by-name/reviewer" {
+			return slackAgentRead("agent_reviewer"), nil
+		}
+		if requests[len(requests)-1].path == "/api/projects/proj/slack-manager/install-agent/credentials" {
+			return response(http.StatusOK, `{"success":true,"data":{"accepted":true,"runtimeCredentialValidationState":"candidate"}}`), nil
+		}
+		if len(requests) == 2 {
+			return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"agent_reviewer","setupProgress":"create_app_credentials"},"agentApp":{"installUrl":"https://api.slack.com/install"},"nextAction":"provide_credentials"}}`), nil
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"agent_reviewer","setupProgress":"claim_owner"},"nextAction":"claim_owner"}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "operator"})
+	deps.ReadFile = func(string) (string, error) { return "", os.ErrNotExist }
+	interactive, readSecret, prompts := slackPrompts("xoxb-typed", "xapp-typed")
+	deps.TerminalInteractive = interactive
+	deps.ReadSecretLine = readSecret
+
+	code := Run(context.Background(), []string{"slack", "install-agent", "reviewer", "--project", "proj"}, deps)
+
+	if code != ExitOK || errOut.Len() != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if len(*prompts) != 2 || !strings.Contains((*prompts)[0], "Agent App Bot token") || !strings.Contains((*prompts)[1], "Agent App App-level token") {
+		t.Fatalf("prompts=%v", *prompts)
+	}
+	if len(requests) != 4 || requests[2].body["botToken"] != "xoxb-typed" || requests[2].body["appLevelToken"] != "xapp-typed" {
+		t.Fatalf("requests=%+v", requests)
+	}
+	if !strings.Contains(out.String(), "claim: mo slack claim-owner connection-1 --project proj") {
+		t.Fatalf("claim command=%q", out.String())
+	}
+	if strings.Contains(out.String(), "xoxb-typed") || strings.Contains(errOut.String(), "xapp-typed") {
+		t.Fatalf("secret leaked: stdout=%q stderr=%q", out.String(), errOut.String())
+	}
+}
+
+func TestSlackInstallAgentRequiresAnAgentTargetBeforeAnyRequest(t *testing.T) {
+	calls := 0
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return response(http.StatusOK, `{"success":true,"data":{}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "operator"})
+
+	code := Run(context.Background(), []string{"slack", "install-agent", "--project", "proj"}, deps)
+
+	if code != ExitUsage || calls != 0 || out.Len() != 0 {
+		t.Fatalf("code=%d calls=%d stdout=%q", code, calls, out.String())
+	}
+	if !strings.Contains(errOut.String(), "Agent is required") || !strings.Contains(errOut.String(), "mo slack install-agent <agent>") {
+		t.Fatalf("stderr=%q", errOut.String())
+	}
+}
+
+func TestSlackInstallAgentExitsNonzeroWhenTheSlackServiceReportsTheConnectionBroken(t *testing.T) {
+	requests := []capturedSlackRequest{}
+	deps, out, errOut := testDeps(roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requests = append(requests, captureSlackRequest(t, request))
+		if requests[len(requests)-1].path == "/api/projects/proj/agents/by-name/reviewer" {
+			return slackAgentRead("agent_reviewer"), nil
+		}
+		return response(http.StatusOK, `{"success":true,"data":{"connection":{"id":"connection-1","projectId":"proj","agentId":"agent_reviewer","setupProgress":"fix_slack_setup","connectionHealth":"degraded","healthReason":"socket_lease_stale"},"agentApp":{},"nextAction":"rerun_install"}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "operator"})
+	deps.ReadFile = func(string) (string, error) { return "", os.ErrNotExist }
+
+	code := Run(context.Background(), []string{"slack", "install-agent", "reviewer", "--project", "proj"}, deps)
+
+	if code != ExitOperation || errOut.Len() != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "rerun the guide to continue") {
+		t.Fatalf("stdout=%q", out.String())
+	}
+}
+
+func TestSlackStatusStructuredOutputKeepsTheFailureExitCode(t *testing.T) {
+	deps, out, errOut := testDeps(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusOK, `{"success":true,"data":{"phase":"failed","primaryAction":"supply_runtime_credentials","summary":"Workspace T123: The last setup step failed.","errorClass":"runtime_credential_mismatch"}}`), nil
+	}), map[string]string{"MOHIST_TOKEN": "management-token"})
+
+	code := Run(context.Background(), []string{"slack", "status", "--json", "phase"}, deps)
+
+	if code != ExitOperation || errOut.Len() != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "\"phase\"") || !strings.Contains(out.String(), "failed") {
+		t.Fatalf("machine output=%q", out.String())
 	}
 }
 

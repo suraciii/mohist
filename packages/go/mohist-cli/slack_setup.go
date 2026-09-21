@@ -24,6 +24,21 @@ type slackSetupProjection struct {
 	ErrorClass    string `json:"errorClass"`
 }
 
+// The install projection carries the same Server-owned next action, plus the
+// Connection facts the guide names: the Connection that owns the Owner claim
+// and the setup progress that reports a broken Slack service.
+type slackInstallProjection struct {
+	Connection struct {
+		ID            string `json:"id"`
+		SetupProgress string `json:"setupProgress"`
+	} `json:"connection"`
+	AgentApp struct {
+		InstallURL string `json:"installUrl"`
+	} `json:"agentApp"`
+	NextAction string `json:"nextAction"`
+	ErrorClass string `json:"errorClass"`
+}
+
 type slackCredentials struct {
 	ConfigurationAccessToken  string `json:"configurationAccessToken"`
 	ConfigurationRefreshToken string `json:"configurationRefreshToken"`
@@ -37,7 +52,10 @@ const (
 	slackActionSupplyRuntimeCredentials = "supply_runtime_credentials"
 	slackActionProvideCredentials       = "provide_credentials"
 	slackActionRerunSetup               = "rerun_setup"
+	slackActionClaimOwner               = "claim_owner"
 	slackPhaseReady                     = "ready"
+	slackPhaseFailed                    = "failed"
+	slackSetupProgressFixSlackSetup     = "fix_slack_setup"
 )
 
 // slackCredentialStep names the pair one step needs, so the guide collects only
@@ -185,7 +203,14 @@ func runSlackInstallAgent(
 	cmd command,
 	project string,
 ) int {
-	agentID := strings.TrimSpace(argValue(cmd.args, "agent", ""))
+	agentRef := strings.TrimSpace(argValue(cmd.args, "agent", ""))
+	// The Agent is resolved by its ordinary Project-scoped name or ID before any
+	// write, so the caller never locates a Connection, App, or Enrollment ID and
+	// a reference that resolves to nothing fails before a mutation.
+	agentID, code := resolveAgent(ctx, deps, client, project, agentRef)
+	if code != ExitOK {
+		return code
+	}
 	selector := slackWorkspaceSelector(cmd)
 	if selector != "" {
 		// The selector resolves before any write, so a selector naming no
@@ -206,7 +231,7 @@ func runSlackInstallAgent(
 		return operationExit(deps, ctx, err)
 	}
 	if nextAction != slackActionProvideCredentials {
-		return writeSlackInstallResult(deps, cmd, progress, agentID, project, selector, nextAction)
+		return writeSlackInstallResult(deps, cmd, progress, agentRef, project, selector, nextAction)
 	}
 
 	credentials, _, err := loadSlackCredentials(deps, cmd)
@@ -219,18 +244,25 @@ func runSlackInstallAgent(
 			return operationExit(deps, ctx, promptErr)
 		}
 		if !supplied {
-			return slackInstallStopped(deps, ctx, cmd, progress, agentID, project, selector, slackAgentRuntimeStep)
+			return slackInstallStopped(deps, ctx, cmd, progress, agentRef, project, selector, slackAgentRuntimeStep)
 		}
 		credentials = prompted
 	}
 
-	_, err = client.request(ctx, http.MethodPost, credentialsPath, map[string]any{
+	submission, err := client.request(ctx, http.MethodPost, credentialsPath, map[string]any{
 		"agentId":       agentID,
 		"botToken":      credentials.BotToken,
 		"appLevelToken": credentials.AppLevelToken,
 	})
 	if err != nil {
 		return slackSetupFailure(deps, ctx, err)
+	}
+	rejected, reason, err := decodeSlackCredentialSubmission(submission)
+	if err != nil {
+		return operationExit(deps, ctx, err)
+	}
+	if rejected {
+		return slackInstallCredentialRejected(deps, ctx, cmd, progress, reason, agentRef, project, selector)
 	}
 	progress, err = client.request(ctx, http.MethodPost, path, map[string]any{"agentId": agentID})
 	if err != nil {
@@ -240,7 +272,7 @@ func runSlackInstallAgent(
 	if err != nil {
 		return operationExit(deps, ctx, err)
 	}
-	return writeSlackInstallResult(deps, cmd, progress, agentID, project, selector, nextAction)
+	return writeSlackInstallResult(deps, cmd, progress, agentRef, project, selector, nextAction)
 }
 
 // Only an explicit --credentials-file supplies credentials: no shared default
@@ -371,10 +403,9 @@ func slackSetupStopped(
 	if len(progress) == 0 {
 		progress = slackSetupNotStartedProjection()
 	}
-	writeSlackStoppedProjection(deps, cmd, redactIntegrationSecrets(progress), func(out io.Writer, data json.RawMessage) {
+	writeSlackStoppedStep(deps, cmd, progress, slackSetupContinuation(selector, true), func(out io.Writer, data json.RawMessage) {
 		writeSlackSetupSummary(out, data, "")
 	})
-	fmt.Fprintln(deps.Stderr, "continue: "+slackSetupContinuation(selector, true))
 	return operationExit(deps, ctx, &operationError{
 		message: fmt.Sprintf(
 			"error: Slack setup needs %s; pass --credentials-file <path> or rerun in an interactive terminal [credentials_required]",
@@ -391,16 +422,74 @@ func slackInstallStopped(
 	agentID, project, selector string,
 	step slackCredentialStep,
 ) int {
-	writeSlackStoppedProjection(deps, cmd, redactIntegrationSecrets(progress), func(out io.Writer, data json.RawMessage) {
-		writeSlackInstallSummary(out, data, "")
+	writeSlackStoppedStep(deps, cmd, progress, slackInstallContinuation(agentID, project, selector, true), func(out io.Writer, data json.RawMessage) {
+		writeSlackInstallSummary(out, data, "", "")
 	})
-	fmt.Fprintln(deps.Stderr, "continue: "+slackInstallContinuation(agentID, project, selector, true))
 	return operationExit(deps, ctx, &operationError{
 		message: fmt.Sprintf(
 			"error: Slack install-agent needs %s; pass --credentials-file <path> or rerun in an interactive terminal [credentials_required]",
 			step.name),
 		code: "credentials_required",
 	})
+}
+
+// A rejected pair is a definite failure, not a missing input: the guide keeps
+// the credential step as the next action and exits nonzero with the Server's
+// reason, because a pair that does not verify against the selected Workspace,
+// App, or Bot is never made usable.
+func slackInstallCredentialRejected(
+	deps Dependencies,
+	ctx context.Context,
+	cmd command,
+	progress json.RawMessage,
+	reason, agentID, project, selector string,
+) int {
+	writeSlackStoppedStep(deps, cmd, progress, slackInstallContinuation(agentID, project, selector, true), func(out io.Writer, data json.RawMessage) {
+		writeSlackInstallSummary(out, data, "", "")
+	})
+	if reason == "" {
+		reason = "invalid_install_credentials"
+	}
+	return operationExit(deps, ctx, &operationError{
+		message: fmt.Sprintf("error: Slack rejected the Agent App credentials [%s]", reason),
+		code:    reason,
+	})
+}
+
+// The credential response is the only place a rejected pair is reported: a
+// first rejection leaves the recorded validation state untouched, so the
+// refreshed projection alone cannot tell it apart from a pair never supplied.
+func decodeSlackCredentialSubmission(data json.RawMessage) (bool, string, error) {
+	var submission struct {
+		Accepted   bool   `json:"accepted"`
+		ErrorClass string `json:"errorClass"`
+	}
+	if json.Unmarshal(data, &submission) != nil {
+		return false, "", &operationError{message: "error: Slack setup response has an invalid shape [invalid_response]"}
+	}
+	return !submission.Accepted, strings.TrimSpace(submission.ErrorClass), nil
+}
+
+func slackInstallConnectionID(data json.RawMessage) string {
+	var projection slackInstallProjection
+	if json.Unmarshal(data, &projection) != nil {
+		return ""
+	}
+	return strings.TrimSpace(projection.Connection.ID)
+}
+
+// Every stopped step renders the same way: the machine projection for a
+// structured caller, the human stage for a person, then the continuation that
+// carries the selected target.
+func writeSlackStoppedStep(
+	deps Dependencies,
+	cmd command,
+	progress json.RawMessage,
+	continuation string,
+	human func(io.Writer, json.RawMessage),
+) {
+	writeSlackStoppedProjection(deps, cmd, redactIntegrationSecrets(progress), human)
+	fmt.Fprintln(deps.Stderr, "continue: "+continuation)
 }
 
 // A structured-output caller keeps the machine projection of the stopped step;
@@ -469,6 +558,24 @@ func slackSetupNotStartedProjection() json.RawMessage {
 
 func writeSlackSetupResult(deps Dependencies, cmd command, progress json.RawMessage) int {
 	data := redactIntegrationSecrets(progress)
+	if code := writeSlackSetupProjection(deps, cmd, data); code != ExitOK {
+		return code
+	}
+	return slackSetupExit(data)
+}
+
+// The failed phase is the projection's own definite failure: a credential that
+// does not verify, or a step Slack refused. Every waiting, unknown, or
+// incomplete phase truthfully reports unfinished work and succeeds, so a
+// structured caller reads the same exit contract as a person.
+func slackSetupExit(data json.RawMessage) int {
+	if slackSetupPhase(data) == slackPhaseFailed {
+		return ExitOperation
+	}
+	return ExitOK
+}
+
+func writeSlackSetupProjection(deps Dependencies, cmd command, data json.RawMessage) int {
 	if cmd.fieldsOnly {
 		for _, field := range cmd.catalog {
 			fmt.Fprintln(deps.Stdout, field)
@@ -540,9 +647,21 @@ func writeSlackInstallResult(
 	deps Dependencies,
 	cmd command,
 	progress json.RawMessage,
-	agentID, project, selector, nextAction string,
+	agentRef, project, selector, nextAction string,
 ) int {
 	data := redactIntegrationSecrets(progress)
+	if code := writeSlackInstallProjection(deps, cmd, data, agentRef, project, selector, nextAction); code != ExitOK {
+		return code
+	}
+	return slackInstallExit(data)
+}
+
+func writeSlackInstallProjection(
+	deps Dependencies,
+	cmd command,
+	data json.RawMessage,
+	agentRef, project, selector, nextAction string,
+) int {
 	if cmd.fieldsOnly {
 		for _, field := range cmd.catalog {
 			fmt.Fprintln(deps.Stdout, field)
@@ -559,24 +678,39 @@ func writeSlackInstallResult(
 	}
 	continuation := ""
 	if nextAction != slackPhaseReady {
-		continuation = slackInstallContinuation(agentID, project, selector, false)
+		continuation = slackInstallContinuation(agentRef, project, selector, false)
 	}
-	writeSlackInstallSummary(deps.Stdout, data, continuation)
+	claim := ""
+	if nextAction == slackActionClaimOwner {
+		claim = slackClaimOwnerCommand(slackInstallConnectionID(data), project)
+	}
+	writeSlackInstallSummary(deps.Stdout, data, continuation, claim)
 	return ExitOK
 }
 
-func writeSlackInstallSummary(out io.Writer, data json.RawMessage, continuation string) {
-	var projection struct {
-		AgentApp struct {
-			InstallURL string `json:"installUrl"`
-		} `json:"agentApp"`
-		NextAction string `json:"nextAction"`
-		ErrorClass string `json:"errorClass"`
+// A Connection the Slack service reported as broken is a definite failure, not
+// a truthfully incomplete installation; every waiting, unknown, or claimable
+// projection stays successful.
+func slackInstallExit(data json.RawMessage) int {
+	var projection slackInstallProjection
+	if json.Unmarshal(data, &projection) != nil {
+		return ExitOK
 	}
+	if projection.Connection.SetupProgress == slackSetupProgressFixSlackSetup {
+		return ExitOperation
+	}
+	return ExitOK
+}
+
+func writeSlackInstallSummary(out io.Writer, data json.RawMessage, continuation, claim string) {
+	var projection slackInstallProjection
 	if json.Unmarshal(data, &projection) != nil {
 		return
 	}
 	fmt.Fprintln(out, "next: "+slackInstallNextActionText(projection.NextAction))
+	if claim != "" {
+		fmt.Fprintln(out, "claim: "+claim)
+	}
 	if installURL := strings.TrimSpace(projection.AgentApp.InstallURL); installURL != "" {
 		fmt.Fprintln(out, "install: "+installURL)
 	}
@@ -588,12 +722,25 @@ func writeSlackInstallSummary(out io.Writer, data json.RawMessage, continuation 
 	}
 }
 
+// The claim code is issued only by the explicit claim command. That response is
+// the single authorized place a code and the exact Bot DM destination appear,
+// so the guide hands the caller that command and prints neither itself.
+func slackClaimOwnerCommand(connectionID, project string) string {
+	command := "mo slack claim-owner " + connectionID
+	if project != "" {
+		command += " --project " + project
+	}
+	return command
+}
+
 func slackInstallNextActionText(action string) string {
 	switch action {
 	case slackActionApproveInstall:
 		return "approve the Agent App installation in Slack"
 	case slackActionProvideCredentials:
 		return "supply the Agent App Bot token and App-level token"
+	case slackActionClaimOwner:
+		return "claim Owner for the Agent App"
 	case slackPhaseReady:
 		return "the Agent App is ready"
 	default:

@@ -554,7 +554,7 @@ func opsLeafHelp(kind string, fields []string) string {
 		return "USAGE\n    mo slack status [--workspace-team <team-id>] [--json [fields]]\n\nShow the configured workspace setup and its single next action.\n\nJSON FIELDS\n" + strings.Join(fields, "\n")
 	}
 	if kind == "ops-slack-install-agent" {
-		return "USAGE\n    mo slack install-agent <agent> [--project <project>] [--credentials-file <path>] [--workspace-team <team-id>] [--json [fields]]\n\nCreate or resume the selected Agent App. Secrets come from hidden terminal input or one local credentials file with mode 0600.\n\nJSON FIELDS\n" + strings.Join(fields, "\n")
+		return "USAGE\n    mo slack install-agent <agent> [--project <project>] [--credentials-file <path>] [--workspace-team <team-id>] [--json [fields]]\n\nCreate or resume the selected Agent App. The Agent is resolved by its Project-scoped name or ID. Secrets come from hidden terminal input or one local credentials file with mode 0600. Once identity, permission, and Socket verification pass, the guide ends at Owner claim and prints the claim-owner command.\n\nJSON FIELDS\n" + strings.Join(fields, "\n")
 	}
 	if strings.HasPrefix(kind, "ops-runner-") {
 		action := strings.TrimPrefix(kind, "ops-runner-")
