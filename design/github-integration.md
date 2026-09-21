@@ -317,9 +317,22 @@ a later successful projection clears them.
 
 ## Failure Model
 
-An outbound failure records the error on the link and surfaces it in CLI and
-Web. It never blocks the Workflow or rolls back Mohist Issue state. The
-`mo issue github sync` command repairs a missing or failed mirror. All retry,
+A durable write-back operation failure re-raises into the Event Bus delivery
+channel, so write-back rides the same at-least-once contract as every other
+subscription in [`eventbus.md`](eventbus.md): the stream parks with exponential
+backoff and redelivers until `MaxAttempts`, then the event settles as a dead
+letter. A handler never swallows its own failure.
+
+The reservation bookkeeping decides what a retry may do. A failure with a known
+remote outcome releases the reservation, so the retry re-reserves and re-executes
+only that operation. An unknown outcome defers it, so the retry skips the held
+reservation and settles without ever resending the operation blindly.
+
+Every attempt writes a `GitHubWriteBackFailure` audit row. The audit row is the
+durable operator record of the attempt; redelivery, not the audit row, drives
+retries. A failing write-back never blocks the Workflow or rolls back Mohist
+Issue state, and `mo issue github sync` repairs a missing or failed mirror.
+Cancellation propagates to the caller instead of being caught. All retry,
 reconciliation, fencing, pause, reset, and health behavior uses the same durable
 operation contract above.
 
