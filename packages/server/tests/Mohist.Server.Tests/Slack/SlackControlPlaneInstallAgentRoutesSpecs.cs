@@ -191,7 +191,14 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
 
         var ready = await ReadDataAsync(await client.PostAsJsonAsync(
             InstallPath(projectId), new { agentId }));
-        Assert.Equal("ready", ready.GetProperty("nextAction").GetString());
+        // A verified App is not the end of the journey: the Owner claim is the
+        // one next action, and the four installation facts stay separate.
+        Assert.Equal("claim_owner", ready.GetProperty("nextAction").GetString());
+        var facts = ready.GetProperty("facts");
+        Assert.True(facts.GetProperty("appReady").GetBoolean());
+        Assert.True(facts.GetProperty("transportReady").GetBoolean());
+        Assert.True(facts.GetProperty("agentExecutable").GetBoolean());
+        Assert.False(facts.GetProperty("connectionSetupComplete").GetBoolean());
         Assert.False(ready.GetProperty("connection").TryGetProperty("appId", out _));
         Assert.False(ready.GetProperty("connection").TryGetProperty("botUserId", out _));
     }

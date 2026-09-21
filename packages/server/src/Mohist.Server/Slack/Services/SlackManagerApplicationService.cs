@@ -90,6 +90,7 @@ public sealed partial class SlackManagerApplicationService : IScopedService
                 connection.ConnectionHealth,
                 connection.HealthReason,
                 connection.AgentReadiness,
+                connection.OwnerSlackUserId,
                 connection.DeletedAt))
             .ToListAsync(ct);
 
@@ -97,7 +98,11 @@ public sealed partial class SlackManagerApplicationService : IScopedService
         return new(
             ProjectEnrollment(enrollment, credentialProvisioned),
             connections,
-            agentApps.Select(ProjectChild).ToList(),
+            agentApps.Select(app =>
+            {
+                var bound = FindConnection(connections, app);
+                return ProjectChild(app, bound?.OwnerSlackUserId, bound?.AgentReadiness ?? AgentReadinessKind.Ready);
+            }).ToList(),
             NextAction(enrollment, credentialProvisioned));
     }
 
@@ -125,7 +130,9 @@ public sealed partial class SlackManagerApplicationService : IScopedService
                 agent.Description,
                 SlackBotIdentityDeriver.Derive(agent),
                 connection is null ? null : ProjectConnection(connection),
-                agentApp is null ? null : ProjectChild(agentApp)));
+                agentApp is null
+                    ? null
+                    : ProjectChild(agentApp, connection!.OwnerSlackUserId, connection.AgentReadiness)));
         }
         return options;
     }
@@ -214,7 +221,9 @@ public sealed partial class SlackManagerApplicationService : IScopedService
         var connection = await _connections.GetAsync(projectId, connectionId, ct);
         if (connection is null) return null;
         var agentApp = await _agentApps.GetByConnectionAsync(connectionId, ct);
-        return agentApp is null ? null : ProjectChild(agentApp);
+        return agentApp is null
+            ? null
+            : ProjectChild(agentApp, connection.OwnerSlackUserId, connection.AgentReadiness);
     }
 
     public async Task<ManagedSlackAgentAppOperationResult> CreateAgentAppAsync(
@@ -328,6 +337,17 @@ public sealed partial class SlackManagerApplicationService : IScopedService
         enrollment.ClaimedSlackUserId,
         enrollment.UpdatedAt);
 
+    /// <summary>
+    /// The Connection an Agent App is bound to, when the projection carries it.
+    /// </summary>
+    private static SlackManagerConnectionStatus? FindConnection(
+        IReadOnlyList<SlackManagerConnectionStatus> connections,
+        ManagedSlackAgentApp agentApp) =>
+        connections.FirstOrDefault(connection => string.Equals(
+            connection.ConnectionId,
+            agentApp.AgentConnectionId,
+            StringComparison.Ordinal));
+
     private static string NextAction(
         SlackWorkspaceEnrollment enrollment,
         bool credentialProvisioned)
@@ -362,9 +382,25 @@ public sealed partial class SlackManagerApplicationService : IScopedService
     private static SecretStoreAddress ManagerCredentialAddress(string enrollmentId) =>
         SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken);
 
-    private static SlackManagerAppProjection ProjectChild(ManagedSlackAgentApp agentApp)
+    /// <summary>
+    /// A technically ready App is not the end of the Connection's setup: while
+    /// the Owner claim is outstanding the projected action is the claim, and a
+    /// complete Connection whose Agent cannot execute points at the existing
+    /// Agent repair surface.
+    /// </summary>
+    private static SlackManagerAppProjection ProjectChild(
+        ManagedSlackAgentApp agentApp,
+        string? ownerSlackUserId = null,
+        string agentReadiness = AgentReadinessKind.Ready)
     {
         var status = ManagedSlackAgentAppStatusDeriver.Derive(agentApp);
+        var nextAction = status.NextAction == SlackAgentAppNextAction.Ready
+            ? ownerSlackUserId is null
+                ? SlackAgentAppNextAction.ClaimOwner
+                : string.Equals(agentReadiness, AgentReadinessKind.Ready, StringComparison.Ordinal)
+                    ? SlackAgentAppNextAction.Ready
+                    : SlackAgentAppNextAction.RepairAgent
+            : status.NextAction;
         return new(
             agentApp.Id,
             agentApp.EnrollmentId,
@@ -377,7 +413,7 @@ public sealed partial class SlackManagerApplicationService : IScopedService
             status.ManifestState,
             SlackManagerTransportKind.Socket,
             status.TransportReadiness,
-            status.NextAction,
+            nextAction,
             agentApp.BindingState,
             string.IsNullOrWhiteSpace(agentApp.InstallUrl) ? null : agentApp.InstallUrl,
             agentApp.UnknownOutcome,
@@ -440,6 +476,7 @@ public sealed record SlackManagerConnectionStatus(
     string ConnectionHealth,
     string? HealthReason,
     string AgentReadiness,
+    string? OwnerSlackUserId,
     DateTimeOffset? DeletedAt);
 
 public sealed record SlackManagerAgentOption(

@@ -396,6 +396,13 @@ public sealed class SlackInstallAgentService : IScopedService
             result.ErrorClass ?? current.ErrorClass ?? "manual_adjudication_required");
     }
 
+    /// <summary>
+    /// A verified App is one fact and Connection setup is another: the App can
+    /// be ready, bound, and healthy while the Owner claim is still outstanding,
+    /// and a claimed Connection is complete while its Agent still cannot
+    /// execute. The projected next action follows the outstanding fact instead
+    /// of reporting the technical App state as the end of the journey.
+    /// </summary>
     private async Task<SlackInstallAgentProgress> MarkReadyAsync(
         AgentConnection connection,
         ManagedSlackAgentApp agentApp,
@@ -404,7 +411,7 @@ public sealed class SlackInstallAgentService : IScopedService
         if (agentApp.ManifestState != SlackManifestState.Applied)
             return Progress(connection, agentApp, SlackAgentAppNextAction.ApplyManifest);
         if (connection.SetupProgress != SetupProgressKind.CreateAppCredentials)
-            return Progress(connection, agentApp, SlackAgentAppNextAction.Ready);
+            return Progress(connection, agentApp, OutstandingSetupAction(connection));
         var setupProgress = connection.OwnerSlackUserId is null
             ? SetupProgressKind.ClaimOwner
             : SetupProgressKind.Complete;
@@ -419,8 +426,29 @@ public sealed class SlackInstallAgentService : IScopedService
         connection.SetupProgress = setupProgress;
         connection.ConnectionHealth = ConnectionHealthKind.Healthy;
         connection.HealthReason = null;
-        return Progress(connection, agentApp, SlackAgentAppNextAction.Ready);
+        return Progress(connection, agentApp, OutstandingSetupAction(connection));
     }
+
+    /// <summary>
+    /// Owner claim is the one next action until it is done; once the Connection
+    /// is complete, an Agent that cannot execute keeps that limitation separate
+    /// and points at the existing Agent repair surface.
+    /// </summary>
+    /// <summary>
+    /// The Agent App's own technical action, except that a technically ready App
+    /// never projects as the end of setup while the Owner claim is outstanding.
+    /// </summary>
+    private static string ProjectedAction(AgentConnection connection, ManagedSlackAgentApp agentApp) =>
+        agentApp.NextAction == SlackAgentAppNextAction.Ready
+            ? OutstandingSetupAction(connection)
+            : agentApp.NextAction;
+
+    private static string OutstandingSetupAction(AgentConnection connection) =>
+        connection.OwnerSlackUserId is null
+            ? SlackAgentAppNextAction.ClaimOwner
+            : connection.AgentReadiness == AgentReadinessKind.Ready
+                ? SlackAgentAppNextAction.Ready
+                : SlackAgentAppNextAction.RepairAgent;
 
     private async Task<SlackInstallAgentProgress> BindAsync(
         AgentConnection connection,
@@ -430,7 +458,7 @@ public sealed class SlackInstallAgentService : IScopedService
         var binding = await _binding.ReconcileAsync(agentApp.Id, ct);
         var current = await ReloadAsync(agentApp.Id, ct);
         return Progress(connection, current, binding.Status == SlackAgentAppBindingStatus.Bound
-            ? SlackAgentAppNextAction.Ready
+            ? OutstandingSetupAction(connection)
             : SlackAgentAppNextAction.BindConnection);
     }
 
@@ -444,7 +472,7 @@ public sealed class SlackInstallAgentService : IScopedService
         if (result.Status == ManagedSlackAgentAppOperationStatus.Completed
             && result.Outcome == SlackAppManagementOutcome.Succeeded
             && current.ManifestState == SlackManifestState.Applied)
-            return Progress(connection, current, current.NextAction);
+            return Progress(connection, current, ProjectedAction(connection, current));
         return Progress(
             connection,
             current,
@@ -691,7 +719,8 @@ public sealed class SlackInstallAgentService : IScopedService
             connection.DesiredState,
             connection.ConnectionHealth,
             connection.HealthReason,
-            connection.SetupProgress),
+            connection.SetupProgress,
+            connection.AgentReadiness),
         new SlackInstallAgentAppState(
             agentApp.Id,
             agentApp.AppId,
@@ -732,7 +761,8 @@ public sealed record SlackInstallAgentConnectionState(
     string DesiredState,
     string ConnectionHealth,
     string? HealthReason,
-    string SetupProgress);
+    string SetupProgress,
+    string AgentReadiness);
 
 public sealed record SlackInstallAgentAppState(
     string Id,

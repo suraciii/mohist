@@ -239,6 +239,7 @@ public static class SlackManagerRoutes
             progress.Connection.SetupProgress,
             progress.Connection.ConnectionHealth,
             progress.Connection.HealthReason,
+            progress.Connection.AgentReadiness,
         },
         agentApp = new
         {
@@ -253,14 +254,53 @@ public static class SlackManagerRoutes
             progress.AgentApp.UnknownOutcome,
             progress.AgentApp.ErrorClass,
         },
+        // Four separate facts: a ready App, the Connection's setup progress,
+        // transport health, and whether the Agent can accept work. No single
+        // status stands in for another, and a pending Owner claim is never
+        // reported as completed setup.
+        facts = new
+        {
+            appReady = progress.AgentApp.AppLifecycle == SlackAppLifecycle.Created
+                && progress.AgentApp.Authorization == SlackAuthorizationState.Authorized
+                && progress.AgentApp.BindingState == SlackAgentAppBindingState.Bound
+                && progress.AgentApp.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified,
+            connectionSetupComplete = string.Equals(
+                progress.Connection.SetupProgress,
+                SetupProgressKind.Complete,
+                StringComparison.Ordinal),
+            transportReady = string.Equals(
+                progress.AgentApp.TransportReadiness,
+                SlackTransportReadiness.Ready,
+                StringComparison.Ordinal),
+            agentExecutable = string.Equals(
+                progress.Connection.AgentReadiness,
+                AgentReadinessKind.Ready,
+                StringComparison.Ordinal),
+        },
         NextAction = PublicInstallNextAction(progress.NextAction),
         progress.ErrorClass,
     };
 
-    private static string PublicInstallNextAction(string nextAction) =>
-        nextAction == SlackAgentAppNextAction.AuthorizeAgentApp
-            ? "approve_install"
-            : nextAction;
+    /// <summary>
+    /// One user-facing primary action. Server-internal App steps project as a
+    /// rerun of the guide, and the two remaining facts that end the journey -
+    /// the Owner claim and an Agent that cannot execute - keep their own
+    /// executable action instead of hiding behind a technical `ready`.
+    /// </summary>
+    private static string PublicInstallNextAction(string nextAction) => nextAction switch
+    {
+        SlackAgentAppNextAction.AuthorizeAgentApp => "approve_install",
+        SlackAgentAppNextAction.ConfigureSocketCredentials => "provide_credentials",
+        SlackAgentAppNextAction.ProvideCredentials => "provide_credentials",
+        SlackAgentAppNextAction.ClaimOwner => SlackAgentAppNextAction.ClaimOwner,
+        SlackAgentAppNextAction.RepairAgent => SlackAgentAppNextAction.RepairAgent,
+        SlackAgentAppNextAction.AdjudicateCreate => SlackAgentAppNextAction.AdjudicateCreate,
+        SlackAgentAppNextAction.Ready => "ready",
+        // App create, manifest application, binding, reconciliation, and the
+        // Socket hello are Server work: the caller's action is to rerun the
+        // guide, which performs at most one of them.
+        _ => "rerun_install",
+    };
 
     private static object PublicManagedApp(SlackManagerAppProjection app) => new
     {
