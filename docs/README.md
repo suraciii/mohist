@@ -8,10 +8,10 @@ If you are new to Mohist, read the [repository README](../README.md) first.
 
 ## Part 1: Start
 
-- [Product Vision](vision.md): Where Mohist is going and how independent Agents
-  work with external interaction locations
+- [Product Vision](vision.md): Use Mohist through natural-language conversations
+  with Agents in existing communication spaces
 - [Philosophy of Software Development](philosophy.md): Human purpose, review,
-  correction, and judgment in AI development
+  correction, and using programs through Agents
 - [Getting Started](getting-started.md): Start from zero and move one Issue
   through the complete Workflow with a Mohist Agent, External Agent, or `mo`
 - [Core Concepts](concepts.md): Understand the Mohist production-line model
@@ -43,10 +43,9 @@ If you are new to Mohist, read the [repository README](../README.md) first.
 
 ## Part 4: Observation and Operations
 
-- [Web UI Guide](web-ui.md): The board, details, evidence, and settings in the
-  fallback operations and visualization plane
+- [Web UI Guide](web-ui.md): The existing board, details, evidence, and settings
 - [CLI Reference](cli-reference.md): The `mo` command language, command map, and
-  interaction contract shared by External Agents and people
+  programmatic interaction contract for Agents
 - [Observability](observability.md): Detect runtime anomalies safely and retain
   enough information for diagnosis
 

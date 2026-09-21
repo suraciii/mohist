@@ -41,6 +41,42 @@ assumptions, and correct direction. AI can supply evidence and challenge a
 proposal. People can delegate work without continuously observing every
 operation, while retaining meaningful judgment over what the work serves.
 
+## Chapter 2: Using Programs Through Agents
+
+People communicate their purposes to Agents in natural language. Agents turn
+those purposes into program operations and return results that people can
+understand and judge.
+
+### 1. Dialogue gives intent a workable form
+
+People can begin with an incomplete idea. Through explanation, questions, and
+responses, they clarify what they want to accomplish and what matters to them.
+The Agent must interpret their words in context and ask when the intended
+meaning is unclear. Dialogue helps form the purpose that guides action.
+
+### 2. Agents connect intent with operations
+
+Programs require explicit operations and inputs. Choosing those operations
+requires understanding what the person means, what the program can do, and
+which actions serve the purpose. The Agent carries this work so the person can
+act through an expression of intent.
+
+The relationship works in both directions. The Agent must connect execution
+results to the person's purpose. An operation can succeed while the problem
+remains unresolved. People need access to the underlying facts so they can
+question the Agent's interpretation and redirect the work.
+
+### 3. Programs carry established rules
+
+Once a procedure is clear, a program can maintain its state and advance it
+according to explicit rules. The Agent can delegate that procedure to the
+program. In turn, the program can call on Agents for work that requires
+interpretation, judgment, or creation.
+
+This division keeps established procedures consistent while allowing people
+to clarify or revise their intentions through dialogue. Their ability to
+intervene must continue throughout execution.
+
 ## References
 
 [^labor]: Karl Marx, [*Capital*, Volume I, Chapter 7, Section 1: The Labour-Process](https://www.marxists.org/archive/marx/works/1867-c1/ch07.htm#S1).
