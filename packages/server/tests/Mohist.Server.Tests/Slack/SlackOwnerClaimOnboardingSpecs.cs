@@ -39,6 +39,7 @@ public sealed class SlackOwnerClaimOnboardingSpecs
     {
         var connection = await SeedConnectionAsync(SetupProgressKind.ClaimOwner, ownerSlackUserId: null);
         var code = await GenerateCodeAsync(connection, "claim-owner");
+        ScriptEligibleClaimMember();
 
         using var response = await PostIngressAsync(connection, "D-DM-CLAIM", "1710000000.000300", code, "U_NEW_OWNER");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -60,6 +61,7 @@ public sealed class SlackOwnerClaimOnboardingSpecs
     {
         var connection = await SeedConnectionAsync(SetupProgressKind.Complete, ownerSlackUserId: "U_OWNER");
         var code = await GenerateCodeAsync(connection, "transfer-owner");
+        ScriptEligibleClaimMember();
 
         using var response = await PostIngressAsync(connection, "D-DM-TRANSFER", "1710000000.000400", code, "U_NEW_OWNER");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -115,6 +117,31 @@ public sealed class SlackOwnerClaimOnboardingSpecs
         Assert.Equal("Mohist", data.GetProperty("botName").GetString());
         Assert.Equal("U123", data.GetProperty("botUserId").GetString());
         Assert.Equal("Direct message with the Mohist Bot", data.GetProperty("dmDestination").GetString());
+    }
+
+    private SlackApiTestScript SlackApi => _fixture.Services.GetRequiredService<SlackApiTestScript>();
+
+    // The Owner-claim boundary proves the sender is a current full Workspace
+    // member through users.info, so the claim/transfer journey scripts an
+    // eligible member for the sender in the connection's team.
+    private void ScriptEligibleClaimMember()
+    {
+        SlackApi.Clear();
+        SlackApi.Responder = _ => SlackApiTestScript.JsonResponse(JsonSerializer.Serialize(new
+        {
+            ok = true,
+            user = new
+            {
+                id = "U_NEW_OWNER",
+                team_id = "T123",
+                deleted = false,
+                is_bot = false,
+                is_app_user = false,
+                is_restricted = false,
+                is_ultra_restricted = false,
+                is_stranger = false,
+            },
+        }));
     }
 
     private async Task<string> GenerateCodeAsync(AgentConnection connection, string action)

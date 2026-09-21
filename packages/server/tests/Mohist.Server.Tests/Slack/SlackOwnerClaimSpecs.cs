@@ -32,16 +32,25 @@ public sealed class SlackOwnerClaimSpecs
     private readonly FakeTimeProvider _time = new(FixedNow);
     private readonly TestSqliteDatabase _database = TestSqliteDatabase.CreateMigrated();
     private readonly TestDbContextFactory _factory;
+    private readonly FakeSlackMemberIdentityPort _memberIdentity = new();
     private readonly SlackOwnerClaimService _claims;
 
     public SlackOwnerClaimSpecs()
     {
         _factory = new TestDbContextFactory(_database.Options);
+        // By default the sender is a current full member of the claim team.
+        _memberIdentity.MemberResult = new SlackMemberIdentityResult(
+            Confirmed: true, UserId: "U_OWNER", TeamId: TeamId);
         _claims = new SlackOwnerClaimService(
             _factory,
             _time,
-            new SlackConnectionAccessDecider(new NoAllowedMemberStore(), new FakeSlackMemberIdentityPort()));
+            new SlackConnectionAccessDecider(new NoAllowedMemberStore(), _memberIdentity));
     }
+
+    // A live lease that proves a verified Bot token for the member lookup.
+    private SlackLeaseContext Lease() => new(
+        "operator", "lease-1", "adapter-1",
+        (_, _) => Task.FromResult<string?>("xoxb-fake"));
 
     [Fact]
     public async Task Explicit_issue_stores_only_a_hash_and_keeps_one_outstanding_code()
@@ -71,10 +80,10 @@ public sealed class SlackOwnerClaimSpecs
 
         Assert.Equal(
             SlackInboundDecisionKind.Rejected,
-            (await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(first.Value))).Kind);
+            (await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(first.Value), Lease())).Kind);
         Assert.Equal(
             SlackInboundDecisionKind.Claimed,
-            (await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(second.Value))).Kind);
+            (await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(second.Value), Lease())).Kind);
         await using var db = _factory.CreateDbContext();
         Assert.Equal(2, await db.SlackOwnerClaimCodes.CountAsync());
         Assert.Equal(1, await db.SlackOwnerClaimCodes.CountAsync(row => row.UsedAt != null));
@@ -88,8 +97,8 @@ public sealed class SlackOwnerClaimSpecs
 
         Assert.Equal(
             SlackInboundDecisionKind.Claimed,
-            (await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(issued.Value))).Kind);
-        var replay = await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(issued.Value));
+            (await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(issued.Value), Lease())).Kind);
+        var replay = await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(issued.Value), Lease());
 
         Assert.Equal(SlackInboundDecisionKind.Rejected, replay.Kind);
         Assert.Contains("no longer valid", replay.Reason, StringComparison.Ordinal);
@@ -102,7 +111,7 @@ public sealed class SlackOwnerClaimSpecs
         var issued = await _claims.GenerateAsync(ProjectId, ConnectionId);
 
         _time.Advance(TimeSpan.FromMinutes(11));
-        var expired = await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(issued.Value));
+        var expired = await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(issued.Value), Lease());
 
         Assert.Equal(SlackInboundDecisionKind.Rejected, expired.Kind);
         Assert.Contains("expired", expired.Reason, StringComparison.Ordinal);
@@ -121,7 +130,7 @@ public sealed class SlackOwnerClaimSpecs
         Assert.Equal(SlackOwnerClaimCodeKinds.Initial, rerun);
         Assert.Equal(
             SlackInboundDecisionKind.Claimed,
-            (await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(issued.Value))).Kind);
+            (await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(issued.Value), Lease())).Kind);
         await using var db = _factory.CreateDbContext();
         Assert.Equal(1, await db.SlackOwnerClaimCodes.CountAsync());
     }
@@ -132,13 +141,58 @@ public sealed class SlackOwnerClaimSpecs
         await SeedConnectionAsync(SetupProgressKind.ClaimOwner);
         var issued = await _claims.GenerateAsync(ProjectId, ConnectionId);
 
-        await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(issued.Value));
+        await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(issued.Value), Lease());
 
         await using var db = _factory.CreateDbContext();
         var connection = await db.AgentConnections.SingleAsync(row => row.Id == ConnectionId);
         Assert.Equal("U_OWNER", connection.OwnerSlackUserId);
         Assert.Equal(SetupProgressKind.Complete, connection.SetupProgress);
         Assert.Equal(AccessPolicyKind.OwnerOnly, connection.AccessPolicy);
+    }
+
+    [Theory]
+    [InlineData(true, false, false, false)]
+    [InlineData(false, true, false, false)]
+    [InlineData(false, false, true, false)]
+    [InlineData(false, false, false, true)]
+    public async Task A_non_full_member_cannot_claim_but_the_code_stays_valid_for_a_real_member(
+        bool deleted, bool restricted, bool bot, bool stranger)
+    {
+        await SeedConnectionAsync(SetupProgressKind.ClaimOwner);
+        var issued = await _claims.GenerateAsync(ProjectId, ConnectionId);
+        // A deactivated, guest, Bot, or external-collaborator sender is not a
+        // current full Workspace member.
+        _memberIdentity.MemberResult = new SlackMemberIdentityResult(
+            Confirmed: true, UserId: "U_OWNER", TeamId: TeamId,
+            Deleted: deleted, IsRestricted: restricted, IsBot: bot, IsStranger: stranger);
+
+        var rejected = await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(issued.Value), Lease());
+
+        Assert.Equal(SlackInboundDecisionKind.Rejected, rejected.Kind);
+        // The outstanding code is not spent, so a real member can still claim.
+        _memberIdentity.MemberResult = new SlackMemberIdentityResult(
+            Confirmed: true, UserId: "U_OWNER", TeamId: TeamId);
+        var claimed = await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(issued.Value), Lease());
+        Assert.Equal(SlackInboundDecisionKind.Claimed, claimed.Kind);
+    }
+
+    [Fact]
+    public async Task An_unverifiable_identity_fails_closed_and_keeps_the_code_outstanding()
+    {
+        await SeedConnectionAsync(SetupProgressKind.ClaimOwner);
+        var issued = await _claims.GenerateAsync(ProjectId, ConnectionId);
+        // Adapter outage: the member lookup cannot confirm the identity, so the
+        // claim fails closed instead of binding an unverified sender.
+        _memberIdentity.MemberResult = new SlackMemberIdentityResult(Confirmed: false);
+
+        var rejected = await _claims.HandleInboundDmAsync(ProjectId, ConnectionId, Dm(issued.Value), Lease());
+
+        Assert.Equal(SlackInboundDecisionKind.Rejected, rejected.Kind);
+        await using var db = _factory.CreateDbContext();
+        var code = await db.SlackOwnerClaimCodes.SingleAsync();
+        Assert.Null(code.UsedAt);
+        var connection = await db.AgentConnections.SingleAsync(row => row.Id == ConnectionId);
+        Assert.Null(connection.OwnerSlackUserId);
     }
 
     private static SlackInboundDm Dm(string text) => new("U_OWNER", text);

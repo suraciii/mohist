@@ -478,6 +478,10 @@ public static partial class SlackConnectionRoutes
                     projectId, connection, identity, senderSlackUserId, body,
                     connections, mapping, agents, claims, inbox, outbox,
                     launcher, attachmentBinder, grains, followupDispatcher,
+                    new SlackLeaseContext(
+                        operatorId, body.LeaseId, body.AdapterId,
+                        (targetRef, leaseCt) => leases.ResolveRuntimeLeaseBotTokenAsync(
+                            operatorId, targetRef, body.LeaseId, body.AdapterId, leaseCt)),
                     http.RequestServices),
                 ct);
         });
@@ -988,6 +992,7 @@ public static partial class SlackConnectionRoutes
             projectId,
             connection.Id,
             new SlackInboundDm(req.SenderSlackUserId, body.Text ?? string.Empty),
+            req.Lease,
             ct);
         if (decision.Kind == SlackInboundDecisionKind.Claimed)
         {
@@ -1394,8 +1399,10 @@ internal sealed record HandleDmIngressRequest(
     SlackAttachmentInputBinder AttachmentBinder,
     IGrainFactory Grains,
     AgentSessionFollowupDispatcher FollowupDispatcher,
+    SlackLeaseContext Lease,
     IServiceProvider Services)
 {
+
     public static HandleDmIngressRequest From(
         string projectId,
         Agent.Domain.AgentConnection connection,
@@ -1412,10 +1419,11 @@ internal sealed record HandleDmIngressRequest(
         SlackAttachmentInputBinder attachmentBinder,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher followupDispatcher,
+        SlackLeaseContext lease,
         IServiceProvider services) =>
         new(projectId, connection, identity, senderSlackUserId, body,
             connections, dmMapping, agents, claims, inbox, outbox,
-            launcher, attachmentBinder, grains, followupDispatcher, services);
+            launcher, attachmentBinder, grains, followupDispatcher, lease, services);
 
 }
 

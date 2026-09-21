@@ -157,6 +157,7 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
         string projectId,
         string connectionId,
         SlackInboundDm inbound,
+        SlackLeaseContext? lease = null,
         CancellationToken ct = default)
     {
         var text = inbound.Text.Trim();
@@ -174,6 +175,13 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
                 return Reject("This owner claim code is no longer valid. Generate a new code.");
             if (_time.GetUtcNow() >= code.ExpiresAt)
                 return Reject("This owner claim code has expired. Generate a new code.");
+            // Only a current full Workspace member can claim or receive a
+            // transfer. An identity that cannot be proven fails closed and
+            // leaves the outstanding code valid for a real member to redeem.
+            var member = await _accessDecider.EvaluateMemberAsync(
+                projectId, connectionId, inbound.SenderSlackUserId, connection.WorkspaceTeamId, lease, ct);
+            if (!member.Allowed)
+                return Reject(member.Reason);
             if (string.Equals(code.Kind, SlackOwnerClaimCodeKinds.Transfer, StringComparison.Ordinal))
             {
                 if (connection.OwnerSlackUserId is null)
