@@ -1,7 +1,6 @@
 # Mohist
 
-Mohist is an Agent-friendly AI software production-line control system for
-individual developers.
+Mohist is an Agent-native software factory for individual developers.
 
 It turns product ideas into executable Issues. Agents continuously plan,
 implement, check, and integrate each Issue according to its Workflow. An Agent
@@ -9,13 +8,12 @@ acts as the owner's proxy and can occupy a pipeline position that a person can
 also occupy. Quality comes from clear inputs, automated checks, review tasks,
 Approval decisions, failure recovery, and human escalation when necessary.
 
-Users usually stay in Slack, an IDE, or another existing workspace. A configured
-Mohist Agent is available directly from the Web UI or CLI. It can also connect
-to Slack as an independent bot. A third-party External Agent uses the Mohist
-Skill and `mo` to query, delegate to, and operate the execution layer. The
-Mohist Web UI is a fallback operations and visualization plane. Use it to
-configure and test Agents, view global state, inspect execution evidence, and
-take over manually. It is not another daily workspace.
+People primarily work through Agents. A configured Mohist Agent is available
+from the Web UI or CLI and can connect to Slack as an independent bot. A
+third-party External Agent uses the Mohist Skill and `mo` to query, delegate
+to, and operate the execution layer. Application interfaces serve Agents
+first. The Web UI displays progress, evidence, and results alongside Agent
+interaction, with controls for configuration, decisions, and manual takeover.
 
 ## Product Interfaces
 
@@ -27,8 +25,9 @@ take over manually. It is not another daily workspace.
   presentation.
 - **Mohist Skill + `mo`**: The path through which a third-party External Agent
   uses Mohist. A person can use the same commands directly.
-- **Web UI**: The fallback operations and visualization plane. It provides all
-  critical operations and can configure, start, and continue a Mohist Agent.
+- **Web UI**: Displays progress, results, and evidence alongside Agent
+  interaction. It also provides critical manual operations and can configure,
+  start, and continue a Mohist Agent.
 - **Notifications**: Push changes that need attention to the user's existing
   chat tools. Notifications do not own execution state.
 

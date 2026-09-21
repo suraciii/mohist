@@ -292,8 +292,9 @@ Workflow orchestration:
 Keep one mental model: a Project is the product and execution boundary; an Epic
 owns a goal and supplies work; an Issue is the workpiece; a Workflow is the
 production line; Mohist Agents are the workers; AgentJob owns each execution;
-and AgentSession records continuing conversation. The Web UI is the fallback
-operations and visualization plane.
+and AgentSession records continuing conversation. The Web UI displays
+progress, results, and evidence alongside Agent interaction and provides
+controls for manual operations.
 
 ## Implementation Gaps
 

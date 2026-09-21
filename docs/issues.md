@@ -1,9 +1,9 @@
 # Issue Management
 
 An Issue is Mohist's main unit of work. This document explains how to create,
-prepare, start, inspect, advance, recover, and close an Issue. Use the same
-operations through an External Agent and the Mohist Skill, the `mo` CLI, or
-the Web UI fallback.
+prepare, start, inspect, advance, recover, and close an Issue. A Mohist Agent
+or an External Agent can perform these operations on the user's behalf. The
+same operations remain available directly through `mo` and the Web UI.
 
 ## Product Commitments
 
