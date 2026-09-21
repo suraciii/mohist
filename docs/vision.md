@@ -22,7 +22,9 @@ purposeful practical activity. Human intentions guide the work; building
 and using its results can also change how humans understand those intentions.
 Review and correction continue this activity. Humans communicate intent
 through dialogue with Agents, which connect that intent to program operations
-and return results for human judgment.
+and return results for human judgment. The argument extends to how
+applications can be organized for use through a user's Agent, and how this
+priority changes interfaces and presentation.
 
 Mohist applies that perspective through a software factory. It amplifies
 human capacity to act while preserving users' ability to inspect evidence,

@@ -10,8 +10,8 @@ If you are new to Mohist, read the [repository README](../README.md) first.
 
 - [Product Vision](vision.md): Agent-native software development, with Agent
   interaction first and UI views for progress, evidence, and results
-- [Philosophy of Software Development](philosophy.md): Human purpose, judgment,
-  and human-computer interaction in AI development
+- [Philosophy of Software Development](philosophy.md): Human purpose, delegated
+  use, and the design of Agent-native applications
 - [Getting Started](getting-started.md): Start from zero and move one Issue
   through the complete Workflow with a Mohist Agent, External Agent, or `mo`
 - [Core Concepts](concepts.md): Understand the Mohist production-line model
