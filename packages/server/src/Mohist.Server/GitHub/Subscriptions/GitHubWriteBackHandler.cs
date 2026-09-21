@@ -24,11 +24,11 @@ namespace Mohist.Server.GitHub.Subscriptions;
 /// <para>
 /// Write-back is best-effort by contract: every GitHub-side operation is
 /// gated by the link's persisted bookkeeping (<see cref="GitHubIssueLink.PostedComments"/>
-/// and <see cref="GitHubIssueLink.StateLabel"/>), fails independently, and
-/// a failure never blocks the pipeline — it lands in
-/// <see cref="GitHubWriteBackFailure"/> and, for 401/403, flags the
-/// connection <see cref="GitHubConnection.NeedsAttention"/>. Redelivery
-/// retries only the operations that did not succeed yet.
+/// and <see cref="GitHubIssueLink.StateLabel"/>) and fails independently. A
+/// failing operation re-raises after recording its audit row, so the Event
+/// Bus redelivers the event until <c>MaxAttempts</c> and then dead-letters it;
+/// the reservation ledger decides what a retry may execute. A failure never
+/// blocks the pipeline or rolls back Mohist Issue state.
 /// </para>
 /// </summary>
 [Subscription(
@@ -177,6 +177,7 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             await RecordFailureAsync(sp, connection, link, eventType, GitHubWriteBackOperation.Label, ex, ct);
+            throw;
         }
     }
 
@@ -238,6 +239,7 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
             else
                 await links.ReleaseCommentReservationAsync(link.Id, commentKey, ct);
             await RecordFailureAsync(sp, connection, link, eventType, GitHubWriteBackOperation.Comment, ex, ct);
+            throw;
         }
     }
 
@@ -286,6 +288,7 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
             else
                 await links.ReleaseCommentReservationAsync(link.Id, closeKey, ct);
             await RecordFailureAsync(sp, connection, link, eventType, GitHubWriteBackOperation.Close, ex, ct);
+            throw;
         }
     }
 
