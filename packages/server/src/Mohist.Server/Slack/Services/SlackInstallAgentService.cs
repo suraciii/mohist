@@ -167,6 +167,43 @@ public sealed class SlackInstallAgentService : IScopedService
         return await AdvanceAsync(connection, agentApp, agent, ct);
     }
 
+    /// <summary>
+    /// Explicit arbitration of an unknown create that recorded no App identity.
+    /// Reconciliation needs that identity, so without it a rerun of the guide
+    /// could never change the state; the operator's decision is recorded on the
+    /// same AgentApp and the guide then runs its own single create step.
+    /// </summary>
+    public async Task<SlackInstallAgentProgress> AdjudicateCreateAsync(
+        string projectId,
+        string agentId,
+        string? workspaceTeamId = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentId);
+
+        var agent = await _agents.GetByIdAsync(projectId, agentId, ct)
+            ?? throw new SlackManagerConflictException("The Agent was not found.", "agent_not_found");
+        if (agent.Status != AgentStatus.Active)
+            throw new SlackManagerConflictException("Only active Agents can be installed to Slack.", "agent_archived");
+
+        var enrollment = await ResolveInstallEnrollmentAsync(projectId, agentId, workspaceTeamId, ct);
+        var agentApp = await _agentApps.GetByProjectAgentAndWorkspaceAsync(
+            projectId, agentId, enrollment.WorkspaceTeamId, ct)
+            ?? throw new SlackManagerConflictException(
+                "Install the Agent before adjudicating its App create.",
+                "agent_install_required");
+        var adjudicated = await _agentAppOperations.AdjudicateCreateAsync(agentApp.Id, ct);
+        if (adjudicated.Status == ManagedSlackAgentAppOperationStatus.NotFound)
+            throw new SlackManagerConflictException("The Agent App was not found.", "agent_app_not_found");
+        if (adjudicated.Status == ManagedSlackAgentAppOperationStatus.NotAllowed)
+            throw new SlackManagerConflictException(
+                "The Agent App create is not awaiting arbitration.",
+                adjudicated.ErrorClass ?? "create_adjudication_not_required");
+
+        return await InstallToEnrollmentAsync(projectId, agentId, enrollment.Id, ct);
+    }
+
     public async Task<SlackInstallAgentCredentialResult> ProvisionCredentialsAsync(
         string projectId,
         string agentId,
@@ -318,6 +355,14 @@ public sealed class SlackInstallAgentService : IScopedService
 
         return agentApp.AppLifecycle switch
         {
+            // Without a recorded App identity the provider cannot be asked
+            // about the operation, so the executable action is the explicit
+            // arbitration rather than a reconcile that could never converge.
+            SlackAppLifecycle.CreateUnknown when string.IsNullOrWhiteSpace(agentApp.AppId) => Progress(
+                connection,
+                agentApp,
+                SlackAgentAppNextAction.AdjudicateCreate,
+                agentApp.ErrorClass ?? "create_adjudication_required"),
             SlackAppLifecycle.CreateUnknown => await ReconcileCreateAsync(connection, agentApp, agent, ct),
             SlackAppLifecycle.Creating or SlackAppLifecycle.Deleting => Progress(connection, agentApp, SlackAgentAppNextAction.WaitForOperation),
             SlackAppLifecycle.Deleted => Progress(connection, agentApp, SlackAgentAppNextAction.Deleted),

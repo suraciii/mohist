@@ -50,6 +50,29 @@ public static class SlackManagerRoutes
             }
         });
 
+        manager.MapPost("/install-agent/adjudicate-create", async (
+            HttpContext context,
+            string? workspaceTeamId,
+            SlackControlInstallAgentBody body,
+            SlackInstallAgentService service,
+            CancellationToken ct) =>
+        {
+            if (body is null || string.IsNullOrWhiteSpace(body.AgentId))
+                return ApiResults.BadRequest("agentId is required.");
+            var identityError = RejectClientIdentity(context, body.ExtensionData);
+            if (identityError is not null) return identityError;
+            try
+            {
+                var progress = await service.AdjudicateCreateAsync(
+                    context.GetResolvedProject().Id, body.AgentId, workspaceTeamId, ct);
+                return ApiResults.Ok(PublicInstallProgress(progress));
+            }
+            catch (SlackManagerConflictException ex)
+            {
+                return ApiResults.Conflict(ex.Message, ex.Code, ex.Details);
+            }
+        });
+
         manager.MapPost("/install-agent/credentials", async (
             HttpContext context,
             string? workspaceTeamId,

@@ -192,7 +192,9 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             new(new("xoxe-current", "xoxr-current")));
 
         Assert.Equal(SlackSetupPhase.CreateUnknown, progress.Phase);
-        Assert.Equal(SlackSetupPrimaryAction.RerunSetup, progress.PrimaryAction);
+        // No App identity was recorded, so the executable action is the
+        // explicit arbitration: a rerun could never change this state.
+        Assert.Equal(SlackSetupPrimaryAction.AdjudicateCreate, progress.PrimaryAction);
         Assert.Equal(0, _appManagement.CreateCalls);
         await AssertEnrollmentAppLifecycleAsync("T_INTERRUPTED", SlackManagerAppLifecycle.CreateUnknown);
     }
@@ -213,9 +215,85 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             new(new("xoxe-current", "xoxr-current")));
 
         Assert.Equal(SlackSetupPhase.CreateUnknown, progress.Phase);
-        Assert.Equal(SlackSetupPrimaryAction.RerunSetup, progress.PrimaryAction);
+        Assert.Equal(SlackSetupPrimaryAction.AdjudicateCreate, progress.PrimaryAction);
         Assert.Equal(0, _appManagement.CreateCalls);
         await AssertEnrollmentAppLifecycleAsync("T_ORPHAN", SlackManagerAppLifecycle.CreateUnknown);
+    }
+
+    [Fact]
+    public async Task Adjudicating_an_identity_less_unknown_create_creates_the_app_once_on_the_same_enrollment()
+    {
+        var enrollment = await SeedEnrollmentAsync("T_ADJUDICATE");
+        var begin = await _enrollments.BeginManagerAppCreateAsync(
+            enrollment.Id, enrollment.ManagerAppOperationFence, "manager_create_crashed");
+        Assert.True(begin.Accepted);
+        _configurationPort.Enqueue(ConfigurationRotation("T_ADJUDICATE"));
+        var unknown = await _orchestrator.SupplyConfigurationAsync(
+            new(new("xoxe-current", "xoxr-current")));
+        Assert.Equal(SlackSetupPrimaryAction.AdjudicateCreate, unknown.PrimaryAction);
+
+        var adjudicated = await _orchestrator.AdjudicateCreateUnknownAsync();
+
+        Assert.Equal(SlackSetupPhase.AwaitingInstall, adjudicated.Phase);
+        Assert.Equal(SlackSetupPrimaryAction.ApproveInstall, adjudicated.PrimaryAction);
+        Assert.Equal(1, _appManagement.CreateCalls);
+        await AssertEnrollmentAppFactsAsync(
+            "T_ADJUDICATE",
+            SlackManagerAppLifecycle.Created,
+            adjudicated.ManagerAppId!,
+            $"https://api.slack.com/apps/{adjudicated.ManagerAppId}/oauth");
+    }
+
+    [Fact]
+    public async Task Adjudicating_a_create_that_recorded_an_app_identity_is_refused()
+    {
+        var enrollment = await SeedEnrollmentAsync("T_ADJUDICATE_KNOWN");
+        var begin = await _enrollments.BeginManagerAppCreateAsync(
+            enrollment.Id, enrollment.ManagerAppOperationFence, "manager_create_lost_response");
+        Assert.True(begin.Accepted);
+        var apply = await _enrollments.ApplyManagerAppCreateResultAsync(
+            enrollment.Id,
+            begin.Enrollment!.ManagerAppOperationFence,
+            SlackManagerAppLifecycle.CreateUnknown,
+            "transport_error");
+        Assert.True(apply.Accepted);
+        await _enrollments.RecordManagerAppIdentityAsync(enrollment.Id, "A_KNOWN_UNKNOWN");
+        // The provider cannot answer yet, so the unknown create keeps its
+        // recorded identity and the rerun stays the executable action.
+        _appManagement.SetResponse(enrollment.Id, new FakeSlackAppResponse(
+            Inspect: new SlackAppManagementFact(
+                SlackAppManagementFactOutcome.Unknown,
+                ErrorClass: "transport_error")));
+        _configurationPort.Enqueue(ConfigurationRotation("T_ADJUDICATE_KNOWN"));
+        var progress = await _orchestrator.SupplyConfigurationAsync(
+            new(new("xoxe-current", "xoxr-current")));
+        Assert.Equal(SlackSetupPhase.CreateUnknown, progress.Phase);
+        // A recorded identity makes the operation reconcilable, so the rerun
+        // stays the executable action and arbitration is refused.
+        Assert.Equal(SlackSetupPrimaryAction.RerunSetup, progress.PrimaryAction);
+
+        var conflict = await Assert.ThrowsAsync<SlackManagerConflictException>(
+            () => _orchestrator.AdjudicateCreateUnknownAsync("T_ADJUDICATE_KNOWN"));
+
+        Assert.Equal("create_reconciliation_required", conflict.Code);
+        await AssertEnrollmentAppFactsAsync(
+            "T_ADJUDICATE_KNOWN",
+            SlackManagerAppLifecycle.CreateUnknown,
+            "A_KNOWN_UNKNOWN",
+            installUrl: string.Empty);
+        Assert.Equal(0, _appManagement.CreateCalls);
+    }
+
+    [Fact]
+    public async Task Adjudicating_a_setup_that_is_not_awaiting_arbitration_is_refused()
+    {
+        await SeedEnrollmentAsync("T_ADJUDICATE_FRESH");
+
+        var conflict = await Assert.ThrowsAsync<SlackManagerConflictException>(
+            () => _orchestrator.AdjudicateCreateUnknownAsync("T_ADJUDICATE_FRESH"));
+
+        Assert.Equal("create_adjudication_not_required", conflict.Code);
+        Assert.Equal(0, _appManagement.CreateCalls);
     }
 
     [Fact]
@@ -741,6 +819,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             SlackSetupPrimaryAction.SupplyRuntimeCredentials,
             SlackSetupPrimaryAction.AwaitSocketVerification,
             SlackSetupPrimaryAction.RerunSetup,
+            SlackSetupPrimaryAction.AdjudicateCreate,
             SlackSetupPrimaryAction.Ready,
         ];
         var projections = new List<SlackSetupProgress>();
@@ -761,8 +840,8 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             await _leases.ReportHelloAsync("operator-1", manager, validation!.LeaseId, configuration.ManagerAppId!));
         projections.Add((await _orchestrator.GetProgressAsync())!);
 
-        // An unresolved App create projects a rerun of the guide, never the
-        // internal reconciliation step.
+        // An unresolved App create that recorded no identity projects the
+        // explicit arbitration: a rerun could never change that state.
         var unresolved = await SeedEnrollmentAsync("T_PROJECTION_UNKNOWN");
         var begin = await _enrollments.BeginManagerAppCreateAsync(
             unresolved.Id, unresolved.ManagerAppOperationFence, "manager_create_crashed");
@@ -787,7 +866,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             Assert.False(string.IsNullOrWhiteSpace(projection.Summary));
         });
         Assert.Contains(projections, projection =>
-            projection.PrimaryAction == SlackSetupPrimaryAction.RerunSetup
+            projection.PrimaryAction == SlackSetupPrimaryAction.AdjudicateCreate
             && projection.Phase == SlackSetupPhase.CreateUnknown);
         Assert.Contains(projections, projection =>
             projection.PrimaryAction == SlackSetupPrimaryAction.SupplyConfiguration

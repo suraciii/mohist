@@ -47,6 +47,67 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
     public Task<ManagedSlackAgentAppOperationResult> ReconcileCreateAsync(string agentAppId, CancellationToken ct = default) =>
         ReconcileAsync(agentAppId, SlackAgentAppOperation.Create, ct);
 
+    /// <summary>
+    /// Explicit arbitration of an unknown create that recorded no App identity.
+    /// Reconciliation asks the provider about the recorded operation by its own
+    /// identity, so without one no rerun could change the state. This records
+    /// the human decision that the create produced nothing and moves the fence
+    /// so no in-flight writer can apply a stale result. No external call runs
+    /// and no replacement App is created; the guide's own create step follows
+    /// on this same AgentApp.
+    /// </summary>
+    public async Task<ManagedSlackAgentAppOperationResult> AdjudicateCreateAsync(
+        string agentAppId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentAppId);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var agentApp = await db.ManagedSlackAgentApps.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == agentAppId, ct);
+        if (agentApp is null)
+            return ManagedSlackAgentAppOperationResult.NotFound;
+        if (agentApp.AppLifecycle != SlackAppLifecycle.CreateUnknown)
+            return ManagedSlackAgentAppOperationResult.NotAllowed(
+                agentApp.AppLifecycle,
+                "create_adjudication_not_required");
+        if (!string.IsNullOrWhiteSpace(agentApp.AppId))
+            return ManagedSlackAgentAppOperationResult.NotAllowed(
+                agentApp.AppLifecycle,
+                "create_reconciliation_required");
+
+        var operationId = $"adjudicate_create_{Guid.NewGuid():N}";
+        var nextFence = agentApp.OperationFence + 1;
+        var now = _timeProvider.GetUtcNow();
+        var changed = await db.ManagedSlackAgentApps
+            .Where(item => item.Id == agentAppId
+                && item.OperationFence == agentApp.OperationFence
+                && item.AppLifecycle == SlackAppLifecycle.CreateUnknown
+                && item.AppId == "")
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.OperationFence, nextFence)
+                .SetProperty(item => item.OperationId, operationId)
+                .SetProperty(item => item.OperationKind, "adjudicate_create")
+                .SetProperty(item => item.OperationStartedAt, now)
+                .SetProperty(item => item.AppLifecycle, SlackAppLifecycle.NotCreated)
+                .SetProperty(item => item.UnknownOutcome, (string?)null)
+                .SetProperty(item => item.ErrorClass, "create_adjudicated_absent")
+                .SetProperty(item => item.UpdatedAt, now), ct);
+        if (changed == 0)
+            return ManagedSlackAgentAppOperationResult.Stale;
+
+        var row = await db.ManagedSlackAgentApps.SingleAsync(item =>
+            item.Id == agentAppId && item.OperationFence == nextFence && item.OperationId == operationId, ct);
+        var audit = JsonSerializer.Deserialize<List<ManagedSlackAuditEntry>>(row.AuditJson) ?? [];
+        audit.Add(new ManagedSlackAuditEntry("create_adjudication", "not_created", now));
+        row.AuditJson = JsonSerializer.Serialize(audit);
+        await db.SaveChangesAsync(ct);
+        return ManagedSlackAgentAppOperationResult.Reconciled(
+            ManagedSlackAgentAppOperationStatus.Reconciled,
+            SlackAppManagementFactOutcome.Absent,
+            appId: null,
+            errorClass: null);
+    }
+
     public async Task<ManagedSlackAgentAppOperationResult> ApplyManifestAsync(
         string agentAppId,
         CancellationToken ct = default)

@@ -68,17 +68,24 @@ public static class ManagedSlackAgentAppStatusDeriver
             agentApp.Authorization,
             manifestState,
             transportReadiness,
-            agentApp.BindingState);
+            agentApp.BindingState,
+            agentApp.AppId);
 
     public static string DeriveNextAction(
         string appLifecycle,
         string authorization,
         string manifestState,
         string transportReadiness,
-        string bindingState)
+        string bindingState,
+        string? appId = null)
     {
         if (appLifecycle == SlackAppLifecycle.CreateUnknown)
-            return SlackAgentAppNextAction.ReconcileCreate;
+            // Reconciliation needs the recorded App identity to ask the
+            // provider about. Without it no rerun can change the state, so the
+            // executable action is the explicit arbitration instead.
+            return string.IsNullOrWhiteSpace(appId)
+                ? SlackAgentAppNextAction.AdjudicateCreate
+                : SlackAgentAppNextAction.ReconcileCreate;
         if (appLifecycle == SlackAppLifecycle.DeleteUnknown)
             return SlackAgentAppNextAction.ReconcileDelete;
         if (appLifecycle == SlackAppLifecycle.NotCreated)
@@ -120,6 +127,7 @@ public static class SlackAgentAppBindingObligationStatus
 public static class SlackAgentAppNextAction
 {
     public const string ReconcileCreate = "reconcile_create";
+    public const string AdjudicateCreate = "adjudicate_create";
     public const string ReconcileDelete = "reconcile_delete";
     public const string CreateAgentApp = "create_agent_app";
     public const string WaitForOperation = "wait_for_operation";

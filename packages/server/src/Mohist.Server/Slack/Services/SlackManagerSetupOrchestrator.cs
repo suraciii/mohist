@@ -257,6 +257,42 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
     }
 
     /// <summary>
+    /// Explicit arbitration of an unknown create that recorded no App identity.
+    /// Reconciliation needs that identity to ask the provider about the
+    /// operation, so without it a rerun could never change the state and the
+    /// projection would point at an action that cannot move. The operator's
+    /// decision is recorded on the same enrollment and the guide then runs its
+    /// own create step once.
+    /// </summary>
+    public async Task<SlackSetupProgress> AdjudicateCreateUnknownAsync(
+        string? workspaceTeamId = null,
+        CancellationToken ct = default)
+    {
+        var selected = await SelectEnrollmentAsync(workspaceTeamId, ct)
+            ?? await RequireSingleEnrollmentAsync(
+                "Run Slack setup with Configuration credentials first.", ct);
+        if (selected.ManagerAppLifecycle != SlackManagerAppLifecycle.CreateUnknown)
+            throw new SlackManagerConflictException(
+                "The Mohist App create result is not unknown; there is nothing to adjudicate.",
+                "create_adjudication_not_required");
+        if (!string.IsNullOrWhiteSpace(selected.ManagerAppId))
+            throw new SlackManagerConflictException(
+                "The unknown create recorded an App identity; reconcile it instead of adjudicating.",
+                "create_reconciliation_required");
+        var adjudicated = await _enrollments.AdjudicateManagerAppCreateAsync(
+            selected.Id,
+            selected.ManagerAppOperationFence,
+            SlackSecretRedactor.Redact("adjudicated_not_created"),
+            ct);
+        if (!adjudicated.Accepted)
+            throw new SlackManagerConflictException(
+                "The Mohist App create changed concurrently; read the current state and retry.",
+                "setup_changed_concurrently");
+        return await AdvanceManagerAppAsync(
+            await ReloadEnrollmentAsync(selected.Id, ct), reconcileUnknown: false, ct);
+    }
+
+    /// <summary>
     /// Resolves an explicit <c>--workspace-team</c> selector to its active
     /// Enrollment before any external write. A selector naming an unknown or
     /// ineligible Enrollment fails instead of falling back to another record.
@@ -682,11 +718,11 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
             or SlackManagerAppLifecycle.Creating
             || enrollment.ManagerAppLifecycle == SlackManagerAppLifecycle.Created
             && string.IsNullOrWhiteSpace(enrollment.ManagerAppId))
-            return (SlackSetupPhase.CreateUnknown, SlackSetupPrimaryAction.RerunSetup, enrollment.ManagerAppOperationOutcome);
+            return (SlackSetupPhase.CreateUnknown, CreateUnknownAction(enrollment), enrollment.ManagerAppOperationOutcome);
         if (enrollment.ManagerAppLifecycle == SlackManagerAppLifecycle.NotCreated)
             return (SlackSetupPhase.Failed, SlackSetupPrimaryAction.RerunSetup, enrollment.ManagerAppOperationOutcome);
         if (string.IsNullOrWhiteSpace(enrollment.ManagerAppId))
-            return (SlackSetupPhase.CreateUnknown, SlackSetupPrimaryAction.RerunSetup, enrollment.ManagerAppOperationOutcome);
+            return (SlackSetupPhase.CreateUnknown, CreateUnknownAction(enrollment), enrollment.ManagerAppOperationOutcome);
         if (!string.Equals(enrollment.ManagerAppManifestHash, desiredManifestHash, StringComparison.Ordinal))
             return (SlackSetupPhase.ApplyingManifest, SlackSetupPrimaryAction.RerunSetup, null);
         if (enrollment.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified)
@@ -697,6 +733,16 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
             return (SlackSetupPhase.AwaitingInstall, SlackSetupPrimaryAction.ApproveInstall, null);
         return (SlackSetupPhase.AwaitingSocketValidation, SlackSetupPrimaryAction.AwaitSocketVerification, null);
     }
+
+    /// <summary>
+    /// A recorded App identity makes the unknown create reconcilable, so a
+    /// rerun is the executable action. Without one the rerun could never change
+    /// the state, and the explicit arbitration is the only action that can.
+    /// </summary>
+    private static string CreateUnknownAction(SlackWorkspaceEnrollment enrollment) =>
+        string.IsNullOrWhiteSpace(enrollment.ManagerAppId)
+            ? SlackSetupPrimaryAction.AdjudicateCreate
+            : SlackSetupPrimaryAction.RerunSetup;
 
     /// <summary>
     /// One human sentence naming the target and what the current state means.
@@ -710,7 +756,9 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
             SlackSetupPhase.NotStarted => "Slack setup has not started for this Workspace.",
             SlackSetupPhase.ConfigurationRequired => "The Workspace Configuration credentials are required.",
             SlackSetupPhase.ConfigurationUnknown => "The Configuration credential rotation result is unknown.",
-            SlackSetupPhase.CreateUnknown => "The Mohist App create result is unknown and must be reconciled.",
+            SlackSetupPhase.CreateUnknown => string.IsNullOrWhiteSpace(enrollment?.ManagerAppId)
+                ? "The Mohist App create result is unknown and recorded no App identity; confirm in Slack that no App was created, then adjudicate."
+                : "The Mohist App create result is unknown and must be reconciled.",
             SlackSetupPhase.ApplyingManifest => "The Mohist App manifest is out of date.",
             SlackSetupPhase.AwaitingInstall => "The Mohist App installation needs approval in Slack.",
             SlackSetupPhase.AwaitingSocketValidation => "The Mohist App Socket identity is being verified.",
@@ -797,5 +845,6 @@ public static class SlackSetupPrimaryAction
     public const string SupplyRuntimeCredentials = "supply_runtime_credentials";
     public const string AwaitSocketVerification = "await_socket_verification";
     public const string RerunSetup = "rerun_setup";
+    public const string AdjudicateCreate = "adjudicate_create";
     public const string Ready = "ready";
 }

@@ -155,6 +155,8 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         Assert.Equal(SlackAgentAppNextAction.CreateAgentApp, child.NextAction);
 
         child.AppLifecycle = SlackAppLifecycle.CreateUnknown;
+        Assert.Equal(SlackAgentAppNextAction.AdjudicateCreate, child.NextAction);
+        child.AppId = "A_KNOWN";
         Assert.Equal(SlackAgentAppNextAction.ReconcileCreate, child.NextAction);
 
         child.AppLifecycle = SlackAppLifecycle.Created;

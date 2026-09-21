@@ -264,6 +264,91 @@ public sealed class SlackInstallAgentSpecs
     }
 
     [Fact]
+    public async Task An_identity_less_unknown_create_is_adjudicated_then_created_once_on_the_same_app()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+        _apps.SetResponse(installed.AgentApp.Id, new FakeSlackAppResponse(
+            Create: new SlackAppManagementResult(
+                SlackAppManagementOutcome.Unknown,
+                ErrorClass: "transport_error")));
+        await using (var db = _factory.CreateDbContext())
+        {
+            var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == installed.AgentApp.Id);
+            row.AppLifecycle = SlackAppLifecycle.CreateUnknown;
+            row.AppId = string.Empty;
+            row.UnknownOutcome = "timeout";
+            await db.SaveChangesAsync();
+        }
+
+        var unknown = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+
+        // No App identity was recorded, so reconciliation cannot ask the
+        // provider about the operation: arbitration is the executable action.
+        Assert.Equal(SlackAppLifecycle.CreateUnknown, unknown.AgentApp.AppLifecycle);
+        Assert.Equal(SlackAgentAppNextAction.AdjudicateCreate, unknown.NextAction);
+        Assert.Equal(1, _apps.CreateCalls);
+
+        // The operator confirmed in Slack that no App was created, so the
+        // guide's own create step now succeeds on the same AgentApp.
+        _apps.SetResponse(installed.AgentApp.Id, new FakeSlackAppResponse());
+        var adjudicated = await _service.AdjudicateCreateAsync(ProjectId, AgentId);
+
+        Assert.Equal(SlackAppLifecycle.Created, adjudicated.AgentApp.AppLifecycle);
+        Assert.Equal(installed.AgentApp.Id, adjudicated.AgentApp.Id);
+        Assert.Equal(SlackAgentAppNextAction.AuthorizeAgentApp, adjudicated.NextAction);
+        Assert.Equal(2, _apps.CreateCalls);
+        await using (var db = _factory.CreateDbContext())
+        {
+            var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == installed.AgentApp.Id);
+            Assert.Contains("create_adjudication", row.AuditJson, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task Adjudicating_a_create_that_recorded_an_app_identity_is_refused()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+        await using (var db = _factory.CreateDbContext())
+        {
+            var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == installed.AgentApp.Id);
+            row.AppLifecycle = SlackAppLifecycle.CreateUnknown;
+            row.UnknownOutcome = "timeout";
+            await db.SaveChangesAsync();
+        }
+        _apps.SetResponse(installed.AgentApp.Id, new FakeSlackAppResponse(
+            Inspect: new SlackAppManagementFact(
+                SlackAppManagementFactOutcome.Unknown,
+                ErrorClass: "transport_error")));
+        var unknown = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+        Assert.Equal(SlackAgentAppNextAction.ReconcileCreate, unknown.NextAction);
+
+        var conflict = await Assert.ThrowsAsync<SlackManagerConflictException>(
+            () => _service.AdjudicateCreateAsync(ProjectId, AgentId));
+
+        Assert.Equal("create_reconciliation_required", conflict.Code);
+        Assert.Equal(1, _apps.CreateCalls);
+    }
+
+    [Fact]
+    public async Task Adjudicating_a_create_that_is_not_unknown_is_refused()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+
+        var conflict = await Assert.ThrowsAsync<SlackManagerConflictException>(
+            () => _service.AdjudicateCreateAsync(ProjectId, AgentId));
+
+        Assert.Equal("create_adjudication_not_required", conflict.Code);
+        Assert.Equal(SlackAppLifecycle.Created, installed.AgentApp.AppLifecycle);
+        Assert.Equal(1, _apps.CreateCalls);
+    }
+
+    [Fact]
     public async Task Provision_credentials_rejects_unverified_or_mismatched_identity_without_storing_secrets()
     {
         await SeedAgentAsync(AgentStatus.Active);
