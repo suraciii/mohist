@@ -1,9 +1,9 @@
 # Web UI
 
-The Web UI is Mohist's fallback operations and visualization plane. It presents
-authoritative state, evidence, relationships, and safe actions for global
-review or manual takeover. The primary conversation may remain in Slack, an
-IDE, or another external surface. Fallback means infrequent, not incomplete.
+The Web UI displays progress, evidence, relationships, and results alongside
+Agent interaction. Agents are the primary operators of Mohist. People use the
+views to understand and judge work, with direct controls for configuration,
+decisions, and manual takeover.
 
 The Web UI is also a complete direct Mohist Agent client for configuration,
 launch, Follow-up, Job results, Session evidence, and recovery. Open
@@ -20,7 +20,9 @@ whether a person must act, and which actions are safe now.
   surfaces show the named Agents responsible for execution with their effective
   configuration and route to the Agents page; they add no model selector.
 - Push is observation. The UI reconciles authoritative queries after reconnect.
-- A Web action must use the same Server-owned intent as every other client.
+- A Web action uses the Server-owned operations exposed for Agents. The UI
+  adds no product operation that an Agent cannot perform through those
+  interfaces.
 - The UI emphasizes Project attention, Issue and Epic progress, Workflow state,
   diffs, Session evidence, and system health.
 

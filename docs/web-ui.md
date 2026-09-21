@@ -1,9 +1,9 @@
 # Web UI Guide
 
-The Web UI is Mohist's fallback operations and visualization plane. Users
-normally work in Slack, an IDE, another interaction surface, or through an
-External Agent. Open the Web UI to inspect complex state, verify evidence,
-change configuration, or take over when another entry point is unavailable.
+The Web UI displays progress, relationships, evidence, and results alongside
+Agent interaction. People use these views to understand and judge work.
+Agents are the primary way to operate Mohist; the Web UI also provides
+controls for configuration, decisions, and manual takeover.
 
 ## Product Commitments
 
@@ -17,8 +17,7 @@ change configuration, or take over when another entry point is unavailable.
   act, and which actions are safe now.
 - The Web UI keeps Agent Readiness, execution availability, Job state, Session
   Activity, and Connection health separate.
-- User actions use the same Server-owned operations as the CLI and other
-  interaction surfaces.
+- User actions use the same Server-owned operations as Agents and the CLI.
 
 Open `http://localhost:3456`.
 
