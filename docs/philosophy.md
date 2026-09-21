@@ -41,41 +41,46 @@ assumptions, and correct direction. AI can supply evidence and challenge a
 proposal. People can delegate work without continuously observing every
 operation, while retaining meaningful judgment over what the work serves.
 
-## Chapter 2: Using Programs Through Agents
+## Chapter 2: Human-Computer Interaction
 
-People communicate their purposes to Agents in natural language. Agents turn
-those purposes into program operations and return results that people can
-understand and judge.
+Human-computer interaction connects human purposes with actions a machine can
+perform. Its central problem is how people give their intentions an effective
+form and understand the consequences of acting through that form.
 
-### 1. Dialogue gives intent a workable form
+### 1. Purpose must take an executable form
 
-People can begin with an incomplete idea. Through explanation, questions, and
-responses, they clarify what they want to accomplish and what matters to them.
-The Agent must interpret their words in context and ask when the intended
-meaning is unclear. Dialogue helps form the purpose that guides action.
+A purpose concerns what an action is for. A program specifies operations.
+Moving from one to the other requires interpreting the purpose and choosing
+means that can realize it.
 
-### 2. Agents connect intent with operations
+An interface gives this interpretation a form. Its commands and categories
+shape what people can express directly and what they must work out for
+themselves. The form of interaction therefore affects how people formulate
+their work and which possibilities they can readily explore.
 
-Programs require explicit operations and inputs. Choosing those operations
-requires understanding what the person means, what the program can do, and
-which actions serve the purpose. The Agent carries this work so the person can
-act through an expression of intent.
+### 2. Language makes interpretation part of interaction
 
-The relationship works in both directions. The Agent must connect execution
-results to the person's purpose. An operation can succeed while the problem
-remains unresolved. People need access to the underlying facts so they can
-question the Agent's interpretation and redirect the work.
+Natural language lets people express purposes before specifying all the
+means. Meaning depends on context, assumptions, and what the speaker is
+trying to accomplish. Understanding develops through explanation, questions,
+and responses.
 
-### 3. Programs carry established rules
+An Agent can participate in this interpretation. Dialogue makes assumptions
+available for examination and connects an emerging intention with possible
+actions. People can revise the purpose itself as they discover what their
+request entails. Expression and understanding develop together.
 
-Once a procedure is clear, a program can maintain its state and advance it
-according to explicit rules. The Agent can delegate that procedure to the
-program. In turn, the program can call on Agents for work that requires
-interpretation, judgment, or creation.
+### 3. Mediation changes the work of judgment
 
-This division keeps established procedures consistent while allowing people
-to clarify or revise their intentions through dialogue. Their ability to
-intervene must continue throughout execution.
+An Agent's interpretation makes action possible, but it can also introduce
+assumptions that the person did not intend. Fluent expression can conceal
+misunderstanding, and successful operations can leave the purpose unfulfilled.
+
+For the activity to remain directed by the person, the interpretation and its
+consequences need to remain open to examination. People can delegate the
+choice of operations while judging what was understood, what happened, and
+whether to continue. Communication sustains this relation throughout the
+activity.
 
 ## References
 

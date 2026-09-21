@@ -10,8 +10,8 @@ If you are new to Mohist, read the [repository README](../README.md) first.
 
 - [Product Vision](vision.md): Use Mohist through natural-language conversations
   with Agents in existing communication spaces
-- [Philosophy of Software Development](philosophy.md): Human purpose, review,
-  correction, and using programs through Agents
+- [Philosophy of Software Development](philosophy.md): Human purpose, judgment,
+  and human-computer interaction in AI development
 - [Getting Started](getting-started.md): Start from zero and move one Issue
   through the complete Workflow with a Mohist Agent, External Agent, or `mo`
 - [Core Concepts](concepts.md): Understand the Mohist production-line model
