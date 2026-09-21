@@ -504,23 +504,36 @@ public sealed class GitHubWriteBackHandlerTests
     }
 
     [Fact]
-    public async Task FailedOperation_IsRecordedAndDoesNotBlockRemainingOperations()
+    public async Task FailedOperation_ReraisesAfterRecordingAndStopsRemainingOperations()
     {
         var harness = new Harness();
         harness.Port.CommentFailure = new InvalidOperationException("comment boom");
         var handler = await harness.NewHandlerAsync();
 
-        await handler.HandleAsync(Event(EventCatalog.ReverseDns.IssueCompleted), CancellationToken.None);
+        // The rethrow is what puts the event back on the dispatcher's
+        // at-least-once channel; the remaining operations must not run on a
+        // attempt whose earlier operation failed.
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => handler.HandleAsync(Event(EventCatalog.ReverseDns.IssueCompleted), CancellationToken.None));
 
         Assert.Empty(harness.Port.Comments);
-        Assert.Single(harness.Port.StateLabels);
-        var close = Assert.Single(harness.Port.Closes);
-        Assert.Equal("completed", close.StateReason);
+        Assert.Empty(harness.Port.StateLabels);
+        Assert.Empty(harness.Port.Closes);
         var failure = Assert.Single(await harness.FailuresAsync());
         Assert.Equal(GitHubWriteBackOperation.Comment, failure.Operation);
         Assert.Equal(nameof(InvalidOperationException), failure.ErrorCode);
         var connection = await harness.ConnectionAsync();
         Assert.False(connection!.NeedsAttention);
+
+        // Redelivery releases the reservation, so the retried event projects
+        // the comment and the operations that never ran.
+        harness.Port.CommentFailure = null;
+        await handler.HandleAsync(Event(EventCatalog.ReverseDns.IssueCompleted), CancellationToken.None);
+
+        Assert.Single(harness.Port.Comments);
+        Assert.Single(harness.Port.StateLabels);
+        var close = Assert.Single(harness.Port.Closes);
+        Assert.Equal("completed", close.StateReason);
     }
 
     [Fact]
@@ -530,7 +543,8 @@ public sealed class GitHubWriteBackHandlerTests
         harness.Port.LabelFailure = new HttpRequestException("Forbidden", inner: null, HttpStatusCode.Forbidden);
         var handler = await harness.NewHandlerAsync();
 
-        await handler.HandleAsync(Event(EventCatalog.ReverseDns.WorkflowRunFailed), CancellationToken.None);
+        await Assert.ThrowsAsync<HttpRequestException>(
+            () => handler.HandleAsync(Event(EventCatalog.ReverseDns.WorkflowRunFailed), CancellationToken.None));
 
         Assert.Empty(harness.Port.StateLabels);
         var failure = Assert.Single(await harness.FailuresAsync());
@@ -553,7 +567,8 @@ public sealed class GitHubWriteBackHandlerTests
         harness.Port.CommentFailure = new GitHubRemoteRequestException("GitHub failure", status, rateLimited);
         var handler = await harness.NewHandlerAsync();
 
-        await handler.HandleAsync(Event(EventCatalog.ReverseDns.IssueWorkStarted), CancellationToken.None);
+        await Assert.ThrowsAsync<GitHubRemoteRequestException>(
+            () => handler.HandleAsync(Event(EventCatalog.ReverseDns.IssueWorkStarted), CancellationToken.None));
 
         await using var db = new MohistDbContext(harness.Options);
         var operation = await db.GitHubIssueCommentOperations.SingleAsync();

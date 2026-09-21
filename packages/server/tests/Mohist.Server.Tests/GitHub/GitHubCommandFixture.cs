@@ -49,6 +49,7 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
     public Exception? UpdateFailure { get; set; }
     public Queue<Exception> UpdateFailures { get; } = new();
     public Exception? LabelFailure { get; set; }
+    public Queue<Exception> CloseFailures { get; } = new();
     public Exception? CloseFailure { get; set; }
     public bool CloseThenThrow { get; set; }
     public TaskCompletionSource? CloseEntered { get; set; }
@@ -189,6 +190,7 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort, IGitHubIssu
         string stateReason,
         CancellationToken ct = default)
     {
+        if (CloseFailures.Count > 0) throw CloseFailures.Dequeue();
         if (CloseFailure is not null) throw CloseFailure;
         Closes.Add(new IssueClose(connection.Id, githubIssueNumber, stateReason));
         CloseEntered?.TrySetResult();
