@@ -20,9 +20,9 @@ ability to understand, evaluate, and redirect the work.
 [Philosophy of Software Development](philosophy.md) examines development as a
 purposeful practical activity. Human intentions guide the work; building
 and using its results can also change how humans understand those intentions.
-Review and correction continue this activity. Humans communicate intent
-through dialogue with Agents, which connect that intent to program operations
-and return results for human judgment. The argument extends to how
+Review and correction continue this activity. Agents connect human intent to
+program operations and return evidence for judgment. Programs make defined
+rules enforceable within those operations. The argument extends to how
 applications can be organized for use through a user's Agent, and how this
 priority changes interfaces and presentation.
 

@@ -86,7 +86,33 @@ direct manipulation, and autonomous work can all participate. Learning and
 creation may give direct participation a value of its own; greater capacity
 to delegate enlarges the available choices.
 
-### 3. Use can transform its own means
+### 3. Programs give rules an executable form
+
+A report combines judgments about its content with rules for its form.
+An Agent can organize the material into parameters; a program can validate
+them and render the required format. The format becomes a property of the
+means used to produce the report, rather than a requirement the Agent must
+continually remember while generating it.
+
+The same change can organize actions. A workflow engine can require a passing
+verification result before allowing the next stage. An Agent can write the
+workflow, whose code can branch on new results while preserving required
+dependencies.[^orchestration] Work can remain dynamic while its conditions of
+advancement are enforced.
+
+Such regularity depends on a boundary. A deterministic state machine produces
+the same transitions from the same initial state and ordered inputs, even
+though observations from clocks, networks, or storage may vary between
+runs.[^determinism] In an Agent system, judgments can likewise enter as inputs.
+Making these inputs explicit allows rules to be examined and tested separately
+from their changing sources. It does not make the whole activity predictable.
+
+These guarantees cover only rules correctly implemented on operations the
+program controls. Correct formatting does not establish truthful content,
+nor does running a review establish a sound judgment. The adequacy of the
+rules remains a question for the activity they serve.
+
+### 4. Use can transform its own means
 
 When an available program is unsuitable, development can become part of use.
 The program is an object while it is created or modified, and a means when
@@ -143,9 +169,9 @@ participation both matter.
 
 To select a capability, an Agent must understand what it can change, when it
 is applicable, and what its outcome permits next. Application interfaces serve
-Agents first by making these operations directly usable. Descriptions and
-instructions connect their availability with an understanding of their use;
-typical methods help the Agent apply them to concrete tasks.
+Agents first through directly usable operations that enforce their declared
+preconditions. Descriptions and instructions explain their use; typical methods
+help the Agent apply them to concrete tasks.
 
 Using a capability changes the conditions for further work. The application
 must expose its state and evidence of effects, failures, and uncertainty.
@@ -165,3 +191,7 @@ humans to perceive and do.
 [^practice]: Karl Marx, [*Theses on Feuerbach*](https://www.marxists.org/archive/marx/works/1845/theses/index.htm), theses 2 and 3, translated by Cyril Smith.
 
 [^agent-practice]: Moonshot AI, [*Kimi K3: Open Frontier Intelligence*](https://arxiv.org/html/2607.24653v1), sections 4.1 and 4.2; MiniMax, [*MiniMax M3: Frontier Coding, 1M Context, Native Multimodality — All in One Model*](https://www.minimax.io/blog/minimax-m3).
+
+[^orchestration]: Anthropic, [*Orchestrate subagents at scale with dynamic workflows*](https://platform.claude.com/cookbook/claude-agent-sdk-08-dynamic-workflows); pi-subagents, [*Workflows and orchestration*](https://github.com/nicobailon/pi-subagents/blob/main/docs/workflows.md), sections on scripted workflows and parallel sequential lanes.
+
+[^determinism]: Outdata, [*Deterministic Core, Non-Deterministic Shell*](https://outdata.net/blog/260803), August 3, 2026.
