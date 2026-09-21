@@ -65,6 +65,15 @@ positions within an activity. An Agent can use programs to act, while programs
 can invoke Agents and organize their execution. The same Agent can occupy
 both positions.
 
+```text diagram
++--------+ delegate  +--------+ use       +----------+
+| Humans +---------->| Agents +---------->| Programs |
++--------+           +----+---+           +-----+----+
+     ^         results    ^                     |
+     +--------------------+          invoke     |
+                          +---------------------+
+```
+
 ### 2. Cooperation develops through action and feedback
 
 An activity can cross the boundaries of several applications. Their
@@ -94,6 +103,14 @@ activity, including the value of taking part in it.
 When an Agent creates or modifies a program, a means of action becomes an
 object of work. When the resulting program is used, it becomes a means again.
 Using software can thus include producing the tools needed to proceed.
+
+```text diagram
++-----------------+ put to use  +----------------+ enables     +--------------+
+| Program: object +------------>| Program: means +------------>| Further work |
++-----------------+             +----------------+             +-------+------+
+         ^                              create or modify               |
+         +-------------------------------------------------------------+
+```
 
 An activity can leave behind programs, methods, and records that become
 conditions for later work.[^labor] Existing programs carry forward knowledge
