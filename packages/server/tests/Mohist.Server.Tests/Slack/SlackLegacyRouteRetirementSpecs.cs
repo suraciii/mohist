@@ -18,6 +18,8 @@ public sealed class SlackLegacyRouteRetirementSpecs : IClassFixture<DefaultMohis
         "/api/slack-manager/setup",
         "/api/projects/{projectRef}/slack-manager/apps",
         "/api/projects/{projectRef}/slack-connections/{connectionId}/configure",
+        "/api/projects/{projectRef}/slack-manager/connections/{connectionId}/create",
+        "/api/projects/{projectRef}/slack-manager/connections/{connectionId}/reconcile-create",
         "/api/projects/{projectRef}/slack-manager/connections/{connectionId}/begin-authorization",
         "/api/projects/{projectRef}/slack-manager/connections/{connectionId}/authorization-progress",
         "/api/projects/{projectRef}/slack-manager/connections/{connectionId}/authorize",
@@ -80,6 +82,8 @@ public sealed class SlackLegacyRouteRetirementSpecs : IClassFixture<DefaultMohis
     [InlineData("POST", "/api/projects/proj-retired/slack-manager/apps")]
     [InlineData("POST", "/api/projects/proj-retired/slack-connections/")]
     [InlineData("POST", "/api/projects/proj-retired/slack-connections/conn-retired/configure")]
+    [InlineData("POST", "/api/projects/proj-retired/slack-manager/connections/conn-retired/create")]
+    [InlineData("POST", "/api/projects/proj-retired/slack-manager/connections/conn-retired/reconcile-create")]
     [InlineData("POST", "/api/projects/proj-retired/slack-manager/connections/conn-retired/begin-authorization")]
     [InlineData("POST", "/api/projects/proj-retired/slack-manager/connections/conn-retired/authorization-progress")]
     [InlineData("POST", "/api/projects/proj-retired/slack-manager/connections/conn-retired/authorize")]

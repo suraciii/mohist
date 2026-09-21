@@ -749,6 +749,34 @@ public sealed record SlackInstallAgentProgress(
     string? ErrorClass = null)
 {
     public string? InstallUrl => string.IsNullOrWhiteSpace(AgentApp.InstallUrl) ? null : AgentApp.InstallUrl;
+
+    /// <summary>
+    /// The one action every surface renders. The CLI, the Web view, and a Mohist
+    /// App conversation read this value, so they name the same step.
+    /// </summary>
+    public string PrimaryAction => SlackInstallAgentActions.UserFacing(NextAction);
+}
+
+/// <summary>
+/// The user-facing spelling of an installation action. App create, manifest
+/// application, binding, reconciliation, and the Socket hello are the guide's
+/// own work, so the caller's action is to rerun it; the two facts that end the
+/// journey - the Owner claim and an Agent that cannot execute - keep their own
+/// executable action instead of hiding behind a technical <c>ready</c>.
+/// </summary>
+public static class SlackInstallAgentActions
+{
+    public static string UserFacing(string nextAction) => nextAction switch
+    {
+        SlackAgentAppNextAction.AuthorizeAgentApp => "approve_install",
+        SlackAgentAppNextAction.ConfigureSocketCredentials => "provide_credentials",
+        SlackAgentAppNextAction.ProvideCredentials => "provide_credentials",
+        SlackAgentAppNextAction.ClaimOwner => SlackAgentAppNextAction.ClaimOwner,
+        SlackAgentAppNextAction.RepairAgent => SlackAgentAppNextAction.RepairAgent,
+        SlackAgentAppNextAction.AdjudicateCreate => SlackAgentAppNextAction.AdjudicateCreate,
+        SlackAgentAppNextAction.Ready => "ready",
+        _ => "rerun_install",
+    };
 }
 
 public sealed record SlackInstallAgentConnectionState(

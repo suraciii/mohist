@@ -137,82 +137,6 @@ public sealed partial class SlackManagerApplicationService : IScopedService
         return options;
     }
 
-    public async Task<SlackManagerCreateResult> CreateAsync(
-        SlackManagerCreateRequest request,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.ProjectId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.AgentId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.WorkspaceTeamId);
-        ValidateAccessPolicy(request.AccessPolicy);
-        var agent = await _agents.GetByIdAsync(request.ProjectId, request.AgentId, ct);
-        if (agent is null)
-            throw new SlackManagerValidationException("The Agent was not found.", "agent_not_found");
-        if (agent.Status != AgentStatus.Active)
-            throw new SlackManagerValidationException("Only active Agents can receive a managed App.", "agent_archived");
-
-        var enrollment = await _enrollments.GetActiveByTeamAsync(request.WorkspaceTeamId, ct)
-            ?? throw new SlackManagerConflictException(
-                "Run Manager setup for this workspace before creating a managed Connection.",
-                "enrollment_required");
-        var existing = (await _connections.ListAsync(request.ProjectId, ct: ct))
-            .FirstOrDefault(connection =>
-                connection.AgentId == request.AgentId
-                && connection.WorkspaceTeamId == request.WorkspaceTeamId);
-        if (existing is not null)
-        {
-            var existingChild = await _agentApps.GetByConnectionAsync(existing.Id, ct);
-            if (existingChild is null)
-                existingChild = await CreateChildAsync(existing, enrollment, agent, request, ct);
-            return new(false, ProjectConnection(existing), ProjectChild(existingChild),
-                SlackBotIdentityDeriver.Derive(agent));
-        }
-
-        if (await _agentApps.HasUndeletedForAgentAndWorkspaceAsync(
-                request.ProjectId, request.AgentId, request.WorkspaceTeamId, ct))
-            throw new SlackManagerConflictException(
-                "An undeleted managed App still owns this Agent/workspace binding. Permanently delete that App before creating another one.",
-                "managed_app_exists");
-
-        var preview = SlackBotIdentityDeriver.Derive(agent);
-        var connection = new AgentConnection
-        {
-            Id = $"connection_{Guid.NewGuid():N}",
-            ProjectId = request.ProjectId,
-            AgentId = request.AgentId,
-            ProviderKind = ConnectionProviderKind.Slack,
-            WorkspaceTeamId = request.WorkspaceTeamId.Trim(),
-            BotName = request.BotName?.Trim() ?? preview.BotName,
-            AvatarHash = request.AvatarHash,
-            SetupProgress = SetupProgressKind.CreateAppCredentials,
-            DesiredState = DesiredStateKind.Enabled,
-            ConnectionHealth = ConnectionHealthKind.Unhealthy,
-            HealthReason = "managed_app_not_ready",
-            AgentReadiness = AgentReadinessDeriver.Derive(agent.AgentConfig),
-            OwnerSlackUserId = request.OwnerSlackUserId,
-            AccessPolicy = request.AccessPolicy,
-        };
-
-        try
-        {
-            connection = await _connections.CreateStagedAsync(connection, ct);
-        }
-        catch (AgentConnectionDuplicateException)
-        {
-            var raced = (await _connections.ListAsync(request.ProjectId, ct: ct))
-                .FirstOrDefault(item => item.AgentId == request.AgentId
-                    && item.WorkspaceTeamId == request.WorkspaceTeamId);
-            if (raced is null) throw;
-            var racedChild = await _agentApps.GetByConnectionAsync(raced.Id, ct)
-                ?? await CreateChildAsync(raced, enrollment, agent, request, ct);
-            return new(false, ProjectConnection(raced), ProjectChild(racedChild), preview);
-        }
-
-        var agentApp = await CreateChildAsync(connection, enrollment, agent, request, ct);
-        return new(true, ProjectConnection(connection), ProjectChild(agentApp), preview);
-    }
-
     public async Task<SlackManagerAppProjection?> GetAsync(
         string projectId,
         string connectionId,
@@ -225,18 +149,6 @@ public sealed partial class SlackManagerApplicationService : IScopedService
             ? null
             : ProjectChild(agentApp, connection.OwnerSlackUserId, connection.AgentReadiness);
     }
-
-    public async Task<ManagedSlackAgentAppOperationResult> CreateAgentAppAsync(
-        string projectId,
-        string connectionId,
-        CancellationToken ct = default) =>
-        await RunChildOperationAsync(projectId, connectionId, _childOperations.CreateAsync, ct);
-
-    public async Task<ManagedSlackAgentAppOperationResult> ReconcileCreateAsync(
-        string projectId,
-        string connectionId,
-        CancellationToken ct = default) =>
-        await RunChildOperationAsync(projectId, connectionId, _childOperations.ReconcileCreateAsync, ct);
 
     public async Task<ManagedSlackAgentAppOperationResult> PermanentDeleteAsync(
         string projectId,
@@ -254,32 +166,6 @@ public sealed partial class SlackManagerApplicationService : IScopedService
         string connectionId,
         CancellationToken ct = default) =>
         await RunChildOperationAsync(projectId, connectionId, _childOperations.ReconcileDeleteAsync, ct);
-
-    private async Task<ManagedSlackAgentApp> CreateChildAsync(
-        AgentConnection connection,
-        SlackWorkspaceEnrollment enrollment,
-        AgentInfo agent,
-        SlackManagerCreateRequest request,
-        CancellationToken ct)
-    {
-        var preview = SlackBotIdentityDeriver.Derive(agent);
-        var manifest = _manifests.Generate(new SlackManifestInput(
-            connection.BotName,
-            preview.AppDescription,
-            ProductCapabilityVersion,
-            new SlackManifestIdentitySnapshot(connection.Id, connection.AgentId, connection.WorkspaceTeamId),
-            SlackManifestKind.AgentApp,
-            ManifestVersion));
-        return await _agentApps.CreateAsync(new ManagedSlackAgentApp
-        {
-            Id = $"child_app_{Guid.NewGuid():N}",
-            EnrollmentId = enrollment.Id,
-            WorkspaceTeamId = connection.WorkspaceTeamId,
-            AgentConnectionId = connection.Id,
-            DesiredManifestVersion = manifest.Version,
-            DesiredManifestHash = manifest.Hash,
-        }, ct);
-    }
 
     private async Task<ManagedSlackAgentAppOperationResult> RunChildOperationAsync(
         string projectId,
@@ -428,15 +314,6 @@ public sealed partial class SlackManagerApplicationService : IScopedService
     }
 }
 
-public sealed record SlackManagerCreateRequest(
-    string ProjectId,
-    string AgentId,
-    string WorkspaceTeamId,
-    string AccessPolicy = AccessPolicyKind.OwnerOnly,
-    string? OwnerSlackUserId = null,
-    string? BotName = null,
-    string? AvatarHash = null);
-
 public sealed record SlackManagerClaimIssued(
     string? Code,
     DateTimeOffset? ExpiresAt)
@@ -486,12 +363,6 @@ public sealed record SlackManagerAgentOption(
     SlackBotIdentityPreview Preview,
     SlackManagerConnectionProjection? Connection,
     SlackManagerAppProjection? ManagedApp);
-
-public sealed record SlackManagerCreateResult(
-    bool Created,
-    SlackManagerConnectionProjection Connection,
-    SlackManagerAppProjection ManagedApp,
-    SlackBotIdentityPreview Preview);
 
 public sealed record SlackManagerConnectionProjection(
     string Id,

@@ -123,22 +123,6 @@ public static class SlackManagerRoutes
                 : ApiResults.Ok(PublicManagedApp(result));
         });
 
-        manager.MapPost("/connections/{connectionId}/create", async (
-            HttpContext context,
-            string connectionId,
-            SlackManagerApplicationService service,
-            CancellationToken ct) =>
-            OperationResult(await service.CreateAgentAppAsync(
-                context.GetResolvedProject().Id, connectionId, ct)));
-
-        manager.MapPost("/connections/{connectionId}/reconcile-create", async (
-            HttpContext context,
-            string connectionId,
-            SlackManagerApplicationService service,
-            CancellationToken ct) =>
-            OperationResult(await service.ReconcileCreateAsync(
-                context.GetResolvedProject().Id, connectionId, ct)));
-
         manager.MapPost("/connections/{connectionId}/disable", async (
             HttpContext context,
             string connectionId,
@@ -287,20 +271,8 @@ public static class SlackManagerRoutes
     /// the Owner claim and an Agent that cannot execute - keep their own
     /// executable action instead of hiding behind a technical `ready`.
     /// </summary>
-    private static string PublicInstallNextAction(string nextAction) => nextAction switch
-    {
-        SlackAgentAppNextAction.AuthorizeAgentApp => "approve_install",
-        SlackAgentAppNextAction.ConfigureSocketCredentials => "provide_credentials",
-        SlackAgentAppNextAction.ProvideCredentials => "provide_credentials",
-        SlackAgentAppNextAction.ClaimOwner => SlackAgentAppNextAction.ClaimOwner,
-        SlackAgentAppNextAction.RepairAgent => SlackAgentAppNextAction.RepairAgent,
-        SlackAgentAppNextAction.AdjudicateCreate => SlackAgentAppNextAction.AdjudicateCreate,
-        SlackAgentAppNextAction.Ready => "ready",
-        // App create, manifest application, binding, reconciliation, and the
-        // Socket hello are Server work: the caller's action is to rerun the
-        // guide, which performs at most one of them.
-        _ => "rerun_install",
-    };
+    private static string PublicInstallNextAction(string nextAction) =>
+        SlackInstallAgentActions.UserFacing(nextAction);
 
     private static object PublicManagedApp(SlackManagerAppProjection app) => new
     {

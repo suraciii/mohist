@@ -89,6 +89,35 @@ public sealed class SlackInstallAgentSpecs
     }
 
     [Fact]
+    public async Task Install_stages_an_owner_only_connection_and_a_rerun_never_widens_it()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1");
+        var installed = await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+
+        await using (var db = _factory.CreateDbContext())
+        {
+            var connection = await db.AgentConnections.SingleAsync(row => row.Id == installed.Connection.Id);
+            // Setup starts Owner-only and claims no Owner: the claim is a
+            // separate act the installation never performs.
+            Assert.Equal(AccessPolicyKind.OwnerOnly, connection.AccessPolicy);
+            Assert.Null(connection.OwnerSlackUserId);
+            // A later management operation may widen access.
+            connection.AccessPolicy = AccessPolicyKind.Allowlist;
+            await db.SaveChangesAsync();
+        }
+
+        await _service.InstallToEnrollmentAsync(ProjectId, AgentId, "enrollment-1");
+
+        await using (var db = _factory.CreateDbContext())
+        {
+            var connection = await db.AgentConnections.SingleAsync(row => row.Id == installed.Connection.Id);
+            Assert.Equal(AccessPolicyKind.Allowlist, connection.AccessPolicy);
+            Assert.Null(connection.OwnerSlackUserId);
+        }
+    }
+
+    [Fact]
     public async Task A_selected_workspace_decides_the_install_target_over_the_agents_first_connection()
     {
         await SeedAgentAsync(AgentStatus.Active);

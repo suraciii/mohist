@@ -32,14 +32,17 @@ public sealed partial class SlackManagerApplicationService
         return new(ProjectConnection(connection), await GetAsync(projectId, connectionId, ct));
     }
 
-    public async Task<SlackManagerCreateResult> CreateOrMountAsync(
+    /// <summary>
+    /// Resolves the Agent a Mohist App conversation request names, creating it
+    /// from a name and its daily responsibility when it does not exist yet.
+    /// Installing it into Slack is the shared managed operation, so nothing here
+    /// stages a Connection, an App, or an Owner.
+    /// </summary>
+    public async Task<SlackManagerAgentResolution> CreateAgentAsync(
         string projectId,
         string? agentId,
         string? agentName,
         string? responsibility,
-        string workspaceTeamId,
-        string ownerSlackUserId,
-        string? accessPolicy = null,
         CancellationToken ct = default)
     {
         if (!string.IsNullOrWhiteSpace(agentId) == !string.IsNullOrWhiteSpace(agentName))
@@ -66,7 +69,7 @@ public sealed partial class SlackManagerApplicationService
                 var trimmedName = agentName.Trim();
                 var trimmedResponsibility = responsibility.Trim();
                 var newAgentId = $"agent_{AgentLaunchCoordinatorCodec.StableToken(
-                    $"manager-create\n{projectId}\n{workspaceTeamId}\n{trimmedName}")}";
+                    $"manager-create\n{projectId}\n{trimmedName}")}";
                 var grain = _grains.GetGrain<IAgentGrain>(GrainKey.Agent(projectId, newAgentId));
                 try
                 {
@@ -95,13 +98,7 @@ public sealed partial class SlackManagerApplicationService
         if (agent is null)
             throw new SlackManagerValidationException("The Agent was not found.", "agent_not_found");
 
-        var mounted = await CreateAsync(new SlackManagerCreateRequest(
-            projectId,
-            agent.Id,
-            workspaceTeamId,
-            accessPolicy ?? AccessPolicyKind.OwnerOnly,
-            ownerSlackUserId), ct);
-        return created ? mounted with { Created = true } : mounted;
+        return new SlackManagerAgentResolution(agent, created);
     }
 
     public async Task<AgentConnection?> SetDesiredStateAsync(
@@ -172,6 +169,14 @@ public sealed partial class SlackManagerApplicationService
             kind == SlackOwnerClaimCodeKinds.Transfer ? "transfer-owner" : "claim-owner");
     }
 }
+
+/// <summary>
+/// The Agent a conversation request resolved. <see cref="Created"/> says whether
+/// this request created it; installation is a separate managed operation.
+/// </summary>
+public sealed record SlackManagerAgentResolution(
+    AgentInfo Agent,
+    bool Created);
 
 public sealed record SlackManagerConnectionInspection(
     SlackManagerConnectionProjection Connection,
