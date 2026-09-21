@@ -611,7 +611,12 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         }
 
         var session = await GetRequiredAsync();
-        if (!command.AllowPendingInitialLaunch || !HasInitialLaunch(session))
+        // A follow-up may arrive while the initial launch is still in flight,
+        // before the Runner has attached a physical session to bind. Once
+        // that launch turn is terminal, an absent binding is a real loss (the
+        // Reset path replaces bindings and never clears one silently), so the
+        // check is enforced instead of queueing the input into a black hole.
+        if (!command.AllowPendingInitialLaunch || !HasPendingInitialLaunch(session))
             EnsureRuntimeSessionPresent(session);
         if (session.Status.PendingReset is { } recovery)
         {

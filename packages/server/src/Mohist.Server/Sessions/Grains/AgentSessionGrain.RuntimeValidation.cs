@@ -13,9 +13,12 @@ public sealed partial class AgentSessionGrain
         throw new RuntimeSessionMissingException(session.Id, session.Status.AgentRuntimeSessionId, session.Runtime.Runtime);
     }
 
-    private static bool HasInitialLaunch(AgentSession session) =>
+    private static bool HasPendingInitialLaunch(AgentSession session) =>
         (session.Status.Turns ?? [])
-            .Any(turn => !string.IsNullOrWhiteSpace(turn.JobId));
+            .Any(turn => !string.IsNullOrWhiteSpace(turn.JobId)
+                && turn.Status is AgentTurnStatus.Queued
+                    or AgentTurnStatus.Executing
+                    or AgentTurnStatus.Unknown);
 
     private static bool IsRuntimeRegistered(string runtime) =>
         string.Equals(runtime, OpenCodeRuntime, StringComparison.OrdinalIgnoreCase)

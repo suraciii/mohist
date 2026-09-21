@@ -4,6 +4,7 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
@@ -180,6 +181,7 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
         var first = await PollWorkAsync(runnerId);
         await ReportAsync(runnerId, first.Work, "completed");
+        await AttachRuntimeSessionAsync(first.Work.AgentSessionId!);
 
         Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
         var second = await PollWorkAsync(runnerId);
@@ -208,6 +210,7 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         var firstRun = await LoadRunAsync(_workflowId!);
         var firstAttempt = Assert.Single(firstRun.Stages.Single(stage => stage.Id == "plan").Tasks);
         await ReportAsync(runnerId, firstDispatch, "completed");
+        await AttachRuntimeSessionAsync(firstDispatch.AgentSessionId!);
 
         Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
         var secondDispatch = (await PollWorkAsync(runnerId)).Work;
@@ -258,7 +261,9 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         await bootstrapHandoff.ActivateAsync();
         var bootstrapPlan = await bootstrapHandoff.GetPlanAsync();
         Assert.NotNull(bootstrapPlan?.Invocation);
-        await ReportAsync(runnerId, (await PollWorkAsync(runnerId)).Work, "completed");
+        var bootstrapWork = (await PollWorkAsync(runnerId)).Work;
+        await ReportAsync(runnerId, bootstrapWork, "completed");
+        await AttachRuntimeSessionAsync(bootstrapWork.AgentSessionId!);
 
         const string sharedIdentity = "apply-feedback.1";
         var planCommand = bootstrapPlan!.Command with
@@ -775,4 +780,13 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
 
     private static System.Text.Json.JsonElement Json(string value) =>
         System.Text.Json.JsonSerializer.SerializeToElement(value);
+
+    private async Task AttachRuntimeSessionAsync(string sessionId)
+    {
+        // The Runner attaches a physical session when it starts executing a
+        // job; a reused Session must therefore present a runtime binding at
+        // the next stage's follow-up acceptance.
+        await Grains.GetGrain<IAgentSessionGrain>(sessionId)
+            .AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand($"runtime-{sessionId}"));
+    }
 }
