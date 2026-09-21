@@ -1,9 +1,13 @@
 # Product Vision
 
-Mohist is an Agent-oriented software factory. It turns the path from idea to
-delivery into a production line that people can define, run, and supervise.
-An Issue enters and a deliverable leaves. People retain direction and judgment
-throughout delivery, while Agents perform delegated work.
+Mohist provides an Agent product and a programmable software factory. People
+can use a Mohist Agent as their own Agent or use Mohist through an External
+Agent.
+
+The factory turns the path from idea to delivery into a production line that
+people can define, run, and supervise. An Issue enters and a deliverable
+leaves. People retain direction and judgment throughout delivery, while
+Agents perform delegated work.
 
 ## Goal
 
@@ -38,11 +42,14 @@ the user to open Mohist's application, fill in a form, or enter a command. The
 Agent must translate intent into operations and explain results using execution
 facts that the user can inspect and question.
 
-A configured Mohist Agent participates in the user's communication space
-through an Agent Connection. Its Instructions, execution settings, and Skills
-belong to the Agent. An External Agent can use the Mohist Skill and `mo` to
-operate Mohist and return results to its existing conversation. It does not
-become a Mohist Agent resource.
+A Mohist Agent works with the user as their own Agent: discussing goals,
+organizing work, and explaining results. It participates in the user's
+communication space through an Agent Connection. Its Instructions, execution
+settings, and Skills belong to the Agent.
+
+Users can also keep an Agent from another product. That External Agent uses
+the Mohist Skill and `mo` to operate Mohist and returns results to its existing
+conversation. It does not become a Mohist Agent resource.
 
 Users can clarify, question, and revise their requests while work proceeds.
 The Agent must relate new input to the ongoing work and explain any decision
