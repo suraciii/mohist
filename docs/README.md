@@ -8,8 +8,8 @@ If you are new to Mohist, read the [repository README](../README.md) first.
 
 ## Part 1: Start
 
-- [Product Vision](vision.md): Use Mohist through natural-language conversations
-  with Agents in existing communication spaces
+- [Product Vision](vision.md): Agent-native software development, with Agent
+  interaction first and UI views for progress, evidence, and results
 - [Philosophy of Software Development](philosophy.md): Human purpose, judgment,
   and human-computer interaction in AI development
 - [Getting Started](getting-started.md): Start from zero and move one Issue
@@ -43,9 +43,10 @@ If you are new to Mohist, read the [repository README](../README.md) first.
 
 ## Part 4: Observation and Operations
 
-- [Web UI Guide](web-ui.md): The existing board, details, evidence, and settings
-- [CLI Reference](cli-reference.md): The `mo` command language, command map, and
-  programmatic interaction contract for Agents
+- [Web UI Guide](web-ui.md): Progress, results, evidence, and direct controls
+  alongside Agent interaction
+- [CLI Reference](cli-reference.md): The `mo` command language and programmatic
+  interaction contract for Agents, also available for manual operations
 - [Observability](observability.md): Detect runtime anomalies safely and retain
   enough information for diagnosis
 

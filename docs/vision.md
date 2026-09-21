@@ -1,8 +1,8 @@
 # Product Vision
 
-Mohist provides an Agent product and a programmable software factory. People
-can use a Mohist Agent as their own Agent or use Mohist through an External
-Agent.
+Mohist is an Agent-native application that provides an Agent product and a
+programmable software factory. People can use a Mohist Agent as their own
+Agent or use Mohist through an External Agent.
 
 The factory turns the path from idea to delivery into a production line that
 people can define, run, and supervise. An Issue enters and a deliverable
@@ -31,21 +31,26 @@ its value through the results it helps people achieve.
 
 ## How People Use Mohist
 
-People use Mohist through natural-language conversations with Agents in
-existing communication spaces such as Slack and Discord. Mohist must not
-provide its own application as a user interaction surface.
+Agent interaction is the first priority. People primarily express intent,
+delegate work, and discuss results in natural-language conversations with
+Agents. They can use a Mohist Agent directly or converse in existing spaces
+such as Slack and Discord.
 
-The conversation must support the complete work cycle: express an idea,
+Agent interaction must support the complete work cycle: express an idea,
 clarify requirements, delegate work, inspect progress, resolve exceptions,
-make decisions, examine results, and correct direction. No step may require
-the user to open Mohist's application, fill in a form, or enter a command. The
-Agent must translate intent into operations and explain results using execution
-facts that the user can inspect and question.
+make decisions, examine results, and correct direction. The Agent must
+translate intent into operations and explain results using execution facts
+that the user can inspect and question.
+
+The [Web UI](web-ui.md) focuses on displaying progress, relationships,
+evidence, and results. People can use these views alongside Agent
+conversations to understand and judge the work. Direct controls remain
+available for configuration, decisions, and manual takeover.
 
 A Mohist Agent works with the user as their own Agent: discussing goals,
-organizing work, and explaining results. It participates in the user's
-communication space through an Agent Connection. Its Instructions, execution
-settings, and Skills belong to the Agent.
+organizing work, and explaining results. It can join the user's communication
+space through an Agent Connection. Its Instructions, execution settings, and
+Skills belong to the Agent.
 
 Users can also keep an Agent from another product. That External Agent uses
 the Mohist Skill and `mo` to operate Mohist and returns results to its existing
@@ -89,9 +94,11 @@ Users do not have to translate their requests into Mohist's resource model.
 - **Connections carry conversations:** An Agent Connection handles identity,
   protocol, and presentation. It does not keep another copy of the Agent
   definition or implement its own reasoning.
-- **Agent interfaces cover the product:** Agents must be able to operate every
-  user capability through programmatic interfaces and inspect the resulting
-  state and evidence. Skills describe how to use those interfaces.
+- **Application interfaces serve Agents first:** Every product operation must
+  have a stable programmatic interface with explicit inputs, results, and
+  failures. Agents use these interfaces to act and inspect state and evidence.
+  The Web UI uses the same operations. Skills explain how Agents use these
+  interfaces.
 - **Issues carry complete objectives:** An Issue contains the requirements,
   acceptance criteria, and boundaries needed to start work. When new evidence
   requires a decision outside those boundaries, the Agent must bring that
@@ -116,9 +123,9 @@ Users do not have to translate their requests into Mohist's resource model.
 
 ## What Mohist Is Not
 
-- Mohist is not an IDE, chat tool, or collaboration workspace. Users keep their
-  daily collaboration in existing interaction locations while Mohist executes
-  work and records evidence.
+- Mohist is not an IDE or a general-purpose chat or collaboration tool. It
+  connects to existing communication spaces and provides views for directing
+  and inspecting software delivery.
 - Mohist is not CI. CI verifies a commit. Mohist advances a complete unit of
   work from requirement to integration.
 
@@ -151,10 +158,3 @@ that stay unchanged, and a commit after each verified step. Clear, verifiable
 bulk work, such as cleanup, migration, and hardening, is rarely scheduled
 by hand. This is the first class of work that parallel delegation makes
 economical.
-
-## Implementation Gaps
-
-The [Web UI](web-ui.md) still exposes direct user operations and Agent
-conversations. The [Slack interface](slack.md) does not yet cover every
-operation; permanent App deletion requires the Web UI or CLI. These paths do
-not yet satisfy the complete conversational interaction contract.

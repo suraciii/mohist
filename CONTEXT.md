@@ -35,10 +35,9 @@ The client identity that represents a Mohist Agent in Slack through an Agent
 Connection. It is neither another Mohist Agent nor an External Agent.
 
 **Web UI**:
-Mohist's fallback plane for observation, visualization, manual operations, and
-takeover, with direct configuration, launch, and continuation of Mohist Agents.
-It is neither the user's daily collaboration workspace nor the primary
-interaction entry point.
+Mohist's display surface for progress, relationships, evidence, and results
+alongside Agent interaction. It includes direct controls for manual operations
+and Agent use; see [Web UI Guide](docs/web-ui.md).
 
 **GitHub Mirror**:
 The one GitHub Issue that Mohist creates and maintains for a Mohist Issue whose

@@ -1,9 +1,10 @@
 # Getting Started
 
 This guide takes a new deployment from source to one merged Issue. Choose a
-Mohist Agent, a third-party External Agent, or `mo`; all three paths use the
-same Project, Issue, and Workflow state. The Web UI is the fallback operations
-and visualization plane.
+Mohist Agent or a third-party External Agent for normal interaction, or use
+`mo` directly for manual operations. All three paths use the same Project,
+Issue, and Workflow state. The Web UI shows progress, evidence, and results,
+with controls available for manual operations.
 
 ## Product Commitments
 
@@ -99,7 +100,8 @@ The installer requests a one-time enrollment from Server, starts Runner as a
 managed service, and lets Runner keep its own machine credential. Later starts
 can use `mo service start runner` without enrolling again.
 
-Start the Web UI when you need the fallback operations and visualization plane:
+Start the Web UI to inspect progress, evidence, and results or use direct
+controls:
 
 ```bash
 # Optional terminal 3: Web UI development server

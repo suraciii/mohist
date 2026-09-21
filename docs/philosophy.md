@@ -65,13 +65,22 @@ positions within an activity. An Agent can use programs to act, while programs
 can invoke Agents and organize their execution. The same Agent can occupy
 both positions.
 
+Delegated use:
+
 ```text diagram
 +--------+ delegate  +--------+ use       +----------+
 | Humans +---------->| Agents +---------->| Programs |
-+--------+           +----+---+           +-----+----+
-     ^         results    ^                     |
-     +--------------------+          invoke     |
-                          +---------------------+
++--------+           +----+---+           +----------+
+     ^         results    |
+     +--------------------+
+```
+
+Program invocation:
+
+```text diagram
++----------+ invoke  +--------+
+| Programs +-------->| Agents |
++----------+         +--------+
 ```
 
 ### 2. Cooperation develops through action and feedback
@@ -105,11 +114,11 @@ object of work. When the resulting program is used, it becomes a means again.
 Using software can thus include producing the tools needed to proceed.
 
 ```text diagram
-+-----------------+ put to use  +----------------+ enables     +--------------+
-| Program: object +------------>| Program: means +------------>| Further work |
-+-----------------+             +----------------+             +-------+------+
-         ^                              create or modify               |
-         +-------------------------------------------------------------+
++-----------------------+ object  +---------+ means   +--------------+
+| Creating or modifying +-------->| Program +-------->| Further work |
++-----------------------+         +---------+         +-------+------+
+                                       ^          may modify  |
+                                       +----------------------+
 ```
 
 An activity can leave behind programs, methods, and records that become
