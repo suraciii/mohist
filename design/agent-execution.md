@@ -613,9 +613,10 @@ itself recorded.
                     +------------+    +-------------------------+
 ```
 
-When recovery is unsafe, Mohist retains the original Binding and Turn, sets
-`admission=blocked`, and exposes `query_runtime_or_force_reset`. It must not
-infer missing, select another Runner, or replay Transcript.
+When recovery is unsafe, Mohist retains the original Binding and Turn and sets
+`admission=blocked`. Diagnostics retain the execution identity and uncertainty
+so an operator can inspect the required Runtime evidence. Mohist must not infer
+missing, select another Runner, or replay Transcript.
 
 ### Recovery ownership and fencing
 
