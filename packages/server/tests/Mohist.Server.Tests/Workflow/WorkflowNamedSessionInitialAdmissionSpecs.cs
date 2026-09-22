@@ -289,6 +289,373 @@ public sealed class WorkflowNamedSessionInitialAdmissionSpecs : WorkflowGrainSpe
     /// <paramref name="priorTurnStatus"/>, and a second Job-owned Input and
     /// Turn appended to the same Session.
     /// </summary>
+    [Fact]
+    public async Task NamedReuseMissingSession_FailsDeterministicallyWithoutRecreatingTarget()
+    {
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [AgentTask("build", "Build the change", "delivery")], [])
+        ]);
+        var workflow = await StartWorkflowAsync(
+            definition,
+            $"workflow-agent-reuse-missing-{Guid.NewGuid():N}");
+        var runnerId = _runnerId!;
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, (await workflow.AssignWorkerAsync(runnerId)).Status);
+        Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var run = await LoadRunAsync(_workflowId!);
+        var attempt = Assert.Single(run.CurrentStage().Tasks);
+        var bootstrapHandoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(WorkflowAgentHandoffCodec.KeyFor(
+            run.Metadata.ProjectId!,
+            run.Id,
+            run.CurrentStage().Id,
+            attempt.Id,
+            attempt.WorkId!));
+        await bootstrapHandoff.ActivateAsync();
+        var bootstrapPlan = await bootstrapHandoff.GetPlanAsync();
+        Assert.NotNull(bootstrapPlan?.Invocation);
+        var bootstrapWork = (await PollWorkAsync(runnerId)).Work;
+        await ReportAsync(runnerId, bootstrapWork, "completed");
+
+        // The persisted Session disappears (for example a store rollback)
+        // and the cached grain state is evicted, so the next named reuse
+        // finds no target.
+        var sessionId = bootstrapPlan!.Invocation!.SessionId;
+        var sessionGrain = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await TestLifecycle.DeactivateAndWait(sessionGrain, Grains);
+        await using (var scope = Services.CreateAsyncScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IAgentSessionStore>().DeleteAsync(sessionId);
+        }
+        Assert.Null(await sessionGrain.GetAsync());
+
+        const string reuseIdentity = "apply-feedback.1";
+        var reuseCommand = bootstrapPlan.Command with
+        {
+            CommandId = reuseIdentity,
+            ActionAttemptId = reuseIdentity,
+            Prompt = "Apply the feedback",
+            ReuseSessionId = sessionId,
+            Completion = bootstrapPlan.Command.Completion! with { WorkId = reuseIdentity },
+        };
+        var reuseHandoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(
+            WorkflowAgentHandoffCodec.KeyFor(reuseCommand));
+        var prepared = await reuseHandoff.PrepareAsync(reuseCommand);
+        await reuseHandoff.AcceptAsync(new WorkflowAgentHandoffAcceptance(
+            reuseIdentity,
+            WorkflowAgentHandoffCodec.Fingerprint(reuseCommand)));
+        var failed = await reuseHandoff.ActivateAsync();
+
+        // No new Session is fabricated under the reuse identity, no Input,
+        // Turn, or provider effect appears, and the prepared Job is not
+        // abandoned Running: the deterministic dead end aborts it.
+        Assert.Equal(WorkflowAgentHandoffDisposition.Failed, failed.Disposition);
+        var failedPlan = await reuseHandoff.GetPlanAsync();
+        Assert.Equal("agent_session_reuse_target_missing", failedPlan!.Rejection?.Code);
+        Assert.Contains(sessionId, failedPlan.ActivationError, StringComparison.Ordinal);
+        Assert.Equal(WorkflowAgentActivationStep.EnsureSession, failedPlan.ActivationStep);
+        Assert.Equal(AgentJobStatus.Cancelled,
+            await Grains.GetGrain<IAgentJobGrain>(prepared.Invocation!.JobKey).GetStatusAsync());
+        Assert.Null(await LoadSessionAsync(sessionId));
+        Assert.Null(await sessionGrain.GetAsync());
+
+        // The failure is terminal and replays stably without reminder spin.
+        await reuseHandoff.TriggerActivationAsync();
+        var replay = await reuseHandoff.ActivateAsync();
+        Assert.Equal(WorkflowAgentHandoffDisposition.Failed, replay.Disposition);
+        var replayPlan = await reuseHandoff.GetPlanAsync();
+        Assert.Equal("agent_session_reuse_target_missing", replayPlan!.Rejection?.Code);
+        Assert.Equal(failedPlan.ActivationError, replayPlan.ActivationError);
+        Assert.Null(await LoadSessionAsync(sessionId));
+    }
+
+    [Fact]
+    public async Task LegacyJobIdNullContinuation_FailsOnceWithoutRelabelOrReminderSpin()
+    {
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [AgentTask("build", "Build the change", "delivery")], [])
+        ]);
+        var workflow = await StartWorkflowAsync(
+            definition,
+            $"workflow-agent-legacy-null-job-{Guid.NewGuid():N}");
+        var runnerId = _runnerId!;
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, (await workflow.AssignWorkerAsync(runnerId)).Status);
+        Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var run = await LoadRunAsync(_workflowId!);
+        var attempt = Assert.Single(run.CurrentStage().Tasks);
+        var bootstrapHandoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(WorkflowAgentHandoffCodec.KeyFor(
+            run.Metadata.ProjectId!,
+            run.Id,
+            run.CurrentStage().Id,
+            attempt.Id,
+            attempt.WorkId!));
+        await bootstrapHandoff.ActivateAsync();
+        var bootstrapPlan = await bootstrapHandoff.GetPlanAsync();
+        Assert.NotNull(bootstrapPlan?.Invocation);
+        var bootstrapWork = (await PollWorkAsync(runnerId)).Work;
+        await ReportAsync(runnerId, bootstrapWork, "completed");
+        var sessionId = bootstrapPlan!.Invocation!.SessionId;
+        await Grains.GetGrain<IAgentSessionGrain>(sessionId)
+            .AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand($"runtime-{sessionId}"));
+
+        // A handoff accepted before the Job-owned seam kept its follow-up as
+        // a JobId-null Input and Turn under the exact pre-minted ids.
+        const string reuseIdentity = "apply-feedback.1";
+        var reuseCommand = bootstrapPlan.Command with
+        {
+            CommandId = reuseIdentity,
+            ActionAttemptId = reuseIdentity,
+            Prompt = "Apply the feedback",
+            ReuseSessionId = sessionId,
+            Completion = bootstrapPlan.Command.Completion! with { WorkId = reuseIdentity },
+        };
+        var invocation = WorkflowAgentHandoffCodec.InvocationFor(reuseCommand);
+        var sessionGrain = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await sessionGrain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: reuseCommand.Prompt,
+            Source: "workflow",
+            IdempotencyKey: invocation.InvocationId,
+            PreMintedInputId: invocation.InputId,
+            PreMintedTurnId: invocation.TurnId,
+            ForceNewTurn: true,
+            ExpectedProjectId: reuseCommand.ProjectId,
+            ExpectedAgentId: bootstrapPlan.AgentId));
+        var seeded = await LoadSessionAsync(sessionId);
+        var seededInput = seeded!.Status.Inputs!.Single(input => input.Id == invocation.InputId);
+        var seededTurn = seeded.Status.Turns!.Single(turn => turn.Id == invocation.TurnId);
+        Assert.Null(seededInput.JobId);
+        Assert.Null(seededTurn.JobId);
+
+        var reuseHandoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(
+            WorkflowAgentHandoffCodec.KeyFor(reuseCommand));
+        var prepared = await reuseHandoff.PrepareAsync(reuseCommand);
+        await reuseHandoff.AcceptAsync(new WorkflowAgentHandoffAcceptance(
+            reuseIdentity,
+            WorkflowAgentHandoffCodec.Fingerprint(reuseCommand)));
+        var failed = await reuseHandoff.ActivateAsync();
+
+        // The deterministic identity conflict settles once: the accepted
+        // facts are never relabeled or replayed, the prepared Job aborts, and
+        // no reminder keeps retrying the dead end.
+        Assert.Equal(WorkflowAgentHandoffDisposition.Failed, failed.Disposition);
+        var failedPlan = await reuseHandoff.GetPlanAsync();
+        Assert.Equal("agent_session_launch_identity_conflict", failedPlan!.Rejection?.Code);
+        Assert.Equal(WorkflowAgentActivationStep.EnsureSession, failedPlan.ActivationStep);
+        Assert.Equal(AgentJobStatus.Cancelled,
+            await Grains.GetGrain<IAgentJobGrain>(prepared.Invocation!.JobKey).GetStatusAsync());
+        var after = await LoadSessionAsync(sessionId);
+        var immutableInput = after!.Status.Inputs!.Single(input => input.Id == invocation.InputId);
+        var immutableTurn = after.Status.Turns!.Single(turn => turn.Id == invocation.TurnId);
+        Assert.Equal(seededInput, immutableInput);
+        Assert.Equal(seededTurn.InputIds, immutableTurn.InputIds);
+        Assert.Null(immutableTurn.JobId);
+        Assert.Equal(AgentTurnStatus.Queued, immutableTurn.Status);
+        Assert.Null(immutableTurn.SupersededAt);
+        Assert.Null(after.Status.InitialInputOperation);
+
+        await reuseHandoff.TriggerActivationAsync();
+        var replay = await reuseHandoff.ActivateAsync();
+        Assert.Equal(WorkflowAgentHandoffDisposition.Failed, replay.Disposition);
+        var replayPlan = await reuseHandoff.GetPlanAsync();
+        Assert.Equal(failedPlan.ActivationError, replayPlan!.ActivationError);
+        Assert.Equal("agent_session_launch_identity_conflict", replayPlan.Rejection?.Code);
+    }
+
+    [Fact]
+    public async Task PartialPreMintedPair_FailsClosedInsteadOfAlreadyPersisted()
+    {
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [AgentTask("build", "Build the change", "delivery")], [])
+        ]);
+        var workflow = await StartWorkflowAsync(
+            definition,
+            $"workflow-agent-partial-pair-{Guid.NewGuid():N}");
+        var runnerId = _runnerId!;
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, (await workflow.AssignWorkerAsync(runnerId)).Status);
+        Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var run = await LoadRunAsync(_workflowId!);
+        var attempt = Assert.Single(run.CurrentStage().Tasks);
+        var bootstrapHandoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(WorkflowAgentHandoffCodec.KeyFor(
+            run.Metadata.ProjectId!,
+            run.Id,
+            run.CurrentStage().Id,
+            attempt.Id,
+            attempt.WorkId!));
+        await bootstrapHandoff.ActivateAsync();
+        var bootstrapPlan = await bootstrapHandoff.GetPlanAsync();
+        Assert.NotNull(bootstrapPlan?.Invocation);
+        var bootstrapWork = (await PollWorkAsync(runnerId)).Work;
+        await ReportAsync(runnerId, bootstrapWork, "completed");
+        var sessionId = bootstrapPlan!.Invocation!.SessionId;
+        await Grains.GetGrain<IAgentSessionGrain>(sessionId)
+            .AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand($"runtime-{sessionId}"));
+
+        const string reuseIdentity = "apply-feedback.1";
+        var reuseCommand = bootstrapPlan.Command with
+        {
+            CommandId = reuseIdentity,
+            ActionAttemptId = reuseIdentity,
+            Prompt = "Apply the feedback",
+            ReuseSessionId = sessionId,
+            Completion = bootstrapPlan.Command.Completion! with { WorkId = reuseIdentity },
+        };
+        var invocation = WorkflowAgentHandoffCodec.InvocationFor(reuseCommand);
+
+        // Only the pre-minted Input exists, with content exactly matching
+        // the reuse command: the torn pair must still not replay as
+        // AlreadyPersisted, because the Turn is missing.
+        var sessionGrain = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await TestLifecycle.DeactivateAndWait(sessionGrain, Grains);
+        await using (var scope = Services.CreateAsyncScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<IAgentSessionStore>();
+            var session = await store.LoadAsync(sessionId);
+            Assert.NotNull(session);
+            session!.Status = session.Status with
+            {
+                Inputs = [.. session.Status.Inputs!, new AgentSessionInputRecord(
+                    Id: invocation.InputId,
+                    Sequence: session.Status.Inputs!.Count + 1,
+                    Text: reuseCommand.Prompt,
+                    Source: "workflow",
+                    Acceptance: AgentSessionInputAcceptance.Accepted,
+                    RecordedAt: TestTime.UtcDateTime)],
+            };
+            await store.SaveAsync(sessionId, session);
+        }
+
+        var reuseHandoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(
+            WorkflowAgentHandoffCodec.KeyFor(reuseCommand));
+        var prepared = await reuseHandoff.PrepareAsync(reuseCommand);
+        await reuseHandoff.AcceptAsync(new WorkflowAgentHandoffAcceptance(
+            reuseIdentity,
+            WorkflowAgentHandoffCodec.Fingerprint(reuseCommand)));
+        var failed = await reuseHandoff.ActivateAsync();
+
+        Assert.Equal(WorkflowAgentHandoffDisposition.Failed, failed.Disposition);
+        var failedPlan = await reuseHandoff.GetPlanAsync();
+        Assert.Equal("agent_session_launch_identity_conflict", failedPlan!.Rejection?.Code);
+        Assert.Equal(WorkflowAgentActivationStep.EnsureSession, failedPlan.ActivationStep);
+        Assert.Equal(AgentJobStatus.Cancelled,
+            await Grains.GetGrain<IAgentJobGrain>(prepared.Invocation!.JobKey).GetStatusAsync());
+        var after = await LoadSessionAsync(sessionId);
+        Assert.NotNull(after);
+        Assert.Null(after!.Status.Turns!.SingleOrDefault(turn => turn.Id == invocation.TurnId));
+        var preserved = after.Status.Inputs!.Single(input => input.Id == invocation.InputId);
+        Assert.Equal(reuseCommand.Prompt, preserved.Text);
+        Assert.Equal("workflow", preserved.Source);
+    }
+
+    [Theory]
+    [InlineData(AgentTurnStatus.Executing)]
+    [InlineData(AgentTurnStatus.Unknown)]
+    public void UnresolvedPriorReceipt_BlocksSecondJobRecovery(AgentTurnStatus priorTurnStatus)
+    {
+        var session = NamedReuseSession(
+            out _,
+            out var secondOperation,
+            priorTurnStatus);
+
+        Assert.Equal("initial_input_operation_conflict", Assert.Throws<InvalidOperationException>(() =>
+            session.RecoverInitialAgentJobTurn(
+                session.CurrentRuntimeBinding(),
+                new AgentRuntimeBinding("runner-1", "opencode", "runtime-new"),
+                secondOperation,
+                TestTime.UtcDateTime.AddMinutes(4),
+                session.BindingEpoch)).Message);
+        Assert.Equal("job-1", session.Status.InitialInputOperation!.JobId);
+    }
+
+    [Fact]
+    public void AdmittedSameOperationRecovery_StaysProhibited()
+    {
+        var session = NamedReuseSession(
+            out var firstOperation,
+            out _,
+            AgentTurnStatus.Executing);
+
+        Assert.Equal("initial_input_operation_conflict", Assert.Throws<InvalidOperationException>(() =>
+            session.RecoverInitialAgentJobTurn(
+                session.CurrentRuntimeBinding(),
+                new AgentRuntimeBinding("runner-1", "opencode", "runtime-new"),
+                firstOperation,
+                TestTime.UtcDateTime.AddMinutes(4),
+                session.BindingEpoch)).Message);
+        Assert.True(session.Status.InitialInputOperation!.EffectAdmitted);
+    }
+
+    [Theory]
+    [InlineData("turn-job")]
+    [InlineData("input-job")]
+    [InlineData("receipt-input")]
+    public void ForgedTerminalOwnership_NeverReleasesThePriorReceipt(string forge)
+    {
+        var session = NamedReuseSession(
+            out _,
+            out var secondOperation,
+            AgentTurnStatus.Completed);
+        session.Status = session.Status with
+        {
+            Turns = session.Status.Turns!.Select(turn =>
+                turn.Id == "turn-1" && forge == "turn-job" ? turn with { JobId = "job-forged" } : turn).ToArray(),
+            Inputs = session.Status.Inputs!.Select(input =>
+                input.Id == "input-1" && forge == "input-job" ? input with { JobId = null } : input).ToArray(),
+            InitialInputOperation = forge == "receipt-input"
+                ? session.Status.InitialInputOperation! with { InputId = "input-forged" }
+                : session.Status.InitialInputOperation,
+        };
+        var before = session.Status;
+
+        Assert.Equal("initial_input_start_conflict", Assert.Throws<InvalidOperationException>(() =>
+            session.AdmitInitialAgentJobInputEffect(secondOperation, TestTime.UtcDateTime.AddMinutes(4))).Message);
+        Assert.Equal("initial_input_operation_conflict", Assert.Throws<InvalidOperationException>(() =>
+            session.RecoverInitialAgentJobTurn(
+                session.CurrentRuntimeBinding(),
+                new AgentRuntimeBinding("runner-1", "opencode", "runtime-new"),
+                secondOperation,
+                TestTime.UtcDateTime.AddMinutes(5),
+                session.BindingEpoch)).Message);
+
+        Assert.Equal(before.InitialInputOperation, session.Status.InitialInputOperation);
+        Assert.Equal(AgentTurnStatus.Queued, session.Status.Turns!.Single(turn => turn.Id == "turn-2").Status);
+    }
+
+    [Fact]
+    public void TerminalPriorReceipt_LetsSecondJobRecoveryReplaceTheBinding()
+    {
+        var session = NamedReuseSession(
+            out _,
+            out var secondOperation,
+            AgentTurnStatus.Completed);
+        var epochBefore = session.BindingEpoch;
+
+        session.RecoverInitialAgentJobTurn(
+            session.CurrentRuntimeBinding(),
+            new AgentRuntimeBinding("runner-1", "opencode", "runtime-new"),
+            secondOperation,
+            TestTime.UtcDateTime.AddMinutes(4),
+            epochBefore);
+
+        var receipt = session.Status.InitialInputOperation!;
+        Assert.Equal(secondOperation.OperationId, receipt.OperationId);
+        Assert.Equal("job-2", receipt.JobId);
+        Assert.False(receipt.EffectAdmitted);
+        Assert.Equal("runtime-new", session.Status.AgentRuntimeSessionId);
+        Assert.Equal(epochBefore + 1, session.BindingEpoch);
+        var retargeted = session.Status.Turns!.Single(turn => turn.Id == "turn-2");
+        Assert.Equal(AgentTurnStatus.Queued, retargeted.Status);
+        Assert.Equal(session.Status.ContextGeneration, retargeted.ContextGeneration);
+
+        // The replacement binding admits the second Job exactly once.
+        var admitted = secondOperation with
+        {
+            RuntimeSessionId = "runtime-new",
+            BindingEpoch = session.BindingEpoch,
+            ContextGeneration = session.Status.ContextGeneration,
+        };
+        session.AdmitInitialAgentJobInputEffect(admitted, TestTime.UtcDateTime.AddMinutes(5));
+        Assert.True(session.Status.InitialInputOperation!.EffectAdmitted);
+        Assert.Equal(AgentTurnStatus.Executing, session.Status.Turns!.Single(turn => turn.Id == "turn-2").Status);
+    }
+
     private static AgentSession NamedReuseSession(
         out AgentInitialInputOperation firstOperation,
         out AgentInitialInputOperation secondOperation,

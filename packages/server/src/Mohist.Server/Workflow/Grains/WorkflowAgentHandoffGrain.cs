@@ -227,21 +227,24 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
         }
         catch (AgentSessionIdentityMismatchException ex)
         {
-            var invocation = plan.Invocation
-                ?? throw new InvalidOperationException("Accepted Workflow Agent handoff has no invocation.");
-            await GrainFactory.GetGrain<IAgentJobGrain>(invocation.JobKey)
-                .AbortPreparedLaunchAsync(ex.Message);
-            var rejection = new WorkflowAgentHandoffRejection(
+            await SettleDeterministicActivationFailureAsync(
+                plan,
                 "agent_session_identity_mismatch",
                 ex.Message);
-            _state.State.Plan = plan with
-            {
-                Disposition = WorkflowAgentHandoffDisposition.Failed,
-                Rejection = rejection,
-                ActivationError = rejection.Message,
-            };
-            await _state.WriteStateAsync();
-            await ClearActivationReminderAsync();
+        }
+        catch (AgentSessionMissingException ex)
+        {
+            await SettleDeterministicActivationFailureAsync(
+                plan,
+                "agent_session_reuse_target_missing",
+                ex.Message);
+        }
+        catch (AgentSessionInitialLaunchConflictException ex)
+        {
+            await SettleDeterministicActivationFailureAsync(
+                plan,
+                "agent_session_launch_identity_conflict",
+                ex.Message);
         }
         catch (RuntimeSessionMissingException ex)
         {
@@ -263,6 +266,33 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
             await _state.WriteStateAsync();
             await EnsureActivationReminderAsync();
         }
+    }
+
+    /// <summary>
+    /// Settles an activation dead end that no retry can converge: the prepared
+    /// Job launch is aborted when it is still safely pre-admission (the abort
+    /// is a no-op for a Job that already started), the plan turns terminally
+    /// Failed with a machine-readable rejection, and the retry reminder is
+    /// released. Transient failures keep the generic retrying catch instead.
+    /// </summary>
+    private async Task SettleDeterministicActivationFailureAsync(
+        WorkflowAgentHandoffPlan plan,
+        string code,
+        string message)
+    {
+        var invocation = plan.Invocation
+            ?? throw new InvalidOperationException("Accepted Workflow Agent handoff has no invocation.");
+        await GrainFactory.GetGrain<IAgentJobGrain>(invocation.JobKey)
+            .AbortPreparedLaunchAsync(message);
+        var rejection = new WorkflowAgentHandoffRejection(code, message);
+        _state.State.Plan = plan with
+        {
+            Disposition = WorkflowAgentHandoffDisposition.Failed,
+            Rejection = rejection,
+            ActivationError = rejection.Message,
+        };
+        await _state.WriteStateAsync();
+        await ClearActivationReminderAsync();
     }
 
     private static PrepareManualLaunchCommand BuildPrepareCommand(
@@ -315,9 +345,10 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
         AgentExecutionDefinition definition)
     {
         var session = GrainFactory.GetGrain<IAgentSessionGrain>(invocation.SessionId);
-        if (!string.IsNullOrWhiteSpace(plan.Command.ReuseSessionId)
-            && await session.GetAsync() is not null)
+        if (!string.IsNullOrWhiteSpace(plan.Command.ReuseSessionId))
         {
+            if (await session.GetAsync() is null)
+                throw new AgentSessionMissingException(invocation.SessionId);
             // A named continuation targets an existing Session, and a terminal
             // launch that never bound a runtime session fails deterministically
             // here instead of letting the next Job silently continue an unbound

@@ -2819,30 +2819,34 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         if (inputMatch is null && turnMatch is null)
             return;
 
-        alreadyPersisted = true;
-        if (inputMatch is not null)
+        // Only the complete pair with fully matching accepted facts is the
+        // exact AlreadyPersisted replay; a partial match is torn state a
+        // replay must never paper over as persisted.
+        string? conflict = null;
+        if (inputMatch is null || turnMatch is null)
         {
-            if (!string.Equals(inputMatch.Text, command.Prompt, StringComparison.Ordinal)
-                || !string.Equals(inputMatch.Source, command.Source, StringComparison.Ordinal)
-                || !string.Equals(inputMatch.JobId, command.JobId, StringComparison.Ordinal)
-                || !AttachmentSetEquivalent(inputMatch.Attachments, command.Attachments)
-                || !Equals(inputMatch.Provenance, command.Provenance)
-                || !Equals(inputMatch.StartupContext, command.StartupContext))
-            {
-                throw new InvalidOperationException(
-                    $"AgentSession {SessionId} already has input '{command.InputId}' with different content/source/job/attachments.");
-            }
+            conflict = inputMatch is null
+                ? $"turn '{command.TurnId}' exists without its input"
+                : $"input '{command.InputId}' exists without its turn";
+        }
+        else if (!string.Equals(inputMatch.Text, command.Prompt, StringComparison.Ordinal)
+            || !string.Equals(inputMatch.Source, command.Source, StringComparison.Ordinal)
+            || !string.Equals(inputMatch.JobId, command.JobId, StringComparison.Ordinal)
+            || !AttachmentSetEquivalent(inputMatch.Attachments, command.Attachments)
+            || !Equals(inputMatch.Provenance, command.Provenance)
+            || !Equals(inputMatch.StartupContext, command.StartupContext))
+        {
+            conflict = "input content, source, job, attachments, provenance, or startup context differs";
+        }
+        else if (!string.Equals(turnMatch.JobId, command.JobId, StringComparison.Ordinal)
+            || !turnMatch.InputIds.Contains(command.InputId, StringComparer.Ordinal))
+        {
+            conflict = "turn job or input linkage differs";
         }
 
-        if (turnMatch is not null)
-        {
-            if (!string.Equals(turnMatch.JobId, command.JobId, StringComparison.Ordinal)
-                || !turnMatch.InputIds.Contains(command.InputId, StringComparer.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    $"AgentSession {SessionId} already has turn '{command.TurnId}' with different job/input linkage.");
-            }
-        }
+        if (conflict is not null)
+            throw new AgentSessionInitialLaunchConflictException(SessionId, command.InputId, command.TurnId, conflict);
+        alreadyPersisted = true;
     }
 
     public async Task MarkInitialTurnExecutingAsync(string jobId)

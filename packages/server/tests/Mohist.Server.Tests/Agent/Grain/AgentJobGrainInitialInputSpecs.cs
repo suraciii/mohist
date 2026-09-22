@@ -334,6 +334,114 @@ public partial class AgentJobGrainSpecs
         }
     }
 
+    [Fact]
+    public async Task InitialInputRecovery_SecondJobContinuation_RecoversMissingRuntimeBeforeProvider()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-second-recovery-{Guid.NewGuid():N}");
+        var sessionId = $"session-second-recovery-{Guid.NewGuid():N}";
+        var oldRuntimeSessionId = $"runtime-old-{Guid.NewGuid():N}";
+        var newRuntimeSessionId = $"runtime-new-{Guid.NewGuid():N}";
+        var workDir = "/tmp/second-recovery";
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", projectId)
+            .WithLabel("mohist.io/source-kind", "agent-launch")
+            .WithLabel("mohist.io/source-id", sessionId)
+            .WithLabel("mohist.io/agent-id", "agent-test");
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(runnerId, "opencode", workDir, Metadata: metadata));
+        await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+            oldRuntimeSessionId, WorkDir: workDir, Runtime: "opencode"));
+
+        // First Job on the logical Session: claim, bind, real provider
+        // admission, then terminal.
+        var job1Key = $"agent-job-second-recovery-1-{Guid.NewGuid():N}";
+        var input1 = $"input-second-recovery-1-{Guid.NewGuid():N}";
+        var turn1 = $"turn-second-recovery-1-{Guid.NewGuid():N}";
+        var job1 = JobGrain(job1Key);
+        await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            input1, turn1, "first prompt", "agent-connection", job1Key,
+            Runtime: "opencode", WorkDir: workDir, Metadata: metadata));
+        await job1.SubmitAsync(MakeInput("first prompt", projectId, workDir) with
+        {
+            AgentSessionId = sessionId,
+            InitialInputId = input1,
+            InitialTurnId = turn1,
+            Runtime = "opencode",
+        });
+        await WaitForStatusAsync(job1, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var work1 = (await job1.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+        Assert.True(await job1.RecordRuntimeSessionBindingAsync(runnerId, work1, sessionId, oldRuntimeSessionId));
+        Assert.True((await job1.StartInitialInputAsync(new StartAgentJobInitialInput(
+            $"operation-{job1Key}", "attempt-1", runnerId, work1, TestRunnerGenerationExtensions.ProcessGeneration,
+            sessionId, input1, turn1, "opencode", oldRuntimeSessionId))).SubmissionAuthorized);
+        Assert.Equal(WorkReportVerdict.Accepted, (await job1.ReportResultAsync(
+            runnerId, work1, new WorkResult(
+                "completed", "first done", AgentSessionId: sessionId, AgentTurnId: turn1,
+                Runtime: "opencode", RuntimeSessionId: oldRuntimeSessionId))).Verdict);
+
+        // Second Job on the same logical Session appends its own Job-owned
+        // Input and Turn, then its physical runtime session goes missing
+        // before the provider ever saw the Input.
+        var job2Key = $"agent-job-second-recovery-2-{Guid.NewGuid():N}";
+        var input2 = $"input-second-recovery-2-{Guid.NewGuid():N}";
+        var turn2 = $"turn-second-recovery-2-{Guid.NewGuid():N}";
+        var job2 = JobGrain(job2Key);
+        await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            input2, turn2, "second prompt", "agent-connection", job2Key,
+            Runtime: "opencode", WorkDir: workDir, Metadata: metadata));
+        await job2.SubmitAsync(MakeInput("second prompt", projectId, workDir) with
+        {
+            AgentSessionId = sessionId,
+            InitialInputId = input2,
+            InitialTurnId = turn2,
+            Runtime = "opencode",
+        });
+        await WaitForStatusAsync(job2, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var work2 = (await job2.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+        Assert.True(await job2.RecordRuntimeSessionBindingAsync(runnerId, work2, sessionId, oldRuntimeSessionId));
+
+        var recovery = new PrepareAgentJobInitialRecovery(
+            $"operation-{job2Key}", runnerId, work2, TestRunnerGenerationExtensions.ProcessGeneration,
+            sessionId, input2, turn2, "opencode", oldRuntimeSessionId, "creation-attempt-1",
+            AgentJobInitialRecoveryReasons.SameRuntimeMissing);
+        Assert.True((await job2.PrepareInitialInputRecoveryAsync(recovery)).CandidateCreationAuthorized);
+        var completedRecovery = await job2.CompleteInitialInputRecoveryAsync(new CompleteAgentJobInitialRecovery(
+            recovery, "opencode", newRuntimeSessionId));
+        Assert.Equal("ready", completedRecovery.Phase);
+        var sessionAfterRecovery = await session.GetAsync();
+        Assert.Equal(newRuntimeSessionId, sessionAfterRecovery!.AgentSessionId);
+
+        var started = await job2.StartInitialInputAsync(new StartAgentJobInitialInput(
+            $"operation-{job2Key}", "attempt-1", runnerId, work2, TestRunnerGenerationExtensions.ProcessGeneration,
+            sessionId, input2, turn2, "opencode", newRuntimeSessionId));
+        Assert.True(started.SubmissionAuthorized);
+        Assert.True((await job2.StartInitialInputAsync(new StartAgentJobInitialInput(
+            $"operation-{job2Key}", "attempt-1", runnerId, work2, TestRunnerGenerationExtensions.ProcessGeneration,
+            sessionId, input2, turn2, "opencode", newRuntimeSessionId))).SubmissionAuthorized);
+
+        await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
+        {
+            var stored = await scope.ServiceProvider.GetRequiredService<Mohist.Server.Infrastructure.Data.Sessions.IAgentSessionStore>()
+                .LoadAsync(sessionId);
+            Assert.NotNull(stored);
+            var receipt = stored!.Status.InitialInputOperation!;
+            Assert.Equal(job2Key, receipt.JobId);
+            Assert.True(receipt.EffectAdmitted);
+            Assert.Equal(newRuntimeSessionId, receipt.RuntimeSessionId);
+            Assert.Equal(job1Key, stored.Status.Turns!.Single(turn => turn.Id == turn1).JobId);
+            Assert.Equal(AgentTurnStatus.Completed, stored.Status.Turns!.Single(turn => turn.Id == turn1).Status);
+            var storedTurn2 = stored.Status.Turns!.Single(turn => turn.Id == turn2);
+            Assert.Equal(job2Key, storedTurn2.JobId);
+            Assert.Equal(AgentTurnStatus.Executing, storedTurn2.Status);
+            Assert.Equal(job2Key, stored.Status.Inputs!.Single(input => input.Id == input2).JobId);
+        }
+
+        Assert.Equal(WorkReportVerdict.Accepted, (await job2.ReportResultAsync(
+            runnerId, work2, new WorkResult(
+                "completed", "second done", AgentSessionId: sessionId, AgentTurnId: turn2,
+                Runtime: "opencode", RuntimeSessionId: newRuntimeSessionId))).Verdict);
+    }
+
     private static async Task AssertOldBindingRefusedForAllStatusesAsync(
         IAgentJobGrain job,
         string runnerId,

@@ -91,6 +91,48 @@ public sealed class RuntimeSessionMissingException : InvalidOperationException
 
 [Serializable]
 [GenerateSerializer]
+public sealed class AgentSessionMissingException : InvalidOperationException
+{
+    public AgentSessionMissingException(string sessionId)
+        : base($"AgentSession {sessionId} does not exist.")
+    {
+        SessionId = sessionId;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+}
+
+[Serializable]
+[GenerateSerializer]
+public sealed class AgentSessionInitialLaunchConflictException : InvalidOperationException
+{
+    public AgentSessionInitialLaunchConflictException(
+        string sessionId,
+        string inputId,
+        string turnId,
+        string detail)
+        : base($"AgentSession {sessionId} already accepted input '{inputId}' or turn '{turnId}' "
+            + $"with a different launch identity: {detail}.")
+    {
+        SessionId = sessionId;
+        InputId = inputId;
+        TurnId = turnId;
+        Detail = detail;
+    }
+
+    [Id(0)]
+    public string SessionId { get; }
+    [Id(1)]
+    public string InputId { get; }
+    [Id(2)]
+    public string TurnId { get; }
+    [Id(3)]
+    public string Detail { get; }
+}
+
+[Serializable]
+[GenerateSerializer]
 public sealed class AgentSessionIdentityMismatchException : InvalidOperationException
 {
     public AgentSessionIdentityMismatchException(

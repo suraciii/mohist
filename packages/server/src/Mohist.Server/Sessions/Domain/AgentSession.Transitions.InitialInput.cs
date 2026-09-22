@@ -16,11 +16,22 @@ public static partial class AgentSessionExtensions
             var existing = session.Status.InitialInputOperation;
             if (existing is not null)
             {
-                if (!SameInitialOperation(existing, operation)
-                    || existing.EffectAdmitted
-                    || !Equals(session.CurrentRuntimeBinding(), replacement))
+                if (SameInitialOperation(existing, operation))
+                {
+                    // The same not-yet-admitted operation replays idempotently
+                    // while the candidate binding still matches; an admitted
+                    // effect can never be recovered again (post-submission
+                    // recovery is prohibited).
+                    if (existing.EffectAdmitted
+                        || !Equals(session.CurrentRuntimeBinding(), replacement))
+                        throw new InvalidOperationException("initial_input_operation_conflict");
+                    return [];
+                }
+                // Parity with admission: a different receipt may be superseded
+                // only after its own Turn is definitely terminal and provably
+                // owned by that receipt.
+                if (!PriorReceiptOwnsDefinitelyTerminalTurn(session, existing))
                     throw new InvalidOperationException("initial_input_operation_conflict");
-                return [];
             }
 
             EnsureExpectedRuntimeBinding(session, expected, session.CurrentRuntimeBinding());
@@ -137,7 +148,7 @@ public static partial class AgentSessionExtensions
                 // prior receipt's own Turn is definitely terminal. Settled
                 // execution is history; a Queued, Executing, Unknown, or absent
                 // Turn keeps that receipt current and this start fail-closed.
-                if (!PriorReceiptTurnDefinitelyTerminal(session, existing))
+                if (!PriorReceiptOwnsDefinitelyTerminalTurn(session, existing))
                     throw new InvalidOperationException("initial_input_start_conflict");
             }
             else if (existing is not null && !SameInitialOperation(existing, operation))
@@ -188,13 +199,26 @@ public static partial class AgentSessionExtensions
             return [];
         }
 
-        private static bool PriorReceiptTurnDefinitelyTerminal(
+        // One evidence rule shared by admission and recovery: the historical
+        // receipt releases its authorization only when its own Turn is
+        // definitely terminal AND the receipt still proves it owned that Turn
+        // and Input. A terminal but unrelated or malformed Turn must never
+        // release an unresolved receipt.
+        private static bool PriorReceiptOwnsDefinitelyTerminalTurn(
             AgentSession current,
             AgentInitialInputOperation receipt)
         {
             var turn = (current.Status.Turns ?? []).FirstOrDefault(candidate =>
                 string.Equals(candidate.Id, receipt.TurnId, StringComparison.Ordinal));
-            return turn is { Status: AgentTurnStatus.Completed or AgentTurnStatus.Failed or AgentTurnStatus.Cancelled };
+            if (turn is not { Status: AgentTurnStatus.Completed or AgentTurnStatus.Failed or AgentTurnStatus.Cancelled })
+                return false;
+            if (!string.Equals(turn.JobId, receipt.JobId, StringComparison.Ordinal)
+                || !turn.InputIds.Contains(receipt.InputId, StringComparer.Ordinal))
+                return false;
+            var input = (current.Status.Inputs ?? []).FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, receipt.InputId, StringComparison.Ordinal));
+            return input is not null
+                && string.Equals(input.JobId, receipt.JobId, StringComparison.Ordinal);
         }
 
         private static bool SameInitialOperation(AgentInitialInputOperation left, AgentInitialInputOperation right) =>
