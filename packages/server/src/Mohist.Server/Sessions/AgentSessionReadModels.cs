@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Sessions;
 

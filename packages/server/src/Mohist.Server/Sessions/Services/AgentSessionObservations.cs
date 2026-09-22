@@ -1,7 +1,7 @@
 using System.Text.Json.Serialization;
 using Mohist.Server.Sessions.Domain;
 
-namespace Mohist.Server.Sessions;
+namespace Mohist.Server.Sessions.Services;
 
 public sealed record AgentSessionInputObservationDto(
     string Id,
