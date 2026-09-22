@@ -211,8 +211,13 @@ Admission follows acceptance order among currently eligible heads. A pending
 launch can claim before Runner selection, but a prepared launch that is not yet
 visible cannot claim or hold a place ahead of visible work. Only the first queued
 follow-up Turn in a Session can compete, and only when that Session's
-execution-ownership and operation fences allow dispatch. A head blocked by its own Session does not
-block eligible work in other Sessions. Capacity never overrides those fences.
+execution-ownership and operation fences allow dispatch. A queued launch Job
+for an existing Session is eligible only when its own initial Turn is the
+first locally deliverable Turn. A later queued Turn does not block an earlier
+Turn merely because the later Turn belongs to a Job; an earlier ordinary
+follow-up holds back the later Job. Execution ownership, uncertain results,
+Stop, Reset, and binding fences still apply in both orders. A head blocked by
+its own Session does not block eligible work in other Sessions. Capacity never overrides those fences.
 The acceptance key is Job `SubmittedAt` or follow-up Turn `RecordedAt`, both
 compared in UTC. A Turn retains the time at which its first Input was accepted;
 joining another Input does not replace it. For equal times, order Jobs before
@@ -613,11 +618,16 @@ approval-feedback tasks. Retries of one scope reuse its identities; a different
 Stage always creates a different invocation, Job, Input, and Turn even when its
 task identifier and rendered prompt match.
 
-A named Session follow-up uses the Stage-scoped invocation ID as its idempotency
-key. Replaying the same launch therefore returns the same Input and Turn, while
-the same task or work ID in another Stage appends a distinct follow-up to the
-shared Session. Because Workflow pre-mints that Turn identity, the follow-up
-requests a distinct queued Turn instead of coalescing with another pending input.
+A named Session continuation uses the Stage-scoped invocation ID as its
+idempotency key. Replaying the same launch therefore returns the same Input and
+Turn, while the same task or work ID in another Stage appends a distinct
+Job-owned Input and Turn to the shared Session. The later Workflow invocation
+retains its own Job as execution and result owner; it is not dispatched as an
+ordinary Session-owned follow-up. Because Workflow pre-mints that Turn identity,
+the continuation requests a distinct queued Turn instead of coalescing with
+another pending input. Each Job's initial provider submission admits only its
+own Input and Turn; an earlier Job's unresolved initial submission cannot be
+replaced by the next invocation.
 
 New launches write only the Stage-scoped handoff. During activation recovery,
 an already-running attempt first reads that key and, only when it has no plan,
