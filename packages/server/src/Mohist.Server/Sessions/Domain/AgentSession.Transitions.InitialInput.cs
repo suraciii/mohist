@@ -119,21 +119,31 @@ public static partial class AgentSessionExtensions
             var existing = session.Status.InitialInputOperation;
             if (existing is { EffectAdmitted: true })
             {
-                var admittedTurn = (session.Status.Turns ?? []).SingleOrDefault(turn =>
-                    string.Equals(turn.Id, existing.TurnId, StringComparison.Ordinal));
-                if (!SameInitialOperation(existing, operation)
-                    || existing.BindingEpoch != session.BindingEpoch
-                    || existing.ContextGeneration != session.Status.ContextGeneration
-                    || admittedTurn is null
-                    || admittedTurn.Status != AgentTurnStatus.Executing
-                    || admittedTurn.SupersededAt is not null
-                    || admittedTurn.ContextGeneration != session.Status.ContextGeneration
-                    || !string.Equals(existing.RuntimeSessionId, session.Status.AgentRuntimeSessionId, StringComparison.Ordinal))
+                if (SameInitialOperation(existing, operation))
+                {
+                    var admittedTurn = (session.Status.Turns ?? []).SingleOrDefault(turn =>
+                        string.Equals(turn.Id, existing.TurnId, StringComparison.Ordinal));
+                    if (existing.BindingEpoch != session.BindingEpoch
+                        || existing.ContextGeneration != session.Status.ContextGeneration
+                        || admittedTurn is null
+                        || admittedTurn.Status != AgentTurnStatus.Executing
+                        || admittedTurn.SupersededAt is not null
+                        || admittedTurn.ContextGeneration != session.Status.ContextGeneration
+                        || !string.Equals(existing.RuntimeSessionId, session.Status.AgentRuntimeSessionId, StringComparison.Ordinal))
+                        throw new InvalidOperationException("initial_input_start_conflict");
+                    return [];
+                }
+                // A later Job may take over the provider receipt only when the
+                // prior receipt's own Turn is definitely terminal. Settled
+                // execution is history; a Queued, Executing, Unknown, or absent
+                // Turn keeps that receipt current and this start fail-closed.
+                if (!PriorReceiptTurnDefinitelyTerminal(session, existing))
                     throw new InvalidOperationException("initial_input_start_conflict");
-                return [];
             }
-            if (existing is not null && !SameInitialOperation(existing, operation))
+            else if (existing is not null && !SameInitialOperation(existing, operation))
+            {
                 throw new InvalidOperationException("initial_input_operation_conflict");
+            }
 
             var turns = (session.Status.Turns ?? []).ToList();
             var live = turns.Where(turn => turn.SupersededAt is null
@@ -165,12 +175,26 @@ public static partial class AgentSessionExtensions
                 Turns = turns,
                 InitialInputOperation = operation with
                 {
-                    RecordedAt = existing?.RecordedAt ?? now,
+                    // A retry of the same recorded operation keeps its original
+                    // record time; a fresh receipt — first admission or the
+                    // terminal-prior replacement — records its own.
+                    RecordedAt = existing is not null && SameInitialOperation(existing, operation)
+                        ? existing.RecordedAt
+                        : now,
                     EffectAdmitted = true,
                     EffectAdmittedAt = now,
                 },
             };
             return [];
+        }
+
+        private static bool PriorReceiptTurnDefinitelyTerminal(
+            AgentSession current,
+            AgentInitialInputOperation receipt)
+        {
+            var turn = (current.Status.Turns ?? []).FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, receipt.TurnId, StringComparison.Ordinal));
+            return turn is { Status: AgentTurnStatus.Completed or AgentTurnStatus.Failed or AgentTurnStatus.Cancelled };
         }
 
         private static bool SameInitialOperation(AgentInitialInputOperation left, AgentInitialInputOperation right) =>

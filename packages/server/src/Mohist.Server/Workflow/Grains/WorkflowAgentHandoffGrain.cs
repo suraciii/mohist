@@ -315,42 +315,19 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
         AgentExecutionDefinition definition)
     {
         var session = GrainFactory.GetGrain<IAgentSessionGrain>(invocation.SessionId);
-        if (!string.IsNullOrWhiteSpace(plan.Command.ReuseSessionId))
+        if (!string.IsNullOrWhiteSpace(plan.Command.ReuseSessionId)
+            && await session.GetAsync() is not null)
         {
-            var accepted = await session.AcceptFollowupAsync(new AcceptFollowupCommand(
-                Text: plan.Command.Prompt,
-                Source: "workflow",
-                IdempotencyKey: FollowupIdempotencyKey(plan, invocation),
-                PreMintedInputId: invocation.InputId,
-                PreMintedTurnId: invocation.TurnId,
-                AllowPendingInitialLaunch: true,
-                ForceNewTurn: true,
-                ExpectedProjectId: plan.Command.ProjectId,
-                ExpectedAgentId: RequiredAgentId(plan)));
-            if (!string.Equals(accepted.InputId, invocation.InputId, StringComparison.Ordinal)
-                || !string.Equals(accepted.TurnId, invocation.TurnId, StringComparison.Ordinal))
-                throw new InvalidOperationException("Workflow named Session replay resolved conflicting Input or Turn identity.");
-            return;
+            // A named continuation targets an existing Session, and a terminal
+            // launch that never bound a runtime session fails deterministically
+            // here instead of letting the next Job silently continue an unbound
+            // Session: only the Runner can establish that binding.
+            await session.EnsureRuntimeSessionPresentAsync();
         }
+        // First launch and named continuation share one Job-owned seam: the
+        // invocation's pre-minted Input and Turn are appended linked to this
+        // Job, and an exact activation replay is the AlreadyPersisted no-op.
         await session.EnsureInitialLaunchAsync(BuildSessionCommand(plan, invocation, definition));
-    }
-
-    private string FollowupIdempotencyKey(
-        WorkflowAgentHandoffPlan plan,
-        WorkflowAgentInvocation invocation)
-    {
-        // A legacy handoff may have accepted its follow-up before persisting
-        // the next activation step. Keep that exact retry key; every newly
-        // prepared handoff uses its Stage-scoped invocation identity.
-        var command = plan.Command;
-        var legacyKey = WorkflowAgentHandoffCodec.LegacyKeyFor(
-            command.ProjectId,
-            command.WorkflowRunId,
-            command.ActionAttemptId,
-            command.CommandId);
-        return string.Equals(this.GetPrimaryKeyString(), legacyKey, StringComparison.Ordinal)
-            ? invocation.CommandId
-            : invocation.InvocationId;
     }
 
     private static EnsureInitialLaunchCommand BuildSessionCommand(

@@ -290,7 +290,7 @@ public sealed partial class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
             var secondInput = Assert.Single(
                 session!.Status.Inputs!,
                 input => string.Equals(input.Id, secondDispatch.InitialInputId, StringComparison.Ordinal));
-            Assert.Equal(secondAttempt.AgentInvocationId, secondInput.IdempotencyKey);
+            Assert.Equal(secondDispatch.AgentJobId, secondInput.JobId);
         }
 
         await ReportAsync(runnerId, secondDispatch, "completed");
@@ -298,7 +298,7 @@ public sealed partial class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task WorkflowAgentHandoffs_SameExactWorkIdentityAcrossStages_AppendsDistinctNamedSessionFollowups()
+    public async Task WorkflowAgentHandoffs_SameExactWorkIdentityAcrossStages_AppendsDistinctJobOwnedLaunchTurns()
     {
         var definition = new WorkflowDefinition([
             new StageDefinition("bootstrap", [AgentTask("bootstrap", "Bootstrap", "delivery")], [])
@@ -390,8 +390,16 @@ public sealed partial class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         var checkInput = Assert.Single(
             session.Status.Inputs!,
             input => string.Equals(input.Id, preparedCheck.Invocation.InputId, StringComparison.Ordinal));
-        Assert.Equal(preparedPlan.Invocation.InvocationId, planInput.IdempotencyKey);
-        Assert.Equal(preparedCheck.Invocation.InvocationId, checkInput.IdempotencyKey);
+        Assert.Equal(preparedPlan.Invocation.JobKey, planInput.JobId);
+        Assert.Equal(preparedCheck.Invocation.JobKey, checkInput.JobId);
+        var planTurn = Assert.Single(
+            session.Status.Turns!,
+            turn => string.Equals(turn.Id, preparedPlan.Invocation.TurnId, StringComparison.Ordinal));
+        var checkTurn = Assert.Single(
+            session.Status.Turns!,
+            turn => string.Equals(turn.Id, preparedCheck.Invocation.TurnId, StringComparison.Ordinal));
+        Assert.Equal(preparedPlan.Invocation.JobKey, planTurn.JobId);
+        Assert.Equal(preparedCheck.Invocation.JobKey, checkTurn.JobId);
     }
 
     [Fact]
