@@ -127,7 +127,7 @@ bounds, and capacity decisions converge at the Runner claim, per
 Counting rule. An execution occupies one slot for `(project, agent)` from its
 occupancy claim until it is terminal:
 
-- a launch Job that is dispatched, running, or of unknown dispatch outcome;
+- a launch Job that has claimed occupancy and is not terminal;
 - a follow-up Turn that has claimed occupancy and is not terminal.
 
 A pending Job or queued Turn that has not claimed occupancy occupies nothing.
@@ -369,7 +369,9 @@ and do not count as unresolved external side effects for `admission=ready`.
 - `idle` and `unknown-to-runner` set Activity to `idle`. `unknown-to-runner`
   additionally records the write-side binding fact `unknown-to-runner`; that
   record is deterministic missing evidence, and the next accepted Input takes
-  the replacement path of
+  the fallback replacement of
+  [`runtime-switch-context.md`](runtime-switch-context.md) while the Runner is
+  live, else
   [Runtime Session missing recovery](#runtime-session-missing-recovery).
 - A failed or unanswered probe leaves Activity `unknown`.
 

@@ -637,7 +637,7 @@ rejection path (one readable rejection reply, inbox row audited and
 dispatched). A Turn settled by Activity convergence is terminal and not in
 flight for this boundary. The reachable causes are a launch that failed
 before its Runner attached (the terminal turn never bound a runtime) or a
-lost binding. This
+lost binding. The boundary
 closes the acceptance-time black hole where a follow-up parked in an invisible
 queue with no user feedback, no reply, and no dispatch. The boundary is
 explicit: a follow-up accepted during the in-flight exemption whose launch then
