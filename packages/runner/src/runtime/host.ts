@@ -242,6 +242,13 @@ export class RunnerHost {
               this.agentSessionRuntimeEventQueue,
             ),
           },
+          sessionProbe: {
+            runnerId: options.runnerId,
+            enabledRuntimes: this.enabledAgentRuntimes,
+            openCode: () => this.openCodeRuntime,
+            pi: () => this.piRuntime,
+            codex: () => this.codexRuntime,
+          },
         }),
         agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
         processGeneration: this.processGeneration,

@@ -371,6 +371,46 @@
         "id": "rpc_session_command",
         "error": { "code": -32603, "message": "Internal error" }
       }
+    },
+    {
+      "method": "session.probe",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "rpc_session_probe",
+        "method": "session.probe",
+        "params": {
+          "sessionId": "session_1",
+          "observationId": "observation_1",
+          "runnerId": "runner_1",
+          "runtime": "opencode",
+          "runtimeSessionId": "runtime_session_1",
+          "workDir": "/work/run_101",
+          "bindingEpoch": 2,
+          "contextGeneration": 1
+        }
+      },
+      "success": {
+        "jsonrpc": "2.0",
+        "id": "rpc_session_probe",
+        "result": {
+          "probe": {
+            "sessionId": "session_1",
+            "observationId": "observation_1",
+            "runnerId": "runner_1",
+            "runtime": "opencode",
+            "runtimeSessionId": "runtime_session_1",
+            "workDir": "/work/run_101",
+            "bindingEpoch": 2,
+            "contextGeneration": 1
+          },
+          "observation": "idle"
+        }
+      },
+      "error": {
+        "jsonrpc": "2.0",
+        "id": null,
+        "error": { "code": -32602, "message": "Invalid params" }
+      }
     }
   ]
 }

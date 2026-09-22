@@ -2,6 +2,7 @@ import type { RunnerControlHandlers } from './runner-control-dispatcher.js'
 import { createCancelHandler, type CancelHandlerDeps } from './cancel-handler.js'
 import { createFollowupHandler, type FollowupHandlerDeps } from './followup-handler.js'
 import { createSessionCommandHandler, type SessionCommandHandlerDeps } from './session-command-handler.js'
+import { createSessionProbeHandler, type SessionProbeHandlerDeps } from './session-probe-handler.js'
 import { createWorkspaceGitHandlers, type WorkspaceGitHandlerDeps } from './workspace-git-handlers.js'
 import { createWorkspaceRemovalHandler, type WorkspaceRemovalHandlerDeps } from './workspace-removal-handler.js'
 
@@ -11,6 +12,7 @@ export interface RunnerControlHandlerDeps {
   followup: FollowupHandlerDeps
   cancel: CancelHandlerDeps
   sessionCommand: SessionCommandHandlerDeps
+  sessionProbe: SessionProbeHandlerDeps
 }
 
 export function createRunnerControlHandlers(deps: RunnerControlHandlerDeps): RunnerControlHandlers {
@@ -19,6 +21,7 @@ export function createRunnerControlHandlers(deps: RunnerControlHandlerDeps): Run
   const followup = createFollowupHandler(deps.followup)
   const cancel = createCancelHandler(deps.cancel)
   const command = createSessionCommandHandler(deps.sessionCommand)
+  const probe = createSessionProbeHandler(deps.sessionProbe)
   return {
     workspaceDiff: git.getDiff,
     workspaceCommits: git.getCommits,
@@ -29,5 +32,6 @@ export function createRunnerControlHandlers(deps: RunnerControlHandlerDeps): Run
     sessionFollowup: followup,
     sessionStop: cancel,
     sessionCommand: command,
+    sessionProbe: probe,
   }
 }

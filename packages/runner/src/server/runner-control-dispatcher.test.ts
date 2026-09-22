@@ -22,6 +22,19 @@ function validTarget() {
   }
 }
 
+function validProbe() {
+  return {
+    sessionId: 'session-1',
+    observationId: 'observation-1',
+    runnerId: 'runner-1',
+    runtime: 'opencode',
+    runtimeSessionId: 'runtime-1',
+    workDir: '/work/run-1',
+    bindingEpoch: 3,
+    contextGeneration: 1,
+  }
+}
+
 function handlerSet(): RunnerControlHandlers {
   return {
     workspaceDiff: vi.fn(async () => 'diff'),
@@ -33,6 +46,7 @@ function handlerSet(): RunnerControlHandlers {
     sessionFollowup: vi.fn(async () => 'followup'),
     sessionStop: vi.fn(async () => 'stopped'),
     sessionCommand: vi.fn(async () => 'command'),
+    sessionProbe: vi.fn(async () => 'probe'),
   }
 }
 
@@ -115,11 +129,12 @@ describe('RunnerControlDispatcher', () => {
         },
         'sessionCommand',
       ],
+      ['session.probe', validProbe(), 'sessionProbe'],
     ] as const
     requests.forEach(([method, params], index) => h.receive({ jsonrpc: '2.0', id: `id-${index}`, method, params }))
     await settle()
     for (const [, , name] of requests) expect(h.handlers[name]).toHaveBeenCalledOnce()
-    expect(h.sent).toHaveLength(9)
+    expect(h.sent).toHaveLength(10)
   })
 
   it('preserves nullable results and typed domain results', async () => {
@@ -239,6 +254,23 @@ describe('RunnerControlDispatcher', () => {
     expect(h.handlers.sessionFollowup).not.toHaveBeenCalled()
     expect(h.sent[0]).toEqual({ jsonrpc: '2.0', id: 'bad', error: { code: -32602, message: 'Invalid params' } })
     expect(h.errors()).toBe(1)
+  })
+
+  it('rejects an incomplete probe target as Invalid Params before the read handler runs', () => {
+    const h = harness()
+    h.receive({
+      jsonrpc: '2.0',
+      id: 'probe',
+      method: 'session.probe',
+      params: { ...validProbe(), contextGeneration: 0 },
+    })
+    h.receive({ jsonrpc: '2.0', id: 'cross', method: 'session.probe', params: { ...validProbe(), runtime: 'gemini' } })
+    expect(h.handlers.sessionProbe).not.toHaveBeenCalled()
+    expect(h.sent).toEqual([
+      { jsonrpc: '2.0', id: 'probe', error: { code: -32602, message: 'Invalid params' } },
+      { jsonrpc: '2.0', id: 'cross', error: { code: -32602, message: 'Invalid params' } },
+    ])
+    expect(h.errors()).toBe(2)
   })
 
   it('does not invoke a duplicate live ID and preserves the original operation', async () => {
