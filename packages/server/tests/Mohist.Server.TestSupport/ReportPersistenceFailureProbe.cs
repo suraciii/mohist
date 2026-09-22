@@ -11,6 +11,8 @@ public sealed class ReportPersistenceFailureProbe :
     private readonly object _gate = new();
     private readonly HashSet<(string OwnerId, string WorkId)> _workflowFailures = [];
     private readonly HashSet<(string OwnerId, string WorkId)> _agentJobFailures = [];
+    private readonly HashSet<string> _activitySettlementReminderFailures = [];
+    private readonly HashSet<string> _activitySettlementPersistFailures = [];
 
     public void FailNextWorkflowReport(string workflowRunId, string workId)
     {
@@ -22,6 +24,18 @@ public sealed class ReportPersistenceFailureProbe :
     {
         lock (_gate)
             _agentJobFailures.Add((agentJobId, workId));
+    }
+
+    public void FailNextAgentJobActivitySettlementReminder(string agentJobId)
+    {
+        lock (_gate)
+            _activitySettlementReminderFailures.Add(agentJobId);
+    }
+
+    public void FailNextAgentJobActivitySettlementPersist(string agentJobId)
+    {
+        lock (_gate)
+            _activitySettlementPersistFailures.Add(agentJobId);
     }
 
     void IWorkflowReportPersistenceFailureInjector.BeforePersist(string workflowRunId, string workId)
@@ -39,6 +53,24 @@ public sealed class ReportPersistenceFailureProbe :
         {
             if (_agentJobFailures.Remove((agentJobId, workId)))
                 throw new AgentJobLedgerConflictException("Injected AgentJob report persistence conflict.");
+        }
+    }
+
+    void IAgentJobReportPersistenceFailureInjector.BeforeActivitySettlementReminder(string agentJobId)
+    {
+        lock (_gate)
+        {
+            if (_activitySettlementReminderFailures.Remove(agentJobId))
+                throw new InvalidOperationException("Injected AgentJob settlement reminder failure.");
+        }
+    }
+
+    void IAgentJobReportPersistenceFailureInjector.BeforeActivitySettlementPersist(string agentJobId)
+    {
+        lock (_gate)
+        {
+            if (_activitySettlementPersistFailures.Remove(agentJobId))
+                throw new AgentJobLedgerConflictException("Injected AgentJob settlement persistence conflict.");
         }
     }
 }

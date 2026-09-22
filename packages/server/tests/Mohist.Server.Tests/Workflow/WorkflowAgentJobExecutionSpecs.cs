@@ -88,6 +88,49 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task WorkflowAgentAction_FinalizedUnknownFailsTheOwningAttemptHonestly()
+    {
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [AgentTask("build", "Build the change", "delivery")], [])
+        ]);
+        var workflow = await StartWorkflowAsync(
+            definition,
+            $"workflow-agent-unknown-{Guid.NewGuid():N}");
+        var runnerId = _runnerId!;
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, (await workflow.AssignWorkerAsync(runnerId)).Status);
+        Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var run = await LoadRunAsync(_workflowId!);
+        var attempt = Assert.Single(run.CurrentStage().Tasks);
+        var handoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(WorkflowAgentHandoffCodec.KeyFor(
+            run.Metadata.ProjectId!,
+            run.Id,
+            run.CurrentStage().Id,
+            attempt.Id,
+            attempt.WorkId!));
+        await handoff.ActivateAsync();
+
+        var job = Grains.GetGrain<IAgentJobGrain>(attempt.AgentJobId!);
+        var snapshot = await job.GetRuntimeSnapshotAsync();
+        Assert.True(await job.ApplyActivityConvergenceAsync(new AgentJobActivityConvergence(
+            snapshot.AgentSessionId!,
+            "idle",
+            1,
+            1,
+            [snapshot.InitialTurnId!],
+            [attempt.AgentJobId!],
+            [],
+            _fixture.TimeProvider.GetUtcNow())));
+        await Services.GetRequiredService<IEventDispatcher>().DrainAsync();
+
+        run = await LoadRunAsync(run.Id);
+        var failed = Assert.Single(run.CurrentStage().Tasks);
+        Assert.Equal(WorkflowActionAttemptStatus.Failed, failed.Status);
+        Assert.Equal("unknown", failed.Error?.Code);
+        Assert.Equal(WorkflowRunStatus.Failed, run.Status);
+        Assert.Equal(AgentJobStatus.Unknown, await job.GetStatusAsync());
+    }
+
+    [Fact]
     public async Task WorkflowAgentAction_ReactivationResumesLegacyHandoffForAlreadyTerminalJob()
     {
         var definition = new WorkflowDefinition([

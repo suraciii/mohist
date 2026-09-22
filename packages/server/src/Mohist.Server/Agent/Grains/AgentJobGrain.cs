@@ -1056,7 +1056,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
 
     private void StageSubagentTerminalEvent(AgentJobStatus status)
     {
-        if (status is not (AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled)
+        if (status is not (AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled or AgentJobStatus.Unknown)
             || State.Input?.SpawnOrigin is null
             || State.LaunchVisibility != AgentLaunchVisibility.Visible
             || State.PendingSubagentTerminalEvent is not null)

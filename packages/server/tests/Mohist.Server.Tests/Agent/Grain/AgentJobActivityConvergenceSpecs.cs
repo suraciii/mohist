@@ -2,12 +2,17 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Agent.Subscriptions;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.TestSupport;
+using Mohist.Server.Workflow.Grains;
+using Orleans;
+using Orleans.Core.Internal;
 using Xunit;
 
 namespace Mohist.Server.Tests.Agent.Grain;
@@ -32,7 +37,13 @@ public sealed class AgentJobActivityConvergenceSpecs : AgentJobGrainTestSupport
             turnId,
             "do the work once",
             ProjectId: "activity-project",
-            AgentId: "activity-agent"));
+            AgentId: "activity-agent",
+            ConnectionOrigin: new ConnectionLaunchOrigin(
+                "connection-1", "workspace-1", "user-1", "conversation-1", "message-1"),
+            SpawnOrigin: new AgentJobSpawnOrigin(
+                "parent-session-1", "parent-agent-1", "edge-1", sessionId, jobId, turnId),
+            WorkflowOrigin: new WorkflowAgentJobOrigin(
+                "invocation-1", "command-1", "workflow-1", "attempt-1", "work-1", "build", "fingerprint-1")));
 
         var fact = new AgentSessionActivityConverged(
             sessionId,
@@ -72,7 +83,69 @@ public sealed class AgentJobActivityConvergenceSpecs : AgentJobGrainTestSupport
         Assert.Null(persisted.PendingSessionClose);
         Assert.Null(persisted.PendingWorkflowTerminalEvent);
         Assert.Null(persisted.PendingSubagentTerminalEvent);
-        Assert.Empty(await _fixture.EventStore.ListAgentJobEventsAsync(jobId));
+        var ownerEvents = await _fixture.EventStore.ListAgentJobEventsAsync(jobId);
+        Assert.Equal(3, ownerEvents.Count);
+        Assert.Equal(
+            [
+                EventCatalog.ReverseDns.AgentJobTerminalDelivery,
+                EventCatalog.ReverseDns.AgentJobWorkflowTerminal,
+                EventCatalog.ReverseDns.AgentJobSubagentTerminal,
+            ],
+            ownerEvents.Select(item => item.Envelope.Type));
+        Assert.All(ownerEvents, item =>
+            Assert.Equal("unknown", item.Envelope.Data!.Value.GetProperty("status").GetString()));
+        Assert.All(ownerEvents, item =>
+            Assert.False(item.Envelope.Data!.Value.TryGetProperty("transcript", out _)));
+        Assert.All(ownerEvents, item =>
+            Assert.False(item.Envelope.Data!.Value.TryGetProperty("assistantReply", out _)));
+    }
+
+    [Theory]
+    [InlineData("reminder")]
+    [InlineData("persist")]
+    public async Task FailedSettlementBoundary_ReloadsAuthoritativeStateAndRedeliverySucceeds(string fault)
+    {
+        var jobId = $"activity-retry-job-{fault}-{Guid.NewGuid():N}";
+        var sessionId = $"activity-retry-session-{Guid.NewGuid():N}";
+        var turnId = $"activity-retry-turn-{Guid.NewGuid():N}";
+        var job = JobGrain(jobId);
+        await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
+            sessionId,
+            $"activity-retry-input-{Guid.NewGuid():N}",
+            turnId,
+            "retry the settlement, not the work",
+            ProjectId: "activity-project",
+            AgentId: "activity-agent"));
+        var command = new AgentJobActivityConvergence(
+            sessionId,
+            RunnerSessionActivityObservations.Idle,
+            1,
+            1,
+            [turnId],
+            [jobId],
+            [],
+            _fixture.TimeProvider.GetUtcNow());
+        var failures = _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<ReportPersistenceFailureProbe>();
+        if (fault == "reminder")
+            failures.FailNextAgentJobActivitySettlementReminder(jobId);
+        else
+            failures.FailNextAgentJobActivitySettlementPersist(jobId);
+
+        await Assert.ThrowsAnyAsync<Exception>(async () =>
+            await job.ApplyActivityConvergenceAsync(command));
+        var unchanged = await ReadStateAsync(jobId);
+        Assert.Equal(AgentJobStatus.Pending, unchanged.Status);
+        Assert.Null(unchanged.TerminalAt);
+        Assert.Null(unchanged.ActivitySettlement);
+
+        await job.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
+        var reloaded = JobGrain(jobId);
+        Assert.True(await reloaded.ApplyActivityConvergenceAsync(command));
+        var settled = await ReadStateAsync(jobId);
+        Assert.Equal(AgentJobStatus.Unknown, settled.Status);
+        Assert.NotNull(settled.TerminalAt);
+        Assert.NotNull(settled.ActivitySettlement);
     }
 
     [Fact]

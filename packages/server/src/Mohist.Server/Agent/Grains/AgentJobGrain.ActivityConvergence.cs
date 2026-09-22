@@ -64,6 +64,11 @@ public sealed partial class AgentJobGrain
         // convergence event. Clearing this opposite-direction obligation is
         // what prevents a Session -> Job -> Session callback cycle.
         State.PendingInitialTurnTerminalDelivery = null;
+        StageTerminalDeliveryEvent(
+            AgentJobStatus.Unknown, reason, null, reason, "unknown", null, null);
+        StageWorkflowTerminalEvent(
+            AgentJobStatus.Unknown, reason, null, reason, "unknown", null, null, null);
+        StageSubagentTerminalEvent(AgentJobStatus.Unknown);
         DisposeJobTimeoutTimer();
 
         State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.Terminal;
@@ -71,16 +76,18 @@ public sealed partial class AgentJobGrain
             || State.ConcurrencyPermitHeld
             || State.ConcurrencyWaiterId is not null;
 
-        await EnsureRecoveryReminderAsync();
         try
         {
+            _reportPersistenceFailures.BeforeActivitySettlementReminder(Key);
+            await EnsureRecoveryReminderAsync();
+            _reportPersistenceFailures.BeforeActivitySettlementPersist(Key);
             await PersistAsync();
         }
         catch
         {
-            // A failed event delivery must remain retryable. Do not let the
-            // activation's mutated cache acknowledge a redelivery whose
-            // settlement never reached the authoritative ledger.
+            // Registration and persistence are one acknowledgement boundary.
+            // Reloading prevents either failure from leaving a terminal cache
+            // over an unchanged authoritative ledger row.
             _hydrated = false;
             await HydrateAsync();
             throw;
@@ -88,6 +95,12 @@ public sealed partial class AgentJobGrain
 
         await TryReleaseConcurrencyPermitAsync();
         _terminalCompletion.TrySetResult(State.TerminalResult);
+        if (State.PendingTerminalDeliveryEvent is not null)
+            await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+        if (State.PendingWorkflowTerminalEvent is not null)
+            await EmitWorkflowTerminalEventAsync(State.PendingWorkflowTerminalEvent);
+        if (State.PendingSubagentTerminalEvent is not null)
+            await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
 
         _log.LogInformation(
             "AgentJob {Id} finalized Unknown from Session activity convergence ({Observation}, generation={ContextGeneration}, bindingEpoch={BindingEpoch})",
