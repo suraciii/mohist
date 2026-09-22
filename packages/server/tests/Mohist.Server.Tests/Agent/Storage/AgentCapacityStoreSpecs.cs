@@ -180,10 +180,19 @@ public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
     {
         await AddAgentAsync("project", "agent", 1);
         var session = NewQueuedSession("session", "turn", "project", "agent", Now.UtcDateTime);
+        session.Metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-run-1")
+            .WithLabel("mohist.io/session-name", "build")
+            .WithLabel("mohist.io/agent-id", "agent");
         var row = AgentSessionJson.ToRow(session, Now.UtcDateTime);
         var state = JsonNode.Parse(row.State)!.AsObject();
         // Persisted Workflow owner evidence missing the canonical agent
-        // label: incomplete, never guessed into an attribution.
+        // label: incomplete, never guessed into an attribution. The strip is
+        // written straight into the row document, never through the creation
+        // API, and the document must stay structurally readable so the claim
+        // is refused for its blank identity, not for an unreadable row.
         state["metadata"]!["labels"]!.AsObject().Remove("mohist.io/agent-id");
         row.State = state.ToJsonString();
         await using (var db = _database.CreateContext())
@@ -192,13 +201,42 @@ public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        var claim = await Store.ClaimTurnAsync("session", row.State, "turn");
+        string incompleteState;
+        await using (var readDb = _database.CreateContext())
+        {
+            var persisted = await readDb.AgentSessions
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == "session");
+            incompleteState = persisted.State;
+            var readable = AgentSessionJson.Deserialize(persisted);
+            Assert.NotNull(readable);
+            Assert.Null(readable!.Metadata.Label("mohist.io/agent-id"));
+            Assert.Equal("workflow", readable.Metadata.Label("mohist.io/source-kind"));
+            Assert.Equal("project", readable.Metadata.Label("mohist.io/project-id"));
+            Assert.Equal("workflow-run-1", readable.Metadata.Label("mohist.io/source-id"));
+            Assert.Equal("build", readable.Metadata.Label("mohist.io/session-name"));
+            var input = Assert.Single(readable.Status.Inputs!);
+            Assert.Equal(AgentSessionInputAcceptance.Accepted, input.Acceptance);
+            var turn = Assert.Single(readable.Status.Turns!);
+            Assert.Equal("turn", turn.Id);
+            Assert.Equal(AgentTurnStatus.Queued, turn.Status);
+            Assert.Equal("project", persisted.LabelProjectId);
+            Assert.Equal("workflow", persisted.LabelSourceKind);
+            Assert.Null(persisted.LabelAgentId);
+        }
+
+        var claim = await Store.ClaimTurnAsync("session", incompleteState, "turn");
 
         Assert.Equal(AgentCapacityClaimDisposition.Incomplete, claim.Disposition);
         Assert.Null(claim.Capacity);
         await using var verifyDb = _database.CreateContext();
-        var persisted = await verifyDb.AgentSessions.SingleAsync(candidate => candidate.Id == "session");
-        Assert.Equal(row.State, persisted.State);
+        var after = await verifyDb.AgentSessions
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == "session");
+        Assert.Equal(incompleteState, after.State);
+        Assert.Equal("project", after.LabelProjectId);
+        Assert.Equal("workflow", after.LabelSourceKind);
+        Assert.Null(after.LabelAgentId);
     }
 
     [Fact]
