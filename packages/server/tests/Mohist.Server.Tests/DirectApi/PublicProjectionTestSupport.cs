@@ -222,7 +222,9 @@ public sealed class PublicProjectionTestSupport : IAsyncDisposable
         AgentTurnStatus status,
         DateTime? recordedAt = null,
         DateTime? updatedAt = null,
-        AgentTurnResult? result = null) => new(
+        AgentTurnResult? result = null,
+        long contextGeneration = 1,
+        DateTime? supersededAt = null) => new(
         Id: turnId,
         Sequence: 1,
         InputIds: [inputId],
@@ -230,7 +232,9 @@ public sealed class PublicProjectionTestSupport : IAsyncDisposable
         JobId: jobId,
         Result: result,
         RecordedAt: recordedAt ?? FixedTime,
-        UpdatedAt: updatedAt);
+        UpdatedAt: updatedAt,
+        ContextGeneration: contextGeneration,
+        SupersededAt: supersededAt);
 
     public Task SaveSessionAsync(AgentSession session) => SessionStore.SaveAsync(session.Id, session);
 

@@ -135,6 +135,14 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// </summary>
     Task MarkUnknownAsync(string reason, DateTimeOffset recoveryDeadlineAt) => MarkUnknownAsync(reason);
 
+    /// <summary>
+    /// Applies a durable Session activity-convergence fact to this Job. The
+    /// Job validates its immutable Session/Input/initial-Turn ownership and
+    /// records Unknown as lifecycle-final without calling back into Session.
+    /// </summary>
+    Task<bool> ApplyActivityConvergenceAsync(AgentJobActivityConvergence command) =>
+        Task.FromResult(false);
+
     Task ConcurrencyPermitGrantedAsync(
         string? token = null,
         string? permitId = null,
@@ -288,6 +296,17 @@ public sealed record AgentJobReportResult(
 {
     public bool Accepted => Verdict == WorkReportVerdict.Accepted;
 }
+
+[GenerateSerializer]
+public sealed record AgentJobActivityConvergence(
+    [property: Id(0)] string SessionId,
+    [property: Id(1)] string Observation,
+    [property: Id(2)] long ContextGeneration,
+    [property: Id(3)] long BindingEpoch,
+    [property: Id(4)] string[] SettledTurnIds,
+    [property: Id(5)] string[] SettledJobIds,
+    [property: Id(6)] string[] SupersededOperationIds,
+    [property: Id(7)] DateTimeOffset RecordedAt);
 
 [GenerateSerializer]
 public sealed record AgentJobRuntimeSnapshot(

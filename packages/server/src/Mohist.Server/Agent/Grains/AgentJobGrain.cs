@@ -188,9 +188,10 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     private string Key => this.GetPrimaryKeyString();
     private AgentJobState State => _state ?? throw new InvalidOperationException(
         $"AgentJob '{Key}' state accessed before hydration");
-    private bool IsTerminal => State.Status is AgentJobStatus.Completed
-        or AgentJobStatus.Failed
-        or AgentJobStatus.Cancelled;
+    private bool IsTerminal => State.TerminalAt is not null
+        || State.Status is AgentJobStatus.Completed
+            or AgentJobStatus.Failed
+            or AgentJobStatus.Cancelled;
 
     private bool IsDispatchable => State.Status is AgentJobStatus.Pending;
 

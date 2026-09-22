@@ -82,7 +82,26 @@ public sealed class AgentJobState
     [Id(54)] public string? AcceptedReportRuntime { get; set; }
     [Id(55)] public string? AcceptedReportRuntimeSessionId { get; set; }
     [Id(56)] public PendingWorkflowAgentTerminalEvent? PendingWorkflowTerminalEvent { get; set; }
+    /// <summary>
+    /// Durable evidence that Unknown is lifecycle-final because the owning
+    /// Session superseded the initial Turn under a fenced Runner observation.
+    /// </summary>
+    [Id(57)] public AgentJobActivitySettlement? ActivitySettlement { get; set; }
 }
+
+[GenerateSerializer]
+public sealed record AgentJobActivitySettlement(
+    [property: Id(0)] string SessionId,
+    [property: Id(1)] string InitialInputId,
+    [property: Id(2)] string InitialTurnId,
+    [property: Id(3)] string Observation,
+    [property: Id(4)] long ContextGeneration,
+    [property: Id(5)] long BindingEpoch,
+    [property: Id(6)] string[] SettledTurnIds,
+    [property: Id(7)] string[] SettledJobIds,
+    [property: Id(8)] string[] SupersededOperationIds,
+    [property: Id(9)] DateTimeOffset RecordedAt,
+    [property: Id(10)] DateTimeOffset SettledAt);
 
 
 [GenerateSerializer]
