@@ -315,7 +315,8 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             command.RuntimeSessionId,
             command.BindingEpoch,
             command.ContextGeneration,
-            now);
+            now,
+            SubmissionAttemptId: command.SubmissionAttemptId);
         session.AdmitInitialAgentJobInputEffect(operation, now);
         await _stateStore.SaveAsync(SessionId, session);
         _session = session;
@@ -329,7 +330,8 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             operation.RuntimeSessionId,
             operation.BindingEpoch,
             operation.ContextGeneration,
-            operation.EffectAdmitted);
+            operation.EffectAdmitted,
+            operation.SubmissionAttemptId);
 
     public async Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command)
     {

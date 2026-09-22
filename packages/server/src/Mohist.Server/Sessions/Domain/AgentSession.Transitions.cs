@@ -370,9 +370,15 @@ public static partial class AgentSessionExtensions
             var existing = session.Status.InitialInputOperation;
             if (existing is { EffectAdmitted: true })
             {
+                var admittedTurn = (session.Status.Turns ?? []).SingleOrDefault(turn =>
+                    string.Equals(turn.Id, existing.TurnId, StringComparison.Ordinal));
                 if (!SameInitialOperation(existing, operation)
                     || existing.BindingEpoch != session.BindingEpoch
                     || existing.ContextGeneration != session.Status.ContextGeneration
+                    || admittedTurn is null
+                    || admittedTurn.Status != AgentTurnStatus.Executing
+                    || admittedTurn.SupersededAt is not null
+                    || admittedTurn.ContextGeneration != session.Status.ContextGeneration
                     || !string.Equals(existing.RuntimeSessionId, session.Status.AgentRuntimeSessionId, StringComparison.Ordinal))
                     throw new InvalidOperationException("initial_input_start_conflict");
                 return [];

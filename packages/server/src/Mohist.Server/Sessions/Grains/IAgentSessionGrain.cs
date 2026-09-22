@@ -254,7 +254,8 @@ public sealed record AdmitInitialAgentJobInputCommand(
     [property: Id(7)] string Runtime,
     [property: Id(8)] string RuntimeSessionId,
     [property: Id(9)] long BindingEpoch,
-    [property: Id(10)] long ContextGeneration);
+    [property: Id(10)] long ContextGeneration,
+    [property: Id(11)] string SubmissionAttemptId);
 
 [GenerateSerializer]
 public sealed record InitialAgentJobSessionReceipt(
@@ -263,7 +264,8 @@ public sealed record InitialAgentJobSessionReceipt(
     [property: Id(2)] string RuntimeSessionId,
     [property: Id(3)] long BindingEpoch,
     [property: Id(4)] long ContextGeneration,
-    [property: Id(5)] bool EffectAdmitted);
+    [property: Id(5)] bool EffectAdmitted,
+    [property: Id(6)] string? SubmissionAttemptId);
 
 [GenerateSerializer]
 public sealed record AppendAgentSessionRuntimeEventsCommand(

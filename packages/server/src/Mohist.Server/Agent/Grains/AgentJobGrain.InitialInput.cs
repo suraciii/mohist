@@ -45,7 +45,7 @@ public sealed partial class AgentJobGrain
             _timeProvider.GetUtcNow(),
             CreationAttemptId: command.CreationAttemptId,
             RecoveryReason: command.RecoveryReason);
-        await PersistAsync();
+        await PersistInitialInputAsync();
         return new AgentJobInitialRecoveryReceipt(InitialCreating, true, null, null);
     }
 
@@ -76,15 +76,12 @@ public sealed partial class AgentJobGrain
                 ReplacementRuntimeSessionId = command.ReplacementRuntimeSessionId,
             };
             State.InitialInputSubmission = current;
-            await PersistAsync();
+            await PersistInitialInputAsync();
         }
 
         if (current.Phase == InitialReady)
-        {
-            await PersistAsync();
             return new AgentJobInitialRecoveryReceipt(
                 current.Phase, false, current.ReplacementRuntime, current.ReplacementRuntimeSessionId);
-        }
 
         var session = _grains.GetGrain<IAgentSessionGrain>(command.Recovery.SessionId);
         var snapshot = await session.GetAsync()
@@ -113,7 +110,7 @@ public sealed partial class AgentJobGrain
             BindingEpoch = receipt.BindingEpoch,
             ContextGeneration = receipt.ContextGeneration,
         };
-        await PersistAsync();
+        await PersistInitialInputAsync();
         return new AgentJobInitialRecoveryReceipt(InitialReady, false, receipt.Runtime, receipt.RuntimeSessionId);
     }
 
@@ -150,26 +147,13 @@ public sealed partial class AgentJobGrain
                 snapshot.BindingEpoch,
                 snapshot.ContextGeneration);
             State.InitialInputSubmission = current;
-            await PersistAsync();
+            await PersistInitialInputAsync();
         }
         else
         {
             if (!MatchesStart(current, command))
                 throw new InvalidOperationException("initial_input_start_operation_mismatch");
-            if (current.Phase == InitialStarted)
-            {
-                await PersistAsync();
-                var sameAttempt = string.Equals(
-                    current.SubmissionAttemptId,
-                    command.SubmissionAttemptId,
-                    StringComparison.Ordinal);
-                return new AgentJobInitialStartReceipt(
-                    true,
-                    sameAttempt,
-                    current.ReplacementRuntime,
-                    current.ReplacementRuntimeSessionId);
-            }
-            if (current.Phase != InitialReady)
+            if (current.Phase is not (InitialReady or InitialStarted))
                 throw new InvalidOperationException("initial_input_recovery_not_ready");
         }
 
@@ -184,9 +168,21 @@ public sealed partial class AgentJobGrain
             command.Runtime,
             command.RuntimeSessionId,
             snapshot.BindingEpoch,
-            snapshot.ContextGeneration));
+            snapshot.ContextGeneration,
+            command.SubmissionAttemptId));
         if (!admitted.EffectAdmitted)
             throw new InvalidOperationException("initial_input_effect_not_admitted");
+
+        var sameAttempt = string.Equals(
+            current.Phase == InitialStarted ? current.SubmissionAttemptId : admitted.SubmissionAttemptId,
+            command.SubmissionAttemptId,
+            StringComparison.Ordinal);
+        if (current.Phase == InitialStarted || !sameAttempt)
+            return new AgentJobInitialStartReceipt(
+                true,
+                sameAttempt,
+                admitted.Runtime,
+                admitted.RuntimeSessionId);
 
         State.InitialInputSubmission = current with
         {
@@ -198,7 +194,7 @@ public sealed partial class AgentJobGrain
             SubmissionAttemptId = command.SubmissionAttemptId,
             StartedAt = _timeProvider.GetUtcNow(),
         };
-        await PersistAsync();
+        await PersistInitialInputAsync();
         return new AgentJobInitialStartReceipt(true, true, admitted.Runtime, admitted.RuntimeSessionId);
     }
 
@@ -314,4 +310,23 @@ public sealed partial class AgentJobGrain
         && string.Equals(current.TurnId, command.TurnId, StringComparison.Ordinal)
         && string.Equals(current.ReplacementRuntime, command.Runtime, StringComparison.Ordinal)
         && string.Equals(current.ReplacementRuntimeSessionId, command.RuntimeSessionId, StringComparison.Ordinal);
+
+    private async Task PersistInitialInputAsync()
+    {
+        try
+        {
+            _reportPersistenceFailures.BeforeInitialInputPersist(
+                Key,
+                State.InitialInputSubmission?.Phase ?? string.Empty);
+            await PersistAsync();
+        }
+        catch
+        {
+            // The Session may already have committed its side of the protocol.
+            // Reload the Job owner before this activation can use dirty cached facts.
+            _hydrated = false;
+            await HydrateAsync();
+            throw;
+        }
+    }
 }

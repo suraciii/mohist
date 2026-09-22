@@ -454,7 +454,8 @@ public sealed record AgentInitialInputOperation(
     long ContextGeneration,
     DateTime RecordedAt,
     bool EffectAdmitted = false,
-    DateTime? EffectAdmittedAt = null);
+    DateTime? EffectAdmittedAt = null,
+    string? SubmissionAttemptId = null);
 
 public sealed record AgentUsageSummary(
     long? InputTokens = null,

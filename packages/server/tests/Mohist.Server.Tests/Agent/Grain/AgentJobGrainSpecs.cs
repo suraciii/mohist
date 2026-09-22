@@ -300,6 +300,106 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             manager.Recovery with { RecoveryReason = AgentJobInitialRecoveryReasons.ConfiguredFallback }));
     }
 
+    [Fact]
+    public async Task InitialInputRecovery_LostSessionReplacementResponseConvergesAfterJobReload()
+    {
+        var claim = await CreateInitialRecoveryClaimAsync(manager: false);
+        var recovery = claim.Recovery with { RecoveryReason = AgentJobInitialRecoveryReasons.SameRuntimeMissing };
+        var replacementId = $"runtime-replacement-{Guid.NewGuid():N}";
+        await claim.Job.PrepareInitialInputRecoveryAsync(recovery);
+        var session = Grains.GetGrain<IAgentSessionGrain>(recovery.SessionId);
+        var before = await session.GetAsync();
+
+        var committed = await session.RecoverInitialAgentJobRuntimeSessionAsync(
+            new RecoverInitialAgentJobRuntimeSessionCommand(
+                recovery.OperationId,
+                claim.Job.GetPrimaryKeyString(),
+                recovery.WorkId,
+                recovery.ProcessGeneration,
+                recovery.RunnerId,
+                recovery.InputId,
+                recovery.TurnId,
+                recovery.ExpectedRuntime,
+                recovery.ExpectedRuntimeSessionId,
+                "opencode",
+                replacementId,
+                before!.BindingEpoch));
+        Assert.Equal(replacementId, committed.RuntimeSessionId);
+
+        await TestLifecycle.DeactivateAndWait(claim.Job, Grains);
+        var reloaded = JobGrain(claim.Job.GetPrimaryKeyString());
+        var receipt = await reloaded.CompleteInitialInputRecoveryAsync(
+            new CompleteAgentJobInitialRecovery(recovery, "opencode", replacementId));
+        var replay = await reloaded.CompleteInitialInputRecoveryAsync(
+            new CompleteAgentJobInitialRecovery(recovery, "opencode", replacementId));
+        var after = await session.GetAsync();
+
+        Assert.Equal("ready", receipt.Phase);
+        Assert.Equal(replacementId, replay.RuntimeSessionId);
+        Assert.Equal(before.ContextGeneration + 1, after!.ContextGeneration);
+        Assert.Equal(before.BindingEpoch + 1, after.BindingEpoch);
+    }
+
+    [Fact]
+    public async Task InitialInputRecovery_JobPersistFailureAfterSessionCommitReloadsBeforeSameActivationRetry()
+    {
+        var claim = await CreateInitialRecoveryClaimAsync(manager: false);
+        var recovery = claim.Recovery with { RecoveryReason = AgentJobInitialRecoveryReasons.SameRuntimeMissing };
+        var replacementId = $"runtime-replacement-{Guid.NewGuid():N}";
+        await claim.Job.PrepareInitialInputRecoveryAsync(recovery);
+        var failures = _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<ReportPersistenceFailureProbe>();
+        failures.FailNextAgentJobInitialInputPersist(claim.Job.GetPrimaryKeyString(), "ready");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            claim.Job.CompleteInitialInputRecoveryAsync(
+                new CompleteAgentJobInitialRecovery(recovery, "opencode", replacementId)));
+
+        var receipt = await claim.Job.CompleteInitialInputRecoveryAsync(
+            new CompleteAgentJobInitialRecovery(recovery, "opencode", replacementId));
+        var session = await Grains.GetGrain<IAgentSessionGrain>(recovery.SessionId).GetAsync();
+        Assert.Equal("ready", receipt.Phase);
+        Assert.Equal(replacementId, receipt.RuntimeSessionId);
+        Assert.Equal(2, session!.ContextGeneration);
+    }
+
+    [Fact]
+    public async Task InitialInputStart_JobPersistFailureReloadsAndOnlySameLiveAttemptCanRecoverAuthority()
+    {
+        var claim = await CreateInitialRecoveryClaimAsync(manager: false);
+        var recovery = claim.Recovery with { RecoveryReason = AgentJobInitialRecoveryReasons.SameRuntimeMissing };
+        var replacementId = $"runtime-replacement-{Guid.NewGuid():N}";
+        await claim.Job.PrepareInitialInputRecoveryAsync(recovery);
+        await claim.Job.CompleteInitialInputRecoveryAsync(
+            new CompleteAgentJobInitialRecovery(recovery, "opencode", replacementId));
+        var start = new StartAgentJobInitialInput(
+            recovery.OperationId,
+            "live-invocation-1",
+            recovery.RunnerId,
+            recovery.WorkId,
+            recovery.ProcessGeneration,
+            recovery.SessionId,
+            recovery.InputId,
+            recovery.TurnId,
+            "opencode",
+            replacementId);
+        var failures = _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<ReportPersistenceFailureProbe>();
+        failures.FailNextAgentJobInitialInputPersist(claim.Job.GetPrimaryKeyString(), "started");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => claim.Job.StartInitialInputAsync(start));
+        await TestLifecycle.DeactivateAndWait(claim.Job, Grains);
+        var reloaded = JobGrain(claim.Job.GetPrimaryKeyString());
+        Assert.False((await reloaded.StartInitialInputAsync(
+            start with { SubmissionAttemptId = "distinct-invocation" })).SubmissionAuthorized);
+        Assert.True((await reloaded.StartInitialInputAsync(start)).SubmissionAuthorized);
+
+        var session = Grains.GetGrain<IAgentSessionGrain>(recovery.SessionId);
+        await session.MarkInitialTurnTerminalAsync(
+            claim.Job.GetPrimaryKeyString(), AgentTurnStatus.Failed, null);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => reloaded.StartInitialInputAsync(start));
+    }
+
     private async Task<(IAgentJobGrain Job, PrepareAgentJobInitialRecovery Recovery)> CreateInitialRecoveryClaimAsync(
         bool manager)
     {

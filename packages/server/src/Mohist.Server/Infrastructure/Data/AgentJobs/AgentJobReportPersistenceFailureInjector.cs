@@ -7,6 +7,8 @@ public interface IAgentJobReportPersistenceFailureInjector
     void BeforeActivitySettlementReminder(string agentJobId) { }
 
     void BeforeActivitySettlementPersist(string agentJobId) { }
+
+    void BeforeInitialInputPersist(string agentJobId, string phase) { }
 }
 
 public sealed class NoopAgentJobReportPersistenceFailureInjector : IAgentJobReportPersistenceFailureInjector
@@ -26,6 +28,10 @@ public sealed class NoopAgentJobReportPersistenceFailureInjector : IAgentJobRepo
     }
 
     public void BeforeActivitySettlementPersist(string agentJobId)
+    {
+    }
+
+    public void BeforeInitialInputPersist(string agentJobId, string phase)
     {
     }
 }

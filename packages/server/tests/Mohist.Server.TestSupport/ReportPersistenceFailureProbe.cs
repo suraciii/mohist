@@ -13,6 +13,7 @@ public sealed class ReportPersistenceFailureProbe :
     private readonly HashSet<(string OwnerId, string WorkId)> _agentJobFailures = [];
     private readonly HashSet<string> _activitySettlementReminderFailures = [];
     private readonly HashSet<string> _activitySettlementPersistFailures = [];
+    private readonly HashSet<(string AgentJobId, string Phase)> _initialInputPersistFailures = [];
 
     public void FailNextWorkflowReport(string workflowRunId, string workId)
     {
@@ -36,6 +37,12 @@ public sealed class ReportPersistenceFailureProbe :
     {
         lock (_gate)
             _activitySettlementPersistFailures.Add(agentJobId);
+    }
+
+    public void FailNextAgentJobInitialInputPersist(string agentJobId, string phase)
+    {
+        lock (_gate)
+            _initialInputPersistFailures.Add((agentJobId, phase));
     }
 
     void IWorkflowReportPersistenceFailureInjector.BeforePersist(string workflowRunId, string workId)
@@ -71,6 +78,15 @@ public sealed class ReportPersistenceFailureProbe :
         {
             if (_activitySettlementPersistFailures.Remove(agentJobId))
                 throw new AgentJobLedgerConflictException("Injected AgentJob settlement persistence conflict.");
+        }
+    }
+
+    void IAgentJobReportPersistenceFailureInjector.BeforeInitialInputPersist(string agentJobId, string phase)
+    {
+        lock (_gate)
+        {
+            if (_initialInputPersistFailures.Remove((agentJobId, phase)))
+                throw new InvalidOperationException("Injected AgentJob initial Input persistence failure.");
         }
     }
 }
