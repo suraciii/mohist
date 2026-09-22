@@ -159,7 +159,9 @@ public sealed class RunnerAdministrativeRemovalSpecs(AgentJobGrainFixture fixtur
                     new GenericAgentSessionContext("project-1", "agent-1", "Agent One"))));
             await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-session-1"));
             await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-                "input-1", "turn-1", "prompt", "agent-connection", "job-1"));
+                "input-1", "turn-1", "prompt", "agent-connection", "job-1",
+                Metadata: GenericAgentSessionMetadata.Metadata(
+                    new GenericAgentSessionContext("project-1", "agent-1", "Agent One"))));
             await session.MarkInitialTurnExecutingAsync("job-1");
 
             fixture.SessionStatePersistence.QueueFailures(1);

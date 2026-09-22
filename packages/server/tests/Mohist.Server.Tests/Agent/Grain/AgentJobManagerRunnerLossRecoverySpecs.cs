@@ -155,6 +155,12 @@ public sealed class AgentJobManagerRunnerLossRecoverySpecs : AgentJobGrainTestSu
             Prompt: "manager request",
             Source: "agent-launch",
             JobId: jobKey,
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = SlackDeliveryOwnerIds.ManagerProjectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "agent-test",
+            }),
             Provenance: new AgentSessionInputProvenance(
                 "slack",
                 "workspace-1",

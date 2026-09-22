@@ -147,7 +147,8 @@ public sealed partial class AgentSessionFollowupGrainSpecs
             TurnId: "initial-turn",
             Prompt: "initial prompt",
             Source: "agent-launch",
-            JobId: "initial-job"));
+            JobId: "initial-job",
+            Metadata: OpenCommand().Metadata));
         await grain.MarkInitialTurnExecutingAsync("initial-job");
         await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             Text: "queued after launch",
@@ -206,7 +207,8 @@ public sealed partial class AgentSessionFollowupGrainSpecs
             TurnId: "initial-idle-turn",
             Prompt: "initial prompt",
             Source: "agent-launch",
-            JobId: "initial-idle-job"));
+            JobId: "initial-idle-job",
+            Metadata: OpenCommand().Metadata));
         await grain.MarkInitialTurnExecutingAsync("initial-idle-job");
         var followup = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             Text: "continue after the initial run",
@@ -253,7 +255,8 @@ public sealed partial class AgentSessionFollowupGrainSpecs
             TurnId: "late-initial-turn",
             Prompt: "initial prompt",
             Source: "agent-launch",
-            JobId: initialJobId));
+            JobId: initialJobId,
+            Metadata: OpenCommand().Metadata));
         await grain.MarkInitialTurnTerminalAsync(initialJobId, AgentTurnStatus.Completed, null);
         var followup = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             Text: "continue while an old terminal close replays",

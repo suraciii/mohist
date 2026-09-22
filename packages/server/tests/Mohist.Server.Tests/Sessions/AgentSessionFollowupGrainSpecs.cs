@@ -143,6 +143,7 @@ public sealed partial class AgentSessionFollowupGrainSpecs
             Prompt: "initial prompt",
             Source: "agent-connection",
             JobId: "initial-job",
+            Metadata: OpenCommand().Metadata,
             Provenance: initialProvenance));
         await grain.MarkInitialTurnTerminalAsync("initial-job", AgentTurnStatus.Completed, null);
 

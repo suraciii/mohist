@@ -92,7 +92,36 @@ public class AgentSessionDomainTests
             metadata,
             new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc)));
 
-        Assert.Contains("agent labels", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("agent label", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PersistedWorkflowSourceWithoutAgentIdentity_RemainsStructurallyReadable()
+    {
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1")
+            .WithLabel("mohist.io/session-name", "build");
+
+        metadata.ValidateSource(allowLegacySource: true);
+        Assert.Throws<InvalidOperationException>(() => metadata.ValidateSource());
+    }
+
+    [Fact]
+    public void PersistedWorkflowSourceMissingRunOrName_StaysUnreadable()
+    {
+        var withoutRun = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/session-name", "build");
+        var withoutName = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1");
+
+        Assert.Throws<InvalidOperationException>(() => withoutRun.ValidateSource(allowLegacySource: true));
+        Assert.Throws<InvalidOperationException>(() => withoutName.ValidateSource(allowLegacySource: true));
     }
 
     [Fact]

@@ -299,11 +299,18 @@ public sealed record AgentSessionMetadata(
         if (string.Equals(kind, "workflow", StringComparison.Ordinal))
         {
             if (string.IsNullOrWhiteSpace(Label(WorkflowRunIdKey))
-                || string.IsNullOrWhiteSpace(Label(SessionNameKey))
-                || string.IsNullOrWhiteSpace(Label(AgentIdKey)))
+                || string.IsNullOrWhiteSpace(Label(SessionNameKey)))
             {
                 throw new InvalidOperationException(
-                    "Workflow AgentSession source requires workflow run, session name, and agent labels.");
+                    "Workflow AgentSession source requires workflow run and session name labels.");
+            }
+            // Persisted Workflow facts written before the agent label existed
+            // stay readable as incomplete owner evidence; every new creation
+            // and admission path validates strictly and never backfills.
+            if (!allowLegacySource && string.IsNullOrWhiteSpace(Label(AgentIdKey)))
+            {
+                throw new InvalidOperationException(
+                    "Workflow AgentSession source requires an agent label.");
             }
             return;
         }

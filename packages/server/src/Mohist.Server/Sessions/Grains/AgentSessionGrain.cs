@@ -683,38 +683,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         return result with { AttachmentResults = command.AttachmentResults };
     }
 
-    private static void EnsureExpectedFollowupIdentity(
-        AgentSession session,
-        AcceptFollowupCommand command)
-    {
-        var hasExpectedProject = command.ExpectedProjectId is not null;
-        var hasExpectedAgent = command.ExpectedAgentId is not null;
-        if (!hasExpectedProject && !hasExpectedAgent)
-            return;
-        if (!hasExpectedProject
-            || !hasExpectedAgent
-            || string.IsNullOrWhiteSpace(command.ExpectedProjectId)
-            || string.IsNullOrWhiteSpace(command.ExpectedAgentId))
-        {
-            throw new ArgumentException(
-                "Expected project and Agent identities must be supplied together.",
-                nameof(command));
-        }
-
-        var actualProjectId = session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId);
-        var actualAgentId = session.Metadata.Label(GenericAgentSessionMetadata.AgentId);
-        if (!string.Equals(actualProjectId, command.ExpectedProjectId, StringComparison.Ordinal)
-            || !string.Equals(actualAgentId, command.ExpectedAgentId, StringComparison.Ordinal))
-        {
-            throw new AgentSessionIdentityMismatchException(
-                session.Id,
-                command.ExpectedProjectId,
-                command.ExpectedAgentId,
-                actualProjectId,
-                actualAgentId);
-        }
-    }
-
     private static bool AttachmentSetEquivalent(
         IReadOnlyList<AgentSessionInputAttachmentDescriptor>? persisted,
         IReadOnlyList<AgentSessionInputAttachmentDescriptor>? supplied)
@@ -2382,6 +2350,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         }
         else
         {
+            EnsureInitialLaunchIdentity(_session, command);
             CheckInputsAndTurns(command, out alreadyPersisted);
         }
 

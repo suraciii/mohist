@@ -225,7 +225,8 @@ public sealed class AgentSessionActivityConvergenceGrainSpecs : AgentSessionGrai
     {
         var grain = await BoundGrainAsync();
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            "removal-input", "removal-turn", "prompt", "agent-connection", "removal-job"));
+            "removal-input", "removal-turn", "prompt", "agent-connection", "removal-job",
+            Metadata: Open().Metadata));
         await grain.MarkInitialTurnExecutingAsync("removal-job");
         Assert.Equal(AgentSessionActivity.Active, SavedActivity());
         Assert.Null(await grain.PrepareActivityProbeAsync("runner-1"));
@@ -290,7 +291,8 @@ public sealed class AgentSessionActivityConvergenceGrainSpecs : AgentSessionGrai
     {
         var grain = await BoundGrainAsync();
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            "competing-input", "competing-turn", "prompt", "agent-connection", "competing-job"));
+            "competing-input", "competing-turn", "prompt", "agent-connection", "competing-job",
+            Metadata: Open().Metadata));
         await grain.MarkInitialTurnExecutingAsync("competing-job");
         var request = await grain.PrepareActivityProbeAsync("runner-1", runnerRemoved: true);
         Assert.NotNull(request);
@@ -349,7 +351,8 @@ public sealed class AgentSessionActivityConvergenceGrainSpecs : AgentSessionGrai
     {
         var grain = await BoundGrainAsync();
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            "phase-stop-input", "phase-stop-turn", "prompt", "agent-connection", "phase-stop-job"));
+            "phase-stop-input", "phase-stop-turn", "prompt", "agent-connection", "phase-stop-job",
+            Metadata: Open().Metadata));
         await grain.MarkInitialTurnExecutingAsync("phase-stop-job");
         var claim = await grain.ClaimTurnStopAsync("phase-stop-turn", "phase-stop-operation");
         var request = await grain.PrepareActivityProbeAsync("runner-1", runnerRemoved: true);
@@ -438,7 +441,8 @@ public sealed class AgentSessionActivityConvergenceGrainSpecs : AgentSessionGrai
     {
         var grain = await BoundGrainAsync();
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            "stop-input", "stop-turn", "prompt", "agent-connection", "stop-job"));
+            "stop-input", "stop-turn", "prompt", "agent-connection", "stop-job",
+            Metadata: Open().Metadata));
         await grain.MarkInitialTurnExecutingAsync("stop-job");
         var claim = await grain.ClaimTurnStopAsync("stop-turn", "stop-operation");
         Assert.True(claim.CanDispatch);
@@ -462,7 +466,8 @@ public sealed class AgentSessionActivityConvergenceGrainSpecs : AgentSessionGrai
     {
         var grain = await BoundGrainAsync();
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            "old-stop-input", "old-stop-turn", "prompt", "agent-connection", "old-stop-job"));
+            "old-stop-input", "old-stop-turn", "prompt", "agent-connection", "old-stop-job",
+            Metadata: Open().Metadata));
         await grain.MarkInitialTurnExecutingAsync("old-stop-job");
         await grain.ClaimTurnStopAsync("old-stop-turn", "old-stop-operation");
         var request = await grain.PrepareActivityProbeAsync("runner-1", runnerRemoved: true);
@@ -542,7 +547,8 @@ public sealed class AgentSessionActivityConvergenceGrainSpecs : AgentSessionGrai
         AgentTurnStatus status)
     {
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            "initial-input", "initial-turn", "initial prompt", "agent-connection", jobId));
+            "initial-input", "initial-turn", "initial prompt", "agent-connection", jobId,
+            Metadata: Open().Metadata));
         await grain.MarkInitialTurnExecutingAsync(jobId);
         await grain.MarkInitialTurnTerminalAsync(jobId, status, null);
     }

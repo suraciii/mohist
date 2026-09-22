@@ -36,6 +36,79 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Load_WorkflowStateWithoutAgentIdentity_RemainsInspectableWithoutRewrite()
+    {
+        var createdAt = new DateTime(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc);
+        var session = AgentSession.Create(
+            $"incomplete-workflow-{Guid.NewGuid():N}",
+            "runner-1",
+            "/work",
+            metadata: WorkflowMetadata(),
+            now: createdAt,
+            runtime: "opencode");
+        session.AttachPhysicalSession(
+            "runtime-session-incomplete",
+            model: null,
+            workDir: "/work",
+            changeDir: null,
+            processPid: null,
+            now: createdAt.AddMinutes(1));
+        session.Status = session.Status with
+        {
+            Inputs = [new("input-1", 1, "persisted prompt", "workflow", AgentSessionInputAcceptance.Accepted, createdAt, JobId: "job-1", ContextGeneration: 1)],
+            Turns = [new("turn-1", 1, ["input-1"], AgentTurnStatus.Completed, "job-1", RecordedAt: createdAt, ContextGeneration: 1)],
+        };
+        await _store.SaveAsync(session.Id, session);
+
+        string incompleteState;
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            var row = await db.AgentSessions.SingleAsync(candidate => candidate.Id == session.Id);
+            var state = JsonNode.Parse(row.State)!.AsObject();
+            // Simulates a Workflow document persisted before the canonical
+            // agent label existed: the row is written directly, not blessed
+            // through the creation API.
+            state["metadata"]!["labels"]!.AsObject().Remove("mohist.io/agent-id");
+            incompleteState = state.ToJsonString();
+            row.State = incompleteState;
+            await db.SaveChangesAsync();
+        }
+
+        var loaded = await _store.LoadAsync(session.Id);
+
+        Assert.NotNull(loaded);
+        Assert.Null(loaded!.Metadata.Label("mohist.io/agent-id"));
+        Assert.Equal("workflow", loaded.Metadata.Label("mohist.io/source-kind"));
+        Assert.Equal("project-1", loaded.Metadata.Label("mohist.io/project-id"));
+        Assert.Equal("workflow-1", loaded.Metadata.Label("mohist.io/source-id"));
+        Assert.Equal("build", loaded.Metadata.Label("mohist.io/session-name"));
+        Assert.Equal("runtime-session-incomplete", loaded.Status.AgentRuntimeSessionId);
+        var input = Assert.Single(loaded.Status.Inputs!);
+        Assert.Equal("persisted prompt", input.Text);
+        var turn = Assert.Single(loaded.Status.Turns!);
+        Assert.Equal(AgentTurnStatus.Completed, turn.Status);
+        Assert.Contains(loaded.Id, (await _store.ListAsync()).Select(candidate => candidate.Id));
+        await using var verificationDb = new MohistDbContext(_database.Options);
+        var persistedState = await verificationDb.AgentSessions
+            .Where(candidate => candidate.Id == session.Id)
+            .Select(candidate => candidate.State)
+            .SingleAsync();
+        Assert.Equal(incompleteState, persistedState);
+
+        var strippedMetadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1")
+            .WithLabel("mohist.io/session-name", "build");
+        Assert.Throws<InvalidOperationException>(() => AgentSession.Create(
+            "rejected-incomplete-workflow",
+            "runner-1",
+            "/work",
+            strippedMetadata,
+            createdAt));
+    }
+
+    [Fact]
     public async Task SaveAndLoad_PreservesCurrentRuntimeBindingAndLineage()
     {
         var createdAt = new DateTime(2026, 7, 15, 0, 0, 0, DateTimeKind.Utc);

@@ -35,7 +35,12 @@ public partial class AgentJobGrainSpecs
                 .WithLabel("mohist.io/source-id", jobKey)
                 .WithLabel("mohist.io/agent-id", "agent-test")));
         await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            inputId, turnId, "recover me", "agent-connection", jobKey, Runtime: "opencode", WorkDir: "/tmp/initial-recovery"));
+            inputId, turnId, "recover me", "agent-connection", jobKey, Runtime: "opencode", WorkDir: "/tmp/initial-recovery",
+            Metadata: new AgentSessionMetadata()
+                .WithLabel("mohist.io/project-id", projectId)
+                .WithLabel("mohist.io/source-kind", "agent-launch")
+                .WithLabel("mohist.io/source-id", jobKey)
+                .WithLabel("mohist.io/agent-id", "agent-test")));
         await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
             oldRuntimeSessionId, WorkDir: "/tmp/initial-recovery", Runtime: "opencode"));
         await job.SubmitAsync(MakeInput("recover me", projectId, "/tmp/initial-recovery") with
@@ -260,7 +265,12 @@ public partial class AgentJobGrainSpecs
             "agent-connection",
             jobKey,
             Runtime: "opencode",
-            WorkDir: "/tmp/initial-recovery-guard"));
+            WorkDir: "/tmp/initial-recovery-guard",
+            Metadata: new AgentSessionMetadata()
+                .WithLabel("mohist.io/project-id", projectId)
+                .WithLabel("mohist.io/source-kind", "agent-launch")
+                .WithLabel("mohist.io/source-id", jobKey)
+                .WithLabel("mohist.io/agent-id", "agent-test")));
         await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
             runtimeSessionId,
             WorkDir: "/tmp/initial-recovery-guard",

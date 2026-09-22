@@ -57,6 +57,13 @@ public sealed class AgentJobSubagentTerminalCallbackSpecs : AgentJobGrainTestSup
             childLaunchJobId,
             Runtime: "opencode",
             WorkDir: "/workspace",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "child-agent",
+                [GenericAgentSessionMetadata.AgentName] = "child-agent",
+            }),
             AgentSessionStartup: new AgentSessionStartup(
                 projectId,
                 childSessionId,
@@ -143,7 +150,14 @@ public sealed class AgentJobSubagentTerminalCallbackSpecs : AgentJobGrainTestSup
             SessionTreeExpectedLinkState.Absent));
         Assert.Equal(SessionTreeAttachMutationState.Attached, attached.State);
         await child.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            inputId, turnId, "child work", "agent-launch", childJobId));
+            inputId, turnId, "child work", "agent-launch", childJobId,
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "child-agent",
+                [GenericAgentSessionMetadata.AgentName] = "child-agent",
+            })));
 
         var job = JobGrain(childJobId);
         await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
@@ -224,7 +238,14 @@ public sealed class AgentJobSubagentTerminalCallbackSpecs : AgentJobGrainTestSup
             initialTurnId,
             "child work",
             "agent-launch",
-            childLaunchJobId));
+            childLaunchJobId,
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "child-agent",
+                [GenericAgentSessionMetadata.AgentName] = "child-agent",
+            })));
 
         var job = JobGrain(childLaunchJobId);
         await job.SubmitAsync(new AgentJobInput(
@@ -313,7 +334,14 @@ public sealed class AgentJobSubagentTerminalCallbackSpecs : AgentJobGrainTestSup
             initialTurnId,
             "child work",
             "agent-launch",
-            childLaunchJobId));
+            childLaunchJobId,
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "child-agent",
+                [GenericAgentSessionMetadata.AgentName] = "child-agent",
+            })));
 
         var job = JobGrain(childLaunchJobId);
         await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
@@ -421,6 +449,13 @@ public sealed class AgentJobSubagentTerminalCallbackSpecs : AgentJobGrainTestSup
             childLaunchJobId,
             Runtime: "opencode",
             WorkDir: "/workspace",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "child-agent",
+                [GenericAgentSessionMetadata.AgentName] = "child-agent",
+            }),
             AgentSessionStartup: new AgentSessionStartup(
                 projectId,
                 childSessionId,

@@ -68,6 +68,12 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport, IClassFixt
             "manager request",
             "agent-launch",
             "manager-route-job",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = SlackDeliveryOwnerIds.ManagerProjectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "manager-agent",
+            }),
             Provenance: provenance));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-route"));
         await grain.MarkInitialTurnTerminalAsync("manager-route-job", AgentTurnStatus.Completed, null);
@@ -189,6 +195,14 @@ public class AgentSessionRuntimeEventSpecs : AgentSessionTestSupport, IClassFixt
             "manager request",
             "agent-connection",
             "manager-initial-job",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = SlackDeliveryOwnerIds.ManagerProjectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-connection",
+                [AgentSessionQueryMetadataKeys.ConnectionId] = enrollmentId,
+                [AgentSessionQueryMetadataKeys.OriginMarker] = AgentOriginMarkers.SlackManager,
+                [GenericAgentSessionMetadata.AgentId] = "manager-agent",
+            }),
             Provenance: initialProvenance));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-initial-recovery"));
         await grain.MarkInitialTurnTerminalAsync("manager-initial-job", AgentTurnStatus.Unknown, null);

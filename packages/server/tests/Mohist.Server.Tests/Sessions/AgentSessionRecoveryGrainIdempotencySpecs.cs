@@ -159,7 +159,8 @@ public sealed partial class AgentSessionRecoveryGrainSpecs
         await grain.OpenAsync(OpenCommand());
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-active"));
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            "active-input", "active-turn", "active work", "agent-connection", "active-job"));
+            "active-input", "active-turn", "active work", "agent-connection", "active-job",
+            Metadata: OpenCommand().Metadata));
         await grain.MarkInitialTurnExecutingAsync("active-job");
         var saveCountBefore = _fixture.StateStore.SaveCount;
         var eventCountBefore = _fixture.StateStore.Events.Count;

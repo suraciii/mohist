@@ -38,7 +38,9 @@ public sealed class AgentJobCancellationSpecs : AgentJobGrainTestSupport
             InputId: $"input-{Guid.NewGuid():N}",
             TurnId: turnId,
             Prompt: "cancel me",
-            Source: "agent-launch"));
+            Source: "agent-launch",
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
+                "cancel-project", "cancel-agent", "cancel-agent"))));
         await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
             SessionId: sessionId,
             InputId: (await session.GetInitialLaunchAsync())!.Input!.Id,

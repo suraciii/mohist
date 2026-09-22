@@ -278,6 +278,11 @@ public sealed class RunnerInitialInputAuthorityApiSpecs
             "agent-connection",
             jobId,
             Runtime: "opencode",
+            Metadata: new AgentSessionMetadata()
+                .WithLabel("mohist.io/project-id", projectId)
+                .WithLabel("mohist.io/source-kind", "agent-launch")
+                .WithLabel("mohist.io/source-id", jobId)
+                .WithLabel("mohist.io/agent-id", "agent-test"),
             WorkDir: workDir));
         await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
             runtimeSessionId,

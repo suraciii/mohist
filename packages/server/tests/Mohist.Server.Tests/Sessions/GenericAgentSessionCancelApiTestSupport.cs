@@ -210,7 +210,8 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
             Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(project.Id, "launch-stop-agent", "launch-stop-agent"))));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand($"runtime-{Guid.NewGuid():N}", workDir));
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            inputId, turnId, "stop this launch", "agent-launch", jobId));
+            inputId, turnId, "stop this launch", "agent-launch", jobId,
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(project.Id, "launch-stop-agent", "launch-stop-agent"))));
 
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
         await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(

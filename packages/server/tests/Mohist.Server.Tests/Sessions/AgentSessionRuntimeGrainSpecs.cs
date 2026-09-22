@@ -106,7 +106,8 @@ public sealed class AgentSessionRuntimeGrainSpecs
         var grain = NewGrain();
         await grain.OpenAsync(OpenCommand());
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job"));
+            "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job",
+            Metadata: OpenCommand().Metadata));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-session-1"));
 
         var sessionId = grain.GetPrimaryKeyString();
@@ -135,7 +136,8 @@ public sealed class AgentSessionRuntimeGrainSpecs
         var grain = NewGrain();
         await grain.OpenAsync(OpenCommand());
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job"));
+            "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job",
+            Metadata: OpenCommand().Metadata));
 
         var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             "continue", "agent-session-followup", "pending-launch-key", AllowPendingInitialLaunch: true));
@@ -151,7 +153,8 @@ public sealed class AgentSessionRuntimeGrainSpecs
         var grain = NewGrain();
         await grain.OpenAsync(OpenCommand());
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job"));
+            "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job",
+            Metadata: OpenCommand().Metadata));
 
         var sessionId = grain.GetPrimaryKeyString();
         var launched = await _fixture.StateStore.LoadAsync(sessionId);
@@ -177,7 +180,8 @@ public sealed class AgentSessionRuntimeGrainSpecs
         var grain = NewGrain();
         await grain.OpenAsync(OpenCommand());
         await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job"));
+            "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job",
+            Metadata: OpenCommand().Metadata));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-session-1"));
 
         var sessionId = grain.GetPrimaryKeyString();

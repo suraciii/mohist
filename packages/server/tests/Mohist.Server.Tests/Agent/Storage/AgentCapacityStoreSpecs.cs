@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -172,6 +173,32 @@ public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
         Assert.Single(claimed.Session.Status.Inputs!);
         Assert.Single(claimed.Session.Status.PendingTranscriptEvidence!);
         Assert.Equal(Now, Assert.Single(claimed.Session.Status.Turns!).CapacityClaimedAt);
+    }
+
+    [Fact]
+    public async Task ClaimTurn_OnWorkflowSessionWithoutAgentIdentity_ReturnsIncompleteWithoutWrite()
+    {
+        await AddAgentAsync("project", "agent", 1);
+        var session = NewQueuedSession("session", "turn", "project", "agent", Now.UtcDateTime);
+        var row = AgentSessionJson.ToRow(session, Now.UtcDateTime);
+        var state = JsonNode.Parse(row.State)!.AsObject();
+        // Persisted Workflow owner evidence missing the canonical agent
+        // label: incomplete, never guessed into an attribution.
+        state["metadata"]!["labels"]!.AsObject().Remove("mohist.io/agent-id");
+        row.State = state.ToJsonString();
+        await using (var db = _database.CreateContext())
+        {
+            db.AgentSessions.Add(row);
+            await db.SaveChangesAsync();
+        }
+
+        var claim = await Store.ClaimTurnAsync("session", row.State, "turn");
+
+        Assert.Equal(AgentCapacityClaimDisposition.Incomplete, claim.Disposition);
+        Assert.Null(claim.Capacity);
+        await using var verifyDb = _database.CreateContext();
+        var persisted = await verifyDb.AgentSessions.SingleAsync(candidate => candidate.Id == "session");
+        Assert.Equal(row.State, persisted.State);
     }
 
     [Fact]

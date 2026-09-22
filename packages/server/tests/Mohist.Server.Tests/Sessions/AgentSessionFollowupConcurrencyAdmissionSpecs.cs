@@ -164,7 +164,8 @@ public partial class AgentSessionFollowupConcurrencySpecs
         // A real current execution owner makes the Session busy; unattributed
         // active evidence cannot create ownership on an otherwise idle Session.
         await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-            "busy-input", "busy-turn", "busy work", "agent-connection", "busy-job"));
+            "busy-input", "busy-turn", "busy work", "agent-connection", "busy-job",
+            Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(projectId, agentId, $"agent-{agentId}"))));
         await session.MarkInitialTurnExecutingAsync("busy-job");
 
         var reservation = await session.BeginFollowupAsync();
