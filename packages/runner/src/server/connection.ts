@@ -431,31 +431,6 @@ export class ServerConnection {
     )
   }
 
-  async recoverMissingWorkflowAgentSession(
-    projectId: string,
-    workflowRunId: string,
-    sessionName: string,
-    body: unknown,
-    signal: AbortSignal,
-  ): Promise<WorkflowAgentSession> {
-    const response = await this.requestTransport.request(
-      'recoverMissingWorkflowAgentSession',
-      this.url(
-        `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/recover-missing`,
-      ),
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-        signal,
-      },
-    )
-    return requireWorkflowSessionPayload(
-      await this.requestTransport.readJson<unknown>(response, 'recoverMissingWorkflowAgentSession'),
-      'recoverMissingWorkflowAgentSession',
-    )
-  }
-
   async resetWorkflowAgentSession(
     projectId: string,
     workflowRunId: string,

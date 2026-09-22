@@ -192,6 +192,35 @@ describe('ServerConnection.attachAgentSession (generic)', () => {
   })
 })
 
+describe('ServerConnection.recoverMissingAgentSession (canonical)', () => {
+  it('RecoverMissingAgentSession_PostsToCanonicalAgentSessionUrl', async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockResponse({
+        status: 200,
+        body: JSON.stringify({ runtimeSessionId: 'runtime-new', runtime: 'pi', workDir: '/work' }),
+      }),
+    )
+    const connection = new ServerConnection(options())
+    const body = {
+      expectedRunnerId: 'runner-1',
+      expectedRuntime: 'opencode',
+      expectedRuntimeSessionId: 'runtime-old',
+      replacementRuntimeSessionId: 'runtime-new',
+      replacementRuntime: 'pi',
+      expectedQueuedTurnId: 'turn-1',
+    }
+
+    await expect(
+      connection.recoverMissingAgentSession('project-1', 'session-abc', body, new AbortController().signal),
+    ).resolves.toEqual({ runtimeSessionId: 'runtime-new', runtime: 'pi', workDir: '/work' })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toMatch(/\/api\/runner\/runner-1\/agent-sessions\/project-1\/session-abc\/recover-missing$/)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual(body)
+  })
+})
+
 describe('ServerConnection.resetWorkflowAgentSession', () => {
   it('ResetWorkflowAgentSession_RejectsAResponseWithoutSessionId', async () => {
     fetchMock.mockResolvedValueOnce(
