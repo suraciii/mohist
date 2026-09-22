@@ -8,19 +8,20 @@ namespace Mohist.Server.Infrastructure.Capacity;
 internal static class AgentCapacityFacts
 {
     internal static bool Occupies(AgentJobState job) =>
-        job.CapacityClaimedAt is not null
-        && job.TerminalAt is null
-        && job.Status is AgentJobStatus.Pending or AgentJobStatus.Running or AgentJobStatus.Unknown;
+        job.TerminalAt is null
+        && (job.Status is AgentJobStatus.Running or AgentJobStatus.Unknown
+            || job.Status == AgentJobStatus.Pending && job.CapacityClaimedAt is not null);
 
     internal static bool Occupies(AgentSession session, AgentTurnRecord turn) =>
-        turn.CapacityClaimedAt is not null
-        && string.IsNullOrWhiteSpace(turn.JobId)
+        string.IsNullOrWhiteSpace(turn.JobId)
         && turn.SupersededAt is null
         && turn.ContextGeneration == session.Status.ContextGeneration
-        && turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing or AgentTurnStatus.Unknown;
+        && (turn.Status is AgentTurnStatus.Executing or AgentTurnStatus.Unknown
+            || turn.Status == AgentTurnStatus.Queued && turn.CapacityClaimedAt is not null);
 
     internal static bool IsEligible(AgentJobState job) =>
         job.Status == AgentJobStatus.Pending
+        && job.LaunchVisibility == AgentLaunchVisibility.Visible
         && job.TerminalAt is null
         && job.CapacityClaimedAt is null
         && job.SubmittedAt is not null

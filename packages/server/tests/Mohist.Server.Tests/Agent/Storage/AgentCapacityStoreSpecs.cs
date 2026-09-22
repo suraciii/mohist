@@ -78,24 +78,31 @@ public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Read_CountsUnknownOwnersWithoutActivityFilterAndExcludesInitialOldAndSupersededTurns()
+    public async Task Read_DerivesIntrinsicExecutionOccupancyWithoutCountingUnclaimedQueues()
     {
-        await AddAgentAsync("project", "agent", 5);
-        await AddJobAsync("unknown-job", "project", "agent", Now, AgentJobStatus.Unknown, Now);
-        var session = NewSession("session", "project", "agent", AgentSessionActivity.Idle,
+        await AddAgentAsync("project", "agent", 4);
+        await AddJobAsync("running-job", "project", "agent", Now, AgentJobStatus.Running);
+        await AddJobAsync("unknown-job", "project", "agent", Now.AddSeconds(1), AgentJobStatus.Unknown);
+        var pending = await AddJobAsync("pending-job", "project", "agent", Now.AddSeconds(2));
+        await AddSessionAsync(NewSession("executing", "project", "agent", AgentSessionActivity.Idle,
+            [Turn("executing", 1, AgentTurnStatus.Executing, generation: 1)]));
+        await AddSessionAsync(NewSession("unknown", "project", "agent", AgentSessionActivity.Idle,
+            [Turn("unknown", 1, AgentTurnStatus.Unknown, generation: 1)]));
+        await AddSessionAsync(NewSession("excluded", "project", "agent", AgentSessionActivity.Active,
         [
-            Turn("unknown", 1, AgentTurnStatus.Unknown, generation: 1, claimedAt: Now),
-            Turn("initial", 2, AgentTurnStatus.Executing, generation: 1, claimedAt: Now, jobId: "job"),
-            Turn("old", 3, AgentTurnStatus.Executing, generation: 0, claimedAt: Now),
-            Turn("superseded", 4, AgentTurnStatus.Executing, generation: 1, claimedAt: Now, supersededAt: Now.UtcDateTime),
+            Turn("queued-unclaimed", 1, AgentTurnStatus.Queued, generation: 1),
+            Turn("initial", 2, AgentTurnStatus.Executing, generation: 1, jobId: "job"),
+            Turn("old", 3, AgentTurnStatus.Executing, generation: 0),
+            Turn("superseded", 4, AgentTurnStatus.Unknown, generation: 1, supersededAt: Now.UtcDateTime),
             Turn("terminal", 5, AgentTurnStatus.Completed, generation: 1, claimedAt: Now),
-        ]);
-        await AddSessionAsync(session);
+        ]));
 
         var snapshot = (await Store.ReadAsync("project", ["agent"]))["agent"];
+        var blocked = await Store.ClaimJobAsync("pending-job", pending.Revision);
 
         Assert.Equal(AgentCapacityEvidenceStatus.Complete, snapshot.EvidenceStatus);
-        Assert.Equal(2, snapshot.Occupied);
+        Assert.Equal(4, snapshot.Occupied);
+        Assert.Equal(AgentCapacityClaimDisposition.CapacityFull, blocked.Disposition);
     }
 
     [Fact]

@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Capacity;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Tests.Support;
 using Xunit;
@@ -38,6 +39,29 @@ public sealed class AgentCapacityLivePolicySpecs : IAsyncLifetime
         await SetLimitAsync("project", "agent", null);
         var claimed = await Store.ClaimJobAsync("queued", queued.Revision);
         Assert.Equal(AgentCapacityClaimDisposition.Claimed, claimed.Disposition);
+    }
+
+    [Fact]
+    public async Task OlderProvisionalJob_IsIneligibleAndDoesNotBlockVisibleContender()
+    {
+        await AddAgentAsync("visibility", "agent", 1);
+        var provisional = await AddJobAsync(
+            "a-provisional",
+            "visibility",
+            "agent",
+            submittedAt: Now.AddMinutes(-1),
+            visibility: AgentLaunchVisibility.Provisional);
+        var visible = await AddJobAsync(
+            "z-visible",
+            "visibility",
+            "agent",
+            submittedAt: Now,
+            visibility: AgentLaunchVisibility.Visible);
+
+        Assert.Equal(AgentCapacityClaimDisposition.NotEligible,
+            (await Store.ClaimJobAsync("a-provisional", provisional.Revision)).Disposition);
+        Assert.Equal(AgentCapacityClaimDisposition.Claimed,
+            (await Store.ClaimJobAsync("z-visible", visible.Revision)).Disposition);
     }
 
     [Fact]
@@ -110,13 +134,16 @@ public sealed class AgentCapacityLivePolicySpecs : IAsyncLifetime
         string key,
         string projectId,
         string agentId,
-        DateTimeOffset? claimedAt = null)
+        DateTimeOffset? claimedAt = null,
+        DateTimeOffset? submittedAt = null,
+        AgentLaunchVisibility visibility = AgentLaunchVisibility.Visible)
     {
         var state = new AgentJobState
         {
             Input = new AgentJobInput("prompt", ProjectId: projectId, AgentId: agentId),
-            SubmittedAt = Now,
+            SubmittedAt = submittedAt ?? Now,
             CapacityClaimedAt = claimedAt,
+            LaunchVisibility = visibility,
         };
         var store = new AgentJobStore(
             new TestDbContextFactory(_database.Options),
@@ -124,6 +151,7 @@ public sealed class AgentCapacityLivePolicySpecs : IAsyncLifetime
             _time);
         return await store.InsertLedgerAsync(new AgentJobLedgerRecord(
             key, JSON.Serialize(state), 0, null, null, null, null, null,
-            "agent-job", "agent", key, projectId, null, null, null, null));
+            "agent-job", "agent", key, projectId, null, null, null, null,
+            LaunchVisibility: visibility.ToString().ToLowerInvariant()));
     }
 }
