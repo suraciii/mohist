@@ -29,9 +29,15 @@ public sealed class RunnerState
     [Id(9)] public RunnerEnvironmentObservation? EnvironmentObservation { get; set; }
     /// <summary>
     /// Durable administrative authority-removal operation. It remains after
-    /// settlement until a new active credential authenticates the same Runner.
+    /// settlement until a request presents a different active credential for
+    /// the same Runner.
     /// </summary>
     [Id(10)] public RunnerAdministrativeRemoval? AdministrativeRemoval { get; set; }
+    /// <summary>
+    /// Exact issued credential that admitted <see cref="CurrentProcessGeneration"/>.
+    /// Null means the process was admitted through an explicit operator override.
+    /// </summary>
+    [Id(11)] public string? CurrentRegistrationCredentialId { get; set; }
 }
 
 [GenerateSerializer]

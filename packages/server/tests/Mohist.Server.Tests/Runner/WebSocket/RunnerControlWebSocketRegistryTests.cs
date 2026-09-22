@@ -126,6 +126,7 @@ public sealed class RunnerControlWebSocketRegistryTests
             reservation,
             fixture.Socket,
             new RunnerControlHandshake(null, null, null, null, null, null, null, null, null),
+            OperatorAuthority,
             TestContext.Current.CancellationToken));
 
         Assert.False(fixture.Registry.IsConnected("runner-1"));
@@ -142,6 +143,7 @@ public sealed class RunnerControlWebSocketRegistryTests
             reservation,
             fixture.Socket,
             new RunnerControlHandshake(null, null, null, null, null, null, null, null, "stale-generation"),
+            OperatorAuthority,
             TestContext.Current.CancellationToken));
 
         Assert.False(fixture.Registry.IsConnected("runner-1"));
@@ -166,7 +168,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         using var stop = new CancellationTokenSource();
         Assert.True(registry.TryReserve(connectionId, out var reservation));
 
-        var run = registry.RunAsync(runnerId, reservation, socket, Handshake(), stop.Token);
+        var run = registry.RunAsync(runnerId, reservation, socket, Handshake(), OperatorAuthority, stop.Token);
         await probes.Started.WaitAsync(TestContext.Current.CancellationToken);
 
         Assert.True(probes.WasCurrentWhenStarted);
@@ -175,6 +177,25 @@ public sealed class RunnerControlWebSocketRegistryTests
         await run;
         await probes.Cancelled.WaitAsync(TestContext.Current.CancellationToken);
         Assert.Equal(1, probes.CallCount);
+    }
+
+    [Fact]
+    public async Task ControlAdmissionRejectsCredentialDifferentFromRegisteredAuthority()
+    {
+        var fixture = RegistryFixture();
+        fixture.Runner.CurrentCredentialId = "credential-b";
+        Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var reservation));
+
+        await Assert.ThrowsAsync<RunnerControlUnavailableException>(() => fixture.Registry.RunAsync(
+            "runner-1",
+            reservation,
+            fixture.Socket,
+            Handshake(),
+            new RunnerPresentedAuthority("credential-a", OperatorOverride: false),
+            TestContext.Current.CancellationToken));
+
+        Assert.False(fixture.Registry.IsConnected("runner-1"));
+        Assert.Equal(0, fixture.Socket.SendCount);
     }
 
     [Fact]
@@ -199,7 +220,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         using var stop = new CancellationTokenSource();
         Assert.True(registry.TryReserve(connectionId, out var reservation));
 
-        var run = registry.RunAsync(runnerId, reservation, socket, Handshake(), stop.Token);
+        var run = registry.RunAsync(runnerId, reservation, socket, Handshake(), OperatorAuthority, stop.Token);
         var result = await probes.Result.WaitAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(RunnerSessionActivityObservations.Idle, result.Observation);
@@ -218,7 +239,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         using var currentStop = new CancellationTokenSource();
         Assert.True(fixture.Registry.TryReserve(currentId, out var currentReservation));
         var currentRun = fixture.Registry.RunAsync(
-            runnerId, currentReservation, fixture.Socket, Handshake(), currentStop.Token);
+            runnerId, currentReservation, fixture.Socket, Handshake(), OperatorAuthority, currentStop.Token);
         await fixture.Registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
 
         var replacementId = Guid.NewGuid();
@@ -233,7 +254,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         };
         Assert.True(fixture.Registry.TryReserve(replacementId, out var replacementReservation));
         var replacementRun = fixture.Registry.RunAsync(
-            runnerId, replacementReservation, replacementSocket, Handshake(), TestContext.Current.CancellationToken);
+            runnerId, replacementReservation, replacementSocket, Handshake(), OperatorAuthority, TestContext.Current.CancellationToken);
         await acquired.Task.WaitAsync(TestContext.Current.CancellationToken);
         fixture.Runner.CurrentGeneration = "replacement-generation";
         release.TrySetResult();
@@ -264,6 +285,7 @@ public sealed class RunnerControlWebSocketRegistryTests
             reservation,
             fixture.Socket,
             Handshake(),
+            OperatorAuthority,
             TestContext.Current.CancellationToken);
         await validated.Task.WaitAsync(TestContext.Current.CancellationToken);
 
@@ -295,6 +317,7 @@ public sealed class RunnerControlWebSocketRegistryTests
             replacementSocket,
             new RunnerControlHandshake(
                 null, null, null, null, null, null, null, null, "replacement-generation"),
+            OperatorAuthority,
             replacementStop.Token);
         await fixture.Registry.WaitForConnectionAsync(
             runnerId,
@@ -312,7 +335,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         using var stop = new CancellationTokenSource();
         Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var reservation));
         var run = fixture.Registry.RunAsync(
-            runnerId, reservation, fixture.Socket, Handshake(), stop.Token);
+            runnerId, reservation, fixture.Socket, Handshake(), OperatorAuthority, stop.Token);
         await fixture.Registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
 
         var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -348,7 +371,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         using var oldStop = new CancellationTokenSource();
         Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var oldReservation));
         var oldRun = fixture.Registry.RunAsync(
-            runnerId, oldReservation, fixture.Socket, Handshake(), oldStop.Token);
+            runnerId, oldReservation, fixture.Socket, Handshake(), OperatorAuthority, oldStop.Token);
         await fixture.Registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
 
         fixture.Registry.SessionCommandGenerationValidatedAsync = async (_, _, ct) =>
@@ -364,6 +387,7 @@ public sealed class RunnerControlWebSocketRegistryTests
                 replacementReservation,
                 replacementSocket,
                 new RunnerControlHandshake(null, null, null, null, null, null, null, null, "replacement-generation"),
+                OperatorAuthority,
                 replacementStop.Token);
             await oldRun.WaitAsync(ct);
             await fixture.Registry.WaitForConnectionAsync(runnerId, ct);
@@ -390,7 +414,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         using var oldStop = new CancellationTokenSource();
         Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var oldReservation));
         var oldRun = fixture.Registry.RunAsync(
-            runnerId, oldReservation, fixture.Socket, Handshake(), oldStop.Token);
+            runnerId, oldReservation, fixture.Socket, Handshake(), OperatorAuthority, oldStop.Token);
         await fixture.Registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
 
         var validationReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -425,7 +449,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         using var oldStop = new CancellationTokenSource();
         Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var oldReservation));
         var oldRun = fixture.Registry.RunAsync(
-            runnerId, oldReservation, fixture.Socket, Handshake(), oldStop.Token);
+            runnerId, oldReservation, fixture.Socket, Handshake(), OperatorAuthority, oldStop.Token);
         await fixture.Registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
         var dispatcher = new RunnerSessionCommandDispatcher(
             fixture.Registry, NullLogger<RunnerSessionCommandDispatcher>.Instance);
@@ -442,6 +466,7 @@ public sealed class RunnerControlWebSocketRegistryTests
             replacementReservation,
             replacementSocket,
             new RunnerControlHandshake(null, null, null, null, null, null, null, null, "replacement-generation"),
+            OperatorAuthority,
             replacementStop.Token);
 
         var result = await pending;
@@ -461,7 +486,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         using var stop = new CancellationTokenSource();
         Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var reservation));
         var run = fixture.Registry.RunAsync(
-            runnerId, reservation, fixture.Socket, Handshake(), stop.Token);
+            runnerId, reservation, fixture.Socket, Handshake(), OperatorAuthority, stop.Token);
         await fixture.Registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
 
         await fixture.Registry.FenceAsync(
@@ -493,13 +518,13 @@ public sealed class RunnerControlWebSocketRegistryTests
 
         Assert.True(registry.TryReserve(oldConnectionId, out var oldReservation));
         var oldRun = registry.RunAsync(
-            runnerId, oldReservation, oldSocket, Handshake(), oldStop.Token);
+            runnerId, oldReservation, oldSocket, Handshake(), OperatorAuthority, oldStop.Token);
         await registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
         Assert.Equal(oldConnectionId.ToString("D"), tracker.GetConnectionId(runnerId));
 
         Assert.True(registry.TryReserve(newConnectionId, out var newReservation));
         var newRun = registry.RunAsync(
-            runnerId, newReservation, newSocket, Handshake(), newStop.Token);
+            runnerId, newReservation, newSocket, Handshake(), OperatorAuthority, newStop.Token);
         await oldSocket.CloseStarted.WaitAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(newConnectionId.ToString("D"), tracker.GetConnectionId(runnerId));
@@ -590,6 +615,9 @@ public sealed class RunnerControlWebSocketRegistryTests
     }
 
     private static RunnerControlHandshake Handshake() => new(null, null, null, null, null, null, null, null, "test-generation");
+
+    private static RunnerPresentedAuthority OperatorAuthority { get; } =
+        new(CredentialId: null, OperatorOverride: true);
 
     private sealed class NoopActivityProbeCoordinator : IRunnerActivityProbeCoordinator
     {
@@ -688,15 +716,30 @@ public sealed class RunnerControlWebSocketRegistryTests
     private class RunnerGrainProxy : DispatchProxy
     {
         public string CurrentGeneration { get; set; } = "test-generation";
+        public string? CurrentCredentialId { get; set; }
 
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) =>
             targetMethod?.Name switch
             {
                 nameof(IRunnerGrain.IsCurrentProcessGenerationAsync) => Task.FromResult(
                     string.Equals(CurrentGeneration, (string?)args![0], StringComparison.Ordinal)),
+                nameof(IRunnerGrain.IsCurrentRegistrationAuthorityAsync) => Task.FromResult(
+                    RegistrationAuthorityMatches(
+                        (string?)args![0],
+                        (RunnerPresentedAuthority)args[1]!)),
                 nameof(IRunnerGrain.UpdateRuntimeIdentityAsync) => Task.CompletedTask,
                 _ => throw new NotSupportedException(targetMethod?.Name),
             };
+
+        private bool RegistrationAuthorityMatches(
+            string? processGeneration,
+            RunnerPresentedAuthority authority) =>
+            string.Equals(CurrentGeneration, processGeneration, StringComparison.Ordinal)
+            && (authority.OperatorOverride
+                || string.Equals(
+                    CurrentCredentialId,
+                    authority.CredentialId,
+                    StringComparison.Ordinal));
     }
 
     private class GrainFactoryProxy : DispatchProxy

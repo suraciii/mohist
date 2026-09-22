@@ -10,7 +10,17 @@ namespace Mohist.Server.Runner.Grains;
 
 public interface IRunnerGrain : IGrainWithStringKey
 {
-    Task RegisterAsync(RunnerInfo info, string processGeneration);
+    Task RegisterAsync(
+        RunnerInfo info,
+        string processGeneration,
+        RunnerPresentedAuthority presentedAuthority);
+    /// <summary>
+    /// Confirms that a control upgrade presents the same authority that
+    /// admitted the current process generation and that it remains active.
+    /// </summary>
+    Task<bool> IsCurrentRegistrationAuthorityAsync(
+        string processGeneration,
+        RunnerPresentedAuthority presentedAuthority);
     /// <summary>
     /// Durably removes this Runner's credential and execution authority before
     /// settling bound Session activity. Repeated calls resume the same removal.
@@ -155,6 +165,23 @@ public sealed record RunnerAdministrativeRemovalResult(
     [property: Id(0)] bool Found,
     [property: Id(1)] DateTimeOffset RevokedAt,
     [property: Id(2)] bool Completed);
+
+/// <summary>
+/// Server-resolved request authority for Runner admission. Credential identity
+/// comes only from authentication context; operator override is explicit and
+/// never inferred from a missing credential ID.
+/// </summary>
+[GenerateSerializer]
+public sealed record RunnerPresentedAuthority(
+    [property: Id(0)] string? CredentialId,
+    [property: Id(1)] bool OperatorOverride);
+
+[Serializable]
+[GenerateSerializer]
+public sealed class RunnerCredentialAuthorityException : Exception
+{
+    public RunnerCredentialAuthorityException(string message) : base(message) { }
+}
 
 public static class RunnerCapacity
 {

@@ -165,6 +165,7 @@ public partial class RunnerGrain
             var state = _state.State ??= new RunnerState();
             var previousRemovedGeneration = removal.RemovedProcessGeneration;
             var previousCurrent = state.CurrentProcessGeneration;
+            var previousRegistrationCredential = state.CurrentRegistrationCredentialId;
             var previousPending = state.PendingProcessGeneration;
             var previousClosing = state.ClosingProcessGeneration;
             var previousLease = state.PresenceLeaseExpiresAt;
@@ -178,6 +179,7 @@ public partial class RunnerGrain
             var previousPhase = removal.Phase;
             removal.RemovedProcessGeneration ??= state.CurrentProcessGeneration;
             state.CurrentProcessGeneration = null;
+            state.CurrentRegistrationCredentialId = null;
             state.PendingProcessGeneration = null;
             if (string.IsNullOrWhiteSpace(state.ClosingProcessGeneration))
                 state.ClosingProcessGeneration = removal.RemovedProcessGeneration;
@@ -197,6 +199,7 @@ public partial class RunnerGrain
                 removal.RemovedProcessGeneration = previousRemovedGeneration;
                 removal.Phase = previousPhase;
                 state.CurrentProcessGeneration = previousCurrent;
+                state.CurrentRegistrationCredentialId = previousRegistrationCredential;
                 state.PendingProcessGeneration = previousPending;
                 state.ClosingProcessGeneration = previousClosing;
                 state.PresenceLeaseExpiresAt = previousLease;
@@ -284,23 +287,23 @@ public partial class RunnerGrain
         return current;
     }
 
-    private async Task ReconcileAdministrativeRemovalForRegistrationAsync()
+    private async Task ReconcileAdministrativeRemovalForRegistrationAsync(
+        RunnerPresentedAuthority presentedAuthority)
     {
+        await RequireActivePresentedCredentialAsync(presentedAuthority);
         var removal = _state.State?.AdministrativeRemoval;
         if (removal is null)
             return;
         if (removal.Phase != RunnerAdministrativeRemovalPhase.Completed)
             throw new InvalidOperationException(
                 $"Runner {RunnerId} administrative removal is still pending.");
-
-        var authority = await _credentialStatus.GetActiveAuthorityAsync(RunnerId);
-        if (authority is null
+        if (presentedAuthority.OperatorOverride
             || string.IsNullOrWhiteSpace(removal.RemovedCredentialId)
             || string.Equals(
-                authority.CredentialId,
+                presentedAuthority.CredentialId,
                 removal.RemovedCredentialId,
                 StringComparison.Ordinal))
-            throw new InvalidOperationException(
+            throw new RunnerCredentialAuthorityException(
                 $"Runner {RunnerId} execution authority remains revoked.");
 
         await _lifecycleGate.WaitAsync();
@@ -332,6 +335,59 @@ public partial class RunnerGrain
             _lifecycleGate.Release();
         }
         await RemoveAdministrativeRemovalReminderAsync();
+    }
+
+    private async Task RequireActivePresentedCredentialAsync(
+        RunnerPresentedAuthority presentedAuthority)
+    {
+        if (presentedAuthority.OperatorOverride)
+        {
+            if (!string.IsNullOrWhiteSpace(presentedAuthority.CredentialId))
+                throw new RunnerCredentialAuthorityException(
+                    "Operator Runner authority must not borrow an issued credential identity.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(presentedAuthority.CredentialId))
+            throw new RunnerCredentialAuthorityException(
+                $"Runner {RunnerId} registration is missing its presented credential identity.");
+        var active = await _credentialStatus.GetActiveAuthorityAsync(RunnerId);
+        if (active is null
+            || !string.Equals(
+                active.CredentialId,
+                presentedAuthority.CredentialId,
+                StringComparison.Ordinal))
+            throw new RunnerCredentialAuthorityException(
+                $"Runner {RunnerId} presented credential authority is not active.");
+    }
+
+    public async Task<bool> IsCurrentRegistrationAuthorityAsync(
+        string processGeneration,
+        RunnerPresentedAuthority presentedAuthority)
+    {
+        ArgumentNullException.ThrowIfNull(presentedAuthority);
+        var state = _state.State;
+        if (state is null
+            || string.IsNullOrWhiteSpace(processGeneration)
+            || !string.Equals(
+                state.CurrentProcessGeneration,
+                processGeneration,
+                StringComparison.Ordinal))
+            return false;
+        if (presentedAuthority.OperatorOverride)
+            return string.IsNullOrWhiteSpace(presentedAuthority.CredentialId);
+        if (string.IsNullOrWhiteSpace(presentedAuthority.CredentialId)
+            || !string.Equals(
+                state.CurrentRegistrationCredentialId,
+                presentedAuthority.CredentialId,
+                StringComparison.Ordinal))
+            return false;
+        var active = await _credentialStatus.GetActiveAuthorityAsync(RunnerId);
+        return active is not null
+            && string.Equals(
+                active.CredentialId,
+                presentedAuthority.CredentialId,
+                StringComparison.Ordinal);
     }
 
     private Task EnsureAdministrativeRemovalReminderAsync() =>

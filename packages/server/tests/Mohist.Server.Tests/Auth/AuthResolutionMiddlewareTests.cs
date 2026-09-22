@@ -33,6 +33,7 @@ public sealed class AuthResolutionMiddlewareTests
         var principal = Assert.IsType<MohistPrincipal>(context.Items[MohistPrincipal.HttpContextItemKey]);
         Assert.Equal(MohistPrincipal.AdminPrincipalId, principal.Id);
         Assert.Equal(PrincipalKind.Admin, principal.Kind);
+        Assert.Null(principal.CredentialId);
         Assert.Equal(HttpStatusCode.OK, (HttpStatusCode)context.Response.StatusCode);
     }
 
@@ -219,6 +220,7 @@ public sealed class AuthResolutionMiddlewareTests
         Assert.Equal("agent-1", principal.Id);
         Assert.Equal(PrincipalKind.Agent, principal.Kind);
         Assert.Equal([Scope.Runner, Scope.Webhook], principal.Scopes);
+        Assert.Equal("cred_1", principal.CredentialId);
     }
 
     [Fact]

@@ -2,6 +2,9 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Runner.Grains;
@@ -100,11 +103,9 @@ public sealed class RunnerEnrollmentSpecs(IsolatedMohistIntegrationFixture fixtu
     public async Task RevocationFencesDurableProcessAuthorityUntilSameRunnerReenrolls()
     {
         var runnerId = $"runner-authority-{Guid.NewGuid():N}";
-        await RegisterAsync(await CreateEnrollmentTokenAsync(), runnerId);
+        var oldCredential = await RegisterAsync(await CreateEnrollmentTokenAsync(), runnerId);
         var runner = fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(
-            new RunnerInfo(runnerId, ["spec/*"], "host-1", null),
-            "process-before-revoke");
+        await RegisterProcessAsync(oldCredential, runnerId, "process-before-revoke");
         Assert.True(await runner.IsCurrentProcessGenerationAsync("process-before-revoke"));
 
         using var revoke = await fixture.Client.DeleteAsync($"/api/runners/{runnerId}/credentials");
@@ -117,12 +118,111 @@ public sealed class RunnerEnrollmentSpecs(IsolatedMohistIntegrationFixture fixtu
         runner = fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         Assert.False(await runner.IsCurrentProcessGenerationAsync("process-before-revoke"));
 
-        await RegisterAsync(await CreateEnrollmentTokenAsync(), runnerId);
-        await runner.RegisterAsync(
-            new RunnerInfo(runnerId, ["spec/*"], "host-1", null),
-            "process-after-reenroll");
+        var replacementCredential = await RegisterAsync(await CreateEnrollmentTokenAsync(), runnerId);
+        await RegisterProcessAsync(replacementCredential, runnerId, "process-after-reenroll");
         Assert.True(await runner.IsCurrentProcessGenerationAsync("process-after-reenroll"));
         Assert.False((await runner.GetRuntimeStateAsync()).Draining);
+    }
+
+    [Fact]
+    public async Task PausedCredentialARequestsCannotBorrowReplacementCredentialB()
+    {
+        var runnerId = $"runner-presented-authority-{Guid.NewGuid():N}";
+        var credentialA = await RegisterAsync(await CreateEnrollmentTokenAsync(), runnerId);
+        await RegisterProcessAsync(credentialA, runnerId, "process-a");
+        using var scope = fixture.Services.CreateScope();
+        var credentialAId = Assert.IsType<RunnerCredentialAuthority>(
+            await scope.ServiceProvider.GetRequiredService<IRunnerCredentialStatusReader>()
+                .GetActiveAuthorityAsync(runnerId)).CredentialId;
+
+        var observer = fixture.Services.GetRequiredService<RunnerAuthorityAdmissionObserver>();
+        var firstRegisterObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondRegisterObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var controlObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstRegister = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSecondRegister = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseControl = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var registerCount = 0;
+        observer.ObservedAsync = async (operation, observedRunnerId, authority, ct) =>
+        {
+            if (!string.Equals(observedRunnerId, runnerId, StringComparison.Ordinal)
+                || !string.Equals(authority.CredentialId, credentialAId, StringComparison.Ordinal))
+                return;
+            if (string.Equals(operation, "control", StringComparison.Ordinal))
+            {
+                controlObserved.TrySetResult();
+                await releaseControl.Task.WaitAsync(ct);
+                return;
+            }
+
+            var ordinal = Interlocked.Increment(ref registerCount);
+            if (ordinal == 1)
+            {
+                firstRegisterObserved.TrySetResult();
+                await releaseFirstRegister.Task.WaitAsync(ct);
+            }
+            else
+            {
+                secondRegisterObserved.TrySetResult();
+                await releaseSecondRegister.Task.WaitAsync(ct);
+            }
+        };
+
+        using var staleClient = fixture.CreateClient();
+        staleClient.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", credentialA);
+        var staleBeforeReplacement = staleClient.PostAsJsonAsync(
+            $"/api/runner/{runnerId}/register",
+            RegisterBody("stale-before-b"),
+            TestContext.Current.CancellationToken);
+        var staleAfterReplacement = staleClient.PostAsJsonAsync(
+            $"/api/runner/{runnerId}/register",
+            RegisterBody("stale-after-b"),
+            TestContext.Current.CancellationToken);
+        var staleControlClient = fixture.CreateWebSocketClient();
+        staleControlClient.ConfigureRequest = request =>
+        {
+            request.Headers.Authorization = $"Bearer {credentialA}";
+            request.Headers["X-Runner-Connection-Id"] = Guid.NewGuid().ToString("D");
+        };
+        var staleControl = staleControlClient.ConnectAsync(
+            new Uri($"ws://localhost/api/runner/{runnerId}/control?processGeneration=process-a"),
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            await Task.WhenAll(
+                firstRegisterObserved.Task,
+                secondRegisterObserved.Task,
+                controlObserved.Task).WaitAsync(TestContext.Current.CancellationToken);
+
+            using var revoke = await fixture.Client.DeleteAsync(
+                $"/api/runners/{runnerId}/credentials",
+                TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, revoke.StatusCode);
+            var credentialB = await RegisterAsync(await CreateEnrollmentTokenAsync(), runnerId);
+
+            releaseFirstRegister.TrySetResult();
+            using (var stale = await staleBeforeReplacement)
+                Assert.Equal(HttpStatusCode.Forbidden, stale.StatusCode);
+
+            await RegisterProcessAsync(credentialB, runnerId, "process-b");
+            releaseSecondRegister.TrySetResult();
+            releaseControl.TrySetResult();
+
+            using (var stale = await staleAfterReplacement)
+                Assert.Equal(HttpStatusCode.Forbidden, stale.StatusCode);
+            await Assert.ThrowsAnyAsync<Exception>(() => staleControl);
+            Assert.True(await fixture.Grains.GetGrain<IRunnerGrain>(runnerId)
+                .IsCurrentProcessGenerationAsync("process-b"));
+        }
+        finally
+        {
+            observer.ObservedAsync = null;
+            releaseFirstRegister.TrySetResult();
+            releaseSecondRegister.TrySetResult();
+            releaseControl.TrySetResult();
+        }
     }
 
     [Fact]
@@ -177,6 +277,26 @@ public sealed class RunnerEnrollmentSpecs(IsolatedMohistIntegrationFixture fixtu
             fixture.TimeProvider.GetUtcNow().AddMinutes(15),
             data.GetProperty("expiresAt").GetDateTimeOffset());
         return token;
+    }
+
+    private static object RegisterBody(string processGeneration) => new
+    {
+        processGeneration,
+        capabilities = new[] { "spec/*" },
+        hostname = "host-1",
+    };
+
+    private async Task RegisterProcessAsync(
+        string credential,
+        string runnerId,
+        string processGeneration)
+    {
+        using var client = fixture.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", credential);
+        using var response = await client.PostAsJsonAsync(
+            $"/api/runner/{runnerId}/register",
+            RegisterBody(processGeneration));
+        response.EnsureSuccessStatusCode();
     }
 
     private async Task<string> RegisterAsync(string enrollmentToken, string runnerId)

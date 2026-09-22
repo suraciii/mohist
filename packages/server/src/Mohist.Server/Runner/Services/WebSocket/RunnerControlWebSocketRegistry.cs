@@ -74,11 +74,23 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
         _connectionIds.TryRemove(
             new KeyValuePair<Guid, RunnerControlConnectionReservation>(reservation.ConnectionId, reservation));
 
+    internal Task<bool> IsControlAuthorityCurrentAsync(
+        string runnerId,
+        RunnerControlHandshake handshake,
+        RunnerPresentedAuthority presentedAuthority) =>
+        !string.IsNullOrWhiteSpace(handshake.ProcessGeneration)
+            ? _grains.GetGrain<IRunnerGrain>(runnerId)
+                .IsCurrentRegistrationAuthorityAsync(
+                    handshake.ProcessGeneration,
+                    presentedAuthority)
+            : Task.FromResult(false);
+
     internal async Task RunAsync(
         string runnerId,
         RunnerControlConnectionReservation reservation,
         System.Net.WebSockets.WebSocket socket,
         RunnerControlHandshake handshake,
+        RunnerPresentedAuthority presentedAuthority,
         CancellationToken ct)
     {
         try
@@ -86,7 +98,13 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
             if (!_connectionIds.TryGetValue(reservation.ConnectionId, out var currentReservation)
                 || !ReferenceEquals(currentReservation, reservation))
                 throw new InvalidOperationException("Connection ID was not reserved before upgrade");
-            await RunConnectionAsync(runnerId, reservation.ConnectionId, socket, handshake, ct);
+            await RunConnectionAsync(
+                runnerId,
+                reservation.ConnectionId,
+                socket,
+                handshake,
+                presentedAuthority,
+                ct);
         }
         finally
         {
@@ -99,18 +117,23 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
         Guid connectionId,
         System.Net.WebSockets.WebSocket socket,
         RunnerControlHandshake handshake,
+        RunnerPresentedAuthority presentedAuthority,
         CancellationToken ct)
     {
         if (string.IsNullOrEmpty(handshake.ProcessGeneration))
             throw new RunnerControlUnavailableException("Runner control processGeneration is required");
         if (!await _grains.GetGrain<IRunnerGrain>(runnerId)
-                .IsCurrentProcessGenerationAsync(handshake.ProcessGeneration))
-            throw new RunnerControlUnavailableException("Runner control processGeneration is not current");
+                .IsCurrentRegistrationAuthorityAsync(
+                    handshake.ProcessGeneration,
+                    presentedAuthority))
+            throw new RunnerControlUnavailableException(
+                "Runner control registration authority is not current");
 
         var connection = new RunnerControlWebSocketConnection(
             runnerId,
             connectionId,
             handshake.ProcessGeneration,
+            presentedAuthority,
             socket,
             _timeProvider,
             _logs.CreateLogger<RunnerControlWebSocketConnection>());
@@ -130,8 +153,11 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
                 try
                 {
                     if (!await _grains.GetGrain<IRunnerGrain>(runnerId)
-                            .IsCurrentProcessGenerationAsync(handshake.ProcessGeneration))
-                        throw new RunnerControlUnavailableException("Runner control processGeneration is not current");
+                            .IsCurrentRegistrationAuthorityAsync(
+                                handshake.ProcessGeneration,
+                                presentedAuthority))
+                        throw new RunnerControlUnavailableException(
+                            "Runner control registration authority is not current");
 
                     Task? replacedFence = null;
                     if (_connections.TryGetValue(runnerId, out var replaced))
@@ -157,6 +183,12 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
                         handshake.SchemaVersion);
                     if (InstallationAuthorityValidatedAsync is not null)
                         await InstallationAuthorityValidatedAsync(runnerId, connectionId, ct);
+                    if (!await _grains.GetGrain<IRunnerGrain>(runnerId)
+                            .IsCurrentRegistrationAuthorityAsync(
+                                handshake.ProcessGeneration,
+                                presentedAuthority))
+                        throw new RunnerControlUnavailableException(
+                            "Runner control registration authority changed during installation");
 
                     run = connection.RunAsync(ct);
                     if (run.IsCompleted) await run;
@@ -253,7 +285,9 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
         if (!IsPublishedAndAuthorized(connection))
             return false;
         return await _grains.GetGrain<IRunnerGrain>(connection.RunnerId)
-            .IsCurrentProcessGenerationAsync(connection.ProcessGeneration);
+            .IsCurrentRegistrationAuthorityAsync(
+                connection.ProcessGeneration,
+                connection.PresentedAuthority);
     }
 
     public async Task FenceAsync(
@@ -365,7 +399,9 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
             return false;
         }
         return await _grains.GetGrain<IRunnerGrain>(runnerId)
-            .IsCurrentProcessGenerationAsync(processGeneration);
+            .IsCurrentRegistrationAuthorityAsync(
+                processGeneration,
+                connection.PresentedAuthority);
     }
 
     public async Task<string> GetCurrentProcessGenerationAsync(
@@ -387,8 +423,11 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
     {
         var connection = GetConnection(runnerId, processGeneration);
         if (!await _grains.GetGrain<IRunnerGrain>(runnerId)
-                .IsCurrentProcessGenerationAsync(processGeneration))
-            throw new RunnerControlUnavailableException("Runner control processGeneration is not current");
+                .IsCurrentRegistrationAuthorityAsync(
+                    processGeneration,
+                    connection.PresentedAuthority))
+            throw new RunnerControlUnavailableException(
+                "Runner control registration authority is not current");
         if (SessionCommandGenerationValidatedAsync is not null)
             await SessionCommandGenerationValidatedAsync(runnerId, processGeneration, ct);
         Task<TResult> response;
@@ -403,8 +442,11 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
         var result = await response;
         if (!IsPublishedAndAuthorized(connection)
             || !await _grains.GetGrain<IRunnerGrain>(runnerId)
-                .IsCurrentProcessGenerationAsync(processGeneration))
-            throw new RunnerControlUnavailableException("Runner control request result belongs to a stale process generation");
+                .IsCurrentRegistrationAuthorityAsync(
+                    processGeneration,
+                    connection.PresentedAuthority))
+            throw new RunnerControlUnavailableException(
+                "Runner control request result belongs to stale registration authority");
         return result;
     }
 
@@ -637,6 +679,7 @@ internal sealed class RunnerControlWebSocketConnection
     public string RunnerId => _runnerId;
     public Guid ConnectionId => _connectionId;
     public string ProcessGeneration { get; }
+    public RunnerPresentedAuthority PresentedAuthority { get; }
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _log;
     private readonly Channel<byte[]> _outgoing = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(QueueCapacity)
@@ -663,6 +706,7 @@ internal sealed class RunnerControlWebSocketConnection
         string runnerId,
         Guid connectionId,
         string processGeneration,
+        RunnerPresentedAuthority presentedAuthority,
         System.Net.WebSockets.WebSocket socket,
         TimeProvider timeProvider,
         ILogger log)
@@ -670,6 +714,7 @@ internal sealed class RunnerControlWebSocketConnection
         _runnerId = runnerId;
         _connectionId = connectionId;
         ProcessGeneration = processGeneration;
+        PresentedAuthority = presentedAuthority;
         _socket = socket;
         _timeProvider = timeProvider;
         _log = log;

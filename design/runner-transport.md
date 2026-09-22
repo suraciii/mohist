@@ -61,6 +61,16 @@ they are query parameters; the handshake and registration name `buildGitHash`
 as its own field instead of collapsing it into the source revision. `version`
 may also appear as display metadata and is never identity.
 
+Authentication also resolves the exact issued credential ID as a Server-side
+request fact; it is never accepted from the registration body or control query.
+Registration admits a Runner credential only while that exact ID is the active
+authority and binds it to the admitted process generation. A control upgrade
+must present the same still-active credential authority. A request authenticated
+before credential replacement cannot borrow the replacement credential merely
+because both credentials belong to the same Runner. An explicit operator Scope
+override remains distinct from issued Runner credential authority and cannot
+release a completed administrative-removal fence.
+
 Registration and the handshake read a payload **without** `schemaVersion` as
 legacy v0: `buildGitHash` then falls back to `gitHash` and `sourceRevision` to
 `buildGitHash` or `gitHash`. `gitHash` is accepted only as a read input and is

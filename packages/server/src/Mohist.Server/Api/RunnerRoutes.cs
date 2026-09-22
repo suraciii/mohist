@@ -27,34 +27,54 @@ public static partial class RunnerRoutes
     {
         var group = app.MapGroup("/api/runner/{runnerId}").RequireScopes(Scope.Runner);
 
-        group.MapPost("/register", async (string runnerId, RunnerRegisterRequest req, IGrainFactory grains) =>
+        group.MapPost("/register", async (
+            string runnerId,
+            RunnerRegisterRequest req,
+            HttpContext context,
+            IGrainFactory grains,
+            RunnerAuthorityAdmissionObserver authorityAdmissions,
+            CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(req.ProcessGeneration))
                 return ApiResults.BadRequest("processGeneration is required");
-            var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            await runner.RegisterAsync(new RunnerInfo(
+            if (ResolvePresentedRunnerAuthority(context) is not { } presentedAuthority)
+                return InvalidRunnerCredentialAuthority();
+            await authorityAdmissions.ObserveAsync(
+                "register",
                 runnerId,
-                req.Capabilities,
-                req.Hostname ?? Environment.MachineName,
-                req.ProjectId,
-                req.CoderModels,
-                BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
-                CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants),
-                ActionCatalog: req.ActionCatalog,
-                RuntimeCatalogs: NormalizeRuntimeCatalogs(req.RuntimeCatalogs),
-                Component: NormalizeIdentity(req.Component),
-                Version: NormalizeIdentity(req.Version),
-                SourceRevision: RunnerBuildIdentityPolicy.ResolveSourceRevision(
-                    req.SchemaVersion,
-                    NormalizeIdentity(req.SourceRevision),
-                    NormalizeBuildGitHash(req.BuildGitHash)),
-                TreeHash: NormalizeIdentity(req.TreeHash),
-                ArtifactDigest: NormalizeIdentity(req.ArtifactDigest),
-                ReleaseId: NormalizeIdentity(req.ReleaseId),
-                Generation: req.Generation > 0 ? req.Generation : null,
-                EnvironmentVersion: NormalizeIdentity(req.EnvironmentVersion),
-                EnvironmentLoadedAt: req.EnvironmentLoadedAt,
-                SchemaVersion: req.SchemaVersion), req.ProcessGeneration);
+                presentedAuthority,
+                ct);
+            var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+            try
+            {
+                await runner.RegisterAsync(new RunnerInfo(
+                    runnerId,
+                    req.Capabilities,
+                    req.Hostname ?? Environment.MachineName,
+                    req.ProjectId,
+                    req.CoderModels,
+                    BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
+                    CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants),
+                    ActionCatalog: req.ActionCatalog,
+                    RuntimeCatalogs: NormalizeRuntimeCatalogs(req.RuntimeCatalogs),
+                    Component: NormalizeIdentity(req.Component),
+                    Version: NormalizeIdentity(req.Version),
+                    SourceRevision: RunnerBuildIdentityPolicy.ResolveSourceRevision(
+                        req.SchemaVersion,
+                        NormalizeIdentity(req.SourceRevision),
+                        NormalizeBuildGitHash(req.BuildGitHash)),
+                    TreeHash: NormalizeIdentity(req.TreeHash),
+                    ArtifactDigest: NormalizeIdentity(req.ArtifactDigest),
+                    ReleaseId: NormalizeIdentity(req.ReleaseId),
+                    Generation: req.Generation > 0 ? req.Generation : null,
+                    EnvironmentVersion: NormalizeIdentity(req.EnvironmentVersion),
+                    EnvironmentLoadedAt: req.EnvironmentLoadedAt,
+                    SchemaVersion: req.SchemaVersion), req.ProcessGeneration, presentedAuthority);
+            }
+            catch (RunnerCredentialAuthorityException)
+            {
+                return InvalidRunnerCredentialAuthority();
+            }
             return Results.Ok();
         });
 

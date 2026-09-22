@@ -325,7 +325,8 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
             credential.PrincipalId,
             credential.Scopes,
             RunnerId: credential.Kind == CredentialKind.Runner ? credential.Name : null,
-            ProjectId: credential.ProjectId);
+            ProjectId: credential.ProjectId,
+            CredentialId: credential.Id);
 
     private static string? TryResolveManagerCapability(HttpContext context)
     {

@@ -251,11 +251,15 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             await ReconcileSupersededGenerationAsync();
     }
 
-    public async Task RegisterAsync(RunnerInfo info, string processGeneration)
+    public async Task RegisterAsync(
+        RunnerInfo info,
+        string processGeneration,
+        RunnerPresentedAuthority presentedAuthority)
     {
         if (string.IsNullOrEmpty(processGeneration))
             throw new ArgumentException("process generation is required", nameof(processGeneration));
-        await ReconcileAdministrativeRemovalForRegistrationAsync();
+        ArgumentNullException.ThrowIfNull(presentedAuthority);
+        await ReconcileAdministrativeRemovalForRegistrationAsync(presentedAuthority);
         await _lifecycleGate.WaitAsync();
         try
         {
@@ -291,7 +295,11 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                         $"Runner {RunnerId} closeout for process generation {closingGeneration} is still pending.");
             }
 
+            await RequireActivePresentedCredentialAsync(presentedAuthority);
             state.CurrentProcessGeneration = processGeneration;
+            state.CurrentRegistrationCredentialId = presentedAuthority.OperatorOverride
+                ? null
+                : presentedAuthority.CredentialId;
             state.PendingProcessGeneration = null;
             state.ClosingProcessGeneration = null;
             SetRunnerInfo(InfoForRegister(info));

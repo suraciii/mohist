@@ -38,7 +38,8 @@ public sealed class RunnerAdministrativeRemovalSpecs(AgentJobGrainFixture fixtur
             var removedCredential = await IssueCredentialAsync(runnerId);
             await runner.RegisterAsync(
                 new RunnerInfo(runnerId, ["spec/*"], "test-host", null),
-                oldProcess);
+                oldProcess,
+                Presented(removedCredential));
             await session.OpenAsync(new OpenAgentSessionCommand(
                 runnerId,
                 "opencode",
@@ -82,9 +83,10 @@ public sealed class RunnerAdministrativeRemovalSpecs(AgentJobGrainFixture fixtur
             _ = await runner.GetRuntimeStateAsync();
             Assert.Null(await reminders.ReadRow(runner.GetGrainId(), "administrative-removal"));
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() => runner.RegisterAsync(
+            await Assert.ThrowsAsync<RunnerCredentialAuthorityException>(() => runner.RegisterAsync(
                 new RunnerInfo(runnerId, ["spec/*"], "test-host", null),
-                newProcess));
+                newProcess,
+                Presented(removedCredential)));
 
             var replacementCredential = await IssueCredentialAsync(runnerId);
             Assert.NotEqual(
@@ -93,10 +95,31 @@ public sealed class RunnerAdministrativeRemovalSpecs(AgentJobGrainFixture fixtur
             await BackdateActiveCredentialAsync(
                 runnerId,
                 fixture.TimeProvider.GetUtcNow().AddDays(-1));
+            await Assert.ThrowsAsync<RunnerCredentialAuthorityException>(() => runner.RegisterAsync(
+                new RunnerInfo(runnerId, ["spec/*"], "test-host", null),
+                "stale-process-before-replacement-registers",
+                Presented(removedCredential)));
+            await Assert.ThrowsAsync<RunnerCredentialAuthorityException>(() => runner.RegisterAsync(
+                new RunnerInfo(runnerId, ["spec/*"], "test-host", null),
+                "missing-presented-authority",
+                new RunnerPresentedAuthority(CredentialId: null, OperatorOverride: false)));
             await runner.RegisterAsync(
                 new RunnerInfo(runnerId, ["spec/*"], "test-host", null),
-                newProcess);
+                newProcess,
+                Presented(replacementCredential));
+            await Assert.ThrowsAsync<RunnerCredentialAuthorityException>(() => runner.RegisterAsync(
+                new RunnerInfo(runnerId, ["spec/*"], "test-host", null),
+                "stale-process-after-removal-clears",
+                Presented(removedCredential)));
 
+            await TestLifecycle.DeactivateAndWait(runner, fixture.Grains);
+            runner = fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+            Assert.True(await runner.IsCurrentRegistrationAuthorityAsync(
+                newProcess,
+                Presented(replacementCredential)));
+            Assert.False(await runner.IsCurrentRegistrationAuthorityAsync(
+                newProcess,
+                Presented(removedCredential)));
             Assert.True(await runner.IsCurrentProcessGenerationAsync(newProcess));
             Assert.False((await runner.GetRuntimeStateAsync()).Draining);
 
@@ -109,6 +132,9 @@ public sealed class RunnerAdministrativeRemovalSpecs(AgentJobGrainFixture fixtur
             fixture.SessionStatePersistence.Reset();
         }
     }
+
+    private static RunnerPresentedAuthority Presented(RunnerCredentialCreateResult credential) =>
+        new(credential.Credential.Id, OperatorOverride: false);
 
     private static ReminderEntry RemovalReminder(IRunnerGrain runner) => new()
     {
