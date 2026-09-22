@@ -15,7 +15,8 @@ public sealed partial class AgentJobGrain
         var fingerprint = WorkResultFingerprint.For(result);
         if (IsTerminal)
         {
-            if (WorkReportStatus.IsCompleted(result.Status) && !HasCompleteExecutionBinding(result))
+            if ((WorkReportStatus.IsCompleted(result.Status) || RecoveryRequiresCompleteReportBinding())
+                && !HasCompleteExecutionBinding(result))
                 return new AgentJobReportResult(WorkReportVerdict.Refused, "execution-binding-required");
             var exactReplay = string.Equals(State.AcceptedReportRunnerId, runnerId, StringComparison.Ordinal)
                 && string.Equals(State.AcceptedReportWorkId, workId, StringComparison.Ordinal)
@@ -56,7 +57,8 @@ public sealed partial class AgentJobGrain
                 Key, runnerId, workId, State.RunnerId, State.WorkId);
             return new AgentJobReportResult(WorkReportVerdict.Refused, "runner-or-work-mismatch");
         }
-        if (WorkReportStatus.IsCompleted(result.Status) && !HasCompleteExecutionBinding(result))
+        if ((WorkReportStatus.IsCompleted(result.Status) || RecoveryRequiresCompleteReportBinding())
+            && !HasCompleteExecutionBinding(result))
             return new AgentJobReportResult(WorkReportVerdict.Refused, "execution-binding-required");
         if (State.InitialInputSubmission?.Phase is "creating" or "candidate")
             return new AgentJobReportResult(WorkReportVerdict.Refused, "initial-input-recovery-in-progress");
@@ -102,6 +104,9 @@ public sealed partial class AgentJobGrain
 
         return new AgentJobReportResult(WorkReportVerdict.Accepted);
     }
+
+    private bool RecoveryRequiresCompleteReportBinding() =>
+        AgentJobInitialRecoveryReasons.IsDefined(State.InitialInputSubmission?.RecoveryReason);
 
     private bool MatchesCurrentExecutionBinding(WorkResult result)
     {

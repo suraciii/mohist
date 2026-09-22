@@ -670,10 +670,17 @@ or uncertain Turn, an active stop, or an uncertain Session rejects replacement.
 Initial AgentJob recovery is advanced by the current AgentJob owner. Its durable
 operation record is part of the existing Job ledger and matches the exact
 Running claim: Job, work, claimed Runner process generation, Runner, Session,
-initial Input, initial Turn, expected Binding, and immutable dispatch. The Job
+initial Input, initial Turn, expected Binding, immutable dispatch, and one closed
+reason: `same-runtime-missing` or `configured-fallback`. The first reason requires
+provider-confirmed missing evidence and keeps the Runtime. The second is allowed
+only for a non-Manager OpenCode execution moving to ready Pi on the same
+initialized Runner; it never rewrites the frozen execution definition or Model.
+An absent, unknown, or changed reason conflicts with the durable operation.
+Before each prepare, complete, or start mutation, the route requires the matching
+current Runner process generation to remain Online and non-draining. The Job
 calls AgentSession to commit or query the matching Binding/Turn operation
-receipt; AgentSession never calls back into the Job. A recovery in progress
-refuses old-target reports. This one-way owner call prevents a
+receipt; AgentSession never calls back into the Job or Runner. A recovery in
+progress refuses old-target reports. This one-way owner call prevents a
 Job-to-Session-to-Job wait cycle while making a crash between the two owner
 writes resumable under the same operation identity.
 
@@ -695,12 +702,16 @@ Before the provider can receive the initial Input, AgentSession durably admits
 that exact effect under the same Job/work/process/Binding fence and marks the
 initial Turn executing; only then does AgentJob durably record the matching start
 receipt and return submission authority. Replays revalidate the current Binding,
-generation, and nonterminal unsuperseded Turn. A receipt is query evidence, not a
-renewable execution permit: only the original live executor that changed the
-receipt from unstarted to started may submit. An already-started re-entry or a
-new process observes the receipt but cannot replay provider Input. The Runner
-therefore submits the original accepted payload once and creates no new Input or
-Turn.
+generation, and nonterminal unsuperseded Turn. Once recovery is admitted, every
+late result status must carry the complete original Session/Turn identity and the
+current physical Runtime/runtimeSessionId through ready, started, and terminal
+replay; an old target or missing binding cannot settle the Job. Ordinary
+first-binding failures before recovery keep their existing reporting behavior.
+A receipt is query evidence, not a renewable execution permit: only the original
+live executor that changed the receipt from unstarted to started may submit. An
+already-started re-entry or a new process observes the receipt but cannot replay
+provider Input. The Runner therefore submits the original accepted payload once
+and creates no new Input or Turn.
 
 ## Context Operations
 

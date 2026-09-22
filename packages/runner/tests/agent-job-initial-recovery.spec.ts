@@ -32,7 +32,7 @@ const binding: BindingResolution = {
 function successfulRecoveryConnection(order: string[]) {
   return {
     runnerId: 'runner-1',
-    prepareAgentJobInitialRecovery: vi.fn(async () => {
+    prepareAgentJobInitialRecovery: vi.fn(async (_jobId: string, _body: unknown) => {
       order.push('prepare')
       return {
         phase: 'creating',
@@ -41,7 +41,7 @@ function successfulRecoveryConnection(order: string[]) {
         runtimeSessionId: null,
       }
     }),
-    completeAgentJobInitialRecovery: vi.fn(async () => {
+    completeAgentJobInitialRecovery: vi.fn(async (_jobId: string, _body: unknown) => {
       order.push('complete')
       return {
         phase: 'ready',
@@ -93,33 +93,39 @@ describe('initial AgentJob pre-submission recovery', () => {
       binding: { ...binding, runtime: 'opencode', runtimeSessionId: 'runtime-new' },
     })
     expect(order).toEqual(['probe', 'prepare', 'create', 'complete'])
+    expect(connection.prepareAgentJobInitialRecovery.mock.calls[0]?.[1]).toMatchObject({
+      recoveryReason: 'same-runtime-missing',
+    })
   })
 
-  it('does not treat an unavailable bound runtime as missing', async () => {
-    const prepare = vi.fn()
-    const createSession = vi.fn()
-    const result = await recoverInitialBindingIfNeeded(
-      work,
-      binding,
-      '/work',
-      'opencode',
-      { runnerId: 'runner-1', prepareAgentJobInitialRecovery: prepare } as never,
-      {
-        openCode: { ready: () => true, resolveSession: async () => ({
-          ok: false,
-          error: { kind: 'unavailable-runtime', message: 'offline' },
-          diagnostics: [],
-        }), createSession } as never,
-        pi: null,
-      },
-      new AbortController().signal,
-      null,
-    )
+  it.each(['unavailable-runtime', 'deadline-exceeded', 'turn-failed'] as const)(
+    'does not treat %s as missing evidence',
+    async (kind) => {
+      const prepare = vi.fn()
+      const createSession = vi.fn()
+      const result = await recoverInitialBindingIfNeeded(
+        work,
+        binding,
+        '/work',
+        'opencode',
+        { runnerId: 'runner-1', prepareAgentJobInitialRecovery: prepare } as never,
+        {
+          openCode: { ready: () => true, resolveSession: async () => ({
+            ok: false,
+            error: { kind, message: kind },
+            diagnostics: [],
+          }), createSession } as never,
+          pi: null,
+        },
+        new AbortController().signal,
+        null,
+      )
 
-    expect(result.ok).toBe(false)
-    expect(prepare).not.toHaveBeenCalled()
-    expect(createSession).not.toHaveBeenCalled()
-  })
+      expect(result.ok).toBe(false)
+      expect(prepare).not.toHaveBeenCalled()
+      expect(createSession).not.toHaveBeenCalled()
+    },
+  )
 
   it('uses the approved OpenCode-to-Pi fallback only when OpenCode is not ready and Pi is ready', async () => {
     const order: string[] = []
@@ -163,7 +169,34 @@ describe('initial AgentJob pre-submission recovery', () => {
     })
     expect(openCodeProbe).not.toHaveBeenCalled()
     expect(order).toEqual(['prepare', 'create-pi'])
+    expect(connection.prepareAgentJobInitialRecovery.mock.calls[0]?.[1]).toMatchObject({
+      expectedRuntime: 'opencode',
+      recoveryReason: 'configured-fallback',
+    })
     expect(connection.completeAgentJobInitialRecovery).toHaveBeenCalledOnce()
+  })
+
+  it('does not select configured fallback for a Manager execution', async () => {
+    const prepare = vi.fn()
+    const piCreate = vi.fn()
+
+    const result = await recoverInitialBindingIfNeeded(
+      work,
+      binding,
+      '/work',
+      'opencode',
+      { runnerId: 'runner-1', prepareAgentJobInitialRecovery: prepare } as never,
+      {
+        openCode: { ready: () => false } as never,
+        pi: { ready: () => true, createSession: piCreate } as never,
+      },
+      new AbortController().signal,
+      {} as never,
+    )
+
+    expect(result.ok).toBe(false)
+    expect(prepare).not.toHaveBeenCalled()
+    expect(piCreate).not.toHaveBeenCalled()
   })
 
   it('uses the same persisted operation after a lost prepare response without recreating twice', async () => {

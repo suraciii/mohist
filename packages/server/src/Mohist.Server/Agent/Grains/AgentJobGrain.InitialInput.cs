@@ -15,7 +15,9 @@ public sealed partial class AgentJobGrain
         PrepareAgentJobInitialRecovery command)
     {
         await HydrateAsync();
-        var fingerprint = ValidateInitialClaim(command);
+        ValidateInitialRecoveryReason(command);
+        var fingerprint = InitialRecoveryFingerprint(command);
+        ValidateInitialClaim(command);
         var current = State.InitialInputSubmission;
         if (current is not null)
         {
@@ -41,7 +43,8 @@ public sealed partial class AgentJobGrain
             fingerprint,
             InitialCreating,
             _timeProvider.GetUtcNow(),
-            CreationAttemptId: command.CreationAttemptId);
+            CreationAttemptId: command.CreationAttemptId,
+            RecoveryReason: command.RecoveryReason);
         await PersistAsync();
         return new AgentJobInitialRecoveryReceipt(InitialCreating, true, null, null);
     }
@@ -50,13 +53,13 @@ public sealed partial class AgentJobGrain
         CompleteAgentJobInitialRecovery command)
     {
         await HydrateAsync();
-        var fingerprint = ValidateInitialClaim(command.Recovery, allowRetargetedBinding: true);
+        ValidateInitialRecoveryReason(command.Recovery);
+        var fingerprint = InitialRecoveryFingerprint(command.Recovery);
+        ValidateInitialClaim(command.Recovery, allowRetargetedBinding: true);
         var current = State.InitialInputSubmission
             ?? throw new InvalidOperationException("initial_input_recovery_not_prepared");
         EnsureSameInitialRecovery(current, command.Recovery, fingerprint);
-        if (string.IsNullOrWhiteSpace(command.ReplacementRuntime)
-            || string.IsNullOrWhiteSpace(command.ReplacementRuntimeSessionId))
-            throw new InvalidOperationException("initial_input_replacement_incomplete");
+        ValidateInitialReplacement(command);
         if (current.ReplacementRuntime is not null
             && (!string.Equals(current.ReplacementRuntime, command.ReplacementRuntime, StringComparison.Ordinal)
                 || !string.Equals(current.ReplacementRuntimeSessionId, command.ReplacementRuntimeSessionId, StringComparison.Ordinal)))
@@ -199,7 +202,7 @@ public sealed partial class AgentJobGrain
         return new AgentJobInitialStartReceipt(true, true, admitted.Runtime, admitted.RuntimeSessionId);
     }
 
-    private string ValidateInitialClaim(
+    private void ValidateInitialClaim(
         PrepareAgentJobInitialRecovery command,
         bool allowRetargetedBinding = false)
     {
@@ -215,7 +218,38 @@ public sealed partial class AgentJobGrain
             || (!allowRetargetedBinding
                 && !string.Equals(State.RuntimeSessionId, command.ExpectedRuntimeSessionId, StringComparison.Ordinal)))
             throw new InvalidOperationException("initial_input_claim_mismatch");
-        return CurrentDispatchFingerprint();
+    }
+
+    private void ValidateInitialRecoveryReason(PrepareAgentJobInitialRecovery command)
+    {
+        if (!AgentJobInitialRecoveryReasons.IsDefined(command.RecoveryReason))
+            throw new InvalidOperationException("initial_input_recovery_reason_invalid");
+        if (string.Equals(command.RecoveryReason, AgentJobInitialRecoveryReasons.ConfiguredFallback, StringComparison.Ordinal)
+            && (!string.Equals(command.ExpectedRuntime, "opencode", StringComparison.Ordinal)
+                || IsManagerInput()))
+            throw new InvalidOperationException("initial_input_fallback_not_allowed");
+    }
+
+    private void ValidateInitialReplacement(CompleteAgentJobInitialRecovery command)
+    {
+        if (string.IsNullOrWhiteSpace(command.ReplacementRuntime)
+            || string.IsNullOrWhiteSpace(command.ReplacementRuntimeSessionId))
+            throw new InvalidOperationException("initial_input_replacement_incomplete");
+
+        var allowed = command.Recovery.RecoveryReason switch
+        {
+            AgentJobInitialRecoveryReasons.SameRuntimeMissing => string.Equals(
+                command.Recovery.ExpectedRuntime,
+                command.ReplacementRuntime,
+                StringComparison.Ordinal),
+            AgentJobInitialRecoveryReasons.ConfiguredFallback =>
+                string.Equals(command.Recovery.ExpectedRuntime, "opencode", StringComparison.Ordinal)
+                && string.Equals(command.ReplacementRuntime, "pi", StringComparison.Ordinal)
+                && !IsManagerInput(),
+            _ => false,
+        };
+        if (!allowed)
+            throw new InvalidOperationException("initial_input_replacement_not_allowed");
     }
 
     private void ValidateInitialStartClaim(StartAgentJobInitialInput command)
@@ -237,12 +271,18 @@ public sealed partial class AgentJobGrain
             throw new InvalidOperationException("initial_input_start_claim_mismatch");
     }
 
+    private string InitialRecoveryFingerprint(PrepareAgentJobInitialRecovery command) =>
+        HashFingerprint($"{CurrentDispatchFingerprint()}\n{command.RecoveryReason}");
+
     private string CurrentDispatchFingerprint()
     {
         if (string.IsNullOrWhiteSpace(_ledger?.DispatchJson))
             throw new InvalidOperationException("initial_input_dispatch_missing");
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(_ledger.DispatchJson)));
+        return HashFingerprint(_ledger.DispatchJson);
     }
+
+    private static string HashFingerprint(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private static void EnsureSameInitialRecovery(
         AgentJobInitialInputSubmission current,
@@ -259,6 +299,7 @@ public sealed partial class AgentJobGrain
             || !string.Equals(current.ExpectedRuntime, command.ExpectedRuntime, StringComparison.Ordinal)
             || !string.Equals(current.ExpectedRuntimeSessionId, command.ExpectedRuntimeSessionId, StringComparison.Ordinal)
             || !string.Equals(current.CreationAttemptId, command.CreationAttemptId, StringComparison.Ordinal)
+            || !string.Equals(current.RecoveryReason, command.RecoveryReason, StringComparison.Ordinal)
             || !string.Equals(current.DispatchFingerprint, dispatchFingerprint, StringComparison.Ordinal))
             throw new InvalidOperationException("initial_input_recovery_operation_mismatch");
     }

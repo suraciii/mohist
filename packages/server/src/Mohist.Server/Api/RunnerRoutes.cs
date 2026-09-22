@@ -244,15 +244,16 @@ public static partial class RunnerRoutes
         group.MapPost("/agent-jobs/{jobId}/initial-input/recovery/prepare", async (
             string runnerId, string jobId, AgentJobInitialRecoveryPrepareRequest req, IGrainFactory grains) =>
         {
-            if (!await grains.GetGrain<IRunnerGrain>(runnerId).IsCurrentProcessGenerationAsync(req.ProcessGeneration))
-                return ApiResults.Conflict("Runner process generation is no longer current", "runner_process_stale");
+            if (!await HasInitialInputMutationAuthorityAsync(grains, runnerId, req.ProcessGeneration))
+                return ApiResults.Conflict("Runner process is not current, online, and non-draining", "runner_process_stale");
             try
             {
                 var receipt = await grains.GetGrain<IAgentJobGrain>(jobId).PrepareInitialInputRecoveryAsync(
                     new PrepareAgentJobInitialRecovery(
                         req.OperationId, runnerId, req.WorkId, req.ProcessGeneration,
                         req.SessionId, req.InputId, req.TurnId,
-                        req.ExpectedRuntime, req.ExpectedRuntimeSessionId, req.CreationAttemptId));
+                        req.ExpectedRuntime, req.ExpectedRuntimeSessionId, req.CreationAttemptId,
+                        req.RecoveryReason));
                 return Results.Ok(receipt);
             }
             catch (InvalidOperationException ex)
@@ -264,14 +265,15 @@ public static partial class RunnerRoutes
         group.MapPost("/agent-jobs/{jobId}/initial-input/recovery/complete", async (
             string runnerId, string jobId, AgentJobInitialRecoveryCompleteRequest req, IGrainFactory grains) =>
         {
-            if (!await grains.GetGrain<IRunnerGrain>(runnerId).IsCurrentProcessGenerationAsync(req.ProcessGeneration))
-                return ApiResults.Conflict("Runner process generation is no longer current", "runner_process_stale");
+            if (!await HasInitialInputMutationAuthorityAsync(grains, runnerId, req.ProcessGeneration))
+                return ApiResults.Conflict("Runner process is not current, online, and non-draining", "runner_process_stale");
             try
             {
                 var recovery = new PrepareAgentJobInitialRecovery(
                     req.OperationId, runnerId, req.WorkId, req.ProcessGeneration,
                     req.SessionId, req.InputId, req.TurnId,
-                    req.ExpectedRuntime, req.ExpectedRuntimeSessionId, req.CreationAttemptId);
+                    req.ExpectedRuntime, req.ExpectedRuntimeSessionId, req.CreationAttemptId,
+                    req.RecoveryReason);
                 var receipt = await grains.GetGrain<IAgentJobGrain>(jobId).CompleteInitialInputRecoveryAsync(
                     new CompleteAgentJobInitialRecovery(
                         recovery, req.ReplacementRuntime, req.ReplacementRuntimeSessionId));
@@ -286,8 +288,8 @@ public static partial class RunnerRoutes
         group.MapPost("/agent-jobs/{jobId}/initial-input/start", async (
             string runnerId, string jobId, AgentJobInitialInputStartRequest req, IGrainFactory grains) =>
         {
-            if (!await grains.GetGrain<IRunnerGrain>(runnerId).IsCurrentProcessGenerationAsync(req.ProcessGeneration))
-                return ApiResults.Conflict("Runner process generation is no longer current", "runner_process_stale");
+            if (!await HasInitialInputMutationAuthorityAsync(grains, runnerId, req.ProcessGeneration))
+                return ApiResults.Conflict("Runner process is not current, online, and non-draining", "runner_process_stale");
             try
             {
                 var receipt = await grains.GetGrain<IAgentJobGrain>(jobId).StartInitialInputAsync(
@@ -566,6 +568,18 @@ public static partial class RunnerRoutes
             || string.Equals(lastTerminalStatus, "cancelled", StringComparison.OrdinalIgnoreCase)
             || string.Equals(lastTerminalStatus, "timeout", StringComparison.OrdinalIgnoreCase));
 
+    private static async Task<bool> HasInitialInputMutationAuthorityAsync(
+        IGrainFactory grains,
+        string runnerId,
+        string processGeneration)
+    {
+        var runtime = await grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync();
+        return runtime.Status == RunnerStatus.Online
+            && !runtime.Draining
+            && !string.IsNullOrWhiteSpace(processGeneration)
+            && string.Equals(runtime.ProcessGeneration, processGeneration, StringComparison.Ordinal);
+    }
+
     private static string? NormalizeBuildGitHash(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
@@ -746,7 +760,8 @@ public record AgentJobInitialRecoveryPrepareRequest(
     string TurnId,
     string ExpectedRuntime,
     string ExpectedRuntimeSessionId,
-    string CreationAttemptId);
+    string CreationAttemptId,
+    string RecoveryReason);
 public record AgentJobInitialRecoveryCompleteRequest(
     string OperationId,
     string WorkId,
@@ -757,6 +772,7 @@ public record AgentJobInitialRecoveryCompleteRequest(
     string ExpectedRuntime,
     string ExpectedRuntimeSessionId,
     string CreationAttemptId,
+    string RecoveryReason,
     string ReplacementRuntime,
     string ReplacementRuntimeSessionId);
 public record AgentJobInitialInputStartRequest(

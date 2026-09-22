@@ -574,6 +574,7 @@ export async function recoverInitialBindingIfNeeded(
     expectedRuntime: runtimeName,
     expectedRuntimeSessionId: binding.runtimeSessionId,
     creationAttemptId: binding.submissionAttemptId,
+    recoveryReason: replacementKind === runtimeName ? 'same-runtime-missing' : 'configured-fallback',
   }
   let prepare
   try {

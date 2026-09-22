@@ -175,6 +175,15 @@ public sealed record AgentJobPendingDispatch(
     [property: Id(1)] string WorkId,
     [property: Id(2)] WorkDispatch Dispatch);
 
+public static class AgentJobInitialRecoveryReasons
+{
+    public const string SameRuntimeMissing = "same-runtime-missing";
+    public const string ConfiguredFallback = "configured-fallback";
+
+    public static bool IsDefined(string? reason) =>
+        reason is SameRuntimeMissing or ConfiguredFallback;
+}
+
 [GenerateSerializer]
 public sealed record PrepareAgentJobInitialRecovery(
     [property: Id(0)] string OperationId,
@@ -186,7 +195,8 @@ public sealed record PrepareAgentJobInitialRecovery(
     [property: Id(6)] string TurnId,
     [property: Id(7)] string ExpectedRuntime,
     [property: Id(8)] string ExpectedRuntimeSessionId,
-    [property: Id(9)] string CreationAttemptId);
+    [property: Id(9)] string CreationAttemptId,
+    [property: Id(10)] string RecoveryReason);
 
 [GenerateSerializer]
 public sealed record CompleteAgentJobInitialRecovery(

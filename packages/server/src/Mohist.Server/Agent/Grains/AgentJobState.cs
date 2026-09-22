@@ -114,7 +114,8 @@ public sealed record AgentJobInitialInputSubmission(
     [property: Id(15)] long? ContextGeneration = null,
     [property: Id(16)] string? SubmissionAttemptId = null,
     [property: Id(17)] DateTimeOffset? StartedAt = null,
-    [property: Id(18)] string? CreationAttemptId = null);
+    [property: Id(18)] string? CreationAttemptId = null,
+    [property: Id(19)] string? RecoveryReason = null);
 
 
 [GenerateSerializer]
