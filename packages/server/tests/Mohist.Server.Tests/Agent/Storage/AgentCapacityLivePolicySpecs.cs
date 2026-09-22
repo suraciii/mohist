@@ -1,4 +1,6 @@
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
@@ -6,6 +8,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Capacity;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.TestSupport;
@@ -89,6 +92,35 @@ public sealed class AgentCapacityLivePolicySpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReadJobHistory_FiltersTerminalRowsButRetainsUnknownOwnerEvidence()
+    {
+        await AddAgentAsync("history", "bounded", 1);
+        await AddAgentAsync("history", "unknown", 1);
+        await AddJobAsync("eligible", "history", "bounded");
+        await AddMalformedTerminalHistoryAsync("history", "bounded", 200);
+        await AddUnknownStatusRowsAsync("history", "unknown");
+        var recorder = new JobSelectRecorder();
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_database.ConnectionString)
+            .AddInterceptors(recorder)
+            .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning))
+            .Options;
+        var store = new AgentCapacityStore(new TestDbContextFactory(options), _time);
+
+        var snapshots = await store.ReadAsync("history", ["bounded", "unknown"]);
+
+        Assert.Equal(AgentCapacityEvidenceStatus.Complete, snapshots["bounded"].EvidenceStatus);
+        Assert.Equal(0, snapshots["bounded"].Occupied);
+        Assert.Single(snapshots["bounded"].Eligible);
+        Assert.Equal(AgentCapacityEvidenceStatus.IncompleteOwnerEvidence, snapshots["unknown"].EvidenceStatus);
+        Assert.Null(snapshots["unknown"].Occupied);
+        Assert.Contains("Status", recorder.JobSelect, StringComparison.Ordinal);
+        Assert.Contains("completed", recorder.JobSelect, StringComparison.Ordinal);
+        Assert.Contains("failed", recorder.JobSelect, StringComparison.Ordinal);
+        Assert.Contains("cancelled", recorder.JobSelect, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Occupancy_IsIsolatedByBothProjectAndAgent()
     {
         await AddAgentAsync("project", "agent-a", 1);
@@ -120,6 +152,54 @@ public sealed class AgentCapacityLivePolicySpecs : IAsyncLifetime
         await db.SaveChangesAsync();
     }
 
+    private async Task AddMalformedTerminalHistoryAsync(string projectId, string agentId, int count)
+    {
+        var terminal = new AgentJobState
+        {
+            Status = AgentJobStatus.Completed,
+            Input = new AgentJobInput("prompt", ProjectId: projectId, AgentId: agentId),
+            SubmittedAt = Now,
+            TerminalAt = Now,
+            FailureReason = "malformed-marker",
+        };
+        var malformed = JSON.Serialize(terminal).Replace(
+            "\"failureReason\":\"malformed-marker\"",
+            "\"failureReason\":42",
+            StringComparison.Ordinal);
+        Assert.Contains("\"failureReason\":42", malformed, StringComparison.Ordinal);
+        await using var db = _database.CreateContext();
+        for (var index = 0; index < count; index++)
+        {
+            db.AgentJobs.Add(new AgentJobRow
+            {
+                JobKey = $"terminal-{index}",
+                State = malformed,
+                Revision = 1,
+            });
+        }
+        await db.SaveChangesAsync();
+    }
+
+    private async Task AddUnknownStatusRowsAsync(string projectId, string agentId)
+    {
+        var pending = new AgentJobState
+        {
+            Status = AgentJobStatus.Pending,
+            Input = new AgentJobInput("prompt", ProjectId: projectId, AgentId: agentId),
+            SubmittedAt = Now,
+        };
+        var valid = JSON.Serialize(pending);
+        var invalid = valid.Replace("\"status\":\"pending\"", "\"status\":\"unexpected\"", StringComparison.Ordinal);
+        var missing = valid.Replace("\"status\":\"pending\",", string.Empty, StringComparison.Ordinal);
+        Assert.NotEqual(valid, invalid);
+        Assert.NotEqual(valid, missing);
+        await using var db = _database.CreateContext();
+        db.AgentJobs.AddRange(
+            new AgentJobRow { JobKey = "invalid-status", State = invalid, Revision = 1 },
+            new AgentJobRow { JobKey = "missing-status", State = missing, Revision = 1 });
+        await db.SaveChangesAsync();
+    }
+
     private async Task SetLimitAsync(string projectId, string agentId, int? limit)
     {
         await using var db = _database.CreateContext();
@@ -128,6 +208,22 @@ public sealed class AgentCapacityLivePolicySpecs : IAsyncLifetime
         agent.MaxConcurrentRuns = limit;
         row.State = AgentStore.Serialize(agent);
         await db.SaveChangesAsync();
+    }
+
+    private sealed class JobSelectRecorder : DbCommandInterceptor
+    {
+        public string JobSelect { get; private set; } = string.Empty;
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("FROM \"AgentJobs\"", StringComparison.Ordinal))
+                JobSelect = command.CommandText;
+            return ValueTask.FromResult(result);
+        }
     }
 
     private async Task<AgentJobLedgerRecord> AddJobAsync(

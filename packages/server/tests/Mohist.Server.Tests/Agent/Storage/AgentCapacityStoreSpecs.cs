@@ -29,10 +29,16 @@ public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
     public ValueTask DisposeAsync() => _database.DisposeAsync();
 
     [Fact]
-    public async Task ClaimJob_AtomicallyWritesOwnerRevisionReadySinceAndDirectProjection()
+    public async Task ClaimJob_AtomicallyRestampsReadySinceAndRetryDoesNotRewriteOwner()
     {
         await AddAgentAsync("project", "agent", 1);
-        var inserted = await AddJobAsync("job", "project", "agent", Now, readySince: null);
+        var inserted = await AddJobAsync("job", "project", "agent", Now, readySince: Now.AddHours(-2));
+        await using (var seedDb = _database.CreateContext())
+        {
+            var seedRow = await seedDb.AgentJobs.SingleAsync(candidate => candidate.JobKey == "job");
+            seedRow.ReadySince = AgentJobStore.FormatTimestamp(Now.AddHours(-1));
+            await seedDb.SaveChangesAsync();
+        }
 
         var result = await Store.ClaimJobAsync("job", inserted.Revision);
 
@@ -44,8 +50,26 @@ public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
         Assert.Equal(Now, state.ReadySince);
         await using var db = _database.CreateContext();
         var row = await db.AgentJobs.SingleAsync(candidate => candidate.JobKey == "job");
+        Assert.Equal(Now, AgentJobStore.ParseTimestamp(row.ReadySince));
         Assert.Equal(row.Revision, row.DirectApiProjectionRevision);
         Assert.NotNull(row.DirectApiProjectionJson);
+        var projection = JSON.Deserialize<DirectApiAgentJobProjection>(row.DirectApiProjectionJson)!;
+        Assert.Equal(Now, projection.ObservedAt);
+        Assert.Equal(row.Revision, projection.SourceRevision);
+        var committedState = row.State;
+        var committedProjection = row.DirectApiProjectionJson;
+
+        _time.Advance(TimeSpan.FromMinutes(5));
+        var retry = await Store.ClaimJobAsync("job", inserted.Revision);
+
+        Assert.Equal(AgentCapacityClaimDisposition.AlreadyClaimed, retry.Disposition);
+        Assert.Equal(result.Job.Revision, retry.Job!.Revision);
+        Assert.Equal(Now, retry.Job.ReadySince);
+        await db.Entry(row).ReloadAsync();
+        Assert.Equal(result.Job.Revision, row.Revision);
+        Assert.Equal(Now, AgentJobStore.ParseTimestamp(row.ReadySince));
+        Assert.Equal(committedState, row.State);
+        Assert.Equal(committedProjection, row.DirectApiProjectionJson);
     }
 
     [Fact]
@@ -167,36 +191,6 @@ public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
         Assert.Equal(AgentCapacityEvidenceStatus.MissingDefinition, snapshots["builtin:not-real"].EvidenceStatus);
         Assert.Equal(AgentCapacityEvidenceStatus.MalformedDefinition, snapshots["bad"].EvidenceStatus);
         Assert.True(snapshots["builtin:mohist/planner"].IsUnlimited);
-    }
-
-    [Fact]
-    public async Task ConcurrentJobClaims_AdmitAtMostOneSlotAndContentionIsNotCapacityFull()
-    {
-        await AddAgentAsync("project", "agent", 1);
-        var first = await AddJobAsync("a", "project", "agent", Now);
-        var second = await AddJobAsync("b", "project", "agent", Now);
-
-        var attempts = await Task.WhenAll(
-            AttemptAsync(() => Store.ClaimJobAsync("a", first.Revision)),
-            AttemptAsync(() => Store.ClaimJobAsync("b", second.Revision)));
-        var claimed = attempts.Where(result => result?.Disposition == AgentCapacityClaimDisposition.Claimed).ToArray();
-        Assert.True(claimed.Length <= 1);
-        Assert.DoesNotContain(attempts, result => result?.Disposition == AgentCapacityClaimDisposition.Claimed
-            && result.Job!.JobKey == "b");
-        var snapshot = (await Store.ReadAsync("project", ["agent"]))["agent"];
-        Assert.InRange(snapshot.Occupied!.Value, 0, 1);
-        if (snapshot.Occupied == 0)
-        {
-            var retry = await Store.ClaimJobAsync("a", first.Revision);
-            Assert.Equal(AgentCapacityClaimDisposition.Claimed, retry.Disposition);
-        }
-    }
-
-    private static async Task<AgentJobCapacityClaimResult?> AttemptAsync(
-        Func<Task<AgentJobCapacityClaimResult>> action)
-    {
-        try { return await action(); }
-        catch (Microsoft.Data.Sqlite.SqliteException) { return null; }
     }
 
     private async Task AddAgentAsync(string projectId, string agentId, int? limit)

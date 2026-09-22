@@ -87,9 +87,9 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
 
         var now = _timeProvider.GetUtcNow();
         job.CapacityClaimedAt = now;
-        job.ReadySince ??= now;
+        job.ReadySince = now;
         row.State = JSON.Serialize(job);
-        row.ReadySince ??= AgentJobStore.FormatTimestamp(job.ReadySince);
+        row.ReadySince = AgentJobStore.FormatTimestamp(now);
         row.Revision++;
         AgentJobStore.StageDirectApiProjection(row, now);
         await db.SaveChangesAsync(ct);
@@ -200,7 +200,13 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
         var ids = agentIds.ToArray();
         var definitions = await ReadDefinitionsAsync(db, projectId, ids, ct);
         var jobs = await db.AgentJobs.AsNoTracking()
-            .Where(row => row.ProjectId == projectId && row.AgentId != null && ids.Contains(row.AgentId))
+            .Where(row => row.ProjectId == projectId
+                && row.AgentId != null
+                && ids.Contains(row.AgentId)
+                && (row.Status == null
+                    || row.Status != "completed"
+                        && row.Status != "failed"
+                        && row.Status != "cancelled"))
             .ToListAsync(ct);
         var sessions = await db.AgentSessions.AsNoTracking()
             .Where(row => row.LabelProjectId == projectId
@@ -218,7 +224,8 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
 
             foreach (var row in jobs.Where(row => string.Equals(row.AgentId, agentId, StringComparison.Ordinal)))
             {
-                if (!TryJob(row.State, out var job))
+                if (row.Status is not ("pending" or "running" or "unknown")
+                    || !TryJob(row.State, out var job))
                 {
                     evidence = Incomplete(evidence);
                     continue;
