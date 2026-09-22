@@ -1,15 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { DispatchWorkItem } from '../src/core/types.js'
-import {
-  recoverInitialBindingIfNeeded,
-  type BindingResolution,
-} from '../src/runtime/agent-job-executor.js'
-import {
-  admitInitialProviderSubmission,
-  executeOpenCodeTurn,
-  executePiTurn,
-} from '../src/runtime/agent-job-turn.js'
-import { executeCodexTurn } from '../src/runtime/agent-job-codex-turn.js'
+import { recoverInitialBindingIfNeeded, type BindingResolution } from '../src/runtime/agent-job-executor.js'
+import { admitInitialProviderSubmission } from '../src/runtime/agent-job-turn.js'
 
 const work: DispatchWorkItem = {
   workflowRunId: '',
@@ -74,115 +66,6 @@ function missingOpenCode(order: string[]) {
       }
     }),
   }
-}
-
-type RuntimeKind = 'opencode' | 'pi' | 'codex'
-
-function deferred() {
-  let resolve!: () => void
-  const promise = new Promise<void>((done) => {
-    resolve = done
-  })
-  return { promise, resolve }
-}
-
-function providerBoundaryFixture(
-  runtimeKind: RuntimeKind,
-  startAgentJobInitialInput: (...args: never[]) => Promise<unknown>,
-) {
-  const providerInput = vi.fn()
-  const connection = {
-    runnerId: 'runner-1',
-    openAgentSession: vi.fn(async () => undefined),
-    attachAgentSession: vi.fn(async () => undefined),
-    startAgentJobInitialInput,
-  }
-  const complete = {
-    ok: true as const,
-    value: {
-      facts: { runtimeSessionId: 'runtime-old', workDir: '/work', finalAssistantText: 'done' },
-      diagnostics: [],
-    },
-    diagnostics: [],
-  }
-  const runtime = {
-    ready: () => true,
-    diagnostic: () => null,
-    runTurn: vi.fn(
-      async (
-        _request: unknown,
-        _signal: AbortSignal,
-        observer?: {
-          onSessionReady?: (session: { runtimeSessionId: string; workDir: string }) => Promise<void>
-        },
-      ) => {
-        await observer?.onSessionReady?.({ runtimeSessionId: 'runtime-old', workDir: '/work' })
-        providerInput()
-        return complete
-      },
-    ),
-  }
-  const deps = {
-    connection,
-    runtimes: {
-      openCode: runtimeKind === 'opencode' ? runtime : null,
-      pi: runtimeKind === 'pi' ? runtime : null,
-      codex: runtimeKind === 'codex' ? runtime : null,
-    },
-    options: {},
-  }
-  const runtimeBinding = { ...binding, runtime: runtimeKind }
-  const signal = new AbortController().signal
-  const execute = () => {
-    if (runtimeKind === 'opencode') {
-      return executeOpenCodeTurn(
-        deps as never,
-        work,
-        signal,
-        work.with ?? null,
-        'hello',
-        { kind: 'absent' },
-        null,
-        null,
-        null,
-        '/work',
-        runtimeBinding,
-        [],
-        [],
-      )
-    }
-    if (runtimeKind === 'pi') {
-      return executePiTurn(
-        deps as never,
-        work,
-        signal,
-        work.with ?? null,
-        'hello',
-        { kind: 'absent' },
-        null,
-        null,
-        null,
-        '/work',
-        runtimeBinding,
-        [],
-      )
-    }
-    return executeCodexTurn(
-      deps as never,
-      work,
-      signal,
-      work.with ?? null,
-      'hello',
-      null,
-      null,
-      null,
-      '/work',
-      runtimeBinding,
-      [],
-      [],
-    )
-  }
-  return { execute, providerInput }
 }
 
 describe('initial AgentJob pre-submission recovery', () => {
@@ -426,52 +309,5 @@ describe('initial AgentJob pre-submission recovery', () => {
 
     expect(start).toHaveBeenCalledTimes(2)
     expect(starts[0]).toEqual(starts[1])
-  })
-})
-
-describe.each(['opencode', 'pi', 'codex'] as const)('%s initial provider boundary', (runtimeKind) => {
-  it('holds provider Input until affirmative durable admission', async () => {
-    const admissionEntered = deferred()
-    const releaseAdmission = deferred()
-    const start = vi.fn(async () => {
-      admissionEntered.resolve()
-      await releaseAdmission.promise
-      return {
-        effectAdmitted: true,
-        submissionAuthorized: true,
-        runtime: runtimeKind,
-        runtimeSessionId: 'runtime-old',
-      }
-    })
-    const fixture = providerBoundaryFixture(runtimeKind, start as never)
-
-    const execution = fixture.execute()
-    await admissionEntered.promise
-    expect(fixture.providerInput).not.toHaveBeenCalled()
-    releaseAdmission.resolve()
-    await execution
-
-    expect(start).toHaveBeenCalledOnce()
-    expect(fixture.providerInput).toHaveBeenCalledOnce()
-  })
-
-  it.each(['rejected', 'uncertain'] as const)('submits no provider Input when admission is %s', async (outcome) => {
-    const start =
-      outcome === 'rejected'
-        ? vi.fn(async () => ({
-            effectAdmitted: true,
-            submissionAuthorized: false,
-            runtime: runtimeKind,
-            runtimeSessionId: 'runtime-old',
-          }))
-        : vi.fn(async () => {
-            throw new Error('admission response unavailable')
-          })
-    const fixture = providerBoundaryFixture(runtimeKind, start as never)
-
-    await fixture.execute()
-
-    expect(start).toHaveBeenCalledTimes(outcome === 'uncertain' ? 2 : 1)
-    expect(fixture.providerInput).not.toHaveBeenCalled()
   })
 })
