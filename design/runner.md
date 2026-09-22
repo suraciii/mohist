@@ -269,30 +269,21 @@ concerns.
 
 ### Fairness
 
-Stamp `ReadySince` whenever work enters or re-enters Ready. Within a candidate
-tier, mix Workflow and AgentJob work by `ORDER BY ReadySince ASC`. This produces
-round-robin service with no scheduler state:
+Within a candidate tier, mix Workflow and AgentJob work by
+`ORDER BY ReadySince ASC`. Any priority between work types must be a declared
+policy, not an implicit bias.
 
-```text diagram
-+------------------------+
-| Ready queue ReadySince |
-|          ASC           |<+
-+------------+-----------+ |
-             |             |
-             v             |
-  +--------------------+   |
-  | serve longest wait |   |
-  +----------+---------+   |
-             |             |
-             v             |
-   +-------------------+   |
-   | requeue next work |   |
-   | ReadySince := now +---+
-   +-------------------+
-```
+Workflow work stamps `ReadySince` whenever it enters or re-enters Ready. A new
+Workflow work item therefore joins the end of the ready queue without separate
+scheduler state.
 
-The policy is strict FIFO. Any priority between work types must be a
-declared policy, not an implicit bias.
+An AgentJob instead fixes `ReadySince` at its first Agent occupancy claim, as
+specified by [Agent capacity](agent-execution.md#atomic-claim-and-owner-state).
+It preserves that timestamp throughout the same Pending episode, including
+Runner assignment, assignment loss, and re-evaluation. Its configured pending
+bound starts at that claim even when no Runner is assigned. Requeue cannot
+restart the deadline, and this timer never settles an already dispatched
+uncertain execution.
 
 ### Capacity
 

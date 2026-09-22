@@ -124,40 +124,120 @@ Runner ([`runner.md`](runner.md#capacity)); a dispatch must satisfy both
 bounds, and capacity decisions converge at the Runner claim, per
 [the decision record](decisions/one-ledger-no-reconciliation.md).
 
-Counting rule. An execution occupies one slot for `(project, agent)` from its
-occupancy claim until it is terminal:
+### Occupancy and identity
 
-- a launch Job that has claimed occupancy and is not terminal;
-- a follow-up Turn that has claimed occupancy and is not terminal.
+An execution occupies one slot for `(project, agent)` from its occupancy claim
+until it is terminal:
 
-A pending Job or queued Turn that has not claimed occupancy occupies nothing.
-A Turn superseded by a committed context boundary — a prior `ContextGeneration`
-left by force-reset, rebind, or handoff — occupies nothing. A terminal Job or
-Turn occupies nothing, whatever its terminal status. A Turn settled by Activity
-convergence is terminal for this count.
+- a claimed launch Job in `pending`, `running`, or unresolved `unknown`, with
+  no terminal timestamp;
+- a claimed follow-up Turn in `queued`, `executing`, or unresolved `unknown`,
+  in the Session's current context and without supersession.
 
-Claim rule. An occupancy claim is one store transaction over the
-`(project, agent)`: it enumerates occupants — Job rows and Session documents
-for that pair — and commits the accepted work as claimed only while the count
-is below the limit. Enumerating in one transaction and claiming in a later one
-is the classic admission race and is forbidden.
+The initial Turn belongs to its launch Job and never counts a second time.
+Unclaimed pending Jobs and queued Turns occupy nothing. A terminal Job or Turn
+occupies nothing, whatever its result. Activity convergence and committed
+context supersession end occupancy without inventing a successful result.
+Unresolved `unknown` still occupies a slot; the enclosing Session's Activity
+projection is not a counting filter. Elapsed time cannot settle that uncertainty.
+The claim timestamp remains on the owner record after occupancy ends.
 
-Queueing and wake. Capacity pressure never discards accepted work: a queued
-later Turn waits in Session order, and a launch Job waits with its capacity
-reason; only a full queue rejects before acceptance. A waiting launch Job
-re-evaluates on its existing per-Job recovery reminder. A queued follow-up
-Turn re-evaluates on a Session recovery reminder that exists only while the
-Session holds queued Turns, after the `schedule-recovery` pattern. Either
-evaluation claims idempotently under the claim rule. Within a
-`(project, agent)`, waiting work is admitted in acceptance order.
+Every launch and Session, including Workflow Sessions, retains the accepted
+Project and Agent IDs. A later name, Agent edit, or Workflow definition cannot
+reattribute its occupancy. The Session's accepted metadata supplies follow-up
+identity; the request cannot choose another Agent.
+
+### Atomic claim and owner state
+
+The capacity store has no state of its own. It reads both owner stores and
+conditionally claims one owner in one transaction. The transaction obtains
+SQLite write serialization before enumeration. It reads the live limit, counts
+occupants, checks eligibility and order, and writes the owner claim together.
+Counting and claiming in separate transactions is forbidden.
+
+A stored Project Agent's current document supplies its limit, not the accepted
+execution snapshot. An exact built-in Agent identity uses its catalog-defined
+limit; a built-in needs no stored Project Agent row. An absent or malformed
+Project Agent is not an unlimited Agent, and a `builtin:` prefix alone is not
+a catalog identity. A limit change and a claim observe one serialized order.
+Lowering the limit does not cancel work that already holds a claim.
+
+Missing owner identity or an absent or malformed Agent definition prevents a
+new claim. Already accepted work remains `pending` or `queued`, keeps its
+original identities, and reports `dispatch-pending` with incomplete capacity
+evidence until the definition or identity is repaired. It is not rejected,
+expired, or mislabeled `capacity-full`. Reads must not invent zero occupancy or
+an unlimited limit from that missing evidence. Existing valid claims remain
+occupied and idempotently readable even when the Agent definition is unavailable.
+
+Only the work owner requests its claim. A Job claim checks and advances the
+existing ledger revision and its direct API projection in the same transaction.
+A Session claim runs inside its serialized grain turn. The owner first flushes
+pending Session state and events. The store patches the latest persisted
+Session document using an exact-document compare-and-set, then returns the
+complete committed document for the owner to install before another save.
+Persistence timers cannot interleave a stale whole-document write with this
+boundary. No coordinator or other grain writes a Session claim on its behalf.
+
+The Session remains a single-writer aggregate. Exact-document comparison and
+cache replacement protect this local claim without adding a separate persistent
+Session revision to every save path. A second Session writer would require a
+new write-concurrency design; it is not permitted by this boundary.
+
+A failed pre-claim flush writes no claim. A revision conflict or storage
+contention requires retry from fresh state, not a false `capacity-full`
+conclusion. An uncertain commit requires owner reload or activation quarantine
+before another save or dispatch. Retrying an existing valid claim returns the
+same owner fact and does not consume another slot.
+
+A pending Job's first claim also fixes its `ReadySince`. Waiting for a Runner,
+assignment changes, and re-evaluation preserve that timestamp. The existing
+pending-work bound applies even when no Runner is assigned. This bounds
+claimed but undispatched work, not an unresolved execution after dispatch.
+Runner process and slot claims remain separate from this Agent occupancy claim.
+
+### Queue order and recovery
+
+Capacity pressure never discards accepted work. Only a full input queue rejects
+before acceptance. A queued follow-up retains its accepted Input, Turn, and
+dispatch identity for as long as it waits; its delivery record cannot expire
+because of a lease-duration timer.
+
+Admission follows acceptance order among currently eligible heads. A pending
+launch can claim before Runner selection. Only the first queued follow-up Turn
+in a Session can compete, and only when that Session's execution-ownership and
+operation fences allow dispatch. A head blocked by its own Session does not
+block eligible work in other Sessions. Capacity never overrides those fences.
+The acceptance key is Job `SubmittedAt` or follow-up Turn `RecordedAt`, both
+compared in UTC. A Turn retains the time at which its first Input was accepted;
+joining another Input does not replace it. For equal times, order Jobs before
+Turns, then owner IDs in ordinal order: Job ID for a Job, Session ID for a Turn.
+Remaining Turn ties use Turn sequence and then Turn ID in ordinal order.
+There is no separate global queue sequence. Unlimited capacity still preserves
+Session order and execution fences but needs no cross-Session capacity wait.
+
+The specialized inspection-only Manager recovery Turn remains eligible from
+unconfirmed Activity `unknown` under its existing recovery fences. The original
+unknown Job dispatch remains withheld, and no confirmed execution owner or
+competing Session operation may be bypassed. This recovery never resubmits or
+settles the original uncertain Input. Its Turn claims its own capacity while
+the original unresolved Job continues to occupy its slot; a finite limit still
+applies to both facts.
+
+A waiting launch Job re-evaluates on its existing per-Job recovery reminder.
+A Session recovery reminder remains registered while any current,
+nonsuperseded follow-up Turn is queued, whether claimed or unclaimed. It wakes
+the existing dispatcher; it does not deliver a grant callback. In particular,
+a crash after claim but before dispatch must not strand a claimed queued Turn.
+The wake is durable before queue acceptance is committed; an orphan reminder
+without queued work is harmless and is removed. Activation restores reminder
+reachability, and a reminder stops only when no such queued work remains.
+A live limit increase or change to unlimited takes effect at the next evaluation.
 
 Availability projections and waiting-work lists (`capacity-full`,
-`concurrency-limit`, `dispatch-pending`) read the same derived count and queue
-facts and keep the existing reason vocabulary. A launch coordinator never
-awaits a capacity decision.
-
-A `maxConcurrentRuns` change takes effect at the next evaluation and never
-cancels running work.
+`concurrency-limit`, `dispatch-pending`) read the same occupancy and queued-owner
+facts. They preserve the existing reason vocabulary. A launch coordinator
+never awaits a capacity decision.
 
 AgentJob references the first Input and Turn created by launch. A completed
 AgentJob means that the launch work returned successfully. It does not close the
@@ -165,8 +245,8 @@ AgentSession or establish that the user's broader task is complete. Later
 Follow-ups never reopen or rewrite that AgentJob.
 
 Agent launch fixes Instructions, Runtime, Model, Variant, Skills, and Workspace
-identity for the Session. Later input uses the same execution snapshot. Policy
-changes affect later launches only. The entry point resolves a named Workspace
+identity for the Session. Later input uses the same execution snapshot. Changes
+to these execution settings affect later launches only. The entry point resolves a named Workspace
 from its Origin and persists that identity before acceptance. Where an entry
 point permits a Workspace override, the caller supplies its name, never a raw
 path or Runner default. The Runner may provision the Workspace Home later.
@@ -471,8 +551,11 @@ Follow-up has two paths chosen by current state:
   no operation competes.
 - A running Turn without steer support queues a later Turn in Session order
   unless the queue is full.
-- `outcome_pending`, `unknown`, or an active context operation rejects the
-  request without guessing a target Turn.
+- Ordinary `outcome_pending`, `unknown`, or an active context operation rejects
+  the request without guessing a target Turn. The specialized inspection-only
+  Manager recovery transition is the explicit `unknown` exception described
+  in [capacity recovery](#queue-order-and-recovery); ordinary callers cannot
+  use it to bypass execution ownership.
 
 The Session request map is unique by `(SessionId, requestId)`. Acceptance,
 rejection, or uncertainty is persisted under that identity. Same-key replay
