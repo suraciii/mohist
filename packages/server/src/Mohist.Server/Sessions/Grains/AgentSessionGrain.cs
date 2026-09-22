@@ -3260,6 +3260,9 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     public async Task<AgentSessionStopClaim?> GetStopClaimAsync() =>
         (await GetRequiredAsync()).Status.PendingStop;
 
+    public async Task<AgentSessionStopClaim?> GetStopClaimAsync(string turnId, string operationId) =>
+        (await GetRequiredAsync()).FindStopClaim(turnId, operationId);
+
     public async Task<AgentTurnControlState?> ResolveTurnControlAsync(string turnId)
     {
         if (string.IsNullOrWhiteSpace(turnId))

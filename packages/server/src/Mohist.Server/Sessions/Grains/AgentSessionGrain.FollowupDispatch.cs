@@ -20,7 +20,16 @@ public sealed partial class AgentSessionGrain
     {
         var session = await GetRequiredAsync();
         var turns = session.Status.Turns ?? [];
-        if (turns.Any(turn => turn.Status == AgentTurnStatus.Executing)) return null;
+        var hasExclusiveOwner = turns.Any(turn =>
+                turn.SupersededAt is null
+                && turn.ContextGeneration == session.Status.ContextGeneration
+                && turn.Status == AgentTurnStatus.Executing)
+            || session.Status.ConfirmedExecutionOwnership is { } ownership
+                && ownership.ContextGeneration == session.Status.ContextGeneration
+                && turns.Any(turn => ownership.TurnIds.Contains(turn.Id, StringComparer.Ordinal)
+                    && turn.SupersededAt is null
+                    && turn.Status is AgentTurnStatus.Executing or AgentTurnStatus.Unknown);
+        if (hasExclusiveOwner) return null;
         if (turns.Any(turn => !string.IsNullOrWhiteSpace(turn.JobId) && turn.Status == AgentTurnStatus.Queued))
             return null;
         var leases = GetPendingFollowups(session).ToList();

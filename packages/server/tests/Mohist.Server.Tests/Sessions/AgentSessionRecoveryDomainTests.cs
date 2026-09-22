@@ -76,6 +76,43 @@ public sealed class AgentSessionRecoveryDomainTests
     }
 
     [Fact]
+    public void RuntimeChangeAttach_CannotStrandAnAcceptedQueuedTurn()
+    {
+        var session = CreateSession();
+        session.AttachPhysicalSession("runtime-old", "original-model", "/work", null, null, TestTime.UtcDateTime);
+        var accepted = session.AcceptFollowup(
+            "input-1", "turn-1", "operation-1", "continue", "agent-session-followup", "key-1", TestTime.UtcDateTime);
+        var bindingBefore = session.CurrentRuntimeBinding();
+        var generationBefore = session.Status.ContextGeneration;
+
+        Assert.Throws<InvalidOperationException>(() => session.AttachPhysicalSession(
+            "runtime-new", "new-model", "/work", null, null, TestTime.UtcDateTime.AddMinutes(1),
+            runtime: "pi"));
+
+        Assert.Equal(bindingBefore, session.CurrentRuntimeBinding());
+        Assert.Equal("original-model", session.Settings.Model);
+        Assert.Equal(generationBefore, session.Status.ContextGeneration);
+        Assert.Equal(generationBefore,
+            Assert.Single(session.Status.Turns!, turn => turn.Id == accepted.TurnId).ContextGeneration);
+        Assert.Equal("continue", Assert.Single(session.Status.Inputs!).Text);
+    }
+
+    [Fact]
+    public void FirstPhysicalAttach_PreservesAcceptedInitialGeneration()
+    {
+        var session = CreateSession();
+        session.EnsureInitialLaunch(
+            "input-1", "turn-1", "prompt", "agent-connection", "job-1", TestTime.UtcDateTime);
+
+        session.AttachPhysicalSession(
+            "runtime-first", null, "/work", null, null, TestTime.UtcDateTime.AddMinutes(1));
+
+        Assert.Equal(1, session.Status.ContextGeneration);
+        Assert.Equal(1, Assert.Single(session.Status.Inputs!).ContextGeneration);
+        Assert.Equal(1, Assert.Single(session.Status.Turns!).ContextGeneration);
+    }
+
+    [Fact]
     public void RebindRuntimeSession_RejectsStaleExpectedBindingWithoutMutation()
     {
         var session = CreateSession();

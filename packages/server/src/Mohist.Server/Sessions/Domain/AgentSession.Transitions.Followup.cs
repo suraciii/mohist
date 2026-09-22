@@ -332,6 +332,11 @@ public static partial class AgentSessionExtensions
                     or AgentTurnStatus.Unknown
                     ? now
                     : session.Status.CurrentTurnEndedAt,
+                ConfirmedExecutionOwnership = session.Status.ConfirmedExecutionOwnership is { } ownership
+                    && !string.IsNullOrWhiteSpace(lease.TurnId)
+                    && ownership.TurnIds.Contains(lease.TurnId, StringComparer.Ordinal)
+                    ? null
+                    : session.Status.ConfirmedExecutionOwnership,
             };
             return [];
         }

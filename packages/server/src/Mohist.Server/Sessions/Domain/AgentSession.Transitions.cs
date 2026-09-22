@@ -86,13 +86,13 @@ public static partial class AgentSessionExtensions
             if (isNewRuntimeBinding && !string.IsNullOrWhiteSpace(existingAgentSessionId)
                 && !string.Equals(existingRuntime, nextRuntime, StringComparison.OrdinalIgnoreCase))
             {
-                session.Settings = session.Settings with { Model = model ?? session.Settings.Model };
                 var replacementEvents = session.RebindRuntimeSession(
                     session.CurrentRuntimeBinding(),
                     new AgentRuntimeBinding(session.Runtime.RunnerId, nextRuntime, agentSessionId),
                     "runtime-change",
                     now: now,
                     expectedBindingEpoch: session.BindingEpoch).ToList();
+                session.Settings = session.Settings with { Model = model ?? session.Settings.Model };
                 if (!string.Equals(oldModel, model ?? oldModel, StringComparison.Ordinal))
                     replacementEvents.Add(new AgentSessionModelChanged(model ?? oldModel));
                 return replacementEvents;
@@ -226,6 +226,12 @@ public static partial class AgentSessionExtensions
                 throw new InvalidOperationException("Binding replacement requires a runner and runtime session.");
             if (reason is not ("reset" or "runtime-change" or "missing-recovery"))
                 throw new ArgumentOutOfRangeException(nameof(reason), reason, "Unsupported binding replacement reason.");
+            var queuedTurns = (session.Status.Turns ?? []).Where(turn =>
+                turn.SupersededAt is null
+                && turn.Status == AgentTurnStatus.Queued).ToArray();
+            if (queuedTurns.Length > 0 && string.IsNullOrWhiteSpace(queuedTurnIdToRetarget))
+                throw new InvalidOperationException(
+                    $"AgentSession {session.Id} binding replacement requires an explicit pre-submission Turn fence.");
             if (!string.IsNullOrWhiteSpace(queuedTurnIdToRetarget))
                 EnsureCanRetargetSealedQueuedTurn(session, queuedTurnIdToRetarget);
             var nextBindingEpoch = checked(session.BindingEpoch + 1);
@@ -255,6 +261,7 @@ public static partial class AgentSessionExtensions
                 ContextGeneration = nextGeneration,
                 MissingRunnerFact = null,
                 PendingActivityObservation = null,
+                ConfirmedExecutionOwnership = null,
             };
             if (!string.IsNullOrWhiteSpace(queuedTurnIdToRetarget))
             {
@@ -884,6 +891,10 @@ public static partial class AgentSessionExtensions
                 Activity = nextActivity,
                 CurrentTurnEndedAt = now,
                 IdleSince = IdleSinceFor(nextActivity, now),
+                ConfirmedExecutionOwnership = session.Status.ConfirmedExecutionOwnership is { } ownership
+                    && ownership.TurnIds.Contains(turnId, StringComparer.Ordinal)
+                    ? null
+                    : session.Status.ConfirmedExecutionOwnership,
             };
             return [];
         }
@@ -944,6 +955,24 @@ public static partial class AgentSessionExtensions
         {
             var control = session.ResolveTurnControl(turnId);
             var pending = session.Status.PendingStop;
+            if (!string.IsNullOrWhiteSpace(operationId))
+            {
+                var archived = (session.Status.SupersededStopClaims ?? []).LastOrDefault(claim =>
+                    string.Equals(claim.TurnId, turnId, StringComparison.Ordinal)
+                    && string.Equals(claim.OperationId, operationId, StringComparison.Ordinal));
+                if (archived is not null)
+                {
+                    return new AgentTurnStopClaimResult(
+                        control,
+                        CanDispatch: false,
+                        archived.OperationId,
+                        archived.Disposition,
+                        archived.Reason);
+                }
+                if ((session.Status.SupersededStopClaims ?? []).Any(claim =>
+                    string.Equals(claim.OperationId, operationId, StringComparison.Ordinal)))
+                    return new AgentTurnStopClaimResult(control, false, null);
+            }
             if (control?.Classification == AgentTurnControlClassification.Terminal
                 && pending is not null
                 && string.Equals(pending.TurnId, turnId, StringComparison.Ordinal))
@@ -979,6 +1008,19 @@ public static partial class AgentSessionExtensions
                 pending.OperationId,
                 pending.Disposition,
                 pending.Reason);
+        }
+
+        public AgentSessionStopClaim? FindStopClaim(string turnId, string operationId)
+        {
+            if (string.IsNullOrWhiteSpace(turnId) || string.IsNullOrWhiteSpace(operationId))
+                return null;
+            if (session.Status.PendingStop is { } pending
+                && string.Equals(pending.TurnId, turnId, StringComparison.Ordinal)
+                && string.Equals(pending.OperationId, operationId, StringComparison.Ordinal))
+                return pending;
+            return (session.Status.SupersededStopClaims ?? []).LastOrDefault(claim =>
+                string.Equals(claim.TurnId, turnId, StringComparison.Ordinal)
+                && string.Equals(claim.OperationId, operationId, StringComparison.Ordinal));
         }
 
         public void MarkTurnStopDispatched(string turnId, string operationId)

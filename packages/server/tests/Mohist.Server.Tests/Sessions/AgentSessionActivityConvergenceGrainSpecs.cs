@@ -104,6 +104,62 @@ public sealed class AgentSessionActivityConvergenceGrainSpecs : AgentSessionGrai
     }
 
     [Fact]
+    public async Task ExecutingAnswer_KeepsQueuedWorkFromDispatchUntilOwnerTerminates()
+    {
+        var grain = await BoundGrainAsync();
+        await CompleteInitialTurnAsync(grain, "initial-job", AgentTurnStatus.Completed);
+        var owner = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "owner work", "agent-session-followup", "owner-key"));
+        await grain.MarkFollowupTurnExecutingAsync(owner.OperationId);
+        await grain.MarkFollowupTurnTerminalAsync(owner.OperationId, AgentTurnStatus.Unknown, null);
+        var request = await grain.PrepareActivityProbeAsync("runner-1");
+        Assert.True(await grain.ApplyActivityProbeAsync(
+            new RunnerSessionActivityProbeResult(request!, RunnerSessionActivityObservations.Executing)));
+
+        var queued = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "queued behind owner", "agent-session-followup", "queued-behind-owner-key"));
+        Assert.Null(await grain.BeginNextFollowupDispatchAsync());
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                $"{{\"activity\":\"idle\",\"status\":\"completed\",\"turnId\":\"{owner.TurnId}\"}}") },
+            "runtime-1"));
+
+        Assert.Equal(AgentTurnStatus.Completed,
+            Assert.Single(await grain.ListTurnsAsync(), turn => turn.Id == owner.TurnId).Status);
+        Assert.Equal(queued.TurnId, (await grain.BeginNextFollowupDispatchAsync())!.TurnId);
+    }
+
+    [Fact]
+    public async Task ActiveEventWithUnknownExplicitIdentity_CannotBorrowCurrentOwner()
+    {
+        var grain = await BoundGrainAsync();
+        await CompleteInitialTurnAsync(grain, "initial-job", AgentTurnStatus.Completed);
+        var owner = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "owner work", "agent-session-followup", "explicit-owner-key"));
+        await grain.MarkFollowupTurnExecutingAsync(owner.OperationId);
+        await grain.MarkFollowupTurnTerminalAsync(owner.OperationId, AgentTurnStatus.Unknown, null);
+        Assert.Equal(AgentSessionActivity.Unknown, SavedActivity());
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[]
+            {
+                new AgentSessionRuntimeEventInput(
+                    RuntimeEventTypes.SessionActivity,
+                    "{\"activity\":\"active\",\"turnId\":\"missing-old-turn\"}"),
+                new AgentSessionRuntimeEventInput(
+                    RuntimeEventTypes.SessionActivity,
+                    "{\"activity\":\"active\",\"operationId\":\"missing-old-operation\"}"),
+            },
+            "runtime-1"));
+
+        Assert.Equal(AgentSessionActivity.Unknown, SavedActivity());
+        Assert.Equal(AgentTurnStatus.Unknown,
+            Assert.Single(await grain.ListTurnsAsync(), turn => turn.Id == owner.TurnId).Status);
+    }
+
+    [Fact]
     public async Task AcceptedButUndispatchedQueuedTurn_IsCancelledAndItsLeaseRemoved()
     {
         var grain = await BoundGrainAsync();
@@ -251,6 +307,61 @@ public sealed class AgentSessionActivityConvergenceGrainSpecs : AgentSessionGrai
     }
 
     [Fact]
+    public async Task FollowupCrossingDispatchBoundaryAfterCapture_RejectsOldEvidence()
+    {
+        var grain = await BoundGrainAsync();
+        await CompleteInitialTurnAsync(grain, "initial-job", AgentTurnStatus.Completed);
+        var queued = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "queued work", "agent-session-followup", "phase-followup-key"));
+        await grain.AppendSystemEventsAsync(new AppendAgentSessionSystemEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                "{\"activity\":\"unknown\"}") }));
+        var request = await grain.PrepareActivityProbeAsync("runner-1");
+
+        Assert.Equal(queued.TurnId, (await grain.BeginNextFollowupDispatchAsync())!.TurnId);
+        Assert.False(await grain.ApplyActivityProbeAsync(
+            new RunnerSessionActivityProbeResult(request!, RunnerSessionActivityObservations.Idle)));
+        Assert.Null(Assert.Single(await grain.ListTurnsAsync(), turn => turn.Id == queued.TurnId).SupersededAt);
+    }
+
+    [Fact]
+    public async Task ResetCrossingEffectBoundaryAfterCapture_RejectsOldEvidence()
+    {
+        var grain = await BoundGrainAsync();
+        var reset = await grain.BeginResetAsync("process-1", "phase-reset-key");
+        await grain.AppendSystemEventsAsync(new AppendAgentSessionSystemEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                "{\"activity\":\"unknown\"}") }));
+        var request = await grain.PrepareActivityProbeAsync("runner-1");
+
+        Assert.Equal(SessionCommandAdmissionOutcome.AdmittedNow,
+            await grain.AdmitSessionCommandEffectAsync(reset.OperationId!, "process-1"));
+        Assert.False(await grain.ApplyActivityProbeAsync(
+            new RunnerSessionActivityProbeResult(request!, RunnerSessionActivityObservations.Idle)));
+        Assert.True(SavedState().Status.PendingReset!.EffectAdmitted);
+        Assert.Null(SavedState().Status.PendingReset!.SupersededAt);
+    }
+
+    [Fact]
+    public async Task StopCrossingDispatchBoundaryAfterCapture_RejectsOldEvidence()
+    {
+        var grain = await BoundGrainAsync();
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            "phase-stop-input", "phase-stop-turn", "prompt", "agent-connection", "phase-stop-job"));
+        await grain.MarkInitialTurnExecutingAsync("phase-stop-job");
+        var claim = await grain.ClaimTurnStopAsync("phase-stop-turn", "phase-stop-operation");
+        var request = await grain.PrepareActivityProbeAsync("runner-1", runnerRemoved: true);
+
+        await grain.MarkTurnStopDispatchedAsync("phase-stop-turn", claim.OperationId!);
+        Assert.False(await grain.ApplyActivityProbeAsync(
+            new RunnerSessionActivityProbeResult(request!, RunnerSessionActivityObservations.UnknownToRunner)));
+        Assert.True(SavedState().Status.PendingStop!.DispatchStarted);
+        Assert.Null(SavedState().Status.PendingStop!.SupersededAt);
+    }
+
+    [Fact]
     public async Task SupersededReset_ReplaysItsExactKeyAndDoesNotBlockANewOperation()
     {
         var grain = await BoundGrainAsync();
@@ -347,6 +458,42 @@ public sealed class AgentSessionActivityConvergenceGrainSpecs : AgentSessionGrai
     }
 
     [Fact]
+    public async Task SupersededStop_ReplaysAfterNewerStopWithoutRedispatch()
+    {
+        var grain = await BoundGrainAsync();
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            "old-stop-input", "old-stop-turn", "prompt", "agent-connection", "old-stop-job"));
+        await grain.MarkInitialTurnExecutingAsync("old-stop-job");
+        await grain.ClaimTurnStopAsync("old-stop-turn", "old-stop-operation");
+        var request = await grain.PrepareActivityProbeAsync("runner-1", runnerRemoved: true);
+        Assert.True(await grain.ApplyActivityProbeAsync(
+            new RunnerSessionActivityProbeResult(request!, RunnerSessionActivityObservations.UnknownToRunner)));
+
+        var newer = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "new stop target", "agent-session-followup", "new-stop-target-key"));
+        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+        await grain.MarkFollowupTurnExecutingAsync(dispatch!.OperationId);
+        var newerClaim = await grain.ClaimTurnStopAsync(newer.TurnId, "new-stop-operation");
+        Assert.True(newerClaim.CanDispatch);
+
+        var archived = await grain.GetStopClaimAsync("old-stop-turn", "old-stop-operation");
+        var replay = await grain.ClaimTurnStopAsync("old-stop-turn", "old-stop-operation");
+        Assert.Equal(AgentSessionStopDisposition.Unknown, archived!.Disposition);
+        Assert.Equal("old-stop-operation", replay.OperationId);
+        Assert.Equal(AgentSessionStopDisposition.Unknown, replay.Disposition);
+        Assert.False(replay.CanDispatch);
+        Assert.Null(await grain.GetStopClaimAsync("old-stop-turn", "new-stop-operation"));
+
+        await grain.MarkTurnStopDispatchedAsync("old-stop-turn", "old-stop-operation");
+        await grain.ApplyStopDeliveryAsync(
+            "old-stop-turn", "old-stop-operation", AgentSessionStopDisposition.Stopped);
+        await grain.CompleteTurnStopAsync("old-stop-turn", "old-stop-operation");
+
+        Assert.Equal(newerClaim.OperationId, (await grain.GetStopClaimAsync())!.OperationId);
+        Assert.False((await grain.GetStopClaimAsync("old-stop-turn", "old-stop-operation"))!.DispatchStarted);
+    }
+
+    [Fact]
     public async Task LateRuntimeEvent_CannotReviveASupersededTurn()
     {
         var grain = await BoundGrainAsync();
@@ -358,19 +505,27 @@ public sealed class AgentSessionActivityConvergenceGrainSpecs : AgentSessionGrai
         var request = await grain.PrepareActivityProbeAsync("runner-1");
         await grain.ApplyActivityProbeAsync(
             new RunnerSessionActivityProbeResult(request!, RunnerSessionActivityObservations.Idle));
+        var newer = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "newer work", "agent-session-followup", "newer-after-settlement-key"));
+        var activityBefore = SavedActivity();
 
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
-            new[]
-            {
-                new AgentSessionRuntimeEventInput(
-                    Type: RuntimeEventTypes.SessionActivity,
-                    PayloadJson: $"{{\"activity\":\"idle\",\"turnId\":\"{later.TurnId}\"}}"),
-            },
+            new[] { new AgentSessionRuntimeEventInput(
+                Type: RuntimeEventTypes.SessionActivity,
+                PayloadJson: $"{{\"activity\":\"active\",\"turnId\":\"{later.TurnId}\"}}") },
+            "runtime-1"));
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                Type: RuntimeEventTypes.SessionActivity,
+                PayloadJson: "{\"activity\":\"active\"}") },
             "runtime-1"));
 
-        var turn = Assert.Single(await grain.ListTurnsAsync(), candidate => candidate.Id == later.TurnId);
-        Assert.Equal(AgentTurnStatus.Unknown, turn.Status);
-        Assert.Equal(AgentSessionActivity.Idle, SavedActivity());
+        var turns = await grain.ListTurnsAsync();
+        Assert.Equal(AgentTurnStatus.Unknown,
+            Assert.Single(turns, candidate => candidate.Id == later.TurnId).Status);
+        Assert.Equal(AgentTurnStatus.Queued,
+            Assert.Single(turns, candidate => candidate.Id == newer.TurnId).Status);
+        Assert.Equal(activityBefore, SavedActivity());
     }
 
     private async Task<IAgentSessionGrain> BoundGrainAsync()

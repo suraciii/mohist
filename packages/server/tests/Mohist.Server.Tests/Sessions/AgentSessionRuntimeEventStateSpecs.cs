@@ -153,6 +153,7 @@ internal static class AgentSessionRuntimeEventTestSupport
             "record runtime events",
             "test",
             $"runtime-events-{name}"));
+        await grain.MarkFollowupTurnExecutingAsync(receipt.OperationId);
         return new RuntimeEventTestSession(grain, sessionId, receipt.TurnId);
     }
 

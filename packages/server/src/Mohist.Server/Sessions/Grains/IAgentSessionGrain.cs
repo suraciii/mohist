@@ -84,6 +84,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
         AgentSessionStopDisposition disposition,
         string? reason = null);
     Task<AgentSessionStopClaim?> GetStopClaimAsync();
+    Task<AgentSessionStopClaim?> GetStopClaimAsync(string turnId, string operationId);
     Task RunStopRecoveryAsync();
 
     Task<AgentTurnControlState?> ResolveTurnControlAsync(string turnId);

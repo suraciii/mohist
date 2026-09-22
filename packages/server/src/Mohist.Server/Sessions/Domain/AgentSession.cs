@@ -393,6 +393,11 @@ public sealed record AgentSessionStatusSnapshot(
     /// </summary>
     AgentSessionActivityObservation? PendingActivityObservation = null,
     /// <summary>
+    /// Runner evidence that a still-unknown Turn retains exclusive Runtime
+    /// ownership. This evidence cannot be derived from terminal Unknown alone.
+    /// </summary>
+    AgentSessionExecutionOwnership? ConfirmedExecutionOwnership = null,
+    /// <summary>
     /// Durable deterministic missing evidence for the current binding's
     /// Runner, recorded from an <c>unknown-to-runner</c> observation and
     /// cleared by the next binding replacement.

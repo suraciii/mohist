@@ -3,12 +3,9 @@ using Mohist.Server.Sessions.Services;
 namespace Mohist.Server.Sessions.Domain;
 
 /// <summary>
-/// Local capture of one outstanding activity observation, persisted with the
-/// wire target plus the session snapshot identity taken at capture time. The
-/// snapshot (input sequence, turn ids, active operation ids) is what fences
-/// newer work: an idle settlement never replaces the binding, so generation
-/// alone cannot tell an answer for the captured facts from an answer for work
-/// accepted afterwards.
+/// Local capture of one outstanding activity observation. Primitive phase
+/// snapshots fence existing work crossing an external-effect boundary without
+/// relying on list reference equality or a global mutation counter.
 /// </summary>
 public sealed record AgentSessionActivityObservation(
     string ObservationId,
@@ -20,10 +17,44 @@ public sealed record AgentSessionActivityObservation(
     long ContextGeneration,
     AgentSessionActivity CapturedActivity,
     long InputSequence,
-    IReadOnlyList<string> TurnIds,
-    IReadOnlyList<string> OperationIds,
+    IReadOnlyList<AgentSessionActivityTurnSnapshot> Turns,
+    IReadOnlyList<AgentSessionActivityFollowupSnapshot> Followups,
+    AgentSessionActivityResetSnapshot? Reset,
+    AgentSessionActivityStopSnapshot? Stop,
     bool RunnerRemoved,
     DateTime CapturedAt);
+
+public sealed record AgentSessionActivityTurnSnapshot(
+    string TurnId,
+    AgentTurnStatus Status,
+    long ContextGeneration,
+    DateTime? SupersededAt);
+
+public sealed record AgentSessionActivityFollowupSnapshot(
+    string OperationId,
+    string? TurnId,
+    bool Accepted,
+    bool Dispatching,
+    bool PayloadSealed,
+    string? ConcurrencyGateStatus);
+
+public sealed record AgentSessionActivityResetSnapshot(
+    string OperationId,
+    bool EffectAdmitted,
+    bool HasOutcome,
+    DateTime? SupersededAt);
+
+public sealed record AgentSessionActivityStopSnapshot(
+    string OperationId,
+    string TurnId,
+    bool DispatchStarted,
+    AgentSessionStopDisposition Disposition,
+    DateTime? SupersededAt);
+
+public sealed record AgentSessionExecutionOwnership(
+    string ObservationId,
+    long ContextGeneration,
+    IReadOnlyList<string> TurnIds);
 
 /// <summary>
 /// Durable write-side fact that the bound Runner cannot account for the
@@ -108,8 +139,10 @@ public static partial class AgentSessionExtensions
                 ContextGeneration: session.Status.ContextGeneration,
                 CapturedActivity: activity,
                 InputSequence: CurrentInputSequence(session),
-                TurnIds: CurrentTurnIds(session),
-                OperationIds: CurrentOperationIds(session),
+                Turns: CurrentTurnSnapshots(session),
+                Followups: CurrentFollowupSnapshots(session),
+                Reset: CurrentResetSnapshot(session),
+                Stop: CurrentStopSnapshot(session),
                 RunnerRemoved: runnerRemoved,
                 CapturedAt: now);
             session.Status = session.Status with { PendingActivityObservation = observation };
@@ -150,7 +183,22 @@ public static partial class AgentSessionExtensions
 
             if (string.Equals(result.Observation, RunnerSessionActivityObservations.Executing, StringComparison.Ordinal))
             {
-                session.Status = session.Status with { PendingActivityObservation = null };
+                var ownerTurnIds = pending.Turns
+                    .Where(turn => turn.ContextGeneration == pending.ContextGeneration
+                        && turn.SupersededAt is null
+                        && turn.Status is AgentTurnStatus.Executing or AgentTurnStatus.Unknown)
+                    .Select(turn => turn.TurnId)
+                    .ToArray();
+                session.Status = session.Status with
+                {
+                    PendingActivityObservation = null,
+                    ConfirmedExecutionOwnership = ownerTurnIds.Length == 0
+                        ? null
+                        : new AgentSessionExecutionOwnership(
+                            pending.ObservationId,
+                            pending.ContextGeneration,
+                            ownerTurnIds),
+                };
                 session.SetActivity(AgentSessionActivity.Active, now);
                 return new AgentSessionActivitySettlement(
                     true,
@@ -164,7 +212,7 @@ public static partial class AgentSessionExtensions
             }
 
             var turns = (session.Status.Turns ?? []).ToList();
-            var capturedTurnIds = pending.TurnIds.ToHashSet(StringComparer.Ordinal);
+            var capturedTurnIds = pending.Turns.Select(turn => turn.TurnId).ToHashSet(StringComparer.Ordinal);
             var settledTurnIds = new List<string>();
             var cancelledTurnIds = new List<string>();
             for (var index = 0; index < turns.Count; index++)
@@ -212,7 +260,7 @@ public static partial class AgentSessionExtensions
             var (keptLeases, releasedLeases, legacyLeaseKept) = PartitionLeasesForSettlement(session, turns);
             var status = session.Status;
             var supersededOperationIds = new List<string>();
-            var capturedOperations = pending.OperationIds.ToHashSet(StringComparer.Ordinal);
+            var capturedOperations = CapturedOperationIds(pending);
             if (status.PendingStop is { IsActive: true } stop
                 && capturedOperations.Contains(stop.OperationId))
             {
@@ -269,6 +317,7 @@ public static partial class AgentSessionExtensions
                     ? new AgentSessionRunnerMissingFact(probe.RunnerId, probe.BindingEpoch, probe.ContextGeneration, now)
                     : session.Status.MissingRunnerFact,
                 PendingActivityObservation = null,
+                ConfirmedExecutionOwnership = null,
             };
             session.SetActivity(session.DeriveCurrentActivity(), now);
 
@@ -434,9 +483,7 @@ public static partial class AgentSessionExtensions
         && pending.BindingEpoch == current.BindingEpoch
         && pending.ContextGeneration == current.Status.ContextGeneration
         && pending.CapturedActivity == current.Status.Activity
-        && pending.InputSequence == CurrentInputSequence(current)
-        && pending.TurnIds.SequenceEqual(CurrentTurnIds(current), StringComparer.Ordinal)
-        && pending.OperationIds.SequenceEqual(CurrentOperationIds(current), StringComparer.Ordinal);
+        && ObservationSnapshotUnchanged(current, pending);
 
     private static bool MatchesObservationTarget(
         AgentSessionActivityObservation pending,
@@ -463,8 +510,10 @@ public static partial class AgentSessionExtensions
         AgentSession current,
         AgentSessionActivityObservation pending) =>
         pending.InputSequence == CurrentInputSequence(current)
-        && pending.TurnIds.SequenceEqual(CurrentTurnIds(current), StringComparer.Ordinal)
-        && pending.OperationIds.SequenceEqual(CurrentOperationIds(current), StringComparer.Ordinal);
+        && pending.Turns.SequenceEqual(CurrentTurnSnapshots(current))
+        && pending.Followups.SequenceEqual(CurrentFollowupSnapshots(current))
+        && Equals(pending.Reset, CurrentResetSnapshot(current))
+        && Equals(pending.Stop, CurrentStopSnapshot(current));
 
     /// <summary>
     /// True only when the Turn's own lease proves it never reached dispatch.
@@ -499,7 +548,7 @@ public static partial class AgentSessionExtensions
         }
         if (current.Status.PendingStop is { IsActive: true }) return true;
         if (current.Status.PendingReset is { Outcome: null }) return true;
-        return CurrentOperationIds(current).Count > 0;
+        return CurrentFollowupSnapshots(current).Count > 0;
     }
 
     private static long CurrentInputSequence(AgentSession current) =>
@@ -507,30 +556,53 @@ public static partial class AgentSessionExtensions
             ? inputs.Max(input => input.Sequence)
             : 0;
 
-    private static IReadOnlyList<string> CurrentTurnIds(AgentSession current) =>
+    private static IReadOnlyList<AgentSessionActivityTurnSnapshot> CurrentTurnSnapshots(AgentSession current) =>
         (current.Status.Turns ?? [])
-            .Select(turn => turn.Id)
+            .Select(turn => new AgentSessionActivityTurnSnapshot(
+                turn.Id,
+                turn.Status,
+                turn.ContextGeneration,
+                turn.SupersededAt))
             .ToArray();
 
-    /// <summary>
-    /// Active operation identities at capture time: in-flight follow-up
-    /// dispatches, the stop claim, and an unfinished reset reservation. A new
-    /// operation of any kind after the capture changes this set and fences the
-    /// answer.
-    /// </summary>
-    private static IReadOnlyList<string> CurrentOperationIds(AgentSession current)
+    private static IReadOnlyList<AgentSessionActivityFollowupSnapshot> CurrentFollowupSnapshots(AgentSession current)
     {
-        var ids = new List<string>();
         var leases = current.Status.PendingFollowups is { Count: > 0 } pending
             ? pending
             : current.Status.PendingFollowup is { } single ? (IReadOnlyList<AgentSessionFollowupLease>)[single] : [];
-        foreach (var lease in leases)
-            if (!string.IsNullOrWhiteSpace(lease.OperationId))
-                ids.Add(lease.OperationId);
-        if (current.Status.PendingStop is { IsActive: true } stop)
-            ids.Add(stop.OperationId);
-        if (current.Status.PendingReset is { Outcome: null } reset)
-            ids.Add(reset.OperationId);
+        return leases.Select(lease => new AgentSessionActivityFollowupSnapshot(
+            lease.OperationId,
+            lease.TurnId,
+            lease.Accepted,
+            lease.Dispatching,
+            lease.PayloadSealed,
+            lease.ConcurrencyGateStatus)).ToArray();
+    }
+
+    private static AgentSessionActivityResetSnapshot? CurrentResetSnapshot(AgentSession current) =>
+        current.Status.PendingReset is { } reset
+            ? new AgentSessionActivityResetSnapshot(
+                reset.OperationId,
+                reset.EffectAdmitted,
+                reset.Outcome is not null,
+                reset.SupersededAt)
+            : null;
+
+    private static AgentSessionActivityStopSnapshot? CurrentStopSnapshot(AgentSession current) =>
+        current.Status.PendingStop is { } stop
+            ? new AgentSessionActivityStopSnapshot(
+                stop.OperationId,
+                stop.TurnId,
+                stop.DispatchStarted,
+                stop.Disposition,
+                stop.SupersededAt)
+            : null;
+
+    private static HashSet<string> CapturedOperationIds(AgentSessionActivityObservation pending)
+    {
+        var ids = pending.Followups.Select(followup => followup.OperationId).ToHashSet(StringComparer.Ordinal);
+        if (pending.Reset is { } reset) ids.Add(reset.OperationId);
+        if (pending.Stop is { } stop) ids.Add(stop.OperationId);
         return ids;
     }
 

@@ -161,14 +161,11 @@ public partial class AgentSessionFollowupConcurrencySpecs
         var session = opened.Grain;
         var gate = Gate(projectId, agentId);
 
-        // Session is Idle by default; flip it to Active via a system event
-        // so the follow-up path determines the gate does not apply.
-        await session.AppendSystemEventsAsync(new AppendAgentSessionSystemEventsCommand(new[]
-        {
-            new AgentSessionRuntimeEventInput(
-                Type: RuntimeEventTypes.SessionActivity,
-                PayloadJson: "{\"activity\":\"active\"}"),
-        }));
+        // A real current execution owner makes the Session busy; unattributed
+        // active evidence cannot create ownership on an otherwise idle Session.
+        await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            "busy-input", "busy-turn", "busy work", "agent-connection", "busy-job"));
+        await session.MarkInitialTurnExecutingAsync("busy-job");
 
         var reservation = await session.BeginFollowupAsync();
 

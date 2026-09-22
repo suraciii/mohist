@@ -18,7 +18,7 @@ public sealed partial class AgentSessionGrain
         var payload = JSON.DeserializeElement(runtimeEvent.PayloadJson);
         var operationId = AgentSessionJsonHelper.GetStringProp(payload, "operationId");
         if (sessionLevelActivityOnly && runtimeEvent.Type == RuntimeEventTypes.SessionActivity)
-            return session.SetActivity(ParseActivity(payload), now);
+            return DriveTerminalActivityLifecycle(session, runtimeEvent, payload, now);
 
         return runtimeEvent.Type switch
         {
@@ -26,9 +26,6 @@ public sealed partial class AgentSessionGrain
                 session.Status.Activity == AgentSessionActivity.Unknown
                     ? AgentSessionActivity.Unknown
                     : AgentSessionActivity.Active,
-                now),
-            RuntimeEventTypes.SessionActivity when HasPendingFollowupOperation(session, operationId) => session.SetActivity(
-                ParseActivity(payload),
                 now),
             RuntimeEventTypes.SessionInput => DriveNonLaunchTurnLifecycle(session, runtimeEvent, now),
             RuntimeEventTypes.SessionActivity => DriveTerminalActivityLifecycle(session, runtimeEvent, payload, now),
@@ -155,12 +152,16 @@ public sealed partial class AgentSessionGrain
         var status = AgentSessionJsonHelper.GetStringProp(payload, "status");
         var activity = ParseActivity(payload);
         if (activity == AgentSessionActivity.Active)
-            return session.SetActivity(activity, now);
+            return DriveActiveActivityLifecycle(session, runtimeEvent, payload, now);
         var terminal = MapTerminalActivityToTurnStatus(
             activity,
             status,
             !string.IsNullOrWhiteSpace(AgentSessionJsonHelper.GetStringProp(payload, "stopOperationId")));
         if (terminal is null)
+            return session.SetActivity(activity, now);
+        if (HasPendingFollowupOperation(
+            session,
+            AgentSessionJsonHelper.GetStringProp(payload, "operationId")))
             return session.SetActivity(activity, now);
         if (TryResolveTurnId(runtimeEvent.PayloadJson, out var payloadTurnId))
         {
@@ -174,7 +175,11 @@ public sealed partial class AgentSessionGrain
             {
                 return [];
             }
-            return session.MarkTurnTerminal(turn.Id, terminal.Value, null, now);
+            return session.MarkTurnTerminal(
+                turn.Id,
+                terminal.Value,
+                ResolveFollowupTurnResult(payload),
+                now);
         }
         if (!string.IsNullOrWhiteSpace(AgentSessionJsonHelper.GetStringProp(payload, "agentJobId")))
             return session.SetActivity(activity, now);
@@ -182,6 +187,53 @@ public sealed partial class AgentSessionGrain
         events.AddRange(MarkCurrentNonLaunchTurnTerminal(session, terminal.Value, now));
         return events;
     }
+
+    private static IReadOnlyList<AgentSessionEvent> DriveActiveActivityLifecycle(
+        AgentSession session,
+        AgentSessionRuntimeEventInput runtimeEvent,
+        JsonElement payload,
+        DateTime now)
+    {
+        AgentTurnRecord? target = null;
+        var hasTurnAttribution = payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("turnId", out _);
+        var hasOperationAttribution = payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("operationId", out _);
+        if (TryResolveTurnId(runtimeEvent.PayloadJson, out var turnId))
+        {
+            target = (session.Status.Turns ?? []).FirstOrDefault(turn =>
+                string.Equals(turn.Id, turnId, StringComparison.Ordinal));
+        }
+        else if (AgentSessionJsonHelper.GetStringProp(payload, "operationId") is { Length: > 0 } operationId)
+        {
+            var lease = GetPendingFollowups(session).FirstOrDefault(candidate =>
+                string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal));
+            target = string.IsNullOrWhiteSpace(lease?.TurnId)
+                ? null
+                : (session.Status.Turns ?? []).FirstOrDefault(turn =>
+                    string.Equals(turn.Id, lease.TurnId, StringComparison.Ordinal));
+        }
+
+        if (target is not null)
+        {
+            if (!IsCurrentExecutionFact(session, target)) return [];
+            return target.Status == AgentTurnStatus.Queued
+                ? session.MarkTurnExecuting(target.Id, now)
+                : session.SetActivity(AgentSessionActivity.Active, now);
+        }
+        if (hasTurnAttribution || hasOperationAttribution) return [];
+
+        return (session.Status.Turns ?? []).Any(turn =>
+                IsCurrentExecutionFact(session, turn)
+                && turn.Status is AgentTurnStatus.Executing or AgentTurnStatus.Unknown)
+            ? session.SetActivity(AgentSessionActivity.Active, now)
+            : [];
+    }
+
+    private static bool IsCurrentExecutionFact(AgentSession session, AgentTurnRecord turn) =>
+        turn.SupersededAt is null
+        && turn.ContextGeneration == session.Status.ContextGeneration
+        && turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing or AgentTurnStatus.Unknown;
 
     private static AgentTurnStatus? MapTerminalActivityToTurnStatus(
         AgentSessionActivity activity,
@@ -238,15 +290,17 @@ public sealed partial class AgentSessionGrain
 
     private static bool IsCurrentNonLaunchTurn(AgentSession session, AgentTurnRecord turn)
     {
-        if (turn.Status is AgentTurnStatus.Completed
-            or AgentTurnStatus.Failed
-            or AgentTurnStatus.Cancelled)
-        {
+        if (!string.IsNullOrWhiteSpace(turn.JobId)
+            || !IsCurrentExecutionFact(session, turn))
             return false;
-        }
+        if (turn.Status == AgentTurnStatus.Unknown)
+            return !(session.Status.Turns ?? []).Any(candidate =>
+                candidate.SupersededAt is null
+                && candidate.ContextGeneration == session.Status.ContextGeneration
+                && candidate.Status == AgentTurnStatus.Executing);
 
-        var turns = session.Status.Turns ?? [];
-        var latestNonLaunch = turns.LastOrDefault(candidate => string.IsNullOrWhiteSpace(candidate.JobId));
+        var latestNonLaunch = (session.Status.Turns ?? [])
+            .LastOrDefault(candidate => string.IsNullOrWhiteSpace(candidate.JobId));
         return latestNonLaunch is not null
             && string.Equals(latestNonLaunch.Id, turn.Id, StringComparison.Ordinal);
     }
