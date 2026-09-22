@@ -27,7 +27,7 @@ public sealed class AgentSessionActivityConvergenceDomainTests
         Assert.Equal("op-followup", settled.OperationId);
         Assert.Null(session.Status.PendingActivityObservation);
         Assert.Equal(1, session.Status.UnresolvedPreviousCount);
-        Assert.Equal(AgentSessionStatusSnapshot.NextActionQueryRuntimeOrForceReset, session.Status.NextAction);
+        Assert.Equal(AgentSessionStatusSnapshot.NextActionInspectPreviousExecution, session.Status.NextAction);
         Assert.Empty(session.Status.PendingFollowups ?? []);
         // The settled facts keep the session usable: an accepted follow-up no
         // longer collides with an unknown turn.

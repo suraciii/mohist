@@ -57,7 +57,11 @@ public sealed record AgentSessionMetadataDto(
     [property: JsonPropertyName("metadata")] AgentSessionMetadataCounts Metadata,
     [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null,
     [property: JsonPropertyName("inputs")] IReadOnlyList<AgentSessionInputObservationDto>? Inputs = null,
-    [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null);
+    [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null,
+    [property: JsonPropertyName("contextGeneration")] long ContextGeneration = 1,
+    [property: JsonPropertyName("unresolvedPrevious")] IReadOnlyList<AgentTurnObservationDto>? UnresolvedPrevious = null,
+    [property: JsonPropertyName("unresolvedPreviousCount")] int UnresolvedPreviousCount = 0,
+    [property: JsonPropertyName("nextAction")] string? NextAction = null);
 
 public sealed record AgentSessionMetadataCounts(
     [property: JsonPropertyName("partCount")] int PartCount,
@@ -280,66 +284,11 @@ public sealed record GenericAgentSessionSummaryDto(
     [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null,
     string? Origin = null,
     string? TargetId = null,
-    [property: JsonPropertyName("appliedReasoningEffort")] string? AppliedReasoningEffort = null);
-
-public sealed record AgentSessionInputObservationDto(
-    string Id,
-    long Sequence,
-    string Source,
-    string Acceptance,
-    IReadOnlyList<AgentSessionInputAttachmentObservationDto>? Attachments = null,
-    [property: JsonPropertyName("provenance")] AgentSessionInputProvenance? Provenance = null,
-    /// <summary>
-    /// First-launch-only startup-context attestation the caller
-    /// attached to this input. Surfaced verbatim so the audit is
-    /// inspectable: a later observer can see exactly what was or
-    /// was not read (whether the bounded range was captured
-    /// completely or oldest-first truncation occurred). Null when
-    /// the launch carried no startup context. The background
-    /// itself is not exposed here — only its presence and
-    /// truncation attestation, so the observation does not echo
-    /// the full transcript back to the read path.
-    /// </summary>
-    [property: JsonPropertyName("startupContext")] AgentStartupContextObservationDto? StartupContext = null);
-
-public sealed record AgentStartupContextObservationDto(
-    [property: JsonPropertyName("source")] string Source,
-    [property: JsonPropertyName("truncated")] bool Truncated,
-    [property: JsonPropertyName("truncationMarker")] string? TruncationMarker,
-    [property: JsonPropertyName("omittedOldestMessageCount")] int OmittedOldestMessageCount);
-
-public sealed record AgentSessionInputAttachmentObservationDto(
-    string Id,
-    string Name,
-    string? ContentType,
-    long Size,
-    string Source,
-    string Availability);
-
-public sealed record AgentTurnObservationDto(
-    string Id,
-    long Sequence,
-    IReadOnlyList<string> InputIds,
-    string Status,
-    [property: JsonPropertyName("result")] AgentTurnResultObservationDto? Result = null);
-
-public sealed record AgentTurnResultObservationDto(
-    string? Message,
-    string? Output,
-    string? FailureReason,
-    string? FailureCategory,
-    int? ExitCode);
-
-public sealed record AgentSessionRecoveryObservationDto(
-    string Type,
-    string RecordedAt,
-    string? RuntimeSessionId,
-    string? Reason,
-    string? Strategy,
-    string? Summary,
-    long? ContextWindowUsedBefore,
-    long? ContextWindowUsedAfter,
-    long? ContextWindowSize);
+    [property: JsonPropertyName("appliedReasoningEffort")] string? AppliedReasoningEffort = null,
+    [property: JsonPropertyName("contextGeneration")] long ContextGeneration = 1,
+    [property: JsonPropertyName("unresolvedPrevious")] IReadOnlyList<AgentTurnObservationDto>? UnresolvedPrevious = null,
+    [property: JsonPropertyName("unresolvedPreviousCount")] int UnresolvedPreviousCount = 0,
+    [property: JsonPropertyName("nextAction")] string? NextAction = null);
 
 /// <summary>
 /// Lightweight association entry returned by the issue/epic agent-session
@@ -454,7 +403,11 @@ public sealed record UnifiedSessionSummaryDto(
     [property: JsonPropertyName("recoveryHistory")] IReadOnlyList<AgentSessionRecoveryObservationDto>? RecoveryHistory = null,
     string? Origin = null,
     string? TargetId = null,
-    [property: JsonPropertyName("appliedReasoningEffort")] string? AppliedReasoningEffort = null);
+    [property: JsonPropertyName("appliedReasoningEffort")] string? AppliedReasoningEffort = null,
+    [property: JsonPropertyName("contextGeneration")] long ContextGeneration = 1,
+    [property: JsonPropertyName("unresolvedPrevious")] IReadOnlyList<AgentTurnObservationDto>? UnresolvedPrevious = null,
+    [property: JsonPropertyName("unresolvedPreviousCount")] int UnresolvedPreviousCount = 0,
+    [property: JsonPropertyName("nextAction")] string? NextAction = null);
 
 /// <summary>
 /// Lightweight unified read shape for an AgentSession in the source-filtered

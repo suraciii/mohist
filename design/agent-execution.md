@@ -329,7 +329,11 @@ AgentSession has only these Activity states:
 An explicit force-reset leaves old facts unknown and starts a new current context.
 Activity is derived from the current `ContextGeneration`. Older unresolved facts
 remain visible through `unresolvedPrevious`, `unresolvedPreviousCount`, and
-`nextAction`; they do not overwrite current Activity.
+`nextAction`; they do not overwrite current Activity. Session detail reads
+retain each superseded Turn's identity, status, execution generation, and
+supersession time. Input observations retain their acceptance generation.
+`nextAction=inspect_previous_execution` directs the operator to those retained
+facts; it does not block new work in a safely settled current context.
 
 `admission=ready` requires current Activity `idle`, terminal Turns, no unresolved
 external side effect, and no ActiveOperation. Otherwise admission is `blocked`

@@ -829,21 +829,12 @@ public partial class AgentSessionQuerier : IScopedService
             new AgentSessionMetadataCounts(partCount, toolCount),
             CurrentTurnId(domainSession),
             AgentSessionObservationMapper.Inputs(domainSession.Status),
-            AgentSessionObservationMapper.Turns(domainSession.Status));
+            AgentSessionObservationMapper.Turns(domainSession.Status),
+            domainSession.Status.ContextGeneration,
+            AgentSessionObservationMapper.UnresolvedPrevious(domainSession.Status),
+            domainSession.Status.UnresolvedPreviousCount,
+            domainSession.Status.NextAction);
     }
-
-    private static string? CurrentTurnId(AgentSession session) =>
-        session.Status.Turns?.FirstOrDefault(turn => turn.Status == AgentTurnStatus.Executing)?.Id
-        ?? session.Status.Turns?.LastOrDefault(turn => turn.Status == AgentTurnStatus.Queued)?.Id;
-
-    private static bool IsRecoveryAvailable(AgentSession session) =>
-        session.Status.Activity == AgentSessionActivity.Idle
-        && session.Status.PendingReset is null
-        && session.Status.PendingStop is not { IsActive: true }
-        && session.Status.PendingFollowup is null
-        && (session.Status.PendingFollowups is null || session.Status.PendingFollowups.Count == 0)
-        && !(session.Status.Turns ?? [])
-            .Any(turn => turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing);
 
     private async Task<AgentSessionRecord?> FindCurrentSessionAsync(
         MohistDbContext db,

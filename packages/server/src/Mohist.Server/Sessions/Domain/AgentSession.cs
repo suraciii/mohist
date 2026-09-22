@@ -421,7 +421,7 @@ public sealed record AgentSessionStatusSnapshot(
     /// persisted: the facts themselves are the record, this is the stable
     /// read a caller acts on.
     /// </summary>
-    public const string NextActionQueryRuntimeOrForceReset = "query_runtime_or_force_reset";
+    public const string NextActionInspectPreviousExecution = "inspect_previous_execution";
 
     /// <summary>
     /// Derived count of the retained superseded facts; a duplicate counter
@@ -432,7 +432,7 @@ public sealed record AgentSessionStatusSnapshot(
 
     [JsonIgnore]
     public string? NextAction =>
-        UnresolvedPreviousCount == 0 ? null : NextActionQueryRuntimeOrForceReset;
+        UnresolvedPreviousCount == 0 ? null : NextActionInspectPreviousExecution;
 }
 
 public sealed record AgentUsageSummary(
