@@ -182,35 +182,39 @@ function turnEvents(body: Record<string, unknown>): Array<{ type: string; payloa
 }
 
 describe('AgentJobExecutor dispatches the Codex runtime', () => {
-  it('routes runtime: codex to executeCodexTurn and labels the terminal output as codex', async () => {
-    const order: string[] = []
-    const connection = makeFakeConnection(order)
-    const codex = makeFakeCodexRuntime(order)
-    const executor = makeExecutor(connection.connection, { openCode: null, pi: null, codex: codex.runtime })
+  it.each(['unbound', 'runtime-known'])(
+    'routes runtime: codex to executeCodexTurn and labels the terminal output as codex (%s)',
+    async (bindingState) => {
+      const order: string[] = []
+      const connection = makeFakeConnection(order)
+      if (bindingState === 'unbound') connection.setAgentSession(null)
+      const codex = makeFakeCodexRuntime(order)
+      const executor = makeExecutor(connection.connection, { openCode: null, pi: null, codex: codex.runtime })
 
-    const result = await executor.execute(
-      buildAgentJobWork({
-        initialTurnId: 'turn-1',
-        with: { prompt: 'ship on codex', runtime: 'codex', executionSource: 'non-slack' },
-      }),
-      new AbortController().signal,
-    )
+      const result = await executor.execute(
+        buildAgentJobWork({
+          initialTurnId: 'turn-1',
+          with: { prompt: 'ship on codex', runtime: 'codex', executionSource: 'non-slack' },
+        }),
+        new AbortController().signal,
+      )
 
-    expect(result.status).toBe('completed')
-    expect(codex.runTurnCalls).toHaveLength(1)
-    expect(codex.runTurnCalls[0].target.runtime).toBe('codex')
-    expect(codex.runTurnCalls[0].target.workDir).toBe(WORK_DIR)
-    const output = result.output as Record<string, unknown>
-    expect(output.kind).toBe('codex')
-    expect(output.status).toBe('success')
-    expect(output.runtimeSessionId).toBe(THREAD_ID)
-    expect(result.agentBinding).toEqual({
-      agentSessionId: 'session-1',
-      agentTurnId: 'turn-1',
-      runtime: 'codex',
-      runtimeSessionId: THREAD_ID,
-    })
-  })
+      expect(result.status).toBe('completed')
+      expect(codex.runTurnCalls).toHaveLength(1)
+      expect(codex.runTurnCalls[0].target.runtime).toBe('codex')
+      expect(codex.runTurnCalls[0].target.workDir).toBe(WORK_DIR)
+      const output = result.output as Record<string, unknown>
+      expect(output.kind).toBe('codex')
+      expect(output.status).toBe('success')
+      expect(output.runtimeSessionId).toBe(THREAD_ID)
+      expect(result.agentBinding).toEqual({
+        agentSessionId: 'session-1',
+        agentTurnId: 'turn-1',
+        runtime: 'codex',
+        runtimeSessionId: THREAD_ID,
+      })
+    },
+  )
 
   it('keeps any runtime other than codex/pi/opencode on the invalid-input error', async () => {
     const order: string[] = []

@@ -236,7 +236,7 @@ export class AgentJobExecutor {
     )
     if (!recovered.ok) return recovered.result
     binding = recovered.binding
-    const executionRuntimeName = binding.runtime as 'pi' | 'opencode' | 'codex'
+    const executionRuntimeName = binding.runtime ?? runtimeName
 
     if (executionRuntimeName === 'pi') {
       const result = await executePiTurn(
