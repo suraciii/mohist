@@ -129,50 +129,73 @@ public sealed class AgentSessionRecoveryDomainTests
     }
 
     [Theory]
-    [InlineData(AgentSessionActivity.Active)]
-    [InlineData(AgentSessionActivity.Unknown)]
-    public void ReconcileMissingBinding_SettlesIdleAndRebinds(AgentSessionActivity activity)
+    [InlineData(AgentTurnStatus.Executing)]
+    [InlineData(AgentTurnStatus.Unknown)]
+    public void RebindRuntimeSession_RejectsCurrentExecutionFactsWithoutMutation(AgentTurnStatus status)
     {
         var session = CreateSession();
-        session.Status = session.Status with
-        {
-            AgentRuntimeSessionId = "runtime-current",
-            Activity = activity,
-            UsageSummary = new AgentUsageSummary { InputTokens = 100, ContextWindowUsed = 90_000, ContextWindowSize = 200_000 }
-        };
-        var expected = session.CurrentRuntimeBinding();
+        session.AttachPhysicalSession("runtime-current", null, "/work", null, null, TestTime.UtcDateTime);
+        session.EnsureInitialLaunch(
+            "input-1", "turn-1", "prompt", "agent-connection", "job-1", TestTime.UtcDateTime);
+        if (status == AgentTurnStatus.Executing)
+            session.MarkInitialTurnExecuting("job-1", TestTime.UtcDateTime);
+        else
+            session.MarkInitialTurnTerminal("job-1", AgentTurnStatus.Unknown, null, TestTime.UtcDateTime);
+        session.Status = session.Status with { Activity = AgentSessionActivity.Idle };
+        var statusBefore = session.Status;
+        var bindingBefore = session.CurrentRuntimeBinding();
+        var epochBefore = session.BindingEpoch;
 
-        var events = session.ReconcileMissingBinding(
-            expected,
-            expected with { RuntimeSessionId = "runtime-replacement" },
-            TestTime.UtcDateTime);
+        Assert.Throws<InvalidOperationException>(() => session.RebindRuntimeSession(
+            bindingBefore,
+            new AgentRuntimeBinding("runner-1", "opencode", "runtime-candidate"),
+            "missing-recovery",
+            TestTime.UtcDateTime.AddMinutes(1),
+            epochBefore));
 
-        Assert.Equal(AgentSessionActivity.Idle, session.Status.Activity);
-        Assert.Equal("runtime-replacement", session.Status.AgentRuntimeSessionId);
-        Assert.Equal(100, session.Status.UsageSummary!.InputTokens);
-        Assert.Null(session.Status.UsageSummary.ContextWindowUsed);
-        Assert.Null(session.Status.UsageSummary.ContextWindowSize);
-        Assert.IsType<AgentSessionRuntimeBound>(Assert.Single(events).Value);
+        Assert.Equal(statusBefore, session.Status);
+        Assert.Equal(bindingBefore, session.CurrentRuntimeBinding());
+        Assert.Equal(epochBefore, session.BindingEpoch);
     }
 
-    [Fact]
-    public void ReconcileMissingBinding_StaleExpectedBindingPreservesActivityAndUsage()
+    [Theory]
+    [InlineData("followup")]
+    [InlineData("reset")]
+    [InlineData("stop")]
+    public void RebindRuntimeSession_RejectsActiveOperationsWithoutMutation(string operation)
     {
         var session = CreateSession();
-        session.Status = session.Status with
+        session.AttachPhysicalSession("runtime-current", null, "/work", null, null, TestTime.UtcDateTime);
+        session.Status = operation switch
         {
-            AgentRuntimeSessionId = "runtime-current",
-            Activity = AgentSessionActivity.Unknown,
-            UsageSummary = new AgentUsageSummary { InputTokens = 100, ContextWindowUsed = 90_000, ContextWindowSize = 200_000 }
+            "followup" => session.Status with
+            {
+                PendingFollowups = [new AgentSessionFollowupLease("followup-1", "runtime-current")],
+            },
+            "reset" => session.Status with
+            {
+                PendingReset = new AgentSessionResetReservation(
+                    "reset-1", "runtime-current", "opencode", TestTime.UtcDateTime),
+            },
+            _ => session.Status with
+            {
+                PendingStop = new AgentSessionStopClaim("turn-1", "stop-1"),
+            },
         };
-        var before = session.Status;
+        var statusBefore = session.Status;
+        var bindingBefore = session.CurrentRuntimeBinding();
+        var epochBefore = session.BindingEpoch;
 
-        Assert.Throws<StaleRuntimeSessionBindingException>(() => session.ReconcileMissingBinding(
-            new AgentRuntimeBinding("runner-1", "opencode", "runtime-stale"),
+        Assert.Throws<InvalidOperationException>(() => session.RebindRuntimeSession(
+            bindingBefore,
             new AgentRuntimeBinding("runner-1", "opencode", "runtime-candidate"),
-            TestTime.UtcDateTime));
+            "missing-recovery",
+            TestTime.UtcDateTime.AddMinutes(1),
+            epochBefore));
 
-        Assert.Equal(before, session.Status);
+        Assert.Equal(statusBefore, session.Status);
+        Assert.Equal(bindingBefore, session.CurrentRuntimeBinding());
+        Assert.Equal(epochBefore, session.BindingEpoch);
     }
 
     [Theory]

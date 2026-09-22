@@ -262,18 +262,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         return await ToInfoAsync(session);
     }
 
-    public async Task<AgentSessionInfo> ReconcileMissingBindingAsync(ReconcileMissingBindingCommand command)
-    {
-        var session = await GetRequiredAsync();
-        var now = Now();
-        var events = session.ReconcileMissingBinding(
-            new AgentRuntimeBinding(command.ExpectedRunnerId, command.ExpectedRuntime, command.ExpectedRuntimeSessionId),
-            new AgentRuntimeBinding(command.ExpectedRunnerId, command.ExpectedRuntime, command.ReplacementRuntimeSessionId),
-            now);
-        await PersistRecoveryAsync(session, events, BuildContextResetTranscriptEntries(session, "missing-recovery", now));
-        return await ToInfoAsync(session);
-    }
-
     public async Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command)
     {
         var session = await GetRequiredAsync();
@@ -3256,12 +3244,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
                 return;
         }
     }
-
-    public async Task<AgentSessionStopClaim?> GetStopClaimAsync() =>
-        (await GetRequiredAsync()).Status.PendingStop;
-
-    public async Task<AgentSessionStopClaim?> GetStopClaimAsync(string turnId, string operationId) =>
-        (await GetRequiredAsync()).FindStopClaim(turnId, operationId);
 
     public async Task<AgentTurnControlState?> ResolveTurnControlAsync(string turnId)
     {

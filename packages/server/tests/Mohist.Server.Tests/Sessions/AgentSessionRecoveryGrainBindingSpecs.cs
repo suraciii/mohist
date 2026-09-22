@@ -174,7 +174,7 @@ public sealed partial class AgentSessionRecoveryGrainSpecs
     }
 
     [Fact]
-    public async Task MissingRecovery_ExecutingFollowup_RejectsWithoutChangingBinding()
+    public async Task MissingRecovery_ExecutingFollowup_RejectsWithoutMutation()
     {
         var (grain, _) = await CreateAttachedSessionAsync("runtime-active-followup");
         var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
@@ -183,6 +183,10 @@ public sealed partial class AgentSessionRecoveryGrainSpecs
             IdempotencyKey: "active-followup"));
         var dispatch = await grain.BeginNextFollowupDispatchAsync();
         await grain.MarkFollowupTurnExecutingAsync(dispatch!.OperationId);
+        var before = await grain.GetAsync();
+        var saveCountBefore = _fixture.StateStore.SaveCount;
+        var eventCountBefore = _fixture.StateStore.Events.Count;
+        var transcriptCountBefore = _fixture.TranscriptStore.Flushes.Count;
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             grain.RecoverMissingRuntimeSessionAsync(new RecoverMissingRuntimeSessionCommand(
@@ -192,7 +196,39 @@ public sealed partial class AgentSessionRecoveryGrainSpecs
                 "runtime-must-not-apply",
                 accepted.TurnId)));
 
-        Assert.Equal("runtime-active-followup", (await grain.GetAsync())?.AgentSessionId);
+        Assert.Equal(before, await grain.GetAsync());
+        Assert.Equal(saveCountBefore, _fixture.StateStore.SaveCount);
+        Assert.Equal(eventCountBefore, _fixture.StateStore.Events.Count);
+        Assert.Equal(transcriptCountBefore, _fixture.TranscriptStore.Flushes.Count);
+    }
+
+    [Fact]
+    public async Task MissingRecovery_UnknownFollowup_RejectsWithoutMutation()
+    {
+        var (grain, _) = await CreateAttachedSessionAsync("runtime-unknown-followup");
+        await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "uncertain submission",
+            Source: "agent-session-followup",
+            IdempotencyKey: "unknown-followup"));
+        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+        await grain.MarkFollowupTurnExecutingAsync(dispatch!.OperationId);
+        await grain.MarkFollowupTurnTerminalAsync(dispatch.OperationId, AgentTurnStatus.Unknown, null);
+        var before = await grain.GetAsync();
+        var saveCountBefore = _fixture.StateStore.SaveCount;
+        var eventCountBefore = _fixture.StateStore.Events.Count;
+        var transcriptCountBefore = _fixture.TranscriptStore.Flushes.Count;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            grain.RecoverMissingRuntimeSessionAsync(new RecoverMissingRuntimeSessionCommand(
+                "runner-1",
+                "opencode",
+                "runtime-unknown-followup",
+                "runtime-must-not-apply")));
+
+        Assert.Equal(before, await grain.GetAsync());
+        Assert.Equal(saveCountBefore, _fixture.StateStore.SaveCount);
+        Assert.Equal(eventCountBefore, _fixture.StateStore.Events.Count);
+        Assert.Equal(transcriptCountBefore, _fixture.TranscriptStore.Flushes.Count);
     }
 
     private async Task<(IAgentSessionGrain Grain, string SessionId)> CreateAttachedSessionAsync(string runtimeSessionId)

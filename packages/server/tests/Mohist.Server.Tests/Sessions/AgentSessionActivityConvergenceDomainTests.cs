@@ -179,18 +179,22 @@ public sealed class AgentSessionActivityConvergenceDomainTests
     [Fact]
     public void AnswerAfterTheBindingWasReplaced_IsDiscarded()
     {
-        var session = CompletedInitialTurnWithUnknownFollowup();
+        var session = BoundSession();
+        session.SetActivity(AgentSessionActivity.Unknown, Now);
         var request = Capture(session);
+        session.SetActivity(AgentSessionActivity.Idle, Now.AddMinutes(1));
 
-        session.ReconcileMissingBinding(
+        session.RebindRuntimeSession(
             new AgentRuntimeBinding("runner-1", "opencode", "runtime-1"),
             new AgentRuntimeBinding("runner-1", "opencode", "runtime-replacement"),
-            Now.AddMinutes(1));
+            "missing-recovery",
+            Now.AddMinutes(1),
+            session.BindingEpoch);
 
         Assert.False(session.SettleActivityFromEvidence(
             Answer(request, RunnerSessionActivityObservations.Idle), Now.AddMinutes(2)).Applied);
         Assert.Equal("runtime-replacement", session.Status.AgentRuntimeSessionId);
-        Assert.Null(SingleTurn(session, "turn-2").SupersededAt);
+        Assert.Equal(2, session.Status.ContextGeneration);
     }
 
     [Fact]

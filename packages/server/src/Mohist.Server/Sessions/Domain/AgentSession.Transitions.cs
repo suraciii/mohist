@@ -191,21 +191,6 @@ public static partial class AgentSessionExtensions
             return [new AgentSessionUsageRecorded(session.Status.UsageSummary ?? new AgentUsageSummary())];
         }
 
-        public IReadOnlyList<AgentSessionEvent> ReconcileMissingBinding(
-            AgentRuntimeBinding expected,
-            AgentRuntimeBinding replacement,
-            DateTime now)
-        {
-            EnsureExpectedRuntimeBinding(session, expected, session.CurrentRuntimeBinding());
-            session.SetActivity(AgentSessionActivity.Idle, now);
-            return session.RebindRuntimeSession(
-                expected,
-                replacement,
-                "missing-recovery",
-                now,
-                session.BindingEpoch);
-        }
-
         public IReadOnlyList<AgentSessionEvent> RebindRuntimeSession(
             AgentRuntimeBinding expected,
             AgentRuntimeBinding replacement,
@@ -234,6 +219,7 @@ public static partial class AgentSessionExtensions
                     $"AgentSession {session.Id} binding replacement requires an explicit pre-submission Turn fence.");
             if (!string.IsNullOrWhiteSpace(queuedTurnIdToRetarget))
                 EnsureCanRetargetSealedQueuedTurn(session, queuedTurnIdToRetarget);
+            EnsureNoCurrentExecutionOrOperations(session, reason, queuedTurnIdToRetarget);
             var nextBindingEpoch = checked(session.BindingEpoch + 1);
             var nextGeneration = checked(session.Status.ContextGeneration + 1);
 
@@ -269,6 +255,39 @@ public static partial class AgentSessionExtensions
                 session.SetActivity(session.DeriveCurrentActivity(), now);
             }
             return [new AgentSessionRuntimeBound(replacement.RuntimeSessionId, session.Runtime.Runtime)];
+        }
+
+        private static void EnsureNoCurrentExecutionOrOperations(
+            AgentSession current,
+            string reason,
+            string? queuedTurnIdToRetarget)
+        {
+            var hasCurrentExecution = (current.Status.Turns ?? []).Any(turn =>
+                turn.ContextGeneration == current.Status.ContextGeneration
+                && turn.SupersededAt is null
+                && turn.Status is AgentTurnStatus.Executing or AgentTurnStatus.Unknown);
+            var hasConfirmedExecution = current.Status.ConfirmedExecutionOwnership is { } ownership
+                && ownership.ContextGeneration == current.Status.ContextGeneration
+                && ownership.TurnIds.Count > 0;
+            var followups = current.Status.PendingFollowups is { Count: > 0 } pending
+                ? pending
+                : current.Status.PendingFollowup is { } legacy
+                    ? (IReadOnlyList<AgentSessionFollowupLease>)[legacy]
+                    : [];
+            var hasOtherFollowup = followups.Any(lease =>
+                string.IsNullOrWhiteSpace(queuedTurnIdToRetarget)
+                || !string.Equals(lease.TurnId, queuedTurnIdToRetarget, StringComparison.Ordinal));
+            // The admitted reset reservation is the operation authorizing a
+            // reset rebind; every other active operation remains a conflict.
+            var hasActiveReset = reason != "reset"
+                && current.Status.PendingReset is { Outcome: null, SupersededAt: null };
+            var hasActiveStop = current.Status.PendingStop is { IsActive: true };
+
+            if (hasCurrentExecution || hasConfirmedExecution || hasOtherFollowup || hasActiveReset || hasActiveStop)
+            {
+                throw new InvalidOperationException(
+                    $"AgentSession {current.Id} binding replacement requires settled execution and operations.");
+            }
         }
 
         private static void EnsureCanRetargetSealedQueuedTurn(AgentSession current, string turnId)

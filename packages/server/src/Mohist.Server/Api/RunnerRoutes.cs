@@ -174,36 +174,6 @@ public static partial class RunnerRoutes
                 binding.WorkDir)));
         });
 
-        group.MapPost("/agent-sessions/{sessionId}/reconcile-missing", async (
-            string runnerId, string sessionId,
-            MissingRuntimeSessionRecoveryRequest req,
-            AgentSessionResolver sessions) =>
-        {
-            if (!string.Equals(runnerId, req.ExpectedRunnerId, StringComparison.Ordinal))
-                return ApiResults.BadRequest("expectedRunnerId must match the route runnerId", "runner_mismatch");
-            var grain = sessions.GetGrain(sessionId);
-            if (await grain.GetAsync() is null)
-                return ApiResults.NotFound($"Agent session {sessionId} not found");
-            try
-            {
-                var session = await grain.ReconcileMissingBindingAsync(new ReconcileMissingBindingCommand(
-                    req.ExpectedRunnerId, req.ExpectedRuntime, req.ExpectedRuntimeSessionId, req.ReplacementRuntimeSessionId));
-                return Results.Ok(new RunnerAgentSessionReconcileResponse(
-                    session.Id,
-                    session.Runtime ?? string.Empty,
-                    session.AgentSessionId ?? string.Empty,
-                    session.WorkDir ?? string.Empty));
-            }
-            catch (StaleRuntimeSessionBindingException ex)
-            {
-                return ApiResults.Conflict(ex.Message, "stale_binding", new { sessionId = ex.SessionId });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return ApiResults.Conflict(ex.Message, "agent_session_recovery_conflict");
-            }
-        });
-
         group.MapPost("/agent-sessions/{sessionId}/runtime-events", async (
             string runnerId, string sessionId,
             AgentSessionRuntimeEventsRequest req,
