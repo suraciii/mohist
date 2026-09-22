@@ -27,6 +27,30 @@ public sealed class RunnerState
     /// output never enter durable Runner state.
     /// </summary>
     [Id(9)] public RunnerEnvironmentObservation? EnvironmentObservation { get; set; }
+    /// <summary>
+    /// Durable administrative authority-removal operation. It remains after
+    /// settlement until a new active credential authenticates the same Runner.
+    /// </summary>
+    [Id(10)] public RunnerAdministrativeRemoval? AdministrativeRemoval { get; set; }
+}
+
+[GenerateSerializer]
+public sealed class RunnerAdministrativeRemoval
+{
+    [Id(0)] public string RemovalId { get; set; } = string.Empty;
+    [Id(1)] public DateTimeOffset RevokedAt { get; set; }
+    [Id(2)] public RunnerAdministrativeRemovalPhase Phase { get; set; }
+    [Id(3)] public string? RemovedProcessGeneration { get; set; }
+}
+
+[GenerateSerializer]
+public enum RunnerAdministrativeRemovalPhase
+{
+    IntentRecorded,
+    CredentialRevoked,
+    AuthorityFenced,
+    SessionsSettling,
+    Completed,
 }
 
 /// <summary>

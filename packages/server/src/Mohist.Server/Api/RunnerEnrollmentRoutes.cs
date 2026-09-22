@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Api;
 
@@ -113,7 +114,7 @@ public static class RunnerEnrollmentRoutes
     private static async Task<IResult> RevokeCredentialsAsync(
         HttpContext context,
         string runnerId,
-        ICredentialStore store,
+        IGrainFactory grains,
         IAuthAuditRecorder audit,
         TimeProvider time,
         CancellationToken ct)
@@ -122,9 +123,11 @@ public static class RunnerEnrollmentRoutes
             return Unauthorized();
 
         var revokedAt = time.GetUtcNow();
-        var revoked = await store.RevokeRunnerCredentialAsync(runnerId, revokedAt, ct).ConfigureAwait(false);
-        if (!revoked)
+        var removal = await grains.GetGrain<IRunnerGrain>(runnerId)
+            .RevokeExecutionAuthorityAsync(revokedAt);
+        if (!removal.Found)
             return ApiResults.NotFound($"No active credential for runner '{runnerId}'");
+        revokedAt = removal.RevokedAt;
 
         // The runner's credential id is opaque; the runnerId is the
         // identifier the whole runner surface addresses the credential

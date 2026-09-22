@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Runner.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Auth;
@@ -93,6 +94,35 @@ public sealed class RunnerEnrollmentSpecs(IsolatedMohistIntegrationFixture fixtu
         staleClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", oldCredential);
         using var stale = await staleClient.GetAsync("/api/runner/runner-reinstall/config");
         Assert.Equal(HttpStatusCode.Unauthorized, stale.StatusCode);
+    }
+
+    [Fact]
+    public async Task RevocationFencesDurableProcessAuthorityUntilSameRunnerReenrolls()
+    {
+        var runnerId = $"runner-authority-{Guid.NewGuid():N}";
+        await RegisterAsync(await CreateEnrollmentTokenAsync(), runnerId);
+        var runner = fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(
+            new RunnerInfo(runnerId, ["spec/*"], "host-1", null),
+            "process-before-revoke");
+        Assert.True(await runner.IsCurrentProcessGenerationAsync("process-before-revoke"));
+
+        using var revoke = await fixture.Client.DeleteAsync($"/api/runners/{runnerId}/credentials");
+        Assert.Equal(HttpStatusCode.OK, revoke.StatusCode);
+        Assert.False(await runner.IsCurrentProcessGenerationAsync("process-before-revoke"));
+        Assert.False((await runner.TryBeginPollAsync("process-before-revoke")).Admitted);
+        Assert.True((await runner.GetRuntimeStateAsync()).Draining);
+
+        await TestLifecycle.DeactivateAndWait(runner, fixture.Grains);
+        runner = fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        Assert.False(await runner.IsCurrentProcessGenerationAsync("process-before-revoke"));
+
+        await RegisterAsync(await CreateEnrollmentTokenAsync(), runnerId);
+        await runner.RegisterAsync(
+            new RunnerInfo(runnerId, ["spec/*"], "host-1", null),
+            "process-after-reenroll");
+        Assert.True(await runner.IsCurrentProcessGenerationAsync("process-after-reenroll"));
+        Assert.False((await runner.GetRuntimeStateAsync()).Draining);
     }
 
     [Fact]

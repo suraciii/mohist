@@ -251,6 +251,7 @@ public sealed class RunnerControlWebSocketApiSpecs(DefaultMohistIntegrationFixtu
         var registry = new RunnerControlWebSocketRegistry(
             tracker,
             fixture.Grains,
+            fixture.Services.GetRequiredService<IRunnerActivityProbeCoordinator>(),
             fixture.Services.GetRequiredService<TimeProvider>(),
             fixture.Services.GetRequiredService<ILoggerFactory>());
         var firstAcquired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

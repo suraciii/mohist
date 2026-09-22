@@ -16,6 +16,14 @@ namespace Mohist.Server.Infrastructure.Data.Sessions;
 public interface IAgentSessionStore : IStateStore<AgentSession>
 {
     Task<IReadOnlyList<AgentSessionReconcileBinding>> ListByRunnerForReconcileAsync(string runnerId, CancellationToken ct = default);
+    async Task<IReadOnlyList<string>> ListSessionIdsByRunnerAsync(string runnerId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return (await ListAsync())
+            .Where(session => string.Equals(session.Runtime.RunnerId, runnerId, StringComparison.Ordinal))
+            .Select(session => session.Id)
+            .ToArray();
+    }
     Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default);
 }
 
@@ -96,6 +104,18 @@ public class AgentSessionStore : IAgentSessionStore, IAgentSessionStreamRetentio
                 && binding.RuntimeSessionId.Length > 0
                 && binding.WorkDir.Length > 0)
             .ToArray();
+    }
+
+    public async Task<IReadOnlyList<string>> ListSessionIdsByRunnerAsync(
+        string runnerId,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.AgentSessions
+            .AsNoTracking()
+            .Where(row => row.RunnerId == runnerId)
+            .Select(row => row.Id)
+            .ToListAsync(ct);
     }
 
     public async Task SaveAsync(string key, AgentSession state)

@@ -15,7 +15,7 @@ using Mohist.Server.Infrastructure.Workspace;
 
 namespace Mohist.Server.Runner.Services.WebSocket;
 
-public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerControlTransport, IRunnerSessionCommandTransport
+public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerControlTransport, IRunnerSessionCommandTransport, IRunnerAuthorityFence
 {
     private static readonly IReadOnlyDictionary<string, (Type Params, Type Result, bool AllowsNull)> RequestMethods =
         new Dictionary<string, (Type, Type, bool)>(StringComparer.Ordinal)
@@ -29,6 +29,7 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
             ["session.followup"] = (typeof(FollowupParams), typeof(RunnerFollowupDeliveryResult), false),
             ["session.stop"] = (typeof(SessionStopParams), typeof(RunnerStopReply), false),
             ["session.command"] = (typeof(SessionCommandRequest), typeof(SessionCommandResult), false),
+            ["session.probe"] = (typeof(RunnerSessionActivityProbeRequest), typeof(RunnerSessionActivityProbeResult), false),
         };
 
     private readonly ConcurrentDictionary<string, RunnerControlWebSocketConnection> _connections = new(StringComparer.Ordinal);
@@ -37,17 +38,20 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
     private readonly RunnerControlInstallationGate _installationGate = new();
     private readonly RunnerConnectionTracker _tracker;
     private readonly IGrainFactory _grains;
+    private readonly IRunnerActivityProbeCoordinator _activityProbes;
     private readonly TimeProvider _timeProvider;
     private readonly ILoggerFactory _logs;
 
     public RunnerControlWebSocketRegistry(
         RunnerConnectionTracker tracker,
         IGrainFactory grains,
+        IRunnerActivityProbeCoordinator activityProbes,
         TimeProvider timeProvider,
         ILoggerFactory logs)
     {
         _tracker = tracker;
         _grains = grains;
+        _activityProbes = activityProbes;
         _timeProvider = timeProvider;
         _logs = logs;
     }
@@ -109,6 +113,7 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
         var trackerInstalled = false;
         var published = false;
         Task? run = null;
+        Task? activityProbe = null;
         try
         {
             using (await _installationGate.AcquireAsync(
@@ -170,6 +175,11 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
                 }
             }
 
+            // Installation has completed and both receive/write loops are now
+            // running. Probe work is tied to this exact connection and is
+            // observed here; it is never awaited while holding the installation
+            // gate and cannot move to a replacement connection.
+            activityProbe = ObserveActivityProbeAsync(connection);
             if (run is not null) await run;
         }
         finally
@@ -189,8 +199,61 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
             finally
             {
                 connection.CompleteDisconnect();
+                if (activityProbe is not null)
+                    await ObserveCancellationAsync(activityProbe);
             }
         }
+    }
+
+    private async Task ObserveActivityProbeAsync(RunnerControlWebSocketConnection connection)
+    {
+        try
+        {
+            await _activityProbes.ProbeAsync(
+                connection.RunnerId,
+                connection.ProcessGeneration,
+                ct => IsCurrentConnectionAsync(connection, ct),
+                (probe, ct) => connection.SendRequestAsync<RunnerSessionActivityProbeRequest, RunnerSessionActivityProbeResult>(
+                    "session.probe", probe, ct),
+                connection.LifetimeToken);
+        }
+        catch (OperationCanceledException) when (connection.LifetimeToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logs.CreateLogger<RunnerControlWebSocketRegistry>().LogWarning(
+                ex,
+                "Runner {RunnerId} reconnect activity probing stopped",
+                connection.RunnerId);
+        }
+    }
+
+    private async Task<bool> IsCurrentConnectionAsync(
+        RunnerControlWebSocketConnection connection,
+        CancellationToken ct)
+    {
+        return _connections.TryGetValue(connection.RunnerId, out var current)
+            && ReferenceEquals(current, connection)
+            && connection.IsAvailable
+            && await _grains.GetGrain<IRunnerGrain>(connection.RunnerId)
+                .IsCurrentProcessGenerationAsync(connection.ProcessGeneration);
+    }
+
+    public async Task FenceAsync(string runnerId, CancellationToken ct = default)
+    {
+        if (!_connections.TryGetValue(runnerId, out var connection))
+            return;
+
+        await connection.FenceAsync(WebSocketCloseStatus.NormalClosure, "Runner authority revoked").WaitAsync(ct);
+        if (_connections.TryRemove(new KeyValuePair<string, RunnerControlWebSocketConnection>(runnerId, connection)))
+            _tracker.UnregisterAndGetSessions(runnerId, connection.ConnectionId.ToString("D"));
+    }
+
+    private static async Task ObserveCancellationAsync(Task task)
+    {
+        try { await task; }
+        catch (OperationCanceledException) { }
     }
 
     public Task<TResult> SendRequestAsync<TParams, TResult>(
@@ -457,6 +520,8 @@ internal sealed class RunnerControlWebSocketConnection
     private readonly Guid _connectionId;
     private readonly System.Net.WebSockets.WebSocket _socket;
 
+    public string RunnerId => _runnerId;
+    public Guid ConnectionId => _connectionId;
     public string ProcessGeneration { get; }
     private readonly TimeProvider _timeProvider;
     private readonly ILogger _log;
@@ -476,6 +541,7 @@ internal sealed class RunnerControlWebSocketConnection
     private Task? _fenceTask;
 
     public Task Disconnected => _disconnected.Task;
+    public CancellationToken LifetimeToken => _closed.Token;
     public bool IsAvailable => Volatile.Read(ref _fenced) == 0;
     internal bool IsSocketSendGateAvailable => _socketSendGate.CurrentCount == 1;
 

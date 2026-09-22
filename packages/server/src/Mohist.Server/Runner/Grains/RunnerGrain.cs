@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Auth.Domain;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
@@ -10,6 +11,7 @@ using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Microsoft.EntityFrameworkCore;
 using Orleans;
 using Orleans.Runtime;
@@ -63,6 +65,10 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private readonly IRunnerActiveWorkReader _activeWorkReader;
     private readonly RunnerStatusObservationStore _statusObservations;
     private readonly AgentJobOptions _agentJobOptions;
+    private readonly ICredentialStore _credentials;
+    private readonly IRunnerCredentialStatusReader _credentialStatus;
+    private readonly IAgentSessionStore _sessions;
+    private readonly IRunnerAuthorityFence _authorityFence;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RunnerGrain> _log;
 
@@ -77,6 +83,10 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         IRunnerActiveWorkReader activeWorkReader,
         RunnerStatusObservationStore statusObservations,
         IOptions<AgentJobOptions> agentJobOptions,
+        ICredentialStore credentials,
+        IRunnerCredentialStatusReader credentialStatus,
+        IAgentSessionStore sessions,
+        IRunnerAuthorityFence authorityFence,
         ILogger<RunnerGrain> log,
         TimeProvider timeProvider,
         [PersistentState("runner")] IPersistentState<RunnerState> state,
@@ -89,6 +99,10 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         _statusObservations = statusObservations;
         _agentJobOptions = agentJobOptions.Value;
         ValidateRunnerLossRecoveryTimeout(_agentJobOptions.RunnerLossRecoveryTimeout);
+        _credentials = credentials;
+        _credentialStatus = credentialStatus;
+        _sessions = sessions;
+        _authorityFence = authorityFence;
         _log = log;
         _timeProvider = timeProvider;
         _state = state;
@@ -134,7 +148,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
         var state = _state.State ??= new RunnerState();
         _info = state.LastKnownInfo;
-        _draining = !string.IsNullOrWhiteSpace(state.UpdateInterruptFence?.PendingId)
+        _draining = state.AdministrativeRemoval is not null
+            || !string.IsNullOrWhiteSpace(state.UpdateInterruptFence?.PendingId)
             || !string.IsNullOrWhiteSpace(state.PendingProcessGeneration)
             || !string.IsNullOrWhiteSpace(state.ClosingProcessGeneration);
         if (!string.IsNullOrWhiteSpace(state.ClosingProcessGeneration))
@@ -179,6 +194,12 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             await ReconcileClosingGenerationAsync();
         }
 
+        if (state.AdministrativeRemoval is not null
+            && state.AdministrativeRemoval.Phase != RunnerAdministrativeRemovalPhase.Completed)
+        {
+            await ContinueAdministrativeRemovalAsync();
+        }
+
         // Activation is where the Server re-establishes the authoritative
         // generation for this Runner, so work left behind by an earlier
         // closeout is settled here instead of waiting for the next register.
@@ -195,6 +216,11 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
 
     public async Task ReceiveReminder(string reminderName, TickStatus status)
     {
+        if (string.Equals(reminderName, AdministrativeRemovalReminderName, StringComparison.Ordinal))
+        {
+            await ContinueAdministrativeRemovalAsync();
+            return;
+        }
         if (!string.Equals(reminderName, PresenceReminderName, StringComparison.Ordinal))
             return;
 
@@ -208,6 +234,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         if (string.IsNullOrEmpty(processGeneration))
             throw new ArgumentException("process generation is required", nameof(processGeneration));
+        await ReconcileAdministrativeRemovalForRegistrationAsync();
         await _lifecycleGate.WaitAsync();
         try
         {
@@ -377,7 +404,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await _lifecycleGate.WaitAsync();
         try
         {
-            if (_draining || _pollAdmissionToken is not null
+            if (_state.State?.AdministrativeRemoval is not null
+                || _draining || _pollAdmissionToken is not null
                 || string.IsNullOrEmpty(processGeneration)
                 || !string.Equals(_state.State?.CurrentProcessGeneration, processGeneration, StringComparison.Ordinal))
                 return new RunnerPollAdmission(false, 0);
@@ -427,7 +455,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await _lifecycleGate.WaitAsync();
         try
         {
-            return !string.IsNullOrEmpty(processGeneration)
+            return _state.State?.AdministrativeRemoval is null
+                && !string.IsNullOrEmpty(processGeneration)
                 && string.Equals(_state.State?.CurrentProcessGeneration, processGeneration, StringComparison.Ordinal);
         }
         finally
@@ -524,7 +553,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
                     fence,
                     pendingId: null,
                     lastCancelledId: normalizedId);
-                _draining = false;
+                RefreshDurableDrainFlag();
                 PublishStatusObservation();
                 return new RunnerUpdateInterruptCancelResult(normalizedId, RunnerUpdateInterruptCancelStatus.Cancelled);
             }
@@ -551,7 +580,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             // Generic draining is intentionally not allowed to undo a
             // persisted update fence. Only the matching update lease or a
             // successful replacement registration can reopen that boundary.
-            if (!string.IsNullOrWhiteSpace(_state.State?.UpdateInterruptFence?.PendingId))
+            if (!string.IsNullOrWhiteSpace(_state.State?.UpdateInterruptFence?.PendingId)
+                || _state.State?.AdministrativeRemoval is not null)
                 return;
             _draining = false;
             PublishStatusObservation();
@@ -571,7 +601,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await _lifecycleGate.WaitAsync();
         try
         {
-            if (_draining
+            if (_state.State?.AdministrativeRemoval is not null
+                || _draining
                 || _status != RunnerStatus.Online
                 || _info is null
                 || !string.Equals(_state.State?.CurrentProcessGeneration, processGeneration, StringComparison.Ordinal)
@@ -614,7 +645,8 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         await _lifecycleGate.WaitAsync();
         try
         {
-            if (_draining
+            if (_state.State?.AdministrativeRemoval is not null
+                || _draining
                 || _status != RunnerStatus.Online
                 || _info is null
                 || !string.Equals(_state.State?.CurrentProcessGeneration, processGeneration, StringComparison.Ordinal)

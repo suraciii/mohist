@@ -15,7 +15,8 @@ public partial class RunnerGrain
         // claims in scope; the older claims stay in scope as non-authoritative.
         if (!string.IsNullOrWhiteSpace(state.CurrentProcessGeneration))
             state.ClosingProcessGeneration = state.CurrentProcessGeneration;
-        _draining = !string.IsNullOrWhiteSpace(state.ClosingProcessGeneration);
+        _draining = state.AdministrativeRemoval is not null
+            || !string.IsNullOrWhiteSpace(state.ClosingProcessGeneration);
     }
 
     /// <summary>
@@ -61,7 +62,8 @@ public partial class RunnerGrain
         }
 
         state.ClosingProcessGeneration = null;
-        _draining = !string.IsNullOrWhiteSpace(state.PendingProcessGeneration)
+        _draining = state.AdministrativeRemoval is not null
+            || !string.IsNullOrWhiteSpace(state.PendingProcessGeneration)
             || !string.IsNullOrWhiteSpace(state.UpdateInterruptFence?.PendingId);
         try
         {
@@ -174,7 +176,8 @@ public partial class RunnerGrain
         // deadline-based, so a claim recording no generation to close out is
         // not an AgentJob closeout trigger.
         IReadOnlyList<AgentJobLedgerRecord> agentJobs = [];
-        if (!string.IsNullOrWhiteSpace(closingGeneration))
+        if (_state.State?.AdministrativeRemoval is null
+            && !string.IsNullOrWhiteSpace(closingGeneration))
         {
             try
             {

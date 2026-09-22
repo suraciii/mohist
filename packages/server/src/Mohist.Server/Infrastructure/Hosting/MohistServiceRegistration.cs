@@ -142,6 +142,10 @@ public static class MohistServiceRegistration
             sp.GetRequiredService<RunnerControlWebSocketRegistry>());
         services.AddSingleton<IRunnerSessionCommandTransport>(sp =>
             sp.GetRequiredService<RunnerControlWebSocketRegistry>());
+        services.AddSingleton<IRunnerAuthorityFence>(sp =>
+            sp.GetRequiredService<RunnerControlWebSocketRegistry>());
+        services.AddSingleton<IRunnerActivityProbeCoordinator>(sp =>
+            sp.GetRequiredService<RunnerActivityProbeCoordinator>());
 
         // IAgentConnectionProviderCleanup implementations are also
         // registered as Self by the conventional services scan; Microsoft DI's

@@ -11,6 +11,11 @@ namespace Mohist.Server.Runner.Grains;
 public interface IRunnerGrain : IGrainWithStringKey
 {
     Task RegisterAsync(RunnerInfo info, string processGeneration);
+    /// <summary>
+    /// Durably removes this Runner's credential and execution authority before
+    /// settling bound Session activity. Repeated calls resume the same removal.
+    /// </summary>
+    Task<RunnerAdministrativeRemovalResult> RevokeExecutionAuthorityAsync(DateTimeOffset revokedAt);
     Task UnregisterAsync();
     /// <summary>Refreshes presence for control-plane heartbeat callers.</summary>
     Task HeartbeatAsync();
@@ -144,6 +149,12 @@ public interface IRunnerGrain : IGrainWithStringKey
     /// </summary>
     Task UpdateAsync(int slots);
 }
+
+[GenerateSerializer]
+public sealed record RunnerAdministrativeRemovalResult(
+    [property: Id(0)] bool Found,
+    [property: Id(1)] DateTimeOffset RevokedAt,
+    [property: Id(2)] bool Completed);
 
 public static class RunnerCapacity
 {
