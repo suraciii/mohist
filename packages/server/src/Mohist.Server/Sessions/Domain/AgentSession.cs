@@ -741,7 +741,12 @@ public sealed record AgentTurnRecord(
     /// superseded Turn never revives and takes no part in current Activity,
     /// occupancy or admission derivation. Append-only Orleans field id.
     /// </summary>
-    [property: Id(12)] DateTime? SupersededAt = null);
+    [property: Id(12)] DateTime? SupersededAt = null,
+    /// <summary>
+    /// Durable owner fact that this Turn acquired Agent capacity. It remains
+    /// after the Turn stops occupying capacity so retries need no permit ledger.
+    /// </summary>
+    [property: Id(13)] DateTimeOffset? CapacityClaimedAt = null);
 
 /// <summary>
 /// Immutable Workflow execution identity frozen on the Agent turn before its

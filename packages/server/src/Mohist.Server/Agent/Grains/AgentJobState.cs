@@ -92,6 +92,12 @@ public sealed class AgentJobState
     /// It is not a second work or capacity ledger.
     /// </summary>
     [Id(58)] public AgentJobInitialInputSubmission? InitialInputSubmission { get; set; }
+    /// <summary>
+    /// Durable owner fact that this Job acquired Agent capacity. It is retained
+    /// after terminality so retries can identify the original claim without a
+    /// separate permit ledger.
+    /// </summary>
+    [Id(59)] public DateTimeOffset? CapacityClaimedAt { get; set; }
 }
 
 [GenerateSerializer]

@@ -1,0 +1,303 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.Agent;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
+using Mohist.Server.Infrastructure.Capacity;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.TestSupport;
+using Mohist.Server.Tests.Support;
+using Xunit;
+using DomainAgent = Mohist.Server.Agent.Domain.Agent;
+
+namespace Mohist.Server.Tests.Agent.Storage;
+
+[Trait("level", "L0")]
+public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
+{
+    private static readonly DateTimeOffset Now = new(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
+    private readonly TestSqliteDatabase _database = TestSqliteDatabase.CreateModelSchema();
+    private readonly FakeTimeProvider _time = new(Now);
+    private AgentCapacityStore Store => new(new TestDbContextFactory(_database.Options), _time);
+
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync() => _database.DisposeAsync();
+
+    [Fact]
+    public async Task ClaimJob_AtomicallyWritesOwnerRevisionReadySinceAndDirectProjection()
+    {
+        await AddAgentAsync("project", "agent", 1);
+        var inserted = await AddJobAsync("job", "project", "agent", Now, readySince: null);
+
+        var result = await Store.ClaimJobAsync("job", inserted.Revision);
+
+        Assert.Equal(AgentCapacityClaimDisposition.Claimed, result.Disposition);
+        Assert.Equal(inserted.Revision + 1, result.Job!.Revision);
+        Assert.Equal(Now, result.Job.ReadySince);
+        var state = JSON.Deserialize<AgentJobState>(result.Job.StateJson)!;
+        Assert.Equal(Now, state.CapacityClaimedAt);
+        Assert.Equal(Now, state.ReadySince);
+        await using var db = _database.CreateContext();
+        var row = await db.AgentJobs.SingleAsync(candidate => candidate.JobKey == "job");
+        Assert.Equal(row.Revision, row.DirectApiProjectionRevision);
+        Assert.NotNull(row.DirectApiProjectionJson);
+    }
+
+    [Fact]
+    public async Task ClaimedJobRetry_IsIdempotentAfterDefinitionDisappearsAndLimitDecreases()
+    {
+        await AddAgentAsync("project", "agent", 2);
+        var inserted = await AddJobAsync("job", "project", "agent", Now);
+        var claimed = await Store.ClaimJobAsync("job", inserted.Revision);
+        await using (var db = _database.CreateContext())
+        {
+            var row = await db.Agents.SingleAsync();
+            var agent = AgentStore.Deserialize(row.State)!;
+            agent.MaxConcurrentRuns = 1;
+            row.State = AgentStore.Serialize(agent);
+            await db.SaveChangesAsync();
+        }
+        var lowerLimitRetry = await Store.ClaimJobAsync("job", inserted.Revision);
+        Assert.Equal(AgentCapacityClaimDisposition.AlreadyClaimed, lowerLimitRetry.Disposition);
+
+        await using (var db = _database.CreateContext())
+        {
+            db.Agents.Remove(await db.Agents.SingleAsync());
+            await db.SaveChangesAsync();
+        }
+        var missingDefinitionRetry = await Store.ClaimJobAsync("job", inserted.Revision);
+
+        Assert.Equal(AgentCapacityClaimDisposition.AlreadyClaimed, missingDefinitionRetry.Disposition);
+        Assert.Equal(claimed.Job!.Revision, missingDefinitionRetry.Job!.Revision);
+        Assert.Equal(AgentCapacityEvidenceStatus.MissingDefinition, missingDefinitionRetry.Capacity!.EvidenceStatus);
+    }
+
+    [Fact]
+    public async Task Read_CountsUnknownOwnersWithoutActivityFilterAndExcludesInitialOldAndSupersededTurns()
+    {
+        await AddAgentAsync("project", "agent", 5);
+        await AddJobAsync("unknown-job", "project", "agent", Now, AgentJobStatus.Unknown, Now);
+        var session = NewSession("session", "project", "agent", AgentSessionActivity.Idle,
+        [
+            Turn("unknown", 1, AgentTurnStatus.Unknown, generation: 1, claimedAt: Now),
+            Turn("initial", 2, AgentTurnStatus.Executing, generation: 1, claimedAt: Now, jobId: "job"),
+            Turn("old", 3, AgentTurnStatus.Executing, generation: 0, claimedAt: Now),
+            Turn("superseded", 4, AgentTurnStatus.Executing, generation: 1, claimedAt: Now, supersededAt: Now.UtcDateTime),
+            Turn("terminal", 5, AgentTurnStatus.Completed, generation: 1, claimedAt: Now),
+        ]);
+        await AddSessionAsync(session);
+
+        var snapshot = (await Store.ReadAsync("project", ["agent"]))["agent"];
+
+        Assert.Equal(AgentCapacityEvidenceStatus.Complete, snapshot.EvidenceStatus);
+        Assert.Equal(2, snapshot.Occupied);
+    }
+
+    [Fact]
+    public async Task FiniteCapacity_UsesEligibleFifoWithJobBeforeTurnAtEqualTime()
+    {
+        await AddAgentAsync("project", "agent", 1);
+        var job = await AddJobAsync("job", "project", "agent", Now);
+        var session = NewQueuedSession("session", "turn", "project", "agent", Now.UtcDateTime);
+        var exact = await AddSessionAsync(session);
+
+        var earlyTurn = await Store.ClaimTurnAsync("session", exact, "turn");
+        Assert.Equal(AgentCapacityClaimDisposition.NotInOrder, earlyTurn.Disposition);
+        var jobClaim = await Store.ClaimJobAsync("job", job.Revision);
+        Assert.Equal(AgentCapacityClaimDisposition.Claimed, jobClaim.Disposition);
+        var full = await Store.ClaimTurnAsync("session", exact, "turn");
+        Assert.Equal(AgentCapacityClaimDisposition.CapacityFull, full.Disposition);
+
+        await SetJobTerminalAsync("job");
+        var turnClaim = await Store.ClaimTurnAsync("session", exact, "turn");
+        Assert.Equal(AgentCapacityClaimDisposition.Claimed, turnClaim.Disposition);
+    }
+
+    [Fact]
+    public async Task ClaimTurn_RequiresExactDocumentAndReturnsCompleteCommittedSession()
+    {
+        await AddAgentAsync("project", "agent", 1);
+        var session = NewQueuedSession("session", "turn", "project", "agent", Now.UtcDateTime);
+        session.Runtime = new AgentSessionRuntime("runner", "/work", "pi");
+        session.Status = session.Status with
+        {
+            AgentRuntimeSessionId = "runtime-session",
+            PendingTranscriptEvidence = [new("evidence", "runtime-session", "text", "{}", Now.UtcDateTime, "followup")],
+        };
+        var exact = await AddSessionAsync(session);
+
+        var conflict = await Store.ClaimTurnAsync("session", exact + " ", "turn");
+        Assert.Equal(AgentCapacityClaimDisposition.Conflict, conflict.Disposition);
+        var claimed = await Store.ClaimTurnAsync("session", exact, "turn");
+
+        Assert.Equal(AgentCapacityClaimDisposition.Claimed, claimed.Disposition);
+        Assert.Equal("runtime-session", claimed.Session!.Status.AgentRuntimeSessionId);
+        Assert.Equal("/work", claimed.Session.Runtime.WorkDir);
+        Assert.Single(claimed.Session.Status.Inputs!);
+        Assert.Single(claimed.Session.Status.PendingTranscriptEvidence!);
+        Assert.Equal(Now, Assert.Single(claimed.Session.Status.Turns!).CapacityClaimedAt);
+    }
+
+    [Fact]
+    public async Task MissingMalformedAndArbitraryBuiltinDefinitions_FailClosed()
+    {
+        await AddJobAsync("missing", "project", "missing-agent", Now);
+        await AddJobAsync("prefix", "project", "builtin:not-real", Now.AddMinutes(1));
+        await using (var db = _database.CreateContext())
+        {
+            db.Agents.Add(new AgentRow { Id = GrainKey.Agent("project", "bad"), State = "{}" });
+            await db.SaveChangesAsync();
+        }
+
+        var snapshots = await Store.ReadAsync("project", ["missing-agent", "builtin:not-real", "bad", "builtin:mohist/planner"]);
+
+        Assert.Equal(AgentCapacityEvidenceStatus.MissingDefinition, snapshots["missing-agent"].EvidenceStatus);
+        Assert.Equal(AgentCapacityEvidenceStatus.MissingDefinition, snapshots["builtin:not-real"].EvidenceStatus);
+        Assert.Equal(AgentCapacityEvidenceStatus.MalformedDefinition, snapshots["bad"].EvidenceStatus);
+        Assert.True(snapshots["builtin:mohist/planner"].IsUnlimited);
+    }
+
+    [Fact]
+    public async Task ConcurrentJobClaims_AdmitAtMostOneSlotAndContentionIsNotCapacityFull()
+    {
+        await AddAgentAsync("project", "agent", 1);
+        var first = await AddJobAsync("a", "project", "agent", Now);
+        var second = await AddJobAsync("b", "project", "agent", Now);
+
+        var attempts = await Task.WhenAll(
+            AttemptAsync(() => Store.ClaimJobAsync("a", first.Revision)),
+            AttemptAsync(() => Store.ClaimJobAsync("b", second.Revision)));
+        var claimed = attempts.Where(result => result?.Disposition == AgentCapacityClaimDisposition.Claimed).ToArray();
+        Assert.True(claimed.Length <= 1);
+        Assert.DoesNotContain(attempts, result => result?.Disposition == AgentCapacityClaimDisposition.Claimed
+            && result.Job!.JobKey == "b");
+        var snapshot = (await Store.ReadAsync("project", ["agent"]))["agent"];
+        Assert.InRange(snapshot.Occupied!.Value, 0, 1);
+        if (snapshot.Occupied == 0)
+        {
+            var retry = await Store.ClaimJobAsync("a", first.Revision);
+            Assert.Equal(AgentCapacityClaimDisposition.Claimed, retry.Disposition);
+        }
+    }
+
+    private static async Task<AgentJobCapacityClaimResult?> AttemptAsync(
+        Func<Task<AgentJobCapacityClaimResult>> action)
+    {
+        try { return await action(); }
+        catch (Microsoft.Data.Sqlite.SqliteException) { return null; }
+    }
+
+    private async Task AddAgentAsync(string projectId, string agentId, int? limit)
+    {
+        var agent = new DomainAgent
+        {
+            Id = agentId,
+            ProjectId = projectId,
+            Name = agentId,
+            MaxConcurrentRuns = limit,
+            CreatedAt = Now,
+            UpdatedAt = Now,
+        };
+        await using var db = _database.CreateContext();
+        db.Agents.Add(new AgentRow { Id = GrainKey.Agent(projectId, agentId), State = AgentStore.Serialize(agent) });
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<AgentJobLedgerRecord> AddJobAsync(
+        string key,
+        string projectId,
+        string agentId,
+        DateTimeOffset submittedAt,
+        AgentJobStatus status = AgentJobStatus.Pending,
+        DateTimeOffset? claimedAt = null,
+        DateTimeOffset? readySince = null)
+    {
+        var state = new AgentJobState
+        {
+            Status = status,
+            Input = new AgentJobInput("prompt", ProjectId: projectId, AgentId: agentId),
+            SubmittedAt = submittedAt,
+            CapacityClaimedAt = claimedAt,
+            ReadySince = readySince,
+        };
+        var store = new AgentJobStore(
+            new TestDbContextFactory(_database.Options),
+            NullLogger<AgentJobStore>.Instance,
+            _time);
+        return await store.InsertLedgerAsync(new AgentJobLedgerRecord(
+            key, JSON.Serialize(state), 0, null, null, readySince, null, null,
+            "agent-job", "agent", key, projectId, null, null, null, null));
+    }
+
+    private async Task<string> AddSessionAsync(AgentSession session)
+    {
+        var row = AgentSessionJson.ToRow(session, Now.UtcDateTime);
+        await using var db = _database.CreateContext();
+        db.AgentSessions.Add(row);
+        await db.SaveChangesAsync();
+        return await db.AgentSessions.Where(candidate => candidate.Id == session.Id)
+            .Select(candidate => candidate.State).SingleAsync();
+    }
+
+    private async Task SetJobTerminalAsync(string key)
+    {
+        await using var db = _database.CreateContext();
+        var row = await db.AgentJobs.SingleAsync(candidate => candidate.JobKey == key);
+        var state = JSON.Deserialize<AgentJobState>(row.State)!;
+        state.Status = AgentJobStatus.Completed;
+        state.TerminalAt = Now.AddMinutes(1);
+        row.State = JSON.Serialize(state);
+        row.Revision++;
+        await db.SaveChangesAsync();
+    }
+
+    private static AgentSession NewQueuedSession(
+        string sessionId,
+        string turnId,
+        string projectId,
+        string agentId,
+        DateTime recordedAt)
+    {
+        var session = NewSession(sessionId, projectId, agentId, AgentSessionActivity.Active,
+            [Turn(turnId, 1, AgentTurnStatus.Queued, 1, recordedAt: recordedAt)]);
+        session.Status = session.Status with
+        {
+            Inputs = [new("input", 1, "prompt", "api", AgentSessionInputAcceptance.Accepted, recordedAt, ContextGeneration: 1)],
+            PendingFollowups = [new("operation", "runtime", Accepted: true, AcceptedAt: recordedAt, StartedAt: recordedAt, InputId: "input", TurnId: turnId)],
+        };
+        return session;
+    }
+
+    private static AgentSession NewSession(
+        string sessionId,
+        string projectId,
+        string agentId,
+        AgentSessionActivity activity,
+        IReadOnlyList<AgentTurnRecord> turns)
+    {
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", projectId)
+            .WithLabel("mohist.io/source-kind", "agent-launch")
+            .WithLabel("mohist.io/agent-id", agentId);
+        var session = AgentSession.Create(sessionId, "runner", "/work", metadata, Now.UtcDateTime, "pi");
+        session.Status = session.Status with { Activity = activity, Turns = turns, ContextGeneration = 1 };
+        return session;
+    }
+
+    private static AgentTurnRecord Turn(
+        string id,
+        long sequence,
+        AgentTurnStatus status,
+        long generation,
+        DateTimeOffset? claimedAt = null,
+        string? jobId = null,
+        DateTime? supersededAt = null,
+        DateTime? recordedAt = null) =>
+        new(id, sequence, ["input"], status, jobId, RecordedAt: recordedAt ?? Now.UtcDateTime,
+            ContextGeneration: generation, SupersededAt: supersededAt, CapacityClaimedAt: claimedAt);
+}
