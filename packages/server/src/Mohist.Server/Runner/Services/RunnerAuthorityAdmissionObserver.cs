@@ -5,9 +5,9 @@ namespace Mohist.Server.Runner.Services;
 
 /// <summary>
 /// Boundary signal emitted after authentication has resolved the concrete
-/// Runner request authority and before registration or control admission.
-/// Production has no observer; deterministic tests use it to hold the exact
-/// authenticated request across credential replacement.
+/// Runner request authority and before registration, control, or initial-input
+/// admission. Production has no observer; deterministic tests use it to hold
+/// the exact authenticated request across credential replacement.
 /// </summary>
 public sealed class RunnerAuthorityAdmissionObserver : ISingletonService
 {

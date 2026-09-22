@@ -242,10 +242,15 @@ public static partial class RunnerRoutes
         });
 
         group.MapPost("/agent-jobs/{jobId}/initial-input/recovery/prepare", async (
-            string runnerId, string jobId, AgentJobInitialRecoveryPrepareRequest req, IGrainFactory grains) =>
+            string runnerId, string jobId, AgentJobInitialRecoveryPrepareRequest req,
+            HttpContext context, IGrainFactory grains,
+            RunnerAuthorityAdmissionObserver authorityAdmissions,
+            CancellationToken ct) =>
         {
-            if (!await HasInitialInputMutationAuthorityAsync(grains, runnerId, req.ProcessGeneration))
-                return ApiResults.Conflict("Runner process is not current, online, and non-draining", "runner_process_stale");
+            if (await GetInitialInputMutationAuthorityFailureAsync(
+                    context, grains, authorityAdmissions, "initial-input-prepare",
+                    runnerId, req.ProcessGeneration, ct) is { } authorityFailure)
+                return authorityFailure;
             try
             {
                 var receipt = await grains.GetGrain<IAgentJobGrain>(jobId).PrepareInitialInputRecoveryAsync(
@@ -263,10 +268,15 @@ public static partial class RunnerRoutes
         });
 
         group.MapPost("/agent-jobs/{jobId}/initial-input/recovery/complete", async (
-            string runnerId, string jobId, AgentJobInitialRecoveryCompleteRequest req, IGrainFactory grains) =>
+            string runnerId, string jobId, AgentJobInitialRecoveryCompleteRequest req,
+            HttpContext context, IGrainFactory grains,
+            RunnerAuthorityAdmissionObserver authorityAdmissions,
+            CancellationToken ct) =>
         {
-            if (!await HasInitialInputMutationAuthorityAsync(grains, runnerId, req.ProcessGeneration))
-                return ApiResults.Conflict("Runner process is not current, online, and non-draining", "runner_process_stale");
+            if (await GetInitialInputMutationAuthorityFailureAsync(
+                    context, grains, authorityAdmissions, "initial-input-complete",
+                    runnerId, req.ProcessGeneration, ct) is { } authorityFailure)
+                return authorityFailure;
             try
             {
                 var recovery = new PrepareAgentJobInitialRecovery(
@@ -286,10 +296,15 @@ public static partial class RunnerRoutes
         });
 
         group.MapPost("/agent-jobs/{jobId}/initial-input/start", async (
-            string runnerId, string jobId, AgentJobInitialInputStartRequest req, IGrainFactory grains) =>
+            string runnerId, string jobId, AgentJobInitialInputStartRequest req,
+            HttpContext context, IGrainFactory grains,
+            RunnerAuthorityAdmissionObserver authorityAdmissions,
+            CancellationToken ct) =>
         {
-            if (!await HasInitialInputMutationAuthorityAsync(grains, runnerId, req.ProcessGeneration))
-                return ApiResults.Conflict("Runner process is not current, online, and non-draining", "runner_process_stale");
+            if (await GetInitialInputMutationAuthorityFailureAsync(
+                    context, grains, authorityAdmissions, "initial-input-start",
+                    runnerId, req.ProcessGeneration, ct) is { } authorityFailure)
+                return authorityFailure;
             try
             {
                 var receipt = await grains.GetGrain<IAgentJobGrain>(jobId).StartInitialInputAsync(
@@ -568,16 +583,37 @@ public static partial class RunnerRoutes
             || string.Equals(lastTerminalStatus, "cancelled", StringComparison.OrdinalIgnoreCase)
             || string.Equals(lastTerminalStatus, "timeout", StringComparison.OrdinalIgnoreCase));
 
-    private static async Task<bool> HasInitialInputMutationAuthorityAsync(
+    private static async Task<IResult?> GetInitialInputMutationAuthorityFailureAsync(
+        HttpContext context,
         IGrainFactory grains,
+        RunnerAuthorityAdmissionObserver authorityAdmissions,
+        string operation,
         string runnerId,
-        string processGeneration)
+        string processGeneration,
+        CancellationToken ct)
     {
-        var runtime = await grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync();
-        return runtime.Status == RunnerStatus.Online
-            && !runtime.Draining
-            && !string.IsNullOrWhiteSpace(processGeneration)
-            && string.Equals(runtime.ProcessGeneration, processGeneration, StringComparison.Ordinal);
+        if (ResolvePresentedRunnerAuthority(context) is not { } presentedAuthority)
+            return InvalidRunnerCredentialAuthority();
+        await authorityAdmissions.ObserveAsync(
+            operation,
+            runnerId,
+            presentedAuthority,
+            ct);
+
+        var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+        var runtime = await runner.GetRuntimeStateAsync();
+        if (runtime.Status != RunnerStatus.Online
+            || runtime.Draining
+            || !string.Equals(runtime.ProcessGeneration, processGeneration, StringComparison.Ordinal))
+            return ApiResults.Conflict(
+                "Runner process is not current, online, and non-draining",
+                "runner_process_stale");
+
+        return await runner.IsCurrentRegistrationAuthorityAsync(
+                processGeneration,
+                presentedAuthority)
+            ? null
+            : InvalidRunnerCredentialAuthority();
     }
 
     private static string? NormalizeBuildGitHash(string? value)
