@@ -12,6 +12,7 @@ public partial class RunnerGrain
     public async Task<RunnerAdministrativeRemovalResult> RevokeExecutionAuthorityAsync(DateTimeOffset revokedAt)
     {
         RunnerAdministrativeRemoval? removal;
+        var transportFenced = false;
         await _lifecycleGate.WaitAsync();
         try
         {
@@ -36,6 +37,14 @@ public partial class RunnerGrain
                 _draining = true;
                 try
                 {
+                    // Linearize local transport revocation before intent can
+                    // become visible to a request that already validated the
+                    // grain. If persistence fails, a fresh post-fence connect
+                    // can be admitted because no durable removal remains.
+                    await _authorityFence.FenceAsync(
+                        RunnerId,
+                        removal.RemovedProcessGeneration);
+                    transportFenced = true;
                     await PersistAsync();
                 }
                 catch
@@ -51,8 +60,7 @@ public partial class RunnerGrain
             _lifecycleGate.Release();
         }
 
-        await EnsureAdministrativeRemovalReminderAsync();
-        await ContinueAdministrativeRemovalAsync();
+        await ContinueAdministrativeRemovalAsync(transportFenced);
         removal = (_state.State ??= new RunnerState()).AdministrativeRemoval;
         if (removal?.Phase != RunnerAdministrativeRemovalPhase.Completed)
             throw new InvalidOperationException(
@@ -60,7 +68,7 @@ public partial class RunnerGrain
         return new RunnerAdministrativeRemovalResult(true, removal.RevokedAt, Completed: true);
     }
 
-    private async Task ContinueAdministrativeRemovalAsync()
+    private async Task ContinueAdministrativeRemovalAsync(bool transportAlreadyFenced = false)
     {
         var removal = (_state.State ??= new RunnerState()).AdministrativeRemoval;
         if (removal is null || removal.Phase == RunnerAdministrativeRemovalPhase.Completed)
@@ -68,6 +76,16 @@ public partial class RunnerGrain
 
         try
         {
+            // Durable removal intent is already a closed transport authority.
+            // This singleton call does not call back into the Runner grain, so
+            // it cannot create a Runner -> transport -> Runner wait cycle.
+            if (!transportAlreadyFenced)
+            {
+                await _authorityFence.FenceAsync(
+                    RunnerId,
+                    removal.RemovedProcessGeneration);
+            }
+
             if (removal.Phase == RunnerAdministrativeRemovalPhase.IntentRecorded)
             {
                 var revoked = await _credentials.RevokeRunnerCredentialAsync(RunnerId, removal.RevokedAt);
@@ -91,12 +109,9 @@ public partial class RunnerGrain
             removal = CurrentAdministrativeRemoval(removal.RemovalId);
             if (removal.Phase == RunnerAdministrativeRemovalPhase.AuthorityFenced)
             {
-                // The durable process-generation fence is already committed.
-                // This closes only the current Server transport; it makes no
-                // claim about an external Runtime process or side effect.
-                await _authorityFence.FenceAsync(
-                    RunnerId,
-                    removal.RemovedProcessGeneration);
+                // The Server transport was already closed from durable intent;
+                // this phase makes no claim about an external Runtime process
+                // or side effect.
                 await GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
                     .UnregisterAsync(RunnerId);
 
@@ -368,6 +383,7 @@ public partial class RunnerGrain
         ArgumentNullException.ThrowIfNull(presentedAuthority);
         var state = _state.State;
         if (state is null
+            || state.AdministrativeRemoval is not null
             || string.IsNullOrWhiteSpace(processGeneration)
             || !string.Equals(
                 state.CurrentProcessGeneration,

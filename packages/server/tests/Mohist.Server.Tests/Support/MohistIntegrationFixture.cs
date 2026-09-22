@@ -15,10 +15,12 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
+using Mohist.Server.Infrastructure.Data.Auth;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
@@ -326,6 +328,11 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            services.AddSingleton<RunnerCredentialRevocationFailureProbe>();
+            services.RemoveAll<ICredentialStore>();
+            services.AddScoped<ICredentialStore>(provider => new FaultInjectingCredentialStore(
+                provider.GetRequiredService<CredentialStore>(),
+                provider.GetRequiredService<RunnerCredentialRevocationFailureProbe>()));
             services.RemoveAll<IWorkflowRunStore>();
             services.AddScoped<WorkflowRunStore>();
             services.AddSingleton<WorkflowRunLoadFailureProbe>();

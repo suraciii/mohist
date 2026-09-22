@@ -69,7 +69,11 @@ must present the same still-active credential authority. A request authenticated
 before credential replacement cannot borrow the replacement credential merely
 because both credentials belong to the same Runner. An explicit operator Scope
 override remains distinct from issued Runner credential authority and cannot
-release a completed administrative-removal fence.
+release an administrative-removal fence. Durable removal intent closes existing
+control transport and all control admission immediately, before fallible
+credential-store or reminder work. A local authority epoch also invalidates any
+installation that passed admission before that intent, even when its process
+generation differs from the generation recorded by removal.
 
 Registration and the handshake read a payload **without** `schemaVersion` as
 legacy v0: `buildGitHash` then falls back to `gitHash` and `sourceRevision` to

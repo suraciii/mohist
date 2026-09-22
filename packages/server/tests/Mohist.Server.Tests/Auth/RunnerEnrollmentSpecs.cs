@@ -1,13 +1,19 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.WebSockets;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Auth.Domain;
+using Mohist.Server.Contracts;
+using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services.WebSocket;
+using Orleans.Runtime;
+using Orleans.Storage;
 using Xunit;
 
 namespace Mohist.Server.Tests.Auth;
@@ -125,6 +131,93 @@ public sealed class RunnerEnrollmentSpecs(IsolatedMohistIntegrationFixture fixtu
     }
 
     [Fact]
+    public async Task PartialRemovalImmediatelyClosesAllControlAuthorityUntilCredentialBRegisters()
+    {
+        var runnerId = $"runner-partial-removal-{Guid.NewGuid():N}";
+        var credentialA = await RegisterAsync(await CreateEnrollmentTokenAsync(), runnerId);
+        await RegisterProcessAsync(credentialA, runnerId, "process-a");
+        var runner = fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        var failures = fixture.Services.GetRequiredService<RunnerCredentialRevocationFailureProbe>();
+        failures.FailNext(runnerId);
+
+        using var oldSocket = await RunnerControlClient(credentialA, Guid.NewGuid()).ConnectAsync(
+            ControlUri(runnerId, "process-a"),
+            TestContext.Current.CancellationToken);
+        var registry = fixture.Services.GetRequiredService<RunnerControlWebSocketRegistry>();
+        await registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
+
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                runner.RevokeExecutionAuthorityAsync(fixture.TimeProvider.GetUtcNow()));
+
+            var storage = fixture.Services.GetRequiredService<IGrainStorage>();
+            var state = new GrainState<RunnerState>();
+            await storage.ReadStateAsync("runner", runner.GetGrainId(), state);
+            Assert.Equal(
+                RunnerAdministrativeRemovalPhase.IntentRecorded,
+                state.State.AdministrativeRemoval!.Phase);
+            Assert.Equal("process-a", state.State.CurrentProcessGeneration);
+            Assert.NotNull(await fixture.Services.GetRequiredService<IRunnerCredentialStatusReader>()
+                .GetActiveAuthorityAsync(runnerId));
+
+            var credentialAId = state.State.CurrentRegistrationCredentialId;
+            Assert.False(await runner.IsCurrentRegistrationAuthorityAsync(
+                "process-a",
+                new RunnerPresentedAuthority(credentialAId, OperatorOverride: false)));
+            Assert.False(await runner.IsCurrentRegistrationAuthorityAsync(
+                "process-a",
+                new RunnerPresentedAuthority(CredentialId: null, OperatorOverride: true)));
+
+            var closed = await oldSocket.ReceiveAsync(
+                new byte[64],
+                TestContext.Current.CancellationToken);
+            Assert.Equal(WebSocketMessageType.Close, closed.MessageType);
+            var requestEnqueued = false;
+            await Assert.ThrowsAsync<RunnerControlUnavailableException>(() =>
+                registry.SendRequestAsync<WorkspaceQueryParams, WorkspaceRemovalResult>(
+                    runnerId,
+                    "workspace.remove",
+                    new WorkspaceQueryParams(new RunnerWorkspaceQuery(
+                        null, null, null, null, null, null, null)),
+                    requestEnqueued: () => requestEnqueued = true,
+                    ct: TestContext.Current.CancellationToken));
+            Assert.False(requestEnqueued);
+
+            await Assert.ThrowsAnyAsync<Exception>(() => RunnerControlClient(
+                    credentialA,
+                    Guid.NewGuid())
+                .ConnectAsync(
+                    ControlUri(runnerId, "process-a"),
+                    TestContext.Current.CancellationToken));
+            await Assert.ThrowsAnyAsync<Exception>(() => OperatorControlClient(Guid.NewGuid())
+                .ConnectAsync(
+                    ControlUri(runnerId, "process-a"),
+                    TestContext.Current.CancellationToken));
+
+            var completed = await runner.RevokeExecutionAuthorityAsync(
+                fixture.TimeProvider.GetUtcNow());
+            Assert.True(completed.Completed);
+            var credentialB = await RegisterAsync(await CreateEnrollmentTokenAsync(), runnerId);
+            await RegisterProcessAsync(credentialB, runnerId, "process-b");
+
+            using var replacement = await RunnerControlClient(credentialB, Guid.NewGuid()).ConnectAsync(
+                ControlUri(runnerId, "process-b"),
+                TestContext.Current.CancellationToken);
+            await registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
+            Assert.True(registry.IsConnected(runnerId));
+            await replacement.CloseAsync(
+                WebSocketCloseStatus.NormalClosure,
+                "test complete",
+                TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            failures.Reset();
+        }
+    }
+
+    [Fact]
     public async Task PausedCredentialARequestsCannotBorrowReplacementCredentialB()
     {
         var runnerId = $"runner-presented-authority-{Guid.NewGuid():N}";
@@ -143,9 +236,11 @@ public sealed class RunnerEnrollmentSpecs(IsolatedMohistIntegrationFixture fixtu
         var releaseSecondRegister = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseControl = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var registerCount = 0;
+        var captureStaleRequests = 1;
         observer.ObservedAsync = async (operation, observedRunnerId, authority, ct) =>
         {
-            if (!string.Equals(observedRunnerId, runnerId, StringComparison.Ordinal)
+            if (Volatile.Read(ref captureStaleRequests) == 0
+                || !string.Equals(observedRunnerId, runnerId, StringComparison.Ordinal)
                 || !string.Equals(authority.CredentialId, credentialAId, StringComparison.Ordinal))
                 return;
             if (string.Equals(operation, "control", StringComparison.Ordinal))
@@ -175,26 +270,29 @@ public sealed class RunnerEnrollmentSpecs(IsolatedMohistIntegrationFixture fixtu
             $"/api/runner/{runnerId}/register",
             RegisterBody("stale-before-b"),
             TestContext.Current.CancellationToken);
-        var staleAfterReplacement = staleClient.PostAsJsonAsync(
-            $"/api/runner/{runnerId}/register",
-            RegisterBody("stale-after-b"),
-            TestContext.Current.CancellationToken);
+        Task<HttpResponseMessage>? staleAfterReplacement = null;
         var staleControlClient = fixture.CreateWebSocketClient();
         staleControlClient.ConfigureRequest = request =>
         {
             request.Headers.Authorization = $"Bearer {credentialA}";
             request.Headers["X-Runner-Connection-Id"] = Guid.NewGuid().ToString("D");
         };
-        var staleControl = staleControlClient.ConnectAsync(
-            new Uri($"ws://localhost/api/runner/{runnerId}/control?processGeneration=process-a"),
-            TestContext.Current.CancellationToken);
+        Task<WebSocket>? staleControl = null;
 
         try
         {
+            await firstRegisterObserved.Task.WaitAsync(TestContext.Current.CancellationToken);
+            staleAfterReplacement = staleClient.PostAsJsonAsync(
+                $"/api/runner/{runnerId}/register",
+                RegisterBody("stale-after-b"),
+                TestContext.Current.CancellationToken);
+            staleControl = staleControlClient.ConnectAsync(
+                new Uri($"ws://localhost/api/runner/{runnerId}/control?processGeneration=process-a"),
+                TestContext.Current.CancellationToken);
             await Task.WhenAll(
-                firstRegisterObserved.Task,
                 secondRegisterObserved.Task,
                 controlObserved.Task).WaitAsync(TestContext.Current.CancellationToken);
+            Volatile.Write(ref captureStaleRequests, 0);
 
             using var revoke = await fixture.Client.DeleteAsync(
                 $"/api/runners/{runnerId}/credentials",
@@ -210,9 +308,9 @@ public sealed class RunnerEnrollmentSpecs(IsolatedMohistIntegrationFixture fixtu
             releaseSecondRegister.TrySetResult();
             releaseControl.TrySetResult();
 
-            using (var stale = await staleAfterReplacement)
+            using (var stale = await staleAfterReplacement!)
                 Assert.Equal(HttpStatusCode.Forbidden, stale.StatusCode);
-            await Assert.ThrowsAnyAsync<Exception>(() => staleControl);
+            await Assert.ThrowsAnyAsync<Exception>(() => staleControl!);
             Assert.True(await fixture.Grains.GetGrain<IRunnerGrain>(runnerId)
                 .IsCurrentProcessGenerationAsync("process-b"));
         }
@@ -277,6 +375,33 @@ public sealed class RunnerEnrollmentSpecs(IsolatedMohistIntegrationFixture fixtu
             fixture.TimeProvider.GetUtcNow().AddMinutes(15),
             data.GetProperty("expiresAt").GetDateTimeOffset());
         return token;
+    }
+
+    private static Uri ControlUri(string runnerId, string processGeneration) => new(
+        $"ws://localhost/api/runner/{runnerId}/control?processGeneration={Uri.EscapeDataString(processGeneration)}");
+
+    private Microsoft.AspNetCore.TestHost.WebSocketClient RunnerControlClient(
+        string credential,
+        Guid connectionId)
+    {
+        var client = fixture.CreateWebSocketClient();
+        client.ConfigureRequest = request =>
+        {
+            request.Headers.Authorization = $"Bearer {credential}";
+            request.Headers["X-Runner-Connection-Id"] = connectionId.ToString("D");
+        };
+        return client;
+    }
+
+    private Microsoft.AspNetCore.TestHost.WebSocketClient OperatorControlClient(Guid connectionId)
+    {
+        var client = fixture.CreateWebSocketClient();
+        client.ConfigureRequest = request =>
+        {
+            request.Headers.Authorization = $"Bearer {MohistIntegrationFixture.OperatorToken}";
+            request.Headers["X-Runner-Connection-Id"] = connectionId.ToString("D");
+        };
+        return client;
     }
 
     private static object RegisterBody(string processGeneration) => new

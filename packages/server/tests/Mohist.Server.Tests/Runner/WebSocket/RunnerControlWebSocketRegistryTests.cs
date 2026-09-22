@@ -328,6 +328,41 @@ public sealed class RunnerControlWebSocketRegistryTests
     }
 
     [Fact]
+    public async Task RemovalFenceRejectsEarlierOperatorInstallationFromDifferentGeneration()
+    {
+        const string runnerId = "runner-cross-generation-removal";
+        var fixture = RegistryFixture(currentGeneration: "generation-a");
+        var publicationReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Registry.InstallationPublicationReadyAsync = async (_, _, ct) =>
+        {
+            publicationReady.TrySetResult();
+            await release.Task.WaitAsync(ct);
+        };
+        Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var reservation));
+        var run = fixture.Registry.RunAsync(
+            runnerId,
+            reservation,
+            fixture.Socket,
+            new RunnerControlHandshake(
+                null, null, null, null, null, null, null, null, "generation-a"),
+            OperatorAuthority,
+            TestContext.Current.CancellationToken);
+        await publicationReady.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        fixture.Runner.CurrentGeneration = "generation-b";
+        await fixture.Registry.FenceAsync(
+            runnerId,
+            "generation-b",
+            TestContext.Current.CancellationToken);
+        release.TrySetResult();
+
+        await Assert.ThrowsAsync<RunnerControlUnavailableException>(() => run);
+        Assert.False(fixture.Registry.IsConnected(runnerId));
+        Assert.Equal(0, fixture.Socket.SendCount);
+    }
+
+    [Fact]
     public async Task RevocationWinningSendAuthorityRacePreventsUnscopedRequestEnqueue()
     {
         const string runnerId = "runner-send-revoked";
