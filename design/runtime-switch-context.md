@@ -42,6 +42,11 @@ If replacement or binding CAS fails, the original binding and canonical history
 remain unchanged and the Turn is reported as retryable/unavailable. A failed
 replacement must not leave a partially adopted physical session as current.
 
+When a Runner reconnects or is removed, Session `unknown` Activity settles
+through the lifecycle convergence specified in
+[`agent-execution.md`](agent-execution.md#activity-convergence); a binding
+recorded `unknown-to-runner` enters the replacement path above.
+
 ```text diagram
 old binding unavailable
   -> create fallback physical session
@@ -54,11 +59,6 @@ old binding unavailable
 
 This does not migrate provider conversation files, summarize history, create a
 new queue, or automatically repair a provider whose completion signal is broken.
-
-When a Runner reconnects, Session `unknown` Activity settles through the
-re-registration probe specified in
-[`agent-execution.md`](agent-execution.md#activity-convergence); a
-runner-disclaimed binding enters the replacement path above.
 
 ## Status
 

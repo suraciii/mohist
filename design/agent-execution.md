@@ -110,35 +110,54 @@ to an existing AgentSession and either joins the current Turn through steer or
 creates a later Turn. Compact, Reset, recovery, rebind, handoff, and force-reset
 also change only the Session.
 
-## Admission and Capacity
+## Capacity
 
-An Agent runs at most `maxConcurrentRuns` concurrent executions. Capacity is
-derived from execution facts in the authoritative stores. No component keeps a
-permit ledger, waiter list, or grant notification for capacity: a ledger is a
+An Agent runs at most `maxConcurrentRuns` concurrent executions; a non-null
+limit is a positive integer, and `null` means unlimited. Capacity is derived
+from execution facts in the authoritative stores. No component keeps a permit
+ledger, waiter list, or grant notification for capacity: a ledger is a
 projection of the facts, a projection must be reconciled against them, and
 reconciliation gaps have leaked permits and deadlocked grant delivery
-(issue #1078). A derived count cannot drift because its input is the authority.
+(issue #1078). A derived count cannot drift because its input is the
+authority. Runner-level slots remain a separate claim layer owned by the
+Runner ([`runner.md`](runner.md#capacity)); a dispatch must satisfy both
+bounds, and capacity decisions converge at the Runner claim, per
+[the decision record](decisions/one-ledger-no-reconciliation.md).
 
-Counting rule. An execution occupies one slot for `(project, agent)` from the
-moment it passes admission until it is terminal:
+Counting rule. An execution occupies one slot for `(project, agent)` from
+acceptance until it is terminal:
 
 - a launch Job that is dispatched, running, or of unknown dispatch outcome;
-- a follow-up Turn that has passed admission and is not terminal.
+- a follow-up Turn that is accepted and not terminal.
 
-A waiting Job occupies nothing. An unadmitted Turn occupies nothing. A terminal
-Job or Turn occupies nothing, whatever its terminal status.
+A pending Job that has not claimed occupancy occupies nothing. A Turn
+superseded by a committed context boundary — a prior `ContextGeneration` left
+by force-reset, rebind, or handoff — occupies nothing. A terminal Job or Turn
+occupies nothing, whatever its terminal status. A Turn settled by Activity
+convergence is terminal for this count.
 
-Claim rule. Admission is one store transaction: it counts occupants for the
-`(project, agent)` and transitions the waiting Job or Turn to admitted only
-while the count is below the limit. Counting in one transaction and claiming in
-a later one is the classic admission race and is forbidden.
+Claim rule. An occupancy claim is one store transaction over the
+`(project, agent)`: it enumerates occupants — Job rows and Session documents
+for that pair — and commits the accepted work as claimed only while the count
+is below the limit. Enumerating in one transaction and claiming in a later one
+is the classic admission race and is forbidden.
 
-Wake rule. A waiting execution re-evaluates admission on the existing periodic
-recovery reminder, which bounds both correctness and admission latency. No
-dedicated capacity signal exists.
+Queueing and wake. Capacity pressure never discards accepted work: a queued
+later Turn waits in Session order, and a launch Job waits with its capacity
+reason; only a full queue rejects before acceptance. A waiting launch Job
+re-evaluates on its existing per-Job recovery reminder. A queued follow-up
+Turn re-evaluates on a Session recovery reminder that exists only while the
+Session holds queued Turns, after the `schedule-recovery` pattern. Either
+evaluation claims idempotently under the claim rule. Within a
+`(project, agent)`, waiting work is admitted in acceptance order.
 
-A `maxConcurrentRuns` change takes effect at the next evaluation. `0` and
-unlimited keep their meaning.
+Availability projections and waiting-work lists (`capacity-full`,
+`concurrency-limit`, `dispatch-pending`) read the same derived count and queue
+facts and keep the existing reason vocabulary. A launch coordinator never
+awaits a capacity decision.
+
+A `maxConcurrentRuns` change takes effect at the next evaluation and never
+cancels running work.
 
 AgentJob references the first Input and Turn created by launch. A completed
 AgentJob means that the launch work returned successfully. It does not close the
@@ -233,7 +252,8 @@ The invariants are:
 - Each accepted Input has one stable Input ID, caller `requestId`, fingerprint,
   Turn ID, and `ContextGeneration`. It never moves to another Turn or generation.
 - A Turn can own multiple steer Inputs. A new-turn Input creates a distinct Turn.
-- Capacity rejection occurs before acceptance. Accepted Input cannot be
+- The capacity decision precedes acceptance: capacity pressure queues work,
+  and only a full queue rejects before acceptance. Accepted Input cannot be
   discarded, overwritten, or assigned a replacement ID.
 - User input contains visible text or an explicit attachment. Attachment-only
   input does not gain a hidden prompt.
@@ -285,7 +305,7 @@ AgentSession has only these Activity states:
   operation cannot be confirmed.
 
 ```text diagram
-                   +------+                   work settles
+                   +------+                work settles / converged
                    | idle |<-------------------------------+
                    +---+--+                                |
                        |                                   |
@@ -324,29 +344,40 @@ a lost execution; guessing violates the `unknown` contract above. Two
 authorities convert `unknown`:
 
 - Runner re-registration. When a Runner's control connection is re-established,
-  Server probes the binding of every Session with `unknown` Activity bound to
-  that Runner. The Runner answers with deterministic evidence per binding:
-  `executing`, `idle`, or `unknown-to-runner`.
-- Runner removal. When a Runner record is removed or revoked, every Session
-  bound to it with `unknown` Activity settles as `unknown-to-runner`.
+  Server probes the current binding of every Session with `unknown` Activity
+  bound to that Runner. Probes follow the request rules of
+  [`runner-transport.md`](runner-transport.md). The probe and its answer carry
+  the complete Binding tuple and binding epoch; an answer for a non-current
+  binding is discarded under the late-event rule. The Runner answers per
+  binding: `executing`, `idle`, or `unknown-to-runner`.
+- Runner removal. When a Runner is removed through the admin command path,
+  every Session bound to it with a nonterminal current-generation Turn settles
+  as `unknown-to-runner`; the removal itself is the deterministic evidence.
 
-Settlement rules:
+Settlement applies to the generation the evidence observed; Turns accepted
+later are outside it. Settlement supersedes, after the force-reset pattern:
+it marks every in-flight Turn of that generation terminal `unknown` and every
+queued undispatched Turn `cancelled`, records them through
+`unresolvedPrevious` and `nextAction`, supersedes any ActiveOperation of that
+generation, and settles the launch Job that owns a settled initial Turn. A
+superseded Turn or Job occupies no capacity and no longer blocks
+`admission=ready`.
 
 - `executing` sets Activity to `active`; the Runner owns the pending turn
   report as before.
-- `idle` marks every non-terminal Turn of the current generation terminal with
-  the existing `unknown` status and sets Activity to `idle`. Settlement never
-  re-executes a Turn, never re-sends a reply, and never replays Transcript;
-  outbound idempotency is the dispatch identity already carried by the reply
-  anchor.
-- `unknown-to-runner` additionally records the binding as runner-disclaimed;
-  the next Input takes the runtime replacement path of
+- `idle` and `unknown-to-runner` set Activity to `idle`. `unknown-to-runner`
+  additionally records the write-side binding fact `unknown-to-runner`; that
+  record is deterministic missing evidence, and the next accepted Input takes
+  the replacement path of
   [Runtime Session missing recovery](#runtime-session-missing-recovery).
 - A failed or unanswered probe leaves Activity `unknown`.
 
-Convergence is idempotent: repeated probes settle the same facts. Settlement
-is a Session transition and competes with other Session operations under the
-same fences; it never bypasses `admission` evaluation.
+Settlement never re-executes a Turn, never re-sends a reply, and never replays
+Transcript; outbound idempotency is the dispatch identity already carried by
+the reply anchor. Convergence is idempotent: repeated probes settle the same
+facts. Settlement is a Session transition and competes with other Session
+operations under the same fences; it never substitutes for `admission`
+evaluation.
 
 ### Transcript contract
 
@@ -529,9 +560,11 @@ recovery, or Runner migration. Transport failure, timeout, disconnect, or a
 missing local cache entry is not proof that the Runtime Session is absent.
 
 Automatic recovery is allowed only when the same Runner gives deterministic
-missing evidence and the current generation is safe: Activity is `idle`,
-admission is `ready`, no Turn is running or `outcome_pending`, and no Input,
-dispatch, Runtime effect, or operation is `unknown`.
+missing evidence — an `unknown-to-runner` binding fact from Activity
+convergence qualifies — and the current generation is safe: Activity is
+`idle`, admission is `ready`, no Turn is running or `outcome_pending`, and no
+Input, dispatch, Runtime effect, or operation is `unknown` beyond the
+superseded facts convergence itself recorded.
 
 ```text diagram
                           +----------------+
@@ -691,6 +724,11 @@ Current implementation gaps are:
   synchronous Session-to-AgentJob stop-unknown cycle and no deadline on recovery
   redelivery. The one-way, single-owner, deadline-bounded rules above are the
   target.
+- Capacity is still brokered by a permit grain with a waiter list and grant
+  notifications; the derived occupancy claim above is the target, not the
+  shipped system (issue #1078).
+- Reconnection settles no `unknown` Activity: the lifecycle convergence rules
+  above are the target; today only explicit force-reset clears `unknown`.
 - Every Follow-up requires a caller `requestId`. Compact, Reset, recovery,
   handoff, rebind, and force-reset require a caller `operationId`. Some current
   entry points still synthesize a hidden key when the caller omits one, so

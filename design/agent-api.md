@@ -278,6 +278,11 @@ An Input or Turn read remains terminal even when its Session has a later active
 Turn. An active Session does not turn a terminal Job or Turn into running.
 `sessionActivity` is context, not the requested Input/Turn outcome.
 
+A Turn settled terminal `unknown` by Activity convergence projects as
+`unknown` and never resolves to a terminal outcome; it is terminal for
+capacity and in-flight boundaries, and `admission` follows the converged
+Session Activity.
+
 Precedence is fixed:
 
 1. A durable terminal fact protected by the target Turn's fence wins. Late
