@@ -350,13 +350,20 @@ authorities convert `unknown`:
   the complete Binding tuple and binding epoch; an answer for a non-current
   binding is discarded under the late-event rule. The Runner answers per
   binding: `executing`, `idle`, or `unknown-to-runner`.
-- Runner removal. When a Runner is removed through the admin command path,
-  every Session bound to it with a nonterminal current-generation Turn settles
-  as `unknown-to-runner`; the removal itself is the deterministic evidence.
+- Runner removal. The operator removes a Runner's execution authority through
+  `mo runner revoke`. Credential revocation and fencing of its current control
+  connection precede settlement. Sessions bound to that authority with current
+  nonterminal or unresolved `unknown` facts settle as `unknown-to-runner`.
+  Ordinary unregister, disconnection, and presence expiry are not removal
+  evidence. Revocation supersedes execution ownership; it does not prove that
+  an external process or side effect stopped.
 
-Settlement applies to the generation the evidence observed; Turns accepted
-later are outside it. Settlement supersedes, after the force-reset pattern:
-it marks every in-flight Turn of that generation terminal `unknown` and every
+An `idle` or `unknown-to-runner` answer settles only the generation, Inputs,
+Turns, and operation identities captured before the probe. A later accepted
+Input or changed operation invalidates that observation even if the binding
+and generation are unchanged. Settlement supersedes, after the force-reset
+pattern: it marks every captured in-flight or unresolved `unknown` Turn of that
+generation terminal `unknown` and every
 queued undispatched Turn `cancelled`, records them through
 `unresolvedPrevious` and `nextAction`, supersedes any ActiveOperation of that
 generation, and settles the launch Job that owns a settled initial Turn.
@@ -371,8 +378,11 @@ and do not count as unresolved external side effects for `admission=ready`.
   record is deterministic missing evidence, and the next accepted Input takes
   the fallback replacement of
   [`runtime-switch-context.md`](runtime-switch-context.md) while the Runner is
-  live, else
-  [Runtime Session missing recovery](#runtime-session-missing-recovery).
+  live. While that Runner is removed or unavailable,
+  execution waits for the same Runner identity to become available again;
+  [Runtime Session missing recovery](#runtime-session-missing-recovery) then
+  uses the recorded evidence. Convergence never selects another Runner or
+  performs an implicit handoff.
 - A failed or unanswered probe leaves Activity `unknown`.
 
 Settlement never re-executes a Turn, never re-sends a reply, and never replays

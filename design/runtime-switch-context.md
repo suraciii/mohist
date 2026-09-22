@@ -44,10 +44,11 @@ replacement must not leave a partially adopted physical session as current.
 
 When a Runner reconnects or is removed, Session `unknown` Activity settles
 through the lifecycle convergence specified in
-[`agent-execution.md`](agent-execution.md#activity-convergence); on reconnect
-a live Runner's `unknown-to-runner` binding enters the fallback replacement
-above, while a removed Runner's binding resolves through that document's
-Runtime Session missing recovery.
+[`agent-execution.md`](agent-execution.md#activity-convergence). Replacement
+waits for the next accepted Input and an available bound Runner. A revoked
+Runner must regain execution authority before same-Runner missing recovery can
+run. Convergence neither replaces context during reconnect nor selects a
+different Runner.
 
 ```text diagram
 old binding unavailable

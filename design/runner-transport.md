@@ -231,6 +231,7 @@ The request methods are:
 - `session.followup`
 - `session.stop`
 - `session.command`
+- `session.probe`
 
 No Server-to-Runner notification method is currently defined.
 
@@ -245,6 +246,31 @@ Every method has one named `params` object:
 - `session.followup` takes `FollowupParams` and returns `RunnerFollowupDeliveryResult`.
 - `session.stop` takes `SessionStopParams` and returns `RunnerStopReply`.
 - `session.command` takes `SessionCommandRequest` and returns `SessionCommandResult`.
+- `session.probe` takes `RunnerSessionActivityProbeRequest` and returns
+  `RunnerSessionActivityProbeResult`.
+
+The activity probe is a read owned by the Session's
+[Activity convergence](agent-execution.md#activity-convergence). Its request
+carries `sessionId`, `observationId`, `runnerId`, `runtime`, `runtimeSessionId`,
+`workDir`, `bindingEpoch`, and `contextGeneration`. All identities and the work
+directory are nonempty. The binding epoch is nonnegative; the context generation
+is positive. The target Runner must match the connected Runner. The reply
+contains the complete examined request as `probe` and one `observation`:
+`executing`, `idle`, or `unknown-to-runner`.
+
+The Runner resolves the named physical Session without submitting Input or
+creating or replacing a Session. Provider-confirmed absence and an explicitly
+disabled Runtime produce `unknown-to-runner`. A cache miss, invalid binding,
+failed Runtime startup, an enabled but unavailable Runtime, or a failed provider
+read produces a request error. It supplies no convergence evidence. A resolved
+Session identity or work directory that differs from the request also fails
+closed.
+
+Server sends the probe only after the control connection is published and its
+receive loop runs. Installation never waits for a probe. The existing process
+generation checks fence the request and response; the Session then validates
+its captured observation before applying the result. A reconnect does not replay
+an expired probe on a new connection.
 
 JSON `null` is a valid result only for `workspace.diff`, `workspace.commits`,
 and `workspace.commit-diff`. Every other request method requires a non-null
@@ -282,9 +308,10 @@ missing operation identities.
 
 ### Read requests
 
-The five Workspace read methods are connection-scoped observations. Server
-applies a timeout. A disconnect or lost response returns unavailable. Server
-does not replay a read automatically; a caller may issue a new read.
+The five Workspace read methods and `session.probe` are connection-scoped
+observations. Server applies a timeout. A disconnect or lost response returns
+unavailable. Server does not replay a read automatically; a caller may issue a
+new read.
 
 Read handlers retain their existing path, Git argument, and process timeout
 rules. The control connection applies one response-size limit and returns a
