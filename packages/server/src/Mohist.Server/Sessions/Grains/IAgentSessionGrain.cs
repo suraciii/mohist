@@ -95,6 +95,25 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task RunnerDisconnectedAsync();
 
     /// <summary>
+    /// Captures the outstanding activity observation for one Runner probe and
+    /// returns the wire request, or null when the binding is incomplete for
+    /// that Runner or nothing is capturable. A re-registration probe captures
+    /// an <c>unknown</c> Activity; an administrative removal may also capture
+    /// an active one. The capture is durable so a repeated or superseded
+    /// answer stays fenced across a grain reload.
+    /// </summary>
+    Task<RunnerSessionActivityProbeRequest?> PrepareActivityProbeAsync(string runnerId, bool runnerRemoved = false);
+
+    /// <summary>
+    /// Applies one Runner answer to the captured observation. Returns false
+    /// for invalid, stale, superseded or post-capture evidence; those are
+    /// discarded without a partial settlement. <c>executing</c> restores
+    /// active and settles nothing; <c>idle</c> and <c>unknown-to-runner</c>
+    /// supersede the captured Turns and operations and re-derive Activity.
+    /// </summary>
+    Task<bool> ApplyActivityProbeAsync(RunnerSessionActivityProbeResult result);
+
+    /// <summary>
     /// Idempotently record the initial input and turn for a launch. The
     /// session is opened from the supplied
     /// metadata when absent; the first <see cref="AgentSessionInputRecord"/>

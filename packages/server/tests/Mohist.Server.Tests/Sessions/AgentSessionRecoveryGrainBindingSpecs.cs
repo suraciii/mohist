@@ -157,7 +157,20 @@ public sealed partial class AgentSessionRecoveryGrainSpecs
             accepted.TurnId));
 
         Assert.Equal("runtime-replacement-before-followup", recovered.AgentSessionId);
-        Assert.Equal(AgentTurnStatus.Queued, (await grain.ListTurnsAsync()).Single().Status);
+        var afterRecovery = Assert.IsType<AgentSession>(await _fixture.StateStore.LoadAsync(sessionId));
+        var input = Assert.Single(afterRecovery.Status.Inputs!);
+        var turn = Assert.Single(afterRecovery.Status.Turns!);
+        var retargetedLease = Assert.Single(afterRecovery.Status.PendingFollowups!);
+        Assert.Equal(1, input.ContextGeneration);
+        Assert.Equal("continue after recovery", input.Text);
+        Assert.Equal([accepted.InputId], turn.InputIds);
+        Assert.Equal(2, turn.ContextGeneration);
+        Assert.Equal(AgentTurnStatus.Queued, turn.Status);
+        Assert.Equal(AgentSessionActivity.Active, afterRecovery.Status.Activity);
+        Assert.Equal("runtime-replacement-before-followup", retargetedLease.RuntimeSessionId);
+        Assert.Equal(accepted.InputId, retargetedLease.InputId);
+        Assert.Equal(accepted.TurnId, retargetedLease.TurnId);
+        Assert.Equal(accepted.OperationId, retargetedLease.OperationId);
     }
 
     [Fact]

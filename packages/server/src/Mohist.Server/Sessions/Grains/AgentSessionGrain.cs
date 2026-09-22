@@ -256,7 +256,8 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             new AgentRuntimeBinding(command.ExpectedRunnerId, command.ReplacementRuntime ?? command.ExpectedRuntime, command.ReplacementRuntimeSessionId),
             "missing-recovery",
             now,
-            session.BindingEpoch);
+            session.BindingEpoch,
+            command.ExpectedQueuedTurnId);
         await PersistRecoveryAsync(session, events, BuildContextResetTranscriptEntries(session, "missing-recovery", now));
         return await ToInfoAsync(session);
     }
@@ -3090,6 +3091,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         var turn = (session.Status.Turns ?? []).FirstOrDefault(candidate =>
             string.Equals(candidate.Id, turnId, StringComparison.Ordinal));
         if (pending is null
+            || !pending.IsActive
             || !string.Equals(pending.TurnId, turnId, StringComparison.Ordinal)
             || !string.Equals(pending.OperationId, operationId, StringComparison.Ordinal))
         {

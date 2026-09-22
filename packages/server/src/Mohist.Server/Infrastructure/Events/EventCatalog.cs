@@ -47,6 +47,7 @@ public static class EventCatalog
         ReverseDns.AgentSessionContextCompacted,
         ReverseDns.AgentSessionContextExhausted,
         ReverseDns.AgentSessionContextHealthUpdated,
+        ReverseDns.AgentSessionActivityConverged,
         ReverseDns.RunnerDisconnected,
         ReverseDns.AgentJobFailed,
         ReverseDns.AgentJobTerminalDelivery,
@@ -207,6 +208,7 @@ public static class EventCatalog
         public const string AgentSessionContextCompacted = "com.mohist.agent-session.context-compacted";
         public const string AgentSessionContextExhausted = "com.mohist.agent-session.context-exhausted";
         public const string AgentSessionContextHealthUpdated = "com.mohist.agent-session.context-health-updated";
+        public const string AgentSessionActivityConverged = "com.mohist.agent-session.activity-converged";
 
         public const string RunnerDisconnected = "com.mohist.runner.disconnected";
 

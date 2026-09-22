@@ -31,6 +31,51 @@ public sealed class AgentSessionRecoveryDomainTests
     }
 
     [Fact]
+    public void MissingRecovery_RetargetsOnlyExecutionFactsForTheSealedQueuedTurn()
+    {
+        var session = CreateSession();
+        session.AttachPhysicalSession("runtime-old", null, "/work", null, null, TestTime.UtcDateTime);
+        var accepted = session.AcceptFollowup(
+            "input-1", "turn-1", "operation-1", "continue", "agent-session-followup", "key-1", TestTime.UtcDateTime);
+        var turn = Assert.Single(session.Status.Turns!);
+        session.Status = session.Status with
+        {
+            Turns = [turn with
+            {
+                WorkflowExecution = new SessionWorkflowExecutionBinding(
+                    "delivery-1", "run-1", "attempt-1", "work-1", "runner-1",
+                    session.Id, turn.Id, "opencode", "runtime-old"),
+            }],
+            PendingFollowups = session.Status.PendingFollowups!
+                .Select(lease => lease with { Dispatching = true, PayloadSealed = true })
+                .ToArray(),
+        };
+
+        session.RebindRuntimeSession(
+            session.CurrentRuntimeBinding(),
+            new AgentRuntimeBinding("runner-1", "pi", "runtime-new"),
+            "missing-recovery",
+            TestTime.UtcDateTime.AddMinutes(1),
+            session.BindingEpoch,
+            accepted.TurnId);
+
+        var input = Assert.Single(session.Status.Inputs!);
+        var retargetedTurn = Assert.Single(session.Status.Turns!);
+        var lease = Assert.Single(session.Status.PendingFollowups!);
+        Assert.Equal(1, input.ContextGeneration);
+        Assert.Equal(2, retargetedTurn.ContextGeneration);
+        Assert.Equal("input-1", input.Id);
+        Assert.Equal("turn-1", retargetedTurn.Id);
+        Assert.Equal("operation-1", retargetedTurn.OperationId);
+        Assert.Equal("runtime-new", lease.RuntimeSessionId);
+        Assert.Equal("delivery-1", retargetedTurn.WorkflowExecution!.InputDeliveryId);
+        Assert.Equal("attempt-1", retargetedTurn.WorkflowExecution.ActionAttemptId);
+        Assert.Equal("pi", retargetedTurn.WorkflowExecution.Runtime);
+        Assert.Equal("runtime-new", retargetedTurn.WorkflowExecution.RuntimeSessionId);
+        Assert.Equal(AgentSessionActivity.Active, session.Status.Activity);
+    }
+
+    [Fact]
     public void RebindRuntimeSession_RejectsStaleExpectedBindingWithoutMutation()
     {
         var session = CreateSession();

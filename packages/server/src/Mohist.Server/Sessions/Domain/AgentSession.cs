@@ -376,6 +376,29 @@ public sealed record AgentSessionStatusSnapshot(
     /// </summary>
     IReadOnlyList<SessionScheduleRecord>? Schedules = null,
     /// <summary>
+    /// Monotonic logical context generation of this session. Starts at 1 and
+    /// advances only when a committed binding replacement starts a new
+    /// logical context. Together with the binding epoch it fences accepted
+    /// execution facts and lifecycle observations.
+    /// </summary>
+    long ContextGeneration = 1,
+    /// <summary>
+    /// Superseded stop operations retained after a newer operation replaces
+    /// the current slot. Their outcome cannot be derived from the Turn alone.
+    /// </summary>
+    IReadOnlyList<AgentSessionStopClaim>? SupersededStopClaims = null,
+    /// <summary>
+    /// Local capture of the outstanding activity probe, if any. Durable so a
+    /// repeated or superseded answer stays fenced across a grain reload.
+    /// </summary>
+    AgentSessionActivityObservation? PendingActivityObservation = null,
+    /// <summary>
+    /// Durable deterministic missing evidence for the current binding's
+    /// Runner, recorded from an <c>unknown-to-runner</c> observation and
+    /// cleared by the next binding replacement.
+    /// </summary>
+    AgentSessionRunnerMissingFact? MissingRunnerFact = null,
+    /// <summary>
     /// Wall-clock instant the session last entered <c>idle</c>, stamped
     /// by the injected <see cref="TimeProvider"/> through the activity
     /// transitions. Non-null only while <see cref="Activity"/> is
@@ -387,6 +410,24 @@ public sealed record AgentSessionStatusSnapshot(
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
         new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), ContextUsageHistory: [], IdleSince: now);
+
+    /// <summary>
+    /// Next action for the retained unresolved previous facts. Derived, not
+    /// persisted: the facts themselves are the record, this is the stable
+    /// read a caller acts on.
+    /// </summary>
+    public const string NextActionQueryRuntimeOrForceReset = "query_runtime_or_force_reset";
+
+    /// <summary>
+    /// Derived count of the retained superseded facts; a duplicate counter
+    /// would be a second ledger to keep in step.
+    /// </summary>
+    [JsonIgnore]
+    public int UnresolvedPreviousCount => Turns?.Count(turn => turn.SupersededAt is not null) ?? 0;
+
+    [JsonIgnore]
+    public string? NextAction =>
+        UnresolvedPreviousCount == 0 ? null : NextActionQueryRuntimeOrForceReset;
 }
 
 public sealed record AgentUsageSummary(
@@ -424,7 +465,15 @@ public sealed record AgentSessionResetReservation(
     IReadOnlyList<string>? AdditionalIdempotencyKeys = null,
     long ExpectedBindingEpoch = 0,
     bool EffectAdmitted = false,
-    string? OwnerProcessGeneration = null);
+    string? OwnerProcessGeneration = null,
+    /// <summary>
+    /// Explicit supersession marker set when lifecycle evidence settled the
+    /// Turn this reservation was opened for. The reservation keeps its
+    /// identity and records a superseded outcome, so the operation stays
+    /// auditable and replayable without holding the session active.
+    /// Append-only Orleans field id.
+    /// </summary>
+    DateTime? SupersededAt = null);
 
 public sealed record AgentSessionCommandAdmissionTombstone(
     string Command,
@@ -625,7 +674,13 @@ public sealed record AgentSessionInputRecord(
     /// </summary>
     [property: Id(10)] AgentStartupContext? StartupContext = null,
     [property: Id(11)] string ExecutionSource = AgentExecutionSources.NonSlack,
-    [property: Id(12)] string? OriginMarker = null);
+    [property: Id(12)] string? OriginMarker = null,
+    /// <summary>
+    /// Immutable logical context in which this Input was accepted. A queued
+    /// Turn may be retargeted before submission, but the accepted Input never
+    /// changes generation.
+    /// </summary>
+    [property: Id(13)] long ContextGeneration = 1);
 
 public enum AgentSessionInputAcceptance
 {
@@ -645,7 +700,21 @@ public sealed record AgentTurnRecord(
     [property: Id(6)] DateTime? RecordedAt = null,
     [property: Id(7)] DateTime? UpdatedAt = null,
     [property: Id(8)] SessionWorkflowExecutionBinding? WorkflowExecution = null,
-    [property: Id(10)] string? OperationId = null);
+    [property: Id(10)] string? OperationId = null,
+    /// <summary>
+    /// Execution context generation for this Turn. It is stamped at
+    /// acceptance and changes only for the one sealed queued Turn retargeted
+    /// atomically by strict pre-submission missing-runtime recovery.
+    /// Append-only Orleans field id.
+    /// </summary>
+    [property: Id(11)] long ContextGeneration = 1,
+    /// <summary>
+    /// Explicit supersession marker set when lifecycle evidence settled this
+    /// Turn. The Turn keeps its identity and terminal status history; a
+    /// superseded Turn never revives and takes no part in current Activity,
+    /// occupancy or admission derivation. Append-only Orleans field id.
+    /// </summary>
+    [property: Id(12)] DateTime? SupersededAt = null);
 
 /// <summary>
 /// Immutable Workflow execution identity frozen on the Agent turn before its
@@ -684,10 +753,19 @@ public sealed record AgentSessionStopClaim(
     [property: Id(2)] bool DispatchStarted = false,
     [property: Id(3)] DateTimeOffset? DeadlineAt = null,
     [property: Id(4)] AgentSessionStopDisposition Disposition = AgentSessionStopDisposition.Pending,
-    [property: Id(5)] string? Reason = null)
+    [property: Id(5)] string? Reason = null,
+    /// <summary>
+    /// Explicit supersession marker set when lifecycle evidence settled the
+    /// owning Turn. The claim keeps its identity, dispatch state and
+    /// disposition for audit and exact-key replay; a superseded claim is no
+    /// longer active and can never dispatch or block again. Append-only
+    /// Orleans field id.
+    /// </summary>
+    [property: Id(6)] DateTime? SupersededAt = null)
 {
-    public bool IsActive => Disposition is AgentSessionStopDisposition.Pending
-        or AgentSessionStopDisposition.StopRequested;
+    public bool IsActive =>
+        (Disposition is AgentSessionStopDisposition.Pending or AgentSessionStopDisposition.StopRequested)
+        && SupersededAt is null;
 }
 
 [GenerateSerializer]
