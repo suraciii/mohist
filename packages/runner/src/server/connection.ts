@@ -16,6 +16,7 @@ import type {
 import type { BuildInfo } from '../runtime/build-info.js'
 import { getSegments } from '../core/json-path.js'
 import type { TaskLogBatch } from '../runtime/task-log.js'
+import type { ArtifactUploadRequest, ArtifactUploadResponse, TaskLogUploadResult } from './connection-upload-models.js'
 import { parsePolledDispatch } from './connection-dispatch.js'
 import { reportWork } from './connection-report.js'
 import { RunnerTransportError } from './connection-errors.js'
@@ -37,6 +38,7 @@ export {
   type RunnerRequestTransport,
   type RunnerTransportOptions,
 } from './connection-transport.js'
+export type { ArtifactUploadRequest, ArtifactUploadResponse, TaskLogUploadResult } from './connection-upload-models.js'
 import {
   getWorkspaceReclaimability as getWorkspaceReclaimabilityViaTransport,
   reportWorkspaceProvisioned as reportWorkspaceProvisionedViaTransport,
@@ -63,6 +65,8 @@ export {
 } from './connection-workspaces.js'
 import type {
   AgentInputAttachmentContent,
+  AgentJobInitialInputReceipt,
+  AgentJobInitialRecoveryReceipt,
   AgentSession,
   AgentSessionReconcileBinding,
   AgentSessionRuntimeEventAcceptance,
@@ -709,7 +713,7 @@ export class ServerConnection {
     jobId: string,
     body: unknown,
     signal: AbortSignal,
-  ): Promise<{ phase: string; candidateCreationAuthorized: boolean; runtime: string | null; runtimeSessionId: string | null }> {
+  ): Promise<AgentJobInitialRecoveryReceipt> {
     const response = await this.requestTransport.request(
       'prepareAgentJobInitialRecovery',
       this.url(`agent-jobs/${encodeURIComponent(jobId)}/initial-input/recovery/prepare`),
@@ -720,19 +724,17 @@ export class ServerConnection {
         signal,
       },
     )
-    return await this.requestTransport.readJson(response, 'prepareAgentJobInitialRecovery') as {
-      phase: string
-      candidateCreationAuthorized: boolean
-      runtime: string | null
-      runtimeSessionId: string | null
-    }
+    return (await this.requestTransport.readJson(
+      response,
+      'prepareAgentJobInitialRecovery',
+    )) as AgentJobInitialRecoveryReceipt
   }
 
   async completeAgentJobInitialRecovery(
     jobId: string,
     body: unknown,
     signal: AbortSignal,
-  ): Promise<{ phase: string; candidateCreationAuthorized: boolean; runtime: string | null; runtimeSessionId: string | null }> {
+  ): Promise<AgentJobInitialRecoveryReceipt> {
     const response = await this.requestTransport.request(
       'completeAgentJobInitialRecovery',
       this.url(`agent-jobs/${encodeURIComponent(jobId)}/initial-input/recovery/complete`),
@@ -743,19 +745,17 @@ export class ServerConnection {
         signal,
       },
     )
-    return await this.requestTransport.readJson(response, 'completeAgentJobInitialRecovery') as {
-      phase: string
-      candidateCreationAuthorized: boolean
-      runtime: string | null
-      runtimeSessionId: string | null
-    }
+    return (await this.requestTransport.readJson(
+      response,
+      'completeAgentJobInitialRecovery',
+    )) as AgentJobInitialRecoveryReceipt
   }
 
   async startAgentJobInitialInput(
     jobId: string,
     body: unknown,
     signal: AbortSignal,
-  ): Promise<{ effectAdmitted: boolean; submissionAuthorized: boolean; runtime: string | null; runtimeSessionId: string | null }> {
+  ): Promise<AgentJobInitialInputReceipt> {
     const response = await this.requestTransport.request(
       'startAgentJobInitialInput',
       this.url(`agent-jobs/${encodeURIComponent(jobId)}/initial-input/start`),
@@ -766,12 +766,7 @@ export class ServerConnection {
         signal,
       },
     )
-    return await this.requestTransport.readJson(response, 'startAgentJobInitialInput') as {
-      effectAdmitted: boolean
-      submissionAuthorized: boolean
-      runtime: string | null
-      runtimeSessionId: string | null
-    }
+    return (await this.requestTransport.readJson(response, 'startAgentJobInitialInput')) as AgentJobInitialInputReceipt
   }
 
   async recoverMissingAgentSession(
@@ -921,37 +916,6 @@ async function parseRuntimeEventReceiptArray(
   }
   return payload as AgentSessionRuntimeEventReceipt[]
 }
-export interface ArtifactUploadRequest {
-  path: string
-  /** `'directory'` selects the dedicated directory upload route. */
-  kind?: 'file' | 'directory'
-  contentType?: string | null
-  contentHash?: string | null
-  size: number
-  content: Uint8Array
-  filename?: string
-}
-
-export interface ArtifactUploadResponse {
-  uploadId: string
-  workflowRunId: string
-  workId: string
-  actionAttemptId: string | null
-  path: string
-  contentType: string | null
-  contentHash: string | null
-  size: number
-  createdAt: string | null
-  expiresAt: string | null
-  idempotent: boolean
-}
-
-export interface TaskLogUploadResult {
-  status: 'changed' | 'duplicate'
-  accepted: number
-  truncated: boolean
-}
-
 function requireWorkflowSessionPayload(value: unknown, operation: string): WorkflowAgentSession {
   if (!isObjectRecord(value) || !nonEmptyString(value.sessionId)) {
     throw createRunnerProtocolError(operation, 'returned a malformed session payload')

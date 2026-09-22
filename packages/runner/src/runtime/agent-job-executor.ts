@@ -492,9 +492,7 @@ async function resolveBinding(
   }
 }
 
-type InitialBindingRecovery =
-  | { ok: true; binding: BindingResolution }
-  | { ok: false; result: WorkItemResult }
+type InitialBindingRecovery = { ok: true; binding: BindingResolution } | { ok: false; result: WorkItemResult }
 
 export async function recoverInitialBindingIfNeeded(
   work: DispatchWorkItem,
@@ -519,7 +517,10 @@ export async function recoverInitialBindingIfNeeded(
     return { ok: true, binding }
   }
   if (binding.runnerId !== connection.runnerId || binding.runtime !== runtimeName) {
-    return { ok: false, result: failureResult('session-binding-failed', 'Initial AgentJob binding changed before execution') }
+    return {
+      ok: false,
+      result: failureResult('session-binding-failed', 'Initial AgentJob binding changed before execution'),
+    }
   }
 
   const expectedAccessor =
@@ -530,11 +531,7 @@ export async function recoverInitialBindingIfNeeded(
         : resolveAccessor(runtimes.codex)
   let replacementKind = runtimeName
   let replacementRuntime = expectedAccessor
-  if (
-    runtimeName === 'opencode' &&
-    !managerExecution &&
-    (!expectedAccessor || !expectedAccessor.ready())
-  ) {
+  if (runtimeName === 'opencode' && !managerExecution && (!expectedAccessor || !expectedAccessor.ready())) {
     const pi = resolveAccessor(runtimes.pi)
     if (pi?.ready()) {
       replacementKind = 'pi'
@@ -542,7 +539,10 @@ export async function recoverInitialBindingIfNeeded(
     }
   }
   if (!replacementRuntime?.ready()) {
-    return { ok: false, result: failureResult('runtime-unavailable', 'The bound Runtime is unavailable; unavailable is not missing') }
+    return {
+      ok: false,
+      result: failureResult('runtime-unavailable', 'The bound Runtime is unavailable; unavailable is not missing'),
+    }
   }
 
   if (replacementKind === runtimeName) {
@@ -555,7 +555,10 @@ export async function recoverInitialBindingIfNeeded(
           : await (replacementRuntime as CodexRuntime).resolveSession({ target })
     if (resolved.ok) {
       if (resolved.value.activeTurn) {
-        return { ok: false, result: failureResult('session-binding-failed', 'The bound Runtime Session is already executing') }
+        return {
+          ok: false,
+          result: failureResult('session-binding-failed', 'The bound Runtime Session is already executing'),
+        }
       }
       return { ok: true, binding }
     }

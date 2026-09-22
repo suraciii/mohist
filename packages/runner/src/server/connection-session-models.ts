@@ -40,4 +40,18 @@ export interface AgentSessionRuntimeEventAcceptance {
   agentSessionId?: string
 }
 
+export interface AgentJobInitialRecoveryReceipt {
+  phase: string
+  candidateCreationAuthorized: boolean
+  runtime: string | null
+  runtimeSessionId: string | null
+}
+
+export interface AgentJobInitialInputReceipt {
+  effectAdmitted: boolean
+  submissionAuthorized: boolean
+  runtime: string | null
+  runtimeSessionId: string | null
+}
+
 export type AgentSession = WorkflowAgentSession

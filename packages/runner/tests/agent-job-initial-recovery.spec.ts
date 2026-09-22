@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { DispatchWorkItem } from '../src/core/types.js'
 import { recoverInitialBindingIfNeeded, type BindingResolution } from '../src/runtime/agent-job-executor.js'
-import { admitInitialProviderSubmission } from '../src/runtime/agent-job-turn.js'
+import { admitInitialProviderSubmission } from '../src/runtime/agent-job-initial-provider-admission.js'
 
 const work: DispatchWorkItem = {
   workflowRunId: '',
@@ -107,11 +107,15 @@ describe('initial AgentJob pre-submission recovery', () => {
         'opencode',
         { runnerId: 'runner-1', prepareAgentJobInitialRecovery: prepare } as never,
         {
-          openCode: { ready: () => true, resolveSession: async () => ({
-            ok: false,
-            error: { kind, message: kind },
-            diagnostics: [],
-          }), createSession } as never,
+          openCode: {
+            ready: () => true,
+            resolveSession: async () => ({
+              ok: false,
+              error: { kind, message: kind },
+              diagnostics: [],
+            }),
+            createSession,
+          } as never,
           pi: null,
         },
         new AbortController().signal,
@@ -198,14 +202,12 @@ describe('initial AgentJob pre-submission recovery', () => {
 
   it('uses the same persisted operation after a lost prepare response without recreating twice', async () => {
     const order: string[] = []
-    const prepare = vi.fn()
-      .mockRejectedValueOnce(new Error('response lost'))
-      .mockResolvedValueOnce({
-        phase: 'creating',
-        candidateCreationAuthorized: true,
-        runtime: null,
-        runtimeSessionId: null,
-      })
+    const prepare = vi.fn().mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce({
+      phase: 'creating',
+      candidateCreationAuthorized: true,
+      runtime: null,
+      runtimeSessionId: null,
+    })
     const connection = {
       ...successfulRecoveryConnection(order),
       prepareAgentJobInitialRecovery: prepare,
@@ -255,8 +257,9 @@ describe('initial AgentJob pre-submission recovery', () => {
     expect(result.ok).toBe(true)
     expect(runtime.createSession).toHaveBeenCalledOnce()
     expect(connection.completeAgentJobInitialRecovery).toHaveBeenCalledTimes(2)
-    expect(connection.completeAgentJobInitialRecovery.mock.calls[0]?.[1])
-      .toEqual(connection.completeAgentJobInitialRecovery.mock.calls[1]?.[1])
+    expect(connection.completeAgentJobInitialRecovery.mock.calls[0]?.[1]).toEqual(
+      connection.completeAgentJobInitialRecovery.mock.calls[1]?.[1],
+    )
   })
 
   it('keeps uncertain candidate creation fenced and does not attempt binding completion', async () => {

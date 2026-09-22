@@ -27,6 +27,7 @@ import type {
   ParsedModel,
 } from './agent-job-executor.js'
 import { knownBinding } from './agent-job-executor.js'
+import { admitInitialProviderSubmission } from './agent-job-initial-provider-admission.js'
 import {
   mapOpenCodeErrorKind,
   mapPiErrorKind,
@@ -615,44 +616,6 @@ interface AgentSessionEventSink {
 // overall bound; a hung work otherwise stays "running" with nothing logged.
 const AGENT_EVENT_DELIVERY_TIMEOUT_MS = 30_000
 const AGENT_EVENT_DRAIN_TIMEOUT_MS = 120_000
-
-export async function admitInitialProviderSubmission(
-  connection: ServerConnection,
-  work: DispatchWorkItem,
-  binding: BindingResolution,
-  runtime: 'opencode' | 'pi' | 'codex',
-  runtimeSessionId: string,
-  signal: AbortSignal,
-): Promise<void> {
-  if (
-    !work.agentJobId ||
-    !work.initialInputId ||
-    !work.initialTurnId ||
-    !binding.agentSessionId ||
-    !binding.processGeneration ||
-    !binding.initialOperationId ||
-    !binding.submissionAttemptId
-  ) return
-  const body = {
-    operationId: binding.initialOperationId,
-    submissionAttemptId: binding.submissionAttemptId,
-    workId: work.workId,
-    processGeneration: binding.processGeneration,
-    sessionId: binding.agentSessionId,
-    inputId: work.initialInputId,
-    turnId: work.initialTurnId,
-    runtime,
-    runtimeSessionId,
-  }
-  let receipt
-  try {
-    receipt = await connection.startAgentJobInitialInput(work.agentJobId, body, signal)
-  } catch {
-    receipt = await connection.startAgentJobInitialInput(work.agentJobId, body, signal)
-  }
-  if (!receipt.effectAdmitted || !receipt.submissionAuthorized)
-    throw new Error('Initial AgentJob provider submission was not authorized for this executor attempt')
-}
 
 export function createAgentSessionEventSink(
   connection: ServerConnection,
