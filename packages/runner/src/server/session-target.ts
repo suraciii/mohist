@@ -155,6 +155,8 @@ export interface ReceiveFollowupPayload {
   slackExecutionContext?: unknown
   managerExecutionGrant?: ManagerExecutionGrantResponse | null
   originMarker?: string | null
+  /** Durable Server evidence requires a fresh physical binding before this Input. */
+  requiresBindingRecovery?: boolean
 }
 
 /**

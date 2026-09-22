@@ -41,6 +41,7 @@ public sealed record FollowupDeliveryRequest(
     string? TurnId = null,
     string ExecutionSource = AgentExecutionSources.NonSlack,
     ManagerExecutionGrant? ManagerExecutionGrant = null,
-    string? OriginMarker = null);
+    string? OriginMarker = null,
+    bool RequiresBindingRecovery = false);
 
 public sealed record FollowupDeliveryResult(bool Accepted, string? Error = null);

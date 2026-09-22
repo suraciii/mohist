@@ -46,7 +46,11 @@ public partial class AgentSessionQuerier
                 : null,
             record.Label(AgentSessionQueryMetadataKeys.ProjectId),
             record.Label(GenericAgentSessionMetadata.AgentId),
-            record.Label(AgentSessionQueryMetadataKeys.ConnectionId));
+            record.Label(AgentSessionQueryMetadataKeys.ConnectionId),
+            session.Status.MissingRunnerFact is { } missing
+                && string.Equals(missing.RunnerId, session.Runtime.RunnerId, StringComparison.Ordinal)
+                && missing.BindingEpoch == session.BindingEpoch
+                && missing.ContextGeneration == session.Status.ContextGeneration);
     }
 
     public async Task<CanonicalTurnStopTarget?> ResolveCanonicalTurnStopTargetAsync(

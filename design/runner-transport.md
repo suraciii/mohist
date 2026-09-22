@@ -281,8 +281,16 @@ member; omission is a malformed result rather than `exists: false`.
 `WorkspaceCommitDiffParams` contains `query` and `hash`.
 `WorkspaceFileContentParams` contains `query` and `path`. `FollowupParams`
 contains the current `target`, `text`, `operationId`, `inputId`, `turnId`,
-`slackExecutionContext`, and attachment descriptor fields. `SessionStopParams`
-contains the current `target`, `sessionId`, `turnId`, and `operationId` fields.
+`slackExecutionContext`, and attachment descriptor fields. A true
+`requiresBindingRecovery` means Server has durable missing evidence for this
+exact current binding. Before submitting the accepted Input, Runner creates
+and confirms a replacement through canonical missing recovery. It cannot reuse
+the old physical Session merely because that Session is locally readable.
+The flag authorizes no Runtime switch beyond the configured fallback policy;
+Manager recovery stays on its bound Runtime. Missing recovery authority or an
+unavailable required Runtime retains the accepted work for retry.
+`SessionStopParams` contains the current `target`, `sessionId`, `turnId`, and
+`operationId` fields.
 
 The nested wire values are:
 

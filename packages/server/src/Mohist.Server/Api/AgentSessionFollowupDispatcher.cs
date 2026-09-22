@@ -108,7 +108,8 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
                 ManagerExecutionGrant: managerGrant?.Grant,
                 OriginMarker: AgentOriginMarkers.IsManager(target.ProjectId)
                     ? AgentOriginMarkers.SlackManager
-                    : null), ct);
+                    : null,
+                RequiresBindingRecovery: target.RequiresBindingRecovery), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

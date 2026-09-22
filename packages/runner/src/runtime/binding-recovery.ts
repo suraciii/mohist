@@ -31,6 +31,7 @@ export interface ResolveOrRecoverBindingRequest {
   readonly recoveryKey?: string
   readonly coordinator?: BindingRecoveryCoordinator
   readonly allowRuntimeReplacement?: boolean
+  readonly requiresBindingRecovery?: boolean
 }
 
 export class BindingRecoveryCoordinator {
@@ -68,7 +69,7 @@ export async function resolveOrRecoverBinding(request: ResolveOrRecoverBindingRe
     return failure('incompatible-runtime', 'The Runtime Session binding does not match the selected runtime')
   }
 
-  if (expected.runtimeSessionId) {
+  if (expected.runtimeSessionId && !request.requiresBindingRecovery) {
     let resolved: BindingProbeResult
     try {
       resolved = await request.probe(expected)

@@ -559,27 +559,6 @@ export class ServerConnection {
     return payload.map((value) => parseAgentSessionReconcileBinding(value, 'listAgentSessionsForReconcile'))
   }
 
-  async reconcileMissingAgentSession(
-    sessionId: string,
-    body: unknown,
-    signal: AbortSignal,
-  ): Promise<AgentSessionReconcileBinding> {
-    const response = await this.requestTransport.request(
-      'reconcileMissingAgentSession',
-      this.url(`agent-sessions/${encodeURIComponent(sessionId)}/reconcile-missing`),
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-        signal,
-      },
-    )
-    return parseAgentSessionReconcileBinding(
-      await this.requestTransport.readJson<unknown>(response, 'reconcileMissingAgentSession'),
-      'reconcileMissingAgentSession',
-    )
-  }
-
   async reconcileAgentSessionRuntimeEvents(
     sessionId: string,
     body: unknown,

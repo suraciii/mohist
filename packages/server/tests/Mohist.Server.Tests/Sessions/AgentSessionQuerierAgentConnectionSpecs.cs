@@ -61,6 +61,38 @@ public sealed class AgentSessionQuerierAgentConnectionSpecs
         Assert.Equal(["mohist", "slack"], target.Definition.Skills);
     }
 
+    [Theory]
+    [InlineData("matching", true)]
+    [InlineData("runner", false)]
+    [InlineData("epoch", false)]
+    [InlineData("generation", false)]
+    public async Task ResolveCanonicalFollowupTarget_UsesOnlyCurrentMissingEvidence(string mismatch, bool expected)
+    {
+        var (database, factory, sessionId) = await SeedAsync();
+        await using var _ = database;
+        await using (var db = factory.CreateDbContext())
+        {
+            var row = await db.AgentSessions.SingleAsync(candidate => candidate.Id == sessionId);
+            var session = AgentSessionJson.Deserialize(row)!;
+            session.Status = session.Status with
+            {
+                MissingRunnerFact = new AgentSessionRunnerMissingFact(
+                    mismatch == "runner" ? "other-runner" : RunnerId,
+                    session.BindingEpoch + (mismatch == "epoch" ? 1 : 0),
+                    session.Status.ContextGeneration + (mismatch == "generation" ? 1 : 0),
+                    CreatedAt),
+            };
+            row.State = JsonSerializer.Serialize(session, JSON.Options);
+            await db.SaveChangesAsync();
+        }
+
+        var target = await NewQuerier(factory).ResolveCanonicalFollowupTargetAsync(ProjectId, sessionId);
+
+        Assert.NotNull(target);
+        Assert.Equal(expected, target.RequiresBindingRecovery);
+        Assert.Equal($"rt-{sessionId}", target.RuntimeSessionId);
+    }
+
     [Fact]
     public async Task ResolveCanonicalFollowupTarget_AgentConnection_CrossProject_ReturnsNull()
     {

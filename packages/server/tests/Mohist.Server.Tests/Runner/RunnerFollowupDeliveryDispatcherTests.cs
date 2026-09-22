@@ -32,18 +32,22 @@ public sealed class RunnerFollowupDeliveryDispatcherTests
             Definition: null,
             OperationId: "operation-1",
             InputTexts: ["continue"],
-            TurnId: "turn-1"));
+            TurnId: "turn-1",
+            RequiresBindingRecovery: true));
 
         Assert.False(result.Accepted);
         Assert.Equal("runtime-unavailable", result.Error);
         Assert.Equal("runner-1", transport.RunnerId);
         Assert.Equal("session.followup", transport.Method);
+        Assert.True(transport.Payload!.RequiresBindingRecovery);
+        Assert.Equal("runtime-session-1", transport.Payload.Target.Binding.RuntimeSessionId);
     }
 
     private sealed class RecordingTransport(RunnerFollowupDeliveryResult response) : IRunnerControlTransport
     {
         public string? RunnerId { get; private set; }
         public string? Method { get; private set; }
+        public FollowupParams? Payload { get; private set; }
 
         public bool IsConnected(string runnerId) => true;
 
@@ -56,6 +60,7 @@ public sealed class RunnerFollowupDeliveryDispatcherTests
         {
             RunnerId = runnerId;
             Method = method;
+            Payload = (FollowupParams)(object)parameters!;
             return Task.FromResult((TResult)(object)response);
         }
     }

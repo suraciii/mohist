@@ -418,6 +418,31 @@ only. No Runner closeout path may create, renew, or act on them. Historical
 interruption events follow the independent compatibility boundary in
 [`event-protocol.md`](event-protocol.md#historical-workflow-interruption-events).
 
+## Administrative Runner Removal
+
+Credential revocation is a durable Runner lifecycle operation. Its intent
+closes admission before credentials change. It then revokes the credential,
+fences the current control connection and process authority, and settles bound
+Sessions through their fenced removal observation. Server restart or a partial
+write resumes the same operation; it never treats a completed earlier step as
+permission to omit later Session settlement.
+
+Ordinary disconnect, unregister, and presence expiry are not administrative
+removal evidence. Removal preserves Workflow-owned closeout obligations, but
+AgentJobs named by Session convergence settle as final Unknown rather than
+being overwritten by the ordinary `runner-lost` failure path. The removal
+coordinator does not await Session settlement while holding an ownership gate
+that the Session can need.
+
+Re-enrollment cannot release unfinished removal. Once settlement completes,
+a new active credential may restore the same Runner identity's authority.
+That release is fenced to the current removal and credential; it must recover
+if credential issuance commits before the release marker does. Removing a
+Runner supersedes its execution authority and does not prove that external
+processes or effects physically stopped. It authorizes no cross-Runner
+handoff. Session settlement and next-Input recovery follow
+[`agent-execution.md`](agent-execution.md#activity-convergence).
+
 ## Restart and Crash Semantics
 
 The recovery goal is flow progress, not result preservation. A Runner crash
