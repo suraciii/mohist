@@ -323,11 +323,15 @@ public sealed class RunnerControlWebSocketApiSpecs(DefaultMohistIntegrationFixtu
                 .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "agent-connection")
                 .WithLabel(GenericAgentSessionMetadata.AgentId, "agent-websocket-disconnect")));
         await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(runtimeSessionId));
+        var accepted = await session.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "runtime work", "agent-session-followup", "disconnect-owned-turn"));
+        await session.MarkFollowupTurnExecutingAsync(accepted.OperationId);
         var persistence = session.PersistenceCheckpoint(fixture.Persistence);
         await session.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, "{\"activity\":\"active\"}") },
             runtimeSessionId));
         await persistence.WaitAsync();
+        Assert.Equal("active", (await session.GetAsync())!.Status);
         var tracker = fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         tracker.RegisterSession(runnerId, sessionId);
         var client = AuthorizedWebSocketClient(Guid.NewGuid());
