@@ -340,7 +340,8 @@ public class WorkflowArtifactUploadRouteSpecs
         var jobId = $"agent-job-upload-{Guid.NewGuid():N}";
         var runnerId = $"agent-upload-runner-{Guid.NewGuid():N}";
         var projectId = $"agent-upload-project-{Guid.NewGuid():N}";
-        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(
             new RunnerInfo(
                 runnerId,
                 ["spec/task"],
@@ -349,41 +350,49 @@ public class WorkflowArtifactUploadRouteSpecs
                 ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration,
                 RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()),
             TestRunnerGenerationExtensions.ProcessGeneration);
-        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
-        await job.SubmitAsync(new AgentJobInput(
-            "upload agent artifact",
-            ProjectId: projectId,
-            AgentId: "agent-test"));
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        var dispatch = await runner.PollAsync(_fixture.Services);
-        Assert.NotNull(dispatch);
-        var workId = dispatch.WorkId;
+        try
+        {
+            var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+            await job.SubmitAsync(new AgentJobInput(
+                "upload agent artifact",
+                ProjectId: projectId,
+                AgentId: "agent-test",
+                PinnedRunnerId: runnerId));
+            var dispatch = await runner.PollAsync(_fixture.Services);
+            Assert.NotNull(dispatch);
+            Assert.Equal(jobId, dispatch.AgentJobId);
+            var workId = dispatch.WorkId;
 
-        var path = "review.md";
-        var payload = Encoding.UTF8.GetBytes("agent artifact content");
-        using var form = BuildMultipart(path, payload, "text/markdown", "sha256:agent", payload.LongLength);
+            var path = "review.md";
+            var payload = Encoding.UTF8.GetBytes("agent artifact content");
+            using var form = BuildMultipart(path, payload, "text/markdown", "sha256:agent", payload.LongLength);
 
-        using var response = await _fixture.Client.PostAsync(
-            $"/api/agent-jobs/{jobId}/work/{workId}/artifact-uploads",
-            form);
+            using var response = await _fixture.Client.PostAsync(
+                $"/api/agent-jobs/{jobId}/work/{workId}/artifact-uploads",
+                form);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var data = json.GetProperty("data");
-        var uploadId = data.GetProperty("uploadId").GetString()!;
-        Assert.StartsWith("artup_", uploadId);
-        Assert.Equal(jobId, data.GetProperty("workflowRunId").GetString());
-        Assert.Equal(workId, data.GetProperty("workId").GetString());
-        Assert.Equal(workId, data.GetProperty("actionAttemptId").GetString());
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var data = json.GetProperty("data");
+            var uploadId = data.GetProperty("uploadId").GetString()!;
+            Assert.StartsWith("artup_", uploadId);
+            Assert.Equal(jobId, data.GetProperty("workflowRunId").GetString());
+            Assert.Equal(workId, data.GetProperty("workId").GetString());
+            Assert.Equal(workId, data.GetProperty("actionAttemptId").GetString());
 
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var pending = await db.WorkflowArtifactPendingUploads
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.UploadId == uploadId);
-        Assert.NotNull(pending);
-        Assert.Equal(jobId, pending!.WorkflowRunId);
-        Assert.Equal(workId, pending.WorkId);
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var pending = await db.WorkflowArtifactPendingUploads
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.UploadId == uploadId);
+            Assert.NotNull(pending);
+            Assert.Equal(jobId, pending!.WorkflowRunId);
+            Assert.Equal(workId, pending.WorkId);
+        }
+        finally
+        {
+            await runner.UnregisterAsync();
+        }
     }
 
     [Fact]

@@ -168,7 +168,6 @@ public sealed class GitHubWriteBackSpecs
     [Fact]
     public async Task TransientCloseFailure_IsRedeliveredAndClosesOnce()
     {
-        var startedAt = _fixture.TimeProvider.GetUtcNow();
         var (projectId, connectionId) = await ConnectNewAsync();
         _fixture.Comments.DeliveryPrUrl = "https://github.com/octocat/hello-world/pull/123";
         _fixture.Comments.CloseFailures.Enqueue(new HttpRequestException(
@@ -190,7 +189,7 @@ public sealed class GitHubWriteBackSpecs
         Assert.Single(_fixture.Comments.StateLabels,
             s => s.ConnectionId == connectionId && s.StateLabel == GitHubStateLabels.Done);
         Assert.Single(await FailuresAsync(projectId, connectionId, GitHubWriteBackOperation.Close));
-        Assert.Empty(await DeadLettersAsync(startedAt));
+        Assert.Empty(await DeadLettersForIssueAsync(projectId, issueNumber));
     }
 
     /// <summary>
@@ -201,7 +200,6 @@ public sealed class GitHubWriteBackSpecs
     [Fact]
     public async Task PersistentCloseFailure_DeadLettersAfterTheAttemptBudget()
     {
-        var startedAt = _fixture.TimeProvider.GetUtcNow();
         var (projectId, connectionId) = await ConnectNewAsync();
         _fixture.Comments.DeliveryPrUrl = "https://github.com/octocat/hello-world/pull/123";
         _fixture.Comments.CloseFailure = new HttpRequestException(
@@ -218,7 +216,7 @@ public sealed class GitHubWriteBackSpecs
 
         Assert.DoesNotContain(_fixture.Comments.Closes, c => c.ConnectionId == connectionId);
         var failures = await FailuresAsync(projectId, connectionId, GitHubWriteBackOperation.Close);
-        var deadLetter = Assert.Single(await DeadLettersAsync(startedAt));
+        var deadLetter = Assert.Single(await DeadLettersForIssueAsync(projectId, issueNumber));
         Assert.Equal(failures.Count, deadLetter.AttemptCount);
         Assert.Equal(EventCatalog.ReverseDns.IssueCompleted, deadLetter.Type);
         Assert.Equal(
@@ -233,7 +231,6 @@ public sealed class GitHubWriteBackSpecs
     [Fact]
     public async Task UnknownCloseOutcome_KeepsTheReservationAndNeverResends()
     {
-        var startedAt = _fixture.TimeProvider.GetUtcNow();
         var (projectId, connectionId) = await ConnectNewAsync();
         _fixture.Comments.DeliveryPrUrl = "https://github.com/octocat/hello-world/pull/123";
         _fixture.Comments.CloseThenThrow = true;
@@ -253,7 +250,7 @@ public sealed class GitHubWriteBackSpecs
         Assert.NotNull(operation!.LastError);
         Assert.NotNull(operation.NextAttemptAt);
         Assert.Single(await FailuresAsync(projectId, connectionId, GitHubWriteBackOperation.Close));
-        Assert.Empty(await DeadLettersAsync(startedAt));
+        Assert.Empty(await DeadLettersForIssueAsync(projectId, issueNumber));
     }
 
     private async Task<List<GitHubWriteBackFailure>> FailuresAsync(
@@ -271,18 +268,20 @@ public sealed class GitHubWriteBackSpecs
     }
 
     /// <summary>
-    /// Dead letters written during this test on the fake clock. The store is
-    /// shared by the whole collection, so the range keeps sibling tests'
-    /// rows out of the assertion.
+    /// Dead letters for the exact Issue event stream owned by this scenario.
+    /// Fake-clock ranges are not an isolation boundary because a sibling's
+    /// final retry can share this scenario's starting timestamp.
     /// </summary>
-    private async Task<List<DeadLetterRow>> DeadLettersAsync(DateTimeOffset fromUtc)
+    private async Task<List<DeadLetterRow>> DeadLettersForIssueAsync(string projectId, int issueNumber)
     {
+        const string handler = "Mohist.Server.GitHub.Subscriptions.GitHubWriteBackHandler";
+        var expectedSource = $"/mohist/projects/{projectId}/issues/{issueNumber}";
         var store = _fixture.Services.GetRequiredService<IDeadLetterStore>();
-        var rows = await store.ListByTimeRangeAsync(
-            fromUtc,
-            _fixture.TimeProvider.GetUtcNow().AddTicks(1));
+        var rows = await store.ListByHandlerAsync(handler);
         return rows
-            .Where(row => row.FailingHandler == "Mohist.Server.GitHub.Subscriptions.GitHubWriteBackHandler")
+            .Where(row => row.Source == expectedSource
+                && row.Subject == issueNumber.ToString()
+                && row.Type == EventCatalog.ReverseDns.IssueCompleted)
             .ToList();
     }
 

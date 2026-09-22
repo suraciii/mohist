@@ -66,17 +66,22 @@ public class WorkspaceEntityApiSpecs : IClassFixture<DefaultMohistIntegrationFix
                 .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "agent-launch")
                 .WithLabel(GenericAgentSessionMetadata.AgentId, "agent-ws")
                 .WithLabel(AgentSessionMetadata.WorkspaceNameKey, workspaceName)));
-        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-session-1"));
+        const string runtimeSessionId = "runtime-session-1";
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(runtimeSessionId));
         if (active)
         {
+            var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+                "workspace activity", "agent-session-followup", "workspace-owned-turn"));
+            await grain.MarkFollowupTurnExecutingAsync(accepted.OperationId);
             var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
             await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
                 new AgentSessionRuntimeEventInput[]
                 {
                     new(RuntimeEventTypes.SessionActivity, "{\"activity\":\"active\"}")
                 },
-                "runtime-session-1"));
+                runtimeSessionId));
             await persistence.WaitAsync();
+            Assert.Equal("active", (await grain.GetAsync())!.Status);
         }
     }
 
