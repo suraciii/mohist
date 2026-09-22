@@ -94,6 +94,53 @@ public sealed class AgentJobCancellationSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task AbortPreparedLaunchAsync_UnsubmittedPlanBecomesCancelled()
+    {
+        var job = JobGrain($"agent-job-abort-prepared-{Guid.NewGuid():N}");
+        await job.PrepareManualLaunchAsync(ManualCommand("abort-prepared-project"));
+        var eventCount = _fixture.EventStore.Appended.Count;
+
+        await job.AbortPreparedLaunchAsync("session_identity_mismatch");
+
+        Assert.Equal(AgentJobStatus.Cancelled, await job.GetStatusAsync());
+        Assert.Equal(eventCount, _fixture.EventStore.Appended.Count);
+    }
+
+    [Fact]
+    public async Task AbortPreparedLaunchAsync_RunningAndUnknownExecutionRemainInspectable()
+    {
+        var (_, projectId) = await RegisterAgentJobRunnerAsync(
+            $"agent-job-abort-advanced-{Guid.NewGuid():N}");
+        var job = JobGrain($"agent-job-abort-advanced-{Guid.NewGuid():N}");
+        await job.PrepareManualLaunchAsync(ManualCommand(projectId));
+        await job.SubmitPreparedLaunchAsync();
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+
+        await job.AbortPreparedLaunchAsync("session_identity_mismatch");
+        Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+
+        await job.MarkUnknownAsync("execution outcome is uncertain");
+        await job.AbortPreparedLaunchAsync("session_identity_mismatch");
+        Assert.Equal(AgentJobStatus.Unknown, await job.GetStatusAsync());
+    }
+
+    [Fact]
+    public async Task AbortPreparedLaunchAsync_TerminalOutcomeRemainsUntouched()
+    {
+        var job = JobGrain($"agent-job-abort-terminal-{Guid.NewGuid():N}");
+        await job.PrepareManualLaunchAsync(ManualCommand("abort-terminal-project"));
+        await job.FailAsync("authoritative terminal failure", "agent-test");
+        var before = await job.GetRuntimeSnapshotAsync();
+
+        await job.AbortPreparedLaunchAsync("session_identity_mismatch");
+
+        var after = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Failed, after.Status);
+        Assert.Equal(before.FailureReason, after.FailureReason);
+        Assert.Equal("authoritative terminal failure", after.FailureReason);
+    }
+
+    [Fact]
     public async Task CancelAsync_RunningJobRejectsCancelAndPreservesExecution()
     {
         var (_, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-cancel-race-{Guid.NewGuid():N}");
@@ -108,4 +155,13 @@ public sealed class AgentJobCancellationSpecs : AgentJobGrainTestSupport
         Assert.Equal(AgentJobStatus.Running, result.Status);
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
     }
+
+    private static PrepareManualLaunchCommand ManualCommand(string projectId) => new(
+        SessionId: $"session-{Guid.NewGuid():N}",
+        InputId: $"input-{Guid.NewGuid():N}",
+        TurnId: $"turn-{Guid.NewGuid():N}",
+        Prompt: "prepared work",
+        ProjectId: projectId,
+        AgentId: "agent-test",
+        Runtime: "opencode");
 }

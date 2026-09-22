@@ -79,7 +79,8 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
             "workflow" => WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext(
                 project.Id,
                 $"workflow-{Guid.NewGuid():N}",
-                "build")),
+                "build",
+                "cancel-workflow-agent")),
             "agent-launch" => GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
                 project.Id,
                 $"agent-{Guid.NewGuid():N}",

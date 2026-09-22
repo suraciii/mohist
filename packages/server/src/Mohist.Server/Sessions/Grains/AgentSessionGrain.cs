@@ -600,6 +600,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         }
 
         var session = await GetRequiredAsync();
+        EnsureExpectedFollowupIdentity(session, command);
         if (!command.AllowPendingInitialLaunch || !HasPendingInitialLaunch(session))
             EnsureRuntimeSessionPresent(session);
         if (session.Status.PendingReset is { } recovery)
@@ -680,6 +681,38 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         if (acceptedLease is not null && session.Status.Activity == AgentSessionActivity.Idle)
             await EnsureFollowupGateAsync(session, acceptedLease);
         return result with { AttachmentResults = command.AttachmentResults };
+    }
+
+    private static void EnsureExpectedFollowupIdentity(
+        AgentSession session,
+        AcceptFollowupCommand command)
+    {
+        var hasExpectedProject = command.ExpectedProjectId is not null;
+        var hasExpectedAgent = command.ExpectedAgentId is not null;
+        if (!hasExpectedProject && !hasExpectedAgent)
+            return;
+        if (!hasExpectedProject
+            || !hasExpectedAgent
+            || string.IsNullOrWhiteSpace(command.ExpectedProjectId)
+            || string.IsNullOrWhiteSpace(command.ExpectedAgentId))
+        {
+            throw new ArgumentException(
+                "Expected project and Agent identities must be supplied together.",
+                nameof(command));
+        }
+
+        var actualProjectId = session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId);
+        var actualAgentId = session.Metadata.Label(GenericAgentSessionMetadata.AgentId);
+        if (!string.Equals(actualProjectId, command.ExpectedProjectId, StringComparison.Ordinal)
+            || !string.Equals(actualAgentId, command.ExpectedAgentId, StringComparison.Ordinal))
+        {
+            throw new AgentSessionIdentityMismatchException(
+                session.Id,
+                command.ExpectedProjectId,
+                command.ExpectedAgentId,
+                actualProjectId,
+                actualAgentId);
+        }
     }
 
     private static bool AttachmentSetEquivalent(

@@ -12,6 +12,7 @@ public class AgentSessionDomainTests
         var metadata = new AgentSessionMetadata()
             .WithLabel("mohist.io/project-id", "proj")
             .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/agent-id", "workflow-agent")
             .WithLabel("mohist.io/source-id", "wf")
             .WithLabel("mohist.io/session-name", "session");
 
@@ -51,6 +52,7 @@ public class AgentSessionDomainTests
         var metadata = new AgentSessionMetadata()
             .WithLabel("mohist.io/project-id", "project-1")
             .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/agent-id", "workflow-agent")
             .WithLabel("mohist.io/source-id", "workflow-1")
             .WithLabel("mohist.io/session-name", "build");
 
@@ -72,6 +74,25 @@ public class AgentSessionDomainTests
             "/work",
             metadata: new AgentSessionMetadata(),
             now: new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc)));
+    }
+
+    [Fact]
+    public void Create_WorkflowSourceWithoutAgentIdentity_IsRejected()
+    {
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1")
+            .WithLabel("mohist.io/session-name", "build");
+
+        var exception = Assert.Throws<InvalidOperationException>(() => AgentSession.Create(
+            "workflow-without-agent",
+            "runner-1",
+            "/work",
+            metadata,
+            new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc)));
+
+        Assert.Contains("agent labels", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

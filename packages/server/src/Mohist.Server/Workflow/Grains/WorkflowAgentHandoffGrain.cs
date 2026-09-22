@@ -225,6 +225,24 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
             }
             await ClearActivationReminderAsync();
         }
+        catch (AgentSessionIdentityMismatchException ex)
+        {
+            var invocation = plan.Invocation
+                ?? throw new InvalidOperationException("Accepted Workflow Agent handoff has no invocation.");
+            await GrainFactory.GetGrain<IAgentJobGrain>(invocation.JobKey)
+                .AbortPreparedLaunchAsync(ex.Message);
+            var rejection = new WorkflowAgentHandoffRejection(
+                "agent_session_identity_mismatch",
+                ex.Message);
+            _state.State.Plan = plan with
+            {
+                Disposition = WorkflowAgentHandoffDisposition.Failed,
+                Rejection = rejection,
+                ActivationError = rejection.Message,
+            };
+            await _state.WriteStateAsync();
+            await ClearActivationReminderAsync();
+        }
         catch (RuntimeSessionMissingException ex)
         {
             // Only the Runner can attach a Runtime Session binding, so a
@@ -263,7 +281,7 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
             WorkspacePath: workspace?.Identity?.Path,
             ProjectId: plan.Command.ProjectId,
             Runtime: definition.Runtime,
-            AgentId: plan.AgentId,
+            AgentId: RequiredAgentId(plan),
             AgentInstructions: definition.Instructions,
             AgentConfig: AgentConfig(definition),
             Variant: definition.Variant,
@@ -306,7 +324,9 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
                 PreMintedInputId: invocation.InputId,
                 PreMintedTurnId: invocation.TurnId,
                 AllowPendingInitialLaunch: true,
-                ForceNewTurn: true));
+                ForceNewTurn: true,
+                ExpectedProjectId: plan.Command.ProjectId,
+                ExpectedAgentId: RequiredAgentId(plan)));
             if (!string.Equals(accepted.InputId, invocation.InputId, StringComparison.Ordinal)
                 || !string.Equals(accepted.TurnId, invocation.TurnId, StringComparison.Ordinal))
                 throw new InvalidOperationException("Workflow named Session replay resolved conflicting Input or Turn identity.");
@@ -352,6 +372,7 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
                 plan.Command.ProjectId,
                 plan.Command.WorkflowRunId,
                 sessionName,
+                RequiredAgentId(plan),
                 WorkId: completion.WorkId,
                 WorkType: WorkItemTypes.Task,
                 Stage: completion.Stage,
@@ -361,6 +382,12 @@ public sealed class WorkflowAgentHandoffGrain : Grain, IWorkflowAgentHandoffGrai
             Definition: definition,
             LaunchVisibility: AgentLaunchVisibility.Visible);
     }
+
+    private static string RequiredAgentId(WorkflowAgentHandoffPlan plan) =>
+        !string.IsNullOrWhiteSpace(plan.AgentId)
+            ? plan.AgentId
+            : throw new InvalidOperationException(
+                "Accepted Workflow Agent handoff has no canonical Agent identity.");
 
     private static string? SerializeOrNull<T>(T? value) =>
         value is null ? null : JSON.Serialize(value);

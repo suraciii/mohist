@@ -155,6 +155,7 @@ public class TranscriptEventSummaryProjectorTests
         var metadata = new AgentSessionMetadata()
             .WithLabel("mohist.io/project-id", "proj")
             .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/agent-id", "workflow-agent")
             .WithLabel("mohist.io/source-id", "wf")
             .WithLabel("mohist.io/session-name", "session");
 

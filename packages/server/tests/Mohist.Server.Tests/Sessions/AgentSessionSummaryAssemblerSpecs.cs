@@ -652,6 +652,7 @@ public class AgentSessionSummaryAssemblerSpecs
         {
             [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
             [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+            [GenericAgentSessionMetadata.AgentId] = "workflow-agent",
             [AgentSessionQueryMetadataKeys.WorkflowRunId] = "wr-w1",
             [AgentSessionQueryMetadataKeys.SessionName] = "session-w1",
             [AgentSessionQueryMetadataKeys.IssueNumber] = "100",

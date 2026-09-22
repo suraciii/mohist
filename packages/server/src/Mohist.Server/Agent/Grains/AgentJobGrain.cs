@@ -630,21 +630,47 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     public async Task AbortPreparedLaunchAsync(string reason)
     {
         await HydrateAsync();
-        if (State.ManualPlan is null && State.Input is null)
+        if (State.ManualPlan is null || State.Input is null || IsTerminal)
             return;
-        if (State.LaunchVisibility == AgentLaunchVisibility.Rejected && IsTerminal)
+        if (State.Status != AgentJobStatus.Pending
+            || State.LaunchReady
+            || !string.IsNullOrWhiteSpace(State.RunnerId)
+            || !string.IsNullOrWhiteSpace(State.WorkId)
+            || State.RunnerAccepted
+            || !string.IsNullOrWhiteSpace(State.RuntimeSessionId)
+            || State.ReadySince is not null
+            || State.CapacityClaimedAt is not null
+            || State.InitialInputSubmission is not null
+            || State.ConcurrencyPermitHeld
+            || !string.IsNullOrWhiteSpace(State.ConcurrencyPermitId)
+            || !string.IsNullOrWhiteSpace(State.ConcurrencyWaiterId)
+            || !string.IsNullOrWhiteSpace(State.ConcurrencyPermitToken)
+            || !string.IsNullOrWhiteSpace(_ledger?.DispatchJson))
+        {
             return;
+        }
+
+        reason = SlackSecretRedactor.Redact(reason);
         State.LaunchVisibility = AgentLaunchVisibility.Rejected;
-        await EnterTerminalStateAsync(
+        State.Status = AgentJobStatus.Cancelled;
+        State.FailureReason = reason;
+        State.RecoveryDeadlineAt = null;
+        State.TerminalAt = _timeProvider.GetUtcNow();
+        State.TerminalResult = new AgentJobTerminalResult(
             AgentJobStatus.Cancelled,
-            exitCode: null,
-            failureReason: reason,
-            failureCategory: null,
-            pendingReason: reason,
-            message: "cancelled",
-            output: null,
-            artifactUploadIds: null,
-            terminalExitCode: null);
+            Message: "cancelled",
+            Output: null,
+            ArtifactUploadIds: null,
+            FailureReason: reason,
+            ExitCode: null,
+            Model: State.Input.Model,
+            Variant: State.Input.Variant,
+            ReasoningEffort: State.Input.ReasoningEffort);
+        State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.Cancelled;
+        DisposeJobTimeoutTimer();
+        await PersistAsync();
+        _terminalCompletion.TrySetResult(State.TerminalResult);
+        await UnregisterSelfAsync(RecoveryReminderName);
     }
 
     internal async Task EnterUnknownStateAsync(string reason)

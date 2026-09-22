@@ -449,7 +449,13 @@ public sealed record AcceptFollowupCommand(
     /// retry path uses this when it has pre-allocated a distinct turn
     /// identity for a failed follow-up.
     /// </summary>
-    [property: Id(9)] bool ForceNewTurn = false);
+    [property: Id(9)] bool ForceNewTurn = false,
+    /// <summary>
+    /// Internal immutable identity fence for trusted Workflow reuse.
+    /// Both expected identities must be supplied together.
+    /// </summary>
+    [property: Id(10)] string? ExpectedProjectId = null,
+    [property: Id(11)] string? ExpectedAgentId = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(

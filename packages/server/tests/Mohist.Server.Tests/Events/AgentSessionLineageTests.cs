@@ -230,6 +230,7 @@ public class AgentSessionLineageTests
             ProjectId: ProjectId,
             WorkflowRunId: WorkflowRunId,
             SessionName: "sess-name",
+            AgentId: AgentId,
             IssueNumber: includeIssueNumber ? IssueNumber : null,
             EpicNumber: epicNumber,
             Stage: Stage);

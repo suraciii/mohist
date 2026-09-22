@@ -234,6 +234,7 @@ public sealed class AgentSessionQuerierAgentConnectionSpecs
         {
             [AgentSessionQueryMetadataKeys.ProjectId] = ProjectId,
             [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+            [GenericAgentSessionMetadata.AgentId] = "workflow-agent",
             [AgentSessionQueryMetadataKeys.WorkflowRunId] = "wr-1",
             [AgentSessionQueryMetadataKeys.SessionName] = "coder",
         };

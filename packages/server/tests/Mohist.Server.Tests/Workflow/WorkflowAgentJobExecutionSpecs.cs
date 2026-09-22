@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
@@ -20,7 +21,7 @@ namespace Mohist.Server.Tests.Workflow;
 
 [Collection("WorkflowExecution")]
 [Trait("level", "L1")]
-public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
+public sealed partial class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
 {
     public WorkflowAgentJobExecutionSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
@@ -72,6 +73,15 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         Assert.Equal(attempt.AgentSessionId, jobSnapshot.AgentSessionId);
         Assert.Equal(run.Id, jobSnapshot.WorkflowOrigin?.WorkflowRunId);
         Assert.Equal(attempt.Id, jobSnapshot.WorkflowOrigin?.ActionAttemptId);
+        await using (var scope = Services.CreateAsyncScope())
+        {
+            var session = await scope.ServiceProvider.GetRequiredService<IAgentSessionStore>()
+                .LoadAsync(attempt.AgentSessionId!);
+            Assert.NotNull(session);
+            Assert.Equal(run.Metadata.ProjectId, session!.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId));
+            Assert.Equal(plan.AgentId, session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+            Assert.NotEqual(plan.Command.AgentRef, session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+        }
 
         await DeactivateWorkflowAsync(run.Id);
         workflow = Grains.GetGrain<IWorkflowGrain>(run.Id);
@@ -231,6 +241,13 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
 
         Assert.NotEqual(first.Work.AgentJobId, second.Work.AgentJobId);
         Assert.Equal(first.Work.AgentSessionId, second.Work.AgentSessionId);
+        await using (var scope = Services.CreateAsyncScope())
+        {
+            var session = await scope.ServiceProvider.GetRequiredService<IAgentSessionStore>()
+                .LoadAsync(second.Work.AgentSessionId!);
+            Assert.Equal(first.Work.AgentId, session!.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+            Assert.Equal(second.Work.AgentId, session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+        }
         await ReportAsync(runnerId, second.Work, "completed");
         Assert.Equal(WorkflowRunStatus.Completed, (await LoadRunAsync(_workflowId!)).Status);
     }

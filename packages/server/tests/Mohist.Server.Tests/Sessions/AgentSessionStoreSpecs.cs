@@ -227,6 +227,7 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
         new AgentSessionMetadata()
             .WithLabel("mohist.io/project-id", "project-1")
             .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/agent-id", "workflow-agent")
             .WithLabel("mohist.io/source-id", "workflow-1")
             .WithLabel("mohist.io/session-name", "build");
 

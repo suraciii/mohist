@@ -222,6 +222,7 @@ public class AgentSessionReadApiSpecs : IClassFixture<DefaultMohistIntegrationFi
             {
                 [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
                 [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+                [GenericAgentSessionMetadata.AgentId] = "workflow-agent",
                 [AgentSessionQueryMetadataKeys.WorkflowRunId] = workflowRunId,
                 [AgentSessionQueryMetadataKeys.WorkId] = workId,
                 [AgentSessionQueryMetadataKeys.WorkType] = "task",

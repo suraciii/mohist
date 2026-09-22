@@ -91,6 +91,34 @@ public sealed class RuntimeSessionMissingException : InvalidOperationException
 
 [Serializable]
 [GenerateSerializer]
+public sealed class AgentSessionIdentityMismatchException : InvalidOperationException
+{
+    public AgentSessionIdentityMismatchException(
+        string sessionId,
+        string expectedProjectId,
+        string expectedAgentId,
+        string? actualProjectId,
+        string? actualAgentId)
+        : base($"AgentSession {sessionId} belongs to project/agent "
+            + $"'{actualProjectId ?? "missing"}'/'{actualAgentId ?? "missing"}', not "
+            + $"'{expectedProjectId}'/'{expectedAgentId}'.")
+    {
+        SessionId = sessionId;
+        ExpectedProjectId = expectedProjectId;
+        ExpectedAgentId = expectedAgentId;
+        ActualProjectId = actualProjectId;
+        ActualAgentId = actualAgentId;
+    }
+
+    [Id(0)] public string SessionId { get; }
+    [Id(1)] public string ExpectedProjectId { get; }
+    [Id(2)] public string ExpectedAgentId { get; }
+    [Id(3)] public string? ActualProjectId { get; }
+    [Id(4)] public string? ActualAgentId { get; }
+}
+
+[Serializable]
+[GenerateSerializer]
 public sealed class StaleRuntimeSessionBindingException : InvalidOperationException
 {
     public StaleRuntimeSessionBindingException(
@@ -270,8 +298,13 @@ public sealed record AgentSessionMetadata(
 
         if (string.Equals(kind, "workflow", StringComparison.Ordinal))
         {
-            if (string.IsNullOrWhiteSpace(Label(WorkflowRunIdKey)) || string.IsNullOrWhiteSpace(Label(SessionNameKey)))
-                throw new InvalidOperationException("Workflow AgentSession source requires workflow run and session name labels.");
+            if (string.IsNullOrWhiteSpace(Label(WorkflowRunIdKey))
+                || string.IsNullOrWhiteSpace(Label(SessionNameKey))
+                || string.IsNullOrWhiteSpace(Label(AgentIdKey)))
+            {
+                throw new InvalidOperationException(
+                    "Workflow AgentSession source requires workflow run, session name, and agent labels.");
+            }
             return;
         }
 

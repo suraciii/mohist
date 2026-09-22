@@ -187,6 +187,7 @@ public class IssueSessionProjectionSpecs
             [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
             [AgentSessionQueryMetadataKeys.IssueNumber] = issueNumber.ToString(),
             [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+            [GenericAgentSessionMetadata.AgentId] = "workflow-agent",
             [AgentSessionQueryMetadataKeys.WorkflowRunId] = workflowRunId,
             [AgentSessionQueryMetadataKeys.SessionName] = sessionName,
             [AgentSessionQueryMetadataKeys.WorkId] = $"work-{sessionName}",

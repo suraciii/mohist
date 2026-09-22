@@ -482,6 +482,7 @@ public sealed class AgentActivityFeedAssemblerSpecs : IClassFixture<MohistDbFixt
         {
             [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
             [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+            [GenericAgentSessionMetadata.AgentId] = "workflow-agent",
             [AgentSessionQueryMetadataKeys.WorkflowRunId] = workflowRunId,
             [AgentSessionQueryMetadataKeys.WorkId] = $"work-{Guid.NewGuid():N}",
             [AgentSessionQueryMetadataKeys.WorkType] = "task",

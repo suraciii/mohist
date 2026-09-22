@@ -438,6 +438,7 @@ public class RuntimeEntrySpecs
             .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, projectId)
             .WithLabel(AgentSessionQueryMetadataKeys.IssueNumber, issueNumber.ToString())
             .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+            .WithLabel(GenericAgentSessionMetadata.AgentId, "workflow-agent")
             .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)
             .WithLabel(AgentSessionQueryMetadataKeys.SessionName, workId);
         var session = AgentSession.Create(
