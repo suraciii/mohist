@@ -344,6 +344,14 @@ The Server is the authority. `idle` permits a new Turn, Compact, or Reset;
 `active` means work is queued, executing, or awaiting confirmation; `unknown`
 blocks new work until the original operation is queried or reconciled.
 
+Verified Runtime evidence or administrative Runner removal can settle an old
+execution without discovering its result. The old Turn remains `unknown` and
+retains its identity and context generation; current readiness can return to
+`idle`. `mo session view <session-id> --json
+contextGeneration,unresolvedPrevious,unresolvedPreviousCount,nextAction`
+exposes that retained uncertainty. `inspect_previous_execution` asks the
+operator to inspect the old execution; it does not resubmit its Input.
+
 Stop is the only operation for ending work. A queued Turn is cancelled locally.
 A running Turn is cancelled only after Runtime confirmation. An uncertain Stop
 leaves the Turn and Session `unknown`.
