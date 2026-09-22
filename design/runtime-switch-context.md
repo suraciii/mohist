@@ -27,11 +27,23 @@ new Slack history command is out of scope until separately specified.
 
 ## Semantics
 
-When a bound runtime is unavailable, the Runner may select the configured
-fallback runtime (Pi), create an empty physical session, and
-atomically replace the binding. It then sends the original user input exactly
-once to the new runtime. It must not create a new logical Session, replay prior
-inputs, or emit a synthetic handoff user message.
+For a non-Manager Session bound to OpenCode, the initialized Runner may select
+the configured Pi fallback when its local OpenCode Runtime is disabled, absent
+or not ready and Pi is ready. A failed request, timeout, disconnect or missing
+local Session cache alone does not authorize fallback. This readiness decision
+authorizes a Runtime change; it does not assert that the old physical Session
+has disappeared. Missing recovery on the same Runtime instead requires the
+[deterministic evidence](agent-execution.md#runtime-session-missing-recovery)
+defined by Agent execution.
+
+The replacement creates an empty physical Session under the same Runner and
+atomically replaces the Binding within that contract's safe execution boundary.
+The Runner then sends the original user Input exactly once to the replacement.
+It must not create a new logical Session, replay prior Inputs, or emit a
+synthetic handoff user message.
+
+A queued follow-up retains its accepted identity through replacement according
+to the [pre-submission recovery contract](agent-execution.md#pre-submission-recovery).
 
 The new runtime receives the standard system context and can request the
 canonical Session transcript on demand through the existing read-only command.
@@ -44,9 +56,12 @@ Agent launch, Agent Connection, and Workflow Sessions. A Workflow's
 `workflowRunId` and `sessionName` are lookup and presentation identities; they
 are not an alternate recovery route.
 
-If replacement or binding CAS fails, the original binding and canonical history
-remain unchanged and the Turn is reported as retryable/unavailable. A failed
-replacement must not leave a partially adopted physical session as current.
+A definite replacement or Binding CAS rejection makes no change to canonical
+Binding or history on behalf of that attempt. After a stale rejection, the caller
+re-reads canonical state because another operation may have replaced the Binding.
+An uncertain CAS response requires querying the recorded operation before any
+submission. Neither case authorizes partial adoption or submission to an
+unconfirmed candidate.
 
 When a Runner reconnects or is removed, Session `unknown` Activity settles
 through the lifecycle convergence specified in

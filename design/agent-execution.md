@@ -250,8 +250,12 @@ The invariants are:
 - One AgentSession has at most one Runtime execution at a time. Transcript order
   is therefore sufficient for the conversation.
 - Each accepted Input has one stable Input ID, caller `requestId`, fingerprint,
-  Turn ID, and `ContextGeneration`. It never moves to another Turn or generation.
+  Turn ID, and acceptance `ContextGeneration`. It never moves to another Turn
+  or changes that acceptance generation.
 - A Turn can own multiple steer Inputs. A new-turn Input creates a distinct Turn.
+  Its `ContextGeneration` identifies the execution context. It is fixed once
+  Runtime submission begins; only [pre-submission missing recovery](#pre-submission-recovery)
+  may retarget a queued Turn before that boundary.
 - The capacity decision precedes acceptance: capacity pressure queues work,
   and only a full queue rejects before acceptance. Accepted Input cannot be
   discarded, overwritten, or assigned a replacement ID.
@@ -374,14 +378,14 @@ and do not count as unresolved external side effects for `admission=ready`.
 - `executing` sets Activity to `active`; the Runner owns the pending turn
   report as before.
 - `idle` and `unknown-to-runner` set Activity to `idle`. `unknown-to-runner`
-  additionally records the write-side binding fact `unknown-to-runner`; that
-  record is deterministic missing evidence, and the next accepted Input takes
-  the fallback replacement of
-  [`runtime-switch-context.md`](runtime-switch-context.md) while the Runner is
-  live. While that Runner is removed or unavailable,
-  execution waits for the same Runner identity to become available again;
-  [Runtime Session missing recovery](#runtime-session-missing-recovery) then
-  uses the recorded evidence. Convergence never selects another Runner or
+  additionally records the write-side binding fact `unknown-to-runner` as
+  deterministic missing evidence. The next accepted Input replaces the binding
+  on the same Runner once that identity has execution authority and is available.
+  It selects the configured fallback only when the policy in
+  [`runtime-switch-context.md`](runtime-switch-context.md) applies; otherwise
+  [Runtime Session missing recovery](#runtime-session-missing-recovery) uses
+  the recorded evidence on the same Runtime. While the bound Runner is removed
+  or unavailable, execution waits. Convergence never selects another Runner or
   performs an implicit handoff.
 - A failed or unanswered probe leaves Activity `unknown`.
 
@@ -572,12 +576,16 @@ Missing recovery repairs a current Binding. It is not Prompt replay, Workflow
 recovery, or Runner migration. Transport failure, timeout, disconnect, or a
 missing local cache entry is not proof that the Runtime Session is absent.
 
-Automatic recovery is allowed only when deterministic missing evidence
-exists — the same Runner reports it, or an `unknown-to-runner` binding fact
-from Activity convergence stands on its own — and the current generation is
-safe: Activity is `idle`, admission is `ready`, no Turn is running or
-`outcome_pending`, and no Input, dispatch, Runtime effect, or operation is
-`unknown` beyond the superseded facts convergence itself recorded.
+Automatic same-Runtime recovery requires deterministic missing evidence:
+the same Runner reports it, or an `unknown-to-runner` binding fact from Activity
+convergence stands on its own. Configured fallback to another Runtime follows
+[`Runtime Switch Context`](runtime-switch-context.md); it is an authorized
+Runtime change and does not establish that the old physical Session is absent.
+Both forms of replacement require an idle Session with ready admission, or the
+single queued Turn allowed by [pre-submission recovery](#pre-submission-recovery).
+No Turn may be running or `outcome_pending`, and no Input, dispatch, Runtime
+effect, or operation may be `unknown` beyond the superseded facts convergence
+itself recorded.
 
 ```text diagram
                           +----------------+
@@ -629,13 +637,38 @@ not keep the original operation active.
 ### Operation boundaries
 
 Automatic replacement after confirmed missing is allowed for an initial AgentJob
-Input not yet submitted and for an idle Follow-up. It is rejected during an
+Input not yet submitted, an idle Follow-up, and the queued Follow-up described
+below. It is rejected during an
 executing Follow-up, for Compact, for a Stop target, and for ordinary Reset.
 Reset requires safe admission. `unknown` resolves through Activity convergence
 or explicit force-reset; nothing else may clear it.
 
 Recovery never reconstructs Runtime context from Transcript. Transcript is an
 audit and presentation record, not a command source.
+
+### Pre-submission recovery
+
+A Runtime can become unavailable after Mohist accepts an Input but before the
+Runner submits it. Acceptance records which context received the intent; the
+Turn records which context executes it. Keeping those facts separate preserves
+accepted work when the physical Session must be replaced.
+
+Only the initial AgentJob Turn proved not yet submitted, or the single queued
+Follow-up named by its sealed dispatch, may use this recovery path. The owning
+dispatch must identify the sole queued Turn and its accepted payload. Before
+submitting any Input, the Runner must establish deterministic missing evidence
+or the Runtime readiness condition for configured fallback defined in
+[`Runtime Switch Context`](runtime-switch-context.md). The complete expected
+Binding, Turn and dispatch must still match; another queued Turn, an executing
+or uncertain Turn, an active stop, or an uncertain Session rejects replacement.
+
+The replacement Binding, context boundary and that Turn's execution generation
+commit atomically. Its pending dispatch and any Workflow execution binding target
+the replacement. Input acceptance generations, Input and Turn IDs, operation and
+delivery identities, payload and occupancy claim remain unchanged. A stale or
+failed commit authorizes no submission to the candidate. After commit, the
+Runner submits the original accepted payload once; it creates no new Input or
+Turn and performs no replay.
 
 ## Context Operations
 
