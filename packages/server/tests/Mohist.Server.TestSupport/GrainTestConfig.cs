@@ -362,7 +362,10 @@ public static class GrainTestConfig
     {
         public static NoopRunnerAuthorityFence Instance { get; } = new();
 
-        public Task FenceAsync(string runnerId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task FenceAsync(
+            string runnerId,
+            string? processGeneration,
+            CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class NoopTranscriptEventPublisher : ITranscriptEventPublisher

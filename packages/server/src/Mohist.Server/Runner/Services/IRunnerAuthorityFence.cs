@@ -6,5 +6,8 @@ namespace Mohist.Server.Runner.Services;
 /// </summary>
 public interface IRunnerAuthorityFence
 {
-    Task FenceAsync(string runnerId, CancellationToken ct = default);
+    Task FenceAsync(
+        string runnerId,
+        string? processGeneration,
+        CancellationToken ct = default);
 }

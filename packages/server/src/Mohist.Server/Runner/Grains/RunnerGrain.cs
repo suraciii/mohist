@@ -152,8 +152,6 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             || !string.IsNullOrWhiteSpace(state.UpdateInterruptFence?.PendingId)
             || !string.IsNullOrWhiteSpace(state.PendingProcessGeneration)
             || !string.IsNullOrWhiteSpace(state.ClosingProcessGeneration);
-        if (!string.IsNullOrWhiteSpace(state.ClosingProcessGeneration))
-            await ReconcileClosingGenerationAsync();
         if (_info is not null && state.LastKnownActionCatalogJson is not null)
         {
             var catalog = JSON.Deserialize<ActionCatalog>(state.LastKnownActionCatalogJson);
@@ -166,6 +164,22 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             ?? (state.PresenceLeaseExpiresAt is { } legacyExpiry
                 ? legacyExpiry - PresenceTimeout
                 : default);
+
+        if (state.AdministrativeRemoval is not null)
+        {
+            // Administrative removal owns Workflow closeout across every
+            // process generation. The ordinary single-generation path must
+            // not clear its marker before that full reconciliation succeeds,
+            // and activation must not republish credential-revoked authority.
+            _status = RunnerStatus.Offline;
+            await ContinueAdministrativeRemovalAsync();
+            await RemovePresenceReminderAsync();
+            if (state.AdministrativeRemoval.Phase == RunnerAdministrativeRemovalPhase.Completed)
+                await RemoveAdministrativeRemovalReminderAsync();
+            PublishStatusObservation();
+            return;
+        }
+
         if (state.PresenceLeaseExpiresAt is { } expiry)
         {
             if (expiry > now && _info is not null)
@@ -194,11 +208,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             await ReconcileClosingGenerationAsync();
         }
 
-        if (state.AdministrativeRemoval is not null
-            && state.AdministrativeRemoval.Phase != RunnerAdministrativeRemovalPhase.Completed)
-        {
-            await ContinueAdministrativeRemovalAsync();
-        }
+        await RemoveAdministrativeRemovalReminderAsync();
 
         // Activation is where the Server re-establishes the authoritative
         // generation for this Runner, so work left behind by an earlier
@@ -218,11 +228,22 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         if (string.Equals(reminderName, AdministrativeRemovalReminderName, StringComparison.Ordinal))
         {
-            await ContinueAdministrativeRemovalAsync();
+            var removal = _state.State?.AdministrativeRemoval;
+            if (removal is null || removal.Phase == RunnerAdministrativeRemovalPhase.Completed)
+                await RemoveAdministrativeRemovalReminderAsync();
+            else
+                await ContinueAdministrativeRemovalAsync();
             return;
         }
         if (!string.Equals(reminderName, PresenceReminderName, StringComparison.Ordinal))
             return;
+
+        if (_state.State?.AdministrativeRemoval is not null)
+        {
+            await ContinueAdministrativeRemovalAsync();
+            await RemovePresenceReminderAsync();
+            return;
+        }
 
         await CheckPresenceAsync();
         await ReconcileClosingGenerationAsync();

@@ -36,6 +36,8 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
     private readonly ConcurrentDictionary<Guid, RunnerControlConnectionReservation> _connectionIds = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource> _connectionSignals = new(StringComparer.Ordinal);
     private readonly RunnerControlInstallationGate _installationGate = new();
+    private readonly object _authoritySync = new();
+    private readonly Dictionary<string, HashSet<string>> _fencedProcessGenerations = new(StringComparer.Ordinal);
     private readonly RunnerConnectionTracker _tracker;
     private readonly IGrainFactory _grains;
     private readonly IRunnerActivityProbeCoordinator _activityProbes;
@@ -58,6 +60,8 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
 
     internal Action<string, Guid>? InstallationWaiting { get; set; }
     internal Func<string, Guid, CancellationToken, Task>? InstallationAcquiredAsync { get; set; }
+    internal Func<string, Guid, CancellationToken, Task>? InstallationAuthorityValidatedAsync { get; set; }
+    internal Func<string, CancellationToken, Task>? RequestAuthorityWaitingAsync { get; set; }
     internal Func<string, string, CancellationToken, Task>? SessionCommandGenerationValidatedAsync { get; set; }
 
     internal bool TryReserve(Guid connectionId, out RunnerControlConnectionReservation reservation)
@@ -151,11 +155,24 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
                         handshake.Generation,
                         generation,
                         handshake.SchemaVersion);
+                    if (InstallationAuthorityValidatedAsync is not null)
+                        await InstallationAuthorityValidatedAsync(runnerId, connectionId, ct);
 
                     run = connection.RunAsync(ct);
                     if (run.IsCompleted) await run;
-                    _connections[runnerId] = connection;
-                    published = true;
+                    lock (_authoritySync)
+                    {
+                        if (IsProcessGenerationFencedUnderLock(runnerId, handshake.ProcessGeneration))
+                            throw new RunnerControlUnavailableException(
+                                "Runner control processGeneration authority was revoked during installation");
+                        // Installation is serialized per Runner and the grain
+                        // already admitted this new process authority. No old
+                        // candidate can still publish, so prior generation
+                        // fences can be discarded once the new authority wins.
+                        _fencedProcessGenerations.Remove(runnerId);
+                        _connections[runnerId] = connection;
+                        published = true;
+                    }
                     if (_connectionSignals.TryGetValue(runnerId, out var signal))
                         signal.TrySetResult();
                 }
@@ -233,21 +250,60 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
         RunnerControlWebSocketConnection connection,
         CancellationToken ct)
     {
-        return _connections.TryGetValue(connection.RunnerId, out var current)
-            && ReferenceEquals(current, connection)
-            && connection.IsAvailable
-            && await _grains.GetGrain<IRunnerGrain>(connection.RunnerId)
-                .IsCurrentProcessGenerationAsync(connection.ProcessGeneration);
+        if (!IsPublishedAndAuthorized(connection))
+            return false;
+        return await _grains.GetGrain<IRunnerGrain>(connection.RunnerId)
+            .IsCurrentProcessGenerationAsync(connection.ProcessGeneration);
     }
 
-    public async Task FenceAsync(string runnerId, CancellationToken ct = default)
+    public async Task FenceAsync(
+        string runnerId,
+        string? processGeneration,
+        CancellationToken ct = default)
     {
-        if (!_connections.TryGetValue(runnerId, out var connection))
-            return;
+        RunnerControlWebSocketConnection? connection = null;
+        Task? connectionFence = null;
+        lock (_authoritySync)
+        {
+            if (string.IsNullOrWhiteSpace(processGeneration)
+                && _connections.TryGetValue(runnerId, out var published))
+                processGeneration = published.ProcessGeneration;
+            if (!string.IsNullOrWhiteSpace(processGeneration))
+            {
+                if (!_fencedProcessGenerations.TryGetValue(runnerId, out var generations))
+                {
+                    generations = new HashSet<string>(StringComparer.Ordinal);
+                    _fencedProcessGenerations.Add(runnerId, generations);
+                }
+                generations.Add(processGeneration);
+            }
 
-        await connection.FenceAsync(WebSocketCloseStatus.NormalClosure, "Runner authority revoked").WaitAsync(ct);
-        if (_connections.TryRemove(new KeyValuePair<string, RunnerControlWebSocketConnection>(runnerId, connection)))
-            _tracker.UnregisterAndGetSessions(runnerId, connection.ConnectionId.ToString("D"));
+            if (_connections.TryGetValue(runnerId, out var current))
+            {
+                if (!_fencedProcessGenerations.TryGetValue(runnerId, out var generations))
+                {
+                    generations = new HashSet<string>(StringComparer.Ordinal);
+                    _fencedProcessGenerations.Add(runnerId, generations);
+                }
+                generations.Add(current.ProcessGeneration);
+                if (_connections.TryRemove(
+                    new KeyValuePair<string, RunnerControlWebSocketConnection>(runnerId, current)))
+                {
+                    connection = current;
+                    // Fence synchronously marks the connection unavailable before
+                    // releasing the registry authority lock; completion may await
+                    // socket ownership outside the lock.
+                    connectionFence = current.FenceAsync(
+                        WebSocketCloseStatus.NormalClosure,
+                        "Runner authority revoked");
+                }
+            }
+        }
+
+        if (connection is null)
+            return;
+        await connectionFence!.WaitAsync(ct);
+        _tracker.UnregisterAndGetSessions(runnerId, connection.ConnectionId.ToString("D"));
     }
 
     private static async Task ObserveCancellationAsync(Task task)
@@ -256,7 +312,7 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
         catch (OperationCanceledException) { }
     }
 
-    public Task<TResult> SendRequestAsync<TParams, TResult>(
+    public async Task<TResult> SendRequestAsync<TParams, TResult>(
         string runnerId,
         string method,
         TParams parameters,
@@ -267,12 +323,29 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
             || contract.Params != typeof(TParams)
             || contract.Result != typeof(TResult))
             throw new ArgumentException($"Unsupported Runner control request contract '{method}'", nameof(method));
-        return GetConnection(runnerId).SendRequestAsync<TParams, TResult>(
-            method,
-            parameters,
-            contract.AllowsNull,
-            requestEnqueued,
-            ct);
+        if (RequestAuthorityWaitingAsync is not null)
+            await RequestAuthorityWaitingAsync(runnerId, ct);
+
+        RunnerControlWebSocketConnection connection;
+        Task<TResult> response;
+        lock (_authoritySync)
+        {
+            connection = GetConnectionUnderAuthorityLock(runnerId);
+            // Request enqueue is the transport-authority linearization point:
+            // either it completes under this lock, or revocation wins first
+            // and no unscoped request can enter the outgoing queue.
+            response = connection.SendRequestAsync<TParams, TResult>(
+                method,
+                parameters,
+                contract.AllowsNull,
+                requestEnqueued,
+                ct);
+        }
+        var result = await response;
+        if (!IsPublishedAndAuthorized(connection))
+            throw new RunnerControlUnavailableException(
+                "Runner control request result belongs to revoked authority");
+        return result;
     }
 
     public bool IsConnected(string runnerId) => HasReadyConnection(runnerId);
@@ -282,10 +355,15 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
         string processGeneration,
         CancellationToken ct = default)
     {
-        if (!_connections.TryGetValue(runnerId, out var connection)
-            || !connection.IsAvailable
-            || !string.Equals(connection.ProcessGeneration, processGeneration, StringComparison.Ordinal))
+        RunnerControlWebSocketConnection connection;
+        try
+        {
+            connection = GetConnection(runnerId, processGeneration);
+        }
+        catch (RunnerControlUnavailableException)
+        {
             return false;
+        }
         return await _grains.GetGrain<IRunnerGrain>(runnerId)
             .IsCurrentProcessGenerationAsync(processGeneration);
     }
@@ -313,16 +391,17 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
             throw new RunnerControlUnavailableException("Runner control processGeneration is not current");
         if (SessionCommandGenerationValidatedAsync is not null)
             await SessionCommandGenerationValidatedAsync(runnerId, processGeneration, ct);
-        if (!_connections.TryGetValue(runnerId, out var current)
-            || !ReferenceEquals(current, connection)
-            || !connection.IsAvailable)
-            throw new RunnerControlUnavailableException(
-                $"Runner '{runnerId}' has no control connection for the supplied process generation");
+        Task<TResult> response;
+        lock (_authoritySync)
+        {
+            if (!IsPublishedAndAuthorizedUnderLock(connection))
+                throw new RunnerControlUnavailableException(
+                    $"Runner '{runnerId}' has no authorized control connection for the supplied process generation");
+            response = connection.SendRequestAsync<TParams, TResult>(method, parameters, ct);
+        }
 
-        var result = await connection.SendRequestAsync<TParams, TResult>(method, parameters, ct);
-        if (!_connections.TryGetValue(runnerId, out current)
-            || !ReferenceEquals(current, connection)
-            || !connection.IsAvailable
+        var result = await response;
+        if (!IsPublishedAndAuthorized(connection)
             || !await _grains.GetGrain<IRunnerGrain>(runnerId)
                 .IsCurrentProcessGenerationAsync(processGeneration))
             throw new RunnerControlUnavailableException("Runner control request result belongs to a stale process generation");
@@ -367,13 +446,48 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
     internal Task WaitForCurrentDisconnectionAsync(string runnerId, CancellationToken ct) =>
         GetConnection(runnerId).Disconnected.WaitAsync(ct);
 
-    private bool HasReadyConnection(string runnerId) =>
-        _connections.TryGetValue(runnerId, out var connection) && connection.IsAvailable;
+    private bool HasReadyConnection(string runnerId)
+    {
+        lock (_authoritySync)
+        {
+            return _connections.TryGetValue(runnerId, out var connection)
+                && connection.IsAvailable
+                && !IsProcessGenerationFencedUnderLock(runnerId, connection.ProcessGeneration);
+        }
+    }
 
-    internal RunnerControlWebSocketConnection GetConnection(string runnerId) =>
-        _connections.TryGetValue(runnerId, out var connection)
-            ? connection
-            : throw new RunnerControlUnavailableException($"Runner '{runnerId}' has no control connection");
+    private bool IsPublishedAndAuthorized(RunnerControlWebSocketConnection connection)
+    {
+        lock (_authoritySync)
+            return IsPublishedAndAuthorizedUnderLock(connection);
+    }
+
+    private bool IsPublishedAndAuthorizedUnderLock(RunnerControlWebSocketConnection connection) =>
+        _connections.TryGetValue(connection.RunnerId, out var current)
+        && ReferenceEquals(current, connection)
+        && connection.IsAvailable
+        && !IsProcessGenerationFencedUnderLock(
+            connection.RunnerId,
+            connection.ProcessGeneration);
+
+    private bool IsProcessGenerationFencedUnderLock(string runnerId, string processGeneration) =>
+        _fencedProcessGenerations.TryGetValue(runnerId, out var generations)
+        && generations.Contains(processGeneration);
+
+    internal RunnerControlWebSocketConnection GetConnection(string runnerId)
+    {
+        lock (_authoritySync)
+            return GetConnectionUnderAuthorityLock(runnerId);
+    }
+
+    private RunnerControlWebSocketConnection GetConnectionUnderAuthorityLock(string runnerId)
+    {
+        if (_connections.TryGetValue(runnerId, out var connection)
+            && connection.IsAvailable
+            && !IsProcessGenerationFencedUnderLock(runnerId, connection.ProcessGeneration))
+            return connection;
+        throw new RunnerControlUnavailableException($"Runner '{runnerId}' has no authorized control connection");
+    }
 
 }
 

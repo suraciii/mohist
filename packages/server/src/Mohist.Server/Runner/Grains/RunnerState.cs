@@ -41,6 +41,8 @@ public sealed class RunnerAdministrativeRemoval
     [Id(1)] public DateTimeOffset RevokedAt { get; set; }
     [Id(2)] public RunnerAdministrativeRemovalPhase Phase { get; set; }
     [Id(3)] public string? RemovedProcessGeneration { get; set; }
+    /// <summary>The exact credential authority invalidated by this operation.</summary>
+    [Id(4)] public string? RemovedCredentialId { get; set; }
 }
 
 [GenerateSerializer]

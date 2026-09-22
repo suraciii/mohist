@@ -219,6 +219,68 @@ public partial class RunnerGrain
     }
 
     /// <summary>
+    /// Administrative removal leaves no authoritative process generation, so
+    /// every generation-bound Workflow claim for this Runner is lost. Owner
+    /// claims remain the durable inventory: a failed discovery or settlement
+    /// leaves the removal phase pending and the next reminder enumerates them
+    /// again. AgentJobs are intentionally outside this path because Session
+    /// convergence owns their terminal-unknown settlement.
+    /// </summary>
+    private async Task<bool> ReconcileAllWorkflowClaimsForAdministrativeRemovalAsync()
+    {
+        IReadOnlyList<string> workflowRunIds;
+        try
+        {
+            workflowRunIds = await _workflowRuns.FindActiveWorkOwnersAssignedToAsync(RunnerId);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(
+                ex,
+                "Runner {RunnerId} could not discover Workflow owners during administrative removal",
+                RunnerId);
+            return false;
+        }
+
+        var complete = true;
+        foreach (var workflowRunId in workflowRunIds)
+        {
+            try
+            {
+                var run = await _workflowRuns.LoadAsync(workflowRunId);
+                if (run is null)
+                {
+                    complete = false;
+                    continue;
+                }
+
+                var active = run.CurrentActiveWorkFor(RunnerId);
+                if (active is null || string.IsNullOrWhiteSpace(active.ProcessGeneration))
+                    continue;
+                var verdict = await GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId)
+                    .FailActiveWorkAsync(
+                        RunnerId,
+                        active.WorkId,
+                        active.ProcessGeneration,
+                        "runner-lost");
+                if (verdict == WorkReportVerdict.Outstanding)
+                    complete = false;
+            }
+            catch (Exception ex)
+            {
+                complete = false;
+                _log.LogWarning(
+                    ex,
+                    "Runner {RunnerId} failed to close Workflow {WorkflowRunId} during administrative removal",
+                    RunnerId,
+                    workflowRunId);
+            }
+        }
+
+        return complete;
+    }
+
+    /// <summary>
     /// Settles active work that cannot belong to the Runner's authoritative
     /// process generation. A claim from any other generation belongs to a
     /// process that can neither report nor receive the work again, so it goes

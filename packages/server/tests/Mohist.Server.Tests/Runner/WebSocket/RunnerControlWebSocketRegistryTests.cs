@@ -3,6 +3,8 @@ using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Contracts;
+using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
@@ -176,6 +178,38 @@ public sealed class RunnerControlWebSocketRegistryTests
     }
 
     [Fact]
+    public async Task PublishedConnectionReceivesAndAnswersSessionProbe()
+    {
+        const string runnerId = "runner-probe-wire";
+        var runner = DispatchProxy.Create<IRunnerGrain, RunnerGrainProxy>();
+        var grains = DispatchProxy.Create<IGrainFactory, GrainFactoryProxy>();
+        ((GrainFactoryProxy)(object)grains).Runner = runner;
+        var probes = new SendingActivityProbeCoordinator(runnerId);
+        var registry = new RunnerControlWebSocketRegistry(
+            new RunnerConnectionTracker(),
+            grains,
+            probes,
+            new FakeTimeProvider(),
+            NullLoggerFactory.Instance);
+        var connectionId = Guid.NewGuid();
+        using var socket = new InstallationWebSocket(blockClose: false)
+        {
+            RespondWithProbeSuccess = true,
+        };
+        using var stop = new CancellationTokenSource();
+        Assert.True(registry.TryReserve(connectionId, out var reservation));
+
+        var run = registry.RunAsync(runnerId, reservation, socket, Handshake(), stop.Token);
+        var result = await probes.Result.WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(RunnerSessionActivityObservations.Idle, result.Observation);
+        Assert.Equal(probes.Probe, result.Probe);
+        Assert.Equal(1, socket.SendCount);
+        stop.Cancel();
+        await run;
+    }
+
+    [Fact]
     public async Task GenerationChangedWhileInstallationWaitsRejectsWithoutFencingCurrentLease()
     {
         const string runnerId = "runner-1";
@@ -210,6 +244,100 @@ public sealed class RunnerControlWebSocketRegistryTests
 
         currentStop.Cancel();
         await currentRun;
+    }
+
+    [Fact]
+    public async Task RevocationAfterAuthorityValidationPreventsPublicationAndUnscopedMutation()
+    {
+        const string runnerId = "runner-install-revoked";
+        var fixture = RegistryFixture();
+        var validated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Registry.InstallationAuthorityValidatedAsync = async (_, _, ct) =>
+        {
+            validated.TrySetResult();
+            await release.Task.WaitAsync(ct);
+        };
+        Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var reservation));
+        var run = fixture.Registry.RunAsync(
+            runnerId,
+            reservation,
+            fixture.Socket,
+            Handshake(),
+            TestContext.Current.CancellationToken);
+        await validated.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        await fixture.Registry.FenceAsync(
+            runnerId,
+            "test-generation",
+            TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<RunnerControlUnavailableException>(() =>
+            fixture.Registry.SendRequestAsync<SessionStopParams, RunnerStopReply>(
+                runnerId,
+                "session.stop",
+                StopParams(runnerId),
+                TestContext.Current.CancellationToken));
+        release.TrySetResult();
+
+        await Assert.ThrowsAsync<RunnerControlUnavailableException>(() => run);
+        Assert.False(fixture.Registry.IsConnected(runnerId));
+        Assert.Equal(0, fixture.Socket.SendCount);
+
+        fixture.Registry.InstallationAuthorityValidatedAsync = null;
+        fixture.Runner.CurrentGeneration = "replacement-generation";
+        var replacementId = Guid.NewGuid();
+        using var replacementSocket = new InstallationWebSocket(blockClose: false);
+        using var replacementStop = new CancellationTokenSource();
+        Assert.True(fixture.Registry.TryReserve(replacementId, out var replacementReservation));
+        var replacementRun = fixture.Registry.RunAsync(
+            runnerId,
+            replacementReservation,
+            replacementSocket,
+            new RunnerControlHandshake(
+                null, null, null, null, null, null, null, null, "replacement-generation"),
+            replacementStop.Token);
+        await fixture.Registry.WaitForConnectionAsync(
+            runnerId,
+            TestContext.Current.CancellationToken);
+        Assert.True(fixture.Registry.IsConnected(runnerId));
+        replacementStop.Cancel();
+        await replacementRun;
+    }
+
+    [Fact]
+    public async Task RevocationWinningSendAuthorityRacePreventsUnscopedRequestEnqueue()
+    {
+        const string runnerId = "runner-send-revoked";
+        var fixture = RegistryFixture();
+        using var stop = new CancellationTokenSource();
+        Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var reservation));
+        var run = fixture.Registry.RunAsync(
+            runnerId, reservation, fixture.Socket, Handshake(), stop.Token);
+        await fixture.Registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
+
+        var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Registry.RequestAuthorityWaitingAsync = async (_, ct) =>
+        {
+            waiting.TrySetResult();
+            await release.Task.WaitAsync(ct);
+        };
+        var request = fixture.Registry.SendRequestAsync<WorkspaceQueryParams, WorkspaceRemovalResult>(
+            runnerId,
+            "workspace.remove",
+            new WorkspaceQueryParams(new RunnerWorkspaceQuery(null, null, null, null, null, null, null)),
+            ct: TestContext.Current.CancellationToken);
+        await waiting.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        await fixture.Registry.FenceAsync(
+            runnerId,
+            "test-generation",
+            TestContext.Current.CancellationToken);
+        release.TrySetResult();
+
+        await Assert.ThrowsAsync<RunnerControlUnavailableException>(() => request);
+        Assert.Equal(0, fixture.Socket.SendCount);
+        await run;
     }
 
     [Fact]
@@ -336,7 +464,10 @@ public sealed class RunnerControlWebSocketRegistryTests
             runnerId, reservation, fixture.Socket, Handshake(), stop.Token);
         await fixture.Registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
 
-        await fixture.Registry.FenceAsync(runnerId, TestContext.Current.CancellationToken);
+        await fixture.Registry.FenceAsync(
+            runnerId,
+            "test-generation",
+            TestContext.Current.CancellationToken);
 
         Assert.False(fixture.Registry.IsConnected(runnerId));
         Assert.Equal(WebSocketState.Closed, fixture.Socket.State);
@@ -472,6 +603,35 @@ public sealed class RunnerControlWebSocketRegistryTests
             CancellationToken ct) => Task.CompletedTask;
     }
 
+    private sealed class SendingActivityProbeCoordinator(string runnerId) : IRunnerActivityProbeCoordinator
+    {
+        private readonly TaskCompletionSource<RunnerSessionActivityProbeResult> _result =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public RunnerSessionActivityProbeRequest Probe { get; } = new(
+            "session-1",
+            "observation-1",
+            runnerId,
+            "opencode",
+            "runtime-1",
+            "/workspace",
+            1,
+            1);
+        public Task<RunnerSessionActivityProbeResult> Result => _result.Task;
+
+        public async Task ProbeAsync(
+            string actualRunnerId,
+            string processGeneration,
+            Func<CancellationToken, Task<bool>> isCurrentConnection,
+            Func<RunnerSessionActivityProbeRequest, CancellationToken, Task<RunnerSessionActivityProbeResult>> send,
+            CancellationToken ct)
+        {
+            Assert.Equal(runnerId, actualRunnerId);
+            Assert.True(await isCurrentConnection(ct));
+            _result.TrySetResult(await send(Probe, ct));
+        }
+    }
+
     private sealed class BlockingActivityProbeCoordinator : IRunnerActivityProbeCoordinator
     {
         private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -504,6 +664,16 @@ public sealed class RunnerControlWebSocketRegistryTests
             }
         }
     }
+
+    private static SessionStopParams StopParams(string runnerId) => new(
+        new RunnerSessionTarget(
+            "generic",
+            "project-1",
+            new RunnerSessionBinding("opencode", "runtime-1", runnerId, "/workspace"),
+            SessionId: "session-1"),
+        "session-1",
+        "turn-1",
+        "operation-1");
 
     private static SessionCommandRequest Command(string runnerId) => new(
         "session-1",
@@ -556,6 +726,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         public Task SendStarted => _sendStarted.Task;
         public int SendCount => Volatile.Read(ref _sendCount);
         public bool RespondWithCompactSuccess { get; set; }
+        public bool RespondWithProbeSuccess { get; set; }
         public override WebSocketCloseStatus? CloseStatus => null;
         public override string? CloseStatusDescription => null;
         public override WebSocketState State => _state;
@@ -593,12 +764,15 @@ public sealed class RunnerControlWebSocketRegistryTests
         {
             Interlocked.Increment(ref _sendCount);
             _sendStarted.TrySetResult();
-            if (RespondWithCompactSuccess)
+            if (RespondWithCompactSuccess || RespondWithProbeSuccess)
             {
                 using var request = JsonDocument.Parse(buffer.AsMemory());
                 var id = request.RootElement.GetProperty("id").GetString();
+                var result = RespondWithProbeSuccess
+                    ? $"{{\"probe\":{request.RootElement.GetProperty("params").GetRawText()},\"observation\":\"idle\"}}"
+                    : "{\"ok\":true}";
                 _receive.TrySetResult(System.Text.Encoding.UTF8.GetBytes(
-                    $"{{\"jsonrpc\":\"2.0\",\"id\":\"{id}\",\"result\":{{\"ok\":true}}}}"));
+                    $"{{\"jsonrpc\":\"2.0\",\"id\":\"{id}\",\"result\":{result}}}"));
             }
             return Task.CompletedTask;
         }

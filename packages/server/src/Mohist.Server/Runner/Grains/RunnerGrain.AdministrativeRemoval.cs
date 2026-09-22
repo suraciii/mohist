@@ -19,7 +19,8 @@ public partial class RunnerGrain
             removal = state.AdministrativeRemoval;
             if (removal is null)
             {
-                if (await _credentialStatus.GetStatusAsync(RunnerId) != RunnerCredentialStatus.Active)
+                var authority = await _credentialStatus.GetActiveAuthorityAsync(RunnerId);
+                if (authority is null)
                     return new RunnerAdministrativeRemovalResult(false, revokedAt, false);
 
                 removal = new RunnerAdministrativeRemoval
@@ -28,6 +29,7 @@ public partial class RunnerGrain
                     RevokedAt = revokedAt,
                     Phase = RunnerAdministrativeRemovalPhase.IntentRecorded,
                     RemovedProcessGeneration = state.CurrentProcessGeneration,
+                    RemovedCredentialId = authority.CredentialId,
                 };
                 var wasDraining = _draining;
                 state.AdministrativeRemoval = removal;
@@ -92,21 +94,21 @@ public partial class RunnerGrain
                 // The durable process-generation fence is already committed.
                 // This closes only the current Server transport; it makes no
                 // claim about an external Runtime process or side effect.
-                await _authorityFence.FenceAsync(RunnerId);
+                await _authorityFence.FenceAsync(
+                    RunnerId,
+                    removal.RemovedProcessGeneration);
                 await GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
                     .UnregisterAsync(RunnerId);
 
-                // Workflow owns its own runner-lost decision. Administrative
-                // removal deliberately excludes AgentJob closeout; Session
-                // convergence publishes that settlement through the event bus.
-                await ReconcileClosingGenerationAsync();
-                if (!string.IsNullOrWhiteSpace(_state.State?.ClosingProcessGeneration))
+                // Workflow owns its own runner-lost decision. With no process
+                // generation authoritative, every generation-bound owner claim
+                // is enumerated and settled. AgentJobs remain excluded; Session
+                // convergence publishes their settlement through the event bus.
+                if (!await ReconcileAllWorkflowClaimsForAdministrativeRemovalAsync())
                     throw new InvalidOperationException(
                         $"Runner {RunnerId} workflow closeout is still pending during administrative removal.");
 
-                await AdvanceAdministrativeRemovalAsync(
-                    removal.RemovalId,
-                    RunnerAdministrativeRemovalPhase.SessionsSettling);
+                await AdvanceAfterAdministrativeWorkflowCloseoutAsync(removal.RemovalId);
             }
 
             removal = CurrentAdministrativeRemoval(removal.RemovalId);
@@ -215,6 +217,36 @@ public partial class RunnerGrain
         }
     }
 
+    private async Task AdvanceAfterAdministrativeWorkflowCloseoutAsync(string removalId)
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            var removal = CurrentAdministrativeRemoval(removalId);
+            if (removal.Phase != RunnerAdministrativeRemovalPhase.AuthorityFenced)
+                return;
+            var state = _state.State ??= new RunnerState();
+            var previousClosing = state.ClosingProcessGeneration;
+            var previousPhase = removal.Phase;
+            state.ClosingProcessGeneration = null;
+            removal.Phase = RunnerAdministrativeRemovalPhase.SessionsSettling;
+            try
+            {
+                await PersistAsync();
+            }
+            catch
+            {
+                state.ClosingProcessGeneration = previousClosing;
+                removal.Phase = previousPhase;
+                throw;
+            }
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
     private async Task AdvanceAdministrativeRemovalAsync(
         string removalId,
         RunnerAdministrativeRemovalPhase phase)
@@ -262,7 +294,12 @@ public partial class RunnerGrain
                 $"Runner {RunnerId} administrative removal is still pending.");
 
         var authority = await _credentialStatus.GetActiveAuthorityAsync(RunnerId);
-        if (authority is null || authority.IssuedAt < removal.RevokedAt)
+        if (authority is null
+            || string.IsNullOrWhiteSpace(removal.RemovedCredentialId)
+            || string.Equals(
+                authority.CredentialId,
+                removal.RemovedCredentialId,
+                StringComparison.Ordinal))
             throw new InvalidOperationException(
                 $"Runner {RunnerId} execution authority remains revoked.");
 
@@ -294,6 +331,7 @@ public partial class RunnerGrain
         {
             _lifecycleGate.Release();
         }
+        await RemoveAdministrativeRemovalReminderAsync();
     }
 
     private Task EnsureAdministrativeRemovalReminderAsync() =>

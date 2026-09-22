@@ -1,6 +1,8 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
@@ -9,6 +11,9 @@ using Mohist.Server.Sessions.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Tests.Agent.Grain;
 using Mohist.Server.Tests.Support;
+using Orleans.Reminders;
+using Orleans.Runtime;
+using Orleans.Storage;
 using Xunit;
 
 namespace Mohist.Server.Tests.Runner.Grain;
@@ -30,7 +35,7 @@ public sealed class RunnerAdministrativeRemovalSpecs(AgentJobGrainFixture fixtur
             var runner = fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
             var session = fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
 
-            await IssueCredentialAsync(runnerId);
+            var removedCredential = await IssueCredentialAsync(runnerId);
             await runner.RegisterAsync(
                 new RunnerInfo(runnerId, ["spec/*"], "test-host", null),
                 oldProcess);
@@ -50,6 +55,13 @@ public sealed class RunnerAdministrativeRemovalSpecs(AgentJobGrainFixture fixtur
                 runner.RevokeExecutionAuthorityAsync(fixture.TimeProvider.GetUtcNow()));
             Assert.False(await runner.IsCurrentProcessGenerationAsync(oldProcess));
             Assert.True((await runner.GetRuntimeStateAsync()).Draining);
+            var storage = fixture.Cluster.GetSiloServiceProvider(null)
+                .GetRequiredService<IGrainStorage>();
+            var removalState = new GrainState<RunnerState>();
+            await storage.ReadStateAsync("runner", runner.GetGrainId(), removalState);
+            Assert.Equal(
+                removedCredential.Credential.Id,
+                removalState.State.AdministrativeRemoval!.RemovedCredentialId);
 
             await TestLifecycle.DeactivateAndWait(runner, fixture.Grains);
             runner = fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -62,13 +74,35 @@ public sealed class RunnerAdministrativeRemovalSpecs(AgentJobGrainFixture fixtur
                 Assert.Equal(runnerId, persisted!.Status.MissingRunnerFact!.RunnerId);
             }
 
-            await IssueCredentialAsync(runnerId);
+            var reminders = fixture.Cluster.GetSiloServiceProvider(null)
+                .GetRequiredService<IReminderTable>();
+            await reminders.UpsertRow(RemovalReminder(runner));
+            await TestLifecycle.DeactivateAndWait(runner, fixture.Grains);
+            runner = fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+            _ = await runner.GetRuntimeStateAsync();
+            Assert.Null(await reminders.ReadRow(runner.GetGrainId(), "administrative-removal"));
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => runner.RegisterAsync(
+                new RunnerInfo(runnerId, ["spec/*"], "test-host", null),
+                newProcess));
+
+            var replacementCredential = await IssueCredentialAsync(runnerId);
+            Assert.NotEqual(
+                removedCredential.Credential.Id,
+                replacementCredential.Credential.Id);
+            await BackdateActiveCredentialAsync(
+                runnerId,
+                fixture.TimeProvider.GetUtcNow().AddDays(-1));
             await runner.RegisterAsync(
                 new RunnerInfo(runnerId, ["spec/*"], "test-host", null),
                 newProcess);
 
             Assert.True(await runner.IsCurrentProcessGenerationAsync(newProcess));
             Assert.False((await runner.GetRuntimeStateAsync()).Draining);
+
+            await reminders.UpsertRow(RemovalReminder(runner));
+            await runner.AsReference<IRemindable>().ReceiveReminder("administrative-removal", default);
+            Assert.Null(await reminders.ReadRow(runner.GetGrainId(), "administrative-removal"));
         }
         finally
         {
@@ -76,11 +110,32 @@ public sealed class RunnerAdministrativeRemovalSpecs(AgentJobGrainFixture fixtur
         }
     }
 
-    private async Task IssueCredentialAsync(string runnerId)
+    private static ReminderEntry RemovalReminder(IRunnerGrain runner) => new()
+    {
+        GrainId = runner.GetGrainId(),
+        ReminderName = "administrative-removal",
+        StartAt = TestTime.UtcNow.UtcDateTime,
+        Period = TimeSpan.FromDays(1),
+    };
+
+    private async Task BackdateActiveCredentialAsync(string runnerId, DateTimeOffset issuedAt)
+    {
+        using var scope = fixture.Cluster.GetSiloServiceProvider(null).CreateScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var row = await db.Credentials.SingleAsync(candidate =>
+            candidate.Kind.ToLower() == "runner"
+            && candidate.Name == runnerId
+            && candidate.RevokedAt == null);
+        row.CreatedAt = issuedAt;
+        await db.SaveChangesAsync();
+    }
+
+    private async Task<RunnerCredentialCreateResult> IssueCredentialAsync(string runnerId)
     {
         using var scope = fixture.Cluster.GetSiloServiceProvider(null).CreateScope();
         var result = await scope.ServiceProvider.GetRequiredService<ICredentialStore>()
             .CreateRunnerCredentialAsync(MohistPrincipal.AdminPrincipalId, runnerId);
-        Assert.NotNull(result);
+        return Assert.IsType<RunnerCredentialCreateResult>(result);
     }
 }
