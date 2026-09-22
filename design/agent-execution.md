@@ -135,12 +135,16 @@ until it is terminal:
   in the Session's current context and without supersession.
 
 The initial Turn belongs to its launch Job and never counts a second time.
-Unclaimed pending Jobs and queued Turns occupy nothing. A terminal Job or Turn
-occupies nothing, whatever its result. Activity convergence and committed
-context supersession end occupancy without inventing a successful result.
-Unresolved `unknown` still occupies a slot; the enclosing Session's Activity
-projection is not a counting filter. Elapsed time cannot settle that uncertainty.
-The claim timestamp remains on the owner record after occupancy ends.
+Unclaimed pending Jobs and queued Turns occupy nothing. Running or executing
+status and unresolved `unknown` are themselves evidence of occupancy; a missing
+claim timestamp cannot make an unresolved execution disappear from the count.
+The timestamp distinguishes claimed but undispatched `pending` or `queued`
+work from work that has not claimed capacity. A terminal Job or Turn occupies
+nothing, whatever its result. Activity convergence and committed context
+supersession end occupancy without inventing a successful result. The enclosing
+Session's Activity projection is not a counting filter. Elapsed time cannot
+settle uncertainty. The claim timestamp remains on the owner record after
+occupancy ends.
 
 Every launch and Session, including Workflow Sessions, retains the accepted
 Project and Agent IDs. A later name, Agent edit, or Workflow definition cannot
@@ -204,9 +208,10 @@ dispatch identity for as long as it waits; its delivery record cannot expire
 because of a lease-duration timer.
 
 Admission follows acceptance order among currently eligible heads. A pending
-launch can claim before Runner selection. Only the first queued follow-up Turn
-in a Session can compete, and only when that Session's execution-ownership and
-operation fences allow dispatch. A head blocked by its own Session does not
+launch can claim before Runner selection, but a prepared launch that is not yet
+visible cannot claim or hold a place ahead of visible work. Only the first queued
+follow-up Turn in a Session can compete, and only when that Session's
+execution-ownership and operation fences allow dispatch. A head blocked by its own Session does not
 block eligible work in other Sessions. Capacity never overrides those fences.
 The acceptance key is Job `SubmittedAt` or follow-up Turn `RecordedAt`, both
 compared in UTC. A Turn retains the time at which its first Input was accepted;
