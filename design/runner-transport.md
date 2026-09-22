@@ -69,10 +69,14 @@ must present the same still-active credential authority. A request authenticated
 before credential replacement cannot borrow the replacement credential merely
 because both credentials belong to the same Runner. An explicit operator Scope
 override remains distinct from issued Runner credential authority and cannot
-release an administrative-removal fence. Durable removal intent closes existing
-control transport and all control admission immediately, before fallible
-credential-store or reminder work. A local authority epoch also invalidates any
-installation that passed admission before that intent, even when its process
+release an administrative-removal fence. Server durably arms the removal wake
+before recording pending intent. It then closes existing control transport and
+all control admission before persisting that intent or attempting fallible
+credential-store work. A wake that finds no committed intent removes itself. If
+intent persistence is known not to have committed after transport teardown, the
+suppressed connection-finalizer observations are delivered as ordinary Runner
+disconnects. A local authority epoch also invalidates any installation that
+passed admission before that intent, even when its process
 generation differs from the generation recorded by removal.
 
 Registration and the handshake read a payload **without** `schemaVersion` as

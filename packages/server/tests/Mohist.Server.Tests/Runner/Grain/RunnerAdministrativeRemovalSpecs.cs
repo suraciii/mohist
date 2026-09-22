@@ -5,6 +5,7 @@ using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -22,6 +23,116 @@ namespace Mohist.Server.Tests.Runner.Grain;
 [Trait("level", "L0")]
 public sealed class RunnerAdministrativeRemovalSpecs(AgentJobGrainFixture fixture)
 {
+    [Fact]
+    public async Task IntentRecordedBeforeContinuationRecoversFromDurableReminderWithoutAnotherRevoke()
+    {
+        var runnerId = $"runner-removal-crash-{Guid.NewGuid():N}";
+        var runner = fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        var credential = await IssueCredentialAsync(runnerId);
+        await runner.RegisterAsync(
+            new RunnerInfo(runnerId, ["spec/*"], "test-host", null),
+            "process-before-crash",
+            Presented(credential));
+        var observer = fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<RunnerAdministrativeRemovalObserver>();
+        var injected = new InvalidOperationException("intent recorded crash boundary");
+        observer.IntentRecordedAsync = (_, _) => Task.FromException(injected);
+
+        try
+        {
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                runner.RevokeExecutionAuthorityAsync(fixture.TimeProvider.GetUtcNow()));
+            Assert.Equal(injected.Message, failure.Message);
+
+            var storage = fixture.Cluster.GetSiloServiceProvider(null)
+                .GetRequiredService<IGrainStorage>();
+            var pending = new GrainState<RunnerState>();
+            await storage.ReadStateAsync("runner", runner.GetGrainId(), pending);
+            Assert.Equal(
+                RunnerAdministrativeRemovalPhase.IntentRecorded,
+                pending.State.AdministrativeRemoval!.Phase);
+            var reminders = fixture.Cluster.GetSiloServiceProvider(null)
+                .GetRequiredService<IReminderTable>();
+            Assert.NotNull(await reminders.ReadRow(
+                runner.GetGrainId(),
+                "administrative-removal"));
+
+            observer.Reset();
+            await TestLifecycle.DeactivateAndWait(runner, fixture.Grains);
+            runner = fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+            await runner.AsReference<IRemindable>().ReceiveReminder(
+                "administrative-removal",
+                default);
+
+            var completed = new GrainState<RunnerState>();
+            await storage.ReadStateAsync("runner", runner.GetGrainId(), completed);
+            Assert.Equal(
+                RunnerAdministrativeRemovalPhase.Completed,
+                completed.State.AdministrativeRemoval!.Phase);
+            Assert.Null(await reminders.ReadRow(
+                runner.GetGrainId(),
+                "administrative-removal"));
+        }
+        finally
+        {
+            observer.Reset();
+        }
+    }
+
+    [Fact]
+    public async Task FailedIntentWriteReplyReloadsCommittedIntentInsteadOfRollingItBack()
+    {
+        var runnerId = $"runner-removal-uncertain-{Guid.NewGuid():N}";
+        var runner = fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        var credential = await IssueCredentialAsync(runnerId);
+        await runner.RegisterAsync(
+            new RunnerInfo(runnerId, ["spec/*"], "test-host", null),
+            "process-before-uncertain-write",
+            Presented(credential));
+        var observer = fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<RunnerAdministrativeRemovalObserver>();
+        observer.AfterIntentWriteAsync = (_, _) =>
+            Task.FromException(new InvalidOperationException("write reply lost"));
+
+        try
+        {
+            var result = await runner.RevokeExecutionAuthorityAsync(
+                fixture.TimeProvider.GetUtcNow());
+
+            Assert.True(result.Completed);
+            var storage = fixture.Cluster.GetSiloServiceProvider(null)
+                .GetRequiredService<IGrainStorage>();
+            var state = new GrainState<RunnerState>();
+            await storage.ReadStateAsync("runner", runner.GetGrainId(), state);
+            Assert.Equal(
+                RunnerAdministrativeRemovalPhase.Completed,
+                state.State.AdministrativeRemoval!.Phase);
+        }
+        finally
+        {
+            observer.Reset();
+        }
+    }
+
+    [Fact]
+    public async Task PrearmedReminderWithoutIntentRemovesItself()
+    {
+        var runnerId = $"runner-removal-orphan-wake-{Guid.NewGuid():N}";
+        var runner = fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        _ = await runner.GetRuntimeStateAsync();
+        var reminders = fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<IReminderTable>();
+        await reminders.UpsertRow(RemovalReminder(runner));
+
+        await runner.AsReference<IRemindable>().ReceiveReminder(
+            "administrative-removal",
+            default);
+
+        Assert.Null(await reminders.ReadRow(
+            runner.GetGrainId(),
+            "administrative-removal"));
+    }
+
     [Fact]
     public async Task SessionPersistenceFailureRecoversAfterRunnerReloadAndReenrollment()
     {

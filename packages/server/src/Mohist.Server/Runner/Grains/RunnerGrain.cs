@@ -69,6 +69,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private readonly IRunnerCredentialStatusReader _credentialStatus;
     private readonly IAgentSessionStore _sessions;
     private readonly IRunnerAuthorityFence _authorityFence;
+    private readonly RunnerAdministrativeRemovalObserver _administrativeRemovalObserver;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RunnerGrain> _log;
 
@@ -87,6 +88,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         IRunnerCredentialStatusReader credentialStatus,
         IAgentSessionStore sessions,
         IRunnerAuthorityFence authorityFence,
+        RunnerAdministrativeRemovalObserver administrativeRemovalObserver,
         ILogger<RunnerGrain> log,
         TimeProvider timeProvider,
         [PersistentState("runner")] IPersistentState<RunnerState> state,
@@ -103,6 +105,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
         _credentialStatus = credentialStatus;
         _sessions = sessions;
         _authorityFence = authorityFence;
+        _administrativeRemovalObserver = administrativeRemovalObserver;
         _log = log;
         _timeProvider = timeProvider;
         _state = state;
@@ -172,10 +175,11 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             // not clear its marker before that full reconciliation succeeds,
             // and activation must not republish credential-revoked authority.
             _status = RunnerStatus.Offline;
-            await ContinueAdministrativeRemovalAsync();
+            var removalId = state.AdministrativeRemoval.RemovalId;
+            await ContinueAdministrativeRemovalAsync(removalId);
             await RemovePresenceReminderAsync();
             if (state.AdministrativeRemoval.Phase == RunnerAdministrativeRemovalPhase.Completed)
-                await RemoveAdministrativeRemovalReminderAsync();
+                await RemoveAdministrativeRemovalReminderIfSafeAsync(removalId);
             PublishStatusObservation();
             return;
         }
@@ -208,7 +212,7 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
             await ReconcileClosingGenerationAsync();
         }
 
-        await RemoveAdministrativeRemovalReminderAsync();
+        await RemoveAdministrativeRemovalReminderIfSafeAsync();
 
         // Activation is where the Server re-establishes the authoritative
         // generation for this Runner, so work left behind by an earlier
@@ -228,19 +232,15 @@ public partial class RunnerGrain : Grain, IRunnerGrain, IRemindable
     {
         if (string.Equals(reminderName, AdministrativeRemovalReminderName, StringComparison.Ordinal))
         {
-            var removal = _state.State?.AdministrativeRemoval;
-            if (removal is null || removal.Phase == RunnerAdministrativeRemovalPhase.Completed)
-                await RemoveAdministrativeRemovalReminderAsync();
-            else
-                await ContinueAdministrativeRemovalAsync();
+            await ReceiveAdministrativeRemovalReminderAsync();
             return;
         }
         if (!string.Equals(reminderName, PresenceReminderName, StringComparison.Ordinal))
             return;
 
-        if (_state.State?.AdministrativeRemoval is not null)
+        if (_state.State?.AdministrativeRemoval is { } removal)
         {
-            await ContinueAdministrativeRemovalAsync();
+            await ContinueAdministrativeRemovalAsync(removal.RemovalId);
             await RemovePresenceReminderAsync();
             return;
         }

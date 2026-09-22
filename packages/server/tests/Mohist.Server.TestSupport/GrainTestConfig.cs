@@ -257,6 +257,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<ICredentialStore>(services => services.GetRequiredService<CredentialStore>());
         siloBuilder.Services.AddScoped<IRunnerCredentialStatusReader>(services => services.GetRequiredService<CredentialStore>());
         siloBuilder.Services.AddSingleton<IRunnerAuthorityFence>(NoopRunnerAuthorityFence.Instance);
+        siloBuilder.Services.AddSingleton<RunnerAdministrativeRemovalObserver>();
         siloBuilder.Services.AddSingleton<IActionCatalogSource>(NullActionCatalogSource.Instance);
         siloBuilder.Services.AddScoped<IWorkflowProfileProvider, WorkflowProfileProvider>();
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
@@ -362,10 +363,10 @@ public static class GrainTestConfig
     {
         public static NoopRunnerAuthorityFence Instance { get; } = new();
 
-        public Task FenceAsync(
+        public Task<RunnerAuthorityFenceResult> FenceAsync(
             string runnerId,
             string? processGeneration,
-            CancellationToken ct = default) => Task.CompletedTask;
+            CancellationToken ct = default) => Task.FromResult(RunnerAuthorityFenceResult.Empty);
     }
 
     private sealed class NoopTranscriptEventPublisher : ITranscriptEventPublisher

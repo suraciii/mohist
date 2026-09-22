@@ -291,7 +291,7 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
                 connection.PresentedAuthority);
     }
 
-    public async Task FenceAsync(
+    public async Task<RunnerAuthorityFenceResult> FenceAsync(
         string runnerId,
         string? processGeneration,
         CancellationToken ct = default)
@@ -318,9 +318,12 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
         }
 
         if (connection is null)
-            return;
+            return RunnerAuthorityFenceResult.Empty;
         await connectionFence!.WaitAsync(ct);
-        _tracker.UnregisterAndGetSessions(runnerId, connection.ConnectionId.ToString("D"));
+        var sessions = _tracker.UnregisterAndGetSessions(
+            runnerId,
+            connection.ConnectionId.ToString("D"));
+        return new RunnerAuthorityFenceResult(sessions);
     }
 
     private static async Task ObserveCancellationAsync(Task task)

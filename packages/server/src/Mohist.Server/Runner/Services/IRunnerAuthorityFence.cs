@@ -6,8 +6,13 @@ namespace Mohist.Server.Runner.Services;
 /// </summary>
 public interface IRunnerAuthorityFence
 {
-    Task FenceAsync(
+    Task<RunnerAuthorityFenceResult> FenceAsync(
         string runnerId,
         string? processGeneration,
         CancellationToken ct = default);
+}
+
+public sealed record RunnerAuthorityFenceResult(IReadOnlyList<string> DisconnectedSessionIds)
+{
+    public static RunnerAuthorityFenceResult Empty { get; } = new([]);
 }

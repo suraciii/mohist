@@ -12,6 +12,10 @@ using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.WebSocket;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
+using Orleans.Reminders;
 using Orleans.Runtime;
 using Orleans.Storage;
 using Xunit;
@@ -214,6 +218,70 @@ public sealed class RunnerEnrollmentSpecs(IsolatedMohistIntegrationFixture fixtu
         finally
         {
             failures.Reset();
+        }
+    }
+
+    [Fact]
+    public async Task FailedInitialIntentPersistenceAfterFenceDeliversOrdinaryDisconnect()
+    {
+        var runnerId = $"runner-removal-rollback-{Guid.NewGuid():N}";
+        var sessionId = $"session-removal-rollback-{Guid.NewGuid():N}";
+        var credential = await RegisterAsync(await CreateEnrollmentTokenAsync(), runnerId);
+        await RegisterProcessAsync(credential, runnerId, "process-a");
+        var runner = fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        var session = fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+
+        using var socket = await RunnerControlClient(credential, Guid.NewGuid()).ConnectAsync(
+            ControlUri(runnerId, "process-a"),
+            TestContext.Current.CancellationToken);
+        var registry = fixture.Services.GetRequiredService<RunnerControlWebSocketRegistry>();
+        await registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            runnerId,
+            "opencode",
+            WorkDir: "/work",
+            Metadata: GenericAgentSessionMetadata.Metadata(
+                new GenericAgentSessionContext("project-1", "agent-1", "Agent One"))));
+        await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-session-1"));
+        await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            "input-1", "turn-1", "prompt", "agent-connection", "job-1"));
+        await session.MarkInitialTurnExecutingAsync("job-1");
+
+        var observer = fixture.Services.GetRequiredService<RunnerAdministrativeRemovalObserver>();
+        observer.BeforeIntentWriteAsync = (_, _) =>
+            Task.FromException(new InvalidOperationException("initial intent write failed"));
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                runner.RevokeExecutionAuthorityAsync(fixture.TimeProvider.GetUtcNow()));
+
+            var storage = fixture.Services.GetRequiredService<IGrainStorage>();
+            var state = new GrainState<RunnerState>();
+            await storage.ReadStateAsync("runner", runner.GetGrainId(), state);
+            Assert.Null(state.State.AdministrativeRemoval);
+            Assert.Equal("unknown", (await session.GetAsync())!.Status);
+            Assert.True(await runner.IsCurrentRegistrationAuthorityAsync(
+                "process-a",
+                new RunnerPresentedAuthority(
+                    state.State.CurrentRegistrationCredentialId,
+                    OperatorOverride: false)));
+
+            var closed = await socket.ReceiveAsync(
+                new byte[64],
+                TestContext.Current.CancellationToken);
+            Assert.Equal(WebSocketMessageType.Close, closed.MessageType);
+
+            await runner.AsReference<IRemindable>().ReceiveReminder(
+                "administrative-removal",
+                default);
+            var reminders = fixture.Services.GetRequiredService<IReminderTable>();
+            Assert.Null(await reminders.ReadRow(
+                runner.GetGrainId(),
+                "administrative-removal"));
+        }
+        finally
+        {
+            observer.Reset();
         }
     }
 
