@@ -174,6 +174,7 @@ public sealed partial class AgentSessionRecoveryOrchestratorSpecs
             Metadata: new AgentSessionMetadata()
                 .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, "project-1")
                 .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+                .WithLabel(GenericAgentSessionMetadata.AgentId, "agent-test")
                 .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, "workflow-1")
                 .WithLabel(AgentSessionQueryMetadataKeys.SessionName, "build")));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(runtimeSessionId, WorkDir: "/work"));
