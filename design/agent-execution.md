@@ -124,16 +124,16 @@ Runner ([`runner.md`](runner.md#capacity)); a dispatch must satisfy both
 bounds, and capacity decisions converge at the Runner claim, per
 [the decision record](decisions/one-ledger-no-reconciliation.md).
 
-Counting rule. An execution occupies one slot for `(project, agent)` from
-acceptance until it is terminal:
+Counting rule. An execution occupies one slot for `(project, agent)` from its
+occupancy claim until it is terminal:
 
 - a launch Job that is dispatched, running, or of unknown dispatch outcome;
-- a follow-up Turn that is accepted and not terminal.
+- a follow-up Turn that has claimed occupancy and is not terminal.
 
-A pending Job that has not claimed occupancy occupies nothing. A Turn
-superseded by a committed context boundary — a prior `ContextGeneration` left
-by force-reset, rebind, or handoff — occupies nothing. A terminal Job or Turn
-occupies nothing, whatever its terminal status. A Turn settled by Activity
+A pending Job or queued Turn that has not claimed occupancy occupies nothing.
+A Turn superseded by a committed context boundary — a prior `ContextGeneration`
+left by force-reset, rebind, or handoff — occupies nothing. A terminal Job or
+Turn occupies nothing, whatever its terminal status. A Turn settled by Activity
 convergence is terminal for this count.
 
 Claim rule. An occupancy claim is one store transaction over the
@@ -359,9 +359,10 @@ later are outside it. Settlement supersedes, after the force-reset pattern:
 it marks every in-flight Turn of that generation terminal `unknown` and every
 queued undispatched Turn `cancelled`, records them through
 `unresolvedPrevious` and `nextAction`, supersedes any ActiveOperation of that
-generation, and settles the launch Job that owns a settled initial Turn. A
-superseded Turn or Job occupies no capacity and no longer blocks
-`admission=ready`.
+generation, and settles the launch Job that owns a settled initial Turn.
+Superseded facts take no part in current Activity, occupancy, or admission
+derivation: they are recorded through `unresolvedPrevious` and `nextAction`
+and do not count as unresolved external side effects for `admission=ready`.
 
 - `executing` sets Activity to `active`; the Runner owns the pending turn
   report as before.
@@ -448,8 +449,8 @@ Follow-up has two paths chosen by current state:
 - Idle and ready admission creates one Input and one new Turn.
 - A running Turn with Runtime steer support accepts one Input on that Turn when
   no operation competes.
-- A running Turn without steer support queues a later Turn in Session order when
-  capacity permits.
+- A running Turn without steer support queues a later Turn in Session order
+  unless the queue is full.
 - `outcome_pending`, `unknown`, or an active context operation rejects the
   request without guessing a target Turn.
 
@@ -559,12 +560,12 @@ Missing recovery repairs a current Binding. It is not Prompt replay, Workflow
 recovery, or Runner migration. Transport failure, timeout, disconnect, or a
 missing local cache entry is not proof that the Runtime Session is absent.
 
-Automatic recovery is allowed only when the same Runner gives deterministic
-missing evidence — an `unknown-to-runner` binding fact from Activity
-convergence qualifies — and the current generation is safe: Activity is
-`idle`, admission is `ready`, no Turn is running or `outcome_pending`, and no
-Input, dispatch, Runtime effect, or operation is `unknown` beyond the
-superseded facts convergence itself recorded.
+Automatic recovery is allowed only when deterministic missing evidence
+exists — the same Runner reports it, or an `unknown-to-runner` binding fact
+from Activity convergence stands on its own — and the current generation is
+safe: Activity is `idle`, admission is `ready`, no Turn is running or
+`outcome_pending`, and no Input, dispatch, Runtime effect, or operation is
+`unknown` beyond the superseded facts convergence itself recorded.
 
 ```text diagram
                           +----------------+
@@ -727,8 +728,10 @@ Current implementation gaps are:
 - Capacity is still brokered by a permit grain with a waiter list and grant
   notifications; the derived occupancy claim above is the target, not the
   shipped system (issue #1078).
-- Reconnection settles no `unknown` Activity: the lifecycle convergence rules
-  above are the target; today only explicit force-reset clears `unknown`.
+- Reconnection settles no `unknown` Activity and force-reset has no
+  implementation; today a Runner-reported terminal activity event or the
+  Manager recovery turn is the only way `unknown` clears. The lifecycle
+  convergence rules above are the target.
 - Every Follow-up requires a caller `requestId`. Compact, Reset, recovery,
   handoff, rebind, and force-reset require a caller `operationId`. Some current
   entry points still synthesize a hidden key when the caller omits one, so
