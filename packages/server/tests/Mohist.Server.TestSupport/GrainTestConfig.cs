@@ -6,6 +6,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Auth.Domain;
+using Mohist.Server.Infrastructure.Capacity;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Auth;
@@ -268,6 +269,7 @@ public static class GrainTestConfig
         siloBuilder.Services.AddScoped<IWorkspaceStore, WorkspaceStore>();
         siloBuilder.Services.AddScoped<WorkspaceQuerier>();
         siloBuilder.Services.AddScoped<IAgentJobStore, AgentJobStore>();
+        siloBuilder.Services.AddScoped<IAgentCapacityStore, AgentCapacityStore>();
         siloBuilder.Services.AddScoped<SlackOutboxStore>();
         siloBuilder.Services.AddScoped<ISlackConnectionHealthBackpressurer, NoopSlackConnectionHealthBackpressurer>();
         siloBuilder.Services.AddScoped<Mohist.Server.Agent.Services.AgentQuerier>();
