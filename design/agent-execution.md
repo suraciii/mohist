@@ -110,6 +110,36 @@ to an existing AgentSession and either joins the current Turn through steer or
 creates a later Turn. Compact, Reset, recovery, rebind, handoff, and force-reset
 also change only the Session.
 
+## Admission and Capacity
+
+An Agent runs at most `maxConcurrentRuns` concurrent executions. Capacity is
+derived from execution facts in the authoritative stores. No component keeps a
+permit ledger, waiter list, or grant notification for capacity: a ledger is a
+projection of the facts, a projection must be reconciled against them, and
+reconciliation gaps have leaked permits and deadlocked grant delivery
+(issue #1078). A derived count cannot drift because its input is the authority.
+
+Counting rule. An execution occupies one slot for `(project, agent)` from the
+moment it passes admission until it is terminal:
+
+- a launch Job that is dispatched, running, or of unknown dispatch outcome;
+- a follow-up Turn that has passed admission and is not terminal.
+
+A waiting Job occupies nothing. An unadmitted Turn occupies nothing. A terminal
+Job or Turn occupies nothing, whatever its terminal status.
+
+Claim rule. Admission is one store transaction: it counts occupants for the
+`(project, agent)` and transitions the waiting Job or Turn to admitted only
+while the count is below the limit. Counting in one transaction and claiming in
+a later one is the classic admission race and is forbidden.
+
+Wake rule. A waiting execution re-evaluates admission on the existing periodic
+recovery reminder, which bounds both correctness and admission latency. No
+dedicated capacity signal exists.
+
+A `maxConcurrentRuns` change takes effect at the next evaluation. `0` and
+unlimited keep their meaning.
+
 AgentJob references the first Input and Turn created by launch. A completed
 AgentJob means that the launch work returned successfully. It does not close the
 AgentSession or establish that the user's broader task is complete. Later
@@ -285,6 +315,38 @@ missing recovery use this result instead of deriving safety from history.
 A steer on a known running Turn is the only ordinary Input exception. It requires
 Runtime support, the same complete Binding, and no competing operation. It never
 converts `unknown` into safe idle.
+
+#### Activity convergence
+
+`unknown` Activity converges through lifecycle evidence from the owning Runner,
+never through elapsed time. Elapsed time cannot distinguish a lost signal from
+a lost execution; guessing violates the `unknown` contract above. Two
+authorities convert `unknown`:
+
+- Runner re-registration. When a Runner's control connection is re-established,
+  Server probes the binding of every Session with `unknown` Activity bound to
+  that Runner. The Runner answers with deterministic evidence per binding:
+  `executing`, `idle`, or `unknown-to-runner`.
+- Runner removal. When a Runner record is removed or revoked, every Session
+  bound to it with `unknown` Activity settles as `unknown-to-runner`.
+
+Settlement rules:
+
+- `executing` sets Activity to `active`; the Runner owns the pending turn
+  report as before.
+- `idle` marks every non-terminal Turn of the current generation terminal with
+  the existing `unknown` status and sets Activity to `idle`. Settlement never
+  re-executes a Turn, never re-sends a reply, and never replays Transcript;
+  outbound idempotency is the dispatch identity already carried by the reply
+  anchor.
+- `unknown-to-runner` additionally records the binding as runner-disclaimed;
+  the next Input takes the runtime replacement path of
+  [Runtime Session missing recovery](#runtime-session-missing-recovery).
+- A failed or unanswered probe leaves Activity `unknown`.
+
+Convergence is idempotent: repeated probes settle the same facts. Settlement
+is a Session transition and competes with other Session operations under the
+same fences; it never bypasses `admission` evaluation.
 
 ### Transcript contract
 
@@ -523,7 +585,8 @@ not keep the original operation active.
 Automatic replacement after confirmed missing is allowed for an initial AgentJob
 Input not yet submitted and for an idle Follow-up. It is rejected during an
 executing Follow-up, for Compact, for a Stop target, and for ordinary Reset.
-Reset requires safe admission. `unknown` requires explicit force-reset.
+Reset requires safe admission. `unknown` resolves through Activity convergence
+or explicit force-reset; nothing else may clear it.
 
 Recovery never reconstructs Runtime context from Transcript. Transcript is an
 audit and presentation record, not a command source.

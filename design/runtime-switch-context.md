@@ -55,6 +55,11 @@ old binding unavailable
 This does not migrate provider conversation files, summarize history, create a
 new queue, or automatically repair a provider whose completion signal is broken.
 
+When a Runner reconnects, Session `unknown` Activity settles through the
+re-registration probe specified in
+[`agent-execution.md`](agent-execution.md#activity-convergence); a
+runner-disclaimed binding enters the replacement path above.
+
 ## Status
 
 This specification replaces the earlier proposal for a one-time user-facing
