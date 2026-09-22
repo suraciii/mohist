@@ -705,6 +705,75 @@ export class ServerConnection {
     return payload === null ? null : requireGenericSessionPayload(payload, 'attachAgentSession')
   }
 
+  async prepareAgentJobInitialRecovery(
+    jobId: string,
+    body: unknown,
+    signal: AbortSignal,
+  ): Promise<{ phase: string; candidateCreationAuthorized: boolean; runtime: string | null; runtimeSessionId: string | null }> {
+    const response = await this.requestTransport.request(
+      'prepareAgentJobInitialRecovery',
+      this.url(`agent-jobs/${encodeURIComponent(jobId)}/initial-input/recovery/prepare`),
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      },
+    )
+    return await this.requestTransport.readJson(response, 'prepareAgentJobInitialRecovery') as {
+      phase: string
+      candidateCreationAuthorized: boolean
+      runtime: string | null
+      runtimeSessionId: string | null
+    }
+  }
+
+  async completeAgentJobInitialRecovery(
+    jobId: string,
+    body: unknown,
+    signal: AbortSignal,
+  ): Promise<{ phase: string; candidateCreationAuthorized: boolean; runtime: string | null; runtimeSessionId: string | null }> {
+    const response = await this.requestTransport.request(
+      'completeAgentJobInitialRecovery',
+      this.url(`agent-jobs/${encodeURIComponent(jobId)}/initial-input/recovery/complete`),
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      },
+    )
+    return await this.requestTransport.readJson(response, 'completeAgentJobInitialRecovery') as {
+      phase: string
+      candidateCreationAuthorized: boolean
+      runtime: string | null
+      runtimeSessionId: string | null
+    }
+  }
+
+  async startAgentJobInitialInput(
+    jobId: string,
+    body: unknown,
+    signal: AbortSignal,
+  ): Promise<{ effectAdmitted: boolean; submissionAuthorized: boolean; runtime: string | null; runtimeSessionId: string | null }> {
+    const response = await this.requestTransport.request(
+      'startAgentJobInitialInput',
+      this.url(`agent-jobs/${encodeURIComponent(jobId)}/initial-input/start`),
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      },
+    )
+    return await this.requestTransport.readJson(response, 'startAgentJobInitialInput') as {
+      effectAdmitted: boolean
+      submissionAuthorized: boolean
+      runtime: string | null
+      runtimeSessionId: string | null
+    }
+  }
+
   async recoverMissingAgentSession(
     projectId: string,
     sessionId: string,

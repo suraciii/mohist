@@ -241,6 +241,68 @@ public static partial class RunnerRoutes
             return Results.Ok(events);
         });
 
+        group.MapPost("/agent-jobs/{jobId}/initial-input/recovery/prepare", async (
+            string runnerId, string jobId, AgentJobInitialRecoveryPrepareRequest req, IGrainFactory grains) =>
+        {
+            if (!await grains.GetGrain<IRunnerGrain>(runnerId).IsCurrentProcessGenerationAsync(req.ProcessGeneration))
+                return ApiResults.Conflict("Runner process generation is no longer current", "runner_process_stale");
+            try
+            {
+                var receipt = await grains.GetGrain<IAgentJobGrain>(jobId).PrepareInitialInputRecoveryAsync(
+                    new PrepareAgentJobInitialRecovery(
+                        req.OperationId, runnerId, req.WorkId, req.ProcessGeneration,
+                        req.SessionId, req.InputId, req.TurnId,
+                        req.ExpectedRuntime, req.ExpectedRuntimeSessionId, req.CreationAttemptId));
+                return Results.Ok(receipt);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "initial_input_recovery_conflict");
+            }
+        });
+
+        group.MapPost("/agent-jobs/{jobId}/initial-input/recovery/complete", async (
+            string runnerId, string jobId, AgentJobInitialRecoveryCompleteRequest req, IGrainFactory grains) =>
+        {
+            if (!await grains.GetGrain<IRunnerGrain>(runnerId).IsCurrentProcessGenerationAsync(req.ProcessGeneration))
+                return ApiResults.Conflict("Runner process generation is no longer current", "runner_process_stale");
+            try
+            {
+                var recovery = new PrepareAgentJobInitialRecovery(
+                    req.OperationId, runnerId, req.WorkId, req.ProcessGeneration,
+                    req.SessionId, req.InputId, req.TurnId,
+                    req.ExpectedRuntime, req.ExpectedRuntimeSessionId, req.CreationAttemptId);
+                var receipt = await grains.GetGrain<IAgentJobGrain>(jobId).CompleteInitialInputRecoveryAsync(
+                    new CompleteAgentJobInitialRecovery(
+                        recovery, req.ReplacementRuntime, req.ReplacementRuntimeSessionId));
+                return Results.Ok(receipt);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "initial_input_recovery_conflict");
+            }
+        });
+
+        group.MapPost("/agent-jobs/{jobId}/initial-input/start", async (
+            string runnerId, string jobId, AgentJobInitialInputStartRequest req, IGrainFactory grains) =>
+        {
+            if (!await grains.GetGrain<IRunnerGrain>(runnerId).IsCurrentProcessGenerationAsync(req.ProcessGeneration))
+                return ApiResults.Conflict("Runner process generation is no longer current", "runner_process_stale");
+            try
+            {
+                var receipt = await grains.GetGrain<IAgentJobGrain>(jobId).StartInitialInputAsync(
+                    new StartAgentJobInitialInput(
+                        req.OperationId, req.SubmissionAttemptId, runnerId, req.WorkId,
+                        req.ProcessGeneration, req.SessionId, req.InputId, req.TurnId,
+                        req.Runtime, req.RuntimeSessionId));
+                return Results.Ok(receipt);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "initial_input_start_conflict");
+            }
+        });
+
         // AgentJob AgentSession routes identify the persisted Session by
         // (projectId, sessionId) regardless of launch origin.
         group.MapGet("/agent-sessions/{projectId}/{sessionId}", async (
@@ -675,6 +737,38 @@ public record AgentSessionAttachRequest(
     string? ExpectedRuntime = null,
     string? ExpectedRuntimeSessionId = null,
     string? ExpectedRunnerId = null);
+public record AgentJobInitialRecoveryPrepareRequest(
+    string OperationId,
+    string WorkId,
+    string ProcessGeneration,
+    string SessionId,
+    string InputId,
+    string TurnId,
+    string ExpectedRuntime,
+    string ExpectedRuntimeSessionId,
+    string CreationAttemptId);
+public record AgentJobInitialRecoveryCompleteRequest(
+    string OperationId,
+    string WorkId,
+    string ProcessGeneration,
+    string SessionId,
+    string InputId,
+    string TurnId,
+    string ExpectedRuntime,
+    string ExpectedRuntimeSessionId,
+    string CreationAttemptId,
+    string ReplacementRuntime,
+    string ReplacementRuntimeSessionId);
+public record AgentJobInitialInputStartRequest(
+    string OperationId,
+    string SubmissionAttemptId,
+    string WorkId,
+    string ProcessGeneration,
+    string SessionId,
+    string InputId,
+    string TurnId,
+    string Runtime,
+    string RuntimeSessionId);
 public record MissingRuntimeSessionRecoveryRequest(
     string ExpectedRunnerId,
     string ExpectedRuntime,

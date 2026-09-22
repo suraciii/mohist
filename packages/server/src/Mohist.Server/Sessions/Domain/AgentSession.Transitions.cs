@@ -257,6 +257,178 @@ public static partial class AgentSessionExtensions
             return [new AgentSessionRuntimeBound(replacement.RuntimeSessionId, session.Runtime.Runtime)];
         }
 
+        public IReadOnlyList<AgentSessionEvent> RecoverInitialAgentJobTurn(
+            AgentRuntimeBinding expected,
+            AgentRuntimeBinding replacement,
+            AgentInitialInputOperation operation,
+            DateTime now,
+            long expectedBindingEpoch)
+        {
+            var existing = session.Status.InitialInputOperation;
+            if (existing is not null)
+            {
+                if (!SameInitialOperation(existing, operation)
+                    || existing.EffectAdmitted
+                    || !Equals(session.CurrentRuntimeBinding(), replacement))
+                    throw new InvalidOperationException("initial_input_operation_conflict");
+                return [];
+            }
+
+            EnsureExpectedRuntimeBinding(session, expected, session.CurrentRuntimeBinding());
+            if (session.BindingEpoch != expectedBindingEpoch)
+                throw new InvalidOperationException(
+                    $"AgentSession {session.Id} binding epoch changed from {expectedBindingEpoch} to {session.BindingEpoch}.");
+            if (session.Status.Activity != AgentSessionActivity.Active
+                || session.Status.PendingStop is { IsActive: true }
+                || session.Status.PendingReset is { Outcome: null, SupersededAt: null }
+                || session.Status.ConfirmedExecutionOwnership is not null
+                || (session.Status.PendingFollowups?.Count ?? 0) != 0
+                || session.Status.PendingFollowup is not null)
+                throw new InvalidOperationException("initial_input_recovery_not_safe");
+
+            var liveTurns = (session.Status.Turns ?? []).Where(turn =>
+                turn.SupersededAt is null
+                && turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing or AgentTurnStatus.Unknown).ToArray();
+            var turn = liveTurns.SingleOrDefault();
+            var input = (session.Status.Inputs ?? []).SingleOrDefault(candidate =>
+                string.Equals(candidate.Id, operation.InputId, StringComparison.Ordinal));
+            if (liveTurns.Length != 1
+                || turn is null
+                || turn.Status != AgentTurnStatus.Queued
+                || !string.Equals(turn.Id, operation.TurnId, StringComparison.Ordinal)
+                || !string.Equals(turn.JobId, operation.JobId, StringComparison.Ordinal)
+                || !turn.InputIds.Contains(operation.InputId, StringComparer.Ordinal)
+                || input is null
+                || !string.Equals(input.JobId, operation.JobId, StringComparison.Ordinal)
+                || input.ContextGeneration != turn.ContextGeneration)
+                throw new InvalidOperationException("initial_input_recovery_fence_mismatch");
+
+            if (string.IsNullOrWhiteSpace(replacement.RunnerId)
+                || string.IsNullOrWhiteSpace(replacement.Runtime)
+                || string.IsNullOrWhiteSpace(replacement.RuntimeSessionId))
+                throw new InvalidOperationException("initial_input_replacement_incomplete");
+
+            var nextBindingEpoch = checked(session.BindingEpoch + 1);
+            var nextGeneration = checked(session.Status.ContextGeneration + 1);
+            session.Runtime = session.Runtime with
+            {
+                RunnerId = replacement.RunnerId,
+                Runtime = NormalizeRuntime(replacement.Runtime),
+            };
+            var usage = session.Status.UsageSummary ?? new AgentUsageSummary();
+            session.Status = session.Status with
+            {
+                AgentRuntimeSessionId = replacement.RuntimeSessionId,
+                BoundAt = now,
+                LastDataAt = now,
+                ContextGeneration = nextGeneration,
+                MissingRunnerFact = null,
+                PendingActivityObservation = null,
+                ConfirmedExecutionOwnership = null,
+                UsageSummary = usage with { ContextWindowUsed = null, ContextWindowSize = null },
+            };
+            session.PersistedActivitySummary = (session.PersistedActivitySummary ?? AgentSessionActivitySummaryState.Empty) with
+            {
+                LastTerminalStatus = null,
+                LatestActivity = null,
+            };
+            session.BindingEpoch = nextBindingEpoch;
+            var turns = (session.Status.Turns ?? []).ToList();
+            var index = turns.FindIndex(candidate => string.Equals(candidate.Id, operation.TurnId, StringComparison.Ordinal));
+            turns[index] = turns[index] with
+            {
+                ContextGeneration = nextGeneration,
+                UpdatedAt = now,
+                WorkflowExecution = turns[index].WorkflowExecution is { } workflow
+                    ? workflow with
+                    {
+                        RunnerId = replacement.RunnerId,
+                        Runtime = NormalizeRuntime(replacement.Runtime)!,
+                        RuntimeSessionId = replacement.RuntimeSessionId!,
+                    }
+                    : null,
+            };
+            session.Status = session.Status with
+            {
+                Turns = turns,
+                InitialInputOperation = operation with
+                {
+                    Runtime = NormalizeRuntime(replacement.Runtime)!,
+                    RuntimeSessionId = replacement.RuntimeSessionId!,
+                    BindingEpoch = nextBindingEpoch,
+                    ContextGeneration = nextGeneration,
+                    RecordedAt = now,
+                },
+            };
+            return [new AgentSessionRuntimeBound(replacement.RuntimeSessionId!, session.Runtime.Runtime)];
+        }
+
+        public IReadOnlyList<AgentSessionEvent> AdmitInitialAgentJobInputEffect(
+            AgentInitialInputOperation operation,
+            DateTime now)
+        {
+            var existing = session.Status.InitialInputOperation;
+            if (existing is { EffectAdmitted: true })
+            {
+                if (!SameInitialOperation(existing, operation)
+                    || existing.BindingEpoch != session.BindingEpoch
+                    || existing.ContextGeneration != session.Status.ContextGeneration
+                    || !string.Equals(existing.RuntimeSessionId, session.Status.AgentRuntimeSessionId, StringComparison.Ordinal))
+                    throw new InvalidOperationException("initial_input_start_conflict");
+                return [];
+            }
+            if (existing is not null && !SameInitialOperation(existing, operation))
+                throw new InvalidOperationException("initial_input_operation_conflict");
+
+            var turns = (session.Status.Turns ?? []).ToList();
+            var live = turns.Where(turn => turn.SupersededAt is null
+                && turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing or AgentTurnStatus.Unknown).ToArray();
+            var index = turns.FindIndex(turn => string.Equals(turn.Id, operation.TurnId, StringComparison.Ordinal));
+            var input = (session.Status.Inputs ?? []).SingleOrDefault(candidate =>
+                string.Equals(candidate.Id, operation.InputId, StringComparison.Ordinal));
+            if (session.Status.Activity != AgentSessionActivity.Active
+                || session.Status.PendingStop is { IsActive: true }
+                || session.Status.PendingReset is { Outcome: null, SupersededAt: null }
+                || live.Length != 1
+                || index < 0
+                || turns[index].Status != AgentTurnStatus.Queued
+                || turns[index].SupersededAt is not null
+                || !string.Equals(turns[index].JobId, operation.JobId, StringComparison.Ordinal)
+                || !turns[index].InputIds.Contains(operation.InputId, StringComparer.Ordinal)
+                || input is null
+                || !string.Equals(input.JobId, operation.JobId, StringComparison.Ordinal)
+                || operation.BindingEpoch != session.BindingEpoch
+                || operation.ContextGeneration != session.Status.ContextGeneration
+                || !string.Equals(operation.RunnerId, session.Runtime.RunnerId, StringComparison.Ordinal)
+                || !string.Equals(NormalizeRuntime(operation.Runtime), session.Runtime.Runtime, StringComparison.Ordinal)
+                || !string.Equals(operation.RuntimeSessionId, session.Status.AgentRuntimeSessionId, StringComparison.Ordinal))
+                throw new InvalidOperationException("initial_input_start_fence_mismatch");
+
+            turns[index] = turns[index] with { Status = AgentTurnStatus.Executing, UpdatedAt = now };
+            session.Status = session.Status with
+            {
+                Turns = turns,
+                InitialInputOperation = operation with
+                {
+                    RecordedAt = existing?.RecordedAt ?? now,
+                    EffectAdmitted = true,
+                    EffectAdmittedAt = now,
+                },
+            };
+            return [];
+        }
+
+        private static bool SameInitialOperation(AgentInitialInputOperation left, AgentInitialInputOperation right) =>
+            string.Equals(left.OperationId, right.OperationId, StringComparison.Ordinal)
+            && string.Equals(left.JobId, right.JobId, StringComparison.Ordinal)
+            && string.Equals(left.WorkId, right.WorkId, StringComparison.Ordinal)
+            && string.Equals(left.ProcessGeneration, right.ProcessGeneration, StringComparison.Ordinal)
+            && string.Equals(left.RunnerId, right.RunnerId, StringComparison.Ordinal)
+            && string.Equals(left.InputId, right.InputId, StringComparison.Ordinal)
+            && string.Equals(left.TurnId, right.TurnId, StringComparison.Ordinal)
+            && string.Equals(left.Runtime, right.Runtime, StringComparison.Ordinal)
+            && string.Equals(left.RuntimeSessionId, right.RuntimeSessionId, StringComparison.Ordinal);
+
         private static void EnsureNoCurrentExecutionOrOperations(
             AgentSession current,
             string reason,

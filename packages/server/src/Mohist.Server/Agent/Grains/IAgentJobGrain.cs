@@ -42,6 +42,12 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
 
     Task<bool> RecordRuntimeSessionBindingAsync(string runnerId, string workId, string sessionId, string runtimeSessionId) =>
         Task.FromResult(false);
+    Task<AgentJobInitialRecoveryReceipt> PrepareInitialInputRecoveryAsync(PrepareAgentJobInitialRecovery command) =>
+        Task.FromResult(new AgentJobInitialRecoveryReceipt("refused", false, null, null));
+    Task<AgentJobInitialRecoveryReceipt> CompleteInitialInputRecoveryAsync(CompleteAgentJobInitialRecovery command) =>
+        Task.FromResult(new AgentJobInitialRecoveryReceipt("refused", false, null, null));
+    Task<AgentJobInitialStartReceipt> StartInitialInputAsync(StartAgentJobInitialInput command) =>
+        Task.FromResult(new AgentJobInitialStartReceipt(false, false, null, null));
     Task SubmitAsync(AgentJobInput input);
     Task EnsureSubmittedAsync(AgentJobInput input);
     Task CheckTimeoutsAsync();
@@ -168,6 +174,52 @@ public sealed record AgentJobPendingDispatch(
     [property: Id(0)] string AgentJobId,
     [property: Id(1)] string WorkId,
     [property: Id(2)] WorkDispatch Dispatch);
+
+[GenerateSerializer]
+public sealed record PrepareAgentJobInitialRecovery(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string RunnerId,
+    [property: Id(2)] string WorkId,
+    [property: Id(3)] string ProcessGeneration,
+    [property: Id(4)] string SessionId,
+    [property: Id(5)] string InputId,
+    [property: Id(6)] string TurnId,
+    [property: Id(7)] string ExpectedRuntime,
+    [property: Id(8)] string ExpectedRuntimeSessionId,
+    [property: Id(9)] string CreationAttemptId);
+
+[GenerateSerializer]
+public sealed record CompleteAgentJobInitialRecovery(
+    [property: Id(0)] PrepareAgentJobInitialRecovery Recovery,
+    [property: Id(1)] string ReplacementRuntime,
+    [property: Id(2)] string ReplacementRuntimeSessionId);
+
+[GenerateSerializer]
+public sealed record StartAgentJobInitialInput(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string SubmissionAttemptId,
+    [property: Id(2)] string RunnerId,
+    [property: Id(3)] string WorkId,
+    [property: Id(4)] string ProcessGeneration,
+    [property: Id(5)] string SessionId,
+    [property: Id(6)] string InputId,
+    [property: Id(7)] string TurnId,
+    [property: Id(8)] string Runtime,
+    [property: Id(9)] string RuntimeSessionId);
+
+[GenerateSerializer]
+public sealed record AgentJobInitialRecoveryReceipt(
+    [property: Id(0)] string Phase,
+    [property: Id(1)] bool CandidateCreationAuthorized,
+    [property: Id(2)] string? Runtime,
+    [property: Id(3)] string? RuntimeSessionId);
+
+[GenerateSerializer]
+public sealed record AgentJobInitialStartReceipt(
+    [property: Id(0)] bool EffectAdmitted,
+    [property: Id(1)] bool SubmissionAuthorized,
+    [property: Id(2)] string? Runtime,
+    [property: Id(3)] string? RuntimeSessionId);
 
 [GenerateSerializer]
 public sealed record PrepareManualLaunchCommand(

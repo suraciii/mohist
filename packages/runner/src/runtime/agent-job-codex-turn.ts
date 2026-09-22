@@ -16,6 +16,7 @@ import type { AgentJobTurnDeps } from './agent-job-turn.js'
 import type { BindingResolution } from './agent-job-executor.js'
 import { knownBinding } from './agent-job-executor.js'
 import {
+  admitInitialProviderSubmission,
   buildAgentJobOutput,
   collectUnknownKeys,
   createAgentSessionEventSink,
@@ -84,6 +85,14 @@ export async function executeCodexTurn(
     onSessionReady: async (session) => {
       executionBinding = physicalBinding(work, binding.agentSessionId, 'codex', session.runtimeSessionId)
       await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
+      await admitInitialProviderSubmission(
+        deps.connection,
+        work,
+        binding,
+        'codex',
+        session.runtimeSessionId,
+        signal,
+      )
       if (!skipInitialInput) await eventSink.publishSessionInput(composed, session.runtimeSessionId)
     },
     onEvent: (event) => {

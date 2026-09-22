@@ -10,6 +10,8 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionInfo> OpenAsync(OpenAgentSessionCommand command);
     Task<AgentSessionInfo> AttachPhysicalSessionAsync(AttachPhysicalSessionCommand command);
     Task<AgentSessionInfo> RecoverMissingRuntimeSessionAsync(RecoverMissingRuntimeSessionCommand command);
+    Task<InitialAgentJobSessionReceipt> RecoverInitialAgentJobRuntimeSessionAsync(RecoverInitialAgentJobRuntimeSessionCommand command);
+    Task<InitialAgentJobSessionReceipt> AdmitInitialAgentJobInputAsync(AdmitInitialAgentJobInputCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command);
     Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendSystemEventsAsync(AppendAgentSessionSystemEventsCommand command);
 
@@ -224,6 +226,44 @@ public sealed record RecoverMissingRuntimeSessionCommand(
     [property: Id(3)] string ReplacementRuntimeSessionId,
     [property: Id(4)] string? ExpectedQueuedTurnId = null,
     [property: Id(5)] string? ReplacementRuntime = null);
+
+[GenerateSerializer]
+public sealed record RecoverInitialAgentJobRuntimeSessionCommand(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string JobId,
+    [property: Id(2)] string WorkId,
+    [property: Id(3)] string ProcessGeneration,
+    [property: Id(4)] string RunnerId,
+    [property: Id(5)] string InputId,
+    [property: Id(6)] string TurnId,
+    [property: Id(7)] string ExpectedRuntime,
+    [property: Id(8)] string ExpectedRuntimeSessionId,
+    [property: Id(9)] string ReplacementRuntime,
+    [property: Id(10)] string ReplacementRuntimeSessionId,
+    [property: Id(11)] long ExpectedBindingEpoch);
+
+[GenerateSerializer]
+public sealed record AdmitInitialAgentJobInputCommand(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string JobId,
+    [property: Id(2)] string WorkId,
+    [property: Id(3)] string ProcessGeneration,
+    [property: Id(4)] string RunnerId,
+    [property: Id(5)] string InputId,
+    [property: Id(6)] string TurnId,
+    [property: Id(7)] string Runtime,
+    [property: Id(8)] string RuntimeSessionId,
+    [property: Id(9)] long BindingEpoch,
+    [property: Id(10)] long ContextGeneration);
+
+[GenerateSerializer]
+public sealed record InitialAgentJobSessionReceipt(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string Runtime,
+    [property: Id(2)] string RuntimeSessionId,
+    [property: Id(3)] long BindingEpoch,
+    [property: Id(4)] long ContextGeneration,
+    [property: Id(5)] bool EffectAdmitted);
 
 [GenerateSerializer]
 public sealed record AppendAgentSessionRuntimeEventsCommand(

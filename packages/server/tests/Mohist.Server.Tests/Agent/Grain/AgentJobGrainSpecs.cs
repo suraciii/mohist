@@ -180,6 +180,85 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task InitialInputRecovery_ConvergesSessionAndJobBeforeStartAndAcceptsOnlyNewBindingReport()
+    {
+        var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-initial-recovery-{Guid.NewGuid():N}");
+        var jobKey = $"agent-job-initial-recovery-{Guid.NewGuid():N}";
+        var sessionId = $"session-initial-recovery-{Guid.NewGuid():N}";
+        var inputId = $"input-initial-recovery-{Guid.NewGuid():N}";
+        var turnId = $"turn-initial-recovery-{Guid.NewGuid():N}";
+        var oldRuntimeSessionId = $"runtime-old-{Guid.NewGuid():N}";
+        var newRuntimeSessionId = $"runtime-new-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            runnerId,
+            "opencode",
+            "/tmp/initial-recovery",
+            Metadata: new AgentSessionMetadata()
+                .WithLabel("mohist.io/project-id", projectId)
+                .WithLabel("mohist.io/source-kind", "agent-launch")
+                .WithLabel("mohist.io/source-id", jobKey)
+                .WithLabel("mohist.io/agent-id", "agent-test")));
+        await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            inputId, turnId, "recover me", "agent-connection", jobKey, Runtime: "opencode", WorkDir: "/tmp/initial-recovery"));
+        await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+            oldRuntimeSessionId, WorkDir: "/tmp/initial-recovery", Runtime: "opencode"));
+        await job.SubmitAsync(MakeInput("recover me", projectId, "/tmp/initial-recovery") with
+        {
+            AgentSessionId = sessionId,
+            InitialInputId = inputId,
+            InitialTurnId = turnId,
+            Runtime = "opencode",
+        });
+        await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
+        var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
+        Assert.True(await job.RecordRuntimeSessionBindingAsync(runnerId, workId, sessionId, oldRuntimeSessionId));
+        var recovery = new PrepareAgentJobInitialRecovery(
+            "operation-1", runnerId, workId, TestRunnerGenerationExtensions.ProcessGeneration,
+            sessionId, inputId, turnId, "opencode", oldRuntimeSessionId, "creation-attempt-1");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => job.PrepareInitialInputRecoveryAsync(
+            recovery with { ProcessGeneration = "stale-process" }));
+        var prepared = await job.PrepareInitialInputRecoveryAsync(recovery);
+        Assert.True(prepared.CandidateCreationAuthorized);
+        Assert.True((await job.PrepareInitialInputRecoveryAsync(recovery)).CandidateCreationAuthorized);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => job.PrepareInitialInputRecoveryAsync(
+            recovery with { CreationAttemptId = "duplicate-executor" }));
+
+        var staleReport = await job.ReportResultAsync(runnerId, workId, new WorkResult(
+            "completed", "stale", AgentSessionId: sessionId, AgentTurnId: turnId,
+            Runtime: "opencode", RuntimeSessionId: oldRuntimeSessionId));
+        Assert.Equal(WorkReportVerdict.Refused, staleReport.Verdict);
+
+        var completed = await job.CompleteInitialInputRecoveryAsync(new CompleteAgentJobInitialRecovery(
+            recovery, "pi", newRuntimeSessionId));
+        Assert.Equal("ready", completed.Phase);
+        var started = await job.StartInitialInputAsync(new StartAgentJobInitialInput(
+            "operation-1", "attempt-1", runnerId, workId,
+            TestRunnerGenerationExtensions.ProcessGeneration, sessionId, inputId, turnId,
+            "pi", newRuntimeSessionId));
+        Assert.True(started.SubmissionAuthorized);
+        Assert.True((await job.StartInitialInputAsync(new StartAgentJobInitialInput(
+            "operation-1", "attempt-1", runnerId, workId,
+            TestRunnerGenerationExtensions.ProcessGeneration, sessionId, inputId, turnId,
+            "pi", newRuntimeSessionId))).SubmissionAuthorized);
+        Assert.False((await job.StartInitialInputAsync(new StartAgentJobInitialInput(
+            "operation-1", "duplicate-executor", runnerId, workId,
+            TestRunnerGenerationExtensions.ProcessGeneration, sessionId, inputId, turnId,
+            "pi", newRuntimeSessionId))).SubmissionAuthorized);
+
+        var sessionAfter = await session.GetAsync();
+        Assert.Equal(newRuntimeSessionId, sessionAfter!.AgentSessionId);
+        Assert.Equal(2, sessionAfter.ContextGeneration);
+        Assert.Equal("pi", sessionAfter.Runtime);
+        var accepted = await job.ReportResultAsync(runnerId, workId, new WorkResult(
+            "completed", "recovered", AgentSessionId: sessionId, AgentTurnId: turnId,
+            Runtime: "pi", RuntimeSessionId: newRuntimeSessionId));
+        Assert.Equal(WorkReportVerdict.Accepted, accepted.Verdict);
+    }
+
+    [Fact]
     public async Task ReportResultAsync_UnboundCompleted_IsRefusedWithoutMutation()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-unbound-success-{Guid.NewGuid():N}");

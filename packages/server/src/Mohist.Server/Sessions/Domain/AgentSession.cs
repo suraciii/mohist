@@ -411,7 +411,12 @@ public sealed record AgentSessionStatusSnapshot(
     /// unconfirmable activity can never retain a stale idle time. A
     /// <c>null</c> value is fail-closed (never confirmed idle).
     /// </summary>
-    [property: JsonPropertyName("idleSince")] DateTime? IdleSince = null)
+    [property: JsonPropertyName("idleSince")] DateTime? IdleSince = null,
+    /// <summary>
+    /// Exact initial AgentJob recovery/start receipt. It is separate from
+    /// accepted Input facts because acceptance generation never changes.
+    /// </summary>
+    AgentInitialInputOperation? InitialInputOperation = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
         new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), ContextUsageHistory: [], IdleSince: now);
@@ -434,6 +439,22 @@ public sealed record AgentSessionStatusSnapshot(
     public string? NextAction =>
         UnresolvedPreviousCount == 0 ? null : NextActionInspectPreviousExecution;
 }
+
+public sealed record AgentInitialInputOperation(
+    string OperationId,
+    string JobId,
+    string WorkId,
+    string ProcessGeneration,
+    string RunnerId,
+    string InputId,
+    string TurnId,
+    string Runtime,
+    string RuntimeSessionId,
+    long BindingEpoch,
+    long ContextGeneration,
+    DateTime RecordedAt,
+    bool EffectAdmitted = false,
+    DateTime? EffectAdmittedAt = null);
 
 public sealed record AgentUsageSummary(
     long? InputTokens = null,

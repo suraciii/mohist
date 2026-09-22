@@ -58,6 +58,8 @@ public sealed partial class AgentJobGrain
         }
         if (WorkReportStatus.IsCompleted(result.Status) && !HasCompleteExecutionBinding(result))
             return new AgentJobReportResult(WorkReportVerdict.Refused, "execution-binding-required");
+        if (State.InitialInputSubmission?.Phase is "creating" or "candidate")
+            return new AgentJobReportResult(WorkReportVerdict.Refused, "initial-input-recovery-in-progress");
         if (!MatchesCurrentExecutionBinding(result))
             return new AgentJobReportResult(WorkReportVerdict.Refused, "execution-binding-mismatch");
         if (await FailRecoveringJobIfDueAsync())
@@ -110,7 +112,8 @@ public sealed partial class AgentJobGrain
         if (!carriesBinding)
             return true;
 
-        var expectedRuntime = ExecutionDefinitionFrom(State.Input)?.Runtime;
+        var expectedRuntime = State.InitialInputSubmission?.ReplacementRuntime
+            ?? ExecutionDefinitionFrom(State.Input)?.Runtime;
         return HasCompleteExecutionBinding(result)
             && string.Equals(State.Input?.AgentSessionId, result.AgentSessionId, StringComparison.Ordinal)
             && string.Equals(State.Input?.InitialTurnId, result.AgentTurnId, StringComparison.Ordinal)

@@ -113,6 +113,102 @@ public sealed class AgentSessionRecoveryDomainTests
     }
 
     [Fact]
+    public void InitialJobRecovery_RetargetsQueuedTurnAndPreservesAcceptedInput()
+    {
+        var session = CreateSession();
+        session.EnsureInitialLaunch(
+            "input-1", "turn-1", "original prompt", "agent-connection", "job-1", TestTime.UtcDateTime);
+        session.AttachPhysicalSession("runtime-old", null, "/work", null, null, TestTime.UtcDateTime);
+        var operation = InitialOperation(session, "runtime-new");
+
+        session.RecoverInitialAgentJobTurn(
+            session.CurrentRuntimeBinding(),
+            new AgentRuntimeBinding("runner-1", "opencode", "runtime-new"),
+            operation,
+            TestTime.UtcDateTime.AddMinutes(1),
+            session.BindingEpoch);
+
+        var input = Assert.Single(session.Status.Inputs!);
+        var turn = Assert.Single(session.Status.Turns!);
+        Assert.Equal("input-1", input.Id);
+        Assert.Equal("original prompt", input.Text);
+        Assert.Equal(1, input.ContextGeneration);
+        Assert.Equal("turn-1", turn.Id);
+        Assert.Equal(2, turn.ContextGeneration);
+        Assert.Equal(AgentTurnStatus.Queued, turn.Status);
+        Assert.Equal("runtime-new", session.Status.AgentRuntimeSessionId);
+        Assert.Equal("operation-1", session.Status.InitialInputOperation!.OperationId);
+        Assert.False(session.Status.InitialInputOperation.EffectAdmitted);
+    }
+
+    [Fact]
+    public void InitialJobStart_PersistsReceiptAndMarksExactTurnExecuting()
+    {
+        var session = CreateSession();
+        session.EnsureInitialLaunch(
+            "input-1", "turn-1", "prompt", "agent-connection", "job-1", TestTime.UtcDateTime);
+        session.AttachPhysicalSession("runtime-first", null, "/work", null, null, TestTime.UtcDateTime);
+        var operation = InitialOperation(session, "runtime-first");
+
+        session.AdmitInitialAgentJobInputEffect(operation, TestTime.UtcDateTime.AddMinutes(1));
+        session.AdmitInitialAgentJobInputEffect(operation, TestTime.UtcDateTime.AddMinutes(2));
+
+        Assert.Equal(AgentTurnStatus.Executing, Assert.Single(session.Status.Turns!).Status);
+        Assert.True(session.Status.InitialInputOperation!.EffectAdmitted);
+        Assert.Equal("runtime-first", session.Status.InitialInputOperation.RuntimeSessionId);
+        Assert.Equal(1, session.Status.InitialInputOperation.ContextGeneration);
+    }
+
+    [Fact]
+    public void InitialJobRecovery_RejectsExtraQueuedWorkAndActiveStop()
+    {
+        var session = CreateSession();
+        session.EnsureInitialLaunch(
+            "input-1", "turn-1", "prompt", "agent-connection", "job-1", TestTime.UtcDateTime);
+        session.AttachPhysicalSession("runtime-old", null, "/work", null, null, TestTime.UtcDateTime);
+        session.Status = session.Status with
+        {
+            Turns = [.. session.Status.Turns!, new AgentTurnRecord(
+                "turn-extra", 2, ["input-1"], AgentTurnStatus.Queued, JobId: "job-extra")],
+            PendingStop = new AgentSessionStopClaim("turn-1", "stop-1"),
+        };
+        var before = session.Status;
+
+        Assert.Throws<InvalidOperationException>(() => session.RecoverInitialAgentJobTurn(
+            session.CurrentRuntimeBinding(),
+            new AgentRuntimeBinding("runner-1", "opencode", "runtime-new"),
+            InitialOperation(session, "runtime-new"),
+            TestTime.UtcDateTime.AddMinutes(1),
+            session.BindingEpoch));
+
+        Assert.Equal(before, session.Status);
+        Assert.Equal("runtime-old", session.Status.AgentRuntimeSessionId);
+    }
+
+    [Theory]
+    [InlineData(AgentTurnStatus.Executing)]
+    [InlineData(AgentTurnStatus.Unknown)]
+    public void InitialJobRecovery_RejectsStartedOrUncertainTurn(AgentTurnStatus status)
+    {
+        var session = CreateSession();
+        session.EnsureInitialLaunch(
+            "input-1", "turn-1", "prompt", "agent-connection", "job-1", TestTime.UtcDateTime);
+        session.AttachPhysicalSession("runtime-old", null, "/work", null, null, TestTime.UtcDateTime);
+        session.Status = session.Status with
+        {
+            Turns = session.Status.Turns!.Select(turn => turn with { Status = status }).ToArray(),
+            Activity = status == AgentTurnStatus.Unknown ? AgentSessionActivity.Unknown : AgentSessionActivity.Active,
+        };
+
+        Assert.Throws<InvalidOperationException>(() => session.RecoverInitialAgentJobTurn(
+            session.CurrentRuntimeBinding(),
+            new AgentRuntimeBinding("runner-1", "opencode", "runtime-new"),
+            InitialOperation(session, "runtime-new"),
+            TestTime.UtcDateTime.AddMinutes(1),
+            session.BindingEpoch));
+    }
+
+    [Fact]
     public void RebindRuntimeSession_RejectsStaleExpectedBindingWithoutMutation()
     {
         var session = CreateSession();
@@ -245,6 +341,21 @@ public sealed class AgentSessionRecoveryDomainTests
 
         Assert.Equal(expected, missing);
     }
+
+    private static AgentInitialInputOperation InitialOperation(AgentSession session, string runtimeSessionId) =>
+        new(
+            "operation-1",
+            "job-1",
+            "work-1",
+            "process-1",
+            "runner-1",
+            "input-1",
+            "turn-1",
+            "opencode",
+            runtimeSessionId,
+            session.BindingEpoch,
+            session.Status.ContextGeneration,
+            TestTime.UtcDateTime);
 
     private static AgentSession CreateSession() => AgentSession.Create(
         "session-1",

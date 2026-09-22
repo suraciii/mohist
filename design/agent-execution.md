@@ -667,13 +667,40 @@ or the Runtime readiness condition for configured fallback defined in
 Binding, Turn and dispatch must still match; another queued Turn, an executing
 or uncertain Turn, an active stop, or an uncertain Session rejects replacement.
 
+Initial AgentJob recovery is advanced by the current AgentJob owner. Its durable
+operation record is part of the existing Job ledger and matches the exact
+Running claim: Job, work, claimed Runner process generation, Runner, Session,
+initial Input, initial Turn, expected Binding, and immutable dispatch. The Job
+calls AgentSession to commit or query the matching Binding/Turn operation
+receipt; AgentSession never calls back into the Job. A recovery in progress
+refuses old-target reports. This one-way owner call prevents a
+Job-to-Session-to-Job wait cycle while making a crash between the two owner
+writes resumable under the same operation identity.
+
+The recovery operation is persisted before candidate creation. Runtime adapters
+that cannot query candidate creation by that identity make a lost or uncertain
+creation result terminally uncertain for this operation: neither a replacement
+candidate nor provider Input may be recreated blindly. Once a concrete candidate
+is known, the Job persists it before asking AgentSession to adopt it. A lost
+AgentSession or Job response is resolved by querying the same operation and
+candidate, never by creating another physical Session.
+
 The replacement Binding, context boundary and that Turn's execution generation
 commit atomically. Its pending dispatch and any Workflow execution binding target
 the replacement. Input acceptance generations, Input and Turn IDs, operation and
 delivery identities, payload and occupancy claim remain unchanged. A stale or
-failed commit authorizes no submission to the candidate. After commit, the
-Runner submits the original accepted payload once; it creates no new Input or
-Turn and performs no replay.
+failed commit authorizes no submission to the candidate.
+
+Before the provider can receive the initial Input, AgentSession durably admits
+that exact effect under the same Job/work/process/Binding fence and marks the
+initial Turn executing; only then does AgentJob durably record the matching start
+receipt and return submission authority. Replays revalidate the current Binding,
+generation, and nonterminal unsuperseded Turn. A receipt is query evidence, not a
+renewable execution permit: only the original live executor that changed the
+receipt from unstarted to started may submit. An already-started re-entry or a
+new process observes the receipt but cannot replay provider Input. The Runner
+therefore submits the original accepted payload once and creates no new Input or
+Turn.
 
 ## Context Operations
 

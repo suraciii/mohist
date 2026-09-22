@@ -87,7 +87,35 @@ public sealed class AgentJobState
     /// Session superseded the initial Turn under a fenced Runner observation.
     /// </summary>
     [Id(57)] public AgentJobActivitySettlement? ActivitySettlement { get; set; }
+    /// <summary>
+    /// Durable initial Input recovery/start protocol owned by this Job claim.
+    /// It is not a second work or capacity ledger.
+    /// </summary>
+    [Id(58)] public AgentJobInitialInputSubmission? InitialInputSubmission { get; set; }
 }
+
+[GenerateSerializer]
+public sealed record AgentJobInitialInputSubmission(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string WorkId,
+    [property: Id(2)] string ProcessGeneration,
+    [property: Id(3)] string RunnerId,
+    [property: Id(4)] string SessionId,
+    [property: Id(5)] string InputId,
+    [property: Id(6)] string TurnId,
+    [property: Id(7)] string ExpectedRuntime,
+    [property: Id(8)] string ExpectedRuntimeSessionId,
+    [property: Id(9)] string DispatchFingerprint,
+    [property: Id(10)] string Phase,
+    [property: Id(11)] DateTimeOffset RecordedAt,
+    [property: Id(12)] string? ReplacementRuntime = null,
+    [property: Id(13)] string? ReplacementRuntimeSessionId = null,
+    [property: Id(14)] long? BindingEpoch = null,
+    [property: Id(15)] long? ContextGeneration = null,
+    [property: Id(16)] string? SubmissionAttemptId = null,
+    [property: Id(17)] DateTimeOffset? StartedAt = null,
+    [property: Id(18)] string? CreationAttemptId = null);
+
 
 [GenerateSerializer]
 public sealed record AgentJobActivitySettlement(
