@@ -45,7 +45,7 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
     }
 
     private RoutedAgentLaunchPlan BuildExecutablePlan(
-        string projectId, string eventId, string ruleId, string workspacePath, string agentId = "agent-routed")
+        string projectId, string eventId, string ruleId, string workspacePath, string agentId = "agent-test")
     {
         return new RoutedAgentLaunchPlan(
             ProjectId: projectId,
@@ -154,6 +154,14 @@ public class AgentJobGrainRoutedLaunchSpecs : AgentJobGrainTestSupport
         var info = await session.GetAsync();
         Assert.NotNull(info);
         Assert.Equal(plan.WorkspacePath, info!.WorkDir);
+
+        var initialLaunch = await session.GetInitialLaunchAsync();
+        Assert.NotNull(initialLaunch);
+        Assert.NotNull(initialLaunch!.Input);
+        Assert.NotNull(initialLaunch.Turn);
+        Assert.Equal(plan.JobKey, initialLaunch.Input!.JobId);
+        Assert.Equal(plan.JobKey, initialLaunch.Turn!.JobId);
+        Assert.Contains(initialLaunch.Input.Id, initialLaunch.Turn.InputIds);
 
         // The grain reached Runner acceptance because a runner was
         // already registered for this project.

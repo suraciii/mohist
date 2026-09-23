@@ -188,6 +188,7 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
         foreach (var staleRunnerId in await registry.ListRunnerIdsAsync())
             await registry.UnregisterAsync(staleRunnerId);
         var project = await CreateProjectAsync("launch-stop");
+        await _fixture.SeedAgentAsync(project.Id, "launch-stop-agent");
         await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId)
             .RegisterAsync(new RunnerInfo(
                 _runnerId,

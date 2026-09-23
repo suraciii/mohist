@@ -84,7 +84,8 @@ public sealed class RunnerAgentSessionReconciliationApiSpecs : IClassFixture<Def
                 .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, "project-reconcile")
                 .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
                 .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, $"workflow-{sessionId}")
-                .WithLabel(AgentSessionQueryMetadataKeys.SessionName, "build")));
+                .WithLabel(AgentSessionQueryMetadataKeys.SessionName, "build")
+                .WithLabel(GenericAgentSessionMetadata.AgentId, "agent-reconcile")));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(runtimeSessionId));
         if (activity != AgentSessionActivity.Idle)
         {

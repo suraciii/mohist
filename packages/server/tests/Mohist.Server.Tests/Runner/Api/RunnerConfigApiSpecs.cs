@@ -412,7 +412,9 @@ public class RunnerConfigApiSpecs : IAsyncLifetime
                 jobId = jobKey,
                 workspace = new { path = "/tmp/runner-config-poll", projectId },
             });
-        await _fixture.WaitForAgentJobAssignmentPreparedAsync(jobKey);
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
+            jobKey,
+            TimeSpan.FromSeconds(5));
 
         using var response = await _fixture.Client.PostRunnerPollAsync(
             runnerId,
@@ -491,6 +493,7 @@ public class RunnerConfigFixture : IAsyncLifetime
     public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
+    public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
     public IEventStore EventStore => _factory.Services.GetRequiredService<IEventStore>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
 

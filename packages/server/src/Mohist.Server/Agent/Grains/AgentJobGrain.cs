@@ -511,29 +511,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
 
-        if (State.Input is null && !string.IsNullOrWhiteSpace(plan.Prompt))
-        {
-            var input = new AgentJobInput(
-                Prompt: plan.Prompt!,
-                Model: plan.Model,
-                WorkspacePath: plan.WorkspacePath,
-                ProjectId: plan.ProjectId,
-                Runtime: plan.Runtime ?? AgentConfigSchema.DefaultRuntime,
-                AgentId: plan.AgentId,
-                AgentInstructions: plan.AgentInstructions,
-                AgentConfig: DeserializeAgentConfig(plan.AgentConfigJson),
-                AgentSessionId: plan.SessionId,
-                Variant: plan.Variant,
-                ReasoningEffort: plan.ReasoningEffort,
-                IssueNumber: plan.IssueNumber,
-                EpicNumber: plan.EpicNumber,
-                WorkflowRunId: plan.WorkflowRunId,
-                Skills: plan.Skills,
-                ExecutionSource: AgentExecutionSources.NonSlack);
-            State.AgentConfigJson = plan.AgentConfigJson;
-            State.Input = input with { AgentConfig = null };
-            State.SubmittedAt = _timeProvider.GetUtcNow();
-        }
+        await EnsureRoutedInitialLaunchAsync(plan, sessionGrain, metadata);
 
         if (!State.LaunchReady)
         {

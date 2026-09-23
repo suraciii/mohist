@@ -153,7 +153,6 @@ public static class AgentJobController
             InitialTurnId: turnId,
             ExecutionSource: AgentExecutionSources.NonSlack);
 
-        var waiter = grain.WaitForTerminalAsync();
         try
         {
             await grain.SubmitAsync(input);
@@ -162,6 +161,10 @@ public static class AgentJobController
         {
             return ApiResults.BadRequest(ex.Message, "validation_failed");
         }
+
+        // Waiting before submission would park the non-reentrant grain turn;
+        // terminal jobs still complete this call synchronously after submit.
+        var waiter = grain.WaitForTerminalAsync();
 
         AgentJobTerminalResult terminal;
         try
