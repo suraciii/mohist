@@ -8,6 +8,8 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Services;
@@ -183,9 +185,11 @@ public sealed class RunnerPollRecoveryStateApiSpecs
         try
         {
             var agentSessionId = $"session-{Guid.NewGuid():N}";
+            var agentInputId = $"input-{Guid.NewGuid():N}";
             var agentTurnId = $"turn-{Guid.NewGuid():N}";
             const string runtime = "opencode";
             var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
+            await _fixture.SeedAgentAsync(projectId, "agent-test");
             await runner.RegisterAsync(
                 new RunnerInfo(
                     runnerId,
@@ -195,6 +199,26 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                     RuntimeCatalogs: CapabilityCatalogTestHelpers.Create(),
                     ConnectionGeneration: connectionGeneration),
                 TestRunnerGenerationExtensions.ProcessGeneration);
+            var metadata = new AgentSessionMetadata()
+                .WithLabel("mohist.io/project-id", projectId)
+                .WithLabel("mohist.io/source-kind", "agent-connection")
+                .WithLabel("mohist.io/source-id", jobId)
+                .WithLabel("mohist.io/agent-id", "agent-test");
+            var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(agentSessionId);
+            await session.OpenAsync(new OpenAgentSessionCommand(
+                runnerId,
+                runtime,
+                "/tmp/agent-job-outstanding",
+                Metadata: metadata));
+            await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+                agentInputId,
+                agentTurnId,
+                "persist terminal report",
+                "agent-connection",
+                jobId,
+                Runtime: runtime,
+                Metadata: metadata,
+                WorkDir: "/tmp/agent-job-outstanding"));
             await job.SubmitAsync(new AgentJobInput(
                 "persist terminal report",
                 WorkspacePath: "/tmp/agent-job-outstanding",
@@ -202,6 +226,7 @@ public sealed class RunnerPollRecoveryStateApiSpecs
                 Runtime: runtime,
                 AgentId: "agent-test",
                 AgentSessionId: agentSessionId,
+                InitialInputId: agentInputId,
                 InitialTurnId: agentTurnId,
                 PinnedRunnerId: runnerId));
             var dispatch = await PollAsync(

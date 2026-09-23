@@ -261,6 +261,7 @@ public sealed class RunnerInitialInputAuthorityApiSpecs
         var turnId = $"initial-turn-{Guid.NewGuid():N}";
         var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
         var workDir = $"/tmp/{jobId}";
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
         var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await session.OpenAsync(new OpenAgentSessionCommand(
             runnerId,

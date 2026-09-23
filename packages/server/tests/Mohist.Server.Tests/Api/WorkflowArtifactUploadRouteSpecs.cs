@@ -350,6 +350,7 @@ public class WorkflowArtifactUploadRouteSpecs
                 ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration,
                 RuntimeCatalogs: CapabilityCatalogTestHelpers.Create()),
             TestRunnerGenerationExtensions.ProcessGeneration);
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
         try
         {
             var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);

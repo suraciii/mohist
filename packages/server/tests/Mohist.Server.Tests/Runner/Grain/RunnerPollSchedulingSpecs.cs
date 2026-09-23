@@ -54,6 +54,7 @@ public class RunnerPollSchedulingSpecs : Mohist.Server.Tests.Workflow.WorkflowGr
 
         var jobId = $"runner-drain-job-{Guid.NewGuid():N}";
         var job = Grains.GetGrain<IAgentJobGrain>(jobId);
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
         await job.SubmitAsync(new AgentJobInput(
             "drain admission",
             WorkspacePath: "/tmp/runner-drain",
