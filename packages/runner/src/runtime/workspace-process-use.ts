@@ -65,38 +65,59 @@ export function inspectWorkspaceProcessUse(workspacePath: string): 'ready' | 'bu
   return 'ready'
 }
 
-export function snapshotRunnerProcessIdentities(): Set<string> | null {
+type ReadProcFile = (path: string, encoding: 'utf8') => string
+
+export function snapshotRunnerProcessIdentities(readFile: ReadProcFile = readFileSync): Set<string> | null {
   if (process.platform !== 'linux') return null
   try {
     // The service cgroup retains detached descendants after their parent exits.
-    const cgroup = readFileSync('/proc/self/cgroup', 'utf8')
+    const cgroup = readFile('/proc/self/cgroup', 'utf8')
       .trim()
       .split('\n')
       .find((line) => line.startsWith('0::'))
     if (!cgroup) return null
     const path = cgroup.slice(3)
     if (!path.startsWith('/') || path.includes('..')) return null
-    const identities = new Set<string>()
-    for (const pid of readFileSync(`/sys/fs/cgroup${path}/cgroup.procs`, 'utf8').trim().split(/\s+/)) {
-      if (!/^\d+$/.test(pid)) continue
-      let stat: string
-      try {
-        stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
-      } catch (error) {
-        if (disappeared(error)) continue
-        return null
+
+    const membersPath = `/sys/fs/cgroup${path}/cgroup.procs`
+    const readMembers = (): Set<string> | null => {
+      const members = new Set(readFile(membersPath, 'utf8').trim().split(/\s+/).filter(Boolean))
+      return [...members].every((pid) => /^\d+$/.test(pid)) ? members : null
+    }
+    const sameMembers = (left: ReadonlySet<string>, right: ReadonlySet<string>) =>
+      left.size === right.size && [...left].every((pid) => right.has(pid))
+    const sameIdentities = (left: ReadonlyMap<string, string>, right: ReadonlyMap<string, string>) =>
+      left.size === right.size && [...left].every(([pid, identity]) => right.get(pid) === identity)
+    const scan = (): Map<string, string> | null => {
+      const before = readMembers()
+      if (!before) return null
+      const identities = new Map<string, string>()
+      for (const pid of before) {
+        // A vanished PID may have forked after cgroup.procs was read.
+        const stat = readFile(`/proc/${pid}/stat`, 'utf8')
+        const closing = stat.lastIndexOf(')')
+        const fields =
+          closing < 0
+            ? []
+            : stat
+                .slice(closing + 2)
+                .trim()
+                .split(/\s+/)
+        if (!fields[19]) return null
+        const state = fields[0] === 'Z' || fields[0] === 'X' ? 'terminated' : 'alive'
+        identities.set(pid, `${fields[19]}:${state}`)
       }
-      const closing = stat.lastIndexOf(')')
-      const fields =
-        closing < 0
-          ? []
-          : stat
-              .slice(closing + 2)
-              .trim()
-              .split(/\s+/)
-      if (!fields[19]) return null
-      if (fields[0] === 'Z' || fields[0] === 'X') continue
-      identities.add(`${pid}:${fields[19]}`)
+      const after = readMembers()
+      return after && sameMembers(before, after) ? identities : null
+    }
+
+    const first = scan()
+    const second = scan()
+    if (!first || !second || !sameIdentities(first, second)) return null
+    const identities = new Set<string>()
+    for (const [pid, identity] of second) {
+      const [startTime, state] = identity.split(':')
+      if (state === 'alive') identities.add(`${pid}:${startTime}`)
     }
     return identities
   } catch {

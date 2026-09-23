@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { RunnerWorkspaceUse, WorkspaceUseConflict } from '../src/runtime/runner-workspace-use.js'
+import { snapshotRunnerProcessIdentities } from '../src/runtime/workspace-process-use.js'
 import { runCommand } from '../src/system/process.js'
 import { noteWorkspaceCommandStart } from '../src/system/process-ownership.js'
 import { FakeProcessSpawner } from './support/fake-process.js'
@@ -68,6 +69,56 @@ describe('RunnerWorkspaceUse', () => {
     live.delete('descendant:2')
     expect(await gate.withRemovalFence(workspace, deleteWork)).toEqual({ kind: 'completed', value: true })
   })
+
+  it.each(['vanished', 'zombie'] as const)(
+    'retains ownership when a listed command parent becomes %s during enumeration',
+    async (transition) => {
+      let phase: 'baseline' | 'parent' | 'child' | 'terminated' = 'baseline'
+      let parentStatReads = 0
+      const stat = (pid: string, state: string) =>
+        `${pid} (command) ${[state, ...Array(18).fill('0'), `${pid}0`].join(' ')}`
+      const readProc = (path: string): string => {
+        if (path === '/proc/self/cgroup') return '0::/runner.service\n'
+        if (path === '/sys/fs/cgroup/runner.service/cgroup.procs') {
+          if (phase === 'baseline') return '100\n'
+          if (phase === 'parent') return '100\n200\n'
+          if (phase === 'child') return '100\n201\n'
+          return '100\n'
+        }
+        if (path === '/proc/100/stat') return stat('100', 'S')
+        if (path === '/proc/201/stat') return stat('201', 'S')
+        if (path === '/proc/200/stat') {
+          parentStatReads++
+          if (transition === 'vanished') throw Object.assign(new Error('gone'), { code: 'ENOENT' })
+          return stat('200', parentStatReads === 1 ? 'S' : 'Z')
+        }
+        throw new Error(`Unexpected proc read: ${path}`)
+      }
+      const gate = new RunnerWorkspaceUse(
+        async () => 'ready',
+        (path) => path,
+        undefined,
+        () => 'ready',
+        () => snapshotRunnerProcessIdentities(readProc),
+      )
+      await gate.withUse(workspace, async () => noteWorkspaceCommandStart())
+
+      phase = 'parent'
+      const deleteWork = vi.fn(async () => true)
+      expect(await gate.withRemovalFence(workspace, deleteWork)).toEqual({
+        kind: 'failed',
+        reason: 'process_termination_unconfirmed',
+      })
+      expect(deleteWork).not.toHaveBeenCalled()
+
+      phase = 'child'
+      expect(await gate.withRemovalFence(workspace, deleteWork)).toEqual({ kind: 'busy' })
+      expect(deleteWork).not.toHaveBeenCalled()
+
+      phase = 'terminated'
+      expect(await gate.withRemovalFence(workspace, deleteWork)).toEqual({ kind: 'completed', value: true })
+    },
+  )
 
   it('rejects a late command from an earlier async context while removal holds the gate', async () => {
     const gate = new RunnerWorkspaceUse(async () => 'ready')
