@@ -10,6 +10,7 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Orleans;
@@ -341,6 +342,13 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                 });
 
             var claim = await ClaimPreparedAgentJobAsync(jobKey, runnerId, projectId, expectedSessionId: null);
+            var initial = await _fixture.Grains.GetGrain<IAgentSessionGrain>(claim.Dispatch.AgentSessionId!)
+                .GetInitialLaunchAsync();
+            Assert.Equal(claim.Dispatch.InitialInputId, initial!.Input!.Id);
+            Assert.Equal(claim.Dispatch.InitialTurnId, initial.Turn!.Id);
+            Assert.Equal(jobKey, initial.Input.JobId);
+            Assert.Equal(jobKey, initial.Turn.JobId);
+            Assert.Contains(initial.Input.Id, initial.Turn.InputIds);
             var binding = await BindClaimedAgentJobAsync(claim);
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
             await jobGrain.ReportResultAsync(
