@@ -206,7 +206,7 @@ internal static class PublicExecutionAggregator
             facts,
             jobStatus,
             turnStatus,
-            dispatchBlocked,
+            dispatchBlocked || IsDispatchPending(job),
             sessionExists: joined,
             jobUnknownSettled: job.TerminalAt is not null || launchTurn?.SupersededAt is not null,
             turnSuperseded: launchTurn?.SupersededAt is not null);
@@ -259,7 +259,7 @@ internal static class PublicExecutionAggregator
             facts,
             job is null ? null : MapJobStatus(job.Status),
             turnStatus,
-            dispatchBlocked,
+            dispatchBlocked || (job is not null && IsDispatchPending(job)),
             sessionExists: true,
             jobUnknownSettled: job?.TerminalAt is not null || turn?.SupersededAt is not null,
             turnSuperseded: turn?.SupersededAt is not null);
@@ -306,7 +306,7 @@ internal static class PublicExecutionAggregator
             facts,
             job is null ? null : MapJobStatus(job.Status),
             MapTurnStatus(turn.Status, facts.PendingStopActive),
-            dispatchBlocked,
+            dispatchBlocked || (job is not null && IsDispatchPending(job)),
             sessionExists: true,
             jobUnknownSettled: job?.TerminalAt is not null || turn.SupersededAt is not null,
             turnSuperseded: turn.SupersededAt is not null);
@@ -369,7 +369,7 @@ internal static class PublicExecutionAggregator
                 facts,
                 job is null ? null : MapJobStatus(job.Status),
                 turnStatus,
-                dispatchBlocked,
+                dispatchBlocked || (job is not null && IsDispatchPending(job)),
                 sessionExists: true,
                 jobUnknownSettled: job?.TerminalAt is not null || contextTurn?.SupersededAt is not null,
                 turnSuperseded: contextTurn?.SupersededAt is not null),
@@ -497,8 +497,8 @@ internal static class PublicExecutionAggregator
     /// The public admission component: blocked whenever an applicable
     /// fact is unknown, a stop outcome is unresolved
     /// (outcome_pending), a reset is in progress, or the launch Job is
-    /// queued behind a retryable dispatch block; ready otherwise when
-    /// a Session exists; null when no Session exists.
+    /// queued behind a retryable dispatch block or unresolved dispatch evidence;
+    /// ready otherwise when a Session exists; null when no Session exists.
     /// </summary>
     public static string? ResolveAdmission(
         PublicProjectionFacts facts,
@@ -787,6 +787,9 @@ internal static class PublicExecutionAggregator
         AgentJobStatus.Cancelled => PublicExecutionFieldValues.OutcomeCancelled,
         _ => PublicExecutionFieldValues.OutcomeFailed,
     };
+
+    private static bool IsDispatchPending(PublicProjectionFacts.JobFacts job) =>
+        job.Status == AgentJobStatus.Pending && job.WaitingReason == "dispatch-pending";
 
     private static bool IsDispatchBlocked(PublicProjectionFacts.JobFacts job) =>
         job.Status == AgentJobStatus.Pending
