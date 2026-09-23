@@ -189,6 +189,28 @@ describe('AgentDetailPage executability and availability', () => {
       'concurrency-limit',
     )
     expect(screen.getByTestId('agent-detail-waiting-work-job-3')).toHaveTextContent('Waiting for dispatch')
+    expect(screen.getByTestId('agent-detail-availability-detail')).toHaveTextContent('Active runs: 2')
+  })
+
+  it('renders an unknown active count instead of coercing a null to zero', () => {
+    state.detailStatus = {
+      agentId: 'agent-1',
+      agentName: 'Test Agent',
+      availability: {
+        canStartNow: false,
+        waitingReason: 'dispatch-pending',
+        activeRuns: null,
+        maxConcurrentRuns: null,
+        capacity: { usedSlots: 0, totalSlots: 4 },
+        observedAt: '2026-07-29T00:00:00.000Z',
+      },
+      waitingWork: [],
+    }
+    renderPage()
+
+    const detail = screen.getByTestId('agent-detail-availability-detail')
+    expect(detail).toHaveTextContent('Active runs: unknown')
+    expect(detail.textContent ?? '').not.toMatch(/Active runs: 0\b/)
   })
 
   it('does not derive a capacity verdict from raw runner slots', () => {

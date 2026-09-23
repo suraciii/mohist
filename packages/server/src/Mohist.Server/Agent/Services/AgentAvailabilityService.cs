@@ -1,6 +1,6 @@
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Capacity;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Services;
 
 namespace Mohist.Server.Agent.Services;
@@ -16,10 +16,11 @@ public static class AgentAvailabilityWaitReasons
 public sealed record AgentAvailabilityResult(
     bool CanStartNow,
     string? WaitingReason,
-    int ActiveRuns,
+    int? ActiveRuns,
     int? MaxConcurrentRuns,
     RunnerCapacityView Capacity,
     DateTimeOffset ObservedAt,
+    IReadOnlyList<AgentCapacityQueueEntry> Queued,
     bool CapacityIncomplete = false);
 
 public sealed record AgentWaitingWork(
@@ -32,27 +33,27 @@ public sealed record AgentAvailabilityListEntry(
     string AgentId,
     bool CanStartNow,
     string? WaitingReason,
-    int ActiveRuns,
+    int? ActiveRuns,
     int? MaxConcurrentRuns,
     RunnerCapacityView Capacity,
-    int QueuedCount,
+    int? QueuedCount,
     bool CapacityIncomplete = false);
 
 public sealed class AgentAvailabilityService : IScopedService
 {
     private readonly IRunnerStatusSource _runnerStatus;
-    private readonly IGrainFactory _grains;
+    private readonly IAgentCapacityStore _capacityStore;
     private readonly AgentJobQuerier _jobs;
     private readonly TimeProvider _timeProvider;
 
     public AgentAvailabilityService(
         IRunnerStatusSource runnerStatus,
-        IGrainFactory grains,
+        IAgentCapacityStore capacityStore,
         AgentJobQuerier jobs,
         TimeProvider timeProvider)
     {
         _runnerStatus = runnerStatus;
-        _grains = grains;
+        _capacityStore = capacityStore;
         _jobs = jobs;
         _timeProvider = timeProvider;
     }
@@ -64,25 +65,24 @@ public sealed class AgentAvailabilityService : IScopedService
     {
         // One canonical Runner read per request; the per-Agent Runtime
         // requirement is projected from the same snapshot so availability
-        // never advertises a Runtime the capability gate would reject.
+        // never advertises a Runtime the capability gate would reject. The
+        // occupancy conclusion comes from one derived owner read, whose
+        // queued projection the waiting-work list reuses without a second
+        // capacity read.
         var runnerSnapshot = await _runnerStatus.GetGlobalRunnersAsync(ct);
         var availability = RunnerStatusService.ProjectAvailability(runnerSnapshot, RequirementFor(agent));
-        var capacity = availability.Capacity;
-        var gateSnapshot = await _grains
-            .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agent.Id))
-            .GetSnapshotAsync();
-        var activeRuns = gateSnapshot.ActivePermits.Count;
+        var snapshots = await _capacityStore.ReadAsync(projectId, [agent.Id], ct);
+        snapshots.TryGetValue(agent.Id, out var snapshot);
 
-        var result = Compute(
-            capacity,
-            activeRuns,
-            agent.MaxConcurrentRuns,
+        return Compute(
+            availability.Capacity,
+            snapshot?.Occupied,
+            snapshot?.MaxConcurrentRuns,
             _timeProvider.GetUtcNow(),
             availability.HasOnlineRunner,
-            GateWaitingCount(gateSnapshot),
             availability.BlockingReason,
-            availability.CapacityIncomplete);
-        return result;
+            availability.CapacityIncomplete || snapshot is null || !snapshot.IsComplete,
+            snapshot?.Queued ?? []);
     }
 
     public async Task<IReadOnlyDictionary<string, AgentAvailabilityListEntry>> GetListSummaryAsync(
@@ -90,40 +90,33 @@ public sealed class AgentAvailabilityService : IScopedService
         IReadOnlyCollection<AgentInfo> agents,
         CancellationToken ct = default)
     {
-        // Runner status is fetched exactly once per request — the list
-        // summary's core cost-control guarantee. Per-Agent active counts
-        // are cheap in-process grain calls; pending-job counts come from
-        // a single batched query grouped by Agent. Per-Agent availability is
-        // then derived from the one snapshot with each Agent's requirement.
+        // Runner status and owner occupancy are each fetched exactly once per
+        // request — the list summary's core cost-control guarantee. One
+        // batched derived read serves every Agent's live limit, active count
+        // and queued projection; per-Agent availability is then derived from
+        // the one snapshot with each Agent's requirement.
         var runnerSnapshot = await _runnerStatus.GetGlobalRunnersAsync(ct);
-        var pendingCounts = agents.Count == 0
-            ? new Dictionary<string, int>(StringComparer.Ordinal)
-            : await _jobs.CountPendingByAgentAsync(projectId, ct);
+        var snapshots = await _capacityStore.ReadAsync(
+            projectId,
+            agents.Select(agent => agent.Id).ToArray(),
+            ct);
 
         var observedAt = _timeProvider.GetUtcNow();
         var entries = new Dictionary<string, AgentAvailabilityListEntry>(agents.Count, StringComparer.Ordinal);
         foreach (var agent in agents)
         {
             var availability = RunnerStatusService.ProjectAvailability(runnerSnapshot, RequirementFor(agent));
-            var snapshot = await _grains
-                .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agent.Id))
-                .GetSnapshotAsync();
-            var pendingCount = pendingCounts.TryGetValue(agent.Id, out var count) ? count : 0;
-            var followupWaiters = snapshot.Waiters.Count(waiter =>
-                waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Followup);
-            var pendingFollowupNotifications = snapshot.PendingNotifications.Count(notification =>
-                notification.OwnerKind == AgentConcurrencyPermitOwnerKind.Followup);
-            var queuedCount = pendingCount + followupWaiters + pendingFollowupNotifications;
+            snapshots.TryGetValue(agent.Id, out var snapshot);
             entries[agent.Id] = BuildListEntry(
                 agent,
                 availability.Capacity,
-                snapshot.ActivePermits.Count,
-                queuedCount,
+                snapshot?.Occupied,
+                snapshot?.Queued.Count,
                 availability.HasOnlineRunner,
                 observedAt,
-                GateWaitingCount(snapshot),
+                snapshot?.MaxConcurrentRuns,
                 availability.BlockingReason,
-                availability.CapacityIncomplete);
+                availability.CapacityIncomplete || snapshot is null || !snapshot.IsComplete);
         }
 
         return entries;
@@ -132,31 +125,30 @@ public sealed class AgentAvailabilityService : IScopedService
     public static AgentAvailabilityListEntry BuildListEntry(
         AgentInfo agent,
         RunnerCapacityView capacity,
-        int activeRuns,
-        int queuedCount,
+        int? activeRuns,
+        int? queuedCount,
         bool hasOnlineRunner,
         DateTimeOffset observedAt,
-        int gateWaiterCount = 0,
+        int? maxConcurrentRuns,
         string? runnerBlockingReason = null,
         bool capacityIncomplete = false)
     {
         var availability = Compute(
             capacity,
             activeRuns,
-            agent.MaxConcurrentRuns,
+            maxConcurrentRuns,
             observedAt,
             hasOnlineRunner,
-            gateWaiterCount,
             runnerBlockingReason,
             capacityIncomplete);
         return new AgentAvailabilityListEntry(
             agent.Id,
             availability.CanStartNow,
             availability.WaitingReason,
-            activeRuns,
-            agent.MaxConcurrentRuns,
+            availability.ActiveRuns,
+            availability.MaxConcurrentRuns,
             capacity,
-            queuedCount,
+            availability.CapacityIncomplete ? null : queuedCount,
             availability.CapacityIncomplete);
     }
 
@@ -166,79 +158,54 @@ public sealed class AgentAvailabilityService : IScopedService
         AgentAvailabilityResult availability,
         CancellationToken ct = default)
     {
-        var snapshot = await _grains
-            .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agent.Id))
-            .GetSnapshotAsync();
-        var concurrencyJobs = snapshot.Waiters
-            .Where(waiter => waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Job)
-            .Select(waiter => waiter.OwnerId)
-            .ToHashSet(StringComparer.Ordinal);
-
+        // Waiting work is derived from the same owner snapshot the conclusion
+        // read: the detail request never performs a second capacity read.
+        // A Turn entry keeps the established contract of carrying its
+        // Session owner id in JobId.
         var pending = await _jobs.ListByAgentAsync(
             projectId,
             agent.Id,
             [AgentJobStatus.Pending],
             ct: ct);
 
-        var jobs = BuildWaitingWork(pending, concurrencyJobs, availability.WaitingReason);
-        var followups = snapshot.Waiters
-            .Where(waiter => waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Followup)
-            .Select(waiter => new AgentWaitingWork(
-                waiter.OwnerId,
+        var jobs = BuildWaitingWork(pending, availability.WaitingReason);
+        var turns = availability.Queued
+            .Where(entry => entry.Kind == AgentCapacityOwnerKind.Turn)
+            .Select(entry => new AgentWaitingWork(
+                entry.OwnerId,
                 "waiting",
-                waiter.WaitingReason,
-                null))
+                availability.WaitingReason ?? AgentAvailabilityWaitReasons.DispatchPending,
+                entry.AcceptedAt.ToString("o")))
             .ToList();
-        var pendingFollowupNotifications = snapshot.PendingNotifications
-            .Where(notification => notification.OwnerKind == AgentConcurrencyPermitOwnerKind.Followup)
-            .Select(notification => new AgentWaitingWork(
-                notification.OwnerId,
-                "waiting",
-                AgentAvailabilityWaitReasons.DispatchPending,
-                null))
-            .ToList();
-        return jobs.Concat(followups).Concat(pendingFollowupNotifications).ToList();
+        return jobs.Concat(turns).ToList();
     }
 
     public static AgentAvailabilityResult Compute(
         RunnerCapacityView capacity,
-        int activeRuns,
-        int? maxConcurrentRuns,
-        DateTimeOffset observedAt) =>
-        Compute(capacity, activeRuns, maxConcurrentRuns, observedAt, capacity.TotalSlots > 0);
-
-    public static AgentAvailabilityResult Compute(
-        RunnerCapacityView capacity,
-        int activeRuns,
-        int? maxConcurrentRuns,
-        DateTimeOffset observedAt,
-        bool hasOnlineRunner)
-        => Compute(capacity, activeRuns, maxConcurrentRuns, observedAt, hasOnlineRunner, 0);
-
-    public static AgentAvailabilityResult Compute(
-        RunnerCapacityView capacity,
-        int activeRuns,
+        int? activeRuns,
         int? maxConcurrentRuns,
         DateTimeOffset observedAt,
         bool hasOnlineRunner,
-        int gateWaiterCount,
         string? runnerBlockingReason = null,
-        bool capacityIncomplete = false)
+        bool capacityIncomplete = false,
+        IReadOnlyList<AgentCapacityQueueEntry>? queued = null)
     {
-        // The Agent's own gate saturation is the tightest constraint; report it
-        // before a pool-wide Runner blocker so a waiting follow-up still reads
-        // as capacity-full rather than a less specific Runner reason.
+        // Owner evidence that cannot be counted is neither an unlimited Agent
+        // nor a full one: the conclusion stays dispatch-pending with the
+        // unknown count visible, and only a missing online Runner outranks
+        // that. The Agent's own saturation is the tightest constraint, so it
+        // is reported before a pool-wide Runner blocker.
+        var incomplete = capacityIncomplete || activeRuns is null;
         string? reason = !hasOnlineRunner
             ? AgentAvailabilityWaitReasons.NoOnlineRunner
-            : gateWaiterCount > 0
-                ? AgentAvailabilityWaitReasons.CapacityFull
-                : runnerBlockingReason is not null
-                    ? runnerBlockingReason
-                    : capacity.UsedSlots >= capacity.TotalSlots
-                        ? AgentAvailabilityWaitReasons.CapacityFull
-                        : maxConcurrentRuns is not null && activeRuns >= maxConcurrentRuns.Value
-                            ? AgentAvailabilityWaitReasons.ConcurrencyLimit
-                            : null;
+            : incomplete
+                ? AgentAvailabilityWaitReasons.DispatchPending
+                : maxConcurrentRuns is { } limit && activeRuns is { } occupied && occupied >= limit
+                    ? AgentAvailabilityWaitReasons.ConcurrencyLimit
+                    : runnerBlockingReason
+                        ?? (capacity.UsedSlots >= capacity.TotalSlots
+                            ? AgentAvailabilityWaitReasons.CapacityFull
+                            : null);
 
         return new AgentAvailabilityResult(
             reason is null,
@@ -247,7 +214,8 @@ public sealed class AgentAvailabilityService : IScopedService
             maxConcurrentRuns,
             capacity,
             observedAt,
-            capacityIncomplete);
+            queued ?? [],
+            incomplete);
     }
 
     private static RunnerRuntimeRequirement? RequirementFor(AgentInfo agent) =>
@@ -257,19 +225,12 @@ public sealed class AgentAvailabilityService : IScopedService
 
     public static IReadOnlyList<AgentWaitingWork> BuildWaitingWork(
         IReadOnlyList<AgentJobListItem> pending,
-        IReadOnlySet<string> concurrencyJobs,
         string? availabilityReason) =>
         pending
             .Select(job => new AgentWaitingWork(
                 job.JobKey,
                 "waiting",
-                concurrencyJobs.Contains(job.JobKey)
-                    ? AgentAvailabilityWaitReasons.CapacityFull
-                    : availabilityReason ?? AgentAvailabilityWaitReasons.DispatchPending,
+                availabilityReason ?? AgentAvailabilityWaitReasons.DispatchPending,
                 job.SubmittedAt))
             .ToList();
-
-    private static int GateWaitingCount(AgentConcurrencySnapshot snapshot) =>
-        snapshot.Waiters.Count + snapshot.PendingNotifications.Count;
-
 }

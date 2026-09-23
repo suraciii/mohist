@@ -102,7 +102,11 @@ export interface AgentAvailabilityCapacity {
 export interface AgentAvailabilityResponse {
   canStartNow: boolean
   waitingReason: string | null
-  activeRuns: number
+  /**
+   * Derived active occupancy. Null when the Server cannot attribute the
+   * owning facts: an unknown count is never presented as zero.
+   */
+  activeRuns: number | null
   maxConcurrentRuns: number | null
   capacity: AgentAvailabilityCapacity
   observedAt: string
@@ -112,10 +116,10 @@ export interface AgentAvailabilitySummaryEntry {
   agentId: string
   canStartNow: boolean
   waitingReason: string | null
-  activeRuns: number
+  activeRuns: number | null
   maxConcurrentRuns: number | null
   capacity: AgentAvailabilityCapacity
-  queuedCount: number
+  queuedCount: number | null
 }
 
 export interface AgentWaitingWorkItem {

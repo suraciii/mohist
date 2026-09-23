@@ -227,7 +227,7 @@ public sealed record AgentStatusDetailResponse(
 public sealed record AgentAvailabilityResponse(
     bool CanStartNow,
     string? WaitingReason,
-    int ActiveRuns,
+    int? ActiveRuns,
     int? MaxConcurrentRuns,
     RunnerCapacityView Capacity,
     bool CapacityIncomplete,

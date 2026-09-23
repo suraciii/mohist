@@ -44,7 +44,8 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
             return new Dictionary<string, AgentCapacitySnapshot>(StringComparer.Ordinal);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await ReadAsync(db, projectId, ids, ct);
+        var snapshots = await ReadAsync(db, projectId, ids, ct);
+        return await MarkUnattributableSessionsAsync(db, projectId, snapshots, ct);
     }
 
     public async Task<AgentJobCapacityClaimResult> ClaimJobAsync(
@@ -262,6 +263,7 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
             var evidence = definition.Status;
             var occupied = 0;
             var eligible = new List<AgentCapacityQueueEntry>();
+            var queued = new List<AgentCapacityQueueEntry>();
 
             foreach (var (row, job) in parsedJobs.Where(entry =>
                 string.Equals(entry.Row.AgentId, agentId, StringComparison.Ordinal)))
@@ -291,6 +293,8 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
                 if (AgentCapacityFacts.Occupies(job)) occupied++;
                 if (locallyEligible && AgentCapacityFacts.IsEligible(job))
                     eligible.Add(AgentCapacityFacts.JobEntry(row.JobKey, job));
+                if (AgentCapacityFacts.IsQueuedJob(job))
+                    queued.Add(AgentCapacityFacts.JobEntry(row.JobKey, job));
             }
 
             foreach (var row in sessionRows.Where(row =>
@@ -303,7 +307,20 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
                     continue;
                 }
                 foreach (var turn in session.Status.Turns ?? [])
+                {
                     if (AgentCapacityFacts.Occupies(session, turn)) occupied++;
+                    if (!AgentCapacityFacts.IsQueuedTurn(session, turn)) continue;
+                    try
+                    {
+                        queued.Add(AgentCapacityFacts.TurnEntry(session, turn));
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // No acceptance timestamp: the queued fact cannot be
+                        // faithfully ordered, so the count stays unknown.
+                        evidence = Incomplete(evidence);
+                    }
+                }
                 var head = AgentCapacityFacts.EligibleHead(session);
                 if (head is null) continue;
                 try
@@ -322,9 +339,53 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
                 evidence,
                 definition.Limit,
                 evidence == AgentCapacityEvidenceStatus.Complete ? occupied : null,
-                AgentCapacityFacts.Order(eligible).ToArray()));
+                AgentCapacityFacts.Order(eligible).ToArray(),
+                AgentCapacityFacts.Order(queued).ToArray()));
         }
         return snapshots;
+    }
+
+    /// <summary>
+    /// Fails the availability read closed while owner work exists that no
+    /// label can attribute to a requested Agent: Sessions with a null indexed
+    /// Agent label under the requested project, and Sessions with no indexed
+    /// project identity at all, enter one batched scan per read, so an
+    /// unattributable row never costs an N+1 query. A row whose current work
+    /// is provably settled stays invisible. Claims never take this path: a
+    /// claim evaluates its own owner facts, not the project-wide projection.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<string, AgentCapacitySnapshot>> MarkUnattributableSessionsAsync(
+        MohistDbContext db,
+        string projectId,
+        IReadOnlyDictionary<string, AgentCapacitySnapshot> snapshots,
+        CancellationToken ct)
+    {
+        var exceptionalRows = await db.AgentSessions.AsNoTracking()
+            .Where(row => row.LabelAgentId == null
+                && (row.LabelProjectId == projectId || row.LabelProjectId == null))
+            .ToListAsync(ct);
+        var unattributable = false;
+        foreach (var row in exceptionalRows)
+        {
+            var session = AgentSessionJson.Deserialize(row);
+            if (session is null || AgentCapacityFacts.HasUnsettledOrdinaryWork(session))
+            {
+                unattributable = true;
+                break;
+            }
+        }
+        if (!unattributable)
+            return snapshots;
+        var marked = new Dictionary<string, AgentCapacitySnapshot>(snapshots.Count, StringComparer.Ordinal);
+        foreach (var (agentId, snapshot) in snapshots)
+            marked[agentId] = snapshot.EvidenceStatus == AgentCapacityEvidenceStatus.Complete
+                ? snapshot with
+                {
+                    EvidenceStatus = AgentCapacityEvidenceStatus.IncompleteOwnerEvidence,
+                    Occupied = null,
+                }
+                : snapshot;
+        return marked;
     }
 
     private static AgentCapacityEvidenceStatus Incomplete(AgentCapacityEvidenceStatus current) =>

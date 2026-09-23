@@ -60,13 +60,22 @@ public sealed record AgentCapacityQueueEntry(
     DateTimeOffset AcceptedAt,
     long TurnSequence = 0);
 
+/// <summary>
+/// Transient derived read of one Agent's capacity facts.
+/// <see cref="Eligible"/> is the admission FIFO (unclaimed heads only);
+/// <see cref="Queued"/> is the complete waiting-work projection — every
+/// accepted visible Pending Job and every current nonsuperseded ordinary
+/// queued Turn, claimed or locally blocked. Neither list is persisted
+/// authority; both are re-derived per read.
+/// </summary>
 public sealed record AgentCapacitySnapshot(
     string ProjectId,
     string AgentId,
     AgentCapacityEvidenceStatus EvidenceStatus,
     int? MaxConcurrentRuns,
     int? Occupied,
-    IReadOnlyList<AgentCapacityQueueEntry> Eligible)
+    IReadOnlyList<AgentCapacityQueueEntry> Eligible,
+    IReadOnlyList<AgentCapacityQueueEntry> Queued)
 {
     public bool IsComplete => EvidenceStatus == AgentCapacityEvidenceStatus.Complete;
     public bool IsUnlimited => IsComplete && MaxConcurrentRuns is null;

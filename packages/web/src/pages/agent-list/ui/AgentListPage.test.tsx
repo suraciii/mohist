@@ -357,6 +357,30 @@ describe('AgentListPage', () => {
       expect(screen.queryByTestId('agent-availability-a2')).toHaveTextContent('Can start now')
     })
 
+    it('shows an unknown workload when the server cannot attribute the owner facts', async () => {
+      mockAgents([
+        makeAgent({
+          id: 'shaded',
+          executability: {
+            state: 'executable',
+            gaps: [],
+            pendingLaunchNote: null,
+          },
+        }),
+      ])
+      mockAvailability([
+        makeAvailability({
+          agentId: 'shaded',
+          activeRuns: null,
+          queuedCount: null,
+        }),
+      ])
+      renderPage()
+
+      const row = await screen.findByTestId('agent-row-shaded')
+      expect(within(row).getByTestId('agent-workload-shaded')).toHaveTextContent('Active: unknown, Queued: unknown')
+    })
+
     it('shows loading Availability while the summary is unresolved', async () => {
       mockAgents([
         makeAgent({

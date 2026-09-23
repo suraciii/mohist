@@ -28,6 +28,44 @@ internal static class AgentCapacityFacts
         && !string.IsNullOrWhiteSpace(job.Input?.ProjectId)
         && !string.IsNullOrWhiteSpace(job.Input?.AgentId);
 
+    /// <summary>
+    /// Acceptance predicate for the waiting-work projection: a visible
+    /// Pending Job counts as queued whether or not it already holds its
+    /// capacity claim. It is not an admission rule.
+    /// </summary>
+    internal static bool IsQueuedJob(AgentJobState job) =>
+        job.Status == AgentJobStatus.Pending
+        && job.LaunchVisibility == AgentLaunchVisibility.Visible
+        && job.TerminalAt is null
+        && job.SubmittedAt is not null
+        && !string.IsNullOrWhiteSpace(job.Input?.ProjectId)
+        && !string.IsNullOrWhiteSpace(job.Input?.AgentId);
+
+    /// <summary>
+    /// Acceptance predicate for the waiting-work projection: every current
+    /// nonsuperseded ordinary queued Turn, claimed or not, and regardless of
+    /// the Session-local fences that hold its head back from dispatch. A
+    /// Job-owned Turn is its Job's fact and never appears twice.
+    /// </summary>
+    internal static bool IsQueuedTurn(AgentSession session, AgentTurnRecord turn) =>
+        string.IsNullOrWhiteSpace(turn.JobId)
+        && turn.SupersededAt is null
+        && turn.ContextGeneration == session.Status.ContextGeneration
+        && turn.Status == AgentTurnStatus.Queued;
+
+    /// <summary>
+    /// Whether a Session row carries ordinary owner work in the current
+    /// context that is not provably settled: queued (claimed or not),
+    /// executing, or unresolved Unknown. Terminal or superseded turns and
+    /// Job-owned Turns leave no unattributable occupancy behind.
+    /// </summary>
+    internal static bool HasUnsettledOrdinaryWork(AgentSession session) =>
+        (session.Status.Turns ?? []).Any(turn =>
+            string.IsNullOrWhiteSpace(turn.JobId)
+            && turn.SupersededAt is null
+            && turn.ContextGeneration == session.Status.ContextGeneration
+            && turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing or AgentTurnStatus.Unknown);
+
     internal static AgentTurnRecord? EligibleHead(AgentSession session)
     {
         // The Session's global-FIFO candidate is its local head only while

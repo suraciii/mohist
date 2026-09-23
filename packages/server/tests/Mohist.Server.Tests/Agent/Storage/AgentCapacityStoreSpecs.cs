@@ -131,6 +131,135 @@ public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Read_QueuedProjectionKeepsEveryCurrentQueuedFact()
+    {
+        await AddAgentAsync("project", "agent", null);
+        // A claimed Pending Job still waits: it holds a slot but has not
+        // dispatched, so it is occupied and queued at once.
+        await AddJobAsync("claimed-job", "project", "agent", Now.AddMinutes(1), claimedAt: Now);
+        await AddJobAsync("pending-job", "project", "agent", Now.AddMinutes(2));
+        await AddSessionAsync(NewLocallyBlockedQueuedSession("session", "project", "agent",
+            ("blocked-turn", 1, null),
+            ("claimed-turn", 2, Now),
+            ("settled-turn", 3, null),
+            ("superseded-turn", 4, null),
+            ("prior-generation-turn", 5, null),
+            ("job-turn", 6, null)));
+
+        var snapshot = (await Store.ReadAsync("project", ["agent"]))["agent"];
+
+        Assert.Equal(AgentCapacityEvidenceStatus.Complete, snapshot.EvidenceStatus);
+        // The claimed Job and the claimed Turn occupy; neither the unclaimed
+        // queued Turn nor the Pending Job occupies anything.
+        Assert.Equal(2, snapshot.Occupied);
+        // The Pending Job competes for admission; the Stop fence holds only
+        // the Session's own heads back.
+        Assert.Equal(
+            ["pending-job"],
+            snapshot.Eligible.Select(entry => entry.OwnerId).ToArray());
+        // Yet every accepted, still-waiting fact stays visible in acceptance
+        // order, claimed or not; settled, superseded, prior-generation and
+        // Job-owned Turns are never Session queue facts.
+        Assert.Equal(
+            ["claimed-job", "pending-job", "blocked-turn", "claimed-turn"],
+            snapshot.Queued.Select(entry =>
+                entry.Kind == AgentCapacityOwnerKind.Job ? entry.OwnerId : entry.TurnId!).ToArray());
+        Assert.All(
+            snapshot.Queued.Where(entry => entry.Kind == AgentCapacityOwnerKind.Turn),
+            entry => Assert.Equal("session", entry.OwnerId));
+    }
+
+    [Fact]
+    public async Task Read_QueuedTurnWithoutAcceptanceTimestamp_IsIncompleteEvidence()
+    {
+        await AddAgentAsync("project", "agent", null);
+        await AddSessionAsync(NewSession("session", "project", "agent", AgentSessionActivity.Active,
+            [new("undated", 1, ["input"], AgentTurnStatus.Queued, RecordedAt: null, ContextGeneration: 1)]));
+
+        var snapshot = (await Store.ReadAsync("project", ["agent"]))["agent"];
+
+        // A queued fact that cannot be timestamped cannot be ordered or
+        // counted: the evidence fails closed instead of inventing an order.
+        Assert.Equal(AgentCapacityEvidenceStatus.IncompleteOwnerEvidence, snapshot.EvidenceStatus);
+        Assert.Null(snapshot.Occupied);
+    }
+
+    [Fact]
+    public async Task Read_UnattributableSessionWithCurrentWork_MarksEveryRequestedAgentIncomplete()
+    {
+        await AddAgentAsync("project", "first", null);
+        await AddAgentAsync("project", "second", null);
+        await AddSessionAsync(NewQueuedSession("visible", "turn", "project", "first", Now.UtcDateTime));
+        // One readable row whose indexed Agent label is null under the
+        // project: its queued ordinary work cannot be attributed to any
+        // requested Agent.
+        await AddExceptionalSessionAsync("shaded", "project");
+
+        var snapshots = await Store.ReadAsync("project", ["first", "second"]);
+
+        Assert.All(snapshots.Values, snapshot =>
+        {
+            Assert.Equal(AgentCapacityEvidenceStatus.IncompleteOwnerEvidence, snapshot.EvidenceStatus);
+            Assert.Null(snapshot.Occupied);
+        });
+    }
+
+    [Fact]
+    public async Task Read_UnattributableSettledSession_DoesNotBlockAvailability()
+    {
+        await AddAgentAsync("project", "agent", null);
+        await AddExceptionalSessionAsync("settled", "project", settle: true);
+
+        var snapshot = (await Store.ReadAsync("project", ["agent"]))["agent"];
+
+        // Terminal history with provably no current work is not evidence
+        // about any Agent's availability.
+        Assert.Equal(AgentCapacityEvidenceStatus.Complete, snapshot.EvidenceStatus);
+        Assert.Equal(0, snapshot.Occupied);
+        Assert.Empty(snapshot.Queued);
+    }
+
+    [Fact]
+    public async Task Read_SessionWithoutProjectOrAgentLabelAndCurrentWork_MarksIncomplete()
+    {
+        await AddAgentAsync("project", "agent", null);
+        await AddExceptionalSessionAsync("orphan", null);
+
+        var snapshot = (await Store.ReadAsync("project", ["agent"]))["agent"];
+
+        // A row with no indexed project identity cannot be attributed to
+        // another project either: the requested project fails closed.
+        Assert.Equal(AgentCapacityEvidenceStatus.IncompleteOwnerEvidence, snapshot.EvidenceStatus);
+        Assert.Null(snapshot.Occupied);
+    }
+
+    [Fact]
+    public async Task Read_UnattributableSessionUnderAnotherProject_LeavesRequestedProjectComplete()
+    {
+        await AddAgentAsync("project", "agent", null);
+        await AddExceptionalSessionAsync("elsewhere", "other-project");
+
+        var snapshot = (await Store.ReadAsync("project", ["agent"]))["agent"];
+
+        Assert.Equal(AgentCapacityEvidenceStatus.Complete, snapshot.EvidenceStatus);
+        Assert.Equal(0, snapshot.Occupied);
+    }
+
+    [Fact]
+    public async Task Read_UnparseableExceptionalSession_MarksIncomplete()
+    {
+        await AddAgentAsync("project", "agent", null);
+        await AddUnparseableExceptionalSessionAsync("broken-owner", "project");
+
+        var snapshot = (await Store.ReadAsync("project", ["agent"]))["agent"];
+
+        // A row that cannot be parsed at all is unattributable work, never
+        // silently absent.
+        Assert.Equal(AgentCapacityEvidenceStatus.IncompleteOwnerEvidence, snapshot.EvidenceStatus);
+        Assert.Null(snapshot.Occupied);
+    }
+
+    [Fact]
     public async Task FiniteCapacity_UsesEligibleFifoWithJobBeforeTurnAtEqualTime()
     {
         await AddAgentAsync("project", "agent", 1);
@@ -359,6 +488,138 @@ public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
         row.State = JSON.Serialize(state);
         row.Revision++;
         await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Seeds one readable exceptional Session row whose indexed Agent label
+    /// is null: the persisted owner evidence lost its agent label, and a row
+    /// with no indexed project identity loses every label. Both shapes stay
+    /// parseable as legacy facts while remaining unattributable. A queued
+    /// ordinary Turn is the default; <paramref name="settle"/> marks it
+    /// terminal instead.
+    /// </summary>
+    private async Task AddExceptionalSessionAsync(string sessionId, string? projectId, bool settle = false)
+    {
+        var recordedAt = Now.UtcDateTime;
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", projectId ?? "placeholder-project")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-run-1")
+            .WithLabel("mohist.io/session-name", "build")
+            .WithLabel("mohist.io/agent-id", "agent");
+        var session = AgentSession.Create(sessionId, "runner", "/work", metadata, recordedAt, "pi");
+        session.Status = session.Status with
+        {
+            Activity = AgentSessionActivity.Active,
+            ContextGeneration = 1,
+            Inputs = [new("input", 1, "prompt", "api", AgentSessionInputAcceptance.Accepted, recordedAt, ContextGeneration: 1)],
+            Turns = [new("turn", 1, ["input"],
+                settle ? AgentTurnStatus.Completed : AgentTurnStatus.Queued,
+                RecordedAt: recordedAt, ContextGeneration: 1)],
+            PendingFollowups = [new($"system-turn:turn", "runtime", Accepted: true,
+                AcceptedAt: recordedAt, StartedAt: recordedAt, InputId: "input", TurnId: "turn")],
+        };
+        var row = AgentSessionJson.ToRow(session, recordedAt);
+        var state = JsonNode.Parse(row.State)!.AsObject();
+        var labels = state["metadata"]!["labels"]!.AsObject();
+        labels.Remove("mohist.io/agent-id");
+        if (projectId is null)
+        {
+            // No indexed project identity at all: the row cannot be
+            // attributed to any project from its persisted evidence.
+            labels.Remove("mohist.io/project-id");
+            labels.Remove("mohist.io/source-kind");
+            labels.Remove("mohist.io/source-id");
+            labels.Remove("mohist.io/session-name");
+        }
+        row.State = state.ToJsonString();
+        await using var db = _database.CreateContext();
+        db.AgentSessions.Add(row);
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Seeds one unparseable exceptional Session row: an agent-launch row
+    /// whose persisted agent label is missing, so the owner document cannot
+    /// be read at all.
+    /// </summary>
+    private async Task AddUnparseableExceptionalSessionAsync(string sessionId, string projectId)
+    {
+        var recordedAt = Now.UtcDateTime;
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", projectId)
+            .WithLabel("mohist.io/source-kind", "agent-launch")
+            .WithLabel("mohist.io/agent-id", "agent");
+        var session = AgentSession.Create(sessionId, "runner", "/work", metadata, recordedAt, "pi");
+        session.Status = session.Status with
+        {
+            Activity = AgentSessionActivity.Active,
+            ContextGeneration = 1,
+            Inputs = [new("input", 1, "prompt", "api", AgentSessionInputAcceptance.Accepted, recordedAt, ContextGeneration: 1)],
+            Turns = [new("turn", 1, ["input"], AgentTurnStatus.Queued,
+                RecordedAt: recordedAt, ContextGeneration: 1)],
+            PendingFollowups = [new($"system-turn:turn", "runtime", Accepted: true,
+                AcceptedAt: recordedAt, StartedAt: recordedAt, InputId: "input", TurnId: "turn")],
+        };
+        var row = AgentSessionJson.ToRow(session, recordedAt);
+        var state = JsonNode.Parse(row.State)!.AsObject();
+        state["metadata"]!["labels"]!.AsObject().Remove("mohist.io/agent-id");
+        row.State = state.ToJsonString();
+        await using var db = _database.CreateContext();
+        db.AgentSessions.Add(row);
+        await db.SaveChangesAsync();
+    }
+
+    private static AgentSession NewLocallyBlockedQueuedSession(
+        string sessionId,
+        string projectId,
+        string agentId,
+        params (string TurnId, long Sequence, DateTimeOffset? ClaimedAt)[] queuedTurns)
+    {
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", projectId)
+            .WithLabel("mohist.io/source-kind", "agent-launch")
+            .WithLabel("mohist.io/agent-id", agentId);
+        var session = AgentSession.Create(sessionId, "runner", "/work", metadata, Now.UtcDateTime, "pi");
+        var inputs = new List<AgentSessionInputRecord>();
+        var turns = new List<AgentTurnRecord>();
+        var leases = new List<AgentSessionFollowupLease>();
+        foreach (var (turnId, sequence, claimedAt) in queuedTurns)
+        {
+            var inputId = $"input-{turnId}";
+            var recordedAt = Now.AddMinutes(2 + sequence);
+            inputs.Add(new(inputId, sequence, "prompt", "api", AgentSessionInputAcceptance.Accepted,
+                recordedAt.UtcDateTime, ContextGeneration: 1));
+            turns.Add(turnId switch
+            {
+                "settled-turn" => new(turnId, sequence, [inputId], AgentTurnStatus.Completed,
+                    RecordedAt: recordedAt.UtcDateTime, ContextGeneration: 1, CapacityClaimedAt: claimedAt),
+                "superseded-turn" => new(turnId, sequence, [inputId], AgentTurnStatus.Queued,
+                    RecordedAt: recordedAt.UtcDateTime, ContextGeneration: 1, SupersededAt: recordedAt.UtcDateTime),
+                "prior-generation-turn" => new(turnId, sequence, [inputId], AgentTurnStatus.Queued,
+                    RecordedAt: recordedAt.UtcDateTime, ContextGeneration: 0),
+                "job-turn" => new(turnId, sequence, [inputId], AgentTurnStatus.Queued, JobId: "job",
+                    RecordedAt: recordedAt.UtcDateTime, ContextGeneration: 1),
+                _ => new(turnId, sequence, [inputId], AgentTurnStatus.Queued,
+                    RecordedAt: recordedAt.UtcDateTime, ContextGeneration: 1, CapacityClaimedAt: claimedAt),
+            });
+            if (turnId is "blocked-turn" or "claimed-turn")
+                leases.Add(new($"system-turn:{turnId}", "runtime", Accepted: true,
+                    AcceptedAt: recordedAt.UtcDateTime, StartedAt: recordedAt.UtcDateTime,
+                    InputId: inputId, TurnId: turnId));
+        }
+        session.Status = session.Status with
+        {
+            Activity = AgentSessionActivity.Active,
+            ContextGeneration = 1,
+            Inputs = inputs,
+            Turns = turns,
+            PendingFollowups = leases,
+            // A pending Stop fences the whole Session: no head may dispatch,
+            // yet the queued work stays visible to the read projection.
+            PendingStop = new AgentSessionStopClaim(queuedTurns[0].TurnId, "stop-operation"),
+        };
+        return session;
     }
 
     private static AgentSession NewQueuedSession(
