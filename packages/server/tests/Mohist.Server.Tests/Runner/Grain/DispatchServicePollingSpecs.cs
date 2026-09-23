@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Agent;
@@ -10,6 +11,8 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Tests.Support;
@@ -187,13 +190,29 @@ public partial class DispatchServiceReconciliationSpecs
 
         var jobId = $"manager-capability-race-job-{Guid.NewGuid():N}";
         var sessionId = $"manager-capability-race-session-{Guid.NewGuid():N}";
+        var inputId = $"manager-capability-race-input-{Guid.NewGuid():N}";
+        var turnId = $"manager-capability-race-turn-{Guid.NewGuid():N}";
+        var managerAgentId = $"builtin:{BuiltInAgentCatalog.MohistSlackName}";
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", SlackDeliveryOwnerIds.ManagerProjectId)
+            .WithLabel("mohist.io/source-kind", "agent-connection")
+            .WithLabel("mohist.io/source-id", jobId)
+            .WithLabel("mohist.io/agent-id", managerAgentId);
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            runnerId, "opencode", $"/tmp/{jobId}", Metadata: metadata));
+        await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            inputId, turnId, "manager request", "agent-connection", jobId,
+            Runtime: "opencode", Metadata: metadata, WorkDir: $"/tmp/{jobId}"));
         var job = Grains.GetGrain<IAgentJobGrain>(jobId);
         await job.SubmitAsync(new AgentJobInput(
             Prompt: "manager request",
             ProjectId: SlackDeliveryOwnerIds.ManagerProjectId,
             Runtime: "opencode",
-            AgentId: "manager-agent",
+            AgentId: managerAgentId,
             AgentSessionId: sessionId,
+            InitialInputId: inputId,
+            InitialTurnId: turnId,
             PinnedRunnerId: runnerId,
             ExecutionSource: AgentExecutionSources.Slack,
             SlackExecutionContext: SlackExecutionContextFactory.Create(
