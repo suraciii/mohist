@@ -260,6 +260,27 @@ public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Claims_FailClosedOnUnattributableActiveSessionWithoutChangingEitherOwner()
+    {
+        await AddAgentAsync("project", "agent", 2);
+        var job = await AddJobAsync("job", "project", "agent", Now);
+        var sessionState = await AddSessionAsync(NewQueuedSession(
+            "session", "turn", "project", "agent", Now.UtcDateTime));
+        await AddExceptionalSessionAsync("unattributable", "project");
+
+        var jobClaim = await Store.ClaimJobAsync("job", job.Revision);
+        var turnClaim = await Store.ClaimTurnAsync("session", sessionState, "turn");
+
+        Assert.Equal(AgentCapacityClaimDisposition.Incomplete, jobClaim.Disposition);
+        Assert.Equal(AgentCapacityEvidenceStatus.IncompleteOwnerEvidence, jobClaim.Capacity!.EvidenceStatus);
+        Assert.Equal(AgentCapacityClaimDisposition.Incomplete, turnClaim.Disposition);
+        Assert.Equal(AgentCapacityEvidenceStatus.IncompleteOwnerEvidence, turnClaim.Capacity!.EvidenceStatus);
+        await using var db = _database.CreateContext();
+        Assert.Equal(job.Revision, (await db.AgentJobs.SingleAsync(row => row.JobKey == "job")).Revision);
+        Assert.Equal(sessionState, (await db.AgentSessions.SingleAsync(row => row.Id == "session")).State);
+    }
+
+    [Fact]
     public async Task FiniteCapacity_UsesEligibleFifoWithJobBeforeTurnAtEqualTime()
     {
         await AddAgentAsync("project", "agent", 1);

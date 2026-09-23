@@ -44,8 +44,7 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
             return new Dictionary<string, AgentCapacitySnapshot>(StringComparer.Ordinal);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var snapshots = await ReadAsync(db, projectId, ids, ct);
-        return await MarkUnattributableSessionsAsync(db, projectId, snapshots, ct);
+        return await ReadAsync(db, projectId, ids, ct);
     }
 
     public async Task<AgentJobCapacityClaimResult> ClaimJobAsync(
@@ -342,17 +341,17 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
                 AgentCapacityFacts.Order(eligible).ToArray(),
                 AgentCapacityFacts.Order(queued).ToArray()));
         }
-        return snapshots;
+        return await MarkUnattributableSessionsAsync(db, projectId, snapshots, ct);
     }
 
     /// <summary>
-    /// Fails the availability read closed while owner work exists that no
+    /// Fails both availability reads and claims closed while owner work exists that no
     /// label can attribute to a requested Agent: Sessions with a null indexed
     /// Agent label under the requested project, and Sessions with no indexed
-    /// project identity at all, enter one batched scan per read, so an
-    /// unattributable row never costs an N+1 query. A row whose current work
-    /// is provably settled stays invisible. Claims never take this path: a
-    /// claim evaluates its own owner facts, not the project-wide projection.
+    /// project identity at all, enter one batched scan per read. Claims use
+    /// the same scan inside their immediate transaction so unattributable
+    /// owner work cannot be mistaken for free capacity. A row whose current
+    /// work is provably settled stays invisible.
     /// </summary>
     private static async Task<IReadOnlyDictionary<string, AgentCapacitySnapshot>> MarkUnattributableSessionsAsync(
         MohistDbContext db,
