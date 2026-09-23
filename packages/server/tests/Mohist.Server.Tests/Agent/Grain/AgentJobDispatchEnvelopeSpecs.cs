@@ -27,6 +27,9 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
     public async Task SubmitAsync_RejectsExplicitNonSlackSourceWithSlackContext()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-source-mismatch-{Guid.NewGuid():N}");
+        // Admission must reach dispatch construction for the invalid
+        // source/context combination to fail closed there.
+        await _fixture.SeedAgentAsync(projectId, "agent-source-mismatch", maxConcurrentRuns: null);
         var job = JobGrain($"agent-job-source-mismatch-{Guid.NewGuid():N}");
         var context = SlackExecutionContextFactory.Create(
             "workspace-1",
@@ -53,6 +56,7 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
     public async Task SubmitAsync_ReconcilesAbsentSourceFromTrustedSlackContext()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-legacy-slack-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-legacy-slack", maxConcurrentRuns: null);
         var job = JobGrain($"agent-job-legacy-slack-{Guid.NewGuid():N}");
         var context = SlackExecutionContextFactory.Create(
             "workspace-legacy",
@@ -87,9 +91,12 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
     public async Task SubmitAsync_WithAgentDefinition_EmitsFlatPromptInstructionsModel_OnDispatchEnvelope()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-agent-source-runner-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-7", maxConcurrentRuns: null);
         var jobKey = $"agent-job-agent-source-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
         var sessionId = $"agent-session-{Guid.NewGuid():N}";
+        var inputId = $"input-agent-source-{Guid.NewGuid():N}";
+        var turnId = $"turn-agent-source-{Guid.NewGuid():N}";
 
         // An explicit reasoningEffort is only claimable when the runner
         // advertises a complete catalog and a ready readiness witness for
@@ -127,6 +134,15 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
 
         var instructions = "Always respond in formal English; refuse non-code tasks.";
         var configElement = JsonDocument.Parse("{\"type\":\"pi\",\"model\":\"openai/gpt-5.5\",\"reasoningEffort\":\"high\",\"variant\":\"balanced\"}").RootElement.Clone();
+        await OpenJobSessionAsync(
+            sessionId,
+            projectId,
+            jobKey,
+            inputId,
+            turnId,
+            "summarize the diff",
+            agentId: "agent-7",
+            runtime: "pi");
 
         var input = new AgentJobInput(
             Prompt: "summarize the diff",
@@ -138,6 +154,8 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
             AgentInstructions: instructions,
             AgentConfig: configElement,
             AgentSessionId: sessionId,
+            InitialInputId: inputId,
+            InitialTurnId: turnId,
             Variant: "balanced",
             ReasoningEffort: "high");
 
@@ -225,9 +243,20 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
     public async Task SubmitAsync_AgentJobWithAgentSessionId_PopulatesSessionIdOnDispatchEnvelope()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-session-runner-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-42", maxConcurrentRuns: null);
         var jobKey = $"agent-job-session-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
         var sessionId = $"generic-session-{Guid.NewGuid():N}";
+        var inputId = $"input-generic-session-{Guid.NewGuid():N}";
+        var turnId = $"turn-generic-session-{Guid.NewGuid():N}";
+        await OpenJobSessionAsync(
+            sessionId,
+            projectId,
+            jobKey,
+            inputId,
+            turnId,
+            "ask the agent",
+            agentId: "agent-42");
 
         var input = new AgentJobInput(
             Prompt: "ask the agent",
@@ -235,7 +264,9 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
             ProjectId: projectId,
             AgentId: "agent-42",
             AgentInstructions: "be brief",
-            AgentSessionId: sessionId);
+            AgentSessionId: sessionId,
+            InitialInputId: inputId,
+            InitialTurnId: turnId);
 
         await job.SubmitAsync(input);
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
@@ -274,9 +305,20 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
     public async Task SubmitAsync_PolledDispatch_ExposesProjectIdAndAgentSessionIdThroughHttpPoll()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"agent-job-http-project-runner-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-http", maxConcurrentRuns: null);
         var jobKey = $"agent-job-http-project-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
         var sessionId = $"http-session-{Guid.NewGuid():N}";
+        var inputId = $"input-http-{Guid.NewGuid():N}";
+        var turnId = $"turn-http-{Guid.NewGuid():N}";
+        await OpenJobSessionAsync(
+            sessionId,
+            projectId,
+            jobKey,
+            inputId,
+            turnId,
+            "expose via http",
+            agentId: "agent-http");
 
         var input = new AgentJobInput(
             Prompt: "expose via http",
@@ -284,7 +326,9 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
             ProjectId: projectId,
             AgentId: "agent-http",
             AgentInstructions: "concise",
-            AgentSessionId: sessionId);
+            AgentSessionId: sessionId,
+            InitialInputId: inputId,
+            InitialTurnId: turnId);
 
         await job.SubmitAsync(input);
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
@@ -339,6 +383,7 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
         // launch-time effort without re-reading the Agent definition.
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
             $"agent-job-effort-dispatch-runner-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-effort", maxConcurrentRuns: null);
         await InstallCapabilityFenceAsync(runnerId, projectId, "opencode");
         var jobKey = $"agent-job-effort-dispatch-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
@@ -384,6 +429,7 @@ public class AgentJobDispatchEnvelopeSpecs : AgentJobGrainTestSupport
         // the `with` payload, no synthesized default on the definition.
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
             $"agent-job-no-effort-dispatch-runner-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-no-effort", maxConcurrentRuns: null);
         var jobKey = $"agent-job-no-effort-dispatch-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
 

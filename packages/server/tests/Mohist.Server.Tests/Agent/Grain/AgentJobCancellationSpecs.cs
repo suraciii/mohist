@@ -1,8 +1,8 @@
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Tests.Workflow;
 using Xunit;
 
@@ -57,42 +57,38 @@ public sealed class AgentJobCancellationSpecs : AgentJobGrainTestSupport
     }
 
     [Fact]
-    public async Task CancelAsync_QueuedJobRemovesItsPersistedConcurrencyWaiter()
+    public async Task CancelAsync_ClaimedPendingJob_ReleasesDerivedOccupancyByOwnerStatus()
     {
         await ClearGlobalRunnerRegistryAsync();
-        var projectId = $"agent-job-cancel-queued-project-{Guid.NewGuid():N}";
+        var projectId = $"agent-job-cancel-claimed-project-{Guid.NewGuid():N}";
         await _fixture.SeedAgentAsync(projectId, "agent-test", maxConcurrentRuns: 1);
-        var gate = Grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, "agent-test"));
-
-        Assert.Equal(
-            AgentConcurrencyAcquireResult.Granted,
-            await gate.AcquireAsync(
-                projectId,
-                "agent-test",
-                "active-job",
-                "active-job",
-                AgentConcurrencyPermitOwnerKind.Job));
-
-        var jobKey = $"agent-job-cancel-queued-{Guid.NewGuid():N}";
+        var jobKey = $"agent-job-cancel-claimed-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
-        await job.SubmitAsync(MakeInput("queued job", projectId));
 
-        Assert.Contains(
-            (await gate.GetSnapshotAsync()).Waiters,
-            waiter => waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Job
-                && waiter.OwnerId == jobKey);
+        await job.SubmitAsync(MakeInput("claimed pending job", projectId));
+
+        // No runner is online: the capacity claim still happened, so the
+        // pending Job occupies its derived slot while it waits.
+        await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<Mohist.Server.Infrastructure.Capacity.IAgentCapacityStore>();
+            var before = (await store.ReadAsync(projectId, ["agent-test"]))["agent-test"];
+            Assert.True(before.IsComplete);
+            Assert.Equal(1, before.Occupied);
+        }
 
         var cancelled = await job.CancelAsync();
 
         Assert.Equal(AgentJobCancelDisposition.Cancelled, cancelled.Disposition);
-        Assert.DoesNotContain(
-            (await gate.GetSnapshotAsync()).Waiters,
-            waiter => waiter.OwnerId == jobKey);
-
-        await gate.ReleaseAsync(projectId, "agent-test", "active-job");
-        var afterRelease = await gate.GetSnapshotAsync();
-        Assert.DoesNotContain(afterRelease.ActivePermits, permit => permit.OwnerId == jobKey);
-        Assert.DoesNotContain(afterRelease.PendingNotifications, notification => notification.OwnerId == jobKey);
+        // Cancellation releases occupancy through the terminal owner
+        // status alone; there is no permit to hand back.
+        await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<Mohist.Server.Infrastructure.Capacity.IAgentCapacityStore>();
+            var after = (await store.ReadAsync(projectId, ["agent-test"]))["agent-test"];
+            Assert.True(after.IsComplete);
+            Assert.Equal(0, after.Occupied);
+        }
     }
 
     [Fact]
@@ -113,8 +109,17 @@ public sealed class AgentJobCancellationSpecs : AgentJobGrainTestSupport
     {
         var (_, projectId) = await RegisterAgentJobRunnerAsync(
             $"agent-job-abort-advanced-{Guid.NewGuid():N}");
-        var job = JobGrain($"agent-job-abort-advanced-{Guid.NewGuid():N}");
-        await job.PrepareManualLaunchAsync(ManualCommand(projectId));
+        var command = ManualCommand(projectId);
+        var jobKey = $"agent-job-abort-advanced-{Guid.NewGuid():N}";
+        var job = JobGrain(jobKey);
+        await OpenJobSessionAsync(
+            command.SessionId,
+            projectId,
+            jobKey,
+            command.InputId,
+            command.TurnId,
+            command.Prompt);
+        await job.PrepareManualLaunchAsync(command with { });
         await job.SubmitPreparedLaunchAsync();
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
 

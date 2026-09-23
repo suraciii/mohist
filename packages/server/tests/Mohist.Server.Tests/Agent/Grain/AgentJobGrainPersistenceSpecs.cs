@@ -150,6 +150,9 @@ public sealed class AgentJobGrainPersistenceSpecs
 
     private async Task<string> RegisterRunnerAsync(string projectId, string suffix)
     {
+        // Admission claims Agent occupancy against the real definition the
+        // submitted jobs launch under.
+        await _fixture.SeedAgentAsync(projectId, "agent-test", maxConcurrentRuns: null);
         var runnerId = $"agent-job-{suffix}-runner-{Guid.NewGuid():N}";
         await Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
             runnerId,

@@ -7,6 +7,7 @@ using Mohist.Server.Api;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data.Agent;
+using Mohist.Server.Infrastructure.Capacity;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -42,6 +43,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public RecordingSessionStopDelivery StopDelivery { get; } = new();
     public AgentSessionPersistenceTestProbe Persistence { get; }
     public AgentSessionStatePersistenceFailureProbe SessionStatePersistence { get; } = new();
+    public AgentJobCapacityClaimUncertaintyProbe CapacityClaimUncertainty { get; } = new();
 
     private readonly InMemoryEventBus _sharedEventBus;
     private readonly RecordingEventStore _sharedEventStore = new();
@@ -80,6 +82,16 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
                 new FailingAgentSessionStore(
                     services.GetRequiredService<AgentSessionStore>(),
                     services.GetRequiredService<AgentSessionStatePersistenceFailureProbe>()));
+            // Owner-level capacity proofs need the real production store;
+            // the decorator only injects a post-commit throw so a test can
+            // observe the owner's uncertain-commit quarantine without
+            // weakening the claim itself.
+            siloBuilder.Services.RemoveAll<IAgentCapacityStore>();
+            siloBuilder.Services.AddScoped<AgentCapacityStore>();
+            siloBuilder.Services.AddScoped<IAgentCapacityStore>(services =>
+                new UncertainAgentCapacityStore(
+                    services.GetRequiredService<AgentCapacityStore>(),
+                    CapacityClaimUncertainty));
             siloBuilder.Services.RemoveAll<ISessionStopDelivery>();
             siloBuilder.Services.AddSingleton<ISessionStopDelivery>(StopDelivery);
             siloBuilder.Services.RemoveAll<IAgentLaunchParticipantProbe>();
@@ -221,8 +233,7 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
 }
 
 public sealed class ControllableAgentSessionTranscriptPersistence
-{
-    private int _failuresRemaining;
+{    private int _failuresRemaining;
 
     /// <summary>
     /// Adds <paramref name="count"/> pending failures to the queue. Each
@@ -255,6 +266,69 @@ public sealed class ControllableAgentSessionTranscriptPersistence
         if (_failuresRemaining > 0)
             Interlocked.Decrement(ref _failuresRemaining);
     }
+}
+
+/// <summary>
+/// Arms a one-shot post-commit throw for one Job's next capacity claim, so
+/// a test can prove the owner treats the outcome as uncertain instead of
+/// guessing the claim failed.
+/// </summary>
+public sealed class AgentJobCapacityClaimUncertaintyProbe
+{
+    private readonly object _gate = new();
+    private readonly HashSet<string> _armed = new(StringComparer.Ordinal);
+
+    public void Arm(string jobKey)
+    {
+        lock (_gate)
+            _armed.Add(jobKey);
+    }
+
+    public bool ConsumeIfArmed(string jobKey)
+    {
+        lock (_gate)
+            return _armed.Remove(jobKey);
+    }
+}
+
+internal sealed class UncertainAgentCapacityStore : IAgentCapacityStore
+{
+    private readonly AgentCapacityStore _inner;
+    private readonly AgentJobCapacityClaimUncertaintyProbe _probe;
+
+    public UncertainAgentCapacityStore(
+        AgentCapacityStore inner,
+        AgentJobCapacityClaimUncertaintyProbe probe)
+    {
+        _inner = inner;
+        _probe = probe;
+    }
+
+    public Task<IReadOnlyDictionary<string, AgentCapacitySnapshot>> ReadAsync(
+        string projectId,
+        IReadOnlyCollection<string> agentIds,
+        CancellationToken ct = default) =>
+        _inner.ReadAsync(projectId, agentIds, ct);
+
+    public async Task<AgentJobCapacityClaimResult> ClaimJobAsync(
+        string jobKey,
+        long expectedRevision,
+        CancellationToken ct = default)
+    {
+        var result = await _inner.ClaimJobAsync(jobKey, expectedRevision, ct);
+        if (result.Disposition == AgentCapacityClaimDisposition.Claimed
+            && _probe.ConsumeIfArmed(jobKey))
+            throw new InvalidOperationException(
+                $"simulated uncertain capacity claim commit for AgentJob {jobKey}");
+        return result;
+    }
+
+    public Task<AgentTurnCapacityClaimResult> ClaimTurnAsync(
+        string sessionId,
+        string expectedStateJson,
+        string turnId,
+        CancellationToken ct = default) =>
+        _inner.ClaimTurnAsync(sessionId, expectedStateJson, turnId, ct);
 }
 
 internal sealed class FailingAgentSessionTranscriptStore : IAgentSessionTranscriptStore

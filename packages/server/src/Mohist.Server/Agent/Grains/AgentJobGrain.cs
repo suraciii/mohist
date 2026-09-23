@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Capacity;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
@@ -30,7 +31,12 @@ namespace Mohist.Server.Agent.Grains;
 /// optimistic revision checking. There is no Orleans persistent state
 /// for this grain — the relational row is the single durable source.
 ///
-/// Admission writes the AgentJob ledger row directly with
+/// Admission first claims Agent occupancy in the derived capacity
+/// store's single SQLite transaction using the persisted ledger
+/// revision, before any Runner election and even when no Runner is
+/// online. The committed claim record is installed in full before any
+/// later save or dispatch. Assignment then writes the AgentJob ledger
+/// row directly with
 /// <see cref="AgentJobLedgerRecord.AssignedRunnerId"/>,
 /// <see cref="AgentJobLedgerRecord.ReadySince"/>, and
 /// <see cref="AgentJobLedgerRecord.DispatchJson"/>; no
@@ -61,6 +67,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     private readonly AgentJobOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly IAgentJobStore _jobStore;
+    private readonly IAgentCapacityStore _capacityStore;
     private readonly IEventStore _eventStore;
     private readonly EventDispatchSignal _dispatchSignal;
     private readonly IGrainFactory _grains;
@@ -79,6 +86,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         IOptions<AgentJobOptions> options,
         TimeProvider timeProvider,
         IAgentJobStore jobStore,
+        IAgentCapacityStore capacityStore,
         IEventStore eventStore,
         EventDispatchSignal dispatchSignal,
         IGrainFactory grains,
@@ -90,6 +98,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
         _options = options.Value;
         _timeProvider = timeProvider;
         _jobStore = jobStore;
+        _capacityStore = capacityStore;
         _eventStore = eventStore;
         _dispatchSignal = dispatchSignal;
         _grains = grains;
@@ -641,10 +650,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             || State.ReadySince is not null
             || State.CapacityClaimedAt is not null
             || State.InitialInputSubmission is not null
-            || State.ConcurrencyPermitHeld
-            || !string.IsNullOrWhiteSpace(State.ConcurrencyPermitId)
-            || !string.IsNullOrWhiteSpace(State.ConcurrencyWaiterId)
-            || !string.IsNullOrWhiteSpace(State.ConcurrencyPermitToken)
             || !string.IsNullOrWhiteSpace(_ledger?.DispatchJson))
         {
             return;
@@ -666,7 +671,6 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
             Model: State.Input.Model,
             Variant: State.Input.Variant,
             ReasoningEffort: State.Input.ReasoningEffort);
-        State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.Cancelled;
         DisposeJobTimeoutTimer();
         await PersistAsync();
         _terminalCompletion.TrySetResult(State.TerminalResult);
@@ -1117,15 +1121,7 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
 
         _ledger = record;
         _state = JsonSerializer.Deserialize<AgentJobState>(record.StateJson, JSON.Options) ?? new AgentJobState();
-        // Backfill scheduling fields from the row so callers that read
-        // state see the indexed values too.
-        _state.RunnerId ??= record.AssignedRunnerId;
-        _state.WorkId ??= record.WorkId;
-        _state.SubmittedAt ??= record.ReadySince;
-        _state.ReadySince ??= record.ReadySince;
-        _state.RunningSince ??= record.RunningSince;
-        if (Enum.TryParse<AgentLaunchVisibility>(record.LaunchVisibility, true, out var visibility))
-            _state.LaunchVisibility = visibility;
+        BackfillSchedulingFieldsFromRecord(record);
         _hydrated = true;
     }
 
@@ -1191,19 +1187,16 @@ public sealed partial class AgentJobGrain : Grain, IAgentJobGrain
     }
 
     /// <summary>
-    /// Pending jobs without an AssignedRunnerId re-arm admission and
-    /// clear the readiness timestamp on persist so the next admission
-    /// resets the deadline. Pending jobs with an AssignedRunnerId
-    /// preserve the timestamp the admission wrote; terminal jobs have
-    /// no readiness projection.
+    /// A Pending Job preserves the readiness timestamp its first capacity
+    /// claim fixed, with or without a runner assignment; reassignment and
+    /// re-evaluation never restamp it. Terminal jobs have no readiness
+    /// projection.
     /// </summary>
     private DateTimeOffset? ResolveReadySinceForPersist()
     {
         if (State.Status != AgentJobStatus.Pending)
             return null;
-        if (!string.IsNullOrWhiteSpace(State.RunnerId))
-            return _ledger?.ReadySince ?? State.ReadySince;
-        return null;
+        return State.ReadySince ?? _ledger?.ReadySince;
     }
 
     /// <summary>

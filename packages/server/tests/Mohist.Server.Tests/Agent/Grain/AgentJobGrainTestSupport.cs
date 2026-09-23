@@ -134,6 +134,12 @@ public abstract class AgentJobGrainTestSupport
         await ClearBacklogAsync();
 
         var pid = projectId ?? $"agent-job-project-{Guid.NewGuid():N}";
+        // Admission claims Agent occupancy against the real Agent
+        // definition, so the success-focused runner helper seeds the
+        // definition the shared MakeInput() jobs launch under. Specs that
+        // exercise missing definitions deliberately never register a
+        // runner through this helper.
+        await _fixture.SeedAgentAsync(pid, "agent-test", maxConcurrentRuns: null);
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var capabilities = new[] { "spec/*", AgentExecutionSources.Version1Capability }
             .Concat(additionalCapabilities ?? [])
@@ -184,6 +190,50 @@ public abstract class AgentJobGrainTestSupport
 
     protected static AgentJobInput MakeInput(string prompt, string projectId, string workspacePath = "/tmp/agent-job") =>
         new(Prompt: prompt, WorkspacePath: workspacePath, ProjectId: projectId, AgentId: "agent-test");
+
+    /// <summary>
+    /// Opens a real AgentSession carrying the accepted identity labels and
+    /// this Job's initial Input and Turn, so the Job's derived capacity
+    /// claim can attribute its Session-local order against the persisted
+    /// row instead of fabricating a bare session reference.
+    /// </summary>
+    protected async Task OpenJobSessionAsync(
+        string sessionId,
+        string projectId,
+        string jobKey,
+        string inputId,
+        string turnId,
+        string prompt,
+        string agentId = "agent-test",
+        string runtime = "opencode",
+        string workDir = "/tmp/agent-job-fixture",
+        string runnerId = "",
+        bool initialLaunch = true)
+    {
+        AgentSessionMetadata Labels() => new(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+            [GenericAgentSessionMetadata.AgentId] = agentId,
+        });
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: runnerId,
+            AgentRuntime: runtime,
+            WorkDir: workDir,
+            Metadata: Labels()));
+        if (!initialLaunch)
+            return;
+        await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            inputId,
+            turnId,
+            prompt,
+            "agent-launch",
+            jobKey,
+            Runtime: runtime,
+            WorkDir: workDir,
+            Metadata: Labels()));
+    }
 
     /// <summary>
     /// Connection generation shared by AgentJob registration and poll helpers.

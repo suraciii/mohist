@@ -71,11 +71,6 @@ public sealed partial class AgentJobGrain
         StageSubagentTerminalEvent(AgentJobStatus.Unknown);
         DisposeJobTimeoutTimer();
 
-        State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.Terminal;
-        State.ConcurrencyReleasePending = State.ConcurrencyPermitId is not null
-            || State.ConcurrencyPermitHeld
-            || State.ConcurrencyWaiterId is not null;
-
         try
         {
             _reportPersistenceFailures.BeforeActivitySettlementReminder(Key);
@@ -93,7 +88,6 @@ public sealed partial class AgentJobGrain
             throw;
         }
 
-        await TryReleaseConcurrencyPermitAsync();
         _terminalCompletion.TrySetResult(State.TerminalResult);
         if (State.PendingTerminalDeliveryEvent is not null)
             await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
