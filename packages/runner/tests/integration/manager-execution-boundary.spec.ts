@@ -163,21 +163,15 @@ describe.sequential('ManagerExecutionBoundary', () => {
 
       // The old forged credential request shape (no arguments) receives no
       // bearer and spawns nothing.
-      const managementResponse = await requestBroker(environment.MOHIST_MANAGER_BROKER!, 'management')
+      const [managementResponse, directManagement, directReply] = await Promise.all([
+        requestBroker(environment.MOHIST_MANAGER_BROKER!, 'management'),
+        requestBroker(environment.MOHIST_MANAGER_BROKER!, 'management', ['slack', 'status']),
+        requestBroker(environment.MOHIST_MANAGER_BROKER!, 'reply', ['slack', 'message', 'send', 'attacker text']),
+      ])
       expect(managementResponse?.credential).toBeUndefined()
       expect(managementResponse?.exitCode).toBeUndefined()
 
       // A generic process cannot proxy an otherwise valid management request.
-      const directManagement = await requestBroker(environment.MOHIST_MANAGER_BROKER!, 'management', [
-        'slack',
-        'status',
-      ])
-      const directReply = await requestBroker(environment.MOHIST_MANAGER_BROKER!, 'reply', [
-        'slack',
-        'message',
-        'send',
-        'attacker text',
-      ])
       expect(directManagement?.exitCode).toBeUndefined()
       expect(directReply?.exitCode).toBeUndefined()
       expect(stub.invocations()).toHaveLength(0)
