@@ -1,4 +1,3 @@
-using Mohist.Server.Agent.Grains;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Capacity;
 using Mohist.Server.Infrastructure.Orleans;
@@ -54,53 +53,32 @@ public sealed partial class AgentSessionGrain
         var texts = turnInputs.Select(input => input.Text).ToArray();
         var attachments = CollectAttachmentsForDispatch(inputs, turn.InputIds);
 
-        if (!await AcquireFollowupDispatchPermitAsync(session, lease))
+        // The derived capacity store is the admission authority for a queued
+        // follow-up: inside this same serialized turn the Session flushes its
+        // pending obligations, claims the Turn against the exact persisted
+        // document, and installs the complete committed Session before anything
+        // is saved, timed, or dispatched. No claim means no dispatch, and a
+        // claimed queued head is still dispatched here without re-entering the
+        // cross-Session queue.
+        if (!await ClaimQueuedFollowupTurnAsync(session, turn.Id))
             return null;
 
-        leases = GetPendingFollowups(session).ToList();
+        var claimed = _session
+            ?? throw new InvalidOperationException($"AgentSession {SessionId} lost its state while claiming turn '{turn.Id}'.");
+        leases = GetPendingFollowups(claimed).ToList();
         index = leases.FindIndex(candidate =>
             string.Equals(candidate.OperationId, lease.OperationId, StringComparison.Ordinal));
         if (index < 0)
             return null;
-        lease = GetPendingFollowups(session).FirstOrDefault(candidate =>
-            string.Equals(candidate.OperationId, lease.OperationId, StringComparison.Ordinal)) ?? lease;
+        lease = leases[index];
 
         leases[index] = lease with
         {
             Dispatching = true,
             PayloadSealed = true,
-            ConcurrencyGateStatus = lease.ConcurrencyPermitId is null ? lease.ConcurrencyGateStatus : "dispatch-pending",
         };
-        SetPendingFollowups(session, leases);
-        await CommitAsync(session, []);
-        if (leases[index].ConcurrencyPermitId is not null
-            && leases[index].ConcurrencyToken is not null
-            && leases[index].ConcurrencyAgentId is not null
-            && leases[index].ConcurrencyDispatchId is not null)
-        {
-            var dispatchProjectId = session.Metadata?.Label(AgentSessionQueryMetadataKeys.ProjectId);
-            var dispatchAgentId = leases[index].ConcurrencyAgentId;
-            var dispatchToken = leases[index].ConcurrencyToken;
-            var dispatchPermitId = leases[index].ConcurrencyPermitId;
-            var dispatchId = leases[index].ConcurrencyDispatchId;
-            if (string.IsNullOrWhiteSpace(dispatchProjectId)
-                || string.IsNullOrWhiteSpace(dispatchAgentId)
-                || string.IsNullOrWhiteSpace(dispatchToken)
-                || string.IsNullOrWhiteSpace(dispatchPermitId)
-                || string.IsNullOrWhiteSpace(dispatchId))
-                return null;
-            await _grains
-                .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(dispatchProjectId, dispatchAgentId))
-                .MarkDispatchedAsync(
-                    dispatchProjectId,
-                    dispatchAgentId,
-                    dispatchToken,
-                    dispatchPermitId,
-                    dispatchId);
-            leases[index] = leases[index] with { ConcurrencyGateStatus = "dispatched" };
-            SetPendingFollowups(session, leases);
-            await CommitAsync(session, []);
-        }
+        SetPendingFollowups(claimed, leases);
+        await CommitAsync(claimed, []);
         return new AgentSessionFollowupDispatch(
             turn.Id,
             leases[index].OperationId,
@@ -108,9 +86,9 @@ public sealed partial class AgentSessionGrain
             attachments,
             representative.Id,
             provenance,
-            leases[index].ConcurrencyDispatchId ?? $"followup:{session.Id}:{leases[index].OperationId}",
+            leases[index].ConcurrencyDispatchId ?? $"followup:{claimed.Id}:{leases[index].OperationId}",
             executionSource,
-            session.Metadata?.Label(AgentSessionQueryMetadataKeys.OriginMarker));
+            claimed.Metadata?.Label(AgentSessionQueryMetadataKeys.OriginMarker));
     }
 
     private static string EffectiveExecutionSource(AgentSessionInputRecord input)

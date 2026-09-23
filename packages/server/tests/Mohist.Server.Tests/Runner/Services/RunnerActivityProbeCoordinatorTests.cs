@@ -135,6 +135,12 @@ public sealed class RunnerActivityProbeCoordinatorTests
             Task.FromResult<IReadOnlyList<AgentSessionReconcileBinding>>([]);
         public Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default) =>
             Task.CompletedTask;
+
+        // No relational document exists behind this store, so no exact
+        // persisted State token is available; a capacity claim against it fails
+        // closed rather than comparing a reserialized in-memory Session.
+        public Task<string?> ReadStateJsonAsync(string key, CancellationToken ct = default) =>
+            Task.FromResult<string?>(null);
     }
 
     private class SessionProxy : DispatchProxy

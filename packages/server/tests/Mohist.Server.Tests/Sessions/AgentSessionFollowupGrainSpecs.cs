@@ -259,6 +259,10 @@ public sealed partial class AgentSessionFollowupGrainSpecs
     private async Task<(IAgentSessionGrain Grain, string SessionId)> CreateAttachedSessionAsync(string runtimeSessionId)
     {
         var sessionId = $"followup-grain-{Guid.NewGuid():N}";
+        // A successful follow-up needs real capacity evidence for the
+        // Session's accepted identity; the derived store admits the queued
+        // head against this seeded definition.
+        await _fixture.SeedAgentAsync("project-1", "workflow-agent", maxConcurrentRuns: null);
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(OpenCommand());
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(runtimeSessionId));

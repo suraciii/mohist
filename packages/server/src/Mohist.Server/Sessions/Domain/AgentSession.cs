@@ -609,13 +609,12 @@ public sealed record AgentSessionFollowupLease(
     [property: Id(3)] DateTime? AcceptedAt = null,
     [property: Id(4)] DateTime? StartedAt = null,
     /// <summary>
-    /// When non-null, this follow-up lease occupies a per-agent
-    /// concurrency permit acquired at <c>BeginFollowupAsync</c>. The
+    /// When non-null, this follow-up lease carries the per-agent dispatch
+    /// identity the dispatcher and the admission claim correlate on. The
     /// permit is released when the lease is cleared by an idle
-    /// activity event, the lease-expiration sweep, or an explicit
-    /// abandon. Null on leases created for follow-ups that join an
-    /// already-active session (per-session serial, no new permit).
-    /// Append-only Orleans field id.
+    /// activity event or an explicit abandon. Null on leases created for
+    /// follow-ups that join an already-active session (per-session serial, no
+    /// new permit). Append-only Orleans field id.
     /// </summary>
     [property: Id(5)] string? ConcurrencyToken = null,
     /// <summary>

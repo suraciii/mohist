@@ -2,6 +2,7 @@ using System.Text.Json;
 using Mohist.Server.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Capacity;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Slack;
@@ -17,7 +18,6 @@ namespace Mohist.Server.Sessions.Grains;
 
 public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
 {
-    private static readonly TimeSpan FollowupLeaseWindow = TimeSpan.FromMinutes(5);
     internal const string ScheduleReminderPrefix = "schedule:";
     internal const string ScheduleRecoveryReminderName = "schedule-recovery";
     internal const string StopRecoveryReminderName = "stop-recovery";
@@ -38,6 +38,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     private readonly IGrainFactory _grains;
     private readonly IEventStore _eventStore;
     private readonly EventDispatchSignal _dispatchSignal;
+    private readonly IAgentCapacityStore _capacityStore;
     private readonly IFollowupDispatchScheduler? _followupDispatchScheduler;
     private readonly ISessionStopDelivery? _sessionStopDelivery;
     private readonly ILogger<AgentSessionGrain> _log;
@@ -65,6 +66,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         ILogger<AgentSessionGrain> log,
         IEventStore eventStore,
         EventDispatchSignal dispatchSignal,
+        IAgentCapacityStore capacityStore,
         IFollowupDispatchScheduler? followupDispatchScheduler = null,
         ISessionStopDelivery? sessionStopDelivery = null)
     {
@@ -79,6 +81,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         _grains = grains;
         _eventStore = eventStore;
         _dispatchSignal = dispatchSignal;
+        _capacityStore = capacityStore;
         _followupDispatchScheduler = followupDispatchScheduler;
         _sessionStopDelivery = sessionStopDelivery;
         _log = log;
@@ -100,6 +103,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             EnsurePersistenceTimer();
         await EnsureScheduleRemindersAsync();
         await EnsureStopRecoveryReminderAsync();
+        await EnsureFollowupQueueReminderAsync();
     }
 
     public async Task ReceiveReminder(string reminderName, TickStatus status)
@@ -130,6 +134,8 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             await RunScheduledInputRecoveryAsync();
         else if (string.Equals(reminderName, StopRecoveryReminderName, StringComparison.Ordinal))
             await RunStopRecoveryAsync();
+        else if (string.Equals(reminderName, FollowupQueueReminderName, StringComparison.Ordinal))
+            await WakeQueuedFollowupAsync();
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -248,7 +254,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     public async Task<AgentSessionInfo> RecoverMissingRuntimeSessionAsync(RecoverMissingRuntimeSessionCommand command)
     {
         var session = await GetRequiredAsync();
-        await ExpireAcceptedFollowupsAsync(session);
         EnsureSessionRecoverableBeforeInputSubmission(session, command.ExpectedQueuedTurnId);
         var now = Now();
         var events = session.RebindRuntimeSession(
@@ -265,7 +270,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     public async Task<AgentSessionRecoveryResult> CompactAsync(CompactAgentSessionCommand command)
     {
         var session = await GetRequiredAsync();
-        await ExpireAcceptedFollowupsAsync(session);
         EnsureRuntimeSessionPresent(session);
         EnsureSessionIdleForRecovery(session);
 
@@ -301,7 +305,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     public async Task<AgentSessionRecoveryResult> ResetAsync(ResetAgentSessionCommand command)
     {
         var session = await GetRequiredAsync();
-        await ExpireAcceptedFollowupsAsync(session);
         EnsureSessionIdleForRecovery(session);
         EnsureBindingChangeAllowed(session, command.ExpectedBindingEpoch);
         var now = Now();
@@ -354,7 +357,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         if (string.IsNullOrEmpty(ownerProcessGeneration))
             throw new ArgumentException("owner process generation is required", nameof(ownerProcessGeneration));
         var session = await GetRequiredAsync();
-        await ExpireAcceptedFollowupsAsync(session);
         EnsureSessionIdleForRecovery(session);
         if (command == SessionCommandKind.Reset)
             EnsureBindingChangeAllowed(session, null);
@@ -418,7 +420,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     public async Task<AgentSessionRecoveryResult> CompleteCompactAsync(CompleteCompactAgentSessionCommand command)
     {
         var session = await GetRequiredAsync();
-        await ExpireAcceptedFollowupsAsync(session);
         var reservation = RequireReservation(
             session,
             command.OperationId,
@@ -452,7 +453,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
     public async Task<AgentSessionRecoveryResult> CompleteResetAsync(CompleteResetAgentSessionCommand command)
     {
         var session = await GetRequiredAsync();
-        await ExpireAcceptedFollowupsAsync(session);
         var reservation = RequireReservation(
             session,
             command.OperationId,
@@ -674,6 +674,10 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             provenance: command.Provenance,
             forceNewTurn: command.ForceNewTurn);
         StampFollowupConcurrencyToken(session, result.OperationId);
+        // The durable queued-work wake must exist before the acceptance
+        // commit: a crash between claim and dispatch then still re-evaluates
+        // the queue, and the stored claim cannot strand the Turn.
+        await EnsureFollowupQueueReminderAsync();
         await CommitAsync(session, Array.Empty<AgentSessionEvent>());
         await PublishCanonicalRefreshAsync(session);
         var acceptedLease = GetPendingFollowups(session).FirstOrDefault(candidate =>
@@ -1266,22 +1270,13 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         if (string.IsNullOrWhiteSpace(operationId))
             return;
         var session = await GetRequiredAsync();
-        var lease = GetPendingFollowups(session).FirstOrDefault(candidate =>
-            string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal));
         var previousStatus = session.Status;
         var events = session.MarkFollowupTurnTerminal(operationId, status, result, Now());
         var changed = !ReferenceEquals(previousStatus, session.Status);
         await CommitAsync(session, events);
         if (changed)
             await PublishCanonicalRefreshAsync(session);
-        if (lease is not null)
-            await ReleaseFollowupConcurrencyPermitAsync(
-                session,
-                lease.ConcurrencyToken,
-                lease.ConcurrencyAgentId,
-                lease.ConcurrencyPermitId,
-                lease.ConcurrencyGeneration,
-                lease.ConcurrencyWaiterId);
+        await EnsureFollowupQueueReminderAsync();
         _followupDispatchScheduler?.Schedule(
             session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
             session.Id);
@@ -1326,30 +1321,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
             PendingFollowup = null,
             PendingFollowups = leases,
         };
-    }
-
-    private async Task ExpireAcceptedFollowupsAsync(AgentSession session)
-    {
-        var pending = GetPendingFollowups(session);
-        var now = Now();
-        var remaining = pending.Where(lease =>
-        {
-            var startedAt = lease.Accepted ? lease.AcceptedAt : lease.StartedAt;
-            return startedAt is { } timestamp
-                && now - timestamp <= FollowupLeaseWindow;
-        }).ToArray();
-        if (remaining.Length == pending.Count) return;
-        var expired = pending.Where(lease => !remaining.Contains(lease)).ToArray();
-        SetPendingFollowups(session, remaining);
-        await CommitAsync(session, []);
-        foreach (var lease in expired)
-            await ReleaseFollowupConcurrencyPermitAsync(
-                session,
-                lease.ConcurrencyToken,
-                lease.ConcurrencyAgentId,
-                lease.ConcurrencyPermitId,
-                lease.ConcurrencyGeneration,
-                lease.ConcurrencyWaiterId);
     }
 
     private static void EnsureBindingChangeAllowed(AgentSession session, long? expectedEpoch)
@@ -3025,13 +2996,6 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
         _session = session;
         if (result.Cancelled && lease is not null)
         {
-            await ReleaseFollowupConcurrencyPermitAsync(
-                session,
-                lease.ConcurrencyToken,
-                lease.ConcurrencyAgentId,
-                lease.ConcurrencyPermitId,
-                lease.ConcurrencyGeneration,
-                lease.ConcurrencyWaiterId);
             _followupDispatchScheduler?.Schedule(
                 session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
                 session.Id);
@@ -3044,6 +3008,7 @@ public sealed partial class AgentSessionGrain : Grain, IAgentSessionGrain, IRemi
                 stopOperationId: session.Status.PendingStop?.TurnId == turnId
                     ? session.Status.PendingStop.OperationId
                     : null);
+        await EnsureFollowupQueueReminderAsync();
         return result;
     }
 

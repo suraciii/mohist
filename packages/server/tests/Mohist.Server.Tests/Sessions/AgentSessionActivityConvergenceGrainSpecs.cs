@@ -536,6 +536,10 @@ public sealed class AgentSessionActivityConvergenceGrainSpecs : AgentSessionGrai
     private async Task<IAgentSessionGrain> BoundGrainAsync()
     {
         var grain = NewGrain();
+        // A successful follow-up needs real capacity evidence for the
+        // Session's accepted identity; the derived store admits the queued
+        // head against this seeded definition.
+        await Fixture.SeedAgentAsync("project-1", "agent-1", maxConcurrentRuns: null);
         await grain.OpenAsync(Open("opencode"));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-1"));
         return grain;

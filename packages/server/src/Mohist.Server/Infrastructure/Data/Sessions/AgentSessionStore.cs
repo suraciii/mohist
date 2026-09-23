@@ -25,6 +25,14 @@ public interface IAgentSessionStore : IStateStore<AgentSession>
             .ToArray();
     }
     Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads the raw persisted State document for one Session. The derived
+    /// capacity claim compares its token against this exact document;
+    /// <see cref="LoadAsync"/> hydrates a Session and applies column
+    /// defaults, so reserializing that Session is not the persisted token.
+    /// </summary>
+    Task<string?> ReadStateJsonAsync(string key, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -72,6 +80,15 @@ public class AgentSessionStore : IAgentSessionStore, IAgentSessionStreamRetentio
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.AgentSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == key);
         return row is null ? null : AgentSessionJson.Deserialize(row);
+    }
+
+    public async Task<string?> ReadStateJsonAsync(string key, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.AgentSessions.AsNoTracking()
+            .Where(row => row.Id == key)
+            .Select(row => row.State)
+            .FirstOrDefaultAsync(ct);
     }
 
     public async Task<IReadOnlyList<AgentSession>> ListAsync()

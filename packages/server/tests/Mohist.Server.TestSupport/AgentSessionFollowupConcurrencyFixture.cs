@@ -6,6 +6,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Capacity;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -130,6 +131,7 @@ public sealed class AgentSessionFollowupConcurrencyFixture : IAsyncLifetime
             siloBuilder.Configure<ReminderOptions>(options =>
                 options.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100));
             siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connectionString));
+            siloBuilder.Services.AddScoped<IAgentCapacityStore, AgentCapacityStore>();
 
             siloBuilder.Services.AddSingleton<IAgentSessionStore>(StateStore);
             siloBuilder.Services.AddSingleton<IAgentSessionTranscriptStore>(TranscriptStore);
@@ -276,6 +278,12 @@ public sealed class AgentSessionFollowupConcurrencyFixture : IAsyncLifetime
                 _lastSavedKey = null;
             return Task.CompletedTask;
         }
+
+        // No relational document exists behind this store, so no exact
+        // persisted State token is available; a capacity claim against it fails
+        // closed rather than comparing a reserialized in-memory Session.
+        public Task<string?> ReadStateJsonAsync(string key, CancellationToken ct = default) =>
+            Task.FromResult<string?>(null);
 
         private static AgentSession Clone(AgentSession state) =>
             JSON.Deserialize<AgentSession>(JSON.Serialize(state))
