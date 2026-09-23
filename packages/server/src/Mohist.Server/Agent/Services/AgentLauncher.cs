@@ -29,13 +29,14 @@ namespace Mohist.Server.Agent.Services;
 /// </para>
 ///
 /// <para>
-/// <c>OpenAsync</c> and <c>SubmitAsync</c> are awaited sequentially because
-/// both the manual launch path and the subscription path require the
-/// session, including trigger correlation labels, to be durable before the
-/// AgentJobGrain dispatches. The dispatch submission itself is
-/// durable at the grain side — <see cref="IAgentJobGrain.SubmitAsync"/>
-/// persists the job input before performing one dispatch attempt without
-/// waiting for Agent execution — so a replay resumes the same job record.
+/// <c>EnsureInitialLaunchAsync</c> and the matching job submission are
+/// awaited sequentially because both the manual launch path and the
+/// subscription path require the session owner Input/Turn, including trigger
+/// correlation labels, to be durable before the AgentJobGrain dispatches.
+/// The dispatch submission itself is durable at the grain side —
+/// <see cref="IAgentJobGrain.SubmitAsync"/> persists the job input before
+/// performing one dispatch attempt without waiting for Agent execution — so
+/// a replay resumes the same job record.
 /// </para>
 /// </summary>
 public sealed class AgentLauncher : IAgentLauncher, IScopedService
@@ -683,6 +684,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
 
         var sessionId = _sessions.CommentSessionId(context.ProjectId, commentId, agent.Id);
         var jobKey = _sessions.CommentJobKey(context.ProjectId, commentId, agent.Id);
+        var inputId = $"agent-job-input:{jobKey}";
+        var turnId = $"agent-job-turn:{jobKey}";
 
         var sessionContext = BuildContext(context, agent) with
         {
@@ -707,14 +710,17 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             agentName: agent.Name);
 
         var sessionGrain = _sessions.GetGrain(sessionId);
-        await sessionGrain.OpenAsync(
-            new OpenAgentSessionCommand(
-                RunnerId: string.Empty,
-                AgentRuntime: definition.Runtime,
-                WorkDir: context.WorkspacePath,
-                Metadata: durableMetadata,
-                Definition: definition,
-                AgentSessionStartup: startup));
+        await sessionGrain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: inputId,
+            TurnId: turnId,
+            Prompt: trimmedPrompt,
+            Source: "agent-launch",
+            JobId: jobKey,
+            Metadata: durableMetadata,
+            Runtime: definition.Runtime,
+            WorkDir: context.WorkspacePath,
+            Definition: definition,
+            AgentSessionStartup: startup));
 
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
         var jobInput = new AgentJobInput(
@@ -728,6 +734,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             AgentInstructions: string.IsNullOrWhiteSpace(definition.Instructions) ? null : definition.Instructions,
             AgentConfig: agent.AgentConfig?.Clone(),
             AgentSessionId: sessionId,
+            InitialInputId: inputId,
+            InitialTurnId: turnId,
             Variant: definition.Variant,
             ReasoningEffort: definition.ReasoningEffort,
             Skills: definition.Skills,
@@ -741,8 +749,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         return new AgentLaunchResult(
             SessionId: sessionId,
             JobKey: jobKey,
-            InputId: string.Empty,
-            TurnId: string.Empty,
+            InputId: inputId,
+            TurnId: turnId,
             AgentId: agent.Id,
             AgentName: agent.Name);
     }
