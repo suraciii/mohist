@@ -53,6 +53,26 @@ public sealed class AgentCapacityEligibilitySpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UnownedWorkflowSession_DoesNotPoisonAgentCapacityEvidence()
+    {
+        await AddAgentAsync("project", "agent");
+        await using (var db = _database.CreateContext())
+        {
+            db.AgentSessions.Add(new AgentSessionRow
+            {
+                Id = "legacy-workflow",
+                State = """{"Id":"legacy-workflow","Metadata":{"Labels":{"mohist.io/project-id":"project","mohist.io/source-kind":"workflow"}},"Runtime":{"RunnerId":"runner","AgentRuntime":"opencode"},"Settings":{},"Status":{"Phase":"Created","CreatedAt":"2026-09-21T12:00:00Z","UsageSummary":{}}}""",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var snapshot = (await Store.ReadAsync("project", ["agent"]))["agent"];
+
+        Assert.Equal(AgentCapacityEvidenceStatus.Complete, snapshot.EvidenceStatus);
+        Assert.Equal(0, snapshot.Occupied);
+    }
+
+    [Fact]
     public async Task UnknownExecution_AllowsOnlySpecializedManagerRecoveryHead()
     {
         await AddAgentAsync("project", "agent");
