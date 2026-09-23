@@ -193,7 +193,7 @@ public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
         // One readable row whose indexed Agent label is null under the
         // project: its queued ordinary work cannot be attributed to any
         // requested Agent.
-        await AddExceptionalSessionAsync("shaded", "project");
+        await AddExceptionalSessionAsync("shaded", "project", sourceKind: "agent-launch");
 
         var snapshots = await Store.ReadAsync("project", ["first", "second"]);
 
@@ -266,7 +266,7 @@ public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
         var job = await AddJobAsync("job", "project", "agent", Now);
         var sessionState = await AddSessionAsync(NewQueuedSession(
             "session", "turn", "project", "agent", Now.UtcDateTime));
-        await AddExceptionalSessionAsync("unattributable", "project");
+        await AddExceptionalSessionAsync("unattributable", "project", sourceKind: "agent-launch");
 
         var jobClaim = await Store.ClaimJobAsync("job", job.Revision);
         var turnClaim = await Store.ClaimTurnAsync("session", sessionState, "turn");
@@ -519,12 +519,16 @@ public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
     /// ordinary Turn is the default; <paramref name="settle"/> marks it
     /// terminal instead.
     /// </summary>
-    private async Task AddExceptionalSessionAsync(string sessionId, string? projectId, bool settle = false)
+    private async Task AddExceptionalSessionAsync(
+        string sessionId,
+        string? projectId,
+        bool settle = false,
+        string sourceKind = "workflow")
     {
         var recordedAt = Now.UtcDateTime;
         var metadata = new AgentSessionMetadata()
             .WithLabel("mohist.io/project-id", projectId ?? "placeholder-project")
-            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-kind", sourceKind)
             .WithLabel("mohist.io/source-id", "workflow-run-1")
             .WithLabel("mohist.io/session-name", "build")
             .WithLabel("mohist.io/agent-id", "agent");

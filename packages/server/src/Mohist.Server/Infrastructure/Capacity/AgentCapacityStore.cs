@@ -367,10 +367,10 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
         foreach (var row in exceptionalRows)
         {
             var session = AgentSessionJson.Deserialize(row);
-            // Workflow sessions written by the pre-AgentSession schema have
-            // no Agent owner and cannot be hydrated as AgentSession. They
-            // are workflow facts, not missing Agent ownership.
-            if (session is null && IsLegacyWorkflowSession(row.State))
+            // Workflow sessions without an Agent owner are a different
+            // aggregate. They must not become missing Agent evidence merely
+            // because this projection scans the shared Session table.
+            if (IsWorkflowSession(row.State))
                 continue;
 
             if (session is null || AgentCapacityFacts.HasUnsettledOrdinaryWork(session))
@@ -393,7 +393,7 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
         return marked;
     }
 
-    private static bool IsLegacyWorkflowSession(string stateJson)
+    private static bool IsWorkflowSession(string stateJson)
     {
         try
         {
