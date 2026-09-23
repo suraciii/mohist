@@ -53,7 +53,7 @@ public sealed class AgentCapacityEligibilitySpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task LegacyWorkflowSession_DoesNotPoisonAgentCapacityEvidence()
+    public async Task UnownedWorkflowSession_DoesNotPoisonAgentCapacityEvidence()
     {
         await AddAgentAsync("project", "agent");
         await using (var db = _database.CreateContext())

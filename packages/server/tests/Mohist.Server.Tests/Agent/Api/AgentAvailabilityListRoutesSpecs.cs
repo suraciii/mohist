@@ -384,12 +384,12 @@ public sealed class AgentAvailabilityListRoutesSpecs : IClassFixture<AgentAvaila
 
     private async Task SeedUnattributedQueuedSessionAsync(string projectId)
     {
-        // A readable legacy Workflow row that lost its agent label: its
+        // A readable Agent-owned row that lost its agent label: its
         // queued ordinary Turn cannot be attributed to any requested Agent.
         var recordedAt = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
         var metadata = new AgentSessionMetadata()
             .WithLabel("mohist.io/project-id", projectId)
-            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-kind", "agent-launch")
             .WithLabel("mohist.io/source-id", "workflow-run-1")
             .WithLabel("mohist.io/session-name", "build")
             .WithLabel("mohist.io/agent-id", "unattributed-agent");
