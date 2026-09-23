@@ -157,15 +157,18 @@ public static partial class AgentSessionExtensions
             }
 
             var turns = (session.Status.Turns ?? []).ToList();
-            var live = turns.Where(turn => turn.SupersededAt is null
-                && turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing or AgentTurnStatus.Unknown).ToArray();
             var index = turns.FindIndex(turn => string.Equals(turn.Id, operation.TurnId, StringComparison.Ordinal));
             var input = (session.Status.Inputs ?? []).SingleOrDefault(candidate =>
                 string.Equals(candidate.Id, operation.InputId, StringComparison.Ordinal));
+            // The target Turn must be the Session's current deliverable head:
+            // an earlier queued Turn, a current Executing or unresolved
+            // Unknown Turn, confirmed Runtime ownership, Stop or Reset all
+            // hold the Session back, while a merely later queued Turn never
+            // vetoes the Job-owned head.
             if (session.Status.Activity != AgentSessionActivity.Active
                 || session.Status.PendingStop is { IsActive: true }
                 || session.Status.PendingReset is { Outcome: null, SupersededAt: null }
-                || live.Length != 1
+                || !AgentSessionLocalOrder.IsDeliverableHead(session, operation.TurnId)
                 || index < 0
                 || turns[index].Status != AgentTurnStatus.Queued
                 || turns[index].SupersededAt is not null

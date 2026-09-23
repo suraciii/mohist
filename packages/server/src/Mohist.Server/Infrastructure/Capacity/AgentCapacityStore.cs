@@ -80,6 +80,22 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
             return new(AgentCapacityClaimDisposition.Conflict, capacity);
         if (!AgentCapacityFacts.IsEligible(job))
             return new(AgentCapacityClaimDisposition.NotEligible, capacity);
+        if (job.Input?.AgentSessionId is { Length: > 0 } referencedSessionId)
+        {
+            // The Job's own initial Turn must be its Session's current
+            // deliverable head, evaluated against the persisted Session row
+            // inside the same claim transaction. A locally ineligible Job
+            // fails closed as incomplete or not-eligible evidence, never as
+            // an unlimited or full-capacity conclusion.
+            var sessionRow = await db.AgentSessions.AsNoTracking()
+                .FirstOrDefaultAsync(candidate => candidate.Id == referencedSessionId, ct);
+            var localOrder = AgentCapacityFacts.EvaluateJobLocalOrder(
+                sessionRow is null ? null : AgentSessionJson.Deserialize(sessionRow),
+                job,
+                row.JobKey);
+            if (localOrder != AgentCapacityClaimDisposition.Claimed)
+                return new(localOrder, capacity);
+        }
 
         var admission = Admission(capacity, AgentCapacityFacts.JobEntry(row.JobKey, job));
         if (admission != AgentCapacityClaimDisposition.Claimed)
@@ -208,11 +224,36 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
                         && row.Status != "failed"
                         && row.Status != "cancelled"))
             .ToListAsync(ct);
-        var sessions = await db.AgentSessions.AsNoTracking()
+        var parsedJobs = jobs
+            .Select(row => (Row: row, Job: TryJob(row.State, out var job) ? job : null))
+            .ToList();
+        var sessionRows = await db.AgentSessions.AsNoTracking()
             .Where(row => row.LabelProjectId == projectId
                 && row.LabelAgentId != null
                 && ids.Contains(row.LabelAgentId))
             .ToListAsync(ct);
+        var sessions = new Dictionary<string, AgentSession?>(StringComparer.Ordinal);
+        foreach (var row in sessionRows)
+            sessions[row.Id] = AgentSessionJson.Deserialize(row);
+
+        // Job-referenced Sessions are batch-loaded by id and the already
+        // loaded rows are reused, so a referenced Session whose labels would
+        // keep it invisible to the label filter still appears as concrete
+        // incomplete evidence instead of silently reading as no Session.
+        var referencedIds = parsedJobs
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.Job?.Input?.AgentSessionId))
+            .Select(entry => entry.Job!.Input!.AgentSessionId!)
+            .Where(id => !sessions.ContainsKey(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (referencedIds.Length > 0)
+        {
+            var referencedRows = await db.AgentSessions.AsNoTracking()
+                .Where(row => referencedIds.Contains(row.Id))
+                .ToListAsync(ct);
+            foreach (var row in referencedRows)
+                sessions[row.Id] = AgentSessionJson.Deserialize(row);
+        }
 
         var snapshots = new Dictionary<string, AgentCapacitySnapshot>(StringComparer.Ordinal);
         foreach (var agentId in ids)
@@ -222,22 +263,40 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
             var occupied = 0;
             var eligible = new List<AgentCapacityQueueEntry>();
 
-            foreach (var row in jobs.Where(row => string.Equals(row.AgentId, agentId, StringComparison.Ordinal)))
+            foreach (var (row, job) in parsedJobs.Where(entry =>
+                string.Equals(entry.Row.AgentId, agentId, StringComparison.Ordinal)))
             {
-                if (row.Status is not ("pending" or "running" or "unknown")
-                    || !TryJob(row.State, out var job))
+                if (row.Status is not ("pending" or "running" or "unknown") || job is null)
                 {
                     evidence = Incomplete(evidence);
                     continue;
                 }
+                var locallyEligible = true;
+                if (!string.IsNullOrWhiteSpace(job.Input?.AgentSessionId))
+                {
+                    // A missing row leaves the lookup null: absent evidence,
+                    // never an unconstrained Job.
+                    sessions.TryGetValue(job.Input.AgentSessionId, out var referenced);
+                    var localOrder = AgentCapacityFacts.EvaluateJobLocalOrder(referenced, job, row.JobKey);
+                    if (localOrder == AgentCapacityClaimDisposition.Incomplete)
+                    {
+                        evidence = Incomplete(evidence);
+                        continue;
+                    }
+                    // A definitively wrong reference or a Turn ordered behind
+                    // its Session's head suppresses eligibility only: the Job
+                    // remains an ordinary owner fact for occupancy.
+                    locallyEligible = localOrder == AgentCapacityClaimDisposition.Claimed;
+                }
                 if (AgentCapacityFacts.Occupies(job)) occupied++;
-                if (AgentCapacityFacts.IsEligible(job))
+                if (locallyEligible && AgentCapacityFacts.IsEligible(job))
                     eligible.Add(AgentCapacityFacts.JobEntry(row.JobKey, job));
             }
 
-            foreach (var row in sessions.Where(row => string.Equals(row.LabelAgentId, agentId, StringComparison.Ordinal)))
+            foreach (var row in sessionRows.Where(row =>
+                string.Equals(row.LabelAgentId, agentId, StringComparison.Ordinal)))
             {
-                var session = AgentSessionJson.Deserialize(row);
+                var session = sessions[row.Id];
                 if (session is null)
                 {
                     evidence = Incomplete(evidence);

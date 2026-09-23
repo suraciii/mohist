@@ -259,6 +259,109 @@ public sealed class WorkflowNamedSessionInitialAdmissionSpecs : WorkflowGrainSpe
     }
 
     [Fact]
+    public void JobOwnedHeadAdmits_WhileOnlyALaterOrdinaryQueuedTurnWaits()
+    {
+        var session = CreateDomainSession();
+        session.AttachPhysicalSession("runtime-first", null, "/work", null, null, TestTime.UtcDateTime);
+        session.EnsureInitialLaunch(
+            "input-1", "turn-1", "first prompt", "workflow", "job-1", TestTime.UtcDateTime);
+        session.AcceptFollowup(
+            "later-input",
+            "later-turn",
+            "operation-later",
+            "later prompt",
+            "api",
+            "later-key",
+            TestTime.UtcDateTime.AddMinutes(1),
+            forceNewTurn: true);
+        var operation = DomainOperation(session, "operation-1", "job-1", "work-1", "input-1", "turn-1", "runtime-first");
+
+        session.AdmitInitialAgentJobInputEffect(operation, TestTime.UtcDateTime.AddMinutes(2));
+
+        Assert.True(session.Status.InitialInputOperation!.EffectAdmitted);
+        Assert.Equal(AgentTurnStatus.Executing,
+            session.Status.Turns!.Single(turn => turn.Id == "turn-1").Status);
+        Assert.Equal(AgentTurnStatus.Queued,
+            session.Status.Turns!.Single(turn => turn.Id == "later-turn").Status);
+    }
+
+    [Fact]
+    public void EarlierOrdinaryQueuedTurn_BlocksJobAdmissionFailClosed()
+    {
+        var session = CreateDomainSession();
+        session.AttachPhysicalSession("runtime-first", null, "/work", null, null, TestTime.UtcDateTime);
+        session.AcceptFollowup(
+            "earlier-input",
+            "earlier-turn",
+            "operation-earlier",
+            "earlier prompt",
+            "api",
+            "earlier-key",
+            TestTime.UtcDateTime,
+            forceNewTurn: true);
+        session.EnsureInitialLaunch(
+            "input-1", "turn-1", "job prompt", "workflow", "job-1", TestTime.UtcDateTime.AddMinutes(1));
+        var operation = DomainOperation(session, "operation-1", "job-1", "work-1", "input-1", "turn-1", "runtime-first");
+
+        Assert.Equal("initial_input_start_fence_mismatch", Assert.Throws<InvalidOperationException>(() =>
+            session.AdmitInitialAgentJobInputEffect(operation, TestTime.UtcDateTime.AddMinutes(2))).Message);
+        Assert.Equal(AgentTurnStatus.Queued,
+            session.Status.Turns!.Single(turn => turn.Id == "turn-1").Status);
+        Assert.Null(session.Status.InitialInputOperation);
+    }
+
+    [Theory]
+    [InlineData(AgentTurnStatus.Executing)]
+    [InlineData(AgentTurnStatus.Unknown)]
+    public void CurrentExecutingOrUnknownTurn_BlocksJobAdmissionFailClosed(AgentTurnStatus fence)
+    {
+        var session = CreateDomainSession();
+        session.AttachPhysicalSession("runtime-first", null, "/work", null, null, TestTime.UtcDateTime);
+        session.EnsureInitialLaunch(
+            "input-1", "turn-1", "first prompt", "workflow", "job-1", TestTime.UtcDateTime);
+        session.Status = session.Status with
+        {
+            Turns = session.Status.Turns!.Select(turn => turn.Id == "turn-1"
+                ? turn with { Status = fence }
+                : turn).ToArray(),
+        };
+        session.EnsureInitialLaunch(
+            "input-2", "turn-2", "second prompt", "workflow", "job-2", TestTime.UtcDateTime.AddMinutes(1));
+        var operation = DomainOperation(session, "operation-2", "job-2", "work-2", "input-2", "turn-2", "runtime-first");
+
+        Assert.Equal("initial_input_start_fence_mismatch", Assert.Throws<InvalidOperationException>(() =>
+            session.AdmitInitialAgentJobInputEffect(operation, TestTime.UtcDateTime.AddMinutes(2))).Message);
+        Assert.Equal(AgentTurnStatus.Queued,
+            session.Status.Turns!.Single(turn => turn.Id == "turn-2").Status);
+        Assert.Null(session.Status.InitialInputOperation);
+    }
+
+    [Theory]
+    [InlineData("stop")]
+    [InlineData("reset")]
+    public void PendingStopOrReset_BlocksJobAdmissionFailClosed(string fence)
+    {
+        var session = CreateDomainSession();
+        session.AttachPhysicalSession("runtime-first", null, "/work", null, null, TestTime.UtcDateTime);
+        session.EnsureInitialLaunch(
+            "input-1", "turn-1", "first prompt", "workflow", "job-1", TestTime.UtcDateTime);
+        session.Status = session.Status with
+        {
+            PendingStop = fence == "stop" ? new AgentSessionStopClaim("turn-1", "stop-operation") : null,
+            PendingReset = fence == "reset"
+                ? new AgentSessionResetReservation("reset-operation", null, "pi", TestTime.UtcDateTime)
+                : null,
+        };
+        var operation = DomainOperation(session, "operation-1", "job-1", "work-1", "input-1", "turn-1", "runtime-first");
+
+        Assert.Equal("initial_input_start_fence_mismatch", Assert.Throws<InvalidOperationException>(() =>
+            session.AdmitInitialAgentJobInputEffect(operation, TestTime.UtcDateTime.AddMinutes(1))).Message);
+        Assert.Equal(AgentTurnStatus.Queued,
+            session.Status.Turns!.Single(turn => turn.Id == "turn-1").Status);
+        Assert.Null(session.Status.InitialInputOperation);
+    }
+
+    [Fact]
     public void RecordedButUnadmittedPriorReceipt_BlocksDifferentJobAdmission()
     {
         var session = CreateDomainSession();

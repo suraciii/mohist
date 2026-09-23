@@ -1,5 +1,6 @@
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Contracts;
+using Mohist.Server.Infrastructure.Capacity;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
@@ -19,26 +20,19 @@ public sealed partial class AgentSessionGrain
     private async Task<AgentSessionFollowupDispatch?> BeginFollowupDispatchAsync(string? targetTurnId)
     {
         var session = await GetRequiredAsync();
-        var turns = session.Status.Turns ?? [];
-        var hasExclusiveOwner = turns.Any(turn =>
-                turn.SupersededAt is null
-                && turn.ContextGeneration == session.Status.ContextGeneration
-                && turn.Status == AgentTurnStatus.Executing)
-            || session.Status.ConfirmedExecutionOwnership is { } ownership
-                && ownership.ContextGeneration == session.Status.ContextGeneration
-                && turns.Any(turn => ownership.TurnIds.Contains(turn.Id, StringComparer.Ordinal)
-                    && turn.SupersededAt is null
-                    && turn.Status is AgentTurnStatus.Executing or AgentTurnStatus.Unknown);
-        if (hasExclusiveOwner) return null;
-        if (turns.Any(turn => !string.IsNullOrWhiteSpace(turn.JobId) && turn.Status == AgentTurnStatus.Queued))
+        // One shared local-order rule: the earliest current queued Turn -
+        // Job-owned or ordinary - is the only Turn that may advance, and a
+        // merely later queued Turn never vetoes it. A Job-owned head is
+        // dispatched by its own Job path, so it holds this dispatcher back;
+        // a targeted retry that names a non-head Turn dispatches nothing and
+        // leaves the ordinary scheduler to select the queue in order.
+        var turn = AgentSessionLocalOrder.FirstDeliverableTurn(session, AgentCapacityFacts.IsManagerRecovery);
+        if (turn is null
+            || !string.IsNullOrEmpty(turn.JobId)
+            || targetTurnId is not null
+                && !string.Equals(turn.Id, targetTurnId, StringComparison.Ordinal))
             return null;
         var leases = GetPendingFollowups(session).ToList();
-        var turn = targetTurnId is null
-            ? turns.FirstOrDefault(turn => string.IsNullOrEmpty(turn.JobId) && turn.Status == AgentTurnStatus.Queued)
-            : turns.FirstOrDefault(turn => string.Equals(turn.Id, targetTurnId, StringComparison.Ordinal)
-                && string.IsNullOrEmpty(turn.JobId)
-                && turn.Status == AgentTurnStatus.Queued);
-        if (turn is null) return null;
         var index = leases.FindIndex(lease => string.Equals(lease.TurnId, turn.Id, StringComparison.Ordinal));
         if (index < 0 || leases[index].Dispatching) return null;
 

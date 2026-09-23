@@ -176,6 +176,45 @@ public sealed class AgentCapacityStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ClaimedQueuedHead_RetriesIdempotentlyAndStaysDeliverableAfterReload()
+    {
+        await AddAgentAsync("project", "agent", 1);
+        var exact = await AddSessionAsync(NewQueuedSession("session", "turn", "project", "agent", Now.UtcDateTime));
+
+        var claimed = await Store.ClaimTurnAsync("session", exact, "turn");
+        Assert.Equal(AgentCapacityClaimDisposition.Claimed, claimed.Disposition);
+
+        string committedJson;
+        AgentSession committed;
+        await using (var readDb = _database.CreateContext())
+        {
+            var row = await readDb.AgentSessions.AsNoTracking().SingleAsync(candidate => candidate.Id == "session");
+            committedJson = row.State;
+            committed = AgentSessionJson.Deserialize(row)!;
+        }
+
+        var retry = await Store.ClaimTurnAsync("session", committedJson, "turn");
+
+        Assert.Equal(AgentCapacityClaimDisposition.AlreadyClaimed, retry.Disposition);
+        Assert.Equal(Now, retry.Session!.Status.Turns!.Single().CapacityClaimedAt);
+        await using (var verifyDb = _database.CreateContext())
+        {
+            Assert.Equal(committedJson,
+                (await verifyDb.AgentSessions.AsNoTracking().SingleAsync(candidate => candidate.Id == "session")).State);
+        }
+
+        // A crash after claim but before dispatch must not strand the head:
+        // the global FIFO does not re-enter it as another candidate, yet the
+        // same shared local-order rule the dispatcher consumes still selects
+        // the committed head from a fresh read of the owner document.
+        var snapshot = (await Store.ReadAsync("project", ["agent"]))["agent"];
+        Assert.Equal(AgentCapacityEvidenceStatus.Complete, snapshot.EvidenceStatus);
+        Assert.Equal(1, snapshot.Occupied);
+        Assert.Empty(snapshot.Eligible);
+        Assert.Equal("turn", AgentSessionLocalOrder.FirstDeliverableTurn(committed)!.Id);
+    }
+
+    [Fact]
     public async Task ClaimTurn_OnWorkflowSessionWithoutAgentIdentity_ReturnsIncompleteWithoutWrite()
     {
         await AddAgentAsync("project", "agent", 1);

@@ -30,34 +30,14 @@ internal static class AgentCapacityFacts
 
     internal static AgentTurnRecord? EligibleHead(AgentSession session)
     {
-        var turns = session.Status.Turns ?? [];
-        var current = turns
-            .Where(turn => turn.SupersededAt is null
-                && turn.ContextGeneration == session.Status.ContextGeneration)
-            .ToArray();
-
-        if (session.Status.PendingStop is { IsActive: true }
-            || session.Status.PendingReset is { Outcome: null, SupersededAt: null }
-            || current.Any(turn => !string.IsNullOrWhiteSpace(turn.JobId)
-                && turn.Status == AgentTurnStatus.Queued)
-            || current.Any(turn => turn.Status == AgentTurnStatus.Executing)
-            || HasConfirmedOwner(session, current))
-            return null;
-
-        var head = current
-            .Where(turn => string.IsNullOrWhiteSpace(turn.JobId)
-                && turn.Status == AgentTurnStatus.Queued)
-            .OrderBy(turn => turn.Sequence)
-            .ThenBy(turn => turn.Id, StringComparer.Ordinal)
-            .FirstOrDefault();
-        if (head is null || head.CapacityClaimedAt is not null)
-            return null;
-
-        // Only the system Manager inspection Turn may proceed beside an
-        // unconfirmed Unknown. An ordinary queued follow-up must not turn a
-        // lost response into permission for another effect.
-        if (current.Any(turn => turn.Status == AgentTurnStatus.Unknown)
-            && !IsManagerRecovery(session, head))
+        // The Session's global-FIFO candidate is its local head only while
+        // that head is ordinary and unclaimed: a Job-owned head competes
+        // through its own Job entry, and a claimed head already holds its
+        // slot without re-entering the queue.
+        var head = AgentSessionLocalOrder.FirstDeliverableTurn(session, IsManagerRecovery);
+        if (head is null
+            || !string.IsNullOrWhiteSpace(head.JobId)
+            || head.CapacityClaimedAt is not null)
             return null;
 
         var leases = session.Status.PendingFollowups
@@ -101,15 +81,60 @@ internal static class AgentCapacityFacts
     internal static string? AgentId(AgentSession session) =>
         session.Metadata.Label(GenericAgentSessionMetadata.AgentId);
 
-    private static bool HasConfirmedOwner(
-        AgentSession session,
-        IReadOnlyCollection<AgentTurnRecord> current) =>
-        session.Status.ConfirmedExecutionOwnership is { } ownership
-        && ownership.ContextGeneration == session.Status.ContextGeneration
-        && current.Any(turn => ownership.TurnIds.Contains(turn.Id, StringComparer.Ordinal)
-            && turn.Status is AgentTurnStatus.Executing or AgentTurnStatus.Unknown);
+    /// <summary>
+    /// Disposition of one Job's Session-local order evidence. Claimed: the
+    /// Job's initial Turn is the referenced Session's current deliverable
+    /// head. Incomplete: the persisted owner sources cannot attribute the
+    /// reference - the Session row is missing or unreadable, its accepted
+    /// identity is blank, a nonblank identity contradicts the Job's own
+    /// accepted identity, or the Job's reference tuple is blank - so global
+    /// occupancy cannot be claimed complete and no claim may be written.
+    /// NotEligible: the reference is definitively wrong or ordered behind an
+    /// earlier Turn; evidence stays complete because a definitive mismatch
+    /// can never authorize an effect, and it must not be reported as a full
+    /// capacity conclusion.
+    /// </summary>
+    internal static AgentCapacityClaimDisposition EvaluateJobLocalOrder(
+        AgentSession? session,
+        AgentJobState job,
+        string jobKey)
+    {
+        if (session is null)
+            return AgentCapacityClaimDisposition.Incomplete;
 
-    private static bool IsManagerRecovery(AgentSession session, AgentTurnRecord head)
+        var projectId = ProjectId(session);
+        var agentId = AgentId(session);
+        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(agentId))
+            return AgentCapacityClaimDisposition.Incomplete;
+        if (!string.Equals(projectId, job.Input?.ProjectId, StringComparison.Ordinal)
+            || !string.Equals(agentId, job.Input?.AgentId, StringComparison.Ordinal))
+            return AgentCapacityClaimDisposition.Incomplete;
+
+        var turnId = job.Input?.InitialTurnId;
+        var inputId = job.Input?.InitialInputId;
+        if (string.IsNullOrWhiteSpace(turnId) || string.IsNullOrWhiteSpace(inputId))
+            return AgentCapacityClaimDisposition.Incomplete;
+
+        var turn = (session.Status.Turns ?? []).FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, turnId, StringComparison.Ordinal));
+        if (turn is null
+            || !string.Equals(turn.JobId, jobKey, StringComparison.Ordinal)
+            || !turn.InputIds.Contains(inputId, StringComparer.Ordinal))
+            return AgentCapacityClaimDisposition.NotEligible;
+        var input = (session.Status.Inputs ?? []).FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, inputId, StringComparison.Ordinal));
+        if (input is null || !string.Equals(input.JobId, jobKey, StringComparison.Ordinal))
+            return AgentCapacityClaimDisposition.NotEligible;
+
+        return AgentSessionLocalOrder.IsDeliverableHead(session, turnId, IsManagerRecovery)
+            ? AgentCapacityClaimDisposition.Claimed
+            : AgentCapacityClaimDisposition.NotEligible;
+    }
+
+    // The narrow inspection-only Manager exception to the Unknown hold: only
+    // the builtin Manager Agent's recorded recovery Turn may proceed beside
+    // an unconfirmed Unknown, and it never resubmits or settles that Unknown.
+    internal static bool IsManagerRecovery(AgentSession session, AgentTurnRecord head)
     {
         if (!string.Equals(ProjectId(session), BuiltInAgentCatalog.MohistSlackProjectId, StringComparison.Ordinal)
             || !string.Equals(AgentId(session), $"builtin:{BuiltInAgentCatalog.MohistSlackName}", StringComparison.Ordinal)

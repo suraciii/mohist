@@ -1,4 +1,6 @@
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Contracts;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -140,9 +142,9 @@ public sealed partial class AgentSessionFollowupGrainSpecs
     }
 
     [Fact]
-    public async Task BeginFollowupDispatchForTurn_TargetsRequestedTurnAndLeavesOtherQueued()
+    public async Task BeginFollowupDispatchForTurn_NonHeadTargetReturnsNullAndHeadDispatchesInOrder()
     {
-        var (grain, sessionId) = await CreateAttachedSessionAsync("targeted-dispatch");
+        var (grain, sessionId) = await CreateAttachedSessionAsync("targeted-no-overtake");
         var first = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             Text: "first queued input",
             Source: "agent-session-followup",
@@ -153,18 +155,100 @@ public sealed partial class AgentSessionFollowupGrainSpecs
             IdempotencyKey: "targeted-second",
             ForceNewTurn: true));
 
-        var dispatch = await grain.BeginFollowupDispatchForTurnAsync(second.TurnId);
-
-        Assert.NotNull(dispatch);
-        Assert.Equal(second.TurnId, dispatch!.TurnId);
-        Assert.Equal(second.InputId, dispatch.InputId);
+        // A targeted retry that names a non-head Turn dispatches nothing; the
+        // ordinary scheduler still selects the queue in acceptance order.
+        Assert.Null(await grain.BeginFollowupDispatchForTurnAsync(second.TurnId));
         var state = await _fixture.StateStore.LoadAsync(sessionId);
         Assert.NotNull(state);
         Assert.Equal(AgentTurnStatus.Queued, state!.Status.Turns!.Single(turn => turn.Id == first.TurnId).Status);
-        Assert.NotNull(state.Status.PendingFollowups);
-        var pending = state.Status.PendingFollowups!;
-        Assert.False(pending.Single(lease => lease.TurnId == first.TurnId).Dispatching);
-        Assert.True(pending.Single(lease => lease.TurnId == second.TurnId).Dispatching);
+        Assert.Equal(AgentTurnStatus.Queued, state.Status.Turns!.Single(turn => turn.Id == second.TurnId).Status);
+        Assert.False(state.Status.PendingFollowups!.Single(lease => lease.TurnId == first.TurnId).Dispatching);
+        Assert.False(state.Status.PendingFollowups!.Single(lease => lease.TurnId == second.TurnId).Dispatching);
+
+        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+
+        Assert.NotNull(dispatch);
+        Assert.Equal(first.TurnId, dispatch!.TurnId);
+        Assert.Equal(first.InputId, dispatch.InputId);
+        var after = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(after);
+        Assert.True(after!.Status.PendingFollowups!.Single(lease => lease.TurnId == first.TurnId).Dispatching);
+        Assert.False(after.Status.PendingFollowups!.Single(lease => lease.TurnId == second.TurnId).Dispatching);
+    }
+
+    [Fact]
+    public async Task BeginNextFollowupDispatch_JobOwnedHeadHoldsOrdinaryTurnBack()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("job-owned-head");
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: "launch-input",
+            TurnId: "launch-turn",
+            Prompt: "launch",
+            Source: "agent-connection",
+            JobId: "launch-job",
+            Metadata: OpenCommand().Metadata));
+        var queued = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+            Text: "ordinary behind the Job-owned head",
+            Source: "agent-session-followup",
+            IdempotencyKey: "behind-job-head"));
+
+        Assert.Null(await grain.BeginNextFollowupDispatchAsync());
+        Assert.Null(await grain.BeginFollowupDispatchForTurnAsync(queued.TurnId));
+        var state = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(state);
+        Assert.Equal(AgentTurnStatus.Queued, state!.Status.Turns!.Single(turn => turn.Id == queued.TurnId).Status);
+        Assert.False(state.Status.PendingFollowups!.Single(lease => lease.TurnId == queued.TurnId).Dispatching);
+    }
+
+    [Fact]
+    public async Task ManagerRecoveryTurn_DispatchesExactlyOnceBesideUnresolvedUnknown()
+    {
+        var sessionId = $"manager-local-order-{Guid.NewGuid():N}";
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var provenance = new AgentSessionInputProvenance(
+            ProviderKind: "slack",
+            WorkspaceId: "T123",
+            ConversationId: "C123",
+            ThreadId: "thread-1",
+            MemberId: "U123",
+            MessageId: "initial-message",
+            ConnectionId: "connection-1",
+            BoundThreadRootMessageId: "thread-1");
+        var metadata = new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", SlackDeliveryOwnerIds.ManagerProjectId)
+            .WithLabel("mohist.io/source-kind", "agent-launch")
+            .WithLabel("mohist.io/agent-id", $"builtin:{BuiltInAgentCatalog.MohistSlackName}");
+        await grain.OpenAsync(new OpenAgentSessionCommand("runner-1", "opencode", "/work", Metadata: metadata));
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: "manager-input",
+            TurnId: "manager-turn",
+            Prompt: "manager request",
+            Source: "agent-connection",
+            JobId: "manager-job",
+            Metadata: metadata,
+            Provenance: provenance));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-manager"));
+        await grain.MarkInitialTurnTerminalAsync("manager-job", AgentTurnStatus.Unknown, null);
+        var recoveryTurnId = $"manager-recovery-turn:{sessionId}";
+        await grain.RecordManagerRecoveryTurnAsync(new RecordFollowupTurnCommand(
+            InputId: $"manager-recovery-input:{sessionId}",
+            TurnId: recoveryTurnId,
+            Prompt: "Inspect the current resource state before acting.",
+            Source: "manager-recovery:manager-credential-expired",
+            Provenance: provenance));
+
+        var dispatch = await grain.BeginNextFollowupDispatchAsync();
+
+        Assert.NotNull(dispatch);
+        Assert.Equal(recoveryTurnId, dispatch!.TurnId);
+        Assert.Null(await grain.BeginNextFollowupDispatchAsync());
+        var state = await _fixture.StateStore.LoadAsync(sessionId);
+        Assert.NotNull(state);
+        Assert.Equal(AgentTurnStatus.Unknown,
+            state!.Status.Turns!.Single(turn => turn.Id == "manager-turn").Status);
+        Assert.Equal(AgentTurnStatus.Queued,
+            state.Status.Turns!.Single(turn => turn.Id == recoveryTurnId).Status);
+        Assert.True(state.Status.PendingFollowups!.Single(lease => lease.TurnId == recoveryTurnId).Dispatching);
     }
 
     [Fact]
