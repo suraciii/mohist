@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { RunnerWorkspaceUse, WorkspaceUseConflict } from '../src/runtime/runner-workspace-use.js'
+import { runCommand } from '../src/system/process.js'
+import { noteWorkspaceCommandStart } from '../src/system/process-ownership.js'
+import { FakeProcessSpawner } from './support/fake-process.js'
+import { withTestRunnerResources } from './support/test-resources.js'
 
 const workspace = '/runner/workspaces/project-home'
 
@@ -34,6 +38,70 @@ describe('RunnerWorkspaceUse', () => {
     const gate = new RunnerWorkspaceUse(async () => 'failed')
     expect(await gate.withRemovalFence(workspace, deleteWork)).toEqual({ kind: 'failed' })
     expect(deleteWork).not.toHaveBeenCalled()
+  })
+
+  it('retains command ownership while a detached descendant is alive outside the Home', async () => {
+    const spawner = new FakeProcessSpawner()
+    const live = new Set(['runner:1'])
+    const gate = new RunnerWorkspaceUse(
+      async () => 'ready',
+      (path) => path,
+      undefined,
+      () => 'ready',
+      () => new Set(live),
+    )
+    await withTestRunnerResources(
+      async () => {
+        await gate.withUse(workspace, async () => {
+          const command = runCommand('command', [], workspace, new AbortController().signal)
+          live.add('descendant:2')
+          spawner.children[0]!.close(0)
+          await command
+        })
+      },
+      { processSpawner: spawner.spawn, processKiller: () => true },
+    )
+
+    const deleteWork = vi.fn(async () => true)
+    expect(await gate.withRemovalFence(workspace, deleteWork)).toEqual({ kind: 'busy' })
+    expect(deleteWork).not.toHaveBeenCalled()
+    live.delete('descendant:2')
+    expect(await gate.withRemovalFence(workspace, deleteWork)).toEqual({ kind: 'completed', value: true })
+  })
+
+  it('rejects a late command from an earlier async context while removal holds the gate', async () => {
+    const gate = new RunnerWorkspaceUse(async () => 'ready')
+    let startLateCommand!: () => void
+    let lateCommand!: Promise<void>
+    await gate.withUse(workspace, async () => {
+      const signal = new Promise<void>((resolve) => {
+        startLateCommand = resolve
+      })
+      lateCommand = signal.then(() => noteWorkspaceCommandStart())
+    })
+    const result = await gate.withRemovalFence(workspace, async () => {
+      startLateCommand()
+      await expect(lateCommand).rejects.toThrow(WorkspaceUseConflict)
+      return true
+    })
+    expect(result).toEqual({ kind: 'completed', value: true })
+  })
+
+  it('keeps a command owner unsafe when process identities cannot be inspected', async () => {
+    let snapshot: Set<string> | null = new Set(['runner:1'])
+    const gate = new RunnerWorkspaceUse(
+      async () => 'ready',
+      (path) => path,
+      undefined,
+      () => 'ready',
+      () => snapshot,
+    )
+    await gate.withUse(workspace, async () => noteWorkspaceCommandStart())
+    snapshot = null
+    expect(await gate.withRemovalFence(workspace, async () => true)).toEqual({
+      kind: 'failed',
+      reason: 'process_termination_unconfirmed',
+    })
   })
 
   it.each([

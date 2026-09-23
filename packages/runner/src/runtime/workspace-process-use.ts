@@ -64,3 +64,42 @@ export function inspectWorkspaceProcessUse(workspacePath: string): 'ready' | 'bu
   }
   return 'ready'
 }
+
+export function snapshotRunnerProcessIdentities(): Set<string> | null {
+  if (process.platform !== 'linux') return null
+  try {
+    // The service cgroup retains detached descendants after their parent exits.
+    const cgroup = readFileSync('/proc/self/cgroup', 'utf8')
+      .trim()
+      .split('\n')
+      .find((line) => line.startsWith('0::'))
+    if (!cgroup) return null
+    const path = cgroup.slice(3)
+    if (!path.startsWith('/') || path.includes('..')) return null
+    const identities = new Set<string>()
+    for (const pid of readFileSync(`/sys/fs/cgroup${path}/cgroup.procs`, 'utf8').trim().split(/\s+/)) {
+      if (!/^\d+$/.test(pid)) continue
+      let stat: string
+      try {
+        stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+      } catch (error) {
+        if (disappeared(error)) continue
+        return null
+      }
+      const closing = stat.lastIndexOf(')')
+      const fields =
+        closing < 0
+          ? []
+          : stat
+              .slice(closing + 2)
+              .trim()
+              .split(/\s+/)
+      if (!fields[19]) return null
+      if (fields[0] === 'Z' || fields[0] === 'X') continue
+      identities.add(`${pid}:${fields[19]}`)
+    }
+    return identities
+  } catch {
+    return null
+  }
+}

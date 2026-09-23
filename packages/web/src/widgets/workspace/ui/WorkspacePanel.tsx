@@ -54,7 +54,7 @@ const DIRECTORY_LABELS = {
 const DIRECTORY_GUIDANCE = {
   removed: 'Local files were removed. Remote work and issue history remain.',
   already_absent: 'The directory was already absent when checked; no space is attributed to this cleanup.',
-  in_use: 'Work is still using this Home. Retry cleanup after that work finishes.',
+  in_use: 'Work still needs this Home. Retry cleanup after that work finishes.',
   unsafe:
     'The Runner cannot verify that this Home is safe to remove. Check the Runner and retry after the cause is resolved.',
   deletion_failed: 'Deletion may have removed some files. Inspect the Home before retrying or resuming work.',

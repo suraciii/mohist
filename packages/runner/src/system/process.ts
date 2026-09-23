@@ -3,6 +3,7 @@ import type { ChildProcess, ChildProcessWithoutNullStreams, SpawnOptions } from 
 import { StringDecoder } from 'node:string_decoder'
 import { assertExternalProcessAllowed, registerExternalProcess } from './process-policy.js'
 import { createTimeoutSignal } from './timeout-signal.js'
+import { noteWorkspaceCommandStart } from './process-ownership.js'
 import { currentRunnerFileSystem, currentRunnerResources } from './filesystem.js'
 
 export interface CommandResult {
@@ -105,6 +106,7 @@ export async function runCommand(
   env?: NodeJS.ProcessEnv,
   options?: CommandLineOptions,
 ) {
+  noteWorkspaceCommandStart()
   const scopedRunner = currentRunnerResources()?.commandRunner
   if (scopedRunner) {
     return (await scopedRunner.run(command, args, cwd, signal, env, options)) as CommandResult

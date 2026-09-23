@@ -14,7 +14,7 @@ import { NamedWorkspaceRegistry } from './workspace-registry.js'
 import { NamedWorkspaceManager } from './workspace-entity.js'
 import { namedWorkspacePath } from './workspace-entity.js'
 import { RunnerWorkspaceUse, WorkspaceUseConflict } from './runner-workspace-use.js'
-import { inspectWorkspaceProcessUse } from './workspace-process-use.js'
+import { inspectWorkspaceProcessUse, snapshotRunnerProcessIdentities } from './workspace-process-use.js'
 import { createNamedWorkspaceCleanupLoop, NamedWorkspaceReclaimProbe } from './named-workspace-cleanup.js'
 import {
   createAgentSessionRuntimeEventQueue,
@@ -198,6 +198,9 @@ export class RunnerHost {
           })
       },
       inspectWorkspaceProcessUse,
+      currentRunnerResources()?.processSpawner || currentRunnerResources()?.commandRunner
+        ? () => new Set()
+        : snapshotRunnerProcessIdentities,
     )
     this.agentSessionRuntimeEventQueue = createAgentSessionRuntimeEventQueue({
       deliver: createServerRuntimeEventDelivery({
@@ -706,6 +709,7 @@ export class RunnerHost {
         }
         this.inFlight.set(key, entry)
         let releaseWorkspace: (() => void) | null = null
+        let admittedWorkspacePath: string | null = null
         if (!isManagerExecution && validationFailure === null) {
           const name = (work.variables?.workspace as { name?: unknown } | undefined)?.name
           if (!work.projectId || typeof name !== 'string' || !name.trim()) {
@@ -716,9 +720,8 @@ export class RunnerHost {
             }
           } else {
             try {
-              releaseWorkspace = this.workspaceUse.acquire(
-                namedWorkspacePath(this.options.runnerRoot, work.projectId, name.trim()),
-              )
+              admittedWorkspacePath = namedWorkspacePath(this.options.runnerRoot, work.projectId, name.trim())
+              releaseWorkspace = this.workspaceUse.acquire(admittedWorkspacePath)
             } catch (error) {
               if (!(error instanceof WorkspaceUseConflict)) throw error
               validationFailure = {
@@ -730,13 +733,12 @@ export class RunnerHost {
             }
           }
         }
-        entry.done = executeAndTransition(
-          this.executionContext,
-          work,
-          controller.signal,
-          key,
-          entry,
-          validationFailure,
+        const execute = () =>
+          executeAndTransition(this.executionContext, work, controller.signal, key, entry, validationFailure)
+        entry.done = (
+          releaseWorkspace && admittedWorkspacePath
+            ? this.workspaceUse.runWithOwner(admittedWorkspacePath, execute)
+            : execute()
         ).finally(() => releaseWorkspace?.())
 
         this.syncOpenCodeWorkOwners()

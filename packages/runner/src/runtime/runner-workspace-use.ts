@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve } from 'node:path'
 import type { WorkspaceRemovalFence, WorkspaceRemovalFenceResult } from './workspace-removal-fence.js'
+import { withWorkspaceProcessOwner } from '../system/process-ownership.js'
 
 export class WorkspaceUseConflict extends Error {
   constructor() {
@@ -13,12 +14,14 @@ export class RunnerWorkspaceUse implements WorkspaceRemovalFence {
   private readonly removing = new Set<string>()
   private readonly previousGeneration = new Set<string>()
   private unknownPreviousGeneration = false
+  private readonly commandBaselines = new Map<string, Set<string> | null>()
 
   constructor(
     private readonly releaseResources: (workspacePath: string) => Promise<'ready' | 'busy' | 'failed'>,
     private readonly realpath: (path: string) => string = realpathSync,
     private readonly onAdmit?: (workspacePath: string) => void,
     private readonly inspectProcesses: (workspacePath: string) => 'ready' | 'busy' | 'failed' = () => 'ready',
+    private readonly snapshotProcesses: () => Set<string> | null = () => new Set(),
   ) {}
 
   acquire(workspacePath: string): () => void {
@@ -39,10 +42,18 @@ export class RunnerWorkspaceUse implements WorkspaceRemovalFence {
   async withUse<T>(workspacePath: string, work: () => Promise<T>): Promise<T> {
     const release = this.acquire(workspacePath)
     try {
-      return await work()
+      return await this.runWithOwner(workspacePath, work)
     } finally {
       release()
     }
+  }
+
+  runWithOwner<T>(workspacePath: string, work: () => T): T {
+    const key = resolve(workspacePath)
+    return withWorkspaceProcessOwner(() => {
+      if (this.removing.has(key)) throw new WorkspaceUseConflict()
+      if (!this.commandBaselines.has(key)) this.commandBaselines.set(key, this.snapshotProcesses())
+    }, work)
   }
 
   async withRemovalFence<T>(
@@ -57,6 +68,13 @@ export class RunnerWorkspaceUse implements WorkspaceRemovalFence {
     try {
       const readiness = await this.releaseResources(key)
       if (readiness !== 'ready') return { kind: readiness }
+      if (this.commandBaselines.has(key)) {
+        const baseline = this.commandBaselines.get(key)
+        const current = this.snapshotProcesses()
+        if (!baseline || !current) return { kind: 'failed', reason: 'process_termination_unconfirmed' }
+        if ([...current].some((identity) => !baseline.has(identity))) return { kind: 'busy' }
+        this.commandBaselines.delete(key)
+      }
       const processes = this.inspectProcesses(key)
       if (processes !== 'ready')
         return { kind: processes, ...(processes === 'failed' ? { reason: 'process_termination_unconfirmed' } : {}) }

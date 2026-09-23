@@ -121,6 +121,26 @@ describe('CleanupLoop removal fence', () => {
     expect(fixture.registry.remove).not.toHaveBeenCalled()
   })
 
+  it('reports a final Server reservation as in use', async () => {
+    const fixture = createFixture()
+    const outcomes: Array<{ outcome: string; reason?: string }> = []
+    fixture.runner.validateAndDeleteWorkspace = vi.fn(async () => 'in_use' as const)
+    const loop = new CleanupLoop(
+      fixture.registry,
+      fixture.runner,
+      '/runner',
+      () => passFence,
+      async (_entry, outcome, reason) => {
+        outcomes.push({ outcome, reason })
+      },
+    )
+
+    expect(await loop.safeRemove(entry)).toBe(false)
+    expect(outcomes).toEqual([{ outcome: 'in_use', reason: 'server_home_reserved' }])
+    expect(fixture.runner.deleteDirectory).not.toHaveBeenCalled()
+    expect(fixture.registry.remove).not.toHaveBeenCalled()
+  })
+
   it('runs final guards, deletion, and registry removal inside the fence', async () => {
     const calls: string[] = []
     const orderedFixture = createFixture(calls)

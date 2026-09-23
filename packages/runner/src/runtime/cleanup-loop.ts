@@ -35,7 +35,10 @@ export interface CleanupRunner {
   deleteDirectory(path: string): Promise<void>
   computeDirectorySize(path: string, signal: AbortSignal): Promise<number | null>
   validateWorkspace?(entry: CleanupEntry): Promise<boolean>
-  validateAndDeleteWorkspace?(entry: CleanupEntry, onDeleteStarted?: () => void): Promise<boolean>
+  validateAndDeleteWorkspace?(
+    entry: CleanupEntry,
+    onDeleteStarted?: () => void,
+  ): Promise<'removed' | 'in_use' | 'unsafe'>
 }
 
 export interface CleanupLoopResult {
@@ -267,10 +270,10 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
       }
 
       if (this.runner.validateAndDeleteWorkspace) {
-        let deleted: boolean
+        let outcome: 'removed' | 'in_use' | 'unsafe'
         let deleteStarted = false
         try {
-          deleted = await this.runner.validateAndDeleteWorkspace(entry, () => {
+          outcome = await this.runner.validateAndDeleteWorkspace(entry, () => {
             deleteStarted = true
           })
         } catch (error) {
@@ -279,15 +282,17 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
           )
           throw error
         }
-        if (!deleted) {
+        if (outcome !== 'removed') {
           log.warn('workspace cleanup refused', {
             run: this.registry.entryKey(entry),
             path: entry.workspacePath,
-            reason: 'workspace identity is invalid',
+            reason: outcome === 'in_use' ? 'server still reserves the Home' : 'workspace identity is invalid',
           })
-          await this.reportOutcome?.(entry, 'unsafe', 'workspace_identity_or_eligibility_invalid').catch(
-            () => undefined,
-          )
+          await this.reportOutcome?.(
+            entry,
+            outcome,
+            outcome === 'in_use' ? 'server_home_reserved' : 'workspace_identity_invalid',
+          ).catch(() => undefined)
           return false
         }
         await this.reportOutcome?.(entry, 'removed')

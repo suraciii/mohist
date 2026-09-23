@@ -144,6 +144,15 @@ describe('NamedWorkspaceReclaimProbe', () => {
 })
 
 describe('NamedWorkspaceCleanupRunner', () => {
+  it('distinguishes a newly reserved Home from an invalid identity', async () => {
+    const { root, registry } = context()
+    await materializeNamedWorkspace({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
+    const entry = registry.get('mohist', 'pay')!
+    const reserved = new NamedWorkspaceCleanupRunner(root, registry, async () => false)
+    expect(await reserved.validateAndDeleteWorkspace(entry)).toBe('in_use')
+    const invalid = new NamedWorkspaceCleanupRunner(root, registry, async () => true)
+    expect(await invalid.validateAndDeleteWorkspace({ ...entry, projectId: 'other' })).toBe('unsafe')
+  })
   it('reads the named workspace marker identity', async () => {
     const { root, registry, runner } = context()
     await materializeNamedWorkspace({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
@@ -168,6 +177,33 @@ describe('NamedWorkspaceCleanupRunner', () => {
 })
 
 describe('named workspace cleanup loop end to end', () => {
+  it('keeps a newly reserved Home and reports in use at the final check', async () => {
+    const { root, registry } = context()
+    await materializeNamedWorkspace({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
+    await registry.markEligible('mohist', 'pay')
+    const entry = registry.get('mohist', 'pay')!
+    const runner = new NamedWorkspaceCleanupRunner(root, registry, async () => false)
+    const outcomes: Array<{ outcome: string; reason?: string }> = []
+    const loop = new CleanupLoop(
+      registry,
+      runner,
+      root,
+      () => ({
+        async withRemovalFence(_path, callback) {
+          return { kind: 'completed', value: await callback() }
+        },
+      }),
+      async (_entry, outcome, reason) => {
+        outcomes.push({ outcome, reason })
+      },
+    )
+
+    expect(await loop.safeRemove(entry)).toBe(false)
+    expect(outcomes).toEqual([{ outcome: 'in_use', reason: 'server_home_reserved' }])
+    expect(registry.get('mohist', 'pay')).not.toBeNull()
+    await expect(stat(namedWorkspacePath(root, 'mohist', 'pay'))).resolves.toBeDefined()
+  })
+
   it('evicts an eligible named workspace past the retention window', async () => {
     const { root, runner } = context()
     let current = now
