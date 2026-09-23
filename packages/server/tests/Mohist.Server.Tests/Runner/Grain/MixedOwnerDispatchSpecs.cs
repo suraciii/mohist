@@ -310,13 +310,7 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
             projectId,
             $"mixed-capacity-runner-{Guid.NewGuid():N}",
             maxWorkflowSlots: 1);
-        var jobId = $"mixed-capacity-job-{Guid.NewGuid():N}";
-        var job = Grains.GetGrain<IAgentJobGrain>(jobId);
-        await job.SubmitAsync(new AgentJobInput(
-            "wait for capacity",
-            WorkspacePath: "/tmp/mixed-capacity",
-            ProjectId: projectId,
-            AgentId: "agent-test"));
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
 
         var workflowId = $"mixed-capacity-workflow-{Guid.NewGuid():N}";
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
@@ -324,11 +318,21 @@ public sealed class MixedOwnerDispatchSpecs : Mohist.Server.Tests.Workflow.Workf
         await workflow.StartAsync(TestInput(projectId));
         await workflow.AssignWorkerAsync(runnerId);
         Assert.NotNull(await workflow.ClaimNextAsync(runnerId, "test-generation"));
+        var workflowPoll = await Dispatch.PollAsync(runnerId, DispatchTestExtensions.ReadyPollRequest());
+        Assert.Single(workflowPoll.Dispatches);
+        Assert.Equal(workflowId, workflowPoll.Dispatches[0].WorkflowRunId);
 
+        var jobId = $"mixed-capacity-job-{Guid.NewGuid():N}";
+        var job = Grains.GetGrain<IAgentJobGrain>(jobId);
+        await job.SubmitAsync(new AgentJobInput(
+            "wait for capacity",
+            WorkspacePath: "/tmp/mixed-capacity",
+            ProjectId: projectId,
+            AgentId: "agent-test"));
         var response = await Dispatch.PollAsync(runnerId, DispatchTestExtensions.ReadyPollRequest());
 
-        Assert.Single(response.Dispatches);
-        Assert.Equal(workflowId, response.Dispatches[0].WorkflowRunId);
+        Assert.DoesNotContain(response.Dispatches, dispatch =>
+            dispatch.OwnerKind == WorkDispatchOwnerKinds.AgentJob && dispatch.AgentJobId == jobId);
         Assert.Equal(AgentJobStatus.Pending, await job.GetStatusAsync());
 
         var runtime = await Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync();
