@@ -16,7 +16,23 @@ namespace Mohist.Server.Infrastructure.Data.Sessions;
 public interface IAgentSessionStore : IStateStore<AgentSession>
 {
     Task<IReadOnlyList<AgentSessionReconcileBinding>> ListByRunnerForReconcileAsync(string runnerId, CancellationToken ct = default);
+    async Task<IReadOnlyList<string>> ListSessionIdsByRunnerAsync(string runnerId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return (await ListAsync())
+            .Where(session => string.Equals(session.Runtime.RunnerId, runnerId, StringComparison.Ordinal))
+            .Select(session => session.Id)
+            .ToArray();
+    }
     Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads the raw persisted State document for one Session. The derived
+    /// capacity claim compares its token against this exact document;
+    /// <see cref="LoadAsync"/> hydrates a Session and applies column
+    /// defaults, so reserializing that Session is not the persisted token.
+    /// </summary>
+    Task<string?> ReadStateJsonAsync(string key, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -66,6 +82,15 @@ public class AgentSessionStore : IAgentSessionStore, IAgentSessionStreamRetentio
         return row is null ? null : AgentSessionJson.Deserialize(row);
     }
 
+    public async Task<string?> ReadStateJsonAsync(string key, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.AgentSessions.AsNoTracking()
+            .Where(row => row.Id == key)
+            .Select(row => row.State)
+            .FirstOrDefaultAsync(ct);
+    }
+
     public async Task<IReadOnlyList<AgentSession>> ListAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -96,6 +121,18 @@ public class AgentSessionStore : IAgentSessionStore, IAgentSessionStreamRetentio
                 && binding.RuntimeSessionId.Length > 0
                 && binding.WorkDir.Length > 0)
             .ToArray();
+    }
+
+    public async Task<IReadOnlyList<string>> ListSessionIdsByRunnerAsync(
+        string runnerId,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.AgentSessions
+            .AsNoTracking()
+            .Where(row => row.RunnerId == runnerId)
+            .Select(row => row.Id)
+            .ToListAsync(ct);
     }
 
     public async Task SaveAsync(string key, AgentSession state)

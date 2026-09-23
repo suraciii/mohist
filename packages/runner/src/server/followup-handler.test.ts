@@ -613,6 +613,62 @@ describe('follow-up attachment delivery', () => {
   })
 })
 
+it('replaces a removed Manager binding on the same Runtime before the accepted Input', async () => {
+  const runtime = {
+    ready: () => true,
+    resolveSession: vi.fn(),
+    createSession: vi.fn(async () => ({
+      ok: true as const,
+      value: { runtimeSessionId: 'manager-new', workDir: '/work' },
+      diagnostics: [],
+    })),
+    followup: vi.fn(async () => ({ ok: true as const, value: { facts: {} }, diagnostics: [] })),
+  }
+  const boundary = {
+    hasExpired: () => false,
+    mask: (value: string) => value,
+    redact: (value: unknown) => value,
+    dispose: vi.fn(async () => undefined),
+  }
+  const outbox = {
+    ready: () => true,
+    awaitInputReceipt: vi.fn(async () => ({ type: 'session.input' })),
+    enqueueBeforeExecution: vi.fn(async () => undefined),
+    enqueueProducedFact: vi.fn(async () => undefined),
+  }
+  const recover = vi.fn(async () => undefined)
+  const receive = createFollowupHandler({
+    followupTargetResolver: () => ({
+      runtimeSessionId: 'runtime-1',
+      workDir: '/work',
+      projectId: '__mohist_slack_manager__',
+    }),
+    agentSessionRuntimeEventQueue: outbox as never,
+    piRuntime: runtime as never,
+    runnerRoot: '/virtual/runner',
+    runnerId: 'runner-1',
+    connection: { recoverMissingAgentSession: recover } as never,
+    createManagerExecutionBoundary: vi.fn(async () => boundary as never) as never,
+  })
+
+  await expect(receive({ ...managerFollowupPayload(), requiresBindingRecovery: true })).resolves.toEqual({
+    accepted: true,
+  })
+  await flushMicrotasks()
+
+  expect(runtime.resolveSession).not.toHaveBeenCalled()
+  expect(recover).toHaveBeenCalledWith(
+    '__mohist_slack_manager__',
+    'session-1',
+    expect.objectContaining({ expectedRuntime: 'pi', replacementRuntimeSessionId: 'manager-new' }),
+    expect.any(AbortSignal),
+  )
+  expect(runtime.followup).toHaveBeenCalledWith(
+    expect.objectContaining({ target: expect.objectContaining({ runtimeSessionId: 'manager-new' }) }),
+    expect.anything(),
+  )
+})
+
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()

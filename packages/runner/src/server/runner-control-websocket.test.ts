@@ -69,6 +69,7 @@ function handlers(overrides: Partial<RunnerControlHandlers> = {}): RunnerControl
     sessionFollowup: result,
     sessionStop: result,
     sessionCommand: result,
+    sessionProbe: result,
     ...overrides,
   }
 }

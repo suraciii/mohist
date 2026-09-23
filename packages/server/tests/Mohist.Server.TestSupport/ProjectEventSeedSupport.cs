@@ -85,6 +85,7 @@ internal sealed class ProjectEventSeedSupport
         {
             [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
             [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+            [GenericAgentSessionMetadata.AgentId] = "workflow-agent",
             [AgentSessionQueryMetadataKeys.IssueNumber] = "1",
             [AgentSessionQueryMetadataKeys.EpicNumber] = "7",
             [AgentSessionQueryMetadataKeys.WorkflowRunId] = "wf-1",

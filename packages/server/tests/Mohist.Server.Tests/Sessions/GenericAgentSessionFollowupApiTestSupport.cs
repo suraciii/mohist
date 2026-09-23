@@ -106,6 +106,8 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
 
         var sessionId = $"idle-{Guid.NewGuid():N}";
         var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
+        var agentId = $"agent-{Guid.NewGuid():N}";
+        await _fixture.SeedAgentAsync(project.Id, agentId);
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(new OpenAgentSessionCommand(
             RunnerId: _runnerId,
@@ -113,7 +115,7 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
             WorkDir: WorkDirFor(project.Id),
             Metadata: GenericAgentSessionMetadata.Metadata(new GenericAgentSessionContext(
                 project.Id,
-                $"agent-{Guid.NewGuid():N}",
+                agentId,
                 "idle-agent"))));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
             runtimeSessionId,

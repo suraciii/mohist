@@ -3,6 +3,8 @@ using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Contracts;
+using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
@@ -124,6 +126,7 @@ public sealed class RunnerControlWebSocketRegistryTests
             reservation,
             fixture.Socket,
             new RunnerControlHandshake(null, null, null, null, null, null, null, null, null),
+            OperatorAuthority,
             TestContext.Current.CancellationToken));
 
         Assert.False(fixture.Registry.IsConnected("runner-1"));
@@ -140,9 +143,91 @@ public sealed class RunnerControlWebSocketRegistryTests
             reservation,
             fixture.Socket,
             new RunnerControlHandshake(null, null, null, null, null, null, null, null, "stale-generation"),
+            OperatorAuthority,
             TestContext.Current.CancellationToken));
 
         Assert.False(fixture.Registry.IsConnected("runner-1"));
+    }
+
+    [Fact]
+    public async Task ReconnectProbeStartsAfterPublicationAndCancelsWithExactConnection()
+    {
+        const string runnerId = "runner-probe";
+        var runner = DispatchProxy.Create<IRunnerGrain, RunnerGrainProxy>();
+        var grains = DispatchProxy.Create<IGrainFactory, GrainFactoryProxy>();
+        ((GrainFactoryProxy)(object)grains).Runner = runner;
+        var probes = new BlockingActivityProbeCoordinator();
+        var registry = new RunnerControlWebSocketRegistry(
+            new RunnerConnectionTracker(),
+            grains,
+            probes,
+            new FakeTimeProvider(),
+            NullLoggerFactory.Instance);
+        var connectionId = Guid.NewGuid();
+        using var socket = new InstallationWebSocket(blockClose: false);
+        using var stop = new CancellationTokenSource();
+        Assert.True(registry.TryReserve(connectionId, out var reservation));
+
+        var run = registry.RunAsync(runnerId, reservation, socket, Handshake(), OperatorAuthority, stop.Token);
+        await probes.Started.WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(probes.WasCurrentWhenStarted);
+        Assert.True(registry.IsConnected(runnerId));
+        stop.Cancel();
+        await run;
+        await probes.Cancelled.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, probes.CallCount);
+    }
+
+    [Fact]
+    public async Task ControlAdmissionRejectsCredentialDifferentFromRegisteredAuthority()
+    {
+        var fixture = RegistryFixture();
+        fixture.Runner.CurrentCredentialId = "credential-b";
+        Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var reservation));
+
+        await Assert.ThrowsAsync<RunnerControlUnavailableException>(() => fixture.Registry.RunAsync(
+            "runner-1",
+            reservation,
+            fixture.Socket,
+            Handshake(),
+            new RunnerPresentedAuthority("credential-a", OperatorOverride: false),
+            TestContext.Current.CancellationToken));
+
+        Assert.False(fixture.Registry.IsConnected("runner-1"));
+        Assert.Equal(0, fixture.Socket.SendCount);
+    }
+
+    [Fact]
+    public async Task PublishedConnectionReceivesAndAnswersSessionProbe()
+    {
+        const string runnerId = "runner-probe-wire";
+        var runner = DispatchProxy.Create<IRunnerGrain, RunnerGrainProxy>();
+        var grains = DispatchProxy.Create<IGrainFactory, GrainFactoryProxy>();
+        ((GrainFactoryProxy)(object)grains).Runner = runner;
+        var probes = new SendingActivityProbeCoordinator(runnerId);
+        var registry = new RunnerControlWebSocketRegistry(
+            new RunnerConnectionTracker(),
+            grains,
+            probes,
+            new FakeTimeProvider(),
+            NullLoggerFactory.Instance);
+        var connectionId = Guid.NewGuid();
+        using var socket = new InstallationWebSocket(blockClose: false)
+        {
+            RespondWithProbeSuccess = true,
+        };
+        using var stop = new CancellationTokenSource();
+        Assert.True(registry.TryReserve(connectionId, out var reservation));
+
+        var run = registry.RunAsync(runnerId, reservation, socket, Handshake(), OperatorAuthority, stop.Token);
+        var result = await probes.Result.WaitAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(RunnerSessionActivityObservations.Idle, result.Observation);
+        Assert.Equal(probes.Probe, result.Probe);
+        Assert.Equal(1, socket.SendCount);
+        stop.Cancel();
+        await run;
     }
 
     [Fact]
@@ -154,7 +239,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         using var currentStop = new CancellationTokenSource();
         Assert.True(fixture.Registry.TryReserve(currentId, out var currentReservation));
         var currentRun = fixture.Registry.RunAsync(
-            runnerId, currentReservation, fixture.Socket, Handshake(), currentStop.Token);
+            runnerId, currentReservation, fixture.Socket, Handshake(), OperatorAuthority, currentStop.Token);
         await fixture.Registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
 
         var replacementId = Guid.NewGuid();
@@ -169,7 +254,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         };
         Assert.True(fixture.Registry.TryReserve(replacementId, out var replacementReservation));
         var replacementRun = fixture.Registry.RunAsync(
-            runnerId, replacementReservation, replacementSocket, Handshake(), TestContext.Current.CancellationToken);
+            runnerId, replacementReservation, replacementSocket, Handshake(), OperatorAuthority, TestContext.Current.CancellationToken);
         await acquired.Task.WaitAsync(TestContext.Current.CancellationToken);
         fixture.Runner.CurrentGeneration = "replacement-generation";
         release.TrySetResult();
@@ -183,6 +268,137 @@ public sealed class RunnerControlWebSocketRegistryTests
     }
 
     [Fact]
+    public async Task RevocationAfterAuthorityValidationPreventsPublicationAndUnscopedMutation()
+    {
+        const string runnerId = "runner-install-revoked";
+        var fixture = RegistryFixture();
+        var validated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Registry.InstallationAuthorityValidatedAsync = async (_, _, ct) =>
+        {
+            validated.TrySetResult();
+            await release.Task.WaitAsync(ct);
+        };
+        Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var reservation));
+        var run = fixture.Registry.RunAsync(
+            runnerId,
+            reservation,
+            fixture.Socket,
+            Handshake(),
+            OperatorAuthority,
+            TestContext.Current.CancellationToken);
+        await validated.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        await fixture.Registry.FenceAsync(
+            runnerId,
+            "test-generation",
+            TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<RunnerControlUnavailableException>(() =>
+            fixture.Registry.SendRequestAsync<SessionStopParams, RunnerStopReply>(
+                runnerId,
+                "session.stop",
+                StopParams(runnerId),
+                TestContext.Current.CancellationToken));
+        release.TrySetResult();
+
+        await Assert.ThrowsAsync<RunnerControlUnavailableException>(() => run);
+        Assert.False(fixture.Registry.IsConnected(runnerId));
+        Assert.Equal(0, fixture.Socket.SendCount);
+
+        fixture.Registry.InstallationAuthorityValidatedAsync = null;
+        fixture.Runner.CurrentGeneration = "replacement-generation";
+        var replacementId = Guid.NewGuid();
+        using var replacementSocket = new InstallationWebSocket(blockClose: false);
+        using var replacementStop = new CancellationTokenSource();
+        Assert.True(fixture.Registry.TryReserve(replacementId, out var replacementReservation));
+        var replacementRun = fixture.Registry.RunAsync(
+            runnerId,
+            replacementReservation,
+            replacementSocket,
+            new RunnerControlHandshake(
+                null, null, null, null, null, null, null, null, "replacement-generation"),
+            OperatorAuthority,
+            replacementStop.Token);
+        await fixture.Registry.WaitForConnectionAsync(
+            runnerId,
+            TestContext.Current.CancellationToken);
+        Assert.True(fixture.Registry.IsConnected(runnerId));
+        replacementStop.Cancel();
+        await replacementRun;
+    }
+
+    [Fact]
+    public async Task RemovalFenceRejectsEarlierOperatorInstallationFromDifferentGeneration()
+    {
+        const string runnerId = "runner-cross-generation-removal";
+        var fixture = RegistryFixture(currentGeneration: "generation-a");
+        var publicationReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Registry.InstallationPublicationReadyAsync = async (_, _, ct) =>
+        {
+            publicationReady.TrySetResult();
+            await release.Task.WaitAsync(ct);
+        };
+        Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var reservation));
+        var run = fixture.Registry.RunAsync(
+            runnerId,
+            reservation,
+            fixture.Socket,
+            new RunnerControlHandshake(
+                null, null, null, null, null, null, null, null, "generation-a"),
+            OperatorAuthority,
+            TestContext.Current.CancellationToken);
+        await publicationReady.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        fixture.Runner.CurrentGeneration = "generation-b";
+        await fixture.Registry.FenceAsync(
+            runnerId,
+            "generation-b",
+            TestContext.Current.CancellationToken);
+        release.TrySetResult();
+
+        await Assert.ThrowsAsync<RunnerControlUnavailableException>(() => run);
+        Assert.False(fixture.Registry.IsConnected(runnerId));
+        Assert.Equal(0, fixture.Socket.SendCount);
+    }
+
+    [Fact]
+    public async Task RevocationWinningSendAuthorityRacePreventsUnscopedRequestEnqueue()
+    {
+        const string runnerId = "runner-send-revoked";
+        var fixture = RegistryFixture();
+        using var stop = new CancellationTokenSource();
+        Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var reservation));
+        var run = fixture.Registry.RunAsync(
+            runnerId, reservation, fixture.Socket, Handshake(), OperatorAuthority, stop.Token);
+        await fixture.Registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
+
+        var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Registry.RequestAuthorityWaitingAsync = async (_, ct) =>
+        {
+            waiting.TrySetResult();
+            await release.Task.WaitAsync(ct);
+        };
+        var request = fixture.Registry.SendRequestAsync<WorkspaceQueryParams, WorkspaceRemovalResult>(
+            runnerId,
+            "workspace.remove",
+            new WorkspaceQueryParams(new RunnerWorkspaceQuery(null, null, null, null, null, null, null)),
+            ct: TestContext.Current.CancellationToken);
+        await waiting.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        await fixture.Registry.FenceAsync(
+            runnerId,
+            "test-generation",
+            TestContext.Current.CancellationToken);
+        release.TrySetResult();
+
+        await Assert.ThrowsAsync<RunnerControlUnavailableException>(() => request);
+        Assert.Equal(0, fixture.Socket.SendCount);
+        await run;
+    }
+
+    [Fact]
     public async Task ReplacementBetweenGenerationValidationAndEnqueueRejectsOldCommand()
     {
         const string runnerId = "runner-1";
@@ -190,7 +406,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         using var oldStop = new CancellationTokenSource();
         Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var oldReservation));
         var oldRun = fixture.Registry.RunAsync(
-            runnerId, oldReservation, fixture.Socket, Handshake(), oldStop.Token);
+            runnerId, oldReservation, fixture.Socket, Handshake(), OperatorAuthority, oldStop.Token);
         await fixture.Registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
 
         fixture.Registry.SessionCommandGenerationValidatedAsync = async (_, _, ct) =>
@@ -206,6 +422,7 @@ public sealed class RunnerControlWebSocketRegistryTests
                 replacementReservation,
                 replacementSocket,
                 new RunnerControlHandshake(null, null, null, null, null, null, null, null, "replacement-generation"),
+                OperatorAuthority,
                 replacementStop.Token);
             await oldRun.WaitAsync(ct);
             await fixture.Registry.WaitForConnectionAsync(runnerId, ct);
@@ -232,7 +449,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         using var oldStop = new CancellationTokenSource();
         Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var oldReservation));
         var oldRun = fixture.Registry.RunAsync(
-            runnerId, oldReservation, fixture.Socket, Handshake(), oldStop.Token);
+            runnerId, oldReservation, fixture.Socket, Handshake(), OperatorAuthority, oldStop.Token);
         await fixture.Registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
 
         var validationReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -267,7 +484,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         using var oldStop = new CancellationTokenSource();
         Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var oldReservation));
         var oldRun = fixture.Registry.RunAsync(
-            runnerId, oldReservation, fixture.Socket, Handshake(), oldStop.Token);
+            runnerId, oldReservation, fixture.Socket, Handshake(), OperatorAuthority, oldStop.Token);
         await fixture.Registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
         var dispatcher = new RunnerSessionCommandDispatcher(
             fixture.Registry, NullLogger<RunnerSessionCommandDispatcher>.Instance);
@@ -284,6 +501,7 @@ public sealed class RunnerControlWebSocketRegistryTests
             replacementReservation,
             replacementSocket,
             new RunnerControlHandshake(null, null, null, null, null, null, null, null, "replacement-generation"),
+            OperatorAuthority,
             replacementStop.Token);
 
         var result = await pending;
@@ -296,6 +514,27 @@ public sealed class RunnerControlWebSocketRegistryTests
     }
 
     [Fact]
+    public async Task AdministrativeAuthorityFenceClosesAndRemovesExactCurrentConnection()
+    {
+        const string runnerId = "runner-revoked";
+        var fixture = RegistryFixture();
+        using var stop = new CancellationTokenSource();
+        Assert.True(fixture.Registry.TryReserve(fixture.ConnectionId, out var reservation));
+        var run = fixture.Registry.RunAsync(
+            runnerId, reservation, fixture.Socket, Handshake(), OperatorAuthority, stop.Token);
+        await fixture.Registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
+
+        await fixture.Registry.FenceAsync(
+            runnerId,
+            "test-generation",
+            TestContext.Current.CancellationToken);
+
+        Assert.False(fixture.Registry.IsConnected(runnerId));
+        Assert.Equal(WebSocketState.Closed, fixture.Socket.State);
+        await run;
+    }
+
+    [Fact]
     public async Task ReplacementLeaseFencesStaleTrafficBeforeOldCloseCompletes()
     {
         const string runnerId = "runner-1";
@@ -304,7 +543,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         var grains = DispatchProxy.Create<IGrainFactory, GrainFactoryProxy>();
         ((GrainFactoryProxy)(object)grains).Runner = runner;
         var registry = new RunnerControlWebSocketRegistry(
-            tracker, grains, new FakeTimeProvider(), NullLoggerFactory.Instance);
+            tracker, grains, NoopActivityProbeCoordinator.Instance, new FakeTimeProvider(), NullLoggerFactory.Instance);
         var oldConnectionId = Guid.NewGuid();
         var newConnectionId = Guid.NewGuid();
         using var oldStop = new CancellationTokenSource();
@@ -314,13 +553,13 @@ public sealed class RunnerControlWebSocketRegistryTests
 
         Assert.True(registry.TryReserve(oldConnectionId, out var oldReservation));
         var oldRun = registry.RunAsync(
-            runnerId, oldReservation, oldSocket, Handshake(), oldStop.Token);
+            runnerId, oldReservation, oldSocket, Handshake(), OperatorAuthority, oldStop.Token);
         await registry.WaitForConnectionAsync(runnerId, TestContext.Current.CancellationToken);
         Assert.Equal(oldConnectionId.ToString("D"), tracker.GetConnectionId(runnerId));
 
         Assert.True(registry.TryReserve(newConnectionId, out var newReservation));
         var newRun = registry.RunAsync(
-            runnerId, newReservation, newSocket, Handshake(), newStop.Token);
+            runnerId, newReservation, newSocket, Handshake(), OperatorAuthority, newStop.Token);
         await oldSocket.CloseStarted.WaitAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(newConnectionId.ToString("D"), tracker.GetConnectionId(runnerId));
@@ -342,7 +581,7 @@ public sealed class RunnerControlWebSocketRegistryTests
     public void StaleReleaseCannotRemoveNewReservation()
     {
         var registry = new RunnerControlWebSocketRegistry(
-            new RunnerConnectionTracker(), null!, new FakeTimeProvider(), NullLoggerFactory.Instance);
+            new RunnerConnectionTracker(), null!, NoopActivityProbeCoordinator.Instance, new FakeTimeProvider(), NullLoggerFactory.Instance);
         var connectionId = Guid.NewGuid();
 
         Assert.True(registry.TryReserve(connectionId, out var oldReservation));
@@ -402,6 +641,7 @@ public sealed class RunnerControlWebSocketRegistryTests
             new RunnerControlWebSocketRegistry(
                 new RunnerConnectionTracker(),
                 grains,
+                NoopActivityProbeCoordinator.Instance,
                 new FakeTimeProvider(),
                 NullLoggerFactory.Instance),
             Guid.NewGuid(),
@@ -410,6 +650,93 @@ public sealed class RunnerControlWebSocketRegistryTests
     }
 
     private static RunnerControlHandshake Handshake() => new(null, null, null, null, null, null, null, null, "test-generation");
+
+    private static RunnerPresentedAuthority OperatorAuthority { get; } =
+        new(CredentialId: null, OperatorOverride: true);
+
+    private sealed class NoopActivityProbeCoordinator : IRunnerActivityProbeCoordinator
+    {
+        public static NoopActivityProbeCoordinator Instance { get; } = new();
+
+        public Task ProbeAsync(
+            string runnerId,
+            string processGeneration,
+            Func<CancellationToken, Task<bool>> isCurrentConnection,
+            Func<RunnerSessionActivityProbeRequest, CancellationToken, Task<RunnerSessionActivityProbeResult>> send,
+            CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class SendingActivityProbeCoordinator(string runnerId) : IRunnerActivityProbeCoordinator
+    {
+        private readonly TaskCompletionSource<RunnerSessionActivityProbeResult> _result =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public RunnerSessionActivityProbeRequest Probe { get; } = new(
+            "session-1",
+            "observation-1",
+            runnerId,
+            "opencode",
+            "runtime-1",
+            "/workspace",
+            1,
+            1);
+        public Task<RunnerSessionActivityProbeResult> Result => _result.Task;
+
+        public async Task ProbeAsync(
+            string actualRunnerId,
+            string processGeneration,
+            Func<CancellationToken, Task<bool>> isCurrentConnection,
+            Func<RunnerSessionActivityProbeRequest, CancellationToken, Task<RunnerSessionActivityProbeResult>> send,
+            CancellationToken ct)
+        {
+            Assert.Equal(runnerId, actualRunnerId);
+            Assert.True(await isCurrentConnection(ct));
+            _result.TrySetResult(await send(Probe, ct));
+        }
+    }
+
+    private sealed class BlockingActivityProbeCoordinator : IRunnerActivityProbeCoordinator
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _cancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _connectionLifetime = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+        public Task Cancelled => _cancelled.Task;
+        public bool WasCurrentWhenStarted { get; private set; }
+        public int CallCount { get; private set; }
+
+        public async Task ProbeAsync(
+            string runnerId,
+            string processGeneration,
+            Func<CancellationToken, Task<bool>> isCurrentConnection,
+            Func<RunnerSessionActivityProbeRequest, CancellationToken, Task<RunnerSessionActivityProbeResult>> send,
+            CancellationToken ct)
+        {
+            CallCount++;
+            WasCurrentWhenStarted = await isCurrentConnection(ct);
+            _started.TrySetResult();
+            try
+            {
+                await _connectionLifetime.Task.WaitAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                _cancelled.TrySetResult();
+                throw;
+            }
+        }
+    }
+
+    private static SessionStopParams StopParams(string runnerId) => new(
+        new RunnerSessionTarget(
+            "generic",
+            "project-1",
+            new RunnerSessionBinding("opencode", "runtime-1", runnerId, "/workspace"),
+            SessionId: "session-1"),
+        "session-1",
+        "turn-1",
+        "operation-1");
 
     private static SessionCommandRequest Command(string runnerId) => new(
         "session-1",
@@ -424,15 +751,30 @@ public sealed class RunnerControlWebSocketRegistryTests
     private class RunnerGrainProxy : DispatchProxy
     {
         public string CurrentGeneration { get; set; } = "test-generation";
+        public string? CurrentCredentialId { get; set; }
 
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args) =>
             targetMethod?.Name switch
             {
                 nameof(IRunnerGrain.IsCurrentProcessGenerationAsync) => Task.FromResult(
                     string.Equals(CurrentGeneration, (string?)args![0], StringComparison.Ordinal)),
+                nameof(IRunnerGrain.IsCurrentRegistrationAuthorityAsync) => Task.FromResult(
+                    RegistrationAuthorityMatches(
+                        (string?)args![0],
+                        (RunnerPresentedAuthority)args[1]!)),
                 nameof(IRunnerGrain.UpdateRuntimeIdentityAsync) => Task.CompletedTask,
                 _ => throw new NotSupportedException(targetMethod?.Name),
             };
+
+        private bool RegistrationAuthorityMatches(
+            string? processGeneration,
+            RunnerPresentedAuthority authority) =>
+            string.Equals(CurrentGeneration, processGeneration, StringComparison.Ordinal)
+            && (authority.OperatorOverride
+                || string.Equals(
+                    CurrentCredentialId,
+                    authority.CredentialId,
+                    StringComparison.Ordinal));
     }
 
     private class GrainFactoryProxy : DispatchProxy
@@ -462,6 +804,7 @@ public sealed class RunnerControlWebSocketRegistryTests
         public Task SendStarted => _sendStarted.Task;
         public int SendCount => Volatile.Read(ref _sendCount);
         public bool RespondWithCompactSuccess { get; set; }
+        public bool RespondWithProbeSuccess { get; set; }
         public override WebSocketCloseStatus? CloseStatus => null;
         public override string? CloseStatusDescription => null;
         public override WebSocketState State => _state;
@@ -499,12 +842,15 @@ public sealed class RunnerControlWebSocketRegistryTests
         {
             Interlocked.Increment(ref _sendCount);
             _sendStarted.TrySetResult();
-            if (RespondWithCompactSuccess)
+            if (RespondWithCompactSuccess || RespondWithProbeSuccess)
             {
                 using var request = JsonDocument.Parse(buffer.AsMemory());
                 var id = request.RootElement.GetProperty("id").GetString();
+                var result = RespondWithProbeSuccess
+                    ? $"{{\"probe\":{request.RootElement.GetProperty("params").GetRawText()},\"observation\":\"idle\"}}"
+                    : "{\"ok\":true}";
                 _receive.TrySetResult(System.Text.Encoding.UTF8.GetBytes(
-                    $"{{\"jsonrpc\":\"2.0\",\"id\":\"{id}\",\"result\":{{\"ok\":true}}}}"));
+                    $"{{\"jsonrpc\":\"2.0\",\"id\":\"{id}\",\"result\":{result}}}"));
             }
             return Task.CompletedTask;
         }

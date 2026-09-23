@@ -36,18 +36,17 @@ public sealed class AgentJobState
     /// </summary>
     [Id(18)] public PrepareManualLaunchCommand? ManualPlan { get; set; }
     [Id(19)] public PendingTerminalDeliveryEvent? PendingTerminalDeliveryEvent { get; set; }
-    [Id(20)] public string? ConcurrencyPermitToken { get; set; }
-    [Id(21)] public bool ConcurrencyPermitHeld { get; set; }
+    // Ids 20, 21 and 26-31 are retired with the AgentConcurrencyGrain
+    // permit/waiter authority: the permit token, held flag, permit id,
+    // dispatch id, generation, gate status, release-pending marker and
+    // waiter id it carried were only ever reconciled against the removed
+    // ledger. They stay free so an older persisted state document still
+    // deserializes without colliding on later ids; the derived claim
+    // (CapacityClaimedAt) is the only capacity fact this state keeps.
     [Id(22)] public string? WaitingReason { get; set; }
     [Id(23)] public DateTimeOffset? ReadySince { get; set; }
     [Id(24)] public AgentLaunchVisibility LaunchVisibility { get; set; } = AgentLaunchVisibility.Visible;
     [Id(25)] public PendingSubagentTerminalEvent? PendingSubagentTerminalEvent { get; set; }
-    [Id(26)] public string? ConcurrencyPermitId { get; set; }
-    [Id(27)] public string? ConcurrencyDispatchId { get; set; }
-    [Id(28)] public long ConcurrencyGeneration { get; set; }
-    [Id(29)] public AgentConcurrencyPermitStatus ConcurrencyGateStatus { get; set; } = AgentConcurrencyPermitStatus.DispatchPending;
-    [Id(30)] public bool ConcurrencyReleasePending { get; set; }
-    [Id(31)] public string? ConcurrencyWaiterId { get; set; }
     [Id(32)] public PendingInitialTurnTerminalDelivery? PendingInitialTurnTerminalDelivery { get; set; }
     [Id(33)] public AgentJobTerminalLogOwnership? TerminalLogOwnership { get; set; }
     /// <summary>
@@ -82,7 +81,61 @@ public sealed class AgentJobState
     [Id(54)] public string? AcceptedReportRuntime { get; set; }
     [Id(55)] public string? AcceptedReportRuntimeSessionId { get; set; }
     [Id(56)] public PendingWorkflowAgentTerminalEvent? PendingWorkflowTerminalEvent { get; set; }
+    /// <summary>
+    /// Durable evidence that Unknown is lifecycle-final because the owning
+    /// Session superseded the initial Turn under a fenced Runner observation.
+    /// </summary>
+    [Id(57)] public AgentJobActivitySettlement? ActivitySettlement { get; set; }
+    /// <summary>
+    /// Durable initial Input recovery/start protocol owned by this Job claim.
+    /// It is not a second work or capacity ledger.
+    /// </summary>
+    [Id(58)] public AgentJobInitialInputSubmission? InitialInputSubmission { get; set; }
+    /// <summary>
+    /// Durable owner fact that this Job acquired Agent capacity. It is retained
+    /// after terminality so retries can identify the original claim without a
+    /// separate permit ledger.
+    /// </summary>
+    [Id(59)] public DateTimeOffset? CapacityClaimedAt { get; set; }
 }
+
+[GenerateSerializer]
+public sealed record AgentJobInitialInputSubmission(
+    [property: Id(0)] string OperationId,
+    [property: Id(1)] string WorkId,
+    [property: Id(2)] string ProcessGeneration,
+    [property: Id(3)] string RunnerId,
+    [property: Id(4)] string SessionId,
+    [property: Id(5)] string InputId,
+    [property: Id(6)] string TurnId,
+    [property: Id(7)] string ExpectedRuntime,
+    [property: Id(8)] string ExpectedRuntimeSessionId,
+    [property: Id(9)] string DispatchFingerprint,
+    [property: Id(10)] string Phase,
+    [property: Id(11)] DateTimeOffset RecordedAt,
+    [property: Id(12)] string? ReplacementRuntime = null,
+    [property: Id(13)] string? ReplacementRuntimeSessionId = null,
+    [property: Id(14)] long? BindingEpoch = null,
+    [property: Id(15)] long? ContextGeneration = null,
+    [property: Id(16)] string? SubmissionAttemptId = null,
+    [property: Id(17)] DateTimeOffset? StartedAt = null,
+    [property: Id(18)] string? CreationAttemptId = null,
+    [property: Id(19)] string? RecoveryReason = null);
+
+
+[GenerateSerializer]
+public sealed record AgentJobActivitySettlement(
+    [property: Id(0)] string SessionId,
+    [property: Id(1)] string InitialInputId,
+    [property: Id(2)] string InitialTurnId,
+    [property: Id(3)] string Observation,
+    [property: Id(4)] long ContextGeneration,
+    [property: Id(5)] long BindingEpoch,
+    [property: Id(6)] string[] SettledTurnIds,
+    [property: Id(7)] string[] SettledJobIds,
+    [property: Id(8)] string[] SupersededOperationIds,
+    [property: Id(9)] DateTimeOffset RecordedAt,
+    [property: Id(10)] DateTimeOffset SettledAt);
 
 
 [GenerateSerializer]

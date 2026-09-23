@@ -1,9 +1,25 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createRunnerControlHandlers } from './runner-control-handlers.js'
 
+const probeParams = {
+  sessionId: 'session',
+  observationId: 'observation',
+  runnerId: 'runner',
+  runtime: 'opencode',
+  runtimeSessionId: 'runtime',
+  workDir: '/work',
+  bindingEpoch: 0,
+  contextGeneration: 1,
+} as const
+
 describe('createRunnerControlHandlers', () => {
-  it('binds all nine methods to the existing transport-neutral domain handlers', async () => {
+  it('binds all ten methods to the existing transport-neutral domain handlers', async () => {
     const command = vi.fn(async () => ({ ok: true }))
+    const resolveSession = vi.fn(async () => ({
+      ok: true,
+      value: { runtimeSessionId: 'runtime', workDir: '/work', activeTurn: false },
+      diagnostics: [],
+    }))
     const handlers = createRunnerControlHandlers({
       workspaceGit: {
         resolveQuery: () => null,
@@ -13,6 +29,11 @@ describe('createRunnerControlHandlers', () => {
       followup: {},
       cancel: {},
       sessionCommand: { handler: command },
+      sessionProbe: {
+        runnerId: 'runner',
+        enabledRuntimes: new Set(['opencode'] as const),
+        openCode: { ready: () => true, resolveSession } as never,
+      },
     })
     const query = {}
 
@@ -55,5 +76,12 @@ describe('createRunnerControlHandlers', () => {
       }),
     ).resolves.toEqual({ ok: true })
     expect(command).toHaveBeenCalledOnce()
+    await expect(handlers.sessionProbe(probeParams)).resolves.toEqual({
+      probe: probeParams,
+      observation: 'idle',
+    })
+    expect(resolveSession).toHaveBeenCalledWith({
+      target: { runtime: 'opencode', runtimeSessionId: 'runtime', workDir: '/work' },
+    })
   })
 })

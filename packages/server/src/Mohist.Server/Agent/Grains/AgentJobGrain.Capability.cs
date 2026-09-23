@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Agent.Grains;
@@ -92,20 +91,10 @@ public sealed partial class AgentJobGrain
 
         ArmJobTimeout();
         await SafeRunnerAcceptedAsync(runnerId, State.WorkId!);
-        if (State.ConcurrencyPermitHeld
-            && State.ConcurrencyPermitId is not null
-            && State.ConcurrencyDispatchId is not null
-            && State.Input?.ProjectId is { } projectId
-            && State.Input.AgentId is { } agentId)
+        // The runner claim owns the transition to Running; once the poll
+        // path accepted the work, this Job is no longer waiting.
+        if (State.WaitingReason is not null)
         {
-            await _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId))
-                .MarkExecutingAsync(
-                    projectId,
-                    agentId,
-                    State.ConcurrencyPermitToken!,
-                    State.ConcurrencyPermitId,
-                    State.ConcurrencyDispatchId);
-            State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.Executing;
             State.WaitingReason = null;
             await PersistAsync();
         }

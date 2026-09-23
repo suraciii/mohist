@@ -105,10 +105,156 @@ launch origin. It validates Project identity and accepts the source kinds
 initial Turn fixed by the accepted dispatch. Workflow artifacts use frozen
 Workflow Run and Action Attempt identity while AgentJob remains the result owner.
 
+The developer-only `/api/agent-jobs/validate` smoke route follows the same
+launch ownership rule: before submitting its Job it persists a Session with
+accepted Project/Agent identity and the Job-owned initial Input/Turn. It does
+not become the authenticated product launch API; successful Runner reports
+still require the complete physical execution binding. A synthetic Session ID
+without the corresponding persisted owner record is not a launch.
+
 A Follow-up is a Session command, not a new dispatch. It appends a SessionInput
 to an existing AgentSession and either joins the current Turn through steer or
 creates a later Turn. Compact, Reset, recovery, rebind, handoff, and force-reset
 also change only the Session.
+
+## Capacity
+
+An Agent runs at most `maxConcurrentRuns` concurrent executions; a non-null
+limit is a positive integer, and `null` means unlimited. Capacity is derived
+from execution facts in the authoritative stores. No component keeps a permit
+ledger, waiter list, or grant notification for capacity: a ledger is a
+projection of the facts, a projection must be reconciled against them, and
+reconciliation gaps have leaked permits and deadlocked grant delivery
+(issue #1078). A derived count cannot drift because its input is the
+authority. Runner-level slots remain a separate claim layer owned by the
+Runner ([`runner.md`](runner.md#capacity)); a dispatch must satisfy both
+bounds, and capacity decisions converge at the Runner claim, per
+[the decision record](decisions/one-ledger-no-reconciliation.md).
+
+### Occupancy and identity
+
+An execution occupies one slot for `(project, agent)` from its occupancy claim
+until it is terminal:
+
+- a claimed launch Job in `pending`, `running`, or unresolved `unknown`, with
+  no terminal timestamp;
+- a claimed follow-up Turn in `queued`, `executing`, or unresolved `unknown`,
+  in the Session's current context and without supersession.
+
+The initial Turn belongs to its launch Job and never counts a second time.
+Unclaimed pending Jobs and queued Turns occupy nothing. Running or executing
+status and unresolved `unknown` are themselves evidence of occupancy; a missing
+claim timestamp cannot make an unresolved execution disappear from the count.
+The timestamp distinguishes claimed but undispatched `pending` or `queued`
+work from work that has not claimed capacity. A terminal Job or Turn occupies
+nothing, whatever its result. Activity convergence and committed context
+supersession end occupancy without inventing a successful result. The enclosing
+Session's Activity projection is not a counting filter. Elapsed time cannot
+settle uncertainty. The claim timestamp remains on the owner record after
+occupancy ends.
+
+Every launch and Session, including Workflow Sessions, retains the accepted
+Project and Agent IDs. A later name, Agent edit, or Workflow definition cannot
+reattribute its occupancy. The Session's accepted metadata supplies follow-up
+identity; the request cannot choose another Agent.
+
+### Atomic claim and owner state
+
+The capacity store has no state of its own. It reads both owner stores and
+conditionally claims one owner in one transaction. The transaction obtains
+SQLite write serialization before enumeration. It reads the live limit, counts
+occupants, checks eligibility and order, and writes the owner claim together.
+Counting and claiming in separate transactions is forbidden.
+
+A stored Project Agent's current document supplies its limit, not the accepted
+execution snapshot. An exact built-in Agent identity uses its catalog-defined
+limit; a built-in needs no stored Project Agent row. An absent or malformed
+Project Agent is not an unlimited Agent, and a `builtin:` prefix alone is not
+a catalog identity. A limit change and a claim observe one serialized order.
+Lowering the limit does not cancel work that already holds a claim.
+
+Missing owner identity or an absent or malformed Agent definition prevents a
+new claim. Already accepted work remains `pending` or `queued`, keeps its
+original identities, and reports `dispatch-pending` with incomplete capacity
+evidence until the definition or identity is repaired. It is not rejected,
+expired, or mislabeled `capacity-full`. Reads must not invent zero occupancy or
+an unlimited limit from that missing evidence. Existing valid claims remain
+occupied and idempotently readable even when the Agent definition is unavailable.
+
+Only the work owner requests its claim. A Job claim checks and advances the
+existing ledger revision and its direct API projection in the same transaction.
+A Session claim runs inside its serialized grain turn. The owner first flushes
+pending Session state and events. The store patches the latest persisted
+Session document using an exact-document compare-and-set, then returns the
+complete committed document for the owner to install before another save.
+Persistence timers cannot interleave a stale whole-document write with this
+boundary. No coordinator or other grain writes a Session claim on its behalf.
+
+The Session remains a single-writer aggregate. Exact-document comparison and
+cache replacement protect this local claim without adding a separate persistent
+Session revision to every save path. A second Session writer would require a
+new write-concurrency design; it is not permitted by this boundary.
+
+A failed pre-claim flush writes no claim. A revision conflict or storage
+contention requires retry from fresh state, not a false `capacity-full`
+conclusion. An uncertain commit requires owner reload or activation quarantine
+before another save or dispatch. Retrying an existing valid claim returns the
+same owner fact and does not consume another slot.
+
+A pending Job's first claim also fixes its `ReadySince`. Waiting for a Runner,
+assignment changes, and re-evaluation preserve that timestamp. The existing
+pending-work bound applies even when no Runner is assigned. This bounds
+claimed but undispatched work, not an unresolved execution after dispatch.
+Runner process and slot claims remain separate from this Agent occupancy claim.
+
+### Queue order and recovery
+
+Capacity pressure never discards accepted work. Only a full input queue rejects
+before acceptance. A queued follow-up retains its accepted Input, Turn, and
+dispatch identity for as long as it waits; its delivery record cannot expire
+because of a lease-duration timer.
+
+Admission follows acceptance order among currently eligible heads. A pending
+launch can claim before Runner selection, but a prepared launch that is not yet
+visible cannot claim or hold a place ahead of visible work. Only the first queued
+follow-up Turn in a Session can compete, and only when that Session's
+execution-ownership and operation fences allow dispatch. A queued launch Job
+for an existing Session is eligible only when its own initial Turn is the
+first locally deliverable Turn. A later queued Turn does not block an earlier
+Turn merely because the later Turn belongs to a Job; an earlier ordinary
+follow-up holds back the later Job. Execution ownership, uncertain results,
+Stop, Reset, and binding fences still apply in both orders. A head blocked by
+its own Session does not block eligible work in other Sessions. Capacity never overrides those fences.
+The acceptance key is Job `SubmittedAt` or follow-up Turn `RecordedAt`, both
+compared in UTC. A Turn retains the time at which its first Input was accepted;
+joining another Input does not replace it. For equal times, order Jobs before
+Turns, then owner IDs in ordinal order: Job ID for a Job, Session ID for a Turn.
+Remaining Turn ties use Turn sequence and then Turn ID in ordinal order.
+There is no separate global queue sequence. Unlimited capacity still preserves
+Session order and execution fences but needs no cross-Session capacity wait.
+
+The specialized inspection-only Manager recovery Turn remains eligible from
+unconfirmed Activity `unknown` under its existing recovery fences. The original
+unknown Job dispatch remains withheld, and no confirmed execution owner or
+competing Session operation may be bypassed. This recovery never resubmits or
+settles the original uncertain Input. Its Turn claims its own capacity while
+the original unresolved Job continues to occupy its slot; a finite limit still
+applies to both facts.
+
+A waiting launch Job re-evaluates on its existing per-Job recovery reminder.
+A Session recovery reminder remains registered while any current,
+nonsuperseded follow-up Turn is queued, whether claimed or unclaimed. It wakes
+the existing dispatcher; it does not deliver a grant callback. In particular,
+a crash after claim but before dispatch must not strand a claimed queued Turn.
+The wake is durable before queue acceptance is committed; an orphan reminder
+without queued work is harmless and is removed. Activation restores reminder
+reachability, and a reminder stops only when no such queued work remains.
+A live limit increase or change to unlimited takes effect at the next evaluation.
+
+Availability projections and waiting-work lists (`capacity-full`,
+`concurrency-limit`, `dispatch-pending`) read the same occupancy and queued-owner
+facts. They preserve the existing reason vocabulary. A launch coordinator
+never awaits a capacity decision.
 
 AgentJob references the first Input and Turn created by launch. A completed
 AgentJob means that the launch work returned successfully. It does not close the
@@ -116,8 +262,8 @@ AgentSession or establish that the user's broader task is complete. Later
 Follow-ups never reopen or rewrite that AgentJob.
 
 Agent launch fixes Instructions, Runtime, Model, Variant, Skills, and Workspace
-identity for the Session. Later input uses the same execution snapshot. Policy
-changes affect later launches only. The entry point resolves a named Workspace
+identity for the Session. Later input uses the same execution snapshot. Changes
+to these execution settings affect later launches only. The entry point resolves a named Workspace
 from its Origin and persists that identity before acceptance. Where an entry
 point permits a Workspace override, the caller supplies its name, never a raw
 path or Runner default. The Runner may provision the Workspace Home later.
@@ -201,9 +347,14 @@ The invariants are:
 - One AgentSession has at most one Runtime execution at a time. Transcript order
   is therefore sufficient for the conversation.
 - Each accepted Input has one stable Input ID, caller `requestId`, fingerprint,
-  Turn ID, and `ContextGeneration`. It never moves to another Turn or generation.
+  Turn ID, and acceptance `ContextGeneration`. It never moves to another Turn
+  or changes that acceptance generation.
 - A Turn can own multiple steer Inputs. A new-turn Input creates a distinct Turn.
-- Capacity rejection occurs before acceptance. Accepted Input cannot be
+  Its `ContextGeneration` identifies the execution context. It is fixed once
+  Runtime submission begins; only [pre-submission missing recovery](#pre-submission-recovery)
+  may retarget a queued Turn before that boundary.
+- The capacity decision precedes acceptance: capacity pressure queues work,
+  and only a full queue rejects before acceptance. Accepted Input cannot be
   discarded, overwritten, or assigned a replacement ID.
 - User input contains visible text or an explicit attachment. Attachment-only
   input does not gain a hidden prompt.
@@ -255,7 +406,7 @@ AgentSession has only these Activity states:
   operation cannot be confirmed.
 
 ```text diagram
-                   +------+                   work settles
+                   +------+                work settles / converged
                    | idle |<-------------------------------+
                    +---+--+                                |
                        |                                   |
@@ -275,7 +426,11 @@ AgentSession has only these Activity states:
 An explicit force-reset leaves old facts unknown and starts a new current context.
 Activity is derived from the current `ContextGeneration`. Older unresolved facts
 remain visible through `unresolvedPrevious`, `unresolvedPreviousCount`, and
-`nextAction`; they do not overwrite current Activity.
+`nextAction`; they do not overwrite current Activity. Session detail reads
+retain each superseded Turn's identity, status, execution generation, and
+supersession time. Input observations retain their acceptance generation.
+`nextAction=inspect_previous_execution` directs the operator to those retained
+facts; it does not block new work in a safely settled current context.
 
 `admission=ready` requires current Activity `idle`, terminal Turns, no unresolved
 external side effect, and no ActiveOperation. Otherwise admission is `blocked`
@@ -285,6 +440,62 @@ missing recovery use this result instead of deriving safety from history.
 A steer on a known running Turn is the only ordinary Input exception. It requires
 Runtime support, the same complete Binding, and no competing operation. It never
 converts `unknown` into safe idle.
+
+#### Activity convergence
+
+`unknown` Activity converges through lifecycle evidence from the owning Runner,
+never through elapsed time. Elapsed time cannot distinguish a lost signal from
+a lost execution; guessing violates the `unknown` contract above. Two
+authorities convert `unknown`:
+
+- Runner re-registration. When a Runner's control connection is re-established,
+  Server probes the current binding of every Session with `unknown` Activity
+  bound to that Runner. Probes follow the request rules of
+  [`runner-transport.md`](runner-transport.md). The probe and its answer carry
+  the complete Binding tuple and binding epoch; an answer for a non-current
+  binding is discarded under the late-event rule. The Runner answers per
+  binding: `executing`, `idle`, or `unknown-to-runner`.
+- Runner removal. The operator removes a Runner's execution authority through
+  `mo runner revoke`. Credential revocation and fencing of its current control
+  connection precede settlement. Sessions bound to that authority with current
+  nonterminal or unresolved `unknown` facts settle as `unknown-to-runner`.
+  Ordinary unregister, disconnection, and presence expiry are not removal
+  evidence. Revocation supersedes execution ownership; it does not prove that
+  an external process or side effect stopped.
+
+An `idle` or `unknown-to-runner` answer settles only the generation, Inputs,
+Turns, and operation identities captured before the probe. A later accepted
+Input or changed operation invalidates that observation even if the binding
+and generation are unchanged. Settlement supersedes, after the force-reset
+pattern: it marks every captured in-flight or unresolved `unknown` Turn of that
+generation terminal `unknown` and every
+queued undispatched Turn `cancelled`, records them through
+`unresolvedPrevious` and `nextAction`, supersedes any ActiveOperation of that
+generation, and settles the launch Job that owns a settled initial Turn.
+Superseded facts take no part in current Activity, occupancy, or admission
+derivation: they are recorded through `unresolvedPrevious` and `nextAction`
+and do not count as unresolved external side effects for `admission=ready`.
+
+- `executing` sets Activity to `active`; the Runner owns the pending turn
+  report as before.
+- `idle` and `unknown-to-runner` set Activity to `idle`. `unknown-to-runner`
+  additionally records the write-side binding fact `unknown-to-runner` as
+  deterministic missing evidence. The next accepted Input replaces the binding
+  on the same Runner once that identity has execution authority and is available.
+  It selects the configured fallback only when the policy in
+  [`runtime-switch-context.md`](runtime-switch-context.md) applies; otherwise
+  [Runtime Session missing recovery](#runtime-session-missing-recovery) uses
+  the recorded evidence on the same Runtime. While the bound Runner is removed
+  or unavailable, execution waits. Convergence never selects another Runner or
+  performs an implicit handoff.
+- A failed or unanswered probe leaves Activity `unknown`.
+
+Settlement never re-executes a Turn, never re-sends a reply, and never replays
+Transcript; outbound idempotency is the dispatch identity already carried by
+the reply anchor. Convergence is idempotent: repeated probes settle the same
+facts. Settlement is a Session transition and competes with other Session
+operations under the same fences; it never substitutes for `admission`
+evaluation.
 
 ### Transcript contract
 
@@ -355,10 +566,13 @@ Follow-up has two paths chosen by current state:
 - Idle and ready admission creates one Input and one new Turn.
 - A running Turn with Runtime steer support accepts one Input on that Turn when
   no operation competes.
-- A running Turn without steer support queues a later Turn in Session order when
-  capacity permits.
-- `outcome_pending`, `unknown`, or an active context operation rejects the
-  request without guessing a target Turn.
+- A running Turn without steer support queues a later Turn in Session order
+  unless the queue is full.
+- Ordinary `outcome_pending`, `unknown`, or an active context operation rejects
+  the request without guessing a target Turn. The specialized inspection-only
+  Manager recovery transition is the explicit `unknown` exception described
+  in [capacity recovery](#queue-order-and-recovery); ordinary callers cannot
+  use it to bypass execution ownership.
 
 The Session request map is unique by `(SessionId, requestId)`. Acceptance,
 rejection, or uncertainty is persisted under that identity. Same-key replay
@@ -411,11 +625,16 @@ approval-feedback tasks. Retries of one scope reuse its identities; a different
 Stage always creates a different invocation, Job, Input, and Turn even when its
 task identifier and rendered prompt match.
 
-A named Session follow-up uses the Stage-scoped invocation ID as its idempotency
-key. Replaying the same launch therefore returns the same Input and Turn, while
-the same task or work ID in another Stage appends a distinct follow-up to the
-shared Session. Because Workflow pre-mints that Turn identity, the follow-up
-requests a distinct queued Turn instead of coalescing with another pending input.
+A named Session continuation uses the Stage-scoped invocation ID as its
+idempotency key. Replaying the same launch therefore returns the same Input and
+Turn, while the same task or work ID in another Stage appends a distinct
+Job-owned Input and Turn to the shared Session. The later Workflow invocation
+retains its own Job as execution and result owner; it is not dispatched as an
+ordinary Session-owned follow-up. Because Workflow pre-mints that Turn identity,
+the continuation requests a distinct queued Turn instead of coalescing with
+another pending input. Each Job's initial provider submission admits only its
+own Input and Turn; an earlier Job's unresolved initial submission cannot be
+replaced by the next invocation.
 
 New launches write only the Stage-scoped handoff. During activation recovery,
 an already-running attempt first reads that key and, only when it has no plan,
@@ -466,10 +685,16 @@ Missing recovery repairs a current Binding. It is not Prompt replay, Workflow
 recovery, or Runner migration. Transport failure, timeout, disconnect, or a
 missing local cache entry is not proof that the Runtime Session is absent.
 
-Automatic recovery is allowed only when the same Runner gives deterministic
-missing evidence and the current generation is safe: Activity is `idle`,
-admission is `ready`, no Turn is running or `outcome_pending`, and no Input,
-dispatch, Runtime effect, or operation is `unknown`.
+Automatic same-Runtime recovery requires deterministic missing evidence:
+the same Runner reports it, or an `unknown-to-runner` binding fact from Activity
+convergence stands on its own. Configured fallback to another Runtime follows
+[`Runtime Switch Context`](runtime-switch-context.md); it is an authorized
+Runtime change and does not establish that the old physical Session is absent.
+Both forms of replacement require an idle Session with ready admission, or the
+single queued Turn allowed by [pre-submission recovery](#pre-submission-recovery).
+No Turn may be running or `outcome_pending`, and no Input, dispatch, Runtime
+effect, or operation may be `unknown` beyond the superseded facts convergence
+itself recorded.
 
 ```text diagram
                           +----------------+
@@ -493,9 +718,10 @@ dispatch, Runtime effect, or operation is `unknown`.
                     +------------+    +-------------------------+
 ```
 
-When recovery is unsafe, Mohist retains the original Binding and Turn, sets
-`admission=blocked`, and exposes `query_runtime_or_force_reset`. It must not
-infer missing, select another Runner, or replay Transcript.
+When recovery is unsafe, Mohist retains the original Binding and Turn and sets
+`admission=blocked`. Diagnostics retain the execution identity and uncertainty
+so an operator can inspect the required Runtime evidence. Mohist must not infer
+missing, select another Runner, or replay Transcript.
 
 ### Recovery ownership and fencing
 
@@ -521,12 +747,76 @@ not keep the original operation active.
 ### Operation boundaries
 
 Automatic replacement after confirmed missing is allowed for an initial AgentJob
-Input not yet submitted and for an idle Follow-up. It is rejected during an
+Input not yet submitted, an idle Follow-up, and the queued Follow-up described
+below. It is rejected during an
 executing Follow-up, for Compact, for a Stop target, and for ordinary Reset.
-Reset requires safe admission. `unknown` requires explicit force-reset.
+Reset requires safe admission. `unknown` resolves through Activity convergence
+or explicit force-reset; nothing else may clear it.
 
 Recovery never reconstructs Runtime context from Transcript. Transcript is an
 audit and presentation record, not a command source.
+
+### Pre-submission recovery
+
+A Runtime can become unavailable after Mohist accepts an Input but before the
+Runner submits it. Acceptance records which context received the intent; the
+Turn records which context executes it. Keeping those facts separate preserves
+accepted work when the physical Session must be replaced.
+
+Only the initial AgentJob Turn proved not yet submitted, or the single queued
+Follow-up named by its sealed dispatch, may use this recovery path. The owning
+dispatch must identify the sole queued Turn and its accepted payload. Before
+submitting any Input, the Runner must establish deterministic missing evidence
+or the Runtime readiness condition for configured fallback defined in
+[`Runtime Switch Context`](runtime-switch-context.md). The complete expected
+Binding, Turn and dispatch must still match; another queued Turn, an executing
+or uncertain Turn, an active stop, or an uncertain Session rejects replacement.
+
+Initial AgentJob recovery is advanced by the current AgentJob owner. Its durable
+operation record is part of the existing Job ledger and matches the exact
+Running claim: Job, work, claimed Runner process generation, Runner, Session,
+initial Input, initial Turn, expected Binding, immutable dispatch, and one closed
+reason: `same-runtime-missing` or `configured-fallback`. The first reason requires
+provider-confirmed missing evidence and keeps the Runtime. The second is allowed
+only for a non-Manager OpenCode execution moving to ready Pi on the same
+initialized Runner; it never rewrites the frozen execution definition or Model.
+An absent, unknown, or changed reason conflicts with the durable operation.
+Before each prepare, complete, or start mutation, the route requires the matching
+current Runner process generation to remain Online and non-draining. The Job
+calls AgentSession to commit or query the matching Binding/Turn operation
+receipt; AgentSession never calls back into the Job or Runner. A recovery in
+progress refuses old-target reports. This one-way owner call prevents a
+Job-to-Session-to-Job wait cycle while making a crash between the two owner
+writes resumable under the same operation identity.
+
+The recovery operation is persisted before candidate creation. Runtime adapters
+that cannot query candidate creation by that identity make a lost or uncertain
+creation result terminally uncertain for this operation: neither a replacement
+candidate nor provider Input may be recreated blindly. Once a concrete candidate
+is known, the Job persists it before asking AgentSession to adopt it. A lost
+AgentSession or Job response is resolved by querying the same operation and
+candidate, never by creating another physical Session.
+
+The replacement Binding, context boundary and that Turn's execution generation
+commit atomically. Its pending dispatch and any Workflow execution binding target
+the replacement. Input acceptance generations, Input and Turn IDs, operation and
+delivery identities, payload and occupancy claim remain unchanged. A stale or
+failed commit authorizes no submission to the candidate.
+
+Before the provider can receive the initial Input, AgentSession durably admits
+that exact effect under the same Job/work/process/Binding fence and marks the
+initial Turn executing; only then does AgentJob durably record the matching start
+receipt and return submission authority. Replays revalidate the current Binding,
+generation, and nonterminal unsuperseded Turn. Once recovery is admitted, every
+late result status must carry the complete original Session/Turn identity and the
+current physical Runtime/runtimeSessionId through ready, started, and terminal
+replay; an old target or missing binding cannot settle the Job. Ordinary
+first-binding failures before recovery keep their existing reporting behavior.
+A receipt is query evidence, not a renewable execution permit: only the original
+live executor that changed the receipt from unstarted to started may submit. An
+already-started re-entry or a new process observes the receipt but cannot replay
+provider Input. The Runner therefore submits the original accepted payload once
+and creates no new Input or Turn.
 
 ## Context Operations
 
@@ -628,6 +918,12 @@ Current implementation gaps are:
   synchronous Session-to-AgentJob stop-unknown cycle and no deadline on recovery
   redelivery. The one-way, single-owner, deadline-bounded rules above are the
   target.
+- Capacity is derived from the occupancy claim above; no permit grain, waiter
+  list, or grant notification remains (issue #1078).
+- Reconnection settles no `unknown` Activity and force-reset has no
+  implementation; today a Runner-reported terminal activity event or the
+  Manager recovery turn is the only way `unknown` clears. The lifecycle
+  convergence rules above are the target.
 - Every Follow-up requires a caller `requestId`. Compact, Reset, recovery,
   handoff, rebind, and force-reset require a caller `operationId`. Some current
   entry points still synthesize a hidden key when the caller omits one, so

@@ -580,9 +580,11 @@ separate queue, or Runtime protocol.
 ### Authoritative terminal trigger
 
 AgentSession never becomes terminal. A child delegation becomes terminal when
-its spawned `ChildLaunchJobId` enters `completed`, `failed`, or `cancelled`.
-`unknown` is not terminal. A terminal initial or later AgentTurn is not a report
-trigger.
+its spawned `ChildLaunchJobId` enters `completed`, `failed`, or `cancelled`, or
+when lifecycle evidence durably settles that Job as final `unknown`. Ordinary
+recoverable `unknown` is not terminal. A terminal initial or later AgentTurn is
+not itself a report trigger; activity convergence settles an owning initial
+Job through its durable event before that Job emits its terminal report.
 
 In that Job transition, AgentJob persists a terminal event with SpawnOrigin. It
 carries child Job, Session, status, initial Turn, result-observation reference,

@@ -6,7 +6,8 @@ public union AgentSessionEvent(
     AgentSessionModelChanged,
     AgentSessionContextCompacted,
     AgentSessionContextExhausted,
-    AgentSessionContextHealthUpdated);
+    AgentSessionContextHealthUpdated,
+    AgentSessionActivityConverged);
 
 public sealed record AgentSessionRuntimeBound(
     string AgentRuntimeSessionId,
@@ -48,4 +49,21 @@ public sealed record AgentSessionContextHealthUpdated(
     double? ContextUsagePercent,
     long? ContextWindowUsed,
     long? ContextWindowSize,
+    DateTime RecordedAt);
+
+/// <summary>
+/// Durable Session-to-Job settlement fact emitted with the transition that
+/// superseded Job-owned Turns under lifecycle evidence. The Job side
+/// arbitrates idempotently against this fact; the Session never awaits a Job
+/// that calls back into it. A Job whose Turn was not settled emits nothing,
+/// so a completed old initial Turn produces no convergence fact.
+/// </summary>
+public sealed record AgentSessionActivityConverged(
+    string SessionId,
+    string Observation,
+    long ContextGeneration,
+    long BindingEpoch,
+    IReadOnlyList<string> SettledTurnIds,
+    IReadOnlyList<string> SettledJobIds,
+    IReadOnlyList<string> SupersededOperationIds,
     DateTime RecordedAt);

@@ -32,13 +32,15 @@ internal sealed record AgentSessionLifecycleSnapshot(
     bool PendingResetActive,
     IReadOnlyList<AgentSessionLifecycleInput> Inputs,
     IReadOnlyList<AgentSessionLifecycleTurn> Turns,
-    IReadOnlyList<AgentSessionLifecycleJob> Jobs);
+    IReadOnlyList<AgentSessionLifecycleJob> Jobs,
+    long ContextGeneration = 1);
 
 internal sealed record AgentSessionLifecycleInput(
     string InputId,
     AgentSessionInputAcceptance Acceptance,
     DateTimeOffset RecordedAt,
-    string? JobId);
+    string? JobId,
+    long ContextGeneration = 1);
 
 internal sealed record AgentSessionLifecycleTurn(
     string TurnId,
@@ -47,7 +49,9 @@ internal sealed record AgentSessionLifecycleTurn(
     string? JobId,
     DateTimeOffset? RecordedAt,
     DateTimeOffset? UpdatedAt,
-    AgentTurnResult? Result);
+    AgentTurnResult? Result,
+    long ContextGeneration = 1,
+    DateTimeOffset? SupersededAt = null);
 
 internal sealed record AgentSessionLifecycleJob(
     string JobKey,
@@ -98,7 +102,8 @@ internal static class AgentSessionLifecycleHistory
                     input.Id,
                     input.Acceptance,
                     ToUtc(input.RecordedAt),
-                    input.JobId))
+                    input.JobId,
+                    input.ContextGeneration))
                 .ToList(),
             (session.Status.Turns ?? [])
                 .Select(turn => new AgentSessionLifecycleTurn(
@@ -108,9 +113,12 @@ internal static class AgentSessionLifecycleHistory
                     turn.JobId,
                     ToNullableUtc(turn.RecordedAt),
                     ToNullableUtc(turn.UpdatedAt),
-                    turn.Result))
+                    turn.Result,
+                    turn.ContextGeneration,
+                    ToNullableUtc(turn.SupersededAt)))
                 .ToList(),
-            jobs);
+            jobs,
+            session.Status.ContextGeneration);
 
     public static IReadOnlyList<AgentSessionLifecycleTransition> Derive(
         AgentSession? previous,

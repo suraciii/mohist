@@ -1,7 +1,11 @@
 using EnvironmentAbstractions.TestHelpers;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Orleans;
+using AgentDomain = Mohist.Server.Agent.Domain.Agent;
+using AgentStatusDomain = Mohist.Server.Agent.Domain.AgentStatus;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -169,6 +173,51 @@ public class WorkflowGrainFixture : IAsyncLifetime
         });
         Cluster = builder.Build();
         await Cluster.DeployAsync();
+    }
+
+    /// <summary>
+    /// Persists a stored Project Agent so a launched Job's derived capacity
+    /// claim can read a real definition. Unlimited (a null
+    /// <c>MaxConcurrentRuns</c>) keeps the claim free of an artificial
+    /// bound: the runner-slot layer still gates dispatch on its own.
+    /// </summary>
+    public async Task SeedAgentAsync(string projectId, string agentId)
+    {
+        var agent = new AgentDomain
+        {
+            Id = agentId,
+            ProjectId = projectId,
+            Name = agentId,
+            Description = "spec",
+            Instructions = "spec",
+            Skills = [],
+            MaxConcurrentRuns = null,
+            Status = AgentStatusDomain.Active,
+            CreatedAt = TimeProvider.GetUtcNow().UtcDateTime,
+            UpdatedAt = TimeProvider.GetUtcNow().UtcDateTime,
+        };
+        var id = GrainKey.Agent(projectId, agentId);
+        await using var db = new MohistDbContext(DbOptions);
+        var row = await db.Agents.FindAsync(id);
+        if (row is null)
+        {
+            db.Agents.Add(new AgentRow
+            {
+                Id = id,
+                ProjectId = projectId,
+                Name = agent.Name,
+                Status = agent.Status,
+                State = AgentStore.Serialize(agent),
+            });
+        }
+        else
+        {
+            row.ProjectId = projectId;
+            row.Name = agent.Name;
+            row.Status = agent.Status;
+            row.State = AgentStore.Serialize(agent);
+        }
+        await db.SaveChangesAsync();
     }
 
     public ValueTask DisposeAsync()

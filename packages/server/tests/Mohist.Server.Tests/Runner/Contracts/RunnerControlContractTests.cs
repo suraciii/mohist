@@ -32,6 +32,7 @@ public sealed class RunnerControlContractTests
         "session.followup",
         "session.stop",
         "session.command",
+        "session.probe",
     ];
 
     [Fact]
@@ -140,6 +141,14 @@ public sealed class RunnerControlContractTests
                     Assert.False(string.IsNullOrWhiteSpace(request.Params.OperationId));
                     Assert.Equal(SessionCommandKind.Reset, request.Params.Command);
                     Assert.True(request.Success.Result.Ok);
+                });
+                break;
+            case "session.probe":
+                Decode<RunnerSessionActivityProbeRequest, RunnerSessionActivityProbeResult>(entry, request =>
+                {
+                    Assert.True(request.Params.HasCompleteTarget());
+                    Assert.Equal(request.Params, request.Success.Result.Probe);
+                    Assert.Equal(RunnerSessionActivityObservations.Idle, request.Success.Result.Observation);
                 });
                 break;
             default:

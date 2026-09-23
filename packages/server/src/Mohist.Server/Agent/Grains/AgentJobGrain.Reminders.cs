@@ -12,7 +12,6 @@ public sealed partial class AgentJobGrain
 
         if (IsTerminal)
         {
-            await TryReleaseConcurrencyPermitAsync();
             if (State.PendingSessionClose is not null)
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
             if (State.PendingFailureEvent is not null)
@@ -27,9 +26,7 @@ public sealed partial class AgentJobGrain
                 && State.PendingFailureEvent is null
                 && State.PendingTerminalDeliveryEvent is null
                 && State.PendingWorkflowTerminalEvent is null
-                && State.PendingSubagentTerminalEvent is null
-
-                && !State.ConcurrencyReleasePending)
+                && State.PendingSubagentTerminalEvent is null)
             {
                 await UnregisterSelfAsync(reminderName);
                 return;

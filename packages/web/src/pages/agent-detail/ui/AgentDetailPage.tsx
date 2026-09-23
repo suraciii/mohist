@@ -273,7 +273,7 @@ function AvailabilityCard({
         </div>
       </div>
       <p data-testid="agent-detail-availability-detail" className="text-xs text-muted-foreground">
-        Active runs: {availability.activeRuns}
+        Active runs: {availability.activeRuns ?? 'unknown'}
         {availability.maxConcurrentRuns != null && ` / ${availability.maxConcurrentRuns}`}
         {' · '}
         Runner slots: {availability.capacity.usedSlots}/{availability.capacity.totalSlots}

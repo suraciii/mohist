@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.WebSocket;
 using Xunit;
 
@@ -401,7 +402,13 @@ public sealed class RunnerControlWebSocketConnectionTests
         {
             Socket = new FakeWebSocket(blockSends, blockClose, ignoreSendCancellation);
             Connection = new RunnerControlWebSocketConnection(
-                "runner-1", Guid.NewGuid(), "test-generation", Socket, time ?? new FakeTimeProvider(), NullLogger.Instance);
+                "runner-1",
+                Guid.NewGuid(),
+                "test-generation",
+                new RunnerPresentedAuthority(CredentialId: null, OperatorOverride: true),
+                Socket,
+                time ?? new FakeTimeProvider(),
+                NullLogger.Instance);
             if (start)
                 _run = Connection.RunAsync(_stop.Token);
         }

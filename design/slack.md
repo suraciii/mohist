@@ -634,8 +634,10 @@ legitimately appear only after the turn starts. Once no launched turn remains
 in flight (`Completed`, `Failed`, `Cancelled`), a missing binding fails at
 accept time with `RuntimeSessionMissing`, and the message takes the existing DM
 rejection path (one readable rejection reply, inbox row audited and
-dispatched). The reachable causes are a launch that failed before its Runner
-attached (the terminal turn never bound a runtime) or a lost binding. This
+dispatched). A Turn settled by Activity convergence is terminal and not in
+flight for this boundary. The reachable causes are a launch that failed
+before its Runner attached (the terminal turn never bound a runtime) or a
+lost binding. The boundary
 closes the acceptance-time black hole where a follow-up parked in an invisible
 queue with no user feedback, no reply, and no dispatch. The boundary is
 explicit: a follow-up accepted during the in-flight exemption whose launch then

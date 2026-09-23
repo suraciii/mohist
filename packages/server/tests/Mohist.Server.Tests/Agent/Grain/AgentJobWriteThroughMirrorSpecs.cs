@@ -21,6 +21,7 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
     public async Task Mirror_SubmitWritesRowBeforeRunnerAcceptance()
     {
         var (_, projectId) = await RegisterAgentJobRunnerAsync($"mirror-submit-runner-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-mirror", maxConcurrentRuns: null);
         var jobKey = $"mirror-submit-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
 
@@ -52,6 +53,7 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
     public async Task Mirror_RunnerAcceptanceWritesRunningStatus()
     {
         var (_, projectId) = await RegisterAgentJobRunnerAsync($"mirror-accept-runner-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-accept", maxConcurrentRuns: null);
         var jobKey = $"mirror-accept-{Guid.NewGuid():N}";
 
         var job = JobGrain(jobKey);
@@ -72,13 +74,16 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
     public async Task Mirror_TerminalTransitionWritesRowWithTerminalStatusAndAt()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"mirror-terminal-runner-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-terminal", maxConcurrentRuns: null);
         await InstallCapabilityFenceAsync(runnerId, projectId, "opencode");
         var jobKey = $"mirror-terminal-{Guid.NewGuid():N}";
         var sessionId = $"session-{Guid.NewGuid():N}";
+        var inputId = $"input-{Guid.NewGuid():N}";
         var turnId = $"turn-{Guid.NewGuid():N}";
         const string runtime = "opencode";
         var runtimeSessionId = $"runtime-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
+        await OpenJobSessionAsync(sessionId, projectId, jobKey, inputId, turnId, "terminal mirror", agentId: "agent-terminal", runtime: runtime);
 
         await job.SubmitAsync(new AgentJobInput(
             Prompt: "terminal mirror",
@@ -88,6 +93,7 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
             Runtime: runtime,
             AgentId: "agent-terminal",
             AgentSessionId: sessionId,
+            InitialInputId: inputId,
             InitialTurnId: turnId,
             Variant: "balanced",
             ReasoningEffort: "high"));
@@ -136,6 +142,7 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
     public async Task Mirror_FailedTerminalTransitionWithoutEffortRecordsEffortAsAbsent()
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync($"mirror-fail-runner-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-fail", maxConcurrentRuns: null);
         var jobKey = $"mirror-fail-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
 
@@ -177,6 +184,7 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
     public async Task Mirror_PersistentStateRemainsAuthoritative()
     {
         var (_, projectId) = await RegisterAgentJobRunnerAsync($"mirror-authority-runner-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-authority", maxConcurrentRuns: null);
         var jobKey = $"mirror-authority-{Guid.NewGuid():N}";
         var job = JobGrain(jobKey);
 

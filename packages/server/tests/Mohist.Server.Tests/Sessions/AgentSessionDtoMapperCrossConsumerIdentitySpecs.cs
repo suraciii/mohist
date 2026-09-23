@@ -224,6 +224,7 @@ public class AgentSessionDtoMapperCrossConsumerIdentitySpecs
         {
             [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
             [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+            [GenericAgentSessionMetadata.AgentId] = "workflow-agent",
             [AgentSessionQueryMetadataKeys.WorkflowRunId] = workflowRunId,
             [AgentSessionQueryMetadataKeys.WorkId] = "work-lineage",
             [AgentSessionQueryMetadataKeys.WorkType] = "task",

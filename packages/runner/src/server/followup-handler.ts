@@ -122,6 +122,10 @@ async function handleFollowup(
   deps: FollowupHandlerDeps,
 ): Promise<FollowupDeliveryResult> {
   if (!payload) return unavailable()
+  if (payload.requiresBindingRecovery !== undefined && typeof payload.requiresBindingRecovery !== 'boolean')
+    return unavailable()
+  const requiresBindingRecovery = payload.requiresBindingRecovery === true
+  if (requiresBindingRecovery && (!deps.connection || !deps.runnerId)) return unavailable()
   const sourceContext = readExecutionSourceContext(payload)
   if (sourceContext.kind === 'invalid') return unavailable()
   const slackContext = sourceContext.slackExecutionContext
@@ -175,7 +179,7 @@ async function handleFollowup(
         const sharedOpenCode = resolveAccessor(deps.openCodeRuntime)
         if (!sharedOpenCode) {
           await managerExecution.dispose()
-          return runtimeUnavailable()
+          return requiresBindingRecovery ? unavailable() : runtimeUnavailable()
         }
         if (!sharedOpenCode.ready()) {
           await managerExecution.dispose()
@@ -206,7 +210,7 @@ async function handleFollowup(
   }
   if (!handle) {
     await managerExecution?.dispose().catch(() => undefined)
-    return runtimeUnavailable()
+    return requiresBindingRecovery ? unavailable() : runtimeUnavailable()
   }
   if (!(await ensureCommandRuntimeReady(handle))) {
     await managerExecution?.dispose().catch(() => undefined)
@@ -220,7 +224,7 @@ async function handleFollowup(
   let selectedTarget = target
   const connection = deps.connection ?? null
   const runnerId = deps.runnerId ?? null
-  if (!managerContext && connection && runnerId) {
+  if (connection && runnerId && (!managerContext || requiresBindingRecovery)) {
     const expected = {
       runnerId: binding.runnerId,
       runtime: binding.runtime as 'opencode' | 'pi' | 'codex',
@@ -271,23 +275,22 @@ async function handleFollowup(
           expectedQueuedTurnId: payload.turnId,
         }
         const signal = new AbortController().signal
-        if (sessionTarget.kind === 'workflow') {
-          await connection.recoverMissingWorkflowAgentSession(
-            sessionTarget.projectId,
-            sessionTarget.workflowRunId,
-            sessionTarget.sessionName,
-            body,
-            signal,
-          )
-        } else {
-          await connection.recoverMissingAgentSession(sessionTarget.projectId, sessionTarget.sessionId, body, signal)
-        }
+        await connection.recoverMissingAgentSession(
+          sessionTarget.projectId,
+          sessionTargetId(sessionTarget),
+          body,
+          signal,
+        )
       },
       recoveryKey: `${sessionTargetId(sessionTarget)}:${expected.runtimeSessionId ?? 'unbound'}`,
       coordinator: deps.bindingRecoveryCoordinator ?? undefined,
       allowRuntimeReplacement,
+      requiresBindingRecovery,
     })
-    if (!recovery.ok || !recovery.binding.runtimeSessionId) return unavailable()
+    if (!recovery.ok || !recovery.binding.runtimeSessionId) {
+      await managerExecution?.dispose().catch(() => undefined)
+      return unavailable()
+    }
     selectedTarget = { ...target, runtimeSessionId: recovery.binding.runtimeSessionId }
   }
 

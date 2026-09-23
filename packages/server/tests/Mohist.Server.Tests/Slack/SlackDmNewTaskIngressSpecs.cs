@@ -456,7 +456,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         var row = await db.Agents.SingleAsync(agent => agent.ProjectId == connection.ProjectId);
         var agent = new Mohist.Server.Agent.Domain.Agent
         {
-            Id = row.Id,
+            Id = connection.AgentId,
             ProjectId = connection.ProjectId,
             Name = "Mohist Agent",
             Status = AgentStatus.Active,

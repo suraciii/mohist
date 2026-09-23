@@ -269,30 +269,21 @@ concerns.
 
 ### Fairness
 
-Stamp `ReadySince` whenever work enters or re-enters Ready. Within a candidate
-tier, mix Workflow and AgentJob work by `ORDER BY ReadySince ASC`. This produces
-round-robin service with no scheduler state:
+Within a candidate tier, mix Workflow and AgentJob work by
+`ORDER BY ReadySince ASC`. Any priority between work types must be a declared
+policy, not an implicit bias.
 
-```text diagram
-+------------------------+
-| Ready queue ReadySince |
-|          ASC           |<+
-+------------+-----------+ |
-             |             |
-             v             |
-  +--------------------+   |
-  | serve longest wait |   |
-  +----------+---------+   |
-             |             |
-             v             |
-   +-------------------+   |
-   | requeue next work |   |
-   | ReadySince := now +---+
-   +-------------------+
-```
+Workflow work stamps `ReadySince` whenever it enters or re-enters Ready. A new
+Workflow work item therefore joins the end of the ready queue without separate
+scheduler state.
 
-The policy is strict FIFO. Any priority between work types must be a
-declared policy, not an implicit bias.
+An AgentJob instead fixes `ReadySince` at its first Agent occupancy claim, as
+specified by [Agent capacity](agent-execution.md#atomic-claim-and-owner-state).
+It preserves that timestamp throughout the same Pending episode, including
+Runner assignment, assignment loss, and re-evaluation. Its configured pending
+bound starts at that claim even when no Runner is assigned. Requeue cannot
+restart the deadline, and this timer never settles an already dispatched
+uncertain execution.
 
 ### Capacity
 
@@ -417,6 +408,31 @@ Legacy interruption status and `WorkInterruption` fields are migration input
 only. No Runner closeout path may create, renew, or act on them. Historical
 interruption events follow the independent compatibility boundary in
 [`event-protocol.md`](event-protocol.md#historical-workflow-interruption-events).
+
+## Administrative Runner Removal
+
+Credential revocation is a durable Runner lifecycle operation. Its intent
+closes admission before credentials change. It then revokes the credential,
+fences the current control connection and process authority, and settles bound
+Sessions through their fenced removal observation. Server restart or a partial
+write resumes the same operation; it never treats a completed earlier step as
+permission to omit later Session settlement.
+
+Ordinary disconnect, unregister, and presence expiry are not administrative
+removal evidence. Removal preserves Workflow-owned closeout obligations, but
+AgentJobs named by Session convergence settle as final Unknown rather than
+being overwritten by the ordinary `runner-lost` failure path. The removal
+coordinator does not await Session settlement while holding an ownership gate
+that the Session can need.
+
+Re-enrollment cannot release unfinished removal. Once settlement completes,
+a new active credential may restore the same Runner identity's authority.
+That release is fenced to the current removal and credential; it must recover
+if credential issuance commits before the release marker does. Removing a
+Runner supersedes its execution authority and does not prove that external
+processes or effects physically stopped. It authorizes no cross-Runner
+handoff. Session settlement and next-Input recovery follow
+[`agent-execution.md`](agent-execution.md#activity-convergence).
 
 ## Restart and Crash Semantics
 

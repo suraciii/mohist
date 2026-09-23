@@ -57,6 +57,13 @@ public sealed class AgentJobSubagentTerminalCallbackSpecs : AgentJobGrainTestSup
             childLaunchJobId,
             Runtime: "opencode",
             WorkDir: "/workspace",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "child-agent",
+                [GenericAgentSessionMetadata.AgentName] = "child-agent",
+            }),
             AgentSessionStartup: new AgentSessionStartup(
                 projectId,
                 childSessionId,
@@ -114,6 +121,87 @@ public sealed class AgentJobSubagentTerminalCallbackSpecs : AgentJobGrainTestSup
     }
 
     [Fact]
+    public async Task FinalizedUnknownChild_DeliversOneHonestReportToAttachedParent()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var projectId = $"project-unknown-callback-{suffix}";
+        var childSessionId = $"child-session-unknown-callback-{suffix}";
+        var childJobId = $"child-job-unknown-callback-{suffix}";
+        var parentSessionId = $"parent-session-unknown-callback-{suffix}";
+        var edgeId = $"edge-unknown-callback-{suffix}";
+        var inputId = $"child-input-unknown-callback-{suffix}";
+        var turnId = $"child-turn-unknown-callback-{suffix}";
+        var parent = await OpenSessionAsync(projectId, parentSessionId, "parent-agent");
+        var child = await OpenSessionAsync(projectId, childSessionId, "child-agent");
+        var attached = await child.ApplyParentLinkAttachAsync(new ApplyParentLinkAttachCommand(
+            $"attach-unknown-callback-{suffix}",
+            edgeId,
+            parentSessionId,
+            "parent-agent",
+            childJobId,
+            1,
+            "/workspace",
+            "runner-1",
+            "opencode",
+            "runtime-session",
+            projectId,
+            1,
+            "standalone-receipt",
+            SessionTreeExpectedLinkState.Absent));
+        Assert.Equal(SessionTreeAttachMutationState.Attached, attached.State);
+        await child.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            inputId, turnId, "child work", "agent-launch", childJobId,
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "child-agent",
+                [GenericAgentSessionMetadata.AgentName] = "child-agent",
+            })));
+
+        var job = JobGrain(childJobId);
+        await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
+            childSessionId,
+            inputId,
+            turnId,
+            "child work",
+            ProjectId: projectId,
+            AgentId: "child-agent",
+            SpawnOrigin: new AgentJobSpawnOrigin(
+                parentSessionId,
+                "parent-agent",
+                edgeId,
+                childSessionId,
+                childJobId,
+                turnId)));
+        Assert.True(await job.ApplyActivityConvergenceAsync(new AgentJobActivityConvergence(
+            childSessionId,
+            RunnerSessionActivityObservations.Idle,
+            1,
+            1,
+            [turnId],
+            [childJobId],
+            [],
+            _fixture.TimeProvider.GetUtcNow())));
+
+        var stored = Assert.Single(_fixture.EventStore.Appended, item =>
+            item.Envelope.Type == ChildTerminalEventType
+            && item.Envelope.Source.ToString() == $"/mohist/agent-job/{childJobId}");
+        Assert.Equal("unknown", stored.Envelope.Data!.Value.GetProperty("status").GetString());
+        var handler = new AgentJobSubagentTerminalHandler(
+            Grains,
+            NullLogger<AgentJobSubagentTerminalHandler>.Instance);
+        await handler.HandleAsync(stored.Envelope, CancellationToken.None);
+        await handler.HandleAsync(stored.Envelope, CancellationToken.None);
+
+        var parentTurn = Assert.Single(await parent.ListTurnsAsync());
+        var parentInput = Assert.Single(await parent.ListInputsAsync());
+        Assert.Equal(AgentTurnStatus.Queued, parentTurn.Status);
+        Assert.Equal("subagent-terminal", parentInput.Source);
+        Assert.Contains("child unknown", parentInput.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task UnknownJobAndTurnTerminal_DoNotPersistSubagentTerminalEvent()
     {
         // Shared collection registry may hold an unadmittable leftover runner
@@ -150,7 +238,14 @@ public sealed class AgentJobSubagentTerminalCallbackSpecs : AgentJobGrainTestSup
             initialTurnId,
             "child work",
             "agent-launch",
-            childLaunchJobId));
+            childLaunchJobId,
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "child-agent",
+                [GenericAgentSessionMetadata.AgentName] = "child-agent",
+            })));
 
         var job = JobGrain(childLaunchJobId);
         await job.SubmitAsync(new AgentJobInput(
@@ -239,7 +334,14 @@ public sealed class AgentJobSubagentTerminalCallbackSpecs : AgentJobGrainTestSup
             initialTurnId,
             "child work",
             "agent-launch",
-            childLaunchJobId));
+            childLaunchJobId,
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "child-agent",
+                [GenericAgentSessionMetadata.AgentName] = "child-agent",
+            })));
 
         var job = JobGrain(childLaunchJobId);
         await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
@@ -347,6 +449,13 @@ public sealed class AgentJobSubagentTerminalCallbackSpecs : AgentJobGrainTestSup
             childLaunchJobId,
             Runtime: "opencode",
             WorkDir: "/workspace",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "child-agent",
+                [GenericAgentSessionMetadata.AgentName] = "child-agent",
+            }),
             AgentSessionStartup: new AgentSessionStartup(
                 projectId,
                 childSessionId,

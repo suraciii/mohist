@@ -13,6 +13,7 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
+using Mohist.Server.Infrastructure.Capacity;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
@@ -142,6 +143,10 @@ public static class MohistServiceRegistration
             sp.GetRequiredService<RunnerControlWebSocketRegistry>());
         services.AddSingleton<IRunnerSessionCommandTransport>(sp =>
             sp.GetRequiredService<RunnerControlWebSocketRegistry>());
+        services.AddSingleton<IRunnerAuthorityFence>(sp =>
+            sp.GetRequiredService<RunnerControlWebSocketRegistry>());
+        services.AddSingleton<IRunnerActivityProbeCoordinator>(sp =>
+            sp.GetRequiredService<RunnerActivityProbeCoordinator>());
 
         // IAgentConnectionProviderCleanup implementations are also
         // registered as Self by the conventional services scan; Microsoft DI's
@@ -189,6 +194,7 @@ public static class MohistServiceRegistration
         services.AddScoped<ISessionStopDelivery, RunnerSessionStopDelivery>();
         services.AddSingleton<IFollowupDispatchScheduler>(sp => sp.GetRequiredService<Mohist.Server.Api.FollowupDispatchScheduler>());
         services.AddScoped<IAgentJobStore, AgentJobStore>();
+        services.AddScoped<IAgentCapacityStore, AgentCapacityStore>();
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
         services.AddSingleton<IEventStore, EventStore>();
         services.TryAddSingleton<IDeadLetterStore, DeadLetterStore>();

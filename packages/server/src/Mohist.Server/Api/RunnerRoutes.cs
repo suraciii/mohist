@@ -27,34 +27,54 @@ public static partial class RunnerRoutes
     {
         var group = app.MapGroup("/api/runner/{runnerId}").RequireScopes(Scope.Runner);
 
-        group.MapPost("/register", async (string runnerId, RunnerRegisterRequest req, IGrainFactory grains) =>
+        group.MapPost("/register", async (
+            string runnerId,
+            RunnerRegisterRequest req,
+            HttpContext context,
+            IGrainFactory grains,
+            RunnerAuthorityAdmissionObserver authorityAdmissions,
+            CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(req.ProcessGeneration))
                 return ApiResults.BadRequest("processGeneration is required");
-            var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            await runner.RegisterAsync(new RunnerInfo(
+            if (ResolvePresentedRunnerAuthority(context) is not { } presentedAuthority)
+                return InvalidRunnerCredentialAuthority();
+            await authorityAdmissions.ObserveAsync(
+                "register",
                 runnerId,
-                req.Capabilities,
-                req.Hostname ?? Environment.MachineName,
-                req.ProjectId,
-                req.CoderModels,
-                BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
-                CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants),
-                ActionCatalog: req.ActionCatalog,
-                RuntimeCatalogs: NormalizeRuntimeCatalogs(req.RuntimeCatalogs),
-                Component: NormalizeIdentity(req.Component),
-                Version: NormalizeIdentity(req.Version),
-                SourceRevision: RunnerBuildIdentityPolicy.ResolveSourceRevision(
-                    req.SchemaVersion,
-                    NormalizeIdentity(req.SourceRevision),
-                    NormalizeBuildGitHash(req.BuildGitHash)),
-                TreeHash: NormalizeIdentity(req.TreeHash),
-                ArtifactDigest: NormalizeIdentity(req.ArtifactDigest),
-                ReleaseId: NormalizeIdentity(req.ReleaseId),
-                Generation: req.Generation > 0 ? req.Generation : null,
-                EnvironmentVersion: NormalizeIdentity(req.EnvironmentVersion),
-                EnvironmentLoadedAt: req.EnvironmentLoadedAt,
-                SchemaVersion: req.SchemaVersion), req.ProcessGeneration);
+                presentedAuthority,
+                ct);
+            var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+            try
+            {
+                await runner.RegisterAsync(new RunnerInfo(
+                    runnerId,
+                    req.Capabilities,
+                    req.Hostname ?? Environment.MachineName,
+                    req.ProjectId,
+                    req.CoderModels,
+                    BuildGitHash: NormalizeBuildGitHash(req.BuildGitHash),
+                    CoderModelVariants: NormalizeCoderModelVariants(req.CoderModelVariants),
+                    ActionCatalog: req.ActionCatalog,
+                    RuntimeCatalogs: NormalizeRuntimeCatalogs(req.RuntimeCatalogs),
+                    Component: NormalizeIdentity(req.Component),
+                    Version: NormalizeIdentity(req.Version),
+                    SourceRevision: RunnerBuildIdentityPolicy.ResolveSourceRevision(
+                        req.SchemaVersion,
+                        NormalizeIdentity(req.SourceRevision),
+                        NormalizeBuildGitHash(req.BuildGitHash)),
+                    TreeHash: NormalizeIdentity(req.TreeHash),
+                    ArtifactDigest: NormalizeIdentity(req.ArtifactDigest),
+                    ReleaseId: NormalizeIdentity(req.ReleaseId),
+                    Generation: req.Generation > 0 ? req.Generation : null,
+                    EnvironmentVersion: NormalizeIdentity(req.EnvironmentVersion),
+                    EnvironmentLoadedAt: req.EnvironmentLoadedAt,
+                    SchemaVersion: req.SchemaVersion), req.ProcessGeneration, presentedAuthority);
+            }
+            catch (RunnerCredentialAuthorityException)
+            {
+                return InvalidRunnerCredentialAuthority();
+            }
             return Results.Ok();
         });
 
@@ -174,36 +194,6 @@ public static partial class RunnerRoutes
                 binding.WorkDir)));
         });
 
-        group.MapPost("/agent-sessions/{sessionId}/reconcile-missing", async (
-            string runnerId, string sessionId,
-            MissingRuntimeSessionRecoveryRequest req,
-            AgentSessionResolver sessions) =>
-        {
-            if (!string.Equals(runnerId, req.ExpectedRunnerId, StringComparison.Ordinal))
-                return ApiResults.BadRequest("expectedRunnerId must match the route runnerId", "runner_mismatch");
-            var grain = sessions.GetGrain(sessionId);
-            if (await grain.GetAsync() is null)
-                return ApiResults.NotFound($"Agent session {sessionId} not found");
-            try
-            {
-                var session = await grain.ReconcileMissingBindingAsync(new ReconcileMissingBindingCommand(
-                    req.ExpectedRunnerId, req.ExpectedRuntime, req.ExpectedRuntimeSessionId, req.ReplacementRuntimeSessionId));
-                return Results.Ok(new RunnerAgentSessionReconcileResponse(
-                    session.Id,
-                    session.Runtime ?? string.Empty,
-                    session.AgentSessionId ?? string.Empty,
-                    session.WorkDir ?? string.Empty));
-            }
-            catch (StaleRuntimeSessionBindingException ex)
-            {
-                return ApiResults.Conflict(ex.Message, "stale_binding", new { sessionId = ex.SessionId });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return ApiResults.Conflict(ex.Message, "agent_session_recovery_conflict");
-            }
-        });
-
         group.MapPost("/agent-sessions/{sessionId}/runtime-events", async (
             string runnerId, string sessionId,
             AgentSessionRuntimeEventsRequest req,
@@ -249,6 +239,85 @@ public static partial class RunnerRoutes
             if (await IsManagerAgentSessionAsync(sessionQuery, sessionId, ct))
                 RevokeCompletedManagerFollowupLeases(sessionId, req.RuntimeEvents, managerCredentials);
             return Results.Ok(events);
+        });
+
+        group.MapPost("/agent-jobs/{jobId}/initial-input/recovery/prepare", async (
+            string runnerId, string jobId, AgentJobInitialRecoveryPrepareRequest req,
+            HttpContext context, IGrainFactory grains,
+            RunnerAuthorityAdmissionObserver authorityAdmissions,
+            CancellationToken ct) =>
+        {
+            if (await GetInitialInputMutationAuthorityFailureAsync(
+                    context, grains, authorityAdmissions, "initial-input-prepare",
+                    runnerId, req.ProcessGeneration, ct) is { } authorityFailure)
+                return authorityFailure;
+            try
+            {
+                var receipt = await grains.GetGrain<IAgentJobGrain>(jobId).PrepareInitialInputRecoveryAsync(
+                    new PrepareAgentJobInitialRecovery(
+                        req.OperationId, runnerId, req.WorkId, req.ProcessGeneration,
+                        req.SessionId, req.InputId, req.TurnId,
+                        req.ExpectedRuntime, req.ExpectedRuntimeSessionId, req.CreationAttemptId,
+                        req.RecoveryReason));
+                return Results.Ok(receipt);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "initial_input_recovery_conflict");
+            }
+        });
+
+        group.MapPost("/agent-jobs/{jobId}/initial-input/recovery/complete", async (
+            string runnerId, string jobId, AgentJobInitialRecoveryCompleteRequest req,
+            HttpContext context, IGrainFactory grains,
+            RunnerAuthorityAdmissionObserver authorityAdmissions,
+            CancellationToken ct) =>
+        {
+            if (await GetInitialInputMutationAuthorityFailureAsync(
+                    context, grains, authorityAdmissions, "initial-input-complete",
+                    runnerId, req.ProcessGeneration, ct) is { } authorityFailure)
+                return authorityFailure;
+            try
+            {
+                var recovery = new PrepareAgentJobInitialRecovery(
+                    req.OperationId, runnerId, req.WorkId, req.ProcessGeneration,
+                    req.SessionId, req.InputId, req.TurnId,
+                    req.ExpectedRuntime, req.ExpectedRuntimeSessionId, req.CreationAttemptId,
+                    req.RecoveryReason);
+                var receipt = await grains.GetGrain<IAgentJobGrain>(jobId).CompleteInitialInputRecoveryAsync(
+                    new CompleteAgentJobInitialRecovery(
+                        recovery, req.ReplacementRuntime, req.ReplacementRuntimeSessionId));
+                return Results.Ok(receipt);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "initial_input_recovery_conflict");
+            }
+        });
+
+        group.MapPost("/agent-jobs/{jobId}/initial-input/start", async (
+            string runnerId, string jobId, AgentJobInitialInputStartRequest req,
+            HttpContext context, IGrainFactory grains,
+            RunnerAuthorityAdmissionObserver authorityAdmissions,
+            CancellationToken ct) =>
+        {
+            if (await GetInitialInputMutationAuthorityFailureAsync(
+                    context, grains, authorityAdmissions, "initial-input-start",
+                    runnerId, req.ProcessGeneration, ct) is { } authorityFailure)
+                return authorityFailure;
+            try
+            {
+                var receipt = await grains.GetGrain<IAgentJobGrain>(jobId).StartInitialInputAsync(
+                    new StartAgentJobInitialInput(
+                        req.OperationId, req.SubmissionAttemptId, runnerId, req.WorkId,
+                        req.ProcessGeneration, req.SessionId, req.InputId, req.TurnId,
+                        req.Runtime, req.RuntimeSessionId));
+                return Results.Ok(receipt);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "initial_input_start_conflict");
+            }
         });
 
         // AgentJob AgentSession routes identify the persisted Session by
@@ -514,6 +583,39 @@ public static partial class RunnerRoutes
             || string.Equals(lastTerminalStatus, "cancelled", StringComparison.OrdinalIgnoreCase)
             || string.Equals(lastTerminalStatus, "timeout", StringComparison.OrdinalIgnoreCase));
 
+    private static async Task<IResult?> GetInitialInputMutationAuthorityFailureAsync(
+        HttpContext context,
+        IGrainFactory grains,
+        RunnerAuthorityAdmissionObserver authorityAdmissions,
+        string operation,
+        string runnerId,
+        string processGeneration,
+        CancellationToken ct)
+    {
+        if (ResolvePresentedRunnerAuthority(context) is not { } presentedAuthority)
+            return InvalidRunnerCredentialAuthority();
+        await authorityAdmissions.ObserveAsync(
+            operation,
+            runnerId,
+            presentedAuthority,
+            ct);
+
+        var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+        var runtime = await runner.GetRuntimeStateAsync();
+        if (runtime.Status != RunnerStatus.Online
+            || runtime.Draining
+            || !string.Equals(runtime.ProcessGeneration, processGeneration, StringComparison.Ordinal))
+            return ApiResults.Conflict(
+                "Runner process is not current, online, and non-draining",
+                "runner_process_stale");
+
+        return await runner.IsCurrentRegistrationAuthorityAsync(
+                processGeneration,
+                presentedAuthority)
+            ? null
+            : InvalidRunnerCredentialAuthority();
+    }
+
     private static string? NormalizeBuildGitHash(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
@@ -685,6 +787,40 @@ public record AgentSessionAttachRequest(
     string? ExpectedRuntime = null,
     string? ExpectedRuntimeSessionId = null,
     string? ExpectedRunnerId = null);
+public record AgentJobInitialRecoveryPrepareRequest(
+    string OperationId,
+    string WorkId,
+    string ProcessGeneration,
+    string SessionId,
+    string InputId,
+    string TurnId,
+    string ExpectedRuntime,
+    string ExpectedRuntimeSessionId,
+    string CreationAttemptId,
+    string RecoveryReason);
+public record AgentJobInitialRecoveryCompleteRequest(
+    string OperationId,
+    string WorkId,
+    string ProcessGeneration,
+    string SessionId,
+    string InputId,
+    string TurnId,
+    string ExpectedRuntime,
+    string ExpectedRuntimeSessionId,
+    string CreationAttemptId,
+    string RecoveryReason,
+    string ReplacementRuntime,
+    string ReplacementRuntimeSessionId);
+public record AgentJobInitialInputStartRequest(
+    string OperationId,
+    string SubmissionAttemptId,
+    string WorkId,
+    string ProcessGeneration,
+    string SessionId,
+    string InputId,
+    string TurnId,
+    string Runtime,
+    string RuntimeSessionId);
 public record MissingRuntimeSessionRecoveryRequest(
     string ExpectedRunnerId,
     string ExpectedRuntime,

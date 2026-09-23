@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { isAbsolute, normalize, relative, resolve, sep } from 'node:path'
-import type { ArtifactUploadRequest, ArtifactUploadResponse } from '../server/connection.js'
+import type { ArtifactUploadRequest, ArtifactUploadResponse } from '../server/connection-upload-models.js'
 import type { ActionResult, JsonObject, JsonValue, DispatchWorkItem } from '../core/types.js'
 import { isObject } from '../core/json.js'
 import { currentRunnerFileSystem } from '../system/filesystem.js'

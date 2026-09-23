@@ -103,7 +103,7 @@ public sealed record SubagentTerminalEventData(
         ArgumentException.ThrowIfNullOrWhiteSpace(EdgeId);
         ArgumentException.ThrowIfNullOrWhiteSpace(InitialTurnId);
         ArgumentException.ThrowIfNullOrWhiteSpace(ResultReference);
-        if (Status is not ("completed" or "failed" or "cancelled"))
+        if (Status is not ("completed" or "failed" or "cancelled" or "unknown"))
             throw new InvalidOperationException($"Invalid subagent terminal status '{Status}'.");
     }
 }

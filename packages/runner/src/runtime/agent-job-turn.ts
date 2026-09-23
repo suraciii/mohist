@@ -27,6 +27,7 @@ import type {
   ParsedModel,
 } from './agent-job-executor.js'
 import { knownBinding } from './agent-job-executor.js'
+import { admitInitialProviderSubmission } from './agent-job-initial-provider-admission.js'
 import {
   mapOpenCodeErrorKind,
   mapPiErrorKind,
@@ -138,6 +139,7 @@ export async function executeOpenCodeTurn(
         })
       }
       await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
+      await admitInitialProviderSubmission(deps.connection, work, binding, 'opencode', session.runtimeSessionId, signal)
       if (!skipInitialInput && !attachedInputPublished) {
         attachedInputPublished = true
         await eventSink.publishSessionInput(composed, session.runtimeSessionId)
@@ -298,6 +300,7 @@ export async function executePiTurn(
   }
   try {
     await eventSink.attachSession(runtimeSessionId, workDir, modelInput)
+    await admitInitialProviderSubmission(deps.connection, work, binding, 'pi', runtimeSessionId, signal)
     if (!work.initialInputId || !work.initialTurnId) {
       await eventSink.publishSessionInput(composed, runtimeSessionId)
     }

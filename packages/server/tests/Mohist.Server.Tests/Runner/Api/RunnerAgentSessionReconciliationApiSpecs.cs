@@ -40,10 +40,10 @@ public sealed class RunnerAgentSessionReconciliationApiSpecs : IClassFixture<Def
     }
 
     [Fact]
-    public async Task ReconcileMissing_UnknownSession_SettlesIdleAndRejectsStaleRetry()
+    public async Task RecoverMissing_IdleSession_RebindsAndRejectsStaleRetry()
     {
         var runnerId = $"runner-missing-{Guid.NewGuid():N}";
-        var sessionId = await CreateBoundSessionAsync(runnerId, "runtime-missing", AgentSessionActivity.Unknown);
+        var sessionId = await CreateBoundSessionAsync(runnerId, "runtime-missing", AgentSessionActivity.Idle);
         var request = new
         {
             expectedRunnerId = runnerId,
@@ -53,7 +53,7 @@ public sealed class RunnerAgentSessionReconciliationApiSpecs : IClassFixture<Def
         };
 
         using var response = await _fixture.Client.PostAsJsonAsync(
-            $"/api/runner/{runnerId}/agent-sessions/{sessionId}/reconcile-missing",
+            $"/api/runner/{runnerId}/agent-sessions/project-reconcile/{sessionId}/recover-missing",
             request);
 
         response.EnsureSuccessStatusCode();
@@ -62,7 +62,7 @@ public sealed class RunnerAgentSessionReconciliationApiSpecs : IClassFixture<Def
         Assert.Equal("idle", state?.Status);
 
         using var stale = await _fixture.Client.PostAsJsonAsync(
-            $"/api/runner/{runnerId}/agent-sessions/{sessionId}/reconcile-missing",
+            $"/api/runner/{runnerId}/agent-sessions/project-reconcile/{sessionId}/recover-missing",
             request);
         Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
         var staleBody = await stale.Content.ReadFromJsonAsync<JsonElement>();
@@ -84,7 +84,8 @@ public sealed class RunnerAgentSessionReconciliationApiSpecs : IClassFixture<Def
                 .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, "project-reconcile")
                 .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
                 .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, $"workflow-{sessionId}")
-                .WithLabel(AgentSessionQueryMetadataKeys.SessionName, "build")));
+                .WithLabel(AgentSessionQueryMetadataKeys.SessionName, "build")
+                .WithLabel(GenericAgentSessionMetadata.AgentId, "agent-reconcile")));
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(runtimeSessionId));
         if (activity != AgentSessionActivity.Idle)
         {

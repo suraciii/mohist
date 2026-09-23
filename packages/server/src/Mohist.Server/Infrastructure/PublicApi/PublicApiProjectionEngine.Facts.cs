@@ -25,6 +25,7 @@ public sealed partial class PublicApiProjectionEngine
             ProjectId = row.LabelProjectId,
             AgentId = row.LabelAgentId,
             Activity = status.Activity,
+            ContextGeneration = status.ContextGeneration,
             SessionCreatedAt = ToUtc(status.CreatedAt),
             PendingStopActive = status.PendingStop?.IsActive == true,
             PendingResetActive = status.PendingReset is not null && status.PendingReset.Outcome is null,
@@ -36,7 +37,8 @@ public sealed partial class PublicApiProjectionEngine
                     input.Id,
                     input.Acceptance,
                     ToUtc(input.RecordedAt),
-                    input.JobId))
+                    input.JobId,
+                    input.ContextGeneration))
                 .ToList(),
             Turns = (status.Turns ?? [])
                 .Select(turn => new PublicProjectionFacts.TurnFacts(
@@ -46,7 +48,9 @@ public sealed partial class PublicApiProjectionEngine
                     turn.JobId,
                     ToUtc(turn.RecordedAt),
                     ToUtc(turn.UpdatedAt),
-                    turn.Result))
+                    turn.Result,
+                    turn.ContextGeneration,
+                    ToUtc(turn.SupersededAt)))
                 .ToList(),
             SessionJournal = journalRows
                 .Select(journal => new PublicProjectionFacts.SessionJournalFacts(
@@ -85,6 +89,7 @@ public sealed partial class PublicApiProjectionEngine
             ProjectId = row.LabelProjectId,
             AgentId = row.LabelAgentId,
             Activity = snapshot.Activity,
+            ContextGeneration = snapshot.ContextGeneration,
             SessionCreatedAt = currentFacts.SessionCreatedAt,
             PendingStopActive = snapshot.PendingStopActive,
             PendingResetActive = snapshot.PendingResetActive,
@@ -94,7 +99,8 @@ public sealed partial class PublicApiProjectionEngine
                     input.InputId,
                     input.Acceptance,
                     input.RecordedAt,
-                    input.JobId))
+                    input.JobId,
+                    input.ContextGeneration))
                 .ToList(),
             Turns = snapshot.Turns
                 .Select(turn => new PublicProjectionFacts.TurnFacts(
@@ -104,7 +110,9 @@ public sealed partial class PublicApiProjectionEngine
                     turn.JobId,
                     turn.RecordedAt,
                     turn.UpdatedAt,
-                    turn.Result))
+                    turn.Result,
+                    turn.ContextGeneration,
+                    turn.SupersededAt))
                 .ToList(),
             SessionJournal = journalRows
                 .Select(journal => new PublicProjectionFacts.SessionJournalFacts(

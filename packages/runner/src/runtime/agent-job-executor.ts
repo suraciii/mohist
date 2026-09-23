@@ -42,6 +42,7 @@ import { renderTemplate, unresolvedReferences } from '../core/template.js'
 import { evaluateCompletion } from '../actions/expectations.js'
 import { captureAndUploadArtifactsForWork } from './artifact-side-effects.js'
 import { tryRecovery } from './recovery.js'
+import { randomUUID } from 'node:crypto'
 
 export { projectTurnToWorkItemResult } from './agent-job-turn.js'
 
@@ -60,6 +61,7 @@ export interface AgentJobExecutorOptions {
   readonly modelRetryMaxDelayMs?: number
   readonly waitForModelRetry?: ModelRetryWaiter
   readonly onManagerRuntimeSessionReady?: (binding: ManagerRuntimeSessionBinding) => void | Promise<void>
+  readonly processGeneration?: string
 }
 
 /**
@@ -214,7 +216,7 @@ export class AgentJobExecutor {
 
     let binding: BindingResolution
     try {
-      binding = await resolveBinding(work, this.connection, signal)
+      binding = await resolveBinding(work, this.connection, signal, this.options.processGeneration)
     } catch (error) {
       return failureResult(
         'session-binding-failed',
@@ -222,7 +224,21 @@ export class AgentJobExecutor {
       )
     }
 
-    if (runtimeName === 'pi') {
+    const recovered = await recoverInitialBindingIfNeeded(
+      work,
+      binding,
+      workDir,
+      runtimeName,
+      this.connection,
+      this.runtimes,
+      signal,
+      managerExecution,
+    )
+    if (!recovered.ok) return recovered.result
+    binding = recovered.binding
+    const executionRuntimeName = binding.runtime ?? runtimeName
+
+    if (executionRuntimeName === 'pi') {
       const result = await executePiTurn(
         this.turnDeps(managerExecution),
         work,
@@ -240,7 +256,7 @@ export class AgentJobExecutor {
       )
       return this.finalizeWorkflowResult(work, workDir, result, signal)
     }
-    if (runtimeName === 'codex') {
+    if (executionRuntimeName === 'codex') {
       const result = await executeCodexTurn(
         this.turnDeps(managerExecution),
         work,
@@ -413,6 +429,9 @@ export type BindingResolution = {
   runnerId: string
   runtime: string | null
   runtimeSessionId: string | null
+  processGeneration: string | null
+  initialOperationId: string | null
+  submissionAttemptId: string | null
 }
 
 export function knownBinding(
@@ -444,6 +463,7 @@ async function resolveBinding(
   work: DispatchWorkItem,
   connection: ServerConnection,
   signal: AbortSignal,
+  processGeneration?: string,
 ): Promise<BindingResolution> {
   const agentSessionId = work.agentSessionId ?? null
   if (!agentSessionId || !work.projectId) {
@@ -452,6 +472,9 @@ async function resolveBinding(
       runnerId: connection.runnerId,
       runtime: null,
       runtimeSessionId: null,
+      processGeneration: processGeneration ?? null,
+      initialOperationId: null,
+      submissionAttemptId: null,
     }
   }
   const opened = await connection.getAgentSession(work.projectId, agentSessionId, signal)
@@ -460,7 +483,159 @@ async function resolveBinding(
     runnerId: connection.runnerId,
     runtime: opened?.runtime ?? null,
     runtimeSessionId: opened?.runtimeSessionId ?? null,
+    processGeneration: processGeneration ?? null,
+    initialOperationId:
+      work.agentJobId && work.initialInputId && work.initialTurnId
+        ? `initial-input:${work.agentJobId}:${work.workId}:${work.initialInputId}:${work.initialTurnId}`
+        : null,
+    submissionAttemptId: processGeneration ? randomUUID() : null,
   }
+}
+
+type InitialBindingRecovery = { ok: true; binding: BindingResolution } | { ok: false; result: WorkItemResult }
+
+export async function recoverInitialBindingIfNeeded(
+  work: DispatchWorkItem,
+  binding: BindingResolution,
+  workDir: string,
+  runtimeName: 'pi' | 'opencode' | 'codex',
+  connection: ServerConnection,
+  runtimes: AgentJobRuntimeAccessors,
+  signal: AbortSignal,
+  managerExecution: ManagerExecutionBoundary | null,
+): Promise<InitialBindingRecovery> {
+  if (
+    !binding.runtimeSessionId ||
+    !binding.agentSessionId ||
+    !binding.processGeneration ||
+    !binding.initialOperationId ||
+    !binding.submissionAttemptId ||
+    !work.agentJobId ||
+    !work.initialInputId ||
+    !work.initialTurnId
+  ) {
+    return { ok: true, binding }
+  }
+  if (binding.runnerId !== connection.runnerId || binding.runtime !== runtimeName) {
+    return {
+      ok: false,
+      result: failureResult('session-binding-failed', 'Initial AgentJob binding changed before execution'),
+    }
+  }
+
+  const expectedAccessor =
+    runtimeName === 'opencode'
+      ? resolveAccessor(runtimes.openCode)
+      : runtimeName === 'pi'
+        ? resolveAccessor(runtimes.pi)
+        : resolveAccessor(runtimes.codex)
+  let replacementKind = runtimeName
+  let replacementRuntime = expectedAccessor
+  if (runtimeName === 'opencode' && !managerExecution && (!expectedAccessor || !expectedAccessor.ready())) {
+    const pi = resolveAccessor(runtimes.pi)
+    if (pi?.ready()) {
+      replacementKind = 'pi'
+      replacementRuntime = pi
+    }
+  }
+  if (!replacementRuntime?.ready()) {
+    return {
+      ok: false,
+      result: failureResult('runtime-unavailable', 'The bound Runtime is unavailable; unavailable is not missing'),
+    }
+  }
+
+  if (replacementKind === runtimeName) {
+    const target = { runtimeSessionId: binding.runtimeSessionId, workDir }
+    const resolved =
+      runtimeName === 'opencode'
+        ? await (replacementRuntime as OpenCodeRuntime).resolveSession({ target: { runtime: 'opencode', ...target } })
+        : runtimeName === 'pi'
+          ? await (replacementRuntime as PiRuntime).resolveSession({ target: { runtime: 'pi', ...target } })
+          : await (replacementRuntime as CodexRuntime).resolveSession({ target })
+    if (resolved.ok) {
+      if (resolved.value.activeTurn) {
+        return {
+          ok: false,
+          result: failureResult('session-binding-failed', 'The bound Runtime Session is already executing'),
+        }
+      }
+      return { ok: true, binding }
+    }
+    if (resolved.error.kind !== 'missing-session') {
+      return { ok: false, result: failureResult('runtime-unavailable', resolved.error.message) }
+    }
+  }
+
+  const recoveryBody = {
+    operationId: binding.initialOperationId,
+    workId: work.workId,
+    processGeneration: binding.processGeneration,
+    sessionId: binding.agentSessionId,
+    inputId: work.initialInputId,
+    turnId: work.initialTurnId,
+    expectedRuntime: runtimeName,
+    expectedRuntimeSessionId: binding.runtimeSessionId,
+    creationAttemptId: binding.submissionAttemptId,
+    recoveryReason: replacementKind === runtimeName ? 'same-runtime-missing' : 'configured-fallback',
+  }
+  let prepare
+  try {
+    prepare = await connection.prepareAgentJobInitialRecovery(work.agentJobId, recoveryBody, signal)
+  } catch {
+    prepare = await connection.prepareAgentJobInitialRecovery(work.agentJobId, recoveryBody, signal)
+  }
+  if (prepare.phase === 'ready' && prepare.runtime && prepare.runtimeSessionId) {
+    return { ok: true, binding: { ...binding, runtime: prepare.runtime, runtimeSessionId: prepare.runtimeSessionId } }
+  }
+  if (!prepare.candidateCreationAuthorized) {
+    return {
+      ok: false,
+      result: failureResult(
+        'session-binding-failed',
+        'Initial Runtime Session creation is already admitted or uncertain; refusing to create another candidate',
+      ),
+    }
+  }
+
+  const created =
+    replacementKind === 'opencode'
+      ? await (replacementRuntime as OpenCodeRuntime).createSession({
+          target: { runtime: 'opencode', runtimeSessionId: null, workDir },
+          model: null,
+        })
+      : replacementKind === 'pi'
+        ? await (replacementRuntime as PiRuntime).createSession({
+            target: { runtime: 'pi', runtimeSessionId: null, workDir },
+          })
+        : await (replacementRuntime as CodexRuntime).createSession({
+            target: { runtimeSessionId: null, workDir },
+          })
+  if (!created.ok) {
+    return {
+      ok: false,
+      result: failureResult(
+        'session-binding-failed',
+        `Initial Runtime Session candidate creation is uncertain or failed: ${created.error.message}`,
+      ),
+    }
+  }
+
+  const completeBody = {
+    ...recoveryBody,
+    replacementRuntime: replacementKind,
+    replacementRuntimeSessionId: created.value.runtimeSessionId,
+  }
+  let complete
+  try {
+    complete = await connection.completeAgentJobInitialRecovery(work.agentJobId, completeBody, signal)
+  } catch {
+    complete = await connection.completeAgentJobInitialRecovery(work.agentJobId, completeBody, signal)
+  }
+  if (complete.phase !== 'ready' || !complete.runtime || !complete.runtimeSessionId) {
+    return { ok: false, result: failureResult('session-binding-failed', 'Initial binding recovery did not converge') }
+  }
+  return { ok: true, binding: { ...binding, runtime: complete.runtime, runtimeSessionId: complete.runtimeSessionId } }
 }
 
 type WorkspaceBindingResolution =

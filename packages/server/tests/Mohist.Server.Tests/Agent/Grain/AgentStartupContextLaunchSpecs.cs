@@ -35,15 +35,20 @@ public sealed class AgentStartupContextLaunchSpecs : AgentJobGrainTestSupport
     {
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
             $"agent-startup-context-truncated-{Guid.NewGuid():N}");
+        await _fixture.SeedAgentAsync(projectId, "agent-truncated", maxConcurrentRuns: null);
         var jobKey = $"agent-job-startup-context-truncated-{Guid.NewGuid():N}";
         var sessionId = $"agent-session-truncated-{Guid.NewGuid():N}";
         var inputId = $"input-{Guid.NewGuid():N}";
         var turnId = $"turn-{Guid.NewGuid():N}";
-        await Grains.GetGrain<IAgentSessionGrain>(sessionId).OpenAsync(new OpenAgentSessionCommand(
-            RunnerId: string.Empty,
-            AgentRuntime: "opencode",
-            WorkDir: "/tmp/agent-job-startup-truncated",
-            Metadata: BuildSessionMetadata(projectId)));
+        await OpenJobSessionAsync(
+            sessionId,
+            projectId,
+            jobKey,
+            inputId,
+            turnId,
+            "summarize",
+            agentId: "agent-truncated",
+            workDir: "/tmp/agent-job-startup-truncated");
 
         var startupContext = new AgentStartupContext(
             Text: "newest discussion message",
@@ -81,13 +86,20 @@ public sealed class AgentStartupContextLaunchSpecs : AgentJobGrainTestSupport
         string projectId,
         AgentStartupContext? startupContext)
     {
+        await _fixture.SeedAgentAsync(projectId, "agent-cap", maxConcurrentRuns: null);
         var jobKey = $"agent-job-startup-context-cap-{Guid.NewGuid():N}";
         var sessionId = $"agent-session-startup-cap-{Guid.NewGuid():N}";
-        await Grains.GetGrain<IAgentSessionGrain>(sessionId).OpenAsync(new OpenAgentSessionCommand(
-            RunnerId: string.Empty,
-            AgentRuntime: "opencode",
-            WorkDir: "/tmp/agent-job-startup-cap",
-            Metadata: BuildSessionMetadata(projectId)));
+        var inputId = $"input-{Guid.NewGuid():N}";
+        var turnId = $"turn-{Guid.NewGuid():N}";
+        await OpenJobSessionAsync(
+            sessionId,
+            projectId,
+            jobKey,
+            inputId,
+            turnId,
+            "review the change",
+            agentId: "agent-cap",
+            workDir: "/tmp/agent-job-startup-cap");
 
         var input = new AgentJobInput(
             Prompt: "review the change",
@@ -100,8 +112,8 @@ public sealed class AgentStartupContextLaunchSpecs : AgentJobGrainTestSupport
             AgentSessionId: sessionId,
             Variant: "high",
             Skills: new[] { "coding", "research" },
-            InitialInputId: $"input-{Guid.NewGuid():N}",
-            InitialTurnId: $"turn-{Guid.NewGuid():N}",
+            InitialInputId: inputId,
+            InitialTurnId: turnId,
             StartupContext: startupContext);
 
         var job = JobGrain(jobKey);
@@ -220,16 +232,6 @@ public sealed class AgentStartupContextLaunchSpecs : AgentJobGrainTestSupport
                 Truncated: truncated,
                 TruncationMarker: marker,
                 OmittedOldestMessageCount: truncated ? 10 : 0));
-
-    private static AgentSessionMetadata BuildSessionMetadata(string projectId) =>
-        new(
-            Labels: new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
-                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
-                [GenericAgentSessionMetadata.AgentId] = "agent-startup-context",
-                [GenericAgentSessionMetadata.AgentName] = "agent-startup-context",
-            });
 
     private static string BuildLongBody()
     {

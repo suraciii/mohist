@@ -192,7 +192,8 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
             Metadata: WorkflowAgentSessionMetadata.Metadata(new WorkflowAgentSessionContext(
                 project.Id,
                 workflowRunId,
-                "plan")),
+                "plan",
+                "workflow-agent")),
             Runtime: "opencode"));
 
         var runnerId = $"workflow-agent-open-runner-{Guid.NewGuid():N}";

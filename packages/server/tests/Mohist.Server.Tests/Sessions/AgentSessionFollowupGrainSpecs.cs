@@ -143,6 +143,7 @@ public sealed partial class AgentSessionFollowupGrainSpecs
             Prompt: "initial prompt",
             Source: "agent-connection",
             JobId: "initial-job",
+            Metadata: OpenCommand().Metadata,
             Provenance: initialProvenance));
         await grain.MarkInitialTurnTerminalAsync("initial-job", AgentTurnStatus.Completed, null);
 
@@ -258,6 +259,10 @@ public sealed partial class AgentSessionFollowupGrainSpecs
     private async Task<(IAgentSessionGrain Grain, string SessionId)> CreateAttachedSessionAsync(string runtimeSessionId)
     {
         var sessionId = $"followup-grain-{Guid.NewGuid():N}";
+        // A successful follow-up needs real capacity evidence for the
+        // Session's accepted identity; the derived store admits the queued
+        // head against this seeded definition.
+        await _fixture.SeedAgentAsync("project-1", "workflow-agent", maxConcurrentRuns: null);
         var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
         await grain.OpenAsync(OpenCommand());
         await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(runtimeSessionId));
@@ -272,6 +277,7 @@ public sealed partial class AgentSessionFollowupGrainSpecs
         Metadata: new AgentSessionMetadata()
             .WithLabel("mohist.io/project-id", "project-1")
             .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/agent-id", "workflow-agent")
             .WithLabel("mohist.io/source-id", "workflow-1")
             .WithLabel("mohist.io/session-name", "build"));
 }

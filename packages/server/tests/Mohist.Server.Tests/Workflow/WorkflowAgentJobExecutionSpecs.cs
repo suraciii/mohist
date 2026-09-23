@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
@@ -20,7 +21,7 @@ namespace Mohist.Server.Tests.Workflow;
 
 [Collection("WorkflowExecution")]
 [Trait("level", "L1")]
-public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
+public sealed partial class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
 {
     public WorkflowAgentJobExecutionSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
@@ -72,6 +73,15 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         Assert.Equal(attempt.AgentSessionId, jobSnapshot.AgentSessionId);
         Assert.Equal(run.Id, jobSnapshot.WorkflowOrigin?.WorkflowRunId);
         Assert.Equal(attempt.Id, jobSnapshot.WorkflowOrigin?.ActionAttemptId);
+        await using (var scope = Services.CreateAsyncScope())
+        {
+            var session = await scope.ServiceProvider.GetRequiredService<IAgentSessionStore>()
+                .LoadAsync(attempt.AgentSessionId!);
+            Assert.NotNull(session);
+            Assert.Equal(run.Metadata.ProjectId, session!.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId));
+            Assert.Equal(plan.AgentId, session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+            Assert.NotEqual(plan.Command.AgentRef, session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+        }
 
         await DeactivateWorkflowAsync(run.Id);
         workflow = Grains.GetGrain<IWorkflowGrain>(run.Id);
@@ -85,6 +95,49 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         run = await LoadRunAsync(run.Id);
         Assert.Equal(WorkflowActionAttemptStatus.Completed, run.CurrentStage().Tasks.Single().Status);
         Assert.Equal(WorkflowRunStatus.Completed, run.Status);
+    }
+
+    [Fact]
+    public async Task WorkflowAgentAction_FinalizedUnknownFailsTheOwningAttemptHonestly()
+    {
+        var definition = new WorkflowDefinition([
+            new StageDefinition("build", [AgentTask("build", "Build the change", "delivery")], [])
+        ]);
+        var workflow = await StartWorkflowAsync(
+            definition,
+            $"workflow-agent-unknown-{Guid.NewGuid():N}");
+        var runnerId = _runnerId!;
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, (await workflow.AssignWorkerAsync(runnerId)).Status);
+        Assert.Null(await workflow.ClaimNextAsync(runnerId, TestRunnerGenerationExtensions.ProcessGeneration));
+        var run = await LoadRunAsync(_workflowId!);
+        var attempt = Assert.Single(run.CurrentStage().Tasks);
+        var handoff = Grains.GetGrain<IWorkflowAgentHandoffGrain>(WorkflowAgentHandoffCodec.KeyFor(
+            run.Metadata.ProjectId!,
+            run.Id,
+            run.CurrentStage().Id,
+            attempt.Id,
+            attempt.WorkId!));
+        await handoff.ActivateAsync();
+
+        var job = Grains.GetGrain<IAgentJobGrain>(attempt.AgentJobId!);
+        var snapshot = await job.GetRuntimeSnapshotAsync();
+        Assert.True(await job.ApplyActivityConvergenceAsync(new AgentJobActivityConvergence(
+            snapshot.AgentSessionId!,
+            "idle",
+            1,
+            1,
+            [snapshot.InitialTurnId!],
+            [attempt.AgentJobId!],
+            [],
+            _fixture.TimeProvider.GetUtcNow())));
+        await Services.GetRequiredService<IEventDispatcher>().DrainAsync();
+
+        run = await LoadRunAsync(run.Id);
+        var failed = Assert.Single(run.CurrentStage().Tasks);
+        Assert.Equal(WorkflowActionAttemptStatus.Failed, failed.Status);
+        Assert.Equal("unknown", failed.Error?.Code);
+        Assert.Equal(WorkflowRunStatus.Failed, run.Status);
+        Assert.Equal(AgentJobStatus.Unknown, await job.GetStatusAsync());
     }
 
     [Fact]
@@ -188,6 +241,13 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
 
         Assert.NotEqual(first.Work.AgentJobId, second.Work.AgentJobId);
         Assert.Equal(first.Work.AgentSessionId, second.Work.AgentSessionId);
+        await using (var scope = Services.CreateAsyncScope())
+        {
+            var session = await scope.ServiceProvider.GetRequiredService<IAgentSessionStore>()
+                .LoadAsync(second.Work.AgentSessionId!);
+            Assert.Equal(first.Work.AgentId, session!.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+            Assert.Equal(second.Work.AgentId, session.Metadata.Label(GenericAgentSessionMetadata.AgentId));
+        }
         await ReportAsync(runnerId, second.Work, "completed");
         Assert.Equal(WorkflowRunStatus.Completed, (await LoadRunAsync(_workflowId!)).Status);
     }
@@ -230,7 +290,7 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
             var secondInput = Assert.Single(
                 session!.Status.Inputs!,
                 input => string.Equals(input.Id, secondDispatch.InitialInputId, StringComparison.Ordinal));
-            Assert.Equal(secondAttempt.AgentInvocationId, secondInput.IdempotencyKey);
+            Assert.Equal(secondDispatch.AgentJobId, secondInput.JobId);
         }
 
         await ReportAsync(runnerId, secondDispatch, "completed");
@@ -238,7 +298,7 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task WorkflowAgentHandoffs_SameExactWorkIdentityAcrossStages_AppendsDistinctNamedSessionFollowups()
+    public async Task WorkflowAgentHandoffs_SameExactWorkIdentityAcrossStages_AppendsDistinctJobOwnedLaunchTurns()
     {
         var definition = new WorkflowDefinition([
             new StageDefinition("bootstrap", [AgentTask("bootstrap", "Bootstrap", "delivery")], [])
@@ -330,8 +390,16 @@ public sealed class WorkflowAgentJobExecutionSpecs : WorkflowGrainSpecs
         var checkInput = Assert.Single(
             session.Status.Inputs!,
             input => string.Equals(input.Id, preparedCheck.Invocation.InputId, StringComparison.Ordinal));
-        Assert.Equal(preparedPlan.Invocation.InvocationId, planInput.IdempotencyKey);
-        Assert.Equal(preparedCheck.Invocation.InvocationId, checkInput.IdempotencyKey);
+        Assert.Equal(preparedPlan.Invocation.JobKey, planInput.JobId);
+        Assert.Equal(preparedCheck.Invocation.JobKey, checkInput.JobId);
+        var planTurn = Assert.Single(
+            session.Status.Turns!,
+            turn => string.Equals(turn.Id, preparedPlan.Invocation.TurnId, StringComparison.Ordinal));
+        var checkTurn = Assert.Single(
+            session.Status.Turns!,
+            turn => string.Equals(turn.Id, preparedCheck.Invocation.TurnId, StringComparison.Ordinal));
+        Assert.Equal(preparedPlan.Invocation.JobKey, planTurn.JobId);
+        Assert.Equal(preparedCheck.Invocation.JobKey, checkTurn.JobId);
     }
 
     [Fact]

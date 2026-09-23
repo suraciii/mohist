@@ -24,6 +24,8 @@ import type {
   JsonRpcErrorResponse,
   JsonRpcRequest,
   JsonRpcSuccessResponse,
+  RunnerSessionActivityProbeRequest,
+  RunnerSessionActivityProbeResult,
   SessionCommandRequest,
   SessionStopParams,
   WorkspaceCommitDiffParams,
@@ -41,6 +43,7 @@ const requestMethods = [
   'session.followup',
   'session.stop',
   'session.command',
+  'session.probe',
 ] as const
 
 const standardErrors = new Map([
@@ -88,6 +91,7 @@ describe('runner control JSON contract', () => {
     const followup = request<FollowupParams>(entries.get('session.followup')!).params
     const stop = request<SessionStopParams>(entries.get('session.stop')!).params
     const command = request<SessionCommandRequest>(entries.get('session.command')!).params
+    const probe = request<RunnerSessionActivityProbeRequest>(entries.get('session.probe')!).params
 
     expect(query).toMatchObject({
       projectId: 'project_1',
@@ -100,6 +104,20 @@ describe('runner control JSON contract', () => {
     expect(followup).toMatchObject({ operationId: 'operation_followup_1', turnId: 'turn_followup_1' })
     expect(stop).toMatchObject({ sessionId: 'session_1', turnId: 'turn_stop_1', operationId: 'operation_stop_1' })
     expect(command).toMatchObject({ command: 'reset', operationId: 'operation_command_1' })
+    expect(probe).toEqual({
+      sessionId: 'session_1',
+      observationId: 'observation_1',
+      runnerId: 'runner_1',
+      runtime: 'opencode',
+      runtimeSessionId: 'runtime_session_1',
+      workDir: '/work/run_101',
+      bindingEpoch: 2,
+      contextGeneration: 1,
+    })
+    expect(success<RunnerSessionActivityProbeResult>(entries.get('session.probe')!).result).toEqual({
+      probe,
+      observation: 'idle',
+    })
   })
 })
 
@@ -123,6 +141,10 @@ function assertEntry(entry: FixtureEntry): void {
 
 function request<TParams>(entry: FixtureEntry): JsonRpcRequest<TParams> {
   return entry.request as JsonRpcRequest<TParams>
+}
+
+function success<TResult>(entry: FixtureEntry): JsonRpcSuccessResponse<TResult> {
+  return entry.success as JsonRpcSuccessResponse<TResult>
 }
 
 function error(value: unknown): JsonRpcErrorResponse {

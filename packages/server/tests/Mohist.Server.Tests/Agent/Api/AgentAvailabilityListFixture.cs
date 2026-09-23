@@ -4,6 +4,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Infrastructure.Capacity;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
@@ -63,6 +64,51 @@ public sealed class CountingRunnerStatusSource : IRunnerStatusSource
 }
 
 /// <summary>
+/// Counts derived capacity reads across a request so the availability
+/// routes' single-batched-read guarantee is asserted at the wire boundary.
+/// </summary>
+public sealed class AgentCapacityReadCounter
+{
+    public int Count { get; set; }
+
+    public void Reset() => Count = 0;
+}
+
+/// <summary>
+/// Test decorator around the real <see cref="AgentCapacityStore"/> that
+/// counts reads while delegating every call, so the counted path stays the
+/// production SQLite projection.
+/// </summary>
+public sealed class CountingAgentCapacityStore : IAgentCapacityStore
+{
+    private readonly IAgentCapacityStore _inner;
+    private readonly AgentCapacityReadCounter _counter;
+
+    public CountingAgentCapacityStore(IAgentCapacityStore inner, AgentCapacityReadCounter counter)
+    {
+        _inner = inner;
+        _counter = counter;
+    }
+
+    public Task<IReadOnlyDictionary<string, AgentCapacitySnapshot>> ReadAsync(
+        string projectId,
+        IReadOnlyCollection<string> agentIds,
+        CancellationToken ct = default)
+    {
+        _counter.Count++;
+        return _inner.ReadAsync(projectId, agentIds, ct);
+    }
+
+    public Task<AgentJobCapacityClaimResult> ClaimJobAsync(
+        string jobKey, long expectedRevision, CancellationToken ct = default) =>
+        _inner.ClaimJobAsync(jobKey, expectedRevision, ct);
+
+    public Task<AgentTurnCapacityClaimResult> ClaimTurnAsync(
+        string sessionId, string expectedStateJson, string turnId, CancellationToken ct = default) =>
+        _inner.ClaimTurnAsync(sessionId, expectedStateJson, turnId, ct);
+}
+
+/// <summary>
 /// Test fixture backing <see cref="AgentAvailabilityListRoutesSpecs"/>.
 /// Replaces the registered <see cref="IRunnerStatusSource"/> with the
 /// counting fake so the route's single-read guarantee can be asserted
@@ -74,10 +120,12 @@ public sealed class AgentAvailabilityListFixture : IAsyncLifetime
     private SqliteConnection _keeper = null!;
     private AvailabilityWebApplicationFactory _factory = null!;
     private readonly CountingRunnerStatusSource _runnerStatus = new(Array.Empty<RunnerStatusView>());
+    private readonly AgentCapacityReadCounter _capacityReads = new();
 
     public HttpClient Client { get; private set; } = null!;
     public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     public CountingRunnerStatusSource RunnerStatus => _runnerStatus;
+    public AgentCapacityReadCounter CapacityReads => _capacityReads;
     public IServiceProvider Services => _factory.Services;
 
     public async ValueTask InitializeAsync()
@@ -93,7 +141,8 @@ public sealed class AgentAvailabilityListFixture : IAsyncLifetime
             $"/mohist-tests/availability-list/runner-{dbName}",
             $"/mohist-tests/availability-list/system-update-{dbName}.json",
             TimeProvider,
-            _runnerStatus);
+            _runnerStatus,
+            _capacityReads);
         Client = _factory.CreateClient();
         Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         await _factory.EnsureSchemaAsync();
@@ -112,21 +161,25 @@ public sealed class AgentAvailabilityListFixture : IAsyncLifetime
     {
         _runnerStatus.Reset();
         _runnerStatus.SetOnlineRunners(runners);
+        _capacityReads.Reset();
     }
 
     private sealed class AvailabilityWebApplicationFactory : MohistWebApplicationFactory
     {
         private readonly CountingRunnerStatusSource _runnerStatus;
+        private readonly AgentCapacityReadCounter _capacityReads;
 
         public AvailabilityWebApplicationFactory(
             string connectionString,
             string runnerRoot,
             string systemUpdateStatePath,
             FakeTimeProvider timeProvider,
-            CountingRunnerStatusSource runnerStatus)
+            CountingRunnerStatusSource runnerStatus,
+            AgentCapacityReadCounter capacityReads)
             : base(connectionString, runnerRoot, systemUpdateStatePath, timeProvider)
         {
             _runnerStatus = runnerStatus;
+            _capacityReads = capacityReads;
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -137,6 +190,14 @@ public sealed class AgentAvailabilityListFixture : IAsyncLifetime
             {
                 services.RemoveAll<IRunnerStatusSource>();
                 services.AddSingleton<IRunnerStatusSource>(_runnerStatus);
+                // The real derived store stays underneath; the decorator only
+                // counts reads so the batched-read guarantee is observable.
+                services.AddSingleton(_capacityReads);
+                services.RemoveAll<IAgentCapacityStore>();
+                services.AddScoped<AgentCapacityStore>();
+                services.AddScoped<IAgentCapacityStore>(provider => new CountingAgentCapacityStore(
+                    provider.GetRequiredService<AgentCapacityStore>(),
+                    provider.GetRequiredService<AgentCapacityReadCounter>()));
             });
         }
     }

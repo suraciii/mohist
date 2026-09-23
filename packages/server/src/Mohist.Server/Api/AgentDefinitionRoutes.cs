@@ -458,9 +458,9 @@ public sealed record AgentAvailabilitySummaryEntry(
     string AgentId,
     bool CanStartNow,
     string? WaitingReason,
-    int ActiveRuns,
+    int? ActiveRuns,
     int? MaxConcurrentRuns,
     AgentAvailabilitySummaryCapacity Capacity,
-    int QueuedCount);
+    int? QueuedCount);
 
 public sealed record AgentAvailabilitySummaryCapacity(int UsedSlots, int TotalSlots, bool Incomplete = false);

@@ -33,7 +33,9 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             $"agent-job-fail-runner-{Guid.NewGuid():N}");
         var jobKey = $"agent-job-fail-pending-{Guid.NewGuid():N}";
         var sessionId = $"session-fail-pending-{Guid.NewGuid():N}";
-        await OpenSessionAsync(sessionId, projectId);
+        var inputId = $"input-fail-pending-{Guid.NewGuid():N}";
+        var turnId = $"turn-fail-pending-{Guid.NewGuid():N}";
+        await OpenJobSessionAsync(sessionId, projectId, jobKey, inputId, turnId, "do a failing thing");
 
         var job = JobGrain(jobKey);
         await job.SubmitAsync(new AgentJobInput(
@@ -41,6 +43,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             WorkspacePath: "/tmp/agent-job-fail-pending",
             ProjectId: projectId,
             AgentSessionId: sessionId,
+            InitialInputId: inputId,
+            InitialTurnId: turnId,
             AgentId: "agent-test"));
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
@@ -89,10 +93,11 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             $"agent-job-success-pending-{Guid.NewGuid():N}");
         var jobKey = $"agent-job-success-pending-{Guid.NewGuid():N}";
         var sessionId = $"session-success-pending-{Guid.NewGuid():N}";
+        var inputId = $"input-success-pending-{Guid.NewGuid():N}";
         var turnId = $"turn-success-pending-{Guid.NewGuid():N}";
         const string runtime = "opencode";
         var runtimeSessionId = $"runtime-success-pending-{Guid.NewGuid():N}";
-        await OpenSessionAsync(sessionId, projectId);
+        await OpenJobSessionAsync(sessionId, projectId, jobKey, inputId, turnId, "do the thing", runtime: runtime);
 
         var job = JobGrain(jobKey);
         await job.SubmitAsync(new AgentJobInput(
@@ -101,8 +106,9 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             ProjectId: projectId,
             Runtime: runtime,
             AgentSessionId: sessionId,
-            AgentId: "agent-test",
-            InitialTurnId: turnId));
+            InitialInputId: inputId,
+            InitialTurnId: turnId,
+            AgentId: "agent-test"));
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
@@ -201,14 +207,19 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
             $"agent-job-timeout-{Guid.NewGuid():N}");
         var sessionId = $"session-timeout-{Guid.NewGuid():N}";
-        await OpenSessionAsync(sessionId, projectId);
+        var jobKey = $"agent-job-timeout-{Guid.NewGuid():N}";
+        var inputId = $"input-timeout-{Guid.NewGuid():N}";
+        var turnId = $"turn-timeout-{Guid.NewGuid():N}";
+        await OpenJobSessionAsync(sessionId, projectId, jobKey, inputId, turnId, "never reports");
 
-        var job = JobGrain($"agent-job-timeout-{Guid.NewGuid():N}");
+        var job = JobGrain(jobKey);
         await job.SubmitAsync(new AgentJobInput(
             Prompt: "never reports",
             WorkspacePath: "/tmp/agent-job-timeout",
             ProjectId: projectId,
             AgentSessionId: sessionId,
+            InitialInputId: inputId,
+            InitialTurnId: turnId,
             AgentId: "agent-test",
             TimeoutMilliseconds: 10_000));
 
@@ -264,20 +275,23 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         var (runnerId, projectId) = await RegisterAgentJobRunnerAsync(
             $"agent-job-dup-{Guid.NewGuid():N}");
         var sessionId = $"session-dup-{Guid.NewGuid():N}";
+        var jobKey = $"agent-job-dup-{Guid.NewGuid():N}";
+        var inputId = $"input-dup-{Guid.NewGuid():N}";
         var turnId = $"turn-dup-{Guid.NewGuid():N}";
         const string runtime = "opencode";
         var runtimeSessionId = $"runtime-dup-{Guid.NewGuid():N}";
-        await OpenSessionAsync(sessionId, projectId);
+        await OpenJobSessionAsync(sessionId, projectId, jobKey, inputId, turnId, "do", runtime: runtime);
 
-        var job = JobGrain($"agent-job-dup-{Guid.NewGuid():N}");
+        var job = JobGrain(jobKey);
         await job.SubmitAsync(new AgentJobInput(
             Prompt: "do",
             WorkspacePath: "/tmp/agent-job-dup",
             ProjectId: projectId,
             Runtime: runtime,
             AgentSessionId: sessionId,
-            AgentId: "agent-test",
-            InitialTurnId: turnId));
+            InitialInputId: inputId,
+            InitialTurnId: turnId,
+            AgentId: "agent-test"));
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;

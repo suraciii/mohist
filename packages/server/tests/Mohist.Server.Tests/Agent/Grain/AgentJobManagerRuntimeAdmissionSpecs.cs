@@ -131,6 +131,23 @@ public sealed class AgentJobManagerRuntimeAdmissionSpecs : AgentJobGrainTestSupp
         var jobId = $"manager-runtime-job-{Guid.NewGuid():N}";
         var sessionId = $"manager-session-{Guid.NewGuid():N}";
         var job = JobGrain(jobId);
+        // The manager Agent is a stored definition in the manager project,
+        // and the Job's occupancy is attributed through a persisted session
+        // carrying the same canonical identity labels and this Job's own
+        // initial Input and Turn.
+        await _fixture.SeedAgentAsync(
+            SlackDeliveryOwnerIds.ManagerProjectId,
+            "manager-agent",
+            maxConcurrentRuns: null);
+        await OpenJobSessionAsync(
+            sessionId,
+            SlackDeliveryOwnerIds.ManagerProjectId,
+            jobId,
+            $"manager-initial-input:{jobId}",
+            $"manager-initial-turn:{jobId}",
+            "manager request",
+            agentId: "manager-agent",
+            runtime: runtime);
         await job.SubmitAsync(new AgentJobInput(
             Prompt: "manager request",
             ProjectId: SlackDeliveryOwnerIds.ManagerProjectId,
@@ -138,6 +155,8 @@ public sealed class AgentJobManagerRuntimeAdmissionSpecs : AgentJobGrainTestSupp
             AgentId: "manager-agent",
             AgentSessionId: sessionId,
             PinnedRunnerId: runnerId,
+            InitialInputId: $"manager-initial-input:{jobId}",
+            InitialTurnId: $"manager-initial-turn:{jobId}",
             ExecutionSource: AgentExecutionSources.Slack,
             SlackExecutionContext: ManagerContext(jobId, sessionId)));
         await _fixture.DispatchObserver.WaitForAssignmentPreparedAsync(jobId, TimeSpan.FromSeconds(5));

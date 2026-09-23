@@ -447,6 +447,7 @@ public class AgentSessionTransactionalEventAppendTests : IAsyncLifetime
             ProjectId: projectId,
             WorkflowRunId: workflowRunId,
             SessionName: "sess-name",
+            AgentId: "workflow-agent",
             IssueNumber: issueNumber,
             EpicNumber: epicNumber,
             Stage: stage));

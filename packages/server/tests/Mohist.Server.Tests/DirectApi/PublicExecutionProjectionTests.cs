@@ -208,6 +208,51 @@ public sealed class PublicExecutionProjectionTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task IncompleteDispatchEvidence_BlocksAdmissionWithoutClaimingCapacityIsFull()
+    {
+        await _harness.SeedJobAsync(
+            "job_dispatch_pending",
+            "proj_pub",
+            "agent_pub",
+            "session_dispatch_pending",
+            "input_dispatch_pending",
+            "turn_dispatch_pending",
+            waitingReason: "dispatch-pending");
+        await _harness.SaveSessionAsync(PublicProjectionTestSupport.WithFacts(
+            _harness.BuildSession("session_dispatch_pending", "proj_pub", "agent_pub"),
+            AgentSessionActivity.Active,
+            inputs: [PublicProjectionTestSupport.Input("input_dispatch_pending", "job_dispatch_pending")],
+            turns: [PublicProjectionTestSupport.Turn(
+                "turn_dispatch_pending", "input_dispatch_pending", "job_dispatch_pending", AgentTurnStatus.Queued)]));
+
+        Assert.True(await _harness.Engine.ProcessPendingAsync());
+
+        foreach (var (kind, id) in new[]
+        {
+            ("job", "job_dispatch_pending"),
+            ("input", "input_dispatch_pending"),
+            ("turn", "turn_dispatch_pending"),
+        })
+        {
+            var row = await _harness.SnapshotAsync(kind, id);
+            Assert.NotNull(row);
+            var snapshot = ParseSnapshot(row);
+            Assert.Equal(PublicExecutionFieldValues.AdmissionBlocked, snapshot.Admission);
+            Assert.Null(snapshot.ReasonCode);
+            Assert.Null(snapshot.Error);
+        }
+
+        var sessionEvent = JsonSerializer.Deserialize<PublicExecutionRead>(
+            (await _harness.EventsAsync("session_dispatch_pending"))
+                .Single(row => row.Type == PublicSessionEventTypes.TurnQueued)
+                .PayloadJson,
+            JSON.PublicApi)!;
+        Assert.Equal(PublicExecutionFieldValues.AdmissionBlocked, sessionEvent.Admission);
+        Assert.Null(sessionEvent.ReasonCode);
+        Assert.Null(sessionEvent.Error);
+    }
+
+    [Fact]
     public async Task LifecycleHistory_PreservesCompressedQueuedRunningAndTerminalTransitions()
     {
         await _harness.SeedJobAsync("job_history_1", "proj_pub", "agent_pub", "session_history_1", "input_history_1", "turn_history_1");

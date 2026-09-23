@@ -27,9 +27,23 @@ public class AgentStore : IStateStore<DomainAgent>
         var row = await db.Agents.FindAsync(key);
         var json = Serialize(state);
         if (row is null)
-            db.Agents.Add(new AgentRow { Id = key, State = json });
+        {
+            db.Agents.Add(new AgentRow
+            {
+                Id = key,
+                State = json,
+                ProjectId = state.ProjectId,
+                Name = state.Name,
+                Status = state.Status,
+            });
+        }
         else
+        {
             row.State = json;
+            row.ProjectId = state.ProjectId;
+            row.Name = state.Name;
+            row.Status = state.Status;
+        }
         await db.SaveChangesAsync();
     }
 

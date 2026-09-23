@@ -477,6 +477,7 @@ public class UnifiedSessionRoutesSpecs
         {
             [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
             [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+            [GenericAgentSessionMetadata.AgentId] = "workflow-agent",
             [AgentSessionQueryMetadataKeys.WorkflowRunId] = workflowRunId,
             [AgentSessionQueryMetadataKeys.SessionName] = sessionName,
             [AgentSessionQueryMetadataKeys.IssueNumber] = issueNumber.ToString(),

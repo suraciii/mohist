@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
@@ -445,6 +447,68 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task AdministrativeRemoval_RetriesAllWorkflowGenerationsAfterReload()
+    {
+        var workflow = await StartWorkflowWithoutRunnerAsync(SingleStage(checks: []));
+        var projectId = TestProjectId(_workflowId!);
+        var runnerId = $"runner-removal-closeout-{Guid.NewGuid():N}";
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await IssueRunnerCredentialAsync(runnerId);
+        await runner.RegisterAsync(RunnerInfoFor(runnerId, _workflowId!), ReplacementGeneration);
+
+        await workflow.AssignWorkerAsync(runnerId);
+        var dispatch = Services.GetRequiredService<Mohist.Server.Runner.Services.DispatchService>();
+        var current = Assert.Single((await dispatch.PollAsync(
+            runnerId,
+            DispatchTestExtensions.ReadyPollRequestForGeneration(ReplacementGeneration))).Dispatches);
+
+        var staleRunId = $"wf-removal-stale-{Guid.NewGuid():N}";
+        var staleWorkflow = Grains.GetGrain<IWorkflowGrain>(staleRunId);
+        await SeedWorkflowTemplateAsync(staleRunId, SingleStage(checks: []), projectId);
+        await staleWorkflow.StartAsync(TestInput(projectId));
+        await staleWorkflow.AssignWorkerAsync(runnerId);
+        await staleWorkflow.ClaimNextAsync(runnerId, "older-generation");
+        var staleClaim = Assert.Single((await LoadRunAsync(staleRunId)).Stages.Single().Tasks);
+
+        var failures = _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<ReportPersistenceFailureProbe>();
+        failures.FailNextWorkflowReport(staleRunId, staleClaim.WorkId!);
+        await runner.RegisterAsync(RunnerInfoFor(runnerId, _workflowId!), ReplacementGeneration);
+
+        var storage = _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<IGrainStorage>();
+        var retained = new GrainState<RunnerState>();
+        await storage.ReadStateAsync("runner", runner.GetGrainId(), retained);
+        Assert.Equal("older-generation", retained.State.ClosingProcessGeneration);
+
+        failures.FailNextWorkflowReport(current.WorkflowRunId, current.WorkId);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            runner.RevokeExecutionAuthorityAsync(_fixture.TimeProvider.GetUtcNow()));
+        Assert.Equal("Running", await workflow.GetRunStatusAsync());
+        var pending = new GrainState<RunnerState>();
+        await storage.ReadStateAsync("runner", runner.GetGrainId(), pending);
+        Assert.Equal(
+            RunnerAdministrativeRemovalPhase.AuthorityFenced,
+            pending.State.AdministrativeRemoval!.Phase);
+        Assert.Equal("older-generation", pending.State.ClosingProcessGeneration);
+
+        await TestLifecycle.DeactivateAndWait(runner, Grains);
+        runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        _ = await runner.GetRuntimeStateAsync();
+
+        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
+        Assert.Equal("runner-lost", (await LoadRunAsync(current.WorkflowRunId)).Failure?.Message);
+        Assert.Equal("Failed", await staleWorkflow.GetRunStatusAsync());
+        Assert.Equal("runner-lost", (await LoadRunAsync(staleRunId)).Failure?.Message);
+
+        var completed = new GrainState<RunnerState>();
+        await storage.ReadStateAsync("runner", runner.GetGrainId(), completed);
+        Assert.Equal(
+            RunnerAdministrativeRemovalPhase.Completed,
+            completed.State.AdministrativeRemoval!.Phase);
+        Assert.Null(completed.State.ClosingProcessGeneration);
+    }
+
+    [Fact]
     public async Task SupersededGenerationOrphan_WhenDiscoveryCannotRun_RetriesOnThePresenceReminder()
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));
@@ -511,6 +575,14 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var state = new GrainState<RunnerState>();
         await storage.ReadStateAsync("runner", runner.GetGrainId(), state);
         Assert.Null(state.State.ClosingProcessGeneration);
+    }
+
+    private async Task IssueRunnerCredentialAsync(string runnerId)
+    {
+        using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateScope();
+        var credential = await scope.ServiceProvider.GetRequiredService<ICredentialStore>()
+            .CreateRunnerCredentialAsync(MohistPrincipal.AdminPrincipalId, runnerId);
+        Assert.NotNull(credential);
     }
 
     private const string ReplacementGeneration = "replacement-generation";

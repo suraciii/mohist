@@ -26,7 +26,8 @@ public sealed class AgentSessionCanonicalRefreshGrainSpecs : AgentSessionGrainPe
             await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-1"));
         else
             await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-                "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job"));
+                "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job",
+                Metadata: Open().Metadata));
 
         var publicationCount = Fixture.TranscriptPublisher.Published.Count;
         var entered = Signal();
@@ -172,7 +173,8 @@ public sealed class AgentSessionCanonicalRefreshGrainSpecs : AgentSessionGrainPe
             await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-1"));
         else
             await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
-                "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job"));
+                "initial-input", "initial-turn", "initial prompt", "agent-connection", "initial-job",
+                Metadata: Open().Metadata));
         var accepted = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
             "follow-up", "agent-session-followup", "terminal-key", AllowPendingInitialLaunch: !startExecuting));
         var eventCount = Fixture.StateStore.Events.Count;

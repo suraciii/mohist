@@ -6,11 +6,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure.Capacity;
+using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -19,6 +23,8 @@ using Orleans.Configuration;
 using Orleans.Reminders;
 using Orleans.TestingHost;
 using Xunit;
+using AgentDomain = Mohist.Server.Agent.Domain.Agent;
+using AgentStatusDomain = Mohist.Server.Agent.Domain.AgentStatus;
 
 namespace Mohist.Server.TestSupport;
 
@@ -26,16 +32,63 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
 {
     public InProcessTestCluster Cluster { get; private set; } = null!;
     public IGrainFactory Grains => Cluster.Client;
-    public FakeAgentSessionStore StateStore { get; }
-    public FakeAgentSessionTranscriptStore TranscriptStore { get; }
-    public RecordingTranscriptEventPublisher TranscriptPublisher { get; }
-    public RecordingFollowupDispatchScheduler FollowupDispatch { get; } = new();
-    public AgentSessionPersistenceTestProbe Persistence { get; }
+    public ObservableAgentSessionStore StateStore { get; private set; } = null!;
+    public FakeAgentSessionTranscriptStore TranscriptStore { get; private set; } = null!;
+    public RecordingTranscriptEventPublisher TranscriptPublisher { get; private set; } = null!;
+    public RecordingFollowupDispatchScheduler FollowupDispatch { get; private set; } = null!;
+    public AgentSessionPersistenceTestProbe Persistence { get; private set; } = null!;
     public AgentSessionGrainTestLogger<AgentSessionGrain> Logger { get; } = new();
     public FakeTimeProvider TimeProvider { get; } = new(TestTime.UtcNow);
     public string ConnectionString { get; private set; } = null!;
+    public IServiceProvider SiloServices => Cluster.GetSiloServiceProvider(null);
 
     public MohistDbContext CreateDbContext() => new(_dbOptions);
+
+    /// <summary>
+    /// Seeds a real Project Agent definition so the derived capacity store
+    /// can read the live limit and identity for the sessions a successful
+    /// spec dispatches. Negative specs deliberately leave the definition
+    /// absent.
+    /// </summary>
+    public async Task SeedAgentAsync(string projectId, string agentId, int? maxConcurrentRuns)
+    {
+        var now = TimeProvider.GetUtcNow().UtcDateTime;
+        var agent = new AgentDomain
+        {
+            Id = agentId,
+            ProjectId = projectId,
+            Name = $"agent-{agentId}",
+            Description = "spec",
+            Instructions = "spec",
+            Skills = Array.Empty<string>(),
+            MaxConcurrentRuns = maxConcurrentRuns,
+            Status = AgentStatusDomain.Active,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        var rowId = GrainKey.Agent(projectId, agentId);
+        await using var db = CreateDbContext();
+        var existing = await db.Agents.FindAsync(rowId);
+        if (existing is null)
+        {
+            db.Agents.Add(new AgentRow
+            {
+                Id = rowId,
+                ProjectId = projectId,
+                Name = agent.Name,
+                Status = agent.Status,
+                State = AgentStore.Serialize(agent),
+            });
+        }
+        else
+        {
+            existing.ProjectId = projectId;
+            existing.Name = agent.Name;
+            existing.Status = agent.Status;
+            existing.State = AgentStore.Serialize(agent);
+        }
+        await db.SaveChangesAsync();
+    }
 
     public void Reset()
     {
@@ -48,14 +101,6 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
 
     private SqliteConnection _keeper = null!;
     private DbContextOptions<MohistDbContext> _dbOptions = null!;
-    public AgentSessionGrainFixture()
-    {
-        StateStore = new FakeAgentSessionStore();
-        TranscriptStore = new FakeAgentSessionTranscriptStore(StateStore.IsCurrentScenario);
-        TranscriptPublisher = new RecordingTranscriptEventPublisher(StateStore.IsCurrentScenario);
-        Persistence = new AgentSessionPersistenceTestProbe(
-            () => TimeProvider.Advance(TimeSpan.FromSeconds(1)));
-    }
 
     public ValueTask InitializeAsync()
     {
@@ -68,6 +113,26 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning))
             .Options;
 
+        // The real Session store owns the persisted document in the fixture's
+        // own hermetic database, so a capacity claim compares and patches the
+        // same document the grain saves; the decorator only observes, fences
+        // stale scenarios, and injects failures.
+        var eventStore = new NoopEventStore();
+        var dispatchSignal = new Mohist.Server.Infrastructure.Events.EventDispatchSignal();
+        StateStore = new ObservableAgentSessionStore(
+            new AgentSessionStore(
+                new TestDbContextFactory(_dbOptions),
+                eventStore,
+                NullLogger<AgentSessionStore>.Instance,
+                dispatchSignal),
+            _dbOptions);
+        Persistence = new AgentSessionPersistenceTestProbe(
+            () => TimeProvider.Advance(TimeSpan.FromSeconds(1)));
+
+        TranscriptStore = new FakeAgentSessionTranscriptStore(StateStore.IsCurrentScenario);
+        TranscriptPublisher = new RecordingTranscriptEventPublisher(StateStore.IsCurrentScenario);
+        FollowupDispatch = new RecordingFollowupDispatchScheduler(StateStore.IsCurrentScenario);
+
         var builder = new InProcessTestClusterBuilder().UseLogicalPorts();
         builder.ConfigureSilo((_, siloBuilder) =>
         {
@@ -78,19 +143,22 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
                 options.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100));
             siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(ConnectionString));
             siloBuilder.Services.AddSingleton(new Mohist.Server.Infrastructure.Events.EventDispatchSignal());
+            // The derived capacity store is the follow-up admission authority;
+            // it reads the same hermetic database the real Session store writes.
+            siloBuilder.Services.AddScoped<IAgentCapacityStore, AgentCapacityStore>();
 
             siloBuilder.Services.AddSingleton<IAgentSessionStore>(StateStore);
             siloBuilder.Services.AddSingleton<IAgentSessionTranscriptStore>(TranscriptStore);
             siloBuilder.Services.AddSingleton<ITranscriptEventPublisher>(TranscriptPublisher);
             siloBuilder.Services.AddSingleton<IFollowupDispatchScheduler>(FollowupDispatch);
             siloBuilder.Services.AddSingleton<IAgentSessionPersistenceObserver>(Persistence);
-             siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
-             siloBuilder.Services.AddSingleton<RunnerConnectionTracker>();
-              siloBuilder.Services.AddSingleton<IAgentSessionConnectionRegistry>(sp =>
-                  sp.GetRequiredService<RunnerConnectionTracker>());
-             siloBuilder.Services.AddSingleton<ILogger<AgentSessionGrain>>(Logger);
-             siloBuilder.Services.AddSingleton<IEventStore>(new NoopEventStore());
-             siloBuilder.Services.AddSingleton<IBackgroundTaskLauncher, BackgroundTaskLauncher>();
+            siloBuilder.Services.AddSingleton<TimeProvider>(TimeProvider);
+            siloBuilder.Services.AddSingleton<RunnerConnectionTracker>();
+            siloBuilder.Services.AddSingleton<IAgentSessionConnectionRegistry>(sp =>
+                sp.GetRequiredService<RunnerConnectionTracker>());
+            siloBuilder.Services.AddSingleton<ILogger<AgentSessionGrain>>(Logger);
+            siloBuilder.Services.AddSingleton<IEventStore>(new NoopEventStore());
+            siloBuilder.Services.AddSingleton<IBackgroundTaskLauncher, BackgroundTaskLauncher>();
             siloBuilder.Services.AddScoped<AgentQuerier>();
             siloBuilder.Services.AddScoped<AgentJobQuerier>();
         });
@@ -136,157 +204,6 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
 
 
 }
-
-    public sealed class FakeAgentSessionStore : IAgentSessionStore
-    {
-        // State is keyed by session so a lingering grain (the test cluster is
-        // shared across tests) flushing on its real-time persist timer cannot
-        // clobber another session's persisted state and break reactivation.
-        // Concurrent: grains activate and flush on different threads, so a
-        // plain Dictionary corrupts under concurrent read/write.
-        private readonly ConcurrentDictionary<string, AgentSession> _states = new(StringComparer.Ordinal);
-        private readonly ConcurrentDictionary<string, long> _scenarioBySession = new(StringComparer.Ordinal);
-        private readonly object _observationGate = new();
-        private long _scenario;
-        private string? _lastSavedKey;
-
-        // Most-recently-saved state, for synchronous test assertions. Kept as
-        // last-write-wins to preserve the existing single-slot semantics.
-        public AgentSession? State =>
-            _lastSavedKey is not null && _states.TryGetValue(_lastSavedKey, out var state) ? state : null;
-
-        public List<AgentSessionEvent> Events { get; } = [];
-        public int SaveCount { get; private set; }
-        public Func<string, Task>? BeforeSaveAsync { get; set; }
-        private (string Key, Exception Error)? _nextFailure;
-        private string? _commitThenThrowNextKey;
-
-        public void FailNextSave(string key, Exception error) => _nextFailure = (key, error);
-
-        public void CommitThenThrowNextSave(string key) => _commitThenThrowNextKey = key;
-
-        public void Reset()
-        {
-            lock (_observationGate)
-            {
-                _scenario++;
-                _nextFailure = null;
-                SaveCount = 0;
-                _lastSavedKey = null;
-                Events.Clear();
-                _commitThenThrowNextKey = null;
-                BeforeSaveAsync = null;
-            }
-        }
-
-        public bool Contains(string key) =>
-            IsCurrentScenario(key) && _states.ContainsKey(key);
-
-        public Task<AgentSession?> LoadAsync(string key) =>
-            Task.FromResult(
-                IsCurrentScenario(key) && _states.TryGetValue(key, out var state)
-                    ? Clone(state)
-                    : null);
-
-        public Task<IReadOnlyList<AgentSession>> ListAsync() =>
-            Task.FromResult<IReadOnlyList<AgentSession>>(_states
-                .Where(entry => IsCurrentScenario(entry.Key))
-                .Select(entry => Clone(entry.Value))
-                .ToArray());
-
-        public Task<IReadOnlyList<AgentSessionReconcileBinding>> ListByRunnerForReconcileAsync(
-            string runnerId,
-            CancellationToken ct = default)
-        {
-            var matches = new List<AgentSessionReconcileBinding>();
-            foreach (var entry in _states)
-            {
-                if (!IsCurrentScenario(entry.Key))
-                    continue;
-
-                var state = entry.Value;
-                if (!string.Equals(state.Runtime.RunnerId, runnerId, StringComparison.Ordinal)
-                    || state.Status.Activity == AgentSessionActivity.Idle
-                    || string.IsNullOrWhiteSpace(state.Runtime.Runtime)
-                    || string.IsNullOrWhiteSpace(state.Status.AgentRuntimeSessionId)
-                    || string.IsNullOrWhiteSpace(state.Runtime.WorkDir))
-                    continue;
-
-                matches.Add(new AgentSessionReconcileBinding(
-                    state.Id,
-                    state.Runtime.Runtime!,
-                    state.Status.AgentRuntimeSessionId,
-                    state.Runtime.WorkDir));
-            }
-
-            return Task.FromResult<IReadOnlyList<AgentSessionReconcileBinding>>(matches);
-        }
-
-        public Task SaveAsync(string key, AgentSession state)
-        {
-            ThrowIfPending(key);
-            _states[key] = Clone(state);
-            ObserveSave(key);
-            return Task.CompletedTask;
-        }
-
-        public async Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default)
-        {
-            if (IsCurrentScenario(key) && BeforeSaveAsync is { } beforeSave)
-                await beforeSave(key);
-            var commitThenThrow = string.Equals(_commitThenThrowNextKey, key, StringComparison.Ordinal);
-            if (!commitThenThrow)
-                ThrowIfPending(key);
-            _states[key] = Clone(state);
-            ObserveSave(key, events);
-            if (commitThenThrow)
-            {
-                _commitThenThrowNextKey = null;
-                throw new InvalidOperationException("store committed before transport failure");
-            }
-        }
-
-        public Task DeleteAsync(string key)
-        {
-            _states.TryRemove(key, out _);
-            if (string.Equals(_lastSavedKey, key, StringComparison.Ordinal))
-                _lastSavedKey = null;
-            return Task.CompletedTask;
-        }
-
-        private void ThrowIfPending(string key)
-        {
-            if (_nextFailure is not { } failure ||
-                !string.Equals(failure.Key, key, StringComparison.Ordinal))
-                return;
-
-            _nextFailure = null;
-            throw failure.Error;
-        }
-
-        public bool IsCurrentScenario(string key) =>
-            _scenarioBySession.TryGetValue(key, out var scenario) && scenario == Volatile.Read(ref _scenario);
-
-        private void ObserveSave(string key, IReadOnlyList<AgentSessionEvent>? events = null)
-        {
-            lock (_observationGate)
-            {
-                var scenario = _scenarioBySession.GetOrAdd(key, _scenario);
-                if (scenario != _scenario)
-                    return;
-
-                SaveCount++;
-                _lastSavedKey = key;
-                if (events is not null)
-                    Events.AddRange(events);
-            }
-        }
-
-        private static AgentSession Clone(AgentSession state) =>
-            JSON.Deserialize<AgentSession>(JSON.Serialize(state))
-            ?? throw new InvalidOperationException("Failed to clone AgentSession state.");
-    }
-
 public sealed class FakeAgentSessionTranscriptStore : IAgentSessionTranscriptStore
 {
     private readonly Func<string, bool> _isCurrentScenario;
@@ -387,3 +304,228 @@ public sealed record LogEntry(
     string Message,
     Exception? Exception,
     IReadOnlyDictionary<string, object?> State);
+
+/// <summary>
+/// Observable, fault-injectable decorator over the real
+/// <see cref="AgentSessionStore"/> in the fixture's own hermetic migrated
+/// database. The real store stays the only owner of the persisted document, so
+/// an atomic capacity claim compares and patches the same State the grain
+/// saves; there is no in-memory mirror that a direct capacity commit could
+/// leave stale.
+///
+/// The cluster is shared across specs, so a session belongs to the scenario
+/// that first wrote it. A write from an earlier scenario — a lingering grain
+/// flushing on its persist timer after its spec finished — is fenced before it
+/// reaches SQLite, and <see cref="Reset"/> removes that scenario's rows so one
+/// spec's queued or claimed work can never occupy another spec's capacity
+/// view. Observation probes (save count, events, last saved state) stay
+/// scenario-scoped exactly as the previous fake scoped them.
+/// </summary>
+public sealed class ObservableAgentSessionStore : IAgentSessionStore
+{
+    private const int CleanupChunkSize = 400;
+
+    private readonly IAgentSessionStore _inner;
+    private readonly DbContextOptions<MohistDbContext> _dbOptions;
+    private readonly object _gate = new();
+    private readonly Dictionary<string, long> _scenarioBySession = new(StringComparer.Ordinal);
+    private long _scenario;
+    private string? _lastSavedKey;
+    private AgentSession? _lastSavedState;
+    private (string Key, Exception Error)? _nextFailure;
+    private string? _commitThenThrowNextKey;
+
+    public ObservableAgentSessionStore(
+        IAgentSessionStore inner,
+        DbContextOptions<MohistDbContext> dbOptions)
+    {
+        _inner = inner;
+        _dbOptions = dbOptions;
+        IsCurrentScenario = IsCurrentScenarioCore;
+    }
+
+    public Func<string, bool> IsCurrentScenario { get; private set; }
+
+    // Most-recently-saved state, for synchronous test assertions. Single-slot
+    // last-write-wins, scoped to the running scenario.
+    public AgentSession? State
+    {
+        get
+        {
+            lock (_gate)
+                return _lastSavedKey is not null ? _lastSavedState : null;
+        }
+    }
+
+    public List<AgentSessionEvent> Events { get; } = [];
+    public int SaveCount { get; private set; }
+    public Func<string, Task>? BeforeSaveAsync { get; set; }
+
+    public void FailNextSave(string key, Exception error)
+    {
+        lock (_gate)
+            _nextFailure = (key, error);
+    }
+
+    public void CommitThenThrowNextSave(string key)
+    {
+        lock (_gate)
+            _commitThenThrowNextKey = key;
+    }
+
+    public async Task<AgentSession?> LoadAsync(string key) => await _inner.LoadAsync(key);
+
+    public Task<IReadOnlyList<AgentSession>> ListAsync() => _inner.ListAsync();
+
+    public Task<IReadOnlyList<AgentSessionReconcileBinding>> ListByRunnerForReconcileAsync(
+        string runnerId,
+        CancellationToken ct = default) =>
+        _inner.ListByRunnerForReconcileAsync(runnerId, ct);
+
+    public async Task<string?> ReadStateJsonAsync(string key, CancellationToken ct = default) =>
+        await _inner.ReadStateJsonAsync(key, ct);
+
+    public async Task SaveAsync(string key, AgentSession state)
+    {
+        if (!ObserveSaveKey(key))
+            return;
+        ThrowIfPending(key);
+        await _inner.SaveAsync(key, state);
+        ObserveSave(key, state, null);
+    }
+
+    public async Task SaveAsync(
+        string key,
+        AgentSession state,
+        IReadOnlyList<AgentSessionEvent> events,
+        CancellationToken ct = default)
+    {
+        if (!ObserveSaveKey(key))
+            return;
+        if (IsCurrentScenario(key) && BeforeSaveAsync is { } beforeSave)
+            await beforeSave(key);
+        var commitThenThrow = IsCommitThenThrow(key);
+        if (!commitThenThrow)
+            ThrowIfPending(key);
+        await _inner.SaveAsync(key, state, events, ct);
+        ObserveSave(key, state, events);
+        if (commitThenThrow)
+        {
+            ConsumeCommitThenThrow(key);
+            throw new InvalidOperationException("store committed before transport failure");
+        }
+    }
+
+    public Task DeleteAsync(string key) => _inner.DeleteAsync(key);
+
+    public void Reset()
+    {
+        string[] staleKeys;
+        lock (_gate)
+        {
+            _scenario++;
+            staleKeys = _scenarioBySession
+                .Where(entry => entry.Value != _scenario)
+                .Select(entry => entry.Key)
+                .ToArray();
+            _nextFailure = null;
+            _commitThenThrowNextKey = null;
+            SaveCount = 0;
+            _lastSavedKey = null;
+            _lastSavedState = null;
+            Events.Clear();
+            BeforeSaveAsync = null;
+            IsCurrentScenario = IsCurrentScenarioCore;
+        }
+
+        DeleteScenarioRows(staleKeys);
+    }
+
+    private bool IsCurrentScenarioCore(string key)
+    {
+        lock (_gate)
+            return _scenarioBySession.TryGetValue(key, out var scenario)
+                && scenario == _scenario;
+    }
+
+    /// <summary>
+    /// Records the writing scenario and reports whether the write belongs to
+    /// it. A session first written by an earlier scenario is fenced here, so a
+    /// lingering grain cannot resurrect its row over the current spec.
+    /// </summary>
+    private bool ObserveSaveKey(string key)
+    {
+        lock (_gate)
+        {
+            if (!_scenarioBySession.TryGetValue(key, out var scenario))
+            {
+                scenario = _scenario;
+                _scenarioBySession[key] = scenario;
+            }
+
+            return scenario == _scenario;
+        }
+    }
+
+    private void ObserveSave(string key, AgentSession state, IReadOnlyList<AgentSessionEvent>? events)
+    {
+        lock (_gate)
+        {
+            SaveCount++;
+            _lastSavedKey = key;
+            _lastSavedState = Clone(state);
+            if (events is not null)
+                Events.AddRange(events);
+        }
+    }
+
+    private void ThrowIfPending(string key)
+    {
+        (string Key, Exception Error)? failure;
+        lock (_gate)
+        {
+            failure = _nextFailure;
+            if (failure is null || !string.Equals(failure.Value.Key, key, StringComparison.Ordinal))
+                return;
+            _nextFailure = null;
+        }
+
+        throw failure.Value.Error;
+    }
+
+    private bool IsCommitThenThrow(string key)
+    {
+        lock (_gate)
+            return string.Equals(_commitThenThrowNextKey, key, StringComparison.Ordinal);
+    }
+
+    private void ConsumeCommitThenThrow(string key)
+    {
+        lock (_gate)
+        {
+            if (string.Equals(_commitThenThrowNextKey, key, StringComparison.Ordinal))
+                _commitThenThrowNextKey = null;
+        }
+    }
+
+    private void DeleteScenarioRows(string[] keys)
+    {
+        if (keys.Length == 0)
+            return;
+        using var db = new MohistDbContext(_dbOptions);
+        db.Database.OpenConnection();
+        foreach (var chunk in keys.Chunk(CleanupChunkSize))
+        {
+            db.AgentSessionLifecycleTransitions
+                .Where(row => chunk.Contains(row.SessionId))
+                .ExecuteDelete();
+            db.AgentSessions
+                .Where(row => chunk.Contains(row.Id))
+                .ExecuteDelete();
+        }
+    }
+
+    private static AgentSession Clone(AgentSession state) =>
+        JSON.Deserialize<AgentSession>(JSON.Serialize(state))
+        ?? throw new InvalidOperationException("Failed to clone AgentSession state.");
+}

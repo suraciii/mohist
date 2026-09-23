@@ -242,6 +242,13 @@ export class RunnerHost {
               this.agentSessionRuntimeEventQueue,
             ),
           },
+          sessionProbe: {
+            runnerId: options.runnerId,
+            enabledRuntimes: this.enabledAgentRuntimes,
+            openCode: () => this.openCodeRuntime,
+            pi: () => this.piRuntime,
+            codex: () => this.codexRuntime,
+          },
         }),
         agentSessionRuntimeEventQueue: this.agentSessionRuntimeEventQueue,
         processGeneration: this.processGeneration,
@@ -550,6 +557,7 @@ export class RunnerHost {
         this.skillResolver,
         this.namedWorkspaceManager,
         {
+          processGeneration: this.processGeneration,
           onManagerRuntimeSessionReady: ({ boundary, ...binding }) => {
             if (!this.managerExecutionRegistry.bindRuntime(boundary, binding)) {
               throw new Error('Manager runtime became ready after its execution boundary was released')

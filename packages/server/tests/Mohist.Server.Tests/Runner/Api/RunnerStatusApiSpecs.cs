@@ -255,6 +255,7 @@ public class RunnerStatusApiSpecs
             TestRunnerGenerationExtensions.ProcessGeneration);
         await runner.UpdateAsync(2);
         await CreateActiveCredentialAsync(runnerId);
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
 
         var workflowId = $"wf-readonly-{Guid.NewGuid():N}";
         await AssignActiveWorkForTestAsync(runnerId, workflowId, "work-readonly-1", "task", "build", "Read-only status", projectId);
@@ -311,6 +312,7 @@ public class RunnerStatusApiSpecs
             ConnectionGeneration: DispatchTestExtensions.ConnectionGeneration),
             TestRunnerGenerationExtensions.ProcessGeneration);
         await CreateActiveCredentialAsync(runnerId);
+        await _fixture.SeedAgentAsync(projectId, "agent-test");
         var jobId = $"job-capacity-{Guid.NewGuid():N}";
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
         await job.SubmitAsync(new AgentJobInput(

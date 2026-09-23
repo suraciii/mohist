@@ -16,6 +16,7 @@ import type {
 import type { BuildInfo } from '../runtime/build-info.js'
 import { getSegments } from '../core/json-path.js'
 import type { TaskLogBatch } from '../runtime/task-log.js'
+import type { ArtifactUploadRequest, ArtifactUploadResponse, TaskLogUploadResult } from './connection-upload-models.js'
 import { parsePolledDispatch } from './connection-dispatch.js'
 import { reportWork } from './connection-report.js'
 import { RunnerTransportError } from './connection-errors.js'
@@ -37,6 +38,7 @@ export {
   type RunnerRequestTransport,
   type RunnerTransportOptions,
 } from './connection-transport.js'
+export type { ArtifactUploadRequest, ArtifactUploadResponse, TaskLogUploadResult } from './connection-upload-models.js'
 import {
   getWorkspaceReclaimability as getWorkspaceReclaimabilityViaTransport,
   reportWorkspaceProvisioned as reportWorkspaceProvisionedViaTransport,
@@ -63,6 +65,8 @@ export {
 } from './connection-workspaces.js'
 import type {
   AgentInputAttachmentContent,
+  AgentJobInitialInputReceipt,
+  AgentJobInitialRecoveryReceipt,
   AgentSession,
   AgentSessionReconcileBinding,
   AgentSessionRuntimeEventAcceptance,
@@ -431,31 +435,6 @@ export class ServerConnection {
     )
   }
 
-  async recoverMissingWorkflowAgentSession(
-    projectId: string,
-    workflowRunId: string,
-    sessionName: string,
-    body: unknown,
-    signal: AbortSignal,
-  ): Promise<WorkflowAgentSession> {
-    const response = await this.requestTransport.request(
-      'recoverMissingWorkflowAgentSession',
-      this.url(
-        `sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/recover-missing`,
-      ),
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-        signal,
-      },
-    )
-    return requireWorkflowSessionPayload(
-      await this.requestTransport.readJson<unknown>(response, 'recoverMissingWorkflowAgentSession'),
-      'recoverMissingWorkflowAgentSession',
-    )
-  }
-
   async resetWorkflowAgentSession(
     projectId: string,
     workflowRunId: string,
@@ -582,27 +561,6 @@ export class ServerConnection {
       throw createRunnerProtocolError('listAgentSessionsForReconcile', 'returned a malformed response')
     }
     return payload.map((value) => parseAgentSessionReconcileBinding(value, 'listAgentSessionsForReconcile'))
-  }
-
-  async reconcileMissingAgentSession(
-    sessionId: string,
-    body: unknown,
-    signal: AbortSignal,
-  ): Promise<AgentSessionReconcileBinding> {
-    const response = await this.requestTransport.request(
-      'reconcileMissingAgentSession',
-      this.url(`agent-sessions/${encodeURIComponent(sessionId)}/reconcile-missing`),
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-        signal,
-      },
-    )
-    return parseAgentSessionReconcileBinding(
-      await this.requestTransport.readJson<unknown>(response, 'reconcileMissingAgentSession'),
-      'reconcileMissingAgentSession',
-    )
   }
 
   async reconcileAgentSessionRuntimeEvents(
@@ -749,6 +707,66 @@ export class ServerConnection {
     )
     const payload = await this.requestTransport.readJson<unknown>(response, 'attachAgentSession', true)
     return payload === null ? null : requireGenericSessionPayload(payload, 'attachAgentSession')
+  }
+
+  async prepareAgentJobInitialRecovery(
+    jobId: string,
+    body: unknown,
+    signal: AbortSignal,
+  ): Promise<AgentJobInitialRecoveryReceipt> {
+    const response = await this.requestTransport.request(
+      'prepareAgentJobInitialRecovery',
+      this.url(`agent-jobs/${encodeURIComponent(jobId)}/initial-input/recovery/prepare`),
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      },
+    )
+    return (await this.requestTransport.readJson(
+      response,
+      'prepareAgentJobInitialRecovery',
+    )) as AgentJobInitialRecoveryReceipt
+  }
+
+  async completeAgentJobInitialRecovery(
+    jobId: string,
+    body: unknown,
+    signal: AbortSignal,
+  ): Promise<AgentJobInitialRecoveryReceipt> {
+    const response = await this.requestTransport.request(
+      'completeAgentJobInitialRecovery',
+      this.url(`agent-jobs/${encodeURIComponent(jobId)}/initial-input/recovery/complete`),
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      },
+    )
+    return (await this.requestTransport.readJson(
+      response,
+      'completeAgentJobInitialRecovery',
+    )) as AgentJobInitialRecoveryReceipt
+  }
+
+  async startAgentJobInitialInput(
+    jobId: string,
+    body: unknown,
+    signal: AbortSignal,
+  ): Promise<AgentJobInitialInputReceipt> {
+    const response = await this.requestTransport.request(
+      'startAgentJobInitialInput',
+      this.url(`agent-jobs/${encodeURIComponent(jobId)}/initial-input/start`),
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      },
+    )
+    return (await this.requestTransport.readJson(response, 'startAgentJobInitialInput')) as AgentJobInitialInputReceipt
   }
 
   async recoverMissingAgentSession(
@@ -898,37 +916,6 @@ async function parseRuntimeEventReceiptArray(
   }
   return payload as AgentSessionRuntimeEventReceipt[]
 }
-export interface ArtifactUploadRequest {
-  path: string
-  /** `'directory'` selects the dedicated directory upload route. */
-  kind?: 'file' | 'directory'
-  contentType?: string | null
-  contentHash?: string | null
-  size: number
-  content: Uint8Array
-  filename?: string
-}
-
-export interface ArtifactUploadResponse {
-  uploadId: string
-  workflowRunId: string
-  workId: string
-  actionAttemptId: string | null
-  path: string
-  contentType: string | null
-  contentHash: string | null
-  size: number
-  createdAt: string | null
-  expiresAt: string | null
-  idempotent: boolean
-}
-
-export interface TaskLogUploadResult {
-  status: 'changed' | 'duplicate'
-  accepted: number
-  truncated: boolean
-}
-
 function requireWorkflowSessionPayload(value: unknown, operation: string): WorkflowAgentSession {
   if (!isObjectRecord(value) || !nonEmptyString(value.sessionId)) {
     throw createRunnerProtocolError(operation, 'returned a malformed session payload')

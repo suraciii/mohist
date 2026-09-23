@@ -151,7 +151,7 @@ public sealed class RunnerControlWebSocketApiSpecs(DefaultMohistIntegrationFixtu
     {
         var runnerId = $"ws-bound-{Guid.NewGuid():N}";
         var token = await EnrollRunnerAsync(runnerId);
-        await RegisterGenerationAsync(runnerId);
+        await RegisterGenerationAsync(runnerId, token);
         var ownClient = RunnerWebSocketClient(token, Guid.NewGuid());
         using var own = await ownClient.ConnectAsync(
             ControlUri(runnerId),
@@ -251,6 +251,7 @@ public sealed class RunnerControlWebSocketApiSpecs(DefaultMohistIntegrationFixtu
         var registry = new RunnerControlWebSocketRegistry(
             tracker,
             fixture.Grains,
+            fixture.Services.GetRequiredService<IRunnerActivityProbeCoordinator>(),
             fixture.Services.GetRequiredService<TimeProvider>(),
             fixture.Services.GetRequiredService<ILoggerFactory>());
         var firstAcquired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -274,9 +275,21 @@ public sealed class RunnerControlWebSocketApiSpecs(DefaultMohistIntegrationFixtu
         using var secondSocket = new BlockingWebSocket();
         var handshake = new RunnerControlHandshake(null, null, null, null, null, null, null, null, "test-generation");
 
-        var firstRun = registry.RunAsync(runnerId, firstReservation, firstSocket, handshake, firstStop.Token);
+        var firstRun = registry.RunAsync(
+            runnerId,
+            firstReservation,
+            firstSocket,
+            handshake,
+            new RunnerPresentedAuthority(CredentialId: null, OperatorOverride: true),
+            firstStop.Token);
         await firstAcquired.Task.WaitAsync(TestContext.Current.CancellationToken);
-        var secondRun = registry.RunAsync(runnerId, secondReservation, secondSocket, handshake, secondStop.Token);
+        var secondRun = registry.RunAsync(
+            runnerId,
+            secondReservation,
+            secondSocket,
+            handshake,
+            new RunnerPresentedAuthority(CredentialId: null, OperatorOverride: true),
+            secondStop.Token);
         await secondWaiting.Task.WaitAsync(TestContext.Current.CancellationToken);
 
         secondStop.Cancel();
@@ -310,11 +323,15 @@ public sealed class RunnerControlWebSocketApiSpecs(DefaultMohistIntegrationFixtu
                 .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "agent-connection")
                 .WithLabel(GenericAgentSessionMetadata.AgentId, "agent-websocket-disconnect")));
         await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(runtimeSessionId));
+        var accepted = await session.AcceptFollowupAsync(new AcceptFollowupCommand(
+            "runtime work", "agent-session-followup", "disconnect-owned-turn"));
+        await session.MarkFollowupTurnExecutingAsync(accepted.OperationId);
         var persistence = session.PersistenceCheckpoint(fixture.Persistence);
         await session.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(RuntimeEventTypes.SessionActivity, "{\"activity\":\"active\"}") },
             runtimeSessionId));
         await persistence.WaitAsync();
+        Assert.Equal("active", (await session.GetAsync())!.Status);
         var tracker = fixture.Services.GetRequiredService<RunnerConnectionTracker>();
         tracker.RegisterSession(runnerId, sessionId);
         var client = AuthorizedWebSocketClient(Guid.NewGuid());
@@ -336,12 +353,29 @@ public sealed class RunnerControlWebSocketApiSpecs(DefaultMohistIntegrationFixtu
         (query is null ? string.Empty : $"&{query}"));
 
     private async Task RegisterGenerationAsync(string runnerId) =>
-        await fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        await RegisterGenerationAsync(runnerId, token: null);
+
+    private async Task RegisterGenerationAsync(string runnerId, string? token)
+    {
+        var client = token is null ? fixture.Client : fixture.CreateClient();
+        try
         {
-            processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
-            capabilities = new[] { "spec/*" },
-            hostname = $"host-{Guid.NewGuid():N}",
-        });
+            if (token is not null)
+                client.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            await client.PostOkAsync($"/api/runner/{runnerId}/register", new
+            {
+                processGeneration = TestRunnerGenerationExtensions.ProcessGeneration,
+                capabilities = new[] { "spec/*" },
+                hostname = $"host-{Guid.NewGuid():N}",
+            });
+        }
+        finally
+        {
+            if (token is not null)
+                client.Dispose();
+        }
+    }
 
     private Microsoft.AspNetCore.TestHost.WebSocketClient AuthorizedWebSocketClient(Guid? connectionId = null)
     {

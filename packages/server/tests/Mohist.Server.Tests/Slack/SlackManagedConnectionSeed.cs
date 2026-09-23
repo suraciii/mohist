@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Slack;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Tests.Support;
@@ -91,7 +92,7 @@ public static class SlackManagedConnectionSeed
         {
             db.Agents.Add(new AgentRow
             {
-                Id = agentId,
+                Id = GrainKey.Agent(projectId, agentId),
                 ProjectId = projectId,
                 Name = agentName,
                 Status = AgentStatus.Active,
