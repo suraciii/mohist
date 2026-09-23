@@ -161,16 +161,23 @@ public sealed class RunnerInitialInputAuthorityApiSpecs
         var runnerId = $"initial-input-authority-{scenario}-{Guid.NewGuid():N}";
         var jobId = $"initial-input-authority-job-{scenario}-{Guid.NewGuid():N}";
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        var processGeneration = await arrange(runner, runnerId);
-
-        foreach (var mutation in new[] { "prepare", "complete", "start" })
+        try
         {
-            using var response = await PostMutationAsync(runnerId, jobId, mutation, processGeneration);
-            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-            Assert.Contains("runner_process_stale", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
-        }
+            var processGeneration = await arrange(runner, runnerId);
 
-        Assert.Equal(AgentJobStatus.Pending, await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).GetStatusAsync());
+            foreach (var mutation in new[] { "prepare", "complete", "start" })
+            {
+                using var response = await PostMutationAsync(runnerId, jobId, mutation, processGeneration);
+                Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+                Assert.Contains("runner_process_stale", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+            }
+
+            Assert.Equal(AgentJobStatus.Pending, await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).GetStatusAsync());
+        }
+        finally
+        {
+            await runner.UnregisterAsync();
+        }
     }
 
     private Task<HttpResponseMessage> PostMutationAsync(
