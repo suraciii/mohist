@@ -3,23 +3,41 @@ import { isAbsolute, relative, resolve } from 'node:path'
 import type { CodexTurnCompletedEvent } from './protocol-types.js'
 
 interface WorkspaceOperation {
+  generation: number
   threadId: string
   turnId: string | null
   workDir: string | null
+  earlyCompletedTurnIds: Set<string>
 }
 
 export class CodexWorkspaceUse {
   private readonly operations = new Set<WorkspaceOperation>()
 
-  begin(threadId: string, workDir: string): WorkspaceOperation {
-    const operation: WorkspaceOperation = { threadId, turnId: null, workDir: canonicalWorkDir(workDir) }
+  begin(generation: number, threadId: string, workDir: string): WorkspaceOperation {
+    const operation: WorkspaceOperation = {
+      generation,
+      threadId,
+      turnId: null,
+      workDir: canonicalWorkDir(workDir),
+      earlyCompletedTurnIds: new Set(),
+    }
     this.operations.add(operation)
     return operation
   }
 
-  completed(event: CodexTurnCompletedEvent): void {
+  bindTurnId(operation: WorkspaceOperation, turnId: string): void {
+    if (!this.operations.has(operation)) return
+    operation.turnId = turnId
+    if (operation.earlyCompletedTurnIds.has(turnId)) this.operations.delete(operation)
+    operation.earlyCompletedTurnIds.clear()
+  }
+
+  completed(generation: number, event: CodexTurnCompletedEvent): void {
     for (const operation of this.operations) {
-      if (operation.threadId === event.threadId && operation.turnId === event.turnId) {
+      if (operation.generation !== generation || operation.threadId !== event.threadId) continue
+      if (operation.turnId === null) {
+        operation.earlyCompletedTurnIds.add(event.turnId)
+      } else if (operation.turnId === event.turnId) {
         this.operations.delete(operation)
       }
     }

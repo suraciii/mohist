@@ -286,7 +286,7 @@ export class CodexRuntime {
       }
     }
 
-    const workspaceOperation = this.workspaceUse.begin(threadId, workDir)
+    const workspaceOperation = this.workspaceUse.begin(this.state.generation!, threadId, workDir)
     const submission = await submitTurnStart(
       turnTransport,
       {
@@ -301,7 +301,7 @@ export class CodexRuntime {
     )
     if (!submission.ok) return submission as CodexResult<CodexTurnResult>
 
-    workspaceOperation.turnId = submission.value.turnId
+    this.workspaceUse.bindTurnId(workspaceOperation, submission.value.turnId)
     this.activeTurns.set(threadId, submission.value.turnId)
     try {
       const completion = await driveTurnToCompletion({
@@ -522,7 +522,7 @@ export class CodexRuntime {
       const error = normalizeTurnFailedCodex('Codex compact is only available while the Thread is idle')
       return { ok: false, error, diagnostics: error.diagnostics }
     }
-    const workspaceOperation = this.workspaceUse.begin(threadId, request.target.workDir)
+    const workspaceOperation = this.workspaceUse.begin(this.state.generation!, threadId, request.target.workDir)
     let response: unknown
     try {
       response = await this.server.handle.send({
@@ -553,7 +553,7 @@ export class CodexRuntime {
       },
     }
     const activeTurnKey = compact.turnId ?? `__compaction_pending_${this.takeRequestId()}`
-    workspaceOperation.turnId = compact.turnId
+    if (compact.turnId !== null) this.workspaceUse.bindTurnId(workspaceOperation, compact.turnId)
     this.activeTurns.set(threadId, activeTurnKey)
     try {
       const completion = await driveTurnToCompletion({
@@ -566,7 +566,7 @@ export class CodexRuntime {
         observer: compactObserver,
         nextRequestId: () => this.takeRequestId(),
         onTurnIdDiscovered: (turnId) => {
-          workspaceOperation.turnId = turnId
+          this.workspaceUse.bindTurnId(workspaceOperation, turnId)
           this.activeTurns.set(threadId, turnId)
         },
       })
@@ -765,7 +765,9 @@ export class CodexRuntime {
     }
     this.server.handle = handle
     this.server.closed = false
-    this.server.unsubscribe = handle.subscribe((message) => this.observeServerMessage(message))
+    this.server.unsubscribe = handle.subscribe((message) => {
+      if (this.server.handle === handle) this.observeServerMessage(message)
+    })
 
     // Run the initialize → initialized handshake. The handshake
     // rejects non-managed codexHome, malformed initialize responses,
@@ -876,7 +878,9 @@ export class CodexRuntime {
 
   private observeServerMessage(message: unknown): void {
     const terminal = normalizeCodexNotification(message) ?? message
-    if (isCodexTurnCompletedEvent(terminal)) this.workspaceUse.completed(terminal)
+    if (this.state.generation !== null && isCodexTurnCompletedEvent(terminal)) {
+      this.workspaceUse.completed(this.state.generation, terminal)
+    }
     if (!message || typeof message !== 'object') return
     const candidate = message as { method?: unknown; params?: unknown }
     if (candidate.method !== 'protocol-failure') return

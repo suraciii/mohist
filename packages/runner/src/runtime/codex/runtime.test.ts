@@ -23,6 +23,9 @@ function fakeHandle(
     onNotify?: (method: string) => void
     enforceUniqueRequestIds?: boolean
     emitCompletionOnTurnStart?: boolean
+    emitCompletionInResponseBatch?: boolean
+    emitExactCompletionInResponseBatch?: boolean
+    onResponseBatchFlushed?: () => void
   } = {},
 ): CodexServerHandle {
   const catalog = options.catalog ?? { models: [{ id: 'gpt-5' }], complete: true }
@@ -94,6 +97,49 @@ function fakeHandle(
         } as unknown as R
       }
       if (request.method === 'turn/start') {
+        const response = {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: { turn: { id: 'turn-runtime', status: 'in_progress' } },
+        }
+        if (options.emitCompletionInResponseBatch) {
+          return new Promise<R>((resolve) => {
+            resolve(response as R)
+            for (const listener of listeners) {
+              listener({
+                type: 'turn/completed',
+                threadId: 'other-thread',
+                turnId: 'turn-runtime',
+                status: 'completed',
+              })
+              listener({
+                type: 'turn/completed',
+                threadId: 'thread-runtime',
+                turnId: 'other-turn',
+                status: 'completed',
+              })
+              if (options.emitExactCompletionInResponseBatch) {
+                listener({
+                  type: 'turn/completed',
+                  threadId: 'thread-runtime',
+                  turnId: 'turn-runtime',
+                  status: 'completed',
+                })
+              }
+            }
+            setTimeout(() => {
+              options.onResponseBatchFlushed?.()
+              for (const listener of listeners) {
+                listener({
+                  type: 'turn/completed',
+                  threadId: 'thread-runtime',
+                  turnId: 'turn-runtime',
+                  status: 'completed',
+                })
+              }
+            }, 0)
+          })
+        }
         if (options.emitCompletionOnTurnStart) {
           setTimeout(() => {
             for (const listener of listeners) {
@@ -106,11 +152,7 @@ function fakeHandle(
             }
           }, 0)
         }
-        return {
-          jsonrpc: '2.0',
-          id: request.id,
-          result: { turn: { id: 'turn-runtime', status: 'in_progress' } },
-        } as unknown as R
+        return response as R
       }
       throw new Error(`Unexpected method ${request.method}`)
     },
@@ -310,6 +352,40 @@ describe('CodexRuntime spawn + handshake happy path', () => {
     expect(runtime.releaseWorkspace('/work')).toBe('ready')
     await runtime.shutdown({ clearDiagnostic: true })
   })
+
+  it.each([
+    { exactCompletionInBatch: true, expected: 'ready' },
+    { exactCompletionInBatch: false, expected: 'busy' },
+  ] as const)(
+    'checks exact Thread and Turn after one response batch ($expected)',
+    async ({ exactCompletionInBatch, expected }) => {
+      let releaseAfterBatch: ReturnType<CodexRuntime['releaseWorkspace']> | null = null
+      const runtime = new CodexRuntime({
+        codexHome: MANAGED_CODEX_HOME,
+        cwd: '/work',
+        serverFactory: async () =>
+          fakeHandle({
+            emitCompletionInResponseBatch: true,
+            emitExactCompletionInResponseBatch: exactCompletionInBatch,
+            onResponseBatchFlushed: () => {
+              releaseAfterBatch = runtime.releaseWorkspace('/work')
+            },
+          }),
+        readinessProbe: passingProbe(),
+      })
+
+      await expect(runtime.start()).resolves.toMatchObject({ ok: true })
+      await runtime.runTurn({
+        target: { runtime: 'codex', runtimeSessionId: null, workDir: '/work' },
+        prompt: 'hello',
+        clientUserMessageId: 'input-1',
+        options: { model: 'gpt-5' },
+      })
+      expect(releaseAfterBatch).toBe(expected)
+      expect(runtime.releaseWorkspace('/work')).toBe('ready')
+      await runtime.shutdown({ clearDiagnostic: true })
+    },
+  )
 
   it('retains Workspace ownership when turn/start has no confirmed outcome', async () => {
     const runtime = new CodexRuntime({
