@@ -14,6 +14,7 @@ public interface IRunnerWorkspaceClient
     Task<WorkspaceStatus> GetWorkspaceStatusAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default);
     Task<RunnerWorkspaceFileContentResult> GetFileContentAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, string path, CancellationToken ct = default);
     Task<WorkspaceRemovalResult> RemoveWorkspaceAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default);
+    Task<WorkspaceInspectionResult> InspectWorkspaceAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default);
 }
 
 public sealed class RunnerWorkspaceClient(IRunnerControlTransport control, IGrainFactory grains) : IRunnerWorkspaceClient
@@ -70,7 +71,7 @@ public sealed class RunnerWorkspaceClient(IRunnerControlTransport control, IGrai
 
     public async Task<WorkspaceRemovalResult> RemoveWorkspaceAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default)
     {
-        var runnerId = await ResolveRunnerIdAsync(projectId, workflowRunId);
+        var runnerId = await ResolveHomeRunnerIdAsync(projectId, issueNumber);
         if (runnerId is null) return UnavailableRemoval(workspace.Path);
         try
         {
@@ -78,7 +79,27 @@ public sealed class RunnerWorkspaceClient(IRunnerControlTransport control, IGrai
                 runnerId, "workspace.remove", new(BuildQuery(projectId, issueNumber, repository)), ct: ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch { return UnavailableRemoval(workspace.Path); }
+        catch { return new(false, "unknown", workspace.Path, "runner_reply_unknown", "Runner reply was not confirmed"); }
+    }
+
+    public async Task<WorkspaceInspectionResult> InspectWorkspaceAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default)
+    {
+        var runnerId = await ResolveHomeRunnerIdAsync(projectId, issueNumber);
+        if (runnerId is null) return new("unsafe", "runner_unavailable");
+        try
+        {
+            return await control.SendRequestAsync<WorkspaceQueryParams, WorkspaceInspectionResult>(
+                runnerId, "workspace.inspect", new(BuildQuery(projectId, issueNumber, repository)), ct: ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch { return new("unsafe", "runner_inspection_unavailable"); }
+    }
+
+    private async Task<string?> ResolveHomeRunnerIdAsync(string projectId, int issueNumber)
+    {
+        var home = await grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
+            Mohist.Server.Infrastructure.Orleans.GrainKey.Workspace(projectId, $"issue-{issueNumber}")).GetHomeAsync();
+        return home is not null && control.IsConnected(home.RunnerId) ? home.RunnerId : null;
     }
 
     private async Task<TResult?> ReadOrNullAsync<TParams, TResult>(string runnerId, string method, TParams parameters, CancellationToken ct)
@@ -99,7 +120,7 @@ public sealed class RunnerWorkspaceClient(IRunnerControlTransport control, IGrai
     private static WorkspaceStatus UnavailableStatus() => new() { Exists = false, Reason = "runner_unavailable" };
     private static RunnerWorkspaceFileContentResult UnavailableFile() => new(null, null, "runner_unavailable");
     private static WorkspaceRemovalResult UnavailableRemoval(string? path) =>
-        new(false, "failed", path, "runner_unavailable", "Runner is not connected");
+        new(false, "unsafe", path, "runner_unavailable", "Runner is not connected");
 
     private static RunnerWorkspaceQuery BuildQuery(string projectId, int issueNumber, WorkflowRepositoryContext repository)
     {

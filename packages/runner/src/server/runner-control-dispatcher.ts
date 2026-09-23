@@ -17,6 +17,7 @@ export interface RunnerControlHandlers {
   workspaceStatus(query: WorkspaceQuery): Promise<unknown>
   workspaceFileContent(query: WorkspaceQuery, path: string): Promise<unknown>
   workspaceRemove(query: WorkspaceQuery): Promise<unknown>
+  workspaceInspect?(query: WorkspaceQuery): Promise<unknown>
   sessionFollowup(params: ReceiveFollowupPayload): Promise<unknown>
   sessionStop(params: CancelAgentSessionPayload): Promise<unknown>
   sessionCommand(params: SessionCommandRequest): Promise<unknown>
@@ -106,13 +107,18 @@ export class RunnerControlDispatcher {
       case 'workspace.diff':
       case 'workspace.commits':
       case 'workspace.status':
-      case 'workspace.remove': {
+      case 'workspace.remove':
+      case 'workspace.inspect': {
         if (!isWorkspaceWrapper(params)) return 'invalid'
         const query = params.query
         if (method === 'workspace.diff') return () => this.handlers.workspaceDiff(query)
         if (method === 'workspace.commits') return () => this.handlers.workspaceCommits(query)
         if (method === 'workspace.status') return () => this.handlers.workspaceStatus(query)
-        return () => this.handlers.workspaceRemove(query)
+        return method === 'workspace.remove'
+          ? () => this.handlers.workspaceRemove(query)
+          : this.handlers.workspaceInspect
+            ? () => this.handlers.workspaceInspect!(query)
+            : 'unknown'
       }
       case 'workspace.commit-diff':
         return isWorkspaceWrapper(params) && nonempty(params.hash)

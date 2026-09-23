@@ -161,7 +161,7 @@ describe('NamedWorkspaceManager', () => {
 
     const result = await manager.provision('mohist', 'pay', [], new AbortController().signal)
 
-    expect(report).toHaveBeenCalledWith('mohist', 'pay', result.path, expect.any(AbortSignal))
+    expect(report).toHaveBeenCalledWith('mohist', 'pay', result.path, expect.any(AbortSignal), true)
     expect(registry.get('mohist', 'pay')).not.toBeNull()
   })
 

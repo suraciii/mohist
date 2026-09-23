@@ -102,6 +102,23 @@ describe('NamedWorkspaceRegistry restart safety', () => {
     expect(Object.keys(raw.entries)).toEqual([namedWorkspaceRegistryKey('project', 'pay')])
   })
 
+  it('persists the latest phase when candidate status changes during another write', async (root) => {
+    const registry = new NamedWorkspaceRegistry(root, { now: () => now })
+    await registry.load()
+    const registering = registry.register({
+      projectId: 'project',
+      workspaceName: 'pay',
+      workspacePath: namedWorkspacePath(root, 'project', 'pay'),
+    })
+    const eligible = registry.markEligible('project', 'pay')
+    const active = registry.markActive('project', 'pay')
+    await Promise.all([registering, eligible, active])
+
+    const reloaded = new NamedWorkspaceRegistry(root, { now: () => now })
+    await reloaded.load()
+    expect(reloaded.get('project', 'pay')).toMatchObject({ phase: 'active', terminalAt: null })
+  })
+
   it('never reports a Home for a leftover run directory when provisioning a named workspace', async (root) => {
     await mkdir(join(root, 'workspaces', 'wr-leftover'), { recursive: true })
     const registry = new NamedWorkspaceRegistry(root, { now: () => now })
@@ -115,6 +132,6 @@ describe('NamedWorkspaceRegistry restart safety', () => {
 
     expect(result.path).toBe(namedWorkspacePath(root, 'project', 'pay'))
     expect(result.path).not.toContain('wr-leftover')
-    expect(report).toHaveBeenCalledWith('project', 'pay', result.path, expect.any(AbortSignal))
+    expect(report).toHaveBeenCalledWith('project', 'pay', result.path, expect.any(AbortSignal), true)
   })
 })

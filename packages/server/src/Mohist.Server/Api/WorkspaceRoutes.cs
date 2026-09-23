@@ -8,6 +8,7 @@ using Mohist.Server.Contracts;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workspace.Grains;
+using Mohist.Server.Workspace.Services;
 
 namespace Mohist.Server.Api;
 
@@ -52,6 +53,7 @@ public static class WorkspaceRoutes
                     context.RequestAborted);
                 if (result is null)
                     return ApiResults.Ok(Unavailable("git_error", "Runner did not return diff data"));
+                if (IsRemovalConflict(result.Reason)) return RemovalConflict();
 
                 var patches = result.Files.Select(f => new { path = f.File, diff = f.Diff }).ToArray();
                 return ApiResults.Ok(new
@@ -69,6 +71,10 @@ public static class WorkspaceRoutes
                     files = result.Files,
                     patches,
                 });
+            }
+            catch (WorkspaceRemovalInProgressException)
+            {
+                return RemovalConflict();
             }
             catch (Exception ex)
             {
@@ -110,6 +116,7 @@ public static class WorkspaceRoutes
                     context.RequestAborted);
                 if (result is null)
                     return ApiResults.Ok(Unavailable("git_error", "Runner did not return commit data"));
+                if (IsRemovalConflict(result.Reason)) return RemovalConflict();
 
                 return ApiResults.Ok(new
                 {
@@ -125,6 +132,10 @@ public static class WorkspaceRoutes
                     summary = new { filesChanged = result.FilesChanged, commits = result.Commits.Count, additions = result.TotalAdditions, deletions = result.TotalDeletions },
                     commits = result.Commits,
                 });
+            }
+            catch (WorkspaceRemovalInProgressException)
+            {
+                return RemovalConflict();
             }
             catch (Exception ex)
             {
@@ -168,8 +179,13 @@ public static class WorkspaceRoutes
                     context.RequestAborted);
                 if (result is null)
                     return ApiResults.Ok(new { available = false, reason = "git_error", message = $"Commit {hash} not found", hash, diff = "" });
+                if (IsRemovalConflict(result.Reason)) return RemovalConflict();
 
                 return ApiResults.Ok(new { available = true, reason = (string?)null, hash, diff = result.Diff });
+            }
+            catch (WorkspaceRemovalInProgressException)
+            {
+                return RemovalConflict();
             }
             catch (Exception ex)
             {
@@ -182,14 +198,36 @@ public static class WorkspaceRoutes
             IGrainFactory grains,
             IRunnerWorkspaceClient runnerWorkspace,
             WorkflowQuerier querier,
-            IssueQuerier issuesQuery) =>
+            IssueQuerier issuesQuery,
+            WorkspaceDirectoryObservationStore observations,
+            WorkspaceQuerier workspaceQuerier) =>
         {
             var pid = context.GetResolvedProject().Id;
             var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
+            var directory = await observations.GetAsync(pid, $"issue-{number}", context.RequestAborted);
+            if (directory?.Outcome == "unknown" && !string.IsNullOrWhiteSpace(issue.WorkflowRunId))
+            {
+                var repository = await querier.GetRepositoryContextAsync(issue.WorkflowRunId);
+                if (repository is not null)
+                {
+                    var home = await ResolveNamedWorkspaceAsync(grains, issue);
+                    var inspection = await runnerWorkspace.InspectWorkspaceAsync(
+                        pid, issue.WorkflowRunId, number, repository, home, context.RequestAborted);
+                    if (inspection.Status is "already_absent" or "present")
+                        directory = await observations.CompleteAsync(pid, $"issue-{number}", directory.AttemptId,
+                            inspection.Status == "already_absent" ? "already_absent" : "unknown",
+                            inspection.Reason ?? (inspection.Status == "present" ? "directory_present_retryable" : null),
+                            context.RequestAborted) ?? directory;
+                }
+            }
+            var state = await grains.GetGrain<IWorkspaceGrain>(GrainKey.Workspace(pid, $"issue-{number}")).GetAsync();
+            var homeRunnerId = state?.Home?.RunnerId;
+            var eligible = state is not null
+                && (await WorkspaceCleanupEligibility.CheckAsync(state, workspaceQuerier, grains, context.RequestAborted)).Reclaimable;
             var prepared = await PrepareWorkspaceQueryAsync(grains, querier, issue);
             if (prepared.Unavailable is not null)
-                return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = prepared.Unavailable.Reason });
+                return ApiResults.Ok(ToWorkspaceStatusResponse(new WorkspaceStatus { Exists = false, Reason = prepared.Unavailable.Reason }, directory, homeRunnerId, eligible));
 
             try
             {
@@ -202,7 +240,7 @@ public static class WorkspaceRoutes
                     prepared.Workspace!,
                     context.RequestAborted);
                 if (unavailable is not null)
-                    return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = unavailable.Reason });
+                    return ApiResults.Ok(ToWorkspaceStatusResponse(new WorkspaceStatus { Exists = false, Reason = unavailable.Reason }, directory, homeRunnerId, eligible));
 
                 var result = await runnerWorkspace.GetWorkspaceStatusAsync(
                     pid,
@@ -211,11 +249,16 @@ public static class WorkspaceRoutes
                     prepared.Repository!,
                     prepared.Workspace!,
                     context.RequestAborted);
-                return ApiResults.Ok(result);
+                if (IsRemovalConflict(result.Reason)) return RemovalConflict();
+                return ApiResults.Ok(ToWorkspaceStatusResponse(result, directory, homeRunnerId, eligible));
+            }
+            catch (WorkspaceRemovalInProgressException)
+            {
+                return RemovalConflict();
             }
             catch (Exception)
             {
-                return ApiResults.Ok(new WorkspaceStatus { Exists = false, Reason = "git_error" });
+                return ApiResults.Ok(ToWorkspaceStatusResponse(new WorkspaceStatus { Exists = false, Reason = "git_error" }, directory, homeRunnerId, eligible));
             }
         });
 
@@ -254,7 +297,12 @@ public static class WorkspaceRoutes
                     prepared.Workspace!,
                     path,
                     context.RequestAborted);
+                if (IsRemovalConflict(result.Reason)) return RemovalConflict();
                 return ApiResults.Ok(new { @base = result.Base, head = result.Head, reason = result.Reason });
+            }
+            catch (WorkspaceRemovalInProgressException)
+            {
+                return RemovalConflict();
             }
             catch (Exception)
             {
@@ -268,24 +316,21 @@ public static class WorkspaceRoutes
             IGrainFactory grains,
             IRunnerWorkspaceClient runnerWorkspace,
             WorkflowQuerier querier,
-            WorkflowActivityQuerier projection,
-            IssueQuerier issuesQuery) =>
+            IssueQuerier issuesQuery,
+            WorkspaceQuerier workspaceQuerier,
+            WorkspaceDirectoryObservationStore observations) =>
         {
             var pid = context.GetResolvedProject().Id;
             var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
 
-            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(pid, number)));
-            var workflow = await grain.GetWorkflowStatusAsync();
-            if (IsWorkflowActive(workflow))
+            var state = await grains.GetGrain<IWorkspaceGrain>(GrainKey.Workspace(pid, $"issue-{number}")).GetAsync();
+            if (state is null) return ApiResults.Conflict("No workflow workspace to clean", "workspace_missing");
+            if (state.Home is null) return ApiResults.Conflict("Workspace Home cannot be inspected without a recorded owner", "workspace_home_unknown");
+            var decision = await WorkspaceCleanupEligibility.CheckAsync(state, workspaceQuerier, grains, context.RequestAborted);
+            if (!decision.Reclaimable)
             {
-                return ApiResults.Conflict("Cannot clean workflow workspace while the issue workflow is active", "workspace_active");
-            }
-
-            var activeAgents = await projection.ListActiveAgentsAsync(pid);
-            if (activeAgents.Any(a => a.IssueNumber == number))
-            {
-                return ApiResults.Conflict("Cannot clean workflow workspace while an agent is running", "workspace_agent_running");
+                return ApiResults.Conflict("Workspace is still reserved for work", decision.Reason ?? "workspace_in_use");
             }
 
             if (string.IsNullOrWhiteSpace(issue.WorkflowRunId))
@@ -296,14 +341,39 @@ public static class WorkspaceRoutes
             if (repository is null)
                 return ApiResults.Conflict("No workflow repository context to clean", "missing_repository_context");
 
-            var removal = await runnerWorkspace.RemoveWorkspaceAsync(
-                pid,
-                issue.WorkflowRunId,
-                issue.Number,
-                repository,
-                workspace,
-                context.RequestAborted);
-            if (removal.Status == "failed")
+            var previous = await observations.GetAsync(pid, state.Name, context.RequestAborted);
+            if (previous?.Outcome == "unknown")
+            {
+                var inspection = await runnerWorkspace.InspectWorkspaceAsync(
+                    pid, issue.WorkflowRunId, issue.Number, repository, workspace, context.RequestAborted);
+                if (inspection.Status == "in_use")
+                    return RemovalConflict();
+                if (inspection.Status == "unsafe")
+                    return ApiResults.Conflict("Workspace cannot be safely inspected", inspection.Reason ?? "workspace_inspection_unavailable");
+                await observations.CompleteAsync(pid, state.Name, previous.AttemptId,
+                    inspection.Status == "already_absent" ? "already_absent" : "unknown",
+                    inspection.Status == "present" ? "directory_present_retryable" : inspection.Reason,
+                    context.RequestAborted);
+            }
+
+            var attemptId = Guid.NewGuid().ToString("N");
+            if (await observations.BeginAsync(pid, state.Name, state.Home.RunnerId, state.Home.Path, attemptId,
+                    context.RequestAborted) is null)
+                return RemovalConflict();
+
+            WorkspaceRemovalResult removal;
+            try
+            {
+                removal = await runnerWorkspace.RemoveWorkspaceAsync(
+                    pid, issue.WorkflowRunId, issue.Number, repository, workspace, context.RequestAborted);
+            }
+            catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+            {
+                await observations.CompleteAsync(pid, state.Name, attemptId, "unknown", "runner_reply_unknown", CancellationToken.None);
+                throw;
+            }
+            await observations.CompleteAsync(pid, state.Name, attemptId, removal.Status, removal.Reason, CancellationToken.None);
+            if (removal.Status is "in_use" or "unsafe" or "deletion_failed" or "failed")
                 return ApiResults.Conflict(removal.Message, removal.Reason ?? "workspace_cleanup_failed", removal);
 
             return ApiResults.Ok(ToCleanupResponse(removal));
@@ -376,6 +446,7 @@ public static class WorkspaceRoutes
             return null;
 
         var reason = string.IsNullOrWhiteSpace(status.Reason) ? "workspace_removed" : status.Reason;
+        if (IsRemovalConflict(reason)) throw new WorkspaceRemovalInProgressException();
         return Unavailable(reason, MessageForUnavailableReason(reason));
     }
 
@@ -385,6 +456,14 @@ public static class WorkspaceRoutes
         return string.Equals(status, "Running", StringComparison.OrdinalIgnoreCase)
             || string.Equals(status, "AwaitingApproval", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsRemovalConflict(string? reason) =>
+        string.Equals(reason, "workspace_removal_in_progress", StringComparison.Ordinal);
+
+    private static IResult RemovalConflict() =>
+        ApiResults.Conflict("Workspace removal is in progress; retry this request", "workspace_removal_in_progress");
+
+    private sealed class WorkspaceRemovalInProgressException : Exception;
 
     private static WorkspaceUnavailable Unavailable(string reason, string message) => new(false, reason, message);
 
@@ -415,6 +494,22 @@ public static class WorkspaceRoutes
                 reason = removal.Reason,
             },
         },
+    };
+
+    private static object ToWorkspaceStatusResponse(WorkspaceStatus status, WorkspaceDirectoryObservation? directory,
+        string? homeRunnerId, bool cleanupEligible) => new
+    {
+        status.Exists,
+        status.Reason,
+        status.Branch,
+        status.BaseBranch,
+        status.Ahead,
+        status.Behind,
+        status.RebaseInProgress,
+        status.ConflictingFiles,
+        Directory = directory,
+        HomeRunnerId = homeRunnerId,
+        CleanupEligible = cleanupEligible,
     };
 
     private sealed record PreparedWorkspaceQuery(WorkspaceIdentity? Workspace, WorkflowRepositoryContext? Repository, WorkspaceUnavailable? Unavailable)

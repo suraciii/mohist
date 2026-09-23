@@ -26,6 +26,7 @@ public sealed class RunnerControlWebSocketRegistry : ISingletonService, IRunnerC
             ["workspace.status"] = (typeof(WorkspaceQueryParams), typeof(WorkspaceStatus), false),
             ["workspace.file-content"] = (typeof(WorkspaceFileContentParams), typeof(RunnerWorkspaceFileContentResult), false),
             ["workspace.remove"] = (typeof(WorkspaceQueryParams), typeof(WorkspaceRemovalResult), false),
+            ["workspace.inspect"] = (typeof(WorkspaceQueryParams), typeof(WorkspaceInspectionResult), false),
             ["session.followup"] = (typeof(FollowupParams), typeof(RunnerFollowupDeliveryResult), false),
             ["session.stop"] = (typeof(SessionStopParams), typeof(RunnerStopReply), false),
             ["session.command"] = (typeof(SessionCommandRequest), typeof(SessionCommandResult), false),

@@ -73,6 +73,7 @@ import {
 
 export interface OpenCodeRuntimeDeps {
   readonly directory: string
+  readonly ownerForDirectory?: (directory: string) => string | null
   readonly serverFactory?: OpencodeServerFactory
   readonly eventSubscriptionFactory?: (client: OpencodeClient) => RuntimeEventSubscription
   readonly rebuildDelayMs?: number
@@ -148,10 +149,15 @@ export class OpenCodeRuntime {
       idleTimer: null,
       activeOperations: 0,
     }
-    this.directoryInstances = new OpenCodeDirectoryInstances(() => this.state.server?.client ?? null)
+    this.directoryInstances = new OpenCodeDirectoryInstances(
+      () => this.state.server?.client ?? null,
+      deps.ownerForDirectory,
+    )
   }
 
-  async reclaimWhere(predicate: (directory: string) => boolean): Promise<DirectoryReclaimResult> {
+  async reclaimWhere(
+    predicate: (directory: string, workspaceOwner: string | null, unknownHandle: boolean) => boolean,
+  ): Promise<DirectoryReclaimResult> {
     return await this.withRuntimeOperation(() => this.directoryInstances.reclaimWhere(predicate))
   }
 

@@ -4,7 +4,12 @@ import { createFollowupHandler, type FollowupHandlerDeps } from './followup-hand
 import { createSessionCommandHandler, type SessionCommandHandlerDeps } from './session-command-handler.js'
 import { createSessionProbeHandler, type SessionProbeHandlerDeps } from './session-probe-handler.js'
 import { createWorkspaceGitHandlers, type WorkspaceGitHandlerDeps } from './workspace-git-handlers.js'
-import { createWorkspaceRemovalHandler, type WorkspaceRemovalHandlerDeps } from './workspace-removal-handler.js'
+import {
+  createWorkspaceInspectionHandler,
+  createWorkspaceRemovalHandler,
+  type WorkspaceRemovalHandlerDeps,
+} from './workspace-removal-handler.js'
+import { WorkspaceUseConflict } from '../runtime/runner-workspace-use.js'
 
 export interface RunnerControlHandlerDeps {
   workspaceGit: WorkspaceGitHandlerDeps
@@ -12,15 +17,19 @@ export interface RunnerControlHandlerDeps {
   followup: FollowupHandlerDeps
   cancel: CancelHandlerDeps
   sessionCommand: SessionCommandHandlerDeps
+  withWorkspaceUse?: <T>(workDir: string, work: () => Promise<T>) => Promise<T>
   sessionProbe: SessionProbeHandlerDeps
 }
 
 export function createRunnerControlHandlers(deps: RunnerControlHandlerDeps): RunnerControlHandlers {
   const git = createWorkspaceGitHandlers(deps.workspaceGit)
   const remove = createWorkspaceRemovalHandler(deps.workspaceRemoval)
+  const inspect = createWorkspaceInspectionHandler(deps.workspaceRemoval)
   const followup = createFollowupHandler(deps.followup)
   const cancel = createCancelHandler(deps.cancel)
   const command = createSessionCommandHandler(deps.sessionCommand)
+  const guarded = async <T>(workDir: string | null | undefined, work: () => Promise<T>): Promise<T> =>
+    workDir && deps.withWorkspaceUse ? await deps.withWorkspaceUse(workDir, work) : await work()
   const probe = createSessionProbeHandler(deps.sessionProbe)
   return {
     workspaceDiff: git.getDiff,
@@ -29,9 +38,32 @@ export function createRunnerControlHandlers(deps: RunnerControlHandlerDeps): Run
     workspaceStatus: git.getWorkspaceStatus,
     workspaceFileContent: git.getFileContent,
     workspaceRemove: remove,
-    sessionFollowup: followup,
-    sessionStop: cancel,
-    sessionCommand: command,
-    sessionProbe: probe,
+    workspaceInspect: inspect,
+    sessionFollowup: async (payload) => {
+      try {
+        return await guarded(payload.target?.binding?.workDir, () => followup(payload))
+      } catch (error) {
+        if (error instanceof WorkspaceUseConflict) return { accepted: false, error: 'workspace-removal-in-progress' }
+        throw error
+      }
+    },
+    sessionStop: async (payload) => {
+      try {
+        return await guarded(payload.target?.binding?.workDir, () => cancel(payload))
+      } catch (error) {
+        if (error instanceof WorkspaceUseConflict)
+          return { state: 'unavailable', error: 'workspace-removal-in-progress' }
+        throw error
+      }
+    },
+    sessionCommand: async (request) => {
+      try {
+        return await guarded(request.workDir, () => command(request))
+      } catch (error) {
+        if (error instanceof WorkspaceUseConflict) return { ok: false, error: 'conflict' }
+        throw error
+      }
+    },
+    sessionProbe: (payload) => guarded(payload?.workDir, () => probe(payload)),
   }
 }

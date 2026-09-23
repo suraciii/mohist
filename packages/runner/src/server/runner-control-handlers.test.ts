@@ -15,6 +15,11 @@ const probeParams = {
 describe('createRunnerControlHandlers', () => {
   it('binds all ten methods to the existing transport-neutral domain handlers', async () => {
     const command = vi.fn(async () => ({ ok: true }))
+    const admittedWorkDirs: string[] = []
+    const withWorkspaceUse = async <T>(workDir: string, work: () => Promise<T>): Promise<T> => {
+      admittedWorkDirs.push(workDir)
+      return await work()
+    }
     const resolveSession = vi.fn(async () => ({
       ok: true,
       value: { runtimeSessionId: 'runtime', workDir: '/work', activeTurn: false },
@@ -29,6 +34,7 @@ describe('createRunnerControlHandlers', () => {
       followup: {},
       cancel: {},
       sessionCommand: { handler: command },
+      withWorkspaceUse,
       sessionProbe: {
         runnerId: 'runner',
         enabledRuntimes: new Set(['opencode'] as const),
@@ -43,7 +49,7 @@ describe('createRunnerControlHandlers', () => {
     await expect(handlers.workspaceStatus(query)).resolves.toEqual({ exists: false })
     await expect(handlers.workspaceFileContent(query, 'a.ts')).resolves.toEqual({ base: null, head: null })
     await expect(handlers.workspaceRemove(query)).resolves.toMatchObject({
-      status: 'failed',
+      status: 'unsafe',
       reason: 'workspace_identity_mismatch',
     })
     await expect(handlers.sessionFollowup({ text: 'next', operationId: 'followup', turnId: 'turn' })).resolves.toEqual({
@@ -83,5 +89,6 @@ describe('createRunnerControlHandlers', () => {
     expect(resolveSession).toHaveBeenCalledWith({
       target: { runtime: 'opencode', runtimeSessionId: 'runtime', workDir: '/work' },
     })
+    expect(admittedWorkDirs).toContain('/work')
   })
 })

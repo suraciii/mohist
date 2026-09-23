@@ -42,6 +42,7 @@ export type { ArtifactUploadRequest, ArtifactUploadResponse, TaskLogUploadResult
 import {
   getWorkspaceReclaimability as getWorkspaceReclaimabilityViaTransport,
   reportWorkspaceProvisioned as reportWorkspaceProvisionedViaTransport,
+  reportWorkspaceDirectoryObservation as reportWorkspaceDirectoryObservationViaTransport,
   type WorkspaceProvisionedReport,
   type WorkspaceReclaimability,
   type WorkspaceReportTransport,
@@ -595,36 +596,44 @@ export class ServerConnection {
     )
   }
 
-  /**
-   * Reports a provisioned named workspace directory to the server
-   * (`POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/provisioned`).
-   * The server records the workspace home (first writer wins); a 409
-   * `workspace_home_claimed` answer throws {@link WorkspaceHomeClaimedError}
-   * so the dispatching runner can yield its local directory and fail the
-   * dispatch (the job retries against the home runner).
-   */
   async reportWorkspaceProvisioned(
     projectId: string,
     workspaceName: string,
     path: string,
     signal: AbortSignal,
+    created = false,
   ): Promise<WorkspaceProvisionedReport> {
-    return await reportWorkspaceProvisionedViaTransport(this.transport(), projectId, workspaceName, path, signal)
+    return await reportWorkspaceProvisionedViaTransport(
+      this.transport(),
+      projectId,
+      workspaceName,
+      path,
+      signal,
+      created,
+    )
   }
 
-  /**
-   * Runner-scoped lifecycle observation for the named-workspace cleanup
-   * guard (`GET /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/reclaimable`).
-   * The server is the lifecycle referee: the runner cannot know archive
-   * state or bound-session activity locally, so each active entry is
-   * probed against this endpoint before it may be promoted to eligible.
-   */
   async getWorkspaceReclaimability(
     projectId: string,
     workspaceName: string,
     signal: AbortSignal,
   ): Promise<WorkspaceReclaimability> {
     return await getWorkspaceReclaimabilityViaTransport(this.transport(), projectId, workspaceName, signal)
+  }
+
+  async reportWorkspaceDirectoryObservation(
+    projectId: string,
+    workspaceName: string,
+    observation: { attemptId: string; homePath: string; outcome: string; reason?: string | null },
+    signal: AbortSignal,
+  ): Promise<void> {
+    return reportWorkspaceDirectoryObservationViaTransport(
+      this.transport(),
+      projectId,
+      workspaceName,
+      observation,
+      signal,
+    )
   }
 
   async listWorkspaceArtifacts(

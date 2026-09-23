@@ -50,7 +50,12 @@ describe('NamedWorkspaceReclaimProbe', () => {
     const { registry } = context()
     await registry.register({ projectId: 'mohist', workspaceName: 'pay', workspacePath: '/tmp/pay' })
     const connection = {
-      getWorkspaceReclaimability: vi.fn(async () => ({ status: 'archived' as const, activeBoundSessions: 0 })),
+      getWorkspaceReclaimability: vi.fn(async () => ({
+        status: 'archived' as const,
+        activeBoundSessions: 0,
+        reclaimable: true,
+        reason: null,
+      })),
     }
     const probe = new NamedWorkspaceReclaimProbe(registry, connection as never)
 
@@ -64,7 +69,12 @@ describe('NamedWorkspaceReclaimProbe', () => {
     const { registry } = context()
     await registry.register({ projectId: 'mohist', workspaceName: 'pay', workspacePath: '/tmp/pay' })
     const connection = {
-      getWorkspaceReclaimability: vi.fn(async () => ({ status: 'active' as const, activeBoundSessions: 0 })),
+      getWorkspaceReclaimability: vi.fn(async () => ({
+        status: 'active' as const,
+        activeBoundSessions: 0,
+        reclaimable: true,
+        reason: null,
+      })),
     }
     const probe = new NamedWorkspaceReclaimProbe(registry, connection as never)
 
@@ -78,7 +88,12 @@ describe('NamedWorkspaceReclaimProbe', () => {
     const { registry } = context()
     await registry.register({ projectId: 'mohist', workspaceName: 'pay', workspacePath: '/tmp/pay' })
     const connection = {
-      getWorkspaceReclaimability: vi.fn(async () => ({ status: 'active' as const, activeBoundSessions: 2 })),
+      getWorkspaceReclaimability: vi.fn(async () => ({
+        status: 'active' as const,
+        activeBoundSessions: 2,
+        reclaimable: false,
+        reason: 'workspace_in_use',
+      })),
     }
     const probe = new NamedWorkspaceReclaimProbe(registry, connection as never)
 
@@ -109,18 +124,32 @@ describe('NamedWorkspaceReclaimProbe', () => {
     await registry.register({ projectId: 'mohist', workspaceName: 'pay', workspacePath: '/tmp/pay' })
     await registry.markEligible('mohist', 'pay')
     const connection = {
-      getWorkspaceReclaimability: vi.fn(async () => ({ status: 'active' as const, activeBoundSessions: 0 })),
+      getWorkspaceReclaimability: vi.fn(async () => ({
+        status: 'active' as const,
+        activeBoundSessions: 0,
+        reclaimable: true,
+        reason: null,
+      })),
     }
     const probe = new NamedWorkspaceReclaimProbe(registry, connection as never)
 
     const result = await probe.runOnce(signal)
 
     expect(result.markedEligible).toBe(0)
-    expect(connection.getWorkspaceReclaimability).not.toHaveBeenCalled()
+    expect(connection.getWorkspaceReclaimability).toHaveBeenCalledOnce()
   })
 })
 
 describe('NamedWorkspaceCleanupRunner', () => {
+  it('distinguishes a newly reserved Home from an invalid identity', async () => {
+    const { root, registry } = context()
+    await provisionNamedWorkspaceHome({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
+    const entry = registry.get('mohist', 'pay')!
+    const reserved = new NamedWorkspaceCleanupRunner(root, registry, async () => false)
+    expect(await reserved.validateAndDeleteWorkspace(entry)).toBe('in_use')
+    const invalid = new NamedWorkspaceCleanupRunner(root, registry, async () => true)
+    expect(await invalid.validateAndDeleteWorkspace({ ...entry, projectId: 'other' })).toBe('unsafe')
+  })
   it('reads the named workspace marker identity', async () => {
     const { root, registry, runner } = context()
     await provisionNamedWorkspaceHome({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
@@ -145,6 +174,33 @@ describe('NamedWorkspaceCleanupRunner', () => {
 })
 
 describe('named workspace cleanup loop end to end', () => {
+  it('keeps a newly reserved Home and reports in use at the final check', async () => {
+    const { root, registry } = context()
+    await provisionNamedWorkspaceHome({ runnerRoot: root, projectId: 'mohist', workspaceName: 'pay', registry })
+    await registry.markEligible('mohist', 'pay')
+    const entry = registry.get('mohist', 'pay')!
+    const runner = new NamedWorkspaceCleanupRunner(root, registry, async () => false)
+    const outcomes: Array<{ outcome: string; reason?: string }> = []
+    const loop = new CleanupLoop(
+      registry,
+      runner,
+      root,
+      () => ({
+        async withRemovalFence(_path, callback) {
+          return { kind: 'completed', value: await callback() }
+        },
+      }),
+      async (_entry, outcome, reason) => {
+        outcomes.push({ outcome, reason })
+      },
+    )
+
+    expect(await loop.safeRemove(entry)).toBe(false)
+    expect(outcomes).toEqual([{ outcome: 'in_use', reason: 'server_home_reserved' }])
+    expect(registry.get('mohist', 'pay')).not.toBeNull()
+    await expect(stat(namedWorkspacePath(root, 'mohist', 'pay'))).resolves.toBeDefined()
+  })
+
   it('evicts an eligible named workspace past the retention window', async () => {
     const { root, runner } = context()
     let current = now
@@ -155,7 +211,11 @@ describe('named workspace cleanup loop end to end', () => {
     current = past
     await registry.markEligible('mohist', 'pay')
 
-    const loop = new CleanupLoop(registry, runner, root, () => null)
+    const loop = new CleanupLoop(registry, runner, root, () => ({
+      async withRemovalFence(_path, callback) {
+        return { kind: 'completed', value: await callback() }
+      },
+    }))
     const policy: CleanupPolicy = { retentionDays: 5 }
     const result = await loop.runOnce(policy, signal)
 

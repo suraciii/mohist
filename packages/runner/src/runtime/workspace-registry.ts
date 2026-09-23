@@ -61,6 +61,7 @@ export class NamedWorkspaceRegistry {
   private pathIndex: Map<string, string> = new Map()
   private loaded = false
   private tempSequence = 0
+  private pendingPersist: Promise<void> = Promise.resolve()
 
   constructor(runnerRoot: string, options: NamedWorkspaceRegistryOptions = {}) {
     this.filePath = options.filePath
@@ -115,7 +116,7 @@ export class NamedWorkspaceRegistry {
       workspacePath,
       phase: 'active',
       provisionedAt,
-      terminalAt: existing?.terminalAt ?? null,
+      terminalAt: null,
     }
     if (existing && this.pathIndex.get(existing.workspacePath) === key && existing.workspacePath !== workspacePath) {
       this.pathIndex.delete(existing.workspacePath)
@@ -126,11 +127,7 @@ export class NamedWorkspaceRegistry {
     return { ...entry }
   }
 
-  // Active -> eligible: the workspace is reclaimable per the server's
-  // lifecycle observation (archived, or no active bound session). The
-  // runner keeps no terminal fact of its own — the probe owns the
-  // transition — but eligibility is sticky across re-provisionings
-  // (a re-dispatch re-registers and flips the entry back to active).
+  // The candidate period starts only after the Server confirms eligibility.
   async markEligible(projectId: string, workspaceName: string): Promise<NamedWorkspaceRegistryEntry | null> {
     this.ensureLoaded()
     const key = namedWorkspaceRegistryKey(projectId, workspaceName)
@@ -139,6 +136,17 @@ export class NamedWorkspaceRegistry {
     if (existing.phase !== 'active') return { ...existing }
     existing.phase = 'eligible'
     existing.terminalAt = this.now().toISOString()
+    await this.persist()
+    return { ...existing }
+  }
+
+  async markActive(projectId: string, workspaceName: string): Promise<NamedWorkspaceRegistryEntry | null> {
+    this.ensureLoaded()
+    const existing = this.entries.get(namedWorkspaceRegistryKey(projectId, workspaceName))
+    if (!existing) return null
+    if (existing.phase === 'active' && existing.terminalAt === null) return { ...existing }
+    existing.phase = 'active'
+    existing.terminalAt = null
     await this.persist()
     return { ...existing }
   }
@@ -235,16 +243,21 @@ export class NamedWorkspaceRegistry {
     this.loaded = true
   }
 
-  private async persist(): Promise<void> {
-    const dir = dirname(this.filePath)
-    await currentRunnerFileSystem().ensureDir(dir)
-    const tempPath = `${this.filePath}.${this.tempSequence++}.tmp`
+  private persist(): Promise<void> {
     const file: NamedWorkspaceRegistryFile = {
       version: 1,
       entries: Object.fromEntries(this.entries),
     }
-    await currentRunnerFileSystem().writeText(tempPath, JSON.stringify(file, null, 2))
-    await currentRunnerFileSystem().rename(tempPath, this.filePath)
+    const serialized = JSON.stringify(file, null, 2)
+    this.pendingPersist = this.pendingPersist
+      .catch(() => undefined)
+      .then(async () => {
+        await currentRunnerFileSystem().ensureDir(dirname(this.filePath))
+        const tempPath = `${this.filePath}.${this.tempSequence++}.tmp`
+        await currentRunnerFileSystem().writeText(tempPath, serialized)
+        await currentRunnerFileSystem().rename(tempPath, this.filePath)
+      })
+    return this.pendingPersist
   }
 }
 

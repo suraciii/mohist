@@ -59,7 +59,7 @@ function passingProbe(): CodexReadinessProbe {
  * `turn/steer`, `turn/interrupt`, and `thread/compact/start` traffic
  * without a real child process.
  */
-function fakeServerHandle(): FakeServerHandle {
+function fakeServerHandle(options: { compactInResponseBatch?: boolean } = {}): FakeServerHandle {
   const sends: SendRecord[] = []
   const methods: string[] = []
   const listeners = new Set<(message: unknown) => void>()
@@ -118,7 +118,15 @@ function fakeServerHandle(): FakeServerHandle {
           const params = request.params as { readonly threadId?: string } | undefined
           const threadId = params?.threadId ?? 'thread-1'
           const turnId = `compact-${++turnOrdinal}`
-          return { jsonrpc: '2.0', id: request.id, result: { threadId, turnId } } as unknown as R
+          const response = { jsonrpc: '2.0', id: request.id, result: { threadId, turnId } }
+          if (options.compactInResponseBatch) {
+            return new Promise<R>((resolve) => {
+              resolve(response as R)
+              emit({ type: 'contextCompaction', threadId, turnId })
+              emit({ type: 'turn/completed', threadId, turnId, status: 'completed' })
+            })
+          }
+          return response as R
         }
         default:
           throw new Error(`Unexpected method ${request.method}`)
@@ -318,6 +326,25 @@ describe('Codex stop confirmation', () => {
 })
 
 describe('Codex compact idle gate', () => {
+  it('reconciles one compact completion delivered with its response', async () => {
+    const handle = fakeServerHandle({ compactInResponseBatch: true })
+    const runtime = await startedRuntime(handle)
+    const setup = runtime.runTurn({
+      target: { runtime: 'codex', runtimeSessionId: null, workDir: WORK_DIR },
+      prompt: 'hello',
+      clientUserMessageId: 'input-1',
+    })
+    await flushMicrotasks()
+    handle.emit({ type: 'turn/completed', threadId: 'thread-1', turnId: 'turn-1', status: 'completed' })
+    await expect(setup).resolves.toMatchObject({ ok: true })
+
+    await expect(
+      runtime.compact({ target: { runtime: 'codex', runtimeSessionId: 'thread-1', workDir: WORK_DIR } }),
+    ).resolves.toMatchObject({ ok: true })
+    expect(runtime.releaseWorkspace(WORK_DIR)).toBe('ready')
+    await runtime.shutdown({ clearDiagnostic: true })
+  })
+
   it('rejects compact while a Turn is active without sending thread/compact/start', async () => {
     const handle = fakeServerHandle()
     const runtime = await startedRuntime(handle)

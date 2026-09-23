@@ -408,6 +408,18 @@ export function getWorkspaceStatus(number: number, projectId?: string | null, si
     behind?: number
     rebaseInProgress?: boolean
     conflictingFiles?: string[]
+    homeRunnerId?: string | null
+    cleanupEligible?: boolean
+    directory?: {
+      attemptId: string
+      runnerId: string
+      homePath: string
+      outcome: 'removed' | 'already_absent' | 'in_use' | 'unsafe' | 'deletion_failed' | 'unknown'
+      observedAt: string
+      reason?: string | null
+      estimatedBytes?: number | null
+      measuredAt?: string | null
+    } | null
   }>(projectApiPath(projectId, `/issues/${number}/workspace-status`), { signal })
 }
 

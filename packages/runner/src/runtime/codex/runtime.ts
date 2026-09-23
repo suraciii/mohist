@@ -9,9 +9,7 @@
  *
  * This file declares the public boundary surface: the constructor
  * shape, the entry points callers depend on, the readiness check,
- * and the initialization handshake. The internal state machine, the
- * JSON-RPC consumer integration, and the per-method server-call
- * details land in their respective files.
+ * and the initialization handshake.
  *
  * Callers depend only on Mohist-owned request/result types from
  * `./types.js`. The app-server protocol is an implementation detail
@@ -55,9 +53,11 @@ import { type CodexReadinessProbe, evaluateCodexReadiness } from './readiness.js
 import { codexInitializationTransportFromHandle, performCodexInitialization } from './initialization.js'
 import { resumeThread, startThread, type CodexThreadTransport } from './thread.js'
 import { driveTurnToCompletion, submitTurnStart, type CodexTurnEventObserver, type CodexTurnTransport } from './turn.js'
+import { withCapturedTurnMessages } from './turn-message-capture.js'
 import { normalizeCodexNotification } from './turn-events.js'
 import { isCodexTurnCompletedEvent } from './protocol-types.js'
 import { assignCodexRequestId, nextCodexRequestId } from './server-process.js'
+import { CodexWorkspaceUse } from './workspace-use.js'
 
 export interface CodexRuntimeDeps {
   readonly codexHome: string
@@ -120,6 +120,7 @@ export class CodexRuntime {
   private catalogManager: CodexCatalogManager | null = null
   private readonly knownThreads = new Set<string>()
   private readonly activeTurns = new Map<string, string>()
+  private readonly workspaceUse = new CodexWorkspaceUse()
   private nextRequestId = 1
 
   constructor(deps: CodexRuntimeDeps) {
@@ -155,6 +156,10 @@ export class CodexRuntime {
 
   ready(): boolean {
     return this.state.ready
+  }
+
+  releaseWorkspace(workspacePath: string): 'ready' | 'busy' | 'failed' {
+    return this.workspaceUse.inspect(workspacePath)
   }
 
   generation(): number | null {
@@ -280,41 +285,46 @@ export class CodexRuntime {
       }
     }
 
-    const submission = await submitTurnStart(
-      turnTransport,
-      {
-        threadId,
-        workDir,
-        prompt: request.prompt,
-        fileParts: request.fileParts ?? null,
-        clientUserMessageId: request.clientUserMessageId,
-        resolved: configuration.value,
-      },
-      this.takeRequestId(),
-    )
-    if (!submission.ok) return submission as CodexResult<CodexTurnResult>
+    const workspaceOperation = this.workspaceUse.begin(this.state.generation!, threadId, workDir)
+    return withCapturedTurnMessages(turnTransport, async (capturedMessages) => {
+      const submission = await submitTurnStart(
+        turnTransport,
+        {
+          threadId,
+          workDir,
+          prompt: request.prompt,
+          fileParts: request.fileParts ?? null,
+          clientUserMessageId: request.clientUserMessageId!,
+          resolved: configuration.value,
+        },
+        this.takeRequestId(),
+      )
+      if (!submission.ok) return submission as CodexResult<CodexTurnResult>
 
-    this.activeTurns.set(threadId, submission.value.turnId)
-    try {
-      const completion = await driveTurnToCompletion({
-        transport: turnTransport,
-        runtimeSessionId: threadId,
-        workDir,
-        threadId,
-        turnId: submission.value.turnId,
-        deadlineMs: request.deadlineMs ?? null,
-        signal,
-        observer,
-        nextRequestId: () => this.takeRequestId(),
-      })
-      if (signal.aborted && completion.ok) {
-        const error = normalizeTurnFailedCodex('Codex turn completed after its owning execution was aborted')
-        return { ok: false, error, diagnostics: error.diagnostics }
+      this.workspaceUse.bindTurnId(workspaceOperation, submission.value.turnId)
+      this.activeTurns.set(threadId, submission.value.turnId)
+      try {
+        const completion = await driveTurnToCompletion({
+          transport: turnTransport,
+          capturedMessages,
+          runtimeSessionId: threadId,
+          workDir,
+          threadId,
+          turnId: submission.value.turnId,
+          deadlineMs: request.deadlineMs ?? null,
+          signal,
+          observer,
+          nextRequestId: () => this.takeRequestId(),
+        })
+        if (signal.aborted && completion.ok) {
+          const error = normalizeTurnFailedCodex('Codex turn completed after its owning execution was aborted')
+          return { ok: false, error, diagnostics: error.diagnostics }
+        }
+        return completion
+      } finally {
+        if (this.activeTurns.get(threadId) === submission.value.turnId) this.activeTurns.delete(threadId)
       }
-      return completion
-    } finally {
-      if (this.activeTurns.get(threadId) === submission.value.turnId) this.activeTurns.delete(threadId)
-    }
+    })
   }
 
   /**
@@ -514,71 +524,80 @@ export class CodexRuntime {
       const error = normalizeTurnFailedCodex('Codex compact is only available while the Thread is idle')
       return { ok: false, error, diagnostics: error.diagnostics }
     }
-    let response: unknown
-    try {
-      response = await this.server.handle.send({
-        id: this.takeRequestId(),
-        method: 'thread/compact/start',
-        params: { threadId },
-      })
-    } catch (cause) {
-      const error = normalizeUnknownCodex(
-        `Codex compact start response was not observed; the compaction outcome is unknown: ${cause instanceof Error ? cause.message : String(cause)}`,
-      )
-      return { ok: false, error, diagnostics: error.diagnostics }
-    }
-    const compact = readCompactStartResult(response, threadId)
-    if (!compact || compact.threadId !== threadId) {
-      const error = normalizeUnknownCodex(
-        'Codex compact start outcome is unknown because its response shape could not be verified',
-      )
-      return { ok: false, error, diagnostics: error.diagnostics }
-    }
-    let sawCompaction = false
-    const compactObserver: CodexTurnEventObserver = {
-      onSessionReady: observer?.onSessionReady,
-      onDiagnostic: observer?.onDiagnostic,
-      onEvent: (event) => {
-        sawCompaction ||= event.type === 'compaction'
-        observer?.onEvent?.(event)
-      },
-    }
-    const activeTurnKey = compact.turnId ?? `__compaction_pending_${this.takeRequestId()}`
-    this.activeTurns.set(threadId, activeTurnKey)
-    try {
-      const completion = await driveTurnToCompletion({
-        transport: this.server.handle,
-        runtimeSessionId: threadId,
-        workDir: request.target.workDir,
-        threadId,
-        turnId: compact.turnId,
-        deadlineMs: null,
-        observer: compactObserver,
-        nextRequestId: () => this.takeRequestId(),
-        onTurnIdDiscovered: (turnId) => this.activeTurns.set(threadId, turnId),
-      })
-      if (!completion.ok) return completion as CodexResult<CodexCompactResult>
-      if (!sawCompaction) {
-        const error = normalizeTurnFailedCodex('Codex compact completed without a contextCompaction item')
+    const workspaceOperation = this.workspaceUse.begin(this.state.generation!, threadId, request.target.workDir)
+    const handle = this.server.handle
+    return withCapturedTurnMessages(handle, async (capturedMessages) => {
+      let response: unknown
+      try {
+        response = await handle.send({
+          id: this.takeRequestId(),
+          method: 'thread/compact/start',
+          params: { threadId },
+        })
+      } catch (cause) {
+        const error = normalizeUnknownCodex(
+          `Codex compact start response was not observed; the compaction outcome is unknown: ${cause instanceof Error ? cause.message : String(cause)}`,
+        )
         return { ok: false, error, diagnostics: error.diagnostics }
       }
-      return {
-        ok: true,
-        value: {
-          facts: { runtimeSessionId: threadId, workDir: request.target.workDir },
-          diagnostics: completion.value.diagnostics,
+      const compact = readCompactStartResult(response, threadId)
+      if (!compact || compact.threadId !== threadId) {
+        const error = normalizeUnknownCodex(
+          'Codex compact start outcome is unknown because its response shape could not be verified',
+        )
+        return { ok: false, error, diagnostics: error.diagnostics }
+      }
+      let sawCompaction = false
+      const compactObserver: CodexTurnEventObserver = {
+        onSessionReady: observer?.onSessionReady,
+        onDiagnostic: observer?.onDiagnostic,
+        onEvent: (event) => {
+          sawCompaction ||= event.type === 'compaction'
+          observer?.onEvent?.(event)
         },
-        diagnostics: completion.diagnostics,
       }
-    } finally {
-      if (
-        this.activeTurns.get(threadId) === activeTurnKey ||
-        compact.turnId === null ||
-        this.activeTurns.get(threadId) === compact.turnId
-      ) {
-        this.activeTurns.delete(threadId)
+      const activeTurnKey = compact.turnId ?? `__compaction_pending_${this.takeRequestId()}`
+      if (compact.turnId !== null) this.workspaceUse.bindTurnId(workspaceOperation, compact.turnId)
+      this.activeTurns.set(threadId, activeTurnKey)
+      try {
+        const completion = await driveTurnToCompletion({
+          transport: handle,
+          capturedMessages,
+          runtimeSessionId: threadId,
+          workDir: request.target.workDir,
+          threadId,
+          turnId: compact.turnId,
+          deadlineMs: null,
+          observer: compactObserver,
+          nextRequestId: () => this.takeRequestId(),
+          onTurnIdDiscovered: (turnId) => {
+            this.workspaceUse.bindTurnId(workspaceOperation, turnId)
+            this.activeTurns.set(threadId, turnId)
+          },
+        })
+        if (!completion.ok) return completion as CodexResult<CodexCompactResult>
+        if (!sawCompaction) {
+          const error = normalizeTurnFailedCodex('Codex compact completed without a contextCompaction item')
+          return { ok: false, error, diagnostics: error.diagnostics }
+        }
+        return {
+          ok: true,
+          value: {
+            facts: { runtimeSessionId: threadId, workDir: request.target.workDir },
+            diagnostics: completion.value.diagnostics,
+          },
+          diagnostics: completion.diagnostics,
+        }
+      } finally {
+        if (
+          this.activeTurns.get(threadId) === activeTurnKey ||
+          compact.turnId === null ||
+          this.activeTurns.get(threadId) === compact.turnId
+        ) {
+          this.activeTurns.delete(threadId)
+        }
       }
-    }
+    })
   }
 
   /**
@@ -752,7 +771,9 @@ export class CodexRuntime {
     }
     this.server.handle = handle
     this.server.closed = false
-    this.server.unsubscribe = handle.subscribe((message) => this.observeServerMessage(message))
+    this.server.unsubscribe = handle.subscribe((message) => {
+      if (this.server.handle === handle) this.observeServerMessage(message)
+    })
 
     // Run the initialize → initialized handshake. The handshake
     // rejects non-managed codexHome, malformed initialize responses,
@@ -862,6 +883,10 @@ export class CodexRuntime {
   }
 
   private observeServerMessage(message: unknown): void {
+    const terminal = normalizeCodexNotification(message) ?? message
+    if (this.state.generation !== null && isCodexTurnCompletedEvent(terminal)) {
+      this.workspaceUse.completed(this.state.generation, terminal)
+    }
     if (!message || typeof message !== 'object') return
     const candidate = message as { method?: unknown; params?: unknown }
     if (candidate.method !== 'protocol-failure') return

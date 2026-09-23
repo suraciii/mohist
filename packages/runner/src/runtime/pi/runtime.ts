@@ -1,6 +1,7 @@
 import { createCredentialMaskerFromEnvironment, CredentialMasker } from '../task-log.js'
 import { NON_RECOVERABLE_PROVIDER_ERROR_CODE } from '../../core/types.js'
-import { resolve } from 'node:path'
+import { isAbsolute, relative, resolve } from 'node:path'
+import { realpathSync } from 'node:fs'
 import { startSettleGuard } from './settle-guard.js'
 import { finalText } from './session-state.js'
 import { SessionMutexes } from './session-locks.js'
@@ -53,6 +54,8 @@ export class PiRuntime {
   private readonly deps: PiRuntimeDeps
   private readonly runtimeShutdownTimeoutMs: number
   private readonly sessions = new Map<string, PiSdkSession>()
+  private readonly sessionWorkDirs = new Map<string, string>()
+  private readonly pendingPrompts = new Map<string, number>()
   private readonly sessionLocks = new SessionMutexes()
   private readonly state: {
     ready: boolean
@@ -97,6 +100,7 @@ export class PiRuntime {
     try {
       const session = this.sessions.get(path) ?? (await this.state.services.openSession(path, request.target.workDir))
       this.sessions.set(path, session)
+      this.sessionWorkDirs.set(path, canonicalWorkDir(request.target.workDir))
       return {
         ok: true,
         value: { runtimeSessionId: path, workDir: request.target.workDir, activeTurn: session.isStreaming },
@@ -122,6 +126,7 @@ export class PiRuntime {
       const path = normalizedPath(session.sessionFile)
       if (!path) return this.failure('incompatible-runtime', 'Pi did not return an absolute session-file path')
       this.sessions.set(path, session)
+      this.sessionWorkDirs.set(path, canonicalWorkDir(request.target.workDir))
       return { ok: true, value: { runtimeSessionId: path, workDir: request.target.workDir }, diagnostics: [] }
     } catch (cause) {
       return this.failure('turn-failed', 'Pi Session creation failed', [
@@ -152,6 +157,7 @@ export class PiRuntime {
           managerExecution: request.managerExecution ?? null,
         }))
       this.sessions.set(path, session)
+      this.sessionWorkDirs.set(path, canonicalWorkDir(request.target.workDir))
     } catch (cause) {
       return this.failure('missing-session', 'The bound Pi Session is missing or corrupt', [
         resetDiagnostic(),
@@ -344,6 +350,7 @@ export class PiRuntime {
       if (!fixed) {
         // Both branches stay observed after settlement so a late SDK result
         // cannot change the result or become an unhandled rejection.
+        this.holdPrompt(path, request.target.workDir)
         void Promise.resolve()
           .then(() => {
             if (fixed) return
@@ -357,6 +364,7 @@ export class PiRuntime {
                 failureDiagnostic('turn-failed', cause, mask, { phase: 'prompt' }),
               ]),
           )
+          .finally(() => this.releasePrompt(path))
       }
       outcome = await result
     } finally {
@@ -445,55 +453,58 @@ export class PiRuntime {
         signal.addEventListener('abort', onAbort, { once: true })
         if (signal.aborted) onAbort()
       }
-      void this.sessionLocks.run(path, async () => {
-        if (settled) {
-          signal?.removeEventListener('abort', onAbort)
-          return
-        }
-        const unsubscribe = session.value.subscribe((event) => report(projector.project(event)))
-        try {
-          await session.value.prompt(request.prompt, {
-            expandPromptTemplates: false,
-            preflight: (success) => {
-              if (success) {
-                if (!waitForCompletion) {
-                  settle({
-                    ok: true,
-                    value: { runtimeSessionId: path, workDir: request.target.workDir },
-                    diagnostics: [],
-                  })
-                }
-              } else {
-                settle(
-                  this.failure('turn-failed', 'Pi rejected follow-up reception (preflight rejected the prompt)', [
-                    diagnostic(
-                      'preflight-rejected',
-                      'Pi preflight rejected the follow-up prompt — model or credentials missing',
-                    ),
-                  ]),
-                )
-              }
-            },
-          })
-          report(projector.reconcile(session.value.messages))
-          if (waitForCompletion && !settled) {
-            settle({
-              ok: true,
-              value: { runtimeSessionId: path, workDir: request.target.workDir },
-              diagnostics: [],
-            })
+      this.holdPrompt(path, request.target.workDir)
+      void this.sessionLocks
+        .run(path, async () => {
+          if (settled) {
+            signal?.removeEventListener('abort', onAbort)
+            return
           }
-        } catch (cause) {
-          settle(
-            this.failure('turn-failed', 'Pi follow-up prompt failed', [
-              diagnostic('prompt-failed', this.mask(message(cause))),
-            ]),
-          )
-        } finally {
-          unsubscribe()
-          signal?.removeEventListener('abort', onAbort)
-        }
-      })
+          const unsubscribe = session.value.subscribe((event) => report(projector.project(event)))
+          try {
+            await session.value.prompt(request.prompt, {
+              expandPromptTemplates: false,
+              preflight: (success) => {
+                if (success) {
+                  if (!waitForCompletion) {
+                    settle({
+                      ok: true,
+                      value: { runtimeSessionId: path, workDir: request.target.workDir },
+                      diagnostics: [],
+                    })
+                  }
+                } else {
+                  settle(
+                    this.failure('turn-failed', 'Pi rejected follow-up reception (preflight rejected the prompt)', [
+                      diagnostic(
+                        'preflight-rejected',
+                        'Pi preflight rejected the follow-up prompt — model or credentials missing',
+                      ),
+                    ]),
+                  )
+                }
+              },
+            })
+            report(projector.reconcile(session.value.messages))
+            if (waitForCompletion && !settled) {
+              settle({
+                ok: true,
+                value: { runtimeSessionId: path, workDir: request.target.workDir },
+                diagnostics: [],
+              })
+            }
+          } catch (cause) {
+            settle(
+              this.failure('turn-failed', 'Pi follow-up prompt failed', [
+                diagnostic('prompt-failed', this.mask(message(cause))),
+              ]),
+            )
+          } finally {
+            unsubscribe()
+            signal?.removeEventListener('abort', onAbort)
+          }
+        })
+        .finally(() => this.releasePrompt(path))
     })
   }
 
@@ -724,8 +735,10 @@ export class PiRuntime {
         /* best-effort cleanup */
       }
       if (this.sessions.get(priorPath) === priorToDispose) this.sessions.delete(priorPath)
+      this.sessionWorkDirs.delete(priorPath)
     }
     this.sessions.set(newPath, nextSession)
+    this.sessionWorkDirs.set(newPath, canonicalWorkDir(workDir))
 
     const facts: PiResetFacts = { runtimeSessionId: newPath, workDir }
     return { ok: true, value: facts, diagnostics }
@@ -772,6 +785,7 @@ export class PiRuntime {
       })
       session = opened
       this.sessions.set(path, session)
+      this.sessionWorkDirs.set(path, canonicalWorkDir(workDir))
       return { ok: true, value: session }
     } catch (cause) {
       return {
@@ -794,12 +808,46 @@ export class PiRuntime {
       }
     }
     this.sessions.clear()
+    this.sessionWorkDirs.clear()
     this.sessionLocks.clear()
     const services = this.state.services
     this.state.services = null
     this.state.ready = false
     this.state.catalog = null
     await boundedWait(() => services?.close(), this.runtimeShutdownTimeoutMs)
+  }
+
+  releaseWorkspace(workspacePath: string): 'ready' | 'busy' | 'failed' {
+    const root = canonicalWorkDir(workspacePath)
+    if (root === '<unresolved>') return 'failed'
+    for (const [path, workDir] of this.sessionWorkDirs) {
+      if (workDir === '<unresolved>') return 'failed'
+      if (!isWithin(root, workDir)) continue
+      const session = this.sessions.get(path)
+      if ((this.pendingPrompts.get(path) ?? 0) > 0 || session?.isStreaming) return 'busy'
+    }
+    for (const [path, workDir] of this.sessionWorkDirs) {
+      if (!isWithin(root, workDir)) continue
+      try {
+        this.sessions.get(path)?.dispose()
+      } catch {
+        return 'failed'
+      }
+      this.sessions.delete(path)
+      this.sessionWorkDirs.delete(path)
+    }
+    return 'ready'
+  }
+
+  private holdPrompt(path: string, workDir: string): void {
+    this.sessionWorkDirs.set(path, canonicalWorkDir(workDir))
+    this.pendingPrompts.set(path, (this.pendingPrompts.get(path) ?? 0) + 1)
+  }
+
+  private releasePrompt(path: string): void {
+    const remaining = (this.pendingPrompts.get(path) ?? 1) - 1
+    if (remaining === 0) this.pendingPrompts.delete(path)
+    else this.pendingPrompts.set(path, remaining)
   }
 
   private async attemptStart(): Promise<PiResult<PiReadyState>> {
@@ -885,6 +933,17 @@ function normalizedPath(value: string | undefined): string | null {
   if (!value) return null
   const path = value.replaceAll('\\', '/')
   return path.startsWith('/') ? resolve(path) : null
+}
+function canonicalWorkDir(value: string): string {
+  try {
+    return realpathSync(value)
+  } catch {
+    return value.startsWith('/proc/') ? '<unresolved>' : resolve(value)
+  }
+}
+function isWithin(root: string, candidate: string): boolean {
+  const child = relative(root, candidate)
+  return child === '' || (child !== '..' && !child.startsWith('../') && !isAbsolute(child))
 }
 function splitModel(value: string): { provider: string; id: string } | null {
   const index = value.indexOf('/')

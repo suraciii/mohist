@@ -35,7 +35,10 @@ export interface CleanupRunner {
   deleteDirectory(path: string): Promise<void>
   computeDirectorySize(path: string, signal: AbortSignal): Promise<number | null>
   validateWorkspace?(entry: CleanupEntry): Promise<boolean>
-  validateAndDeleteWorkspace?(entry: CleanupEntry): Promise<boolean>
+  validateAndDeleteWorkspace?(
+    entry: CleanupEntry,
+    onDeleteStarted?: () => void,
+  ): Promise<'removed' | 'in_use' | 'unsafe'>
 }
 
 export interface CleanupLoopResult {
@@ -59,6 +62,11 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
     private readonly runner: CleanupRunner,
     private readonly runnerRoot: string,
     private readonly removalFence: () => WorkspaceRemovalFence | null = () => null,
+    private readonly reportOutcome?: (
+      entry: E,
+      outcome: 'removed' | 'already_absent' | 'in_use' | 'unsafe' | 'deletion_failed',
+      reason?: string,
+    ) => Promise<void>,
   ) {}
 
   async runOnce(
@@ -94,13 +102,25 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
     for (const entry of initialEligible) {
       if (signal.aborted) break
       if (blockedPaths.has(entry.workspacePath)) continue
-      const verdict = await this.evaluateGuards(entry)
+      let verdict: Awaited<ReturnType<typeof this.evaluateGuards>>
+      try {
+        if (!this.runner.pathExists(entry.workspacePath)) continue
+        verdict = await this.evaluateGuards(entry)
+      } catch (error) {
+        await this.reportOutcome?.(entry, 'unsafe', errorReason(error)).catch(() => undefined)
+        continue
+      }
       if (verdict.ok) continue
+      if (verdict.message === 'workspace identity is missing or unreadable') {
+        await this.reportOutcome?.(entry, 'unsafe', verdict.message).catch(() => undefined)
+        continue
+      }
       log.warn('workspace cleanup refused', {
         run: this.registry.entryKey(entry),
         path: entry.workspacePath,
         reason: verdict.message,
       })
+      await this.reportOutcome?.(entry, 'unsafe', verdict.message).catch(() => undefined)
       await this.registry.markStuck(this.registry.entryKey(entry))
       result.stuckResolved++
     }
@@ -141,6 +161,10 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
       if (result.workspaceUsageBytes <= policy.storageBudgetBytes!) return result
 
       const targetWatermark = policy.storageTargetWatermarkBytes ?? Math.floor(policy.storageBudgetBytes! * 0.7)
+      if (targetWatermark < 0 || targetWatermark >= policy.storageBudgetBytes!) {
+        log.warn('workspace cleanup refused invalid storage target', { reason: String(targetWatermark) })
+        return result
+      }
       const sorted = [...remaining].sort((a, b) => {
         if (!a.terminalAt && !b.terminalAt) return 0
         if (!a.terminalAt) return 1
@@ -154,13 +178,11 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
         if (currentUsage <= targetWatermark) break
 
         const entrySize = await this.runner.computeDirectorySize(entry.workspacePath, signal)
-        if (entrySize != null && entrySize > 0) {
-          currentUsage -= entrySize
-        }
-
         const removed = await this.safeRemove(entry, blockedPaths)
-        if (removed) result.budgetRemoved++
-        else result.guardAborted++
+        if (removed) {
+          result.budgetRemoved++
+          if (entrySize != null && entrySize > 0) currentUsage -= entrySize
+        } else result.guardAborted++
       }
     }
 
@@ -204,62 +226,106 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
   }
 
   async safeRemove(entry: E, blockedPaths: ReadonlySet<string> = new Set()): Promise<boolean> {
-    if (blockedPaths.has(entry.workspacePath)) return false
+    if (blockedPaths.has(entry.workspacePath)) {
+      await this.reportOutcome?.(entry, 'in_use', 'runtime_resource_busy').catch(() => undefined)
+      return false
+    }
     const fence = this.removalFence()
+    if (!fence) {
+      await this.reportOutcome?.(entry, 'unsafe', 'removal_fence_unavailable').catch(() => undefined)
+      return false
+    }
     const remove = async (): Promise<boolean> => {
-      const verdict = await this.evaluateGuards(entry)
+      let present: boolean
+      try {
+        present = this.runner.pathExists(entry.workspacePath)
+      } catch (error) {
+        await this.reportOutcome?.(entry, 'unsafe', errorReason(error)).catch(() => undefined)
+        return false
+      }
+      if (!present) {
+        if (!this.runner.isUnderRunnerRoot(this.runnerRoot, entry.workspacePath)) {
+          await this.reportOutcome?.(entry, 'unsafe', 'path_outside_runner_root').catch(() => undefined)
+          return false
+        }
+        await this.reportOutcome?.(entry, 'already_absent')
+        await this.registry.remove(this.registry.entryKey(entry))
+        return true
+      }
+      let verdict: Awaited<ReturnType<typeof this.evaluateGuards>>
+      try {
+        verdict = await this.evaluateGuards(entry)
+      } catch (error) {
+        await this.reportOutcome?.(entry, 'unsafe', errorReason(error)).catch(() => undefined)
+        return false
+      }
       if (!verdict.ok) {
         log.warn('workspace cleanup refused', {
           run: this.registry.entryKey(entry),
           path: entry.workspacePath,
           reason: verdict.message,
         })
+        await this.reportOutcome?.(entry, 'unsafe', verdict.message).catch(() => undefined)
         return false
       }
 
-      if (!this.runner.pathExists(entry.workspacePath)) {
-        await this.registry.remove(this.registry.entryKey(entry))
-        return true
-      }
-
       if (this.runner.validateAndDeleteWorkspace) {
-        if (!(await this.runner.validateAndDeleteWorkspace(entry))) {
+        let outcome: 'removed' | 'in_use' | 'unsafe'
+        let deleteStarted = false
+        try {
+          outcome = await this.runner.validateAndDeleteWorkspace(entry, () => {
+            deleteStarted = true
+          })
+        } catch (error) {
+          await this.reportOutcome?.(entry, deleteStarted ? 'deletion_failed' : 'unsafe', errorReason(error)).catch(
+            () => undefined,
+          )
+          throw error
+        }
+        if (outcome !== 'removed') {
           log.warn('workspace cleanup refused', {
             run: this.registry.entryKey(entry),
             path: entry.workspacePath,
-            reason: 'workspace identity is invalid',
+            reason: outcome === 'in_use' ? 'server still reserves the Home' : 'workspace identity is invalid',
           })
+          await this.reportOutcome?.(
+            entry,
+            outcome,
+            outcome === 'in_use' ? 'server_home_reserved' : 'workspace_identity_invalid',
+          ).catch(() => undefined)
           return false
         }
+        await this.reportOutcome?.(entry, 'removed')
         await this.registry.remove(this.registry.entryKey(entry))
         return true
       }
 
-      if (this.runner.validateWorkspace && !(await this.runner.validateWorkspace(entry))) {
+      let valid = true
+      try {
+        if (this.runner.validateWorkspace) valid = await this.runner.validateWorkspace(entry)
+      } catch (error) {
+        await this.reportOutcome?.(entry, 'unsafe', errorReason(error)).catch(() => undefined)
+        return false
+      }
+      if (!valid) {
         log.warn('workspace cleanup refused', {
           run: this.registry.entryKey(entry),
           path: entry.workspacePath,
           reason: 'workspace identity is invalid',
         })
+        await this.reportOutcome?.(entry, 'unsafe', 'workspace_identity_or_eligibility_invalid').catch(() => undefined)
         return false
       }
 
-      await this.runner.deleteDirectory(entry.workspacePath)
+      try {
+        await this.runner.deleteDirectory(entry.workspacePath)
+      } catch (error) {
+        await this.reportOutcome?.(entry, 'deletion_failed', errorReason(error)).catch(() => undefined)
+        throw error
+      }
+      await this.reportOutcome?.(entry, 'removed')
       await this.registry.remove(this.registry.entryKey(entry))
       return true
-    }
-
-    if (!fence) {
-      try {
-        return await remove()
-      } catch (error) {
-        log.error('workspace cleanup failed to remove path', {
-          run: this.registry.entryKey(entry),
-          path: entry.workspacePath,
-          exception: error,
-        })
-        return false
-      }
     }
 
     const result = await fence.withRemovalFence(entry.workspacePath, async () => {
@@ -274,6 +340,12 @@ export class CleanupLoop<E extends CleanupEntry = CleanupEntry> {
         return false
       }
     })
+    if (result.kind === 'busy') await this.reportOutcome?.(entry, 'in_use', 'workspace_busy').catch(() => undefined)
+    if (result.kind === 'failed') await this.reportOutcome?.(entry, 'unsafe', result.reason).catch(() => undefined)
     return result.kind === 'completed' ? result.value : false
   }
+}
+
+function errorReason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

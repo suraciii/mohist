@@ -25,6 +25,24 @@ export interface WorkspaceProvisionedReport {
 export interface WorkspaceReclaimability {
   readonly status: 'active' | 'archived'
   readonly activeBoundSessions: number
+  readonly reclaimable: boolean
+  readonly reason: string | null
+}
+
+export async function reportWorkspaceDirectoryObservation(
+  transport: WorkspaceReportTransport,
+  projectId: string,
+  workspaceName: string,
+  observation: { attemptId: string; homePath: string; outcome: string; reason?: string | null },
+  signal: AbortSignal,
+): Promise<void> {
+  await transport.request(
+    'reportWorkspaceDirectoryObservation',
+    transport.url(
+      `workspaces/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceName)}/directory-observation`,
+    ),
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(observation), signal },
+  )
 }
 
 export interface WorkspaceReportTransport {
@@ -39,13 +57,19 @@ export async function reportWorkspaceProvisioned(
   workspaceName: string,
   path: string,
   signal: AbortSignal,
+  created = false,
 ): Promise<WorkspaceProvisionedReport> {
   let response: Response
   try {
     response = await transport.request(
       'reportWorkspaceProvisioned',
       transport.url(`workspaces/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceName)}/provisioned`),
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }), signal },
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(created ? { path, created } : { path }),
+        signal,
+      },
     )
   } catch (error) {
     if (
@@ -98,7 +122,12 @@ export function parseWorkspaceReclaimability(payload: unknown): WorkspaceReclaim
   if (count === null || !Number.isInteger(count) || count < 0) {
     throw new Error('workspace reclaimability returned an invalid session count')
   }
-  return { status, activeBoundSessions: count }
+  const reclaimable = payload['reclaimable']
+  const reason = payload['reason']
+  if (typeof reclaimable !== 'boolean' || (reason !== null && typeof reason !== 'string')) {
+    throw new Error('workspace reclaimability returned an invalid decision')
+  }
+  return { status, activeBoundSessions: count, reclaimable, reason }
 }
 
 function readObject(value: unknown, path: string[]): Record<string, unknown> | null {

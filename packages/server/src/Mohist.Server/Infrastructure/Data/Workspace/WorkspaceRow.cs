@@ -12,4 +12,5 @@ public class WorkspaceRow
     public string? HomePath { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? ArchivedAt { get; set; }
+    public string? DirectoryObservationJson { get; set; }
 }

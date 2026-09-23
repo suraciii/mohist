@@ -146,8 +146,8 @@ describe('RemoveWorkspace removal fence', () => {
   })
 
   vitestIt.each([
-    ['busy', 'Workspace is busy and cannot be safely released'],
-    ['failed', 'Workspace cannot be safely released because the removal fence failed'],
+    ['busy', 'Workspace is in use or removal is in progress; retry later'],
+    ['failed', 'Workspace use cannot be safely checked'],
   ] as const)(
     'returns cleanup failure and does not enter the callback when the fence is %s',
     async (kind, message) =>
@@ -163,9 +163,9 @@ describe('RemoveWorkspace removal fence', () => {
 
         await expect(handler(query)).resolves.toEqual({
           removed: false,
-          status: 'failed',
+          status: kind === 'busy' ? 'in_use' : 'unsafe',
           path: workspacePath,
-          reason: 'workspace_cleanup_failed',
+          reason: kind === 'busy' ? 'workspace_busy' : 'workspace_inspection_unavailable',
           message,
         })
         expect(pathExists).not.toHaveBeenCalled()
@@ -183,10 +183,10 @@ describe('RemoveWorkspace removal fence', () => {
 
     await expect(handler(query)).resolves.toEqual({
       removed: false,
-      status: 'failed',
+      status: 'unsafe',
       path: workspacePath,
       reason: 'workspace_cleanup_refused',
-      message: 'Runtime removal fence is unavailable',
+      message: 'Runner Workspace removal fence is unavailable',
     })
     expect(pathExists).not.toHaveBeenCalled()
     expect(validateNamedWorkspaceIdentity).not.toHaveBeenCalled()
@@ -202,7 +202,7 @@ describe('RemoveWorkspace removal fence', () => {
 
     await expect(handler({ projectId })).resolves.toEqual({
       removed: false,
-      status: 'failed',
+      status: 'unsafe',
       path: null,
       reason: 'workspace_identity_mismatch',
       message: 'Workspace query requires complete identity',
@@ -228,10 +228,10 @@ describe('RemoveWorkspace removal fence', () => {
 
     await expect(handler(query)).resolves.toEqual({
       removed: false,
-      status: 'missing',
+      status: 'already_absent',
       path: workspacePath,
       reason: 'workspace_missing',
-      message: 'Workspace already removed',
+      message: 'Workspace was already absent',
     })
     expect(calls).toEqual([`fence-enter:${workspacePath}`, 'path-exists', 'registry-remove', 'fence-exit'])
     expect(validateNamedWorkspaceIdentity).not.toHaveBeenCalled()
@@ -256,7 +256,7 @@ describe('RemoveWorkspace removal fence', () => {
         },
         { fileSystem, controlExistsChecker: (candidate) => fileSystem.exists(candidate) },
       )
-      expect(result).toMatchObject({ removed: false, status: 'failed' })
+      expect(result).toMatchObject({ removed: false, status: 'unsafe' })
       expect(fileSystem.exists(join(outside, workspaceName))).toBe(true)
     })
   })
@@ -317,7 +317,7 @@ describe('RemoveWorkspace removal fence', () => {
 
     await expect(handler(query)).resolves.toEqual({
       removed: false,
-      status: 'failed',
+      status: 'unsafe',
       path: workspacePath,
       reason: 'workspace_identity_mismatch',
       message: 'marker mismatch',

@@ -81,6 +81,7 @@ import {
   type CodexTurnResult,
 } from './types.js'
 import { mapCodexCanonicalReasoningEffort, type CodexResolvedTurnConfiguration } from './model-catalog.js'
+import type { CodexTurnMessageCapture } from './turn-message-capture.js'
 
 // ---------------------------------------------------------------------------
 // Transport
@@ -278,6 +279,7 @@ export interface CodexTurnCompletionConfig {
 
 export interface CodexTurnCompletionOptions extends CodexTurnCompletionConfig {
   readonly transport: CodexTurnTransport
+  readonly capturedMessages?: CodexTurnMessageCapture
   readonly observer?: CodexTurnEventObserver
   readonly fixedDeadlineResult?: CodexResult<CodexTurnResult> | null
   readonly fixedPermissionResult?: CodexResult<CodexTurnResult> | null
@@ -384,6 +386,7 @@ export async function driveTurnToCompletion(
   })
   session.permissionRejection = permissionRejection
   try {
+    options.capturedMessages?.replayTo((message) => routeTurnMessage(message, session, options.transport))
     return await session.settled.promise
   } finally {
     warningHandle?.dispose()

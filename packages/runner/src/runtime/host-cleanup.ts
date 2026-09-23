@@ -46,8 +46,8 @@ export function createHostCleanup(deps: HostCleanupDeps) {
       if (runtime) {
         let reclaim: Awaited<ReturnType<OpenCodeRuntime['reclaimWhere']>>
         try {
-          reclaim = await runtime.reclaimWhere((directory) => {
-            const entry = deps.namedWorkspaceRegistry.findByWorkspacePath(directory)
+          reclaim = await runtime.reclaimWhere((_directory, owner) => {
+            const entry = owner ? deps.namedWorkspaceRegistry.findByWorkspacePath(owner) : null
             return entry?.phase === 'eligible' || entry?.phase === 'stuck'
           })
         } catch (error) {

@@ -16,7 +16,9 @@ public sealed class FakeRunnerWorkspaceClient : IRunnerWorkspaceClient
     public RunnerWorkspaceCommitsResult? Commits { get; set; }
     public Dictionary<string, RunnerWorkspaceCommitDiffResult?> CommitDiffs { get; } = new(StringComparer.Ordinal);
     public RunnerWorkspaceFileContentResult FileContent { get; set; } = new(null, null, "workspace_removed");
-    public WorkspaceRemovalResult WorkspaceRemoval { get; set; } = new(false, "missing", "/fake/workspace", "workspace_missing", "Workspace already removed");
+    public WorkspaceRemovalResult WorkspaceRemoval { get; set; } = new(false, "already_absent", "/fake/workspace", "workspace_missing", "Workspace was already absent");
+    public Func<Task<WorkspaceRemovalResult>>? RemoveWorkspaceHandler { get; set; }
+    public WorkspaceInspectionResult WorkspaceInspection { get; set; } = new("already_absent", null);
     public Exception? Throw { get; set; }
     public string? LastBaseBranch { get; private set; }
     public IReadOnlyList<RemoveWorkspaceCall> RemoveWorkspaceCalls
@@ -31,7 +33,9 @@ public sealed class FakeRunnerWorkspaceClient : IRunnerWorkspaceClient
         Commits = null;
         CommitDiffs.Clear();
         FileContent = new RunnerWorkspaceFileContentResult(null, null, "workspace_removed");
-        WorkspaceRemoval = new WorkspaceRemovalResult(false, "missing", "/fake/workspace", "workspace_missing", "Workspace already removed");
+        WorkspaceRemoval = new WorkspaceRemovalResult(false, "already_absent", "/fake/workspace", "workspace_missing", "Workspace was already absent");
+        RemoveWorkspaceHandler = null;
+        WorkspaceInspection = new WorkspaceInspectionResult("already_absent", null);
         Throw = null;
         LastBaseBranch = null;
         lock (_gate)
@@ -79,7 +83,13 @@ public sealed class FakeRunnerWorkspaceClient : IRunnerWorkspaceClient
         {
             _removeWorkspaceCalls.Add(new RemoveWorkspaceCall(workspace.Path));
         }
-        return Task.FromResult(WorkspaceRemoval);
+        return RemoveWorkspaceHandler?.Invoke() ?? Task.FromResult(WorkspaceRemoval);
+    }
+
+    public Task<WorkspaceInspectionResult> InspectWorkspaceAsync(string projectId, string workflowRunId, int issueNumber, WorkflowRepositoryContext repository, WorkspaceIdentity workspace, CancellationToken ct = default)
+    {
+        MaybeThrow();
+        return Task.FromResult(WorkspaceInspection);
     }
 
     private void MaybeThrow()

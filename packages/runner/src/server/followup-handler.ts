@@ -87,7 +87,7 @@ export interface FollowupHandlerDeps {
 
 export interface FollowupDeliveryResult {
   accepted: boolean
-  error?: 'missing' | 'runtime-unavailable' | 'unavailable'
+  error?: 'missing' | 'runtime-unavailable' | 'unavailable' | 'workspace-removal-in-progress'
 }
 
 export function createFollowupHandler(

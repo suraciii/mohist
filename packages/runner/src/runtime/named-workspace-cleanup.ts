@@ -1,6 +1,8 @@
 import { resolve } from 'node:path'
 import { isUnderRunnerRoot } from './workspace-query.js'
 import { namedWorkspacePath, readNamedWorkspaceMarker } from './workspace-entity.js'
+import { withManagedWorkspaceHandle } from './workspace-managed.js'
+import { WorkspaceIdentityMismatchError } from './workspace-errors.js'
 import { deleteDirectory } from '../system/process.js'
 import { runnerLogger } from '../system/logger.js'
 import { currentRunnerFileSystem } from '../system/filesystem.js'
@@ -22,6 +24,7 @@ export class NamedWorkspaceCleanupRunner implements CleanupRunner {
   constructor(
     private readonly runnerRoot: string,
     private readonly registry: NamedWorkspaceRegistry | null = null,
+    private readonly eligibleNow?: (projectId: string, workspaceName: string) => Promise<boolean>,
   ) {}
 
   isUnderRunnerRoot(root: string, candidate: string): boolean {
@@ -56,14 +59,21 @@ export class NamedWorkspaceCleanupRunner implements CleanupRunner {
   }
 
   async validateWorkspace(entry: NamedWorkspaceRegistryEntry): Promise<boolean> {
+    if (this.eligibleNow && !(await this.eligibleNow(entry.projectId, entry.workspaceName))) return false
     return await this.withValidWorkspace(entry, async () => true)
   }
 
-  async validateAndDeleteWorkspace(entry: NamedWorkspaceRegistryEntry): Promise<boolean> {
-    return await this.withValidWorkspace(entry, async (workspacePath) => {
+  async validateAndDeleteWorkspace(
+    entry: NamedWorkspaceRegistryEntry,
+    onDeleteStarted?: () => void,
+  ): Promise<'removed' | 'in_use' | 'unsafe'> {
+    if (this.eligibleNow && !(await this.eligibleNow(entry.projectId, entry.workspaceName))) return 'in_use'
+    const valid = await this.withValidWorkspace(entry, async (workspacePath) => {
+      onDeleteStarted?.()
       await deleteDirectory(workspacePath)
       return true
     })
+    return valid ? 'removed' : 'unsafe'
   }
 
   private async withValidWorkspace(
@@ -71,10 +81,17 @@ export class NamedWorkspaceCleanupRunner implements CleanupRunner {
     operation: (workspacePath: string) => Promise<boolean>,
   ): Promise<boolean> {
     if (entry.workspacePath !== namedWorkspacePath(this.runnerRoot, entry.projectId, entry.workspaceName)) return false
-    const marker = await readNamedWorkspaceMarker(entry.workspacePath)
-    if (!marker) return false
-    if (marker.projectId !== entry.projectId || marker.workspaceName !== entry.workspaceName) return false
-    return await operation(entry.workspacePath)
+    try {
+      return await withManagedWorkspaceHandle(this.runnerRoot, entry.workspacePath, true, async (heldPath) => {
+        const marker = await readNamedWorkspaceMarker(heldPath)
+        if (!marker || marker.projectId !== entry.projectId || marker.workspaceName !== entry.workspaceName)
+          return false
+        return await operation(heldPath)
+      })
+    } catch (error) {
+      if (error instanceof WorkspaceIdentityMismatchError) return false
+      throw error
+    }
   }
 }
 
@@ -90,13 +107,8 @@ export interface NamedWorkspaceReclaimProbeResult {
   unobserved: number
 }
 
-// Server-authoritative lifecycle probe for named workspaces. The
-// runner cannot observe archive state or bound-session activity
-// locally, so each active entry is probed before it may become
-// eligible for cleanup: archived workspaces are reclaimable; active
-// workspaces are reclaimable only while no session is actively bound
-// (an active bound session forbids reclamation). Best-effort: a probe
-// failure leaves the entry active and the next tick retries.
+// Server eligibility includes bound Sessions and Workflows that still need Home.
+// A failed probe leaves the entry active for a later pass.
 export class NamedWorkspaceReclaimProbe {
   constructor(
     private readonly registry: NamedWorkspaceRegistry,
@@ -107,7 +119,6 @@ export class NamedWorkspaceReclaimProbe {
     const result: NamedWorkspaceReclaimProbeResult = { markedEligible: 0, deferred: 0, unobserved: 0 }
     for (const entry of this.registry.list()) {
       if (signal.aborted) break
-      if (entry.phase !== 'active') continue
       let info: Awaited<ReturnType<ServerConnection['getWorkspaceReclaimability']>>
       try {
         info = await this.connection.getWorkspaceReclaimability(entry.projectId, entry.workspaceName, signal)
@@ -119,9 +130,9 @@ export class NamedWorkspaceReclaimProbe {
         result.unobserved++
         continue
       }
-      if (info.status === 'archived' || info.activeBoundSessions === 0) {
+      if (info.reclaimable) {
         const promoted = await this.registry.markEligible(entry.projectId, entry.workspaceName)
-        if (promoted?.phase === 'eligible') {
+        if (entry.phase !== 'eligible' && promoted?.phase === 'eligible') {
           log.info('named workspace reclaimable', {
             workspace: entry.workspaceName,
             reason: info.status === 'archived' ? 'archived' : 'no active bound session',
@@ -129,6 +140,7 @@ export class NamedWorkspaceReclaimProbe {
           result.markedEligible++
         }
       } else {
+        await this.registry.markActive(entry.projectId, entry.workspaceName)
         result.deferred++
       }
     }
@@ -142,12 +154,19 @@ export function createNamedWorkspaceCleanupLoop(
   registry: NamedWorkspaceRegistry,
   runnerRoot: string,
   removalFence: () => WorkspaceRemovalFence | null = () => null,
+  eligibleNow?: (projectId: string, workspaceName: string) => Promise<boolean>,
+  reportOutcome?: (
+    entry: NamedWorkspaceRegistryEntry,
+    outcome: 'removed' | 'already_absent' | 'in_use' | 'unsafe' | 'deletion_failed',
+    reason?: string,
+  ) => Promise<void>,
 ) {
   return new CleanupLoop<NamedWorkspaceRegistryEntry>(
     registry,
-    new NamedWorkspaceCleanupRunner(runnerRoot, registry),
+    new NamedWorkspaceCleanupRunner(runnerRoot, registry, eligibleNow),
     runnerRoot,
     removalFence,
+    reportOutcome,
   )
 }
 

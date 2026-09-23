@@ -103,7 +103,8 @@ public sealed record RunnerWorkspaceDiffResult(
     int CommitCount,
     int TotalAdditions,
     int TotalDeletions,
-    IReadOnlyList<DiffFile> Files);
+    IReadOnlyList<DiffFile> Files,
+    string? Reason = null);
 
 public sealed record RunnerWorkspaceCommitsResult(
     string Base,
@@ -114,9 +115,10 @@ public sealed record RunnerWorkspaceCommitsResult(
     int FilesChanged,
     int TotalAdditions,
     int TotalDeletions,
-    IReadOnlyList<GitCommit> Commits);
+    IReadOnlyList<GitCommit> Commits,
+    string? Reason = null);
 
-public sealed record RunnerWorkspaceCommitDiffResult(string Diff);
+public sealed record RunnerWorkspaceCommitDiffResult(string Diff, string? Reason = null);
 
 public sealed record RunnerWorkspaceFileContentResult(string? Base, string? Head, string? Reason = null);
 
@@ -125,5 +127,7 @@ public sealed record DiffFile(string File, int Additions, int Deletions, string 
 public sealed record GitCommit(string Hash, string ShortHash, string Message, string Author, string Date, string[] Files);
 
 public sealed record WorkspaceRemovalResult(bool Removed, string Status, string? Path, string? Reason, string Message);
+
+public sealed record WorkspaceInspectionResult(string Status, string? Reason);
 
 public sealed record RunnerFollowupDeliveryResult(bool Accepted, string? Error = null);

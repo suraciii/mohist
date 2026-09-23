@@ -13,6 +13,7 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
 {
     internal const string RuntimeUnavailableError = "runtime-unavailable";
     private const string TransientUnavailableError = "unavailable";
+    internal const string WorkspaceRemovalInProgressError = "workspace-removal-in-progress";
 
     private readonly AgentSessionQuerier _sessions;
     private readonly IGrainFactory _grains;
@@ -134,7 +135,8 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
                         FailureReason: "The bound runtime is disabled on the Runner.",
                         FailureCategory: RuntimeUnavailableError));
             }
-            else if (string.Equals(result.Error, TransientUnavailableError, StringComparison.Ordinal))
+            else if (string.Equals(result.Error, TransientUnavailableError, StringComparison.Ordinal)
+                || string.Equals(result.Error, WorkspaceRemovalInProgressError, StringComparison.Ordinal))
             {
                 await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
             }

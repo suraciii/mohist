@@ -5003,6 +5003,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DirectoryObservationJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("HomePath")
                         .HasColumnType("TEXT");
 

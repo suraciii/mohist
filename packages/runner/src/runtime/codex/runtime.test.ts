@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import { CodexRuntime } from './runtime.js'
+import { RunnerWorkspaceUse } from '../runner-workspace-use.js'
 import type { CodexServerHandle } from './server-process.js'
 import type { CodexAuthenticationProbe, CodexCatalogLoader, CodexCliProbe, CodexReadinessProbe } from './readiness.js'
 import type { CodexCatalog } from './types.js'
@@ -23,6 +24,9 @@ function fakeHandle(
     onNotify?: (method: string) => void
     enforceUniqueRequestIds?: boolean
     emitCompletionOnTurnStart?: boolean
+    emitCompletionInResponseBatch?: boolean
+    emitExactCompletionInResponseBatch?: boolean
+    onResponseBatchFlushed?: () => void
   } = {},
 ): CodexServerHandle {
   const catalog = options.catalog ?? { models: [{ id: 'gpt-5' }], complete: true }
@@ -94,6 +98,51 @@ function fakeHandle(
         } as unknown as R
       }
       if (request.method === 'turn/start') {
+        const response = {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: { turn: { id: 'turn-runtime', status: 'in_progress' } },
+        }
+        if (options.emitCompletionInResponseBatch) {
+          return new Promise<R>((resolve) => {
+            resolve(response as R)
+            for (const listener of listeners) {
+              listener({
+                type: 'turn/completed',
+                threadId: 'other-thread',
+                turnId: 'turn-runtime',
+                status: 'completed',
+              })
+              listener({
+                type: 'turn/completed',
+                threadId: 'thread-runtime',
+                turnId: 'other-turn',
+                status: 'completed',
+              })
+              if (options.emitExactCompletionInResponseBatch) {
+                listener({
+                  type: 'turn/completed',
+                  threadId: 'thread-runtime',
+                  turnId: 'turn-runtime',
+                  status: 'completed',
+                })
+              }
+            }
+            setTimeout(() => {
+              options.onResponseBatchFlushed?.()
+              if (!options.emitExactCompletionInResponseBatch) {
+                for (const listener of listeners) {
+                  listener({
+                    type: 'turn/completed',
+                    threadId: 'thread-runtime',
+                    turnId: 'turn-runtime',
+                    status: 'completed',
+                  })
+                }
+              }
+            }, 0)
+          })
+        }
         if (options.emitCompletionOnTurnStart) {
           setTimeout(() => {
             for (const listener of listeners) {
@@ -106,11 +155,7 @@ function fakeHandle(
             }
           }, 0)
         }
-        return {
-          jsonrpc: '2.0',
-          id: request.id,
-          result: { turn: { id: 'turn-runtime', status: 'in_progress' } },
-        } as unknown as R
+        return response as R
       }
       throw new Error(`Unexpected method ${request.method}`)
     },
@@ -307,6 +352,71 @@ describe('CodexRuntime spawn + handshake happy path', () => {
         options: { model: 'gpt-5' },
       }),
     ).resolves.toMatchObject({ ok: true, value: { facts: { runtimeSessionId: 'thread-runtime' } } })
+    expect(runtime.releaseWorkspace('/work')).toBe('ready')
+    await runtime.shutdown({ clearDiagnostic: true })
+  })
+
+  it.each([
+    { exactCompletionInBatch: true, expected: 'ready' },
+    { exactCompletionInBatch: false, expected: 'busy' },
+  ] as const)(
+    'checks exact Thread and Turn after one response batch ($expected)',
+    async ({ exactCompletionInBatch, expected }) => {
+      let observeBatch!: (state: ReturnType<CodexRuntime['releaseWorkspace']>) => void
+      const releaseAfterBatch = new Promise<ReturnType<CodexRuntime['releaseWorkspace']>>((resolve) => {
+        observeBatch = resolve
+      })
+      const runtime = new CodexRuntime({
+        codexHome: MANAGED_CODEX_HOME,
+        cwd: '/work',
+        serverFactory: async () =>
+          fakeHandle({
+            emitCompletionInResponseBatch: true,
+            emitExactCompletionInResponseBatch: exactCompletionInBatch,
+            onResponseBatchFlushed: () => {
+              observeBatch(runtime.releaseWorkspace('/work'))
+            },
+          }),
+        readinessProbe: passingProbe(),
+      })
+      const gate = new RunnerWorkspaceUse(async (path) => runtime.releaseWorkspace(path))
+
+      await expect(runtime.start()).resolves.toMatchObject({ ok: true })
+      const result = await gate.withUse('/work', () =>
+        runtime.runTurn({
+          target: { runtime: 'codex', runtimeSessionId: null, workDir: '/work' },
+          prompt: 'hello',
+          clientUserMessageId: 'input-1',
+          options: { model: 'gpt-5' },
+        }),
+      )
+      expect(result).toMatchObject({ ok: true })
+      expect(await releaseAfterBatch).toBe(expected)
+      expect(runtime.releaseWorkspace('/work')).toBe('ready')
+      expect(await gate.withRemovalFence('/work', async () => true)).toEqual({ kind: 'completed', value: true })
+      await runtime.shutdown({ clearDiagnostic: true })
+    },
+  )
+
+  it('retains Workspace ownership when turn/start has no confirmed outcome', async () => {
+    const runtime = new CodexRuntime({
+      codexHome: MANAGED_CODEX_HOME,
+      cwd: '/work',
+      serverFactory: async () => fakeHandle({ beforeInitialize: (method) => method === 'turn/start' }),
+      readinessProbe: passingProbe(),
+    })
+    await expect(runtime.start()).resolves.toMatchObject({ ok: true })
+
+    await expect(
+      runtime.runTurn({
+        target: { runtime: 'codex', runtimeSessionId: null, workDir: '/work' },
+        prompt: 'hello',
+        clientUserMessageId: 'input-1',
+        options: { model: 'gpt-5' },
+      }),
+    ).resolves.toMatchObject({ ok: false })
+    expect(runtime.releaseWorkspace('/work')).toBe('busy')
+    expect(runtime.releaseWorkspace('/other')).toBe('ready')
     await runtime.shutdown({ clearDiagnostic: true })
   })
 })

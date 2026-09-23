@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
@@ -301,6 +302,24 @@ public class WorkspaceSpecs
         Assert.Contains(cleanup.Resources, r => r.Type == "workspace" && r.Status == "removed");
         Assert.Single(_fixture.RunnerWorkspace.RemoveWorkspaceCalls);
         Assert.Equal(expectedPath, _fixture.RunnerWorkspace.RemoveWorkspaceCalls[0].WorkspacePath);
+        var status = await _client.GetDataAsync<StatusDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workspace-status");
+        Assert.Equal("removed", status.Directory?.Outcome);
+        var confirmedAt = Assert.IsType<DateTimeOffset>(status.Directory?.ConfirmedRemovalAt);
+
+        _fixture.RunnerWorkspace.WorkspaceRemoval = new WorkspaceRemovalResultDto(false, "already_absent", expectedPath,
+            "workspace_missing", "Workspace was already absent").ToDomain();
+        await _client.PostDataAsync<CleanupDto>($"/api/projects/{project.Id}/issues/{issue.Number}/cleanup");
+        var repeated = await _client.GetDataAsync<StatusDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workspace-status");
+        Assert.Equal("already_absent", repeated.Directory?.Outcome);
+        Assert.Equal(confirmedAt, repeated.Directory?.ConfirmedRemovalAt);
+
+        using var rematerialized = await _client.PostAsJsonAsync(
+            $"/api/runner/workspace-spec-runner/workspaces/{project.Id}/issue-{issue.Number}/provisioned",
+            new { path = expectedPath, created = true });
+        Assert.True(rematerialized.IsSuccessStatusCode);
+        var current = await _client.GetDataAsync<StatusDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workspace-status");
+        Assert.Null(current.Directory);
+        Assert.Equal("workspace-spec-runner", current.HomeRunnerId);
     }
 
     [Fact]
@@ -308,16 +327,102 @@ public class WorkspaceSpecs
     {
         var project = await CreateProjectWithRepositoryAsync("main");
         var issue = await CreateIssueAsync(project, "Missing cleanup issue");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
-        await DispatchEventsAsync();
-        _fixture.RunnerWorkspace.WorkspaceRemoval = new WorkspaceRemovalResultDto(false, "missing", "/fake/workspace", "workspace_missing", "Workspace already removed").ToDomain();
+        await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
+        _fixture.RunnerWorkspace.WorkspaceRemoval = new WorkspaceRemovalResultDto(false, "already_absent", "/fake/workspace", "workspace_missing", "Workspace was already absent").ToDomain();
         await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/stop");
 
         var cleanup = await _client.PostDataAsync<CleanupDto>($"/api/projects/{project.Id}/issues/{issue.Number}/cleanup");
 
         Assert.False(cleanup.Removed);
-        Assert.Equal("Workspace already removed", cleanup.Message);
-        Assert.Contains(cleanup.Resources, r => r.Type == "workspace" && r.Status == "missing");
+        Assert.Equal("Workspace was already absent", cleanup.Message);
+        Assert.Contains(cleanup.Resources, r => r.Type == "workspace" && r.Status == "already_absent");
+        var status = await _client.GetDataAsync<StatusDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workspace-status");
+        Assert.Equal("already_absent", status.Directory?.Outcome);
+    }
+
+    [Fact]
+    public async Task ConcurrentCleanup_KeepsFirstAttemptAndReturnsRetryableConflict()
+    {
+        var project = await CreateProjectWithRepositoryAsync();
+        var issue = await CreateIssueAsync(project, "Concurrent cleanup issue");
+        await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/stop");
+
+        var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _fixture.RunnerWorkspace.WorkspaceInspection = new WorkspaceInspectionResult("in_use", "workspace_busy");
+        _fixture.RunnerWorkspace.RemoveWorkspaceHandler = async () =>
+        {
+            entered.SetResult(true);
+            await release.Task;
+            return new WorkspaceRemovalResult(true, "removed", NamedWorkspaceHomePath($"issue-{issue.Number}"), null, "Workspace removed");
+        };
+
+        var route = $"/api/projects/{project.Id}/issues/{issue.Number}/cleanup";
+        var first = _client.PostAsync(route, null);
+        try
+        {
+            await entered.Task;
+            using var duplicate = await _client.PostAsync(route, null);
+            Assert.Equal(409, (int)duplicate.StatusCode);
+            Assert.Contains("workspace_removal_in_progress", await duplicate.Content.ReadAsStringAsync());
+        }
+        finally
+        {
+            release.SetResult(true);
+        }
+        using var completed = await first;
+        Assert.True(completed.IsSuccessStatusCode);
+        Assert.Single(_fixture.RunnerWorkspace.RemoveWorkspaceCalls);
+        var status = await _client.GetDataAsync<StatusDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workspace-status");
+        Assert.Equal("removed", status.Directory?.Outcome);
+        Assert.NotNull(status.Directory?.ConfirmedRemovalAt);
+    }
+
+    [Fact]
+    public async Task MissingHome_CannotBeReportedAsAlreadyAbsent()
+    {
+        var project = await CreateProjectWithRepositoryAsync();
+        var issue = await CreateIssueAsync(project, "Unmaterialized cleanup issue");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
+        await DispatchEventsAsync();
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/stop");
+
+        using var result = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/cleanup", null);
+        Assert.Equal(409, (int)result.StatusCode);
+        Assert.Contains("workspace_home_unknown", await result.Content.ReadAsStringAsync());
+        Assert.Empty(_fixture.RunnerWorkspace.RemoveWorkspaceCalls);
+    }
+
+    [Fact]
+    public async Task LostRemovalReply_ConfirmedAbsenceHasNoDeletionCredit()
+    {
+        var project = await CreateProjectWithRepositoryAsync();
+        var issue = await CreateIssueAsync(project, "Unconfirmed cleanup issue");
+        await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/stop");
+        _fixture.RunnerWorkspace.WorkspaceRemoval = new WorkspaceRemovalResult(false, "unknown",
+            NamedWorkspaceHomePath($"issue-{issue.Number}"), "runner_reply_unknown", "Runner reply was not confirmed");
+        _fixture.RunnerWorkspace.WorkspaceInspection = new WorkspaceInspectionResult("already_absent", null);
+
+        await _client.PostDataAsync<CleanupDto>($"/api/projects/{project.Id}/issues/{issue.Number}/cleanup");
+        var status = await _client.GetDataAsync<StatusDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workspace-status");
+        Assert.Equal("already_absent", status.Directory?.Outcome);
+        Assert.Null(status.Directory?.ConfirmedRemovalAt);
+    }
+
+    [Fact]
+    public async Task PausedWorkflowWithNoActiveSession_StillReservesItsWorkspaceHome()
+    {
+        var project = await CreateProjectWithRepositoryAsync("main");
+        var issue = await CreateIssueAsync(project, "Paused cleanup issue");
+        await StartIssueAndCreateWorkspaceDirectoryAsync(project, issue.Number);
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/force-stop");
+
+        var answer = await _client.GetDataAsync<ReclaimableDto>(
+            $"/api/runner/runner-1/workspaces/{project.Id}/issue-{issue.Number}/reclaimable");
+        Assert.False(answer.Reclaimable);
+        Assert.Equal("workflow_reserves_workspace", answer.Reason);
     }
 
     private async Task<ProjectDto> CreateProjectWithRepositoryAsync(string baseBranch = "main")
@@ -401,7 +506,10 @@ public class WorkspaceSpecs
     private sealed record CommitsDto(bool Available, string? Reason, string? Message, string Base, string Head, string MergeBase, int Ahead, int Behind, bool CanFastForward, string Comparison, SummaryDto Summary, GitCommitDto[] Commits);
     private sealed record GitCommitDto(string Hash, string ShortHash, string Message, string Author, string Date, string[] Files);
     private sealed record CommitDiffDto(bool Available, string? Reason, string? Message, string Hash, string Diff);
-    private sealed record StatusDto(bool Exists, string? Reason, string? Branch, string? BaseBranch, int Ahead, int Behind, bool RebaseInProgress, string[] ConflictingFiles);
+    private sealed record StatusDto(bool Exists, string? Reason, string? Branch, string? BaseBranch, int Ahead, int Behind, bool RebaseInProgress, string[] ConflictingFiles, DirectoryDto? Directory = null, string? HomeRunnerId = null);
+    private sealed record DirectoryDto(string Outcome, string AttemptId, string RunnerId, DateTimeOffset ObservedAt,
+        DateTimeOffset? ConfirmedRemovalAt = null);
+    private sealed record ReclaimableDto(bool Reclaimable, string? Reason);
     private sealed record FileContentDto(string? Base, string? Head, string? Reason);
     private sealed record CleanupDto(bool Removed, string Message, CleanupResourceDto[] Resources);
     private sealed record CleanupResourceDto(string Type, string Status, string? Path, string? Reason);
