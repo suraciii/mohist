@@ -367,6 +367,12 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
         foreach (var row in exceptionalRows)
         {
             var session = AgentSessionJson.Deserialize(row);
+            // Workflow sessions written by the pre-AgentSession schema have
+            // no Agent owner and cannot be hydrated as AgentSession. They
+            // are workflow facts, not missing Agent ownership.
+            if (session is null && IsLegacyWorkflowSession(row.State))
+                continue;
+
             if (session is null || AgentCapacityFacts.HasUnsettledOrdinaryWork(session))
             {
                 unattributable = true;
@@ -385,6 +391,42 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
                 }
                 : snapshot;
         return marked;
+    }
+
+    private static bool IsLegacyWorkflowSession(string stateJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(stateJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                return false;
+
+            foreach (var metadata in document.RootElement.EnumerateObject()
+                         .Where(property => string.Equals(property.Name, "metadata", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (metadata.Value.ValueKind != JsonValueKind.Object)
+                    continue;
+                foreach (var labels in metadata.Value.EnumerateObject()
+                             .Where(property => string.Equals(property.Name, "labels", StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (labels.Value.ValueKind != JsonValueKind.Object)
+                        continue;
+                    foreach (var label in labels.Value.EnumerateObject())
+                    {
+                        if (string.Equals(label.Name, "mohist.io/source-kind", StringComparison.OrdinalIgnoreCase)
+                            && label.Value.ValueKind == JsonValueKind.String
+                            && string.Equals(label.Value.GetString(), "workflow", StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Keep malformed non-workflow documents fail-closed below.
+        }
+
+        return false;
     }
 
     private static AgentCapacityEvidenceStatus Incomplete(AgentCapacityEvidenceStatus current) =>
