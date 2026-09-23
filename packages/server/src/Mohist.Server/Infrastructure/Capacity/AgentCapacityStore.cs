@@ -80,7 +80,7 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
             return new(AgentCapacityClaimDisposition.Conflict, capacity);
         if (!AgentCapacityFacts.IsEligible(job))
             return new(AgentCapacityClaimDisposition.NotEligible, capacity);
-        if (job.Input?.AgentSessionId is { Length: > 0 } referencedSessionId)
+        if (job.Input?.AgentSessionId is { } referencedSessionId)
         {
             // The Job's own initial Turn must be its Session's current
             // deliverable head, evaluated against the persisted Session row
@@ -272,7 +272,7 @@ public sealed class AgentCapacityStore : IAgentCapacityStore
                     continue;
                 }
                 var locallyEligible = true;
-                if (!string.IsNullOrWhiteSpace(job.Input?.AgentSessionId))
+                if (job.Input?.AgentSessionId is not null)
                 {
                     // A missing row leaves the lookup null: absent evidence,
                     // never an unconstrained Job.

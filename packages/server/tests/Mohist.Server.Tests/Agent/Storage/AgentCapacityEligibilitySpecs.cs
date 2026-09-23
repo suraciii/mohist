@@ -371,6 +371,32 @@ public sealed class AgentCapacityEligibilitySpecs : IAsyncLifetime
         await AssertJobClaimUntouchedAsync("job");
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task BlankSessionIdReference_IsIncompleteNotSessionless(string sessionId)
+    {
+        await AddAgentAsync("project", "agent", 1);
+        var job = await AddJobAsync("job", "project", "agent", Now, agentSessionId: sessionId);
+
+        var snapshot = (await Store.ReadAsync("project", ["agent"]))["agent"];
+        Assert.Equal(AgentCapacityEvidenceStatus.IncompleteOwnerEvidence, snapshot.EvidenceStatus);
+        Assert.Null(snapshot.Occupied);
+        Assert.Equal(AgentCapacityClaimDisposition.Incomplete,
+            (await Store.ClaimJobAsync("job", job.Revision)).Disposition);
+        await AssertJobClaimUntouchedAsync("job");
+    }
+
+    [Fact]
+    public async Task NullSessionIdReference_RemainsDirectJob()
+    {
+        await AddAgentAsync("project", "agent", 1);
+        var job = await AddJobAsync("job", "project", "agent", Now);
+
+        Assert.Equal(AgentCapacityClaimDisposition.Claimed,
+            (await Store.ClaimJobAsync("job", job.Revision)).Disposition);
+    }
+
     private async Task AddAgentAsync(string projectId, string agentId, int? limit = null)
     {
         var agent = new DomainAgent
