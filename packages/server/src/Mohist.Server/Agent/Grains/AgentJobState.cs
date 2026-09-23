@@ -36,18 +36,17 @@ public sealed class AgentJobState
     /// </summary>
     [Id(18)] public PrepareManualLaunchCommand? ManualPlan { get; set; }
     [Id(19)] public PendingTerminalDeliveryEvent? PendingTerminalDeliveryEvent { get; set; }
-    [Id(20)] public string? ConcurrencyPermitToken { get; set; }
-    [Id(21)] public bool ConcurrencyPermitHeld { get; set; }
+    // Ids 20, 21 and 26-31 are retired with the AgentConcurrencyGrain
+    // permit/waiter authority: the permit token, held flag, permit id,
+    // dispatch id, generation, gate status, release-pending marker and
+    // waiter id it carried were only ever reconciled against the removed
+    // ledger. They stay free so an older persisted state document still
+    // deserializes without colliding on later ids; the derived claim
+    // (CapacityClaimedAt) is the only capacity fact this state keeps.
     [Id(22)] public string? WaitingReason { get; set; }
     [Id(23)] public DateTimeOffset? ReadySince { get; set; }
     [Id(24)] public AgentLaunchVisibility LaunchVisibility { get; set; } = AgentLaunchVisibility.Visible;
     [Id(25)] public PendingSubagentTerminalEvent? PendingSubagentTerminalEvent { get; set; }
-    [Id(26)] public string? ConcurrencyPermitId { get; set; }
-    [Id(27)] public string? ConcurrencyDispatchId { get; set; }
-    [Id(28)] public long ConcurrencyGeneration { get; set; }
-    [Id(29)] public AgentConcurrencyPermitStatus ConcurrencyGateStatus { get; set; } = AgentConcurrencyPermitStatus.DispatchPending;
-    [Id(30)] public bool ConcurrencyReleasePending { get; set; }
-    [Id(31)] public string? ConcurrencyWaiterId { get; set; }
     [Id(32)] public PendingInitialTurnTerminalDelivery? PendingInitialTurnTerminalDelivery { get; set; }
     [Id(33)] public AgentJobTerminalLogOwnership? TerminalLogOwnership { get; set; }
     /// <summary>

@@ -608,32 +608,17 @@ public sealed record AgentSessionFollowupLease(
     [property: Id(2)] bool Accepted = false,
     [property: Id(3)] DateTime? AcceptedAt = null,
     [property: Id(4)] DateTime? StartedAt = null,
-    /// <summary>
-    /// When non-null, this follow-up lease carries the per-agent dispatch
-    /// identity the dispatcher and the admission claim correlate on. The
-    /// permit is released when the lease is cleared by an idle
-    /// activity event or an explicit abandon. Null on leases created for
-    /// follow-ups that join an already-active session (per-session serial, no
-    /// new permit). Append-only Orleans field id.
-    /// </summary>
-    [property: Id(5)] string? ConcurrencyToken = null,
-    /// <summary>
-    /// Agent identity stamped on the lease when the concurrency
-    /// permit is acquired, so the lease-clearing release path can
-    /// route back to the same per-agent gate as the launch path.
-    /// Null when <see cref="ConcurrencyToken"/> is null.
-    /// </summary>
-    [property: Id(6)] string? ConcurrencyAgentId = null,
+    // Ids 5, 6, 11-14 and 16 are retired with the AgentConcurrencyGrain
+    // permit authority: the per-agent dispatch token, agent id, permit id,
+    // dispatch id, generation, gate status and waiter id a lease carried
+    // were only reconciled against the removed ledger. They stay free so an
+    // older persisted lease still deserializes without colliding on later
+    // ids; admission is now the derived capacity claim the Turn itself
+    // makes (see AgentTurnRecord.CapacityClaimedAt).
     [property: Id(7)] string? InputId = null,
     [property: Id(8)] string? TurnId = null,
     [property: Id(9)] bool Dispatching = false,
-    [property: Id(10)] bool PayloadSealed = false,
-    [property: Id(11)] string? ConcurrencyPermitId = null,
-    [property: Id(12)] string? ConcurrencyDispatchId = null,
-    [property: Id(13)] long ConcurrencyGeneration = 0,
-    [property: Id(14)] string? ConcurrencyGateStatus = null,
-    [property: Id(15)] string? WaitingReason = null,
-    [property: Id(16)] string? ConcurrencyWaiterId = null);
+    [property: Id(10)] bool PayloadSealed = false);
 
 /// <summary>
 /// Result of a single <see cref="AgentSessionExtensions.AcceptFollowup"/>

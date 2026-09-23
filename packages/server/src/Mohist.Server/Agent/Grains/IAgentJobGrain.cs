@@ -148,11 +148,6 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// </summary>
     Task<bool> ApplyActivityConvergenceAsync(AgentJobActivityConvergence command) =>
         Task.FromResult(false);
-
-    Task ConcurrencyPermitGrantedAsync(
-        string? token = null,
-        string? permitId = null,
-        string? dispatchId = null) => Task.CompletedTask;
 }
 
 /// <summary>

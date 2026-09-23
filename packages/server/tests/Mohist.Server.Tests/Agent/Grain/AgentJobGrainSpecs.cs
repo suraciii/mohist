@@ -13,7 +13,6 @@ using Mohist.Server.Runner.Domain;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Sessions.Services;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Tests.Workflow;
@@ -398,20 +397,6 @@ public partial class AgentJobGrainSpecs : AgentJobGrainTestSupport
             TimeSpan.FromMilliseconds(25),
             "job stays pending past first attempt");
         Assert.Equal(AgentJobStatus.Pending, stillPending);
-    }
-
-    [Fact]
-    public async Task SubmitAsync_NoEligibleRunner_DoesNotCountPendingJobAgainstConcurrencyLimit()
-    {
-        await ClearGlobalRunnerRegistryAsync();
-        var projectId = $"agent-job-missing-project-{Guid.NewGuid():N}";
-        await _fixture.SeedAgentAsync(projectId, "agent-test", maxConcurrentRuns: 1);
-        var job = JobGrain($"agent-job-no-runner-limit-{Guid.NewGuid():N}");
-
-        await job.SubmitAsync(MakeInput("no runner", projectId));
-
-        var gate = Grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, "agent-test"));
-        Assert.Equal(0, await gate.GetActiveCountAsync());
     }
 
     [Fact]

@@ -77,7 +77,11 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
 
             Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
             var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-            await Assert.ThrowsAsync<StopOperationInProgressException>(session.BeginFollowupAsync);
+            await Assert.ThrowsAsync<StopOperationInProgressException>(
+                () => session.AcceptFollowupAsync(new AcceptFollowupCommand(
+                    Text: "accepted while stopping",
+                    Source: "agent-session-followup",
+                    IdempotencyKey: $"cancel-{Guid.NewGuid():N}")));
         }
         finally
         {

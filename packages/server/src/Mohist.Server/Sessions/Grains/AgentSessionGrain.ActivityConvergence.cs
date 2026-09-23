@@ -60,15 +60,6 @@ public sealed partial class AgentSessionGrain
             return false;
 
         await CommitAsync(session, settlement.Events);
-
-        foreach (var lease in settlement.ReleasedLeases)
-            await ReleaseFollowupConcurrencyPermitAsync(
-                session,
-                lease.ConcurrencyToken,
-                lease.ConcurrencyAgentId,
-                lease.ConcurrencyPermitId,
-                lease.ConcurrencyGeneration,
-                lease.ConcurrencyWaiterId);
         await PublishCanonicalRefreshAsync(session);
         return true;
     }

@@ -38,13 +38,6 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionRecoveryResult> CompleteCompactAsync(CompleteCompactAgentSessionCommand command);
     Task<AgentSessionRecoveryResult> CompleteResetAsync(CompleteResetAgentSessionCommand command);
     Task AbandonResetAsync(string operationId);
-    Task<AgentSessionFollowupReservation> BeginFollowupAsync();
-    Task ConfirmFollowupAsync(string operationId);
-    Task AbandonFollowupAsync(string operationId);
-    Task ConcurrencyPermitGrantedAsync(
-        string? token = null,
-        string? permitId = null,
-        string? dispatchId = null);
 
     Task<AgentSessionFollowupAcceptResult> AcceptFollowupAsync(AcceptFollowupCommand command);
     Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync();
@@ -392,12 +385,6 @@ public sealed record CompleteCompactAgentSessionCommand(
     [property: Id(1)] string OwnerProcessGeneration,
     [property: Id(2)] string? Summary = null,
     [property: Id(3)] int? MaxSummaryChars = null);
-
-[GenerateSerializer]
-public sealed record AgentSessionFollowupReservation(
-    [property: Id(0)] string? OperationId,
-    [property: Id(1)] bool StartsIdleTurn = false,
-    [property: Id(2)] bool ConcurrencyPermitHeld = false);
 
 [GenerateSerializer]
 public sealed record AcceptFollowupCommand(

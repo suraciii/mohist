@@ -1,6 +1,5 @@
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Capacity;
-using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 
@@ -86,7 +85,7 @@ public sealed partial class AgentSessionGrain
             attachments,
             representative.Id,
             provenance,
-            leases[index].ConcurrencyDispatchId ?? $"followup:{claimed.Id}:{leases[index].OperationId}",
+            $"followup:{claimed.Id}:{leases[index].OperationId}",
             executionSource,
             claimed.Metadata?.Label(AgentSessionQueryMetadataKeys.OriginMarker));
     }

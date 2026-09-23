@@ -543,17 +543,11 @@ public class ArchitectureRules
         // "可选后续". Allowed here so the directional tightening (issue #368) is
         // not blocked on the relocation.
         ("Project", "Workflow"),
-        // issue-520 T-002: AgentSessionGrain's follow-up path acquires and
-        // releases a permit on the per-agent AgentConcurrencyGrain (Agent/Grains)
-        // so follow-ups that start a new execution honour the agent's
-        // MaxConcurrentRuns (design D5 / D6 follow-up half). The gate is a
-        // coordination authority, not a domain entity: it owns only permit tokens
-        // and waiter identities, no business facts. The clean long-term home for
-        // the grain and its result enum is a shared contracts / coordination
-        // namespace (alongside other shared-resource grains) so the dependency
-        // becomes data-only, matching the issue-446 Workflow→Runner allowance.
-        // Allowed here so the follow-up gate ships with the launch gate from
-        // T-001; relocation can follow.
+        // Sessions→Agent is the Session's own lifecycle coupling to its
+        // launch and Job owners (AgentSessionGrain marks an unknown Job,
+        // AgentSessionRetryService resolves the launch it retries). It is
+        // not a capacity dependency: the permit gate that once forced this
+        // edge is deleted, and admission is the derived capacity claim.
         ("Sessions", "Agent"),
     ];
 

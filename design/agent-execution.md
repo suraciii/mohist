@@ -911,9 +911,8 @@ Current implementation gaps are:
   synchronous Session-to-AgentJob stop-unknown cycle and no deadline on recovery
   redelivery. The one-way, single-owner, deadline-bounded rules above are the
   target.
-- Capacity is still brokered by a permit grain with a waiter list and grant
-  notifications; the derived occupancy claim above is the target, not the
-  shipped system (issue #1078).
+- Capacity is derived from the occupancy claim above; no permit grain, waiter
+  list, or grant notification remains (issue #1078).
 - Reconnection settles no `unknown` Activity and force-reset has no
   implementation; today a Runner-reported terminal activity event or the
   Manager recovery turn is the only way `unknown` clears. The lifecycle

@@ -35,8 +35,7 @@ public sealed record AgentSessionActivityFollowupSnapshot(
     string? TurnId,
     bool Accepted,
     bool Dispatching,
-    bool PayloadSealed,
-    string? ConcurrencyGateStatus);
+    bool PayloadSealed);
 
 public sealed record AgentSessionActivityResetSnapshot(
     string OperationId,
@@ -81,11 +80,10 @@ public sealed record AgentSessionActivitySettlement(
     IReadOnlyList<string> SettledTurnIds,
     IReadOnlyList<string> CancelledTurnIds,
     IReadOnlyList<string> SupersededOperationIds,
-    IReadOnlyList<AgentSessionFollowupLease> ReleasedLeases,
     IReadOnlyList<AgentSessionEvent> Events)
 {
     public static readonly AgentSessionActivitySettlement NotApplied =
-        new(false, string.Empty, false, [], [], [], [], []);
+        new(false, string.Empty, false, [], [], [], []);
 }
 
 public static partial class AgentSessionExtensions
@@ -207,7 +205,6 @@ public static partial class AgentSessionExtensions
                     [],
                     [],
                     [],
-                    [],
                     []);
             }
 
@@ -257,7 +254,7 @@ public static partial class AgentSessionExtensions
                 };
             }
 
-            var (keptLeases, releasedLeases, legacyLeaseKept) = PartitionLeasesForSettlement(session, turns);
+            var (keptLeases, legacyLeaseKept) = PartitionLeasesForSettlement(session, turns);
             var status = session.Status;
             var supersededOperationIds = new List<string>();
             var capturedOperations = CapturedOperationIds(pending);
@@ -337,7 +334,6 @@ public static partial class AgentSessionExtensions
                 settledTurnIds,
                 cancelledTurnIds,
                 supersededOperationIds,
-                releasedLeases,
                 events);
         }
 
@@ -440,13 +436,12 @@ public static partial class AgentSessionExtensions
     /// <summary>
     /// Splits the captured dispatch leases: a lease survives only while its
     /// Turn is still live, so a settled, cancelled or never-assigned lease is
-    /// released and its concurrency permit handed back. The Turn keeps the
+    /// released. The Turn keeps the
     /// operation identity for audit, which is why dropping the lease loses no
     /// accepted identity.
     /// </summary>
     private static (
         IReadOnlyList<AgentSessionFollowupLease> Kept,
-        IReadOnlyList<AgentSessionFollowupLease> Released,
         AgentSessionFollowupLease? LegacyKept) PartitionLeasesForSettlement(
         AgentSession session,
         IReadOnlyList<AgentTurnRecord> turns)
@@ -455,7 +450,6 @@ public static partial class AgentSessionExtensions
             ? list
             : session.Status.PendingFollowup is { } single ? (IReadOnlyList<AgentSessionFollowupLease>)[single] : [];
         var kept = new List<AgentSessionFollowupLease>();
-        var released = new List<AgentSessionFollowupLease>();
         foreach (var lease in combined)
         {
             var live = !string.IsNullOrEmpty(lease.TurnId)
@@ -463,12 +457,11 @@ public static partial class AgentSessionExtensions
                     && turn.SupersededAt is null
                     && turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing);
             if (live) kept.Add(lease);
-            else released.Add(lease);
         }
         var legacyKept = session.Status.PendingFollowup is { } pending && kept.Contains(pending)
             ? pending
             : null;
-        return (kept, released, legacyKept);
+        return (kept, legacyKept);
     }
 
     private static bool ActivityObservationStillCurrent(
@@ -575,8 +568,7 @@ public static partial class AgentSessionExtensions
             lease.TurnId,
             lease.Accepted,
             lease.Dispatching,
-            lease.PayloadSealed,
-            lease.ConcurrencyGateStatus)).ToArray();
+            lease.PayloadSealed)).ToArray();
     }
 
     private static AgentSessionActivityResetSnapshot? CurrentResetSnapshot(AgentSession current) =>

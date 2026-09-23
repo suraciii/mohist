@@ -51,31 +51,6 @@ public class AgentJobQuerier : IScopedService
         return rows.Select(ToItem).ToList();
     }
 
-    public async Task<IReadOnlyDictionary<string, int>> CountPendingByAgentAsync(
-        string projectId,
-        CancellationToken ct = default)
-    {
-        var pending = AgentJobStatus.Pending.ToString().ToLowerInvariant();
-
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var groups = await db.AgentJobs
-            .AsNoTracking()
-            .Where(r => r.ProjectId == projectId
-                && r.Status == pending
-                && (r.LaunchVisibility == null || r.LaunchVisibility == "visible"))
-            .GroupBy(r => r.AgentId)
-            .Select(g => new { AgentId = g.Key, Count = g.Count() })
-            .ToListAsync(ct);
-
-        var result = new Dictionary<string, int>(groups.Count, StringComparer.Ordinal);
-        foreach (var group in groups)
-        {
-            if (group.AgentId is null) continue;
-            result[group.AgentId] = group.Count;
-        }
-        return result;
-    }
-
     public async Task<AgentJobListItem?> GetByKeyAsync(string jobKey, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -84,50 +59,6 @@ public class AgentJobQuerier : IScopedService
             .FirstOrDefaultAsync(r => r.JobKey == jobKey
                 && (r.LaunchVisibility == null || r.LaunchVisibility == "visible"), ct);
         return row is null ? null : ToItem(row);
-    }
-
-    public async Task<bool> HoldsConcurrencyPermitAsync(
-        string jobKey,
-        string token,
-        CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var stateJson = await db.AgentJobs
-            .AsNoTracking()
-            .Where(row => row.JobKey == jobKey)
-            .Select(row => row.State)
-            .FirstOrDefaultAsync(ct);
-        if (stateJson is null)
-            return false;
-
-        var state = JSON.Deserialize<AgentJobState>(stateJson);
-        return state?.ConcurrencyPermitHeld == true
-            && string.Equals(state.ConcurrencyPermitToken, token, StringComparison.Ordinal);
-    }
-
-    public async Task<bool> HoldsConcurrencyWaiterAsync(
-        string jobKey,
-        string token,
-        string? waiterId = null,
-        long generation = 0,
-        CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var stateJson = await db.AgentJobs
-            .AsNoTracking()
-            .Where(row => row.JobKey == jobKey)
-            .Select(row => row.State)
-            .FirstOrDefaultAsync(ct);
-        if (stateJson is null)
-            return false;
-
-        var state = JSON.Deserialize<AgentJobState>(stateJson);
-        return state?.Status == AgentJobStatus.Pending
-            && !state.ConcurrencyPermitHeld
-            && !state.ConcurrencyReleasePending
-            && string.Equals(state.ConcurrencyPermitToken, token, StringComparison.Ordinal)
-            && (waiterId is null || string.Equals(state.ConcurrencyWaiterId, waiterId, StringComparison.Ordinal))
-            && (generation == 0 || state.ConcurrencyGeneration == generation);
     }
 
     public async Task<AgentExecutionHistory?> GetLatestExecutionAsync(
