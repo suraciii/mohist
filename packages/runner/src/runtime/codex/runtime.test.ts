@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import { CodexRuntime } from './runtime.js'
+import { RunnerWorkspaceUse } from '../runner-workspace-use.js'
 import type { CodexServerHandle } from './server-process.js'
 import type { CodexAuthenticationProbe, CodexCatalogLoader, CodexCliProbe, CodexReadinessProbe } from './readiness.js'
 import type { CodexCatalog } from './types.js'
@@ -129,13 +130,15 @@ function fakeHandle(
             }
             setTimeout(() => {
               options.onResponseBatchFlushed?.()
-              for (const listener of listeners) {
-                listener({
-                  type: 'turn/completed',
-                  threadId: 'thread-runtime',
-                  turnId: 'turn-runtime',
-                  status: 'completed',
-                })
+              if (!options.emitExactCompletionInResponseBatch) {
+                for (const listener of listeners) {
+                  listener({
+                    type: 'turn/completed',
+                    threadId: 'thread-runtime',
+                    turnId: 'turn-runtime',
+                    status: 'completed',
+                  })
+                }
               }
             }, 0)
           })
@@ -359,7 +362,10 @@ describe('CodexRuntime spawn + handshake happy path', () => {
   ] as const)(
     'checks exact Thread and Turn after one response batch ($expected)',
     async ({ exactCompletionInBatch, expected }) => {
-      let releaseAfterBatch: ReturnType<CodexRuntime['releaseWorkspace']> | null = null
+      let observeBatch!: (state: ReturnType<CodexRuntime['releaseWorkspace']>) => void
+      const releaseAfterBatch = new Promise<ReturnType<CodexRuntime['releaseWorkspace']>>((resolve) => {
+        observeBatch = resolve
+      })
       const runtime = new CodexRuntime({
         codexHome: MANAGED_CODEX_HOME,
         cwd: '/work',
@@ -368,21 +374,26 @@ describe('CodexRuntime spawn + handshake happy path', () => {
             emitCompletionInResponseBatch: true,
             emitExactCompletionInResponseBatch: exactCompletionInBatch,
             onResponseBatchFlushed: () => {
-              releaseAfterBatch = runtime.releaseWorkspace('/work')
+              observeBatch(runtime.releaseWorkspace('/work'))
             },
           }),
         readinessProbe: passingProbe(),
       })
+      const gate = new RunnerWorkspaceUse(async (path) => runtime.releaseWorkspace(path))
 
       await expect(runtime.start()).resolves.toMatchObject({ ok: true })
-      await runtime.runTurn({
-        target: { runtime: 'codex', runtimeSessionId: null, workDir: '/work' },
-        prompt: 'hello',
-        clientUserMessageId: 'input-1',
-        options: { model: 'gpt-5' },
-      })
-      expect(releaseAfterBatch).toBe(expected)
+      const result = await gate.withUse('/work', () =>
+        runtime.runTurn({
+          target: { runtime: 'codex', runtimeSessionId: null, workDir: '/work' },
+          prompt: 'hello',
+          clientUserMessageId: 'input-1',
+          options: { model: 'gpt-5' },
+        }),
+      )
+      expect(result).toMatchObject({ ok: true })
+      expect(await releaseAfterBatch).toBe(expected)
       expect(runtime.releaseWorkspace('/work')).toBe('ready')
+      expect(await gate.withRemovalFence('/work', async () => true)).toEqual({ kind: 'completed', value: true })
       await runtime.shutdown({ clearDiagnostic: true })
     },
   )
