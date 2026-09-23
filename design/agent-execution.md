@@ -105,6 +105,13 @@ launch origin. It validates Project identity and accepts the source kinds
 initial Turn fixed by the accepted dispatch. Workflow artifacts use frozen
 Workflow Run and Action Attempt identity while AgentJob remains the result owner.
 
+The developer-only `/api/agent-jobs/validate` smoke route follows the same
+launch ownership rule: before submitting its Job it persists a Session with
+accepted Project/Agent identity and the Job-owned initial Input/Turn. It does
+not become the authenticated product launch API; successful Runner reports
+still require the complete physical execution binding. A synthetic Session ID
+without the corresponding persisted owner record is not a launch.
+
 A Follow-up is a Session command, not a new dispatch. It appends a SessionInput
 to an existing AgentSession and either joins the current Turn through steer or
 creates a later Turn. Compact, Reset, recovery, rebind, handoff, and force-reset

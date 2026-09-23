@@ -6,6 +6,9 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Api;
 
@@ -91,6 +94,7 @@ public static class AgentJobController
                 new { fields = errors });
         }
 
+        AgentInfo? agent = null;
         if (agents is not null)
         {
             var projectId = body.Workspace?.ProjectId;
@@ -99,7 +103,7 @@ public static class AgentJobController
                 return ApiResults.BadRequest("workspace.projectId is required.", "validation_failed");
             }
 
-            var agent = await agents.GetByIdAsync(projectId, body.AgentId!.Trim());
+            agent = await agents.GetByIdAsync(projectId, body.AgentId!.Trim());
             if (agent is null)
             {
                 return ApiResults.BadRequest("agentId must identify an Agent in workspace.projectId.", "validation_failed");
@@ -110,6 +114,31 @@ public static class AgentJobController
         var timeout = ResolveTimeout(agentOptions);
         var jobKey = ResolveJobKey(body);
         var grain = grains.GetGrain<IAgentJobGrain>(jobKey);
+        var runtime = agent?.EffectiveExecutionConfig?.Runtime ?? AgentConfigSchema.OpenCodeRuntime;
+        string? sessionId = null;
+        string? inputId = null;
+        string? turnId = null;
+        if (agent is not null)
+        {
+            sessionId = $"agent-session-{Guid.NewGuid():N}";
+            inputId = Guid.NewGuid().ToString("N");
+            turnId = Guid.NewGuid().ToString("N");
+            var metadata = new AgentSessionMetadata()
+                .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, agent.ProjectId)
+                .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "agent-launch")
+                .WithLabel(GenericAgentSessionMetadata.AgentId, agent.Id)
+                .WithLabel(GenericAgentSessionMetadata.AgentName, agent.Name);
+            await grains.GetGrain<IAgentSessionGrain>(sessionId).EnsureInitialLaunchAsync(
+                new EnsureInitialLaunchCommand(
+                    inputId,
+                    turnId,
+                    body.Prompt!.Trim(),
+                    "agent-launch",
+                    jobKey,
+                    Runtime: runtime,
+                    WorkDir: body.Workspace?.Path,
+                    Metadata: metadata));
+        }
 
         var input = new AgentJobInput(
             Prompt: body.Prompt!.Trim(),
@@ -117,9 +146,11 @@ public static class AgentJobController
             WorkspaceName: body.Workspace?.Name,
             WorkspacePath: body.Workspace?.Path,
             ProjectId: body.Workspace?.ProjectId,
+            Runtime: runtime,
             AgentId: body.AgentId!.Trim(),
-            AgentSessionId: $"agent-session-{Guid.NewGuid():N}",
-            InitialTurnId: Guid.NewGuid().ToString("N"),
+            AgentSessionId: sessionId,
+            InitialInputId: inputId,
+            InitialTurnId: turnId,
             ExecutionSource: AgentExecutionSources.NonSlack);
 
         var waiter = grain.WaitForTerminalAsync();
